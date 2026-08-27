@@ -107,8 +107,8 @@ A forced build still writes fresh valid cache metadata for the next invocation.
   expected static analysis error rather than reusing stale proof.
 - The public CLI accepts `--no-cache` and retains its entry-path output contract.
 
-## Next Slice
+## Follow-up
 
-The cache now records enough graph structure to report precise build decisions.
-A later tooling slice can add an opt-in machine-readable CLI report and explain
-why each module was reused or invalidated without changing default stdout.
+The opt-in machine-readable report and stable per-module decision reasons are
+implemented in [0032-build-decision-reports.md](0032-build-decision-reports.md).
+Default CLI standard output remains unchanged.

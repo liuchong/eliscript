@@ -90,11 +90,16 @@ The returned `eliscript-project-build-result` records canonical root, output
 directory, source entry, generated entry, sorted module records, manifest path,
 and graph digest. Each module record contains its source, JavaScript output,
 source-map path, and three content digests.
-Build results also report compiled and reused module counts.
+Build results also report compiled and reused module counts. Call
+`eliscript-project-build-report` to obtain the versioned JSON-compatible graph
+and cache decision schema defined by
+[0032-build-decision-reports.md](0032-build-decision-reports.md).
 
 Shell callers use `bin/eliscript-build`. `--out-dir` is required; the command
 prints the generated entry path after a successful build. The existing
-single-file `bin/eliscript` interface remains unchanged.
+single-file `bin/eliscript` interface remains unchanged. `--json` replaces the
+entry path with one machine-readable build report when tooling needs counts and
+per-module decisions.
 
 ## Acceptance Evidence
 

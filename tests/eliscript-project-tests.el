@@ -33,6 +33,12 @@
     (insert-file-contents-literally filename)
     (secure-hash 'sha256 (current-buffer))))
 
+(defun eliscript-project-tests--report-module (report source)
+  "Return SOURCE's module record from build REPORT."
+  (cl-find source (append (alist-get 'modules report) nil)
+           :key (lambda (module) (alist-get 'source module))
+           :test #'equal))
+
 (ert-deftest eliscript-project-builds-expanded-import-graph ()
   (eliscript-project-tests--with-directory root
     (let* ((entry (expand-file-name "src/main.eli" root))
@@ -234,7 +240,13 @@
              (eliscript-project-build-portable
               entry '(twice) out-dir root)))
         (should (= (eliscript-project-build-result-compiled-count second) 0))
-        (should (= (eliscript-project-build-result-reused-count second) 2)))
+        (should (= (eliscript-project-build-result-reused-count second) 2))
+        (let ((report (eliscript-project-build-report second)))
+          (should (equal (alist-get 'mode report) "portable"))
+          (should (equal (append (alist-get 'portableEntries report) nil)
+                         '("twice")))
+          (should (equal (alist-get 'status (alist-get 'cache report))
+                         "hit"))))
       (eliscript-project-tests--write
        dependency "(defportable increment (value) (+ value 2))\n")
       (let ((third
@@ -247,6 +259,79 @@
       (should-error
        (eliscript-project-build-portable entry '(twice) out-dir root)
        :type 'eliscript-analyze-error))))
+
+(ert-deftest eliscript-project-reports-incremental-decisions ()
+  (eliscript-project-tests--with-directory root
+    (let* ((entry (expand-file-name "main.eli" root))
+           (dependency (expand-file-name "value.eli" root))
+           (out-dir (expand-file-name "build" root)))
+      (eliscript-project-tests--write
+       entry "(import \"./value.eli\" answer)\n(print answer)\n")
+      (eliscript-project-tests--write
+       dependency "(defconst answer 1)\n(export answer)\n")
+      (let* ((first (eliscript-project-build entry out-dir root))
+             (report (eliscript-project-build-report first))
+             (cache (alist-get 'cache report))
+             (counts (alist-get 'counts report)))
+        (should (equal (alist-get 'format report)
+                       "eliscript-build-report"))
+        (should (= (alist-get 'version report) 1))
+        (should (equal (alist-get 'status cache) "miss"))
+        (should (equal (alist-get 'reason cache) "manifest-missing"))
+        (should (= (alist-get 'compiled counts) 2))
+        (should (= (alist-get 'reused counts) 0))
+        (should (equal
+                 (alist-get
+                  'reason
+                  (eliscript-project-tests--report-module report "main.eli"))
+                 "manifest-missing"))
+        (should (json-serialize report :false-object :false)))
+      (let* ((second (eliscript-project-build entry out-dir root))
+             (report (eliscript-project-build-report second))
+             (cache (alist-get 'cache report)))
+        (should (equal (alist-get 'status cache) "hit"))
+        (should (equal (alist-get 'reason cache) "verified"))
+        (should (equal
+                 (alist-get
+                  'status
+                  (eliscript-project-tests--report-module report "main.eli"))
+                 "reused")))
+      (eliscript-project-tests--write
+       dependency "(defconst answer 2)\n(export answer)\n")
+      (let* ((third (eliscript-project-build entry out-dir root))
+             (report (eliscript-project-build-report third))
+             (cache (alist-get 'cache report))
+             (main
+              (eliscript-project-tests--report-module report "main.eli"))
+             (value
+              (eliscript-project-tests--report-module report "value.eli")))
+        (should (equal (alist-get 'status cache) "partial"))
+        (should (equal (alist-get 'reason cache) "dirty-modules"))
+        (should (equal (alist-get 'status main) "reused"))
+        (should (equal (alist-get 'reason main) "verified"))
+        (should (equal (alist-get 'status value) "compiled"))
+        (should (equal (alist-get 'reason value) "source-changed")))
+      (let ((eliscript-project-use-cache nil))
+        (let* ((forced (eliscript-project-build entry out-dir root))
+               (report (eliscript-project-build-report forced))
+               (cache (alist-get 'cache report)))
+          (should (eq (alist-get 'enabled cache) :false))
+          (should (equal (alist-get 'status cache) "disabled"))
+          (should (equal (alist-get 'reason cache) "cache-disabled"))))
+      (let* ((manifest-path
+              (expand-file-name eliscript-project-manifest-filename out-dir))
+             (manifest
+              (json-parse-string
+               (eliscript-project-tests--read manifest-path)
+               :object-type 'alist :array-type 'array)))
+        (setq manifest (assq-delete-all 'cache manifest))
+        (with-temp-file manifest-path
+          (insert (json-serialize manifest) "\n"))
+        (let* ((rebuilt (eliscript-project-build entry out-dir root))
+               (report (eliscript-project-build-report rebuilt))
+               (cache (alist-get 'cache report)))
+          (should (equal (alist-get 'status cache) "miss"))
+          (should (equal (alist-get 'reason cache) "cache-missing")))))))
 
 (ert-deftest eliscript-project-invalidates-cache-when-compiler-changes ()
   (eliscript-project-tests--with-directory root

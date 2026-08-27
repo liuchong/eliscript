@@ -66,6 +66,16 @@ bun run dist/project/examples/stdlib-cli/main.mjs
 macro expansion, preserves the source tree, rewrites imports to `.mjs`, and
 emits an external source map for every module.
 
+Repeat builds reuse verified modules. Request a stable machine-readable summary
+of cache and per-module decisions when integrating the builder with other tools:
+
+```sh
+./bin/eliscript-build --json --root . --out-dir dist/project \
+  examples/stdlib-cli/main.eli
+```
+
+Without `--json`, the command continues to print only the generated entry path.
+
 Portable libraries can compose across local source modules with an explicit,
 named-only edge:
 
@@ -395,6 +405,9 @@ Current evidence:
   skip unchanged modules entirely; portable projects reuse a clean graph or
   revalidate its closure before emitting only dirty modules. `--no-cache`
   remains available for forced builds.
+- `eliscript-project-build-report` and `eliscript-build --json` expose a
+  versioned graph summary with stable cache statuses, invalidation reasons, and
+  per-module compiled or reused decisions without changing default CLI output.
 - `stdlib/sequence.eli` supplies twelve non-mutating, higher-order sequence
   operations as dependency-prunable `defportable` declarations. The React
   browser entry imports it as source through Vite.
@@ -412,7 +425,7 @@ Current evidence:
 - Repeated `--portable NAME` options make the same builder verify every local
   `import-portable` target, reject bare or escaping source edges, and emit only
   each module's requested transitive closure.
-- Eighty-five ERT tests cover reading, locations, macro expansion, analysis, IR
+- Eighty-six ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
 - Eighteen Bun tests cover the compiler and Org Vite adapters, source-map
@@ -503,7 +516,9 @@ for the first multi-module portable graph executed by the Emacs worker, and
 for deterministic graph identity, integrity checks, and dependency Source Maps,
 and
 [specs/0031-incremental-project-builds.md](specs/0031-incremental-project-builds.md)
-for verified module reuse and conservative cache invalidation.
+for verified module reuse and conservative cache invalidation, and
+[specs/0032-build-decision-reports.md](specs/0032-build-decision-reports.md)
+for machine-readable build summaries and stable per-module decision reasons.
 
 ## License
 

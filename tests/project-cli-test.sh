@@ -32,6 +32,28 @@ NO_CACHE_OUTPUT=$(
 )
 test "$NO_CACHE_OUTPUT" = "$ENTRY"
 
+JSON_REPORT=$(
+  cd "$PROJECT_DIR"
+  "$PROJECT_DIR/bin/eliscript-build" \
+    --json \
+    --root "$PROJECT_DIR" \
+    --out-dir "$TMP_DIR/build" \
+    "$PROJECT_DIR/examples/stdlib-cli/main.eli"
+)
+printf '%s' "$JSON_REPORT" | bun --eval '
+  const report = JSON.parse(await Bun.stdin.text());
+  if (report.format !== "eliscript-build-report" ||
+      report.version !== 1 ||
+      report.entryOutput !== "examples/stdlib-cli/main.mjs" ||
+      report.cache.status !== "hit" ||
+      report.counts.compiled !== 0 ||
+      report.counts.reused !== 4 ||
+      report.modules.some((module) => module.status !== "reused" ||
+        module.reason !== "verified")) {
+    throw new Error("unexpected incremental build report");
+  }
+'
+
 test -f "$ENTRY"
 test -f "$ENTRY.map"
 test -f "$SEQUENCE"

@@ -29,7 +29,8 @@
   source-map-digest
   dependencies
   portable-entries
-  reused)
+  reused
+  reason)
 
 (cl-defstruct (eliscript-project-build-result
                (:constructor eliscript-project-build-result-create))
@@ -41,7 +42,12 @@
   manifest
   digest
   compiled-count
-  reused-count)
+  reused-count
+  mode
+  portable-entries
+  cache-enabled
+  cache-status
+  cache-reason)
 
 (cl-defstruct (eliscript-project-cache
                (:constructor eliscript-project-cache-create))
@@ -50,11 +56,24 @@
   manifest
   digest)
 
+(cl-defstruct (eliscript-project-cache-lookup
+               (:constructor eliscript-project-cache-lookup-create))
+  cache
+  reason)
+
+(cl-defstruct (eliscript-project-cache-decision
+               (:constructor eliscript-project-cache-decision-create))
+  module
+  reason)
+
 (defconst eliscript-project-manifest-filename "eliscript-project.json"
   "Filename of the deterministic project build manifest.")
 
 (defconst eliscript-project-cache-version 1
   "Version of private incremental metadata in the project manifest.")
+
+(defconst eliscript-project-build-report-version 1
+  "Version of the public project build decision report.")
 
 (defvar eliscript-project-use-cache t
   "When non-nil, project builds may reuse verified manifest artifacts.")
@@ -182,90 +201,120 @@ FILENAME and SPAN identify the import responsible for PATH."
     (dependencies . ,(vconcat (alist-get 'dependencies record)))
     (portableEntries . ,(vconcat (alist-get 'portableEntries record)))))
 
+(defun eliscript-project--cache-miss (reason)
+  "Return a cache lookup miss with stable REASON."
+  (eliscript-project-cache-lookup-create :reason reason))
+
 (defun eliscript-project--read-cache
     (out-dir entry-output mode portable-entries compiler-digest)
   "Read reusable build metadata for the requested project configuration."
-  (when eliscript-project-use-cache
-    (let ((manifest-path
-           (expand-file-name eliscript-project-manifest-filename out-dir)))
-      (when (file-regular-p manifest-path)
-        (condition-case nil
-            (let* ((manifest
-                    (with-temp-buffer
-                      (insert-file-contents manifest-path)
-                      (json-parse-buffer
-                       :object-type 'alist :array-type 'list
-                       :null-object nil :false-object :false)))
-                   (cache (alist-get 'cache manifest))
-                   (identity-modules (alist-get 'modules manifest))
-                   (cache-modules (alist-get 'modules cache))
-                   (graph-identity
-                    `((format . ,(alist-get 'format manifest))
-                      (version . ,(alist-get 'version manifest))
-                      (entry . ,(alist-get 'entry manifest))
-                      (modules . ,(vconcat identity-modules))))
-                   (cache-identity
-                    `((version . ,(alist-get 'version cache))
-                      (compilerDigest
-                       . ,(alist-get 'compilerDigest cache))
-                      (mode . ,(alist-get 'mode cache))
-                      (portableEntries
-                       . ,(vconcat (alist-get 'portableEntries cache)))
-                      (modules
-                       . ,(vconcat
-                           (mapcar
-                            #'eliscript-project--cache-identity-module
-                            cache-modules))))))
-              (when (and (equal (alist-get 'format manifest)
-                                "eliscript-project")
-                         (equal (alist-get 'version manifest) 1)
-                         (equal (alist-get 'entry manifest)
-                                (file-relative-name entry-output out-dir))
-                         (equal (alist-get 'version cache)
-                                eliscript-project-cache-version)
-                         (equal (alist-get 'compilerDigest cache)
-                                compiler-digest)
-                         (equal (alist-get 'mode cache) mode)
-                         (equal (alist-get 'portableEntries cache)
-                                portable-entries)
-                         (equal (alist-get 'digest manifest)
-                                (eliscript-project--json-digest
-                                 graph-identity))
-                         (equal (alist-get 'digest cache)
-                                (eliscript-project--json-digest
-                                 cache-identity))
-                         (listp identity-modules)
-                         (listp cache-modules))
-                (let ((identities (make-hash-table :test #'equal))
-                      (records (make-hash-table :test #'equal))
-                      sources)
-                  (dolist (record identity-modules)
-                    (let ((source (alist-get 'source record)))
-                      (when (stringp source)
-                        (puthash source record identities))))
-                  (dolist (metadata cache-modules)
-                    (let* ((source (alist-get 'source metadata))
-                           (identity (and (stringp source)
-                                          (gethash source identities))))
-                      (when identity
-                        (puthash source (cons identity metadata) records)
-                        (push source sources))))
-                  (when (= (hash-table-count identities)
-                           (hash-table-count records))
-                    (eliscript-project-cache-create
-                     :records records
-                     :sources (sort sources #'string-lessp)
-                     :manifest (file-truename manifest-path)
-                     :digest (alist-get 'digest manifest))))))
-          (error nil))))))
+  (let ((manifest-path
+         (expand-file-name eliscript-project-manifest-filename out-dir)))
+    (cond
+     ((not eliscript-project-use-cache)
+      (eliscript-project--cache-miss "cache-disabled"))
+     ((not (file-regular-p manifest-path))
+      (eliscript-project--cache-miss "manifest-missing"))
+     (t
+      (condition-case nil
+          (let* ((manifest
+                  (with-temp-buffer
+                    (insert-file-contents manifest-path)
+                    (json-parse-buffer
+                     :object-type 'alist :array-type 'list
+                     :null-object nil :false-object :false)))
+                 (cache (alist-get 'cache manifest))
+                 (identity-modules (alist-get 'modules manifest))
+                 (cache-modules (alist-get 'modules cache))
+                 (expected-entry (file-relative-name entry-output out-dir)))
+            (cond
+             ((or (not (equal (alist-get 'format manifest)
+                              "eliscript-project"))
+                  (not (equal (alist-get 'version manifest) 1))
+                  (not (listp identity-modules)))
+              (eliscript-project--cache-miss "manifest-version-changed"))
+             ((not (equal (alist-get 'entry manifest) expected-entry))
+              (eliscript-project--cache-miss "entry-changed"))
+             ((let ((graph-identity
+                     `((format . ,(alist-get 'format manifest))
+                       (version . ,(alist-get 'version manifest))
+                       (entry . ,(alist-get 'entry manifest))
+                       (modules . ,(vconcat identity-modules)))))
+                (not (equal (alist-get 'digest manifest)
+                            (eliscript-project--json-digest graph-identity))))
+              (eliscript-project--cache-miss "graph-digest-invalid"))
+             ((not (consp cache))
+              (eliscript-project--cache-miss "cache-missing"))
+             ((not (equal (alist-get 'version cache)
+                          eliscript-project-cache-version))
+              (eliscript-project--cache-miss "cache-version-changed"))
+             ((not (listp cache-modules))
+              (eliscript-project--cache-miss "cache-records-invalid"))
+             ((let ((cache-identity
+                     `((version . ,(alist-get 'version cache))
+                       (compilerDigest
+                        . ,(alist-get 'compilerDigest cache))
+                       (mode . ,(alist-get 'mode cache))
+                       (portableEntries
+                        . ,(vconcat (alist-get 'portableEntries cache)))
+                       (modules
+                        . ,(vconcat
+                            (mapcar
+                             #'eliscript-project--cache-identity-module
+                             cache-modules))))))
+                (not (equal (alist-get 'digest cache)
+                            (eliscript-project--json-digest cache-identity))))
+              (eliscript-project--cache-miss "cache-digest-invalid"))
+             ((not (equal (alist-get 'compilerDigest cache)
+                          compiler-digest))
+              (eliscript-project--cache-miss "compiler-changed"))
+             ((not (equal (alist-get 'mode cache) mode))
+              (eliscript-project--cache-miss "mode-changed"))
+             ((not (equal (alist-get 'portableEntries cache)
+                          portable-entries))
+              (eliscript-project--cache-miss "portable-roots-changed"))
+             (t
+              (let ((identities (make-hash-table :test #'equal))
+                    (records (make-hash-table :test #'equal))
+                    sources)
+                (dolist (record identity-modules)
+                  (let ((source (alist-get 'source record)))
+                    (when (stringp source)
+                      (puthash source record identities))))
+                (dolist (metadata cache-modules)
+                  (let* ((source (alist-get 'source metadata))
+                         (identity (and (stringp source)
+                                        (gethash source identities))))
+                    (when identity
+                      (puthash source (cons identity metadata) records)
+                      (push source sources))))
+                (if (and (= (length identity-modules)
+                            (hash-table-count identities))
+                         (= (length cache-modules)
+                            (hash-table-count records))
+                         (= (hash-table-count identities)
+                            (hash-table-count records)))
+                    (eliscript-project-cache-lookup-create
+                     :cache
+                     (eliscript-project-cache-create
+                      :records records
+                      :sources (sort sources #'string-lessp)
+                      :manifest (file-truename manifest-path)
+                      :digest (alist-get 'digest manifest))
+                     :reason "verified")
+                  (eliscript-project--cache-miss
+                   "cache-records-invalid"))))))
+        (error
+         (eliscript-project--cache-miss "manifest-unreadable")))))))
 
-(defun eliscript-project--cached-module
+(defun eliscript-project--cache-decision
     (source root out-dir cache &optional expected-portable-entries)
-  "Return a verified cached module for SOURCE, or nil.
+  "Return the cache decision for SOURCE.
 
 EXPECTED-PORTABLE-ENTRIES is a sorted string list. The symbol `any' accepts
 the entries recorded by CACHE for complete-graph reuse."
-  (when cache
+  (if (not cache)
+      (eliscript-project-cache-decision-create :reason "not-cached")
     (condition-case nil
         (let* ((relative (file-relative-name source root))
                (pair
@@ -276,53 +325,79 @@ the entries recorded by CACHE for complete-graph reuse."
                (output
                 (eliscript-project--source-output source root out-dir))
                (source-map (concat output ".map"))
-               (dependencies
-                (mapcar
-                 (lambda (dependency)
-                   (eliscript-project--canonical-source
-                    (expand-file-name dependency root) root source nil))
-                 (alist-get 'dependencies metadata)))
                (portable-entries
-                (alist-get 'portableEntries metadata)))
-          (when (and pair
-                     (equal (alist-get 'output identity)
-                            (file-relative-name output out-dir))
-                     (equal (alist-get 'sourceMap identity)
-                            (file-relative-name source-map out-dir))
-                     (or (eq expected-portable-entries 'any)
-                         (equal portable-entries expected-portable-entries))
-                     (equal (alist-get 'sourceDigest identity)
-                            (eliscript-project--file-digest source))
-                     (file-regular-p output)
-                     (file-regular-p source-map)
-                     (equal (alist-get 'outputDigest identity)
-                            (eliscript-project--file-digest output))
-                     (equal (alist-get 'sourceMapDigest identity)
-                            (eliscript-project--file-digest source-map)))
-            (eliscript-project-module-create
-             :source source
-             :output output
-             :source-map source-map
-             :source-digest (alist-get 'sourceDigest identity)
-             :output-digest (alist-get 'outputDigest identity)
-             :source-map-digest (alist-get 'sourceMapDigest identity)
-             :dependencies dependencies
-             :portable-entries portable-entries
-             :reused t)))
-      (error nil))))
+                (alist-get 'portableEntries metadata))
+               reason)
+          (setq reason
+                (cond
+                 ((not pair) "not-cached")
+                 ((not (equal (alist-get 'output identity)
+                              (file-relative-name output out-dir)))
+                  "output-path-changed")
+                 ((not (equal (alist-get 'sourceMap identity)
+                              (file-relative-name source-map out-dir)))
+                  "source-map-path-changed")
+                 ((not (or (eq expected-portable-entries 'any)
+                           (equal portable-entries
+                                  expected-portable-entries)))
+                  "portable-entries-changed")
+                 ((not (equal (alist-get 'sourceDigest identity)
+                              (eliscript-project--file-digest source)))
+                  "source-changed")
+                 ((not (file-regular-p output)) "output-missing")
+                 ((not (file-regular-p source-map)) "source-map-missing")
+                 ((not (equal (alist-get 'outputDigest identity)
+                              (eliscript-project--file-digest output)))
+                  "output-digest-changed")
+                 ((not (equal (alist-get 'sourceMapDigest identity)
+                              (eliscript-project--file-digest source-map)))
+                  "source-map-digest-changed")))
+          (if reason
+              (eliscript-project-cache-decision-create :reason reason)
+            (condition-case nil
+                (let ((dependencies
+                       (mapcar
+                        (lambda (dependency)
+                          (eliscript-project--canonical-source
+                           (expand-file-name dependency root)
+                           root source nil))
+                        (alist-get 'dependencies metadata))))
+                  (eliscript-project-cache-decision-create
+                   :module
+                   (eliscript-project-module-create
+                    :source source
+                    :output output
+                    :source-map source-map
+                    :source-digest (alist-get 'sourceDigest identity)
+                    :output-digest (alist-get 'outputDigest identity)
+                    :source-map-digest (alist-get 'sourceMapDigest identity)
+                    :dependencies dependencies
+                    :portable-entries portable-entries
+                    :reused t
+                    :reason "verified")
+                   :reason "verified"))
+              (error
+               (eliscript-project-cache-decision-create
+                :reason "dependencies-invalid")))))
+      (error
+       (eliscript-project-cache-decision-create
+        :reason "artifact-unreadable")))))
 
 (defun eliscript-project--cached-build-result
-    (root out-dir entry cache)
+    (root out-dir entry cache mode portable-entries)
   "Return a fully reused result for ENTRY from CACHE, or nil."
   (when cache
     (let (modules valid)
       (setq valid t)
       (dolist (relative (eliscript-project-cache-sources cache))
         (let* ((source (expand-file-name relative root))
-               (module
+               (decision
                 (and (file-regular-p source)
-                     (eliscript-project--cached-module
-                      (file-truename source) root out-dir cache 'any))))
+                     (eliscript-project--cache-decision
+                      (file-truename source) root out-dir cache 'any)))
+               (module
+                (and decision
+                     (eliscript-project-cache-decision-module decision))))
           (if module
               (push module modules)
             (setq valid nil))))
@@ -345,10 +420,15 @@ the entries recorded by CACHE for complete-graph reuse."
          :manifest (eliscript-project-cache-manifest cache)
          :digest (eliscript-project-cache-digest cache)
          :compiled-count 0
-         :reused-count (length modules))))))
+         :reused-count (length modules)
+         :mode mode
+         :portable-entries portable-entries
+         :cache-enabled t
+         :cache-status "hit"
+         :cache-reason "verified")))))
 
 (defun eliscript-project--write-module
-    (program source source-text output-path dependencies portable-entries)
+    (program source source-text output-path dependencies portable-entries reason)
   "Emit PROGRAM for SOURCE and write it to OUTPUT-PATH with a source map."
   (let* ((map-path (concat output-path ".map"))
          (map-directory (file-name-directory map-path))
@@ -376,7 +456,8 @@ the entries recorded by CACHE for complete-graph reuse."
      :source-map-digest (eliscript-project--file-digest map-path)
      :dependencies dependencies
      :portable-entries portable-entries
-     :reused nil)))
+     :reused nil
+     :reason reason)))
 
 (defun eliscript-project--manifest-module (module root out-dir)
   "Return the stable manifest record for MODULE below ROOT and OUT-DIR."
@@ -434,13 +515,35 @@ ROOT and OUT-DIR provide stable relative namespaces for MODULES."
     (list (file-truename manifest-path) digest)))
 
 (defun eliscript-project--build-result
-    (root out-dir entry modules mode portable-entries compiler-digest)
+    (root out-dir entry modules mode portable-entries compiler-digest
+          cache-lookup)
   "Create a complete project build result for ENTRY and MODULES."
   (let* ((entry-output (eliscript-project--source-output entry root out-dir))
          (manifest-data
           (eliscript-project--write-manifest
            root out-dir entry-output modules mode portable-entries
-           compiler-digest)))
+           compiler-digest))
+         (compiled-count
+          (cl-count-if-not #'eliscript-project-module-reused modules))
+         (reused-count
+          (cl-count-if #'eliscript-project-module-reused modules))
+         (cache (eliscript-project-cache-lookup-cache cache-lookup))
+         (lookup-reason
+          (eliscript-project-cache-lookup-reason cache-lookup))
+         (cache-enabled (not (equal lookup-reason "cache-disabled")))
+         (cache-status
+          (cond
+           ((not cache-enabled) "disabled")
+           ((not cache) "miss")
+           ((= reused-count (length modules)) "hit")
+           ((> reused-count 0) "partial")
+           (t "miss")))
+         (cache-reason
+          (cond
+           ((not cache) lookup-reason)
+           ((equal cache-status "hit") "verified")
+           ((equal cache-status "partial") "dirty-modules")
+           (t "all-modules-dirty"))))
     (eliscript-project-build-result-create
      :root root
      :out-dir out-dir
@@ -449,10 +552,79 @@ ROOT and OUT-DIR provide stable relative namespaces for MODULES."
      :modules modules
      :manifest (car manifest-data)
      :digest (cadr manifest-data)
-     :compiled-count
-     (cl-count-if-not #'eliscript-project-module-reused modules)
-     :reused-count
-     (cl-count-if #'eliscript-project-module-reused modules))))
+     :compiled-count compiled-count
+     :reused-count reused-count
+     :mode mode
+     :portable-entries portable-entries
+     :cache-enabled cache-enabled
+     :cache-status cache-status
+     :cache-reason cache-reason)))
+
+(defun eliscript-project-build-report (result)
+  "Return a stable JSON-compatible report for project build RESULT."
+  (unless (eliscript-project-build-result-p result)
+    (signal 'wrong-type-argument
+            (list 'eliscript-project-build-result-p result)))
+  (let ((root (eliscript-project-build-result-root result))
+        (out-dir (eliscript-project-build-result-out-dir result)))
+    `((format . "eliscript-build-report")
+      (version . ,eliscript-project-build-report-version)
+      (mode . ,(eliscript-project-build-result-mode result))
+      (root . ,(directory-file-name root))
+      (outDir . ,(directory-file-name out-dir))
+      (entry
+       . ,(file-relative-name
+           (eliscript-project-build-result-entry result) root))
+      (entryOutput
+       . ,(file-relative-name
+           (eliscript-project-build-result-entry-output result) out-dir))
+      (manifest
+       . ,(file-relative-name
+           (eliscript-project-build-result-manifest result) out-dir))
+      (digest . ,(eliscript-project-build-result-digest result))
+      (portableEntries
+       . ,(vconcat
+           (or (eliscript-project-build-result-portable-entries result) nil)))
+      (cache
+       . ((enabled
+           . ,(if (eliscript-project-build-result-cache-enabled result)
+                  t :false))
+          (status . ,(eliscript-project-build-result-cache-status result))
+          (reason . ,(eliscript-project-build-result-cache-reason result))))
+      (counts
+       . ((modules
+           . ,(length (eliscript-project-build-result-modules result)))
+          (compiled . ,(eliscript-project-build-result-compiled-count result))
+          (reused . ,(eliscript-project-build-result-reused-count result))))
+      (modules
+       . ,(vconcat
+           (mapcar
+            (lambda (module)
+              `((source
+                 . ,(file-relative-name
+                     (eliscript-project-module-source module) root))
+                (output
+                 . ,(file-relative-name
+                     (eliscript-project-module-output module) out-dir))
+                (sourceMap
+                 . ,(file-relative-name
+                     (eliscript-project-module-source-map module) out-dir))
+                (status
+                 . ,(if (eliscript-project-module-reused module)
+                        "reused" "compiled"))
+                (reason . ,(eliscript-project-module-reason module))
+                (dependencies
+                 . ,(vconcat
+                     (mapcar
+                      (lambda (dependency)
+                        (file-relative-name dependency root))
+                      (or (eliscript-project-module-dependencies module)
+                          nil))))
+                (portableEntries
+                 . ,(vconcat
+                     (or (eliscript-project-module-portable-entries module)
+                         nil)))))
+            (eliscript-project-build-result-modules result)))))))
 
 (defun eliscript-project-build (entry out-dir &optional root)
   "Compile the local Eliscript graph rooted at ENTRY into OUT-DIR.
@@ -474,10 +646,11 @@ are rewritten to `.mjs'.  Other import specifiers remain unchanged."
          (entry-output
           (eliscript-project--source-output
            canonical-entry root-path output-directory))
-         (cache
+         (cache-lookup
           (eliscript-project--read-cache
            output-directory entry-output "standard" nil
            compiler-digest))
+         (cache (eliscript-project-cache-lookup-cache cache-lookup))
          (states (make-hash-table :test #'equal))
          modules)
     (unless (string-suffix-p ".eli" canonical-entry)
@@ -498,9 +671,11 @@ are rewritten to `.mjs'.  Other import specifiers remain unchanged."
               (let* ((output-path
                       (eliscript-project--source-output
                        source root-path output-directory))
+                     (decision
+                      (eliscript-project--cache-decision
+                       source root-path output-directory cache nil))
                      (cached
-                      (eliscript-project--cached-module
-                       source root-path output-directory cache nil)))
+                      (eliscript-project-cache-decision-module decision)))
 		(if cached
                     (progn
                       (dolist (dependency
@@ -545,7 +720,10 @@ are rewritten to `.mjs'.  Other import specifiers remain unchanged."
                       (visit dependency))
                     (push
                      (eliscript-project--write-module
-                      program source source-text output-path dependencies nil)
+                      program source source-text output-path dependencies nil
+                      (if cache
+                          (eliscript-project-cache-decision-reason decision)
+			(eliscript-project-cache-lookup-reason cache-lookup)))
                      modules)))
 		(puthash source 'done states))))))
       (visit canonical-entry))
@@ -557,7 +735,7 @@ are rewritten to `.mjs'.  Other import specifiers remain unchanged."
                    (eliscript-project-module-source right)))))
     (eliscript-project--build-result
      root-path output-directory canonical-entry modules "standard" nil
-     compiler-digest)))
+     compiler-digest cache-lookup)))
 
 (defun eliscript-project--portable-imports (forms)
   "Return portable import descriptions from selected FORMS.
@@ -599,13 +777,15 @@ only the requested declarations, immutable constants, and portable imports."
          (entry-output
           (eliscript-project--source-output
            canonical-entry root-path output-directory))
-         (cache
+         (cache-lookup
           (eliscript-project--read-cache
            output-directory entry-output "portable"
            portable-entry-names compiler-digest))
+         (cache (eliscript-project-cache-lookup-cache cache-lookup))
          (cached-result
           (eliscript-project--cached-build-result
-           root-path output-directory canonical-entry cache))
+           root-path output-directory canonical-entry cache
+           "portable" portable-entry-names))
          (forms-by-source (make-hash-table :test #'equal))
          (texts-by-source (make-hash-table :test #'equal))
          (requests (make-hash-table :test #'equal))
@@ -623,26 +803,26 @@ only the requested declarations, immutable constants, and portable imports."
      (progn
        (cl-labels
            ((load-forms
-             (source)
-             (or (gethash source forms-by-source)
-                 (let* ((text (eliscript-project--read-source source))
-                        (forms (eliscript--analyzed-string text source)))
-                   (puthash source text texts-by-source)
-                   (puthash source forms forms-by-source)
-                   forms)))
+              (source)
+              (or (gethash source forms-by-source)
+                  (let* ((text (eliscript-project--read-source source))
+                         (forms (eliscript--analyzed-string text source)))
+                    (puthash source text texts-by-source)
+                    (puthash source forms forms-by-source)
+                    forms)))
             (enqueue
-             (source name)
-             (push (cons source (if (symbolp name) name (intern name))) queue))
+              (source name)
+              (push (cons source (if (symbolp name) name (intern name))) queue))
             (resolve-import
-             (source specifier span)
-             (unless (eliscript-project--local-import-p specifier)
-               (eliscript-project--fail
-                source span
-                "portable import must be a relative .eli module: %s"
-                specifier))
-             (eliscript-project--canonical-source
-              (expand-file-name specifier (file-name-directory source))
-              root-path source span)))
+              (source specifier span)
+              (unless (eliscript-project--local-import-p specifier)
+		(eliscript-project--fail
+                 source span
+                 "portable import must be a relative .eli module: %s"
+                 specifier))
+              (eliscript-project--canonical-source
+               (expand-file-name specifier (file-name-directory source))
+               root-path source span)))
          (dolist (name entries) (enqueue canonical-entry name))
          (while queue
            (pcase-let*
@@ -703,9 +883,11 @@ only the requested declarations, immutable constants, and portable imports."
                         #'string-lessp))
                       (entry-names
                        (mapcar #'symbol-name names))
+                      (decision
+                       (eliscript-project--cache-decision
+                        source root-path output-directory cache entry-names))
                       (cached
-                       (eliscript-project--cached-module
-                        source root-path output-directory cache entry-names)))
+                       (eliscript-project-cache-decision-module decision)))
                  (if cached
                      (push cached modules)
                    (let ((program (eliscript-lower-module selected source)))
@@ -728,11 +910,15 @@ only the requested declarations, immutable constants, and portable imports."
                      (push
                       (eliscript-project--write-module
                        program source (gethash source texts-by-source)
-                       output-path dependencies entry-names)
+                       output-path dependencies entry-names
+                       (if cache
+                           (eliscript-project-cache-decision-reason decision)
+                         (eliscript-project-cache-lookup-reason cache-lookup)))
                       modules)))))))
          (eliscript-project--build-result
           root-path output-directory canonical-entry (nreverse modules)
-          "portable" portable-entry-names compiler-digest))))))
+          "portable" portable-entry-names compiler-digest
+          cache-lookup))))))
 
 (provide 'eliscript-project)
 

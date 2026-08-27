@@ -13,17 +13,19 @@
 
 (defconst eliscript-project-cli--usage
   (concat
-   "Usage: eliscript-build [--root DIR] [--portable NAME] [--no-cache] --out-dir DIR ENTRY\n\n"
+   "Usage: eliscript-build [--root DIR] [--portable NAME] [--no-cache] [--json] --out-dir DIR ENTRY\n\n"
    "Compile ENTRY and its relative .eli imports into an ESM directory tree.\n"
    "Write eliscript-project.json with deterministic graph content digests.\n"
    "Reuse verified modules by default; --no-cache forces complete compilation.\n"
+   "Use --json for a machine-readable build decision report on stdout.\n"
    "Repeat --portable to emit a verified, dependency-pruned portable graph.\n"))
 
 (defun eliscript-project-cli--parse (arguments)
-  "Parse ARGUMENTS and return (ENTRY OUT-DIR ROOT PORTABLE-ENTRIES USE-CACHE)."
+  "Parse ARGUMENTS into entry, output, root, portable, cache, and JSON fields."
   (when (equal (car arguments) "--")
     (setq arguments (cdr arguments)))
   (let ((use-cache t)
+        (json-report nil)
         entry out-dir root portable-entries)
     (while arguments
       (let ((argument (pop arguments)))
@@ -45,6 +47,8 @@
           (push (pop arguments) portable-entries))
          ((equal argument "--no-cache")
           (setq use-cache nil))
+         ((equal argument "--json")
+          (setq json-report t))
          ((string-prefix-p "-" argument)
           (error "unknown option: %s" argument))
          (entry (error "multiple entry files are not supported"))
@@ -53,12 +57,14 @@
       (error "missing entry file"))
     (unless out-dir
       (error "missing --out-dir"))
-    (list entry out-dir root (nreverse portable-entries) use-cache)))
+    (list entry out-dir root (nreverse portable-entries)
+          use-cache json-report)))
 
 (defun eliscript-project-cli-main (arguments)
   "Build an Eliscript project according to command-line ARGUMENTS."
   (condition-case error-data
-      (pcase-let ((`(,entry ,out-dir ,root ,portable-entries ,use-cache)
+      (pcase-let ((`(,entry ,out-dir ,root ,portable-entries
+			    ,use-cache ,json-report)
                    (eliscript-project-cli--parse arguments)))
         (let* ((eliscript-project-use-cache use-cache)
                (result
@@ -66,7 +72,12 @@
                     (eliscript-project-build-portable
                      entry portable-entries out-dir root)
                   (eliscript-project-build entry out-dir root))))
-          (princ (eliscript-project-build-result-entry-output result))
+          (princ
+           (if json-report
+               (json-serialize
+                (eliscript-project-build-report result)
+                :false-object :false)
+             (eliscript-project-build-result-entry-output result)))
           (princ "\n")))
     (error
      (message "eliscript-build: %s" (error-message-string error-data))
