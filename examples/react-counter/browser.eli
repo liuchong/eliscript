@@ -2,6 +2,7 @@
   (import "react" StrictMode)
   (import "react-dom/client" createRoot)
   (import "./main.eli" :default Counter)
+  (import "../../stdlib/sequence.eli" map)
   (import "./counter.css")
   (import "../../docs/pages/assets/eliscript-logo.png" :default logo-url)
 
@@ -35,6 +36,7 @@
           (jsx :p (object :className "status")
             "Edit the .eli source and Vite will refresh this module."))
         (jsx :footer (object :className "demo-footer")
-          (jsx :span nil "Automatic JSX runtime")
-          (jsx :span nil "Source Map v3")
-          (jsx :span nil "Fast Refresh"))))))
+          (map
+            (lambda (label)
+              (jsx :span (object :key label) label))
+            ["Automatic JSX runtime" "Source Map v3" "Portable sequence library"]))))))

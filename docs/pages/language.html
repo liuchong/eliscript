@@ -42,6 +42,7 @@
           <a href="#forms">Forms</a>
           <a href="#macros">Macros</a>
           <a href="#modules">Modules</a>
+          <a href="#sequences">Sequences</a>
           <a href="#react">React</a>
           <a href="#differences">Differences</a>
         </nav>
@@ -129,6 +130,14 @@
 (export Component helper)
 (export-default Component)</code></pre>
             <p>One Eliscript source file emits one ESM file. Module names are source-level identifiers today; path resolution belongs to a later module-resolution stage.</p>
+          </section>
+
+          <section id="sequences">
+            <h2>Portable sequences</h2>
+            <pre><code>(import "../../stdlib/sequence.eli" map filter reduce range)
+
+(map (lambda (value) (* value 2)) (range 1 5))</code></pre>
+            <p>The first standard-library module is written entirely in Eliscript. It provides <code>reverse</code>, <code>map</code>, <code>filter</code>, <code>reduce</code>, <code>concat</code>, ranges, slicing, predicate checks, and search without adding compiler intrinsics or mutating input arrays.</p>
           </section>
 
           <section id="react">

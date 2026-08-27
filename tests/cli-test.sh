@@ -119,13 +119,15 @@ if [ -z "$VITE_SCRIPT" ] || [ -z "$VITE_STYLE" ] || [ -z "$VITE_MAP" ]; then
   exit 1
 fi
 
-if ! grep -F 'Interactive counter' "$VITE_SCRIPT" >/dev/null; then
-  printf 'expected compiled browser counter in Vite bundle\n' >&2
+if ! grep -F 'Interactive counter' "$VITE_SCRIPT" >/dev/null || \
+   ! grep -F 'Portable sequence library' "$VITE_SCRIPT" >/dev/null; then
+  printf 'expected compiled browser counter and sequence library in Vite bundle\n' >&2
   exit 1
 fi
 
 if ! grep -F 'examples/react-counter/browser.eli' "$VITE_MAP" >/dev/null || \
-   ! grep -F 'examples/react-counter/main.eli' "$VITE_MAP" >/dev/null; then
+   ! grep -F 'examples/react-counter/main.eli' "$VITE_MAP" >/dev/null || \
+   ! grep -F 'stdlib/sequence.eli' "$VITE_MAP" >/dev/null; then
   printf 'expected Eliscript sources in bundled source map\n' >&2
   exit 1
 fi

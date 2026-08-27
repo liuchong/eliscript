@@ -292,6 +292,19 @@
     (should-not (string-match-p "function unused" output))
     (should-not (string-match-p "function ordinary" output))))
 
+(ert-deftest eliscript-standard-library-sequence-closure-is-portable ()
+  (let* ((source
+          (expand-file-name "stdlib/sequence.eli" default-directory))
+         (output (eliscript-compile-portable-file source '(map))))
+    (should (string-match-p "function reverse(values)" output))
+    (should (string-match-p "function map(function$, values)" output))
+    (should-not (string-match-p "function filter" output))
+    (should-not (string-match-p "function range" output))
+    (should (string-match-p
+             (regexp-quote
+              "Object.fromEntries([[\"reverse\", reverse], [\"map\", map]])")
+             output))))
+
 (ert-deftest eliscript-portable-functions-reject-non-portable-dependencies ()
   (dolist (source
            '("(defun helper () 1) (defportable work () (helper))"

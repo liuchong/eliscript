@@ -14,5 +14,5 @@ test:
 		tests/bootstrap-expander.test.mjs tests/bootstrap-analyzer.test.mjs \
 		tests/bootstrap-ir.test.mjs tests/bootstrap-emitter.test.mjs \
 		tests/bootstrap-compiler.test.mjs tests/worker-runtime.test.mjs \
-		tests/worker-benchmark.test.mjs
+		tests/worker-benchmark.test.mjs tests/stdlib-sequence.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh

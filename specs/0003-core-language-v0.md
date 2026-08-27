@@ -111,6 +111,11 @@ Lists and vectors currently share the ECMAScript array representation. `equal`
 currently uses strict identity equality; structural equality is deferred to the
 portable runtime.
 
+Higher-order, non-mutating sequence operations are implemented as Eliscript
+library code rather than special forms. See
+[0023-portable-sequence-library.md](0023-portable-sequence-library.md) for
+`map`, `filter`, `reduce`, ranges, slicing, predicates, and search.
+
 ## ECMAScript Modules
 
 Imports use these top-level forms:

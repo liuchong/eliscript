@@ -305,6 +305,20 @@ mapped runtime diagnostics, and the representative asynchronous document
 indexing adapter complete the milestone. See
 [0022-emacs-worker-integration.md](0022-emacs-worker-integration.md).
 
+### M6: Standard Library (In Progress)
+
+- Implement reusable facilities in Eliscript rather than compiler intrinsics.
+- Keep standard modules host-independent and dependency-prunable.
+- Prove source imports in browser builds and generated ESM imports in
+  command-line builds.
+- Grow sequence, object, text, and application-facing libraries from measured
+  usage.
+
+Started on 2026-08-28. The first sequence module implements twelve portable
+operations, closure-only dependency selection, seed/self-hosted compiler parity,
+standalone ESM execution, and import through the React/Vite example. See
+[0023-portable-sequence-library.md](0023-portable-sequence-library.md).
+
 ## Non-goals for the Initial Implementation
 
 - Emacs byte-code or native-comp compatibility

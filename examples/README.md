@@ -6,7 +6,8 @@ expected generated JavaScript, and the smallest environment needed to run it.
 `basic/main.eli` exercises the M1 language core. `react-counter/main.eli`
 exercises components, hooks, props, children, events, fragments, conditional
 children, automatic JSX runtime emission, server rendering, browser mounting,
-Vite production builds, and React Fast Refresh.
+Vite production builds, React Fast Refresh, and a direct source import from the
+portable sequence standard library.
 
 `org-site/` adds the publishing vertical slice: Org metadata and body export,
 draft filtering, a watched ESM content module, and a fully custom React reading

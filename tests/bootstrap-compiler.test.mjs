@@ -129,6 +129,23 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
     });
     expect(portableOutput).toBe(seedOutput);
 
+    const sequenceSource = resolve(projectDirectory, "stdlib/sequence.eli");
+    const seedSequenceOutput = await runSuccessful([seedCliPath, sequenceSource], {
+      env: { ...process.env, EMACS: emacs },
+    });
+    const selfHostedSequenceOutput = await runSuccessful(
+      [portableCliPath, sequenceSource],
+      {
+        env: {
+          ...process.env,
+          ELISCRIPT_BOOTSTRAP_MODULE_DIR: generationTwo,
+        },
+      },
+    );
+    expect(selfHostedSequenceOutput).toBe(seedSequenceOutput);
+    expect(seedSequenceOutput).toContain("function map(function$, values)");
+    expect(seedSequenceOutput).toContain("function range_by(start, end, step)");
+
     const portableSource = resolve(directory, "portable.eli");
     await writeFile(
       portableSource,

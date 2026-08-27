@@ -39,6 +39,18 @@ Generate an external Source Map v3 file when debugging generated code:
 
 This writes `dist/basic.mjs.map` and adds its `sourceMappingURL` to the module.
 
+Import the portable sequence library from an Eliscript module handled by Vite:
+
+```elisp
+(import "../../stdlib/sequence.eli" map filter reduce range)
+
+(map (lambda (value) (* value 2)) (range 1 5))
+```
+
+The React counter uses this source-module path in its production build. For a
+standalone ESM tree, run `bun run compile:stdlib` and import the generated
+`dist/stdlib/sequence.mjs` module.
+
 Run the complete test suite:
 
 ```sh
@@ -166,6 +178,8 @@ Implemented forms include:
 - `defvar`, `defconst`, `defun`, `defportable`, `lambda`, `let`, and `let*`
 - `if`, `when`, `unless`, `cond`, `progn`, `while`, `and`, and `or`
 - `setq`, arithmetic, comparisons, and basic list/vector operations
+- portable `map`, `filter`, `reduce`, ranges, slicing, predicates, and search
+  from `stdlib/sequence.eli`
 - ESM `module`, `import`, `export`, and `export-default`
 - compile-time `defmacro` with backquote, `&rest`, and `&body`
 - `get`, `put`, `js-call`, `new`, and explicit `js*` interop
@@ -262,8 +276,8 @@ portable execution model. The exact implemented subset is recorded in
 ## Status
 
 The first Emacs Lisp seed compiler is implemented and usable from the command
-line. The M0 vertical slice, M1 language core, M2 React target, M3 Org
-publishing target, and M4 self-hosting compiler are complete.
+line. M0 through M5 are complete. M6 has started with the first standard-library
+module written entirely in Eliscript.
 
 Current evidence:
 
@@ -335,12 +349,16 @@ Current evidence:
 - The Emacs indexing adapter tokenizes editor-owned text, dispatches portable
   scoring calls concurrently, preserves document order, and cleans up its
   generated module and worker session.
-- Sixty-one ERT tests cover reading, locations, macro expansion, analysis, IR
+- `stdlib/sequence.eli` supplies twelve non-mutating, higher-order sequence
+  operations as dependency-prunable `defportable` declarations. The React
+  browser entry imports it as source through Vite.
+- Sixty-two ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- Fifteen Bun tests cover the compiler and Org Vite adapters, source-map
+- Sixteen Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
-  bootstrap behavior, the worker protocol, and benchmark reporting.
+  bootstrap behavior, the worker protocol, standard library, and benchmark
+  reporting.
 - A CLI integration test compares generated output with a checked-in snapshot.
 - Bun 1.4 executes generated modules and verifies recursion, mutation, loops,
   higher-order functions, objects, arrays, exports, React server rendering, and
@@ -350,6 +368,11 @@ M5 is complete: the measured worker boundary, portable-function path, immutable
 module cache, automatic restart policy, mapped runtime diagnostics, and
 representative asynchronous indexing workload are integrated across Emacs,
 Bun, and both compiler generations.
+
+M6 is underway. Its first slice proves that a useful sequence library can live
+in Eliscript source, remain statically portable, compile identically through
+the seed and self-hosted compilers, and participate in a source-mapped browser
+module graph without new compiler intrinsics.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -389,7 +412,9 @@ execution protocol and measurement boundary, and
 calls, and
 [specs/0022-emacs-worker-integration.md](specs/0022-emacs-worker-integration.md)
 for automatic worker generations, mapped diagnostics, cache policy, and the
-document indexing adapter.
+document indexing adapter, and
+[specs/0023-portable-sequence-library.md](specs/0023-portable-sequence-library.md)
+for the first portable standard-library module and its sequence semantics.
 
 ## License
 

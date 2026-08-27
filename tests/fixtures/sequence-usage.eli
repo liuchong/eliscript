@@ -1,0 +1,33 @@
+(module test.sequence-usage
+  (import "./sequence.mjs"
+          reverse map filter reduce concat range-by range take drop
+          some? every? find)
+
+  (defconst values (range 1 6))
+  (defconst result
+    (object
+      :values values
+      :reversed (reverse values)
+      :mapped (map (lambda (value) (* value 2)) values)
+      :filtered (filter (lambda (value) (= (% value 2) 0)) values)
+      :reduced (reduce (lambda (total value) (+ total value)) 0 values)
+      :concatenated (concat [1 2] [3 4])
+      :descending (range-by 5 0 -2)
+      :zero-step (range-by 1 5 0)
+      :taken (take 3 values)
+      :dropped (drop 3 values)
+      :take-many (take 20 values)
+      :take-negative (take -1 values)
+      :drop-negative (drop -1 values)
+      :some (some? (lambda (value) (> value 4)) values)
+      :every (every? (lambda (value) (> value 0)) values)
+      :found (find (lambda (value) (> value 3)) values)
+      :empty-map (map (lambda (value) value) [])
+      :empty-filter (filter (lambda (value) value) [])
+      :empty-reduce (reduce (lambda (total value) (+ total value)) 7 [])
+      :empty-some (some? (lambda (value) value) [])
+      :empty-every (every? (lambda (value) value) [])
+      :missing (find (lambda (value) (> value 9)) values)))
+
+  (print (JSON/stringify result))
+  (export result))
