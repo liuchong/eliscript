@@ -319,6 +319,12 @@ operations, closure-only dependency selection, seed/self-hosted compiler parity,
 standalone ESM execution, and import through the React/Vite example. See
 [0023-portable-sequence-library.md](0023-portable-sequence-library.md).
 
+The Emacs project builder now walks expanded IR imports, recursively compiles
+root-contained `.eli` dependencies, preserves their directory tree as `.mjs`,
+and emits a source map for every module. Its command-line example executes the
+same sequence source graph without Vite. See
+[0024-project-builds.md](0024-project-builds.md).
+
 ## Non-goals for the Initial Implementation
 
 - Emacs byte-code or native-comp compatibility

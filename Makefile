@@ -5,6 +5,7 @@ BUN ?= bun
 test:
 	$(EMACS) --batch -Q -L compiler -L tools/org -L tools/worker -L tests \
 		-l tests/eliscript-tests.el \
+		-l tests/eliscript-project-tests.el \
 		-l tests/eliscript-org-tests.el \
 		-l tests/eliscript-worker-tests.el \
 		-l tests/bootstrap-tests.el \
@@ -16,3 +17,4 @@ test:
 		tests/bootstrap-compiler.test.mjs tests/worker-runtime.test.mjs \
 		tests/worker-benchmark.test.mjs tests/stdlib-sequence.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh
+	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/project-cli-test.sh

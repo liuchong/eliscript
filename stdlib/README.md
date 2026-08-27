@@ -30,5 +30,14 @@ Compile the complete module and its external source map with:
 bun run compile:stdlib
 ```
 
+Build and run a complete project that imports the `.eli` source directly:
+
+```sh
+bun run build:sequence-cli
+bun run dist/project/examples/sequence-cli/main.mjs
+```
+
 See [specs/0023-portable-sequence-library.md](../specs/0023-portable-sequence-library.md)
-for exact semantics and acceptance evidence.
+for exact semantics and acceptance evidence, and
+[specs/0024-project-builds.md](../specs/0024-project-builds.md) for recursive
+source-module builds.

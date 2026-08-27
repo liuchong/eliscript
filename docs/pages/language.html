@@ -129,7 +129,7 @@
 
 (export Component helper)
 (export-default Component)</code></pre>
-            <p>One Eliscript source file emits one ESM file. Module names are source-level identifiers today; path resolution belongs to a later module-resolution stage.</p>
+            <p>One Eliscript source file emits one ESM file. Vite resolves <code>.eli</code> imports during browser builds; the Emacs project builder recursively resolves root-contained relative source imports, preserves their directory tree, and rewrites them to <code>.mjs</code>. Other specifiers remain host-defined.</p>
           </section>
 
           <section id="sequences">

@@ -16,3 +16,7 @@ interface written in Eliscript.
 `emacs-index/` adds the Emacs acceleration vertical slice: a statically checked
 portable scoring kernel compiled with a source map and driven concurrently by a
 high-level Emacs adapter.
+
+`sequence-cli/` exercises ordinary multi-file project builds by importing the
+portable sequence library as Eliscript source, then running the emitted ESM
+tree directly with Bun.

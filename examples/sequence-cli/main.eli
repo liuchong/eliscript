@@ -1,0 +1,13 @@
+(module example.sequence-cli
+  (import "../../stdlib/sequence.eli" map filter reduce range)
+
+  (defconst values (range 1 8))
+  (defconst result
+    (object
+     :values values
+     :squares (map (lambda (value) (* value value)) values)
+     :even (filter (lambda (value) (= (% value 2) 0)) values)
+     :sum (reduce (lambda (total value) (+ total value)) 0 values)))
+
+  (print (JSON/stringify result))
+  (export result))

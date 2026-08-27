@@ -53,6 +53,11 @@ ESM fixture, inspect its source map, and retain the library source in the React
 production bundle map. ERT separately proves that selecting portable `map`
 includes `reverse` but excludes unrelated sequence operations.
 
+Project-build tests inspect expanded IR imports, retain non-Eliscript
+specifiers, support cycles, enforce canonical root containment, and verify
+per-module source maps. The public CLI builds and executes a source graph that
+crosses from `examples/` into `stdlib/` without Vite.
+
 Worker tests compile one pure Eliscript workload, then exercise the Bun runtime
 and Emacs client over real pipes. They cover framing, version negotiation,
 request correlation, progress, cancellation, timeout, module logging,

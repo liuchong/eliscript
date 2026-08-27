@@ -19,8 +19,8 @@ build reusable language facilities.
 (map (lambda (value) (* value 2)) (range 1 5))
 ```
 
-Vite can consume `.eli` imports directly. A command-line build compiles the
-library to ESM first and imports the resulting `.mjs` module.
+Vite can consume `.eli` imports directly. The project builder can also compile
+the complete local source graph and rewrite each generated import to `.mjs`.
 
 ## Representation and Purity
 
@@ -79,8 +79,11 @@ Emacs editor state.
   and Generation 2 compiler and compares their JavaScript byte-for-byte.
 - The React production build resolves `sequence.eli`, renders a mapped footer,
   and records the standard-library source in the final bundle map.
+- The project CLI discovers the same source import, emits both modules and
+  their maps, rewrites the relative specifier, and runs the entry with Bun.
 
 ## Next Slice
 
-M6 can continue with object/text helpers and a project build command that turns
-a local `.eli` module graph into a runnable ESM tree without requiring Vite.
+The project build command is implemented in
+[0024-project-builds.md](0024-project-builds.md). M6 can continue with object
+and text helpers exercised through both browser and ordinary ESM builds.
