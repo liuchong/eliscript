@@ -1,0 +1,54 @@
+(module bootstrap.compiler.syntax
+  (defun make-span
+      (filename start end line column end-line end-column)
+    (object
+      :filename filename
+      :start start
+      :end end
+      :line line
+      :column column
+      :endLine end-line
+      :endColumn end-column))
+
+  (defun literal-node (value span)
+    (object :kind "literal" :value value :span span))
+
+  (defun undefined-node (span)
+    (object :kind "undefined" :span span))
+
+  (defun symbol-node (name span)
+    (object :kind "symbol" :name name :span span))
+
+  (defun keyword-node (name span)
+    (object :kind "keyword" :name name :span span))
+
+  (defun collection-node (kind items span)
+    (object :kind kind :items items :span span))
+
+  (defun node-kind (node)
+    (get node :kind))
+
+  (defun node-span (node)
+    (get node :span))
+
+  (defun node-value (node)
+    (get node :value undefined))
+
+  (defun node-name (node)
+    (get node :name undefined))
+
+  (defun node-items (node)
+    (get node :items []))
+
+  (export
+    make-span
+    literal-node
+    undefined-node
+    symbol-node
+    keyword-node
+    collection-node
+    node-kind
+    node-span
+    node-value
+    node-name
+    node-items))

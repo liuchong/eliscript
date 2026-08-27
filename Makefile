@@ -9,5 +9,5 @@ test:
 		-l tests/bootstrap-tests.el \
 		-f ert-run-tests-batch-and-exit
 	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
-		tests/bootstrap-symbol.test.mjs
+		tests/bootstrap-symbol.test.mjs tests/bootstrap-reader.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh

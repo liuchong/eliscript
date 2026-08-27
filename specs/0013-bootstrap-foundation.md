@@ -90,3 +90,6 @@ The remaining Generation 1 dependency order is:
 6. seed/portable compiler equivalence and reproducible self-compilation
 
 Each phase must expose deterministic data and add shared conformance evidence.
+
+The first two items are implemented by
+[0014-portable-syntax-reader.md](0014-portable-syntax-reader.md).

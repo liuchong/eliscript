@@ -1,0 +1,94 @@
+{
+  "valid": [
+    {
+      "name": "literals",
+      "filename": "literals.eli",
+      "source": "nil t false undefined 42 -3.5 1e3 \"hello\\nworld\" :tag symbol-name"
+    },
+    {
+      "name": "collections",
+      "filename": "collections.eli",
+      "source": "(module demo [one 2 :three]\n  (print \"ok\"))"
+    },
+    {
+      "name": "reader-prefixes",
+      "filename": "prefixes.eli",
+      "source": "'name `(a ,b ,@items) #'handler"
+    },
+    {
+      "name": "comments-and-unicode",
+      "filename": "unicode.eli",
+      "source": "; heading\n(你好 \"😀\" ; inline\n [ready?])"
+    },
+    {
+      "name": "empty-values",
+      "filename": "empty.eli",
+      "source": "() [] \"\" :"
+    },
+    {
+      "name": "self-symbol-module",
+      "filename": "bootstrap/compiler/symbol.eli",
+      "file": "bootstrap/compiler/symbol.eli"
+    },
+    {
+      "name": "self-syntax-module",
+      "filename": "bootstrap/compiler/syntax.eli",
+      "file": "bootstrap/compiler/syntax.eli"
+    },
+    {
+      "name": "self-reader-module",
+      "filename": "bootstrap/compiler/reader.eli",
+      "file": "bootstrap/compiler/reader.eli"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "unclosed-list",
+      "filename": "unclosed-list.eli",
+      "source": "(a",
+      "error": "unclosed-list.eli:1:1: unexpected end of input"
+    },
+    {
+      "name": "unclosed-vector",
+      "filename": "unclosed-vector.eli",
+      "source": "[a",
+      "error": "unclosed-vector.eli:1:1: unexpected end of input"
+    },
+    {
+      "name": "unterminated-string",
+      "filename": "string.eli",
+      "source": "\"unfinished",
+      "error": "string.eli:1:1: unexpected end of input"
+    },
+    {
+      "name": "unexpected-close",
+      "filename": "close.eli",
+      "source": ")",
+      "error": "close.eli:1:1: Invalid read syntax: \")\""
+    },
+    {
+      "name": "mismatched-close",
+      "filename": "mismatch.eli",
+      "source": "(a]",
+      "error": "mismatch.eli:1:1: Invalid read syntax: \"]\""
+    },
+    {
+      "name": "missing-quoted-value",
+      "filename": "quote.eli",
+      "source": "'",
+      "error": "quote.eli:1:1: unexpected end of input"
+    },
+    {
+      "name": "missing-function-value",
+      "filename": "function.eli",
+      "source": "#'",
+      "error": "function.eli:1:1: unexpected end of input"
+    },
+    {
+      "name": "unknown-dispatch",
+      "filename": "dispatch.eli",
+      "source": "#foo",
+      "error": "dispatch.eli:1:1: Invalid read syntax: \"#f\""
+    }
+  ]
+}

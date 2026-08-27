@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
+OUTPUT_DIR=${ELISCRIPT_BOOTSTRAP_OUT_DIR:-"$PROJECT_DIR/dist/bootstrap"}
+
+mkdir -p "$OUTPUT_DIR"
+
+for module in symbol syntax reader; do
+  "$PROJECT_DIR/bin/eliscript" \
+    --source-map \
+    --output "$OUTPUT_DIR/$module.mjs" \
+    "$PROJECT_DIR/bootstrap/compiler/$module.eli"
+done

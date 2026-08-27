@@ -1,0 +1,121 @@
+# 0014: Portable Syntax and Reader
+
+- Status: Implemented
+- Date: 2026-08-28
+
+## Summary
+
+Generation 1 now has an explicit, serializable syntax representation and a
+reader written in Eliscript. The Emacs Lisp seed compiler builds both modules
+to ordinary ESM; the generated reader then parses fixture programs and all
+current bootstrap compiler sources, including its own source.
+
+This stage replaces dependency on native Emacs symbols, cons cells, vectors,
+and located-form structs at the portable reader boundary. It does not yet
+replace macro expansion, lexical analysis, IR lowering, emission, or the
+compiler driver.
+
+## Syntax Nodes
+
+Every parsed value is an object with a `kind` and `span`:
+
+| Kind | Payload |
+| --- | --- |
+| `literal` | `value` containing null, boolean, number, or string |
+| `undefined` | no value field |
+| `symbol` | `name` without host symbol identity |
+| `keyword` | `name` without the leading colon |
+| `list` | ordered `items` |
+| `vector` | ordered `items` |
+
+An empty list has the same value semantics as `nil` and is represented as a
+null literal, matching the seed compiler. An empty vector remains a vector.
+
+`bootstrap/compiler/syntax.eli` owns constructors and accessors for these
+objects. The representation is JSON-compatible except for the explicit
+`undefined` kind, which avoids losing that distinction during serialization.
+
+## Source Spans
+
+A span contains:
+
+- `filename`
+- zero-based, end-exclusive `start` and `end` character offsets
+- one-based `line`, `column`, `endLine`, and `endColumn`
+
+Offsets and columns count Unicode code points, not bytes, UTF-16 code units, or
+display-cell widths. The reader separately keeps a UTF-16 code-unit cursor for
+JavaScript `slice` and `codePointAt`. Supplementary characters therefore
+advance the slicing cursor by two but the source offset and column by one.
+
+The seed reader uses Emacs display columns, where wide characters may occupy
+two cells. The conformance oracle normalizes its spans to character columns
+before comparison. Source Map generation will perform its own conversion to
+the UTF-16 columns required by Source Map v3.
+
+## Reader Grammar
+
+`bootstrap/compiler/reader.eli` currently reads the stable grammar needed by
+Eliscript and its bootstrap compiler sources:
+
+- whitespace and semicolon line comments
+- lists and vectors
+- null, true, false, and undefined literals
+- decimal integers and floats, including exponent notation
+- JSON-compatible quoted strings
+- keywords and Lisp-style symbols
+- quote, backquote, comma, comma-at, and function-quote prefixes
+
+Reader prefixes become explicit list nodes. The synthetic prefix symbol owns
+the prefix span, while the list owns the complete prefix-plus-value span.
+
+The reader rejects unexpected or mismatched closing delimiters, unknown `#`
+dispatch syntax, missing prefixed values, and unterminated collections or
+strings with filename, line, and column diagnostics.
+
+The seed's underlying Emacs reader accepts additional host syntax. That extra
+surface is not automatically part of the portable language contract. Any
+additional numeric, string, character, dispatch, or dotted-pair syntax must be
+specified and added to shared conformance before the portable compiler relies
+on it.
+
+## Build Boundary
+
+`bin/eliscript-bootstrap` compiles the current Generation 1 modules in a stable
+layout:
+
+```text
+bootstrap/compiler/symbol.eli -> dist/bootstrap/symbol.mjs
+bootstrap/compiler/syntax.eli -> dist/bootstrap/syntax.mjs
+bootstrap/compiler/reader.eli -> dist/bootstrap/reader.mjs
+```
+
+Each module receives an external Source Map v3 file. The generated reader uses
+a standard relative ESM import for `syntax.mjs`; it has no handwritten
+JavaScript module wrapper.
+
+## Shared Conformance
+
+`tests/fixtures/bootstrap-reader.json` contains valid source cases, expected
+diagnostics, and file-backed self-reader cases. The Emacs oracle normalizes
+seed located forms to the portable object shape. The Bun test compares the
+generated reader's complete nested output against that oracle.
+
+Acceptance covers:
+
+- every node kind and recursive source span
+- literals, collections, comments, Unicode, and reader prefixes
+- exact supported diagnostics
+- byte-identical repeated builds of all generated ESM and source maps
+- reading `symbol.eli`, `syntax.eli`, and `reader.eli` with both readers
+
+The generated reader reading its own source proves reader-level closure. It is
+not compiler self-hosting: the generated reader cannot yet expand, analyze,
+lower, or emit that syntax tree.
+
+## Next Phase
+
+The next dependency boundary is portable macro expansion and lexical analysis.
+Those phases must consume these syntax nodes without converting them back into
+Emacs objects, preserve spans through generated forms, and share diagnostics
+with the seed implementations.

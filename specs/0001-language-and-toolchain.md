@@ -254,6 +254,10 @@ identifier mapping and is compiled to ESM by the seed compiler. The seed and
 generated implementations consume one shared conformance fixture and agree on
 valid names, diagnostics, reserved words, qualified references, and Unicode
 code points. See [0013-bootstrap-foundation.md](0013-bootstrap-foundation.md).
+The second slice adds serializable syntax nodes and a portable reader whose
+complete ASTs and diagnostics match the normalized seed reader. It reads all
+current bootstrap sources, including itself. See
+[0014-portable-syntax-reader.md](0014-portable-syntax-reader.md).
 
 ### M5: Emacs Acceleration
 

@@ -71,7 +71,7 @@ bun run dev:org-site
 
 Create its static production bundle with `bun run build:org-site`.
 
-Build the first compiler module written in Eliscript:
+Build the current compiler modules written in Eliscript:
 
 ```sh
 bun run build:bootstrap
@@ -261,10 +261,13 @@ Current evidence:
 - The first portable compiler module is written in Eliscript, compiled by the
   seed to ESM, and matches seed identifier semantics over one shared
   conformance fixture, including Unicode and diagnostic cases.
-- Forty-six ERT tests cover reading, locations, macro expansion, analysis, IR
+- Portable syntax nodes replace Emacs runtime objects at the Generation 1
+  reader boundary. The generated Eliscript reader matches normalized seed ASTs
+  and diagnostics, then reads all bootstrap sources including itself.
+- Forty-seven ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, errors, and interop.
-- Seven Bun tests cover the compiler and Org Vite adapters, source-map handoff,
+- Eight Bun tests cover the compiler and Org Vite adapters, source-map handoff,
   file filtering, React Refresh, Org module invalidation, and generated
   bootstrap behavior.
 - A CLI integration test compares generated output with a checked-in snapshot.
@@ -272,8 +275,8 @@ Current evidence:
   higher-order functions, objects, arrays, exports, React server rendering, and
   production Vite bundles, and deterministic Org publishing.
 
-M4 now continues with the portable syntax model and reader, followed by the
-analyzer, IR, emitter, compiler driver, and reproducible self-compilation.
+M4 now continues with portable macro expansion and lexical analysis, followed
+by IR, emission, the compiler driver, and reproducible self-compilation.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -293,7 +296,9 @@ and production builds, and
 [specs/0012-org-publishing.md](specs/0012-org-publishing.md) for deterministic
 Org content modules and the custom React publishing site, and
 [specs/0013-bootstrap-foundation.md](specs/0013-bootstrap-foundation.md) for
-the first shared seed/portable compiler contract.
+the first shared seed/portable compiler contract, and
+[specs/0014-portable-syntax-reader.md](specs/0014-portable-syntax-reader.md) for
+the serializable syntax model and self-reading Generation 1 reader.
 
 ## License
 

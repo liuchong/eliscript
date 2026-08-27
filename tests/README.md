@@ -15,3 +15,7 @@ Bootstrap tests use shared JSON conformance fixtures. ERT runs the Emacs Lisp
 seed implementation, while Bun compiles the corresponding `.eli` module,
 imports its generated ESM, and checks the same cases. This keeps Generation 0
 and Generation 1 behavior directly comparable as compiler phases migrate.
+The portable reader comparison covers full normalized syntax trees, recursive
+character-based spans, diagnostics, deterministic build artifacts, and all
+current bootstrap sources. The generated reader must successfully read its own
+`.eli` implementation.

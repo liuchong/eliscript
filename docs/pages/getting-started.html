@@ -105,14 +105,14 @@ bun run build:org-site</code></pre>
           <section id="bootstrap">
             <h2>Build the bootstrap module</h2>
             <pre><code>bun run build:bootstrap</code></pre>
-            <p>The Emacs Lisp seed compiler writes the first compiler module maintained in Eliscript to <code>dist/bootstrap/symbol.mjs</code>, together with its source map. The test suite checks its behavior against the same conformance fixture used by the seed implementation.</p>
+            <p>The Emacs Lisp seed compiler writes <code>symbol.mjs</code>, <code>syntax.mjs</code>, and <code>reader.mjs</code> below <code>dist/bootstrap/</code>, together with source maps. The generated reader is compared node-for-node with the seed and must read its own Eliscript source.</p>
           </section>
 
           <section id="test">
             <h2>Run the test suite</h2>
             <pre><code>bun run test</code></pre>
             <p>This runs the Emacs ERT suite, Vite adapter tests, public CLI fixtures, deterministic snapshots, source-map validation, runtime execution, React server rendering, and a production browser build.</p>
-            <div class="callout callout-coral"><p>M4 is underway. Identifier mapping now runs from compiler source written in Eliscript; the portable syntax model and reader are next.</p></div>
+            <div class="callout callout-coral"><p>M4 is underway. Identifier mapping, explicit syntax nodes, and a self-reading reader now run from compiler source written in Eliscript; macro expansion and lexical analysis are next.</p></div>
           </section>
         </article>
       </div>
