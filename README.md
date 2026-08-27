@@ -383,9 +383,10 @@ Current evidence:
   compiled without unrelated declarations, exported through a source-name
   manifest, source-mapped by both compilers, and callable from Emacs without
   exposing generated JS identifiers.
-- The Emacs indexing adapter tokenizes editor-owned text, dispatches portable
-  scoring calls concurrently, preserves document order, and cleans up its
-  generated module and worker session.
+- The Emacs indexing adapter tokenizes editor-owned text, builds a pruned
+  `index -> data -> object` portable graph, dispatches scoring calls
+  concurrently, preserves document order, and cleans up the generated tree and
+  worker session.
 - `stdlib/sequence.eli` supplies twelve non-mutating, higher-order sequence
   operations as dependency-prunable `defportable` declarations. The React
   browser entry imports it as source through Vite.
@@ -403,7 +404,7 @@ Current evidence:
 - Repeated `--portable NAME` options make the same builder verify every local
   `import-portable` target, reject bare or escaping source edges, and emit only
   each module's requested transitive closure.
-- Seventy-nine ERT tests cover reading, locations, macro expansion, analysis, IR
+- Eighty ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
 - Eighteen Bun tests cover the compiler and Org Vite adapters, source-map
@@ -427,6 +428,9 @@ through the seed and self-hosted compilers, and participate in Vite and
 source-mapped module graphs. `import-portable` extends closure proof across
 root-contained local modules; object behavior still rests on three minimal
 portable primitives while indexing policy remains library code.
+The Emacs indexing workload is the second production composition case: its
+portable entry reuses `data/count-by`, and the long-lived worker executes the
+resulting three-module closure rather than a copied single-file helper.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -479,7 +483,9 @@ for immutable object operations and their primitive boundary, and
 keyed lookup, grouping, and counting, and
 [specs/0028-portable-module-composition.md](specs/0028-portable-module-composition.md)
 for graph-verified `import-portable` composition and project-level closure
-builds.
+builds, and
+[specs/0029-portable-indexing-composition.md](specs/0029-portable-indexing-composition.md)
+for the first multi-module portable graph executed by the Emacs worker.
 
 ## License
 

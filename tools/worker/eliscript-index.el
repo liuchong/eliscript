@@ -3,12 +3,14 @@
 ;;; Commentary:
 
 ;; Keep text extraction and editor state in Emacs while a portable Eliscript
-;; kernel scores explicit document data in a long-lived JavaScript worker.
+;; module graph scores explicit document data in a long-lived JavaScript
+;; worker.
 
 ;;; Code:
 
 (require 'cl-lib)
-(require 'eliscript)
+(require 'subr-x)
+(require 'eliscript-project)
 (require 'eliscript-worker)
 
 (defconst eliscript-index--source-file
@@ -20,6 +22,7 @@
 (cl-defstruct (eliscript-index-session
                (:constructor eliscript-index-session--create))
   worker
+  build
   module
   directory)
 
@@ -38,26 +41,33 @@
   `((id . ,id) (terms . ,(eliscript-index-tokenize text))))
 
 (defun eliscript-index-start (&optional command)
-  "Compile the indexing kernel and start a worker session.
+  "Compile the indexing module graph and start a worker session.
 
 COMMAND has the same meaning as in `eliscript-worker-start'."
   (let* ((directory (make-temp-file "eliscript-index-" t))
-         (module (expand-file-name "index.mjs" directory))
+         (project-root eliscript-worker--project-directory)
+         build
+         module
          worker)
     (condition-case error-data
         (progn
-          (eliscript-compile-portable-file-with-source-map
-           eliscript-index--source-file '(score-document) module)
+          (setq build
+                (eliscript-project-build-portable
+                 eliscript-index--source-file
+                 '(score-document)
+                 directory
+                 project-root)
+                module (eliscript-project-build-result-entry-output build))
           (setq worker (eliscript-worker-start command))
           (eliscript-index-session--create
-           :worker worker :module module :directory directory))
+           :worker worker :build build :module module :directory directory))
       (error
        (when worker (eliscript-worker-stop worker t))
        (delete-directory directory t)
        (signal (car error-data) (cdr error-data))))))
 
 (defun eliscript-index-stop (session)
-  "Stop SESSION and remove its generated module and source map."
+  "Stop SESSION and remove its generated module tree and source maps."
   (when (eliscript-index-session-p session)
     (eliscript-worker-stop (eliscript-index-session-worker session))
     (let ((directory (eliscript-index-session-directory session)))

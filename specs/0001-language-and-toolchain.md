@@ -339,6 +339,12 @@ hash change. See [0026-portable-object-library.md](0026-portable-object-library.
 [0027-portable-data-indexing.md](0027-portable-data-indexing.md), and
 [0028-portable-module-composition.md](0028-portable-module-composition.md).
 
+The Emacs indexing workload is the second real consumer of portable module
+composition. It builds term frequencies with `data/count-by`, causing the
+project builder to select and execute a three-module `index -> data -> object`
+graph in the worker. See
+[0029-portable-indexing-composition.md](0029-portable-indexing-composition.md).
+
 ## Non-goals for the Initial Implementation
 
 - Emacs byte-code or native-comp compatibility

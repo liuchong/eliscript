@@ -259,6 +259,41 @@
       (should (string-match-p "function has_QMARK_" object-text))
       (should-not (string-match-p "function keys" object-text)))))
 
+(ert-deftest eliscript-project-builds-portable-indexing-application-graph ()
+  (eliscript-project-tests--with-directory output
+    (let* ((root default-directory)
+           (entry
+            (expand-file-name "examples/emacs-index/index.eli" root))
+           (result
+            (eliscript-project-build-portable
+             entry '(score-document) output root))
+           (entry-output
+            (file-truename
+             (expand-file-name "examples/emacs-index/index.mjs" output)))
+           (data-output
+            (file-truename (expand-file-name "stdlib/data.mjs" output)))
+           (object-output
+            (file-truename (expand-file-name "stdlib/object.mjs" output)))
+           (entry-text (eliscript-project-tests--read entry-output))
+           (data-text (eliscript-project-tests--read data-output))
+           (object-text (eliscript-project-tests--read object-output)))
+      (should (= (length
+                  (eliscript-project-build-result-modules result))
+                 3))
+      (should (equal
+               (eliscript-project-build-result-entry-output result)
+               entry-output))
+      (dolist (module (list entry-output data-output object-output))
+        (should (file-exists-p module))
+        (should (file-exists-p (concat module ".map"))))
+      (should (string-match-p "function score_document" entry-text))
+      (should (string-match-p "function count_by" data-text))
+      (should-not (string-match-p "function index_by" data-text))
+      (should-not (string-match-p "function group_by" data-text))
+      (should (string-match-p "function assoc" object-text))
+      (should (string-match-p "function has_QMARK_" object-text))
+      (should-not (string-match-p "function keys" object-text)))))
+
 (provide 'eliscript-project-tests)
 
 ;;; eliscript-project-tests.el ends here

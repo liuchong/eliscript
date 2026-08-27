@@ -192,9 +192,10 @@ Worker and Emacs clients can invoke manifest entries by Eliscript source name.
 The Emacs client now automatically recovers the same worker object after
 process failure, timeout termination, or generated-module changes. Worker
 generations cache immutable module versions and return source-mapped structured
-runtime errors. The document indexing adapter compiles a portable scoring
-kernel, dispatches document requests asynchronously, and preserves ordered
-results. See [0022-emacs-worker-integration.md](0022-emacs-worker-integration.md).
+runtime errors. The document indexing adapter builds a portable scoring graph,
+dispatches document requests asynchronously, and preserves ordered results.
+See [0022-emacs-worker-integration.md](0022-emacs-worker-integration.md) and
+[0029-portable-indexing-composition.md](0029-portable-indexing-composition.md).
 
 ## Open Questions
 

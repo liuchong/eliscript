@@ -85,6 +85,7 @@ builder, preserving the host-neutral self-hosted compiler core.
 
 ## Next Slice
 
-The next M6 step should use this graph boundary for a second real composition
-case, then decide whether portable project orchestration also needs a
-host-neutral manifest format for non-Emacs build hosts.
+The second production composition case is implemented in
+[0029-portable-indexing-composition.md](0029-portable-indexing-composition.md):
+the Emacs indexing workload now executes an `index -> data -> object` portable
+graph in the long-lived worker.

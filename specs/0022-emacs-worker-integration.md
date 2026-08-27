@@ -18,7 +18,7 @@ path with concurrent, representative work.
 Emacs text and editor state
   -> explicit token vectors
   -> asynchronous portable calls
-  -> cached generated module in Bun
+  -> cached generated module graph in Bun
   -> ordered score records or mapped diagnostics
   -> Emacs applies complete results
 ```
@@ -73,12 +73,13 @@ delegates pure scoring to `examples/emacs-index/index.eli`.
 The adapter:
 
 - tokenizes text in Emacs into explicit JSON-compatible vectors
-- compiles only the portable `score-document` closure with a source map
-- owns a temporary generated module and long-lived worker session
+- builds only the portable `score-document` project closure and its selected
+  `data`/`object` dependencies, with a source map for every module
+- owns a temporary generated module tree and long-lived worker session
 - sends one asynchronous request per document
 - preserves document order while responses complete independently
 - cancels remaining requests after the first failure
-- removes generated files and stops its worker during session cleanup
+- removes the generated module tree and stops its worker during session cleanup
 
 The synchronous convenience path is built on the asynchronous API; it does not
 introduce a second execution mechanism.
@@ -98,6 +99,10 @@ cache hits.
 The fixed-point compiler test compares seed and self-hosted portable closure
 JavaScript and Source Maps. This keeps diagnostics available on both sides of
 the bootstrap boundary.
+
+The indexing kernel now composes with `data/count-by` through a verified
+portable import. Its project build and three-module execution path are detailed
+in [0029-portable-indexing-composition.md](0029-portable-indexing-composition.md).
 
 ## Future Work
 

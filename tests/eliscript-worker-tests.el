@@ -147,10 +147,35 @@
       (delete-directory directory t))))
 
 (ert-deftest eliscript-index-scores-texts-asynchronously ()
-  (let (session timing-values)
+  (let (session directory timing-values)
     (unwind-protect
         (progn
           (setq session (eliscript-index-start))
+          (setq directory (eliscript-index-session-directory session))
+          (should (= (length
+                      (eliscript-project-build-result-modules
+                       (eliscript-index-session-build session)))
+                     3))
+          (let ((entry
+                 (eliscript-index-session-module session))
+                (data (expand-file-name "stdlib/data.mjs" directory))
+                (object (expand-file-name "stdlib/object.mjs" directory)))
+            (should (string-suffix-p
+                     "examples/emacs-index/index.mjs" entry))
+            (dolist (module (list entry data object))
+              (should (file-exists-p module))
+              (should (file-exists-p (concat module ".map"))))
+            (should (string-match-p
+                     "function count_by"
+                     (with-temp-buffer
+                       (insert-file-contents data)
+                       (buffer-string))))
+            (should-not
+             (string-match-p
+              "function group_by"
+              (with-temp-buffer
+                (insert-file-contents data)
+                (buffer-string)))))
           (let ((results
                  (eliscript-index-search-sync
                   session
@@ -171,8 +196,22 @@
             (should (= (length timing-values) 3))
             (should (eq (alist-get 'moduleCacheHit (aref timing-values 0))
                         :false))
-            (should (alist-get 'moduleCacheHit (aref timing-values 1)))))
-      (when session (eliscript-index-stop session)))))
+            (should (alist-get 'moduleCacheHit (aref timing-values 1))))
+          (let ((duplicate-query
+                 (eliscript-index-search-sync
+                  session
+                  '(("compiler" . "compiler compiler"))
+                  "compiler compiler"
+                  :timeout-ms 2000)))
+            (should (= (alist-get 'matches (aref duplicate-query 0)) 4)))
+          (let ((empty-query
+                 (eliscript-index-search-sync
+                  session '(("empty" . "")) "" :timeout-ms 2000)))
+            (should (= (alist-get 'matches (aref empty-query 0)) 0))
+            (should (= (alist-get 'terms (aref empty-query 0)) 0))))
+      (when session (eliscript-index-stop session))
+      (when directory
+        (should-not (file-exists-p directory))))))
 
 (provide 'eliscript-worker-tests)
 

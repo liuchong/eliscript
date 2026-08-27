@@ -129,26 +129,30 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
     });
     expect(portableOutput).toBe(seedOutput);
 
-    for (const [sourceName, expectedFunctions] of [
-      ["sequence.eli", [
+    for (const [sourcePath, expectedFunctions] of [
+      ["stdlib/sequence.eli", [
         "function map(function$, values)",
         "function range_by(start, end, step)",
       ]],
-      ["text.eli", [
+      ["stdlib/text.eli", [
         "function slice(start, end, text)",
         "function trim(text)",
       ]],
-      ["object.eli", [
+      ["stdlib/object.eli", [
         "function assoc(object, key, value)",
         "function omit(object, omitted_keys)",
       ]],
-      ["data.eli", [
+      ["stdlib/data.eli", [
         "import {assoc} from \"./object.eli\";",
         "import {has_QMARK_} from \"./object.eli\";",
         "function group_by(key_function, values)",
       ]],
+      ["examples/emacs-index/index.eli", [
+        "import {count_by} from \"../../stdlib/data.eli\";",
+        "function score_document(id, terms, query_terms)",
+      ]],
     ]) {
-      const source = resolve(projectDirectory, "stdlib", sourceName);
+      const source = resolve(projectDirectory, sourcePath);
       const seedLibraryOutput = await runSuccessful([seedCliPath, source], {
         env: { ...process.env, EMACS: emacs },
       });

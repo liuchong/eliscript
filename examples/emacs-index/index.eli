@@ -1,15 +1,15 @@
 (module example.emacs-index
+  (import-portable "../../stdlib/data.eli" count-by)
+
   (defportable score-document (id terms query-terms)
-    (let ((term-index 0)
+    (let ((frequencies (count-by (lambda (term) term) terms))
+          (query-index 0)
           (matches 0))
-      (while (< term-index (length terms))
-        (let ((query-index 0))
-          (while (< query-index (length query-terms))
-            (when (equal (nth term-index terms)
-                         (nth query-index query-terms))
-              (setq matches (1+ matches)))
-            (setq query-index (1+ query-index))))
-        (setq term-index (1+ term-index)))
+      (while (< query-index (length query-terms))
+        (setq matches
+              (+ matches
+                 (get frequencies (nth query-index query-terms) 0))
+              query-index (1+ query-index)))
       (object :id id
               :matches matches
               :terms (length terms)))))

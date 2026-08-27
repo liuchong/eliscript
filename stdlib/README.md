@@ -109,3 +109,8 @@ See
 for keyed collection transforms and
 [specs/0028-portable-module-composition.md](../specs/0028-portable-module-composition.md)
 for the cross-module proof contract.
+
+The Emacs indexing workload imports `count-by` from this module. Its portable
+project build follows the dependency into `object.eli`, emits only `count-by`,
+`assoc`, and `has?`, and executes the resulting graph in the worker. See
+[specs/0029-portable-indexing-composition.md](../specs/0029-portable-indexing-composition.md).
