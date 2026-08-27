@@ -20,6 +20,10 @@ character-based spans, diagnostics, deterministic build artifacts, and all
 current bootstrap sources. The generated reader must successfully read its own
 `.eli` implementation.
 
+The macro fixture compares complete expanded syntax and call-site spans, exact
+diagnostics, deterministic macro evaluation, and recursive expansion. Every
+valid result is then accepted by the generated lexical analyzer.
+
 The analyzer fixture runs after both readers. It compares success and complete
 diagnostic strings for scope resolution, declaration collisions, mutability,
 imports, exports, and malformed special forms. Both analyzers must accept all

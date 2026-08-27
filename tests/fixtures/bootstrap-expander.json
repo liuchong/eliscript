@@ -1,0 +1,136 @@
+{
+  "valid": [
+    {
+      "name": "backquote-and-recursive-expansion",
+      "filename": "recursive.eli",
+      "source": "(defmacro twice (value) `(+ ,value ,value))\n(defmacro four-times (value) `(twice (twice ,value)))\n(defun scale (value) (four-times value))\n(export scale)"
+    },
+    {
+      "name": "body-splicing",
+      "filename": "body.eli",
+      "source": "(defmacro begin (&body forms) `(progn ,@forms))\n(defun two () (begin 1 2))\n(export two)"
+    },
+    {
+      "name": "generated-top-level-declaration",
+      "filename": "declaration.eli",
+      "source": "(defmacro define-answer () '(defconst answer 42))\n(define-answer)\n(export answer)"
+    },
+    {
+      "name": "optional-rest-and-list-operations",
+      "filename": "parameters.eli",
+      "source": "(defmacro build-call (operator &optional first &rest rest)\n  (cons operator (append (list first) rest)))\n(defun total () (build-call + 1 2 3))\n(defun empty () (build-call list))\n(export total empty)"
+    },
+    {
+      "name": "macro-local-computation",
+      "filename": "compute.eli",
+      "source": "(defmacro define-indexed (prefix index)\n  (let* ((next (1+ index))\n         (name (intern (concat prefix \"-value\"))))\n    `(defconst ,name ,next)))\n(define-indexed \"item\" 2)\n(export item-value)"
+    },
+    {
+      "name": "conditional-macro",
+      "filename": "conditional.eli",
+      "source": "(defmacro choose (test yes no) (if (null test) no yes))\n(defconst answer (choose nil 1 2))\n(export answer)"
+    },
+    {
+      "name": "macro-evaluator-core",
+      "filename": "evaluator.eli",
+      "source": "(defmacro calculate (value)\n  (let ((current value))\n    (setq current (+ current 2))\n    (cond\n      ((and (> current 3) (equal current 4)) (list 'quote current))\n      (t current))))\n(defmacro condition-value (value) (cond (value)))\n(defconst answer (calculate 2))\n(defconst direct (condition-value 5))\n(export answer direct)"
+    },
+    {
+      "name": "quoted-data-boundary",
+      "filename": "quoted.eli",
+      "source": "(defmacro twice (value) `(+ ,value ,value))\n(defconst syntax '(twice 1))\n(export syntax)"
+    },
+    {
+      "name": "component-and-expression-boundaries",
+      "filename": "boundaries.eli",
+      "source": "(defmacro identity (value) value)\n(defcomponent View (props)\n  (let ((value (identity props)))\n    (object :fixed (identity value) literal-key (identity value) (identity :computed) (identity value))))\n(export View)"
+    },
+    {
+      "name": "self-symbol-module",
+      "filename": "bootstrap/compiler/symbol.eli",
+      "file": "bootstrap/compiler/symbol.eli"
+    },
+    {
+      "name": "self-syntax-module",
+      "filename": "bootstrap/compiler/syntax.eli",
+      "file": "bootstrap/compiler/syntax.eli"
+    },
+    {
+      "name": "self-reader-module",
+      "filename": "bootstrap/compiler/reader.eli",
+      "file": "bootstrap/compiler/reader.eli"
+    },
+    {
+      "name": "self-expander-module",
+      "filename": "bootstrap/compiler/expander.eli",
+      "file": "bootstrap/compiler/expander.eli"
+    },
+    {
+      "name": "self-analyzer-module",
+      "filename": "bootstrap/compiler/analyzer.eli",
+      "file": "bootstrap/compiler/analyzer.eli"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "missing-definition-shape",
+      "filename": "missing.eli",
+      "source": "(defmacro only-name)",
+      "error": "missing.eli:1:1: defmacro expects a name and parameter list"
+    },
+    {
+      "name": "non-symbol-name",
+      "filename": "name.eli",
+      "source": "(defmacro \"wrong\" () 1)",
+      "error": "name.eli:1:1: macro name must be a symbol: \"wrong\""
+    },
+    {
+      "name": "non-list-parameters",
+      "filename": "parameters-list.eli",
+      "source": "(defmacro wrong [value] value)",
+      "error": "parameters-list.eli:1:1: macro parameters must be a list: [value]"
+    },
+    {
+      "name": "non-symbol-parameter",
+      "filename": "parameter.eli",
+      "source": "(defmacro wrong (value 1) value)",
+      "error": "parameter.eli:1:1: macro parameters must be symbols: (value 1)"
+    },
+    {
+      "name": "duplicate-definition",
+      "filename": "duplicate.eli",
+      "source": "(defmacro once (value) value)\n(defmacro once (value) value)",
+      "error": "duplicate.eli:2:1: duplicate macro definition: once"
+    },
+    {
+      "name": "nested-definition",
+      "filename": "nested.eli",
+      "source": "(defun broken ()\n  (defmacro nested () 1))",
+      "error": "nested.eli:2:3: defmacro is only valid at module top level"
+    },
+    {
+      "name": "nested-component",
+      "filename": "component.eli",
+      "source": "(defun broken ()\n  (defcomponent Nested () nil))",
+      "error": "component.eli:2:3: defcomponent is only valid at module top level"
+    },
+    {
+      "name": "invalid-component",
+      "filename": "component-arity.eli",
+      "source": "(defcomponent OnlyName)",
+      "error": "component-arity.eli:1:1: defcomponent expects a name and parameter list"
+    },
+    {
+      "name": "macro-failure",
+      "filename": "failure.eli",
+      "source": "(defmacro boom () (error \"bad expansion\"))\n\n(boom)",
+      "error": "failure.eli:3:1: macro boom failed: bad expansion"
+    },
+    {
+      "name": "runaway-expansion",
+      "filename": "runaway.eli",
+      "source": "(defmacro forever (value) `(forever ,value))\n(forever 1)",
+      "error": "runaway.eli:2:1: macro expansion exceeded 100 steps near forever"
+    }
+  ]
+}

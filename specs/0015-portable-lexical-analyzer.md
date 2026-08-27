@@ -75,12 +75,13 @@ references retain their original segments.
 
 ## Build Boundary
 
-The stable bootstrap build now emits four portable modules and source maps:
+The stable bootstrap build now emits five portable modules and source maps:
 
 ```text
 symbol.eli   -> symbol.mjs
 syntax.eli   -> syntax.mjs
 reader.eli   -> reader.mjs
+expander.eli -> expander.mjs
 analyzer.eli -> analyzer.mjs
 ```
 
@@ -97,14 +98,12 @@ generated analyzer, then compares acceptance and complete diagnostic strings.
 
 Coverage includes forward declarations, lexical scope, mutable state, imports,
 exports, special forms, lambdas, JavaScript references, duplicate bindings,
-identifier collisions, invalid arities, malformed clauses, and all four
+identifier collisions, invalid arities, malformed clauses, and all five
 bootstrap modules. Repeated bootstrap builds remain byte-identical, including
 the new analyzer and its source map.
 
 ## Next Phase
 
-The next front-end dependency is a portable macro expander. It must transform
-the same explicit syntax nodes, preserve and assign source spans, process macro
-definitions in source order, and feed its output directly to this analyzer.
-After that, Generation 1 can move into explicit IR lowering and direct ESM
-emission.
+The portable macro expander that feeds this analyzer is specified in
+[0016-portable-macro-expander.md](0016-portable-macro-expander.md). Generation 1
+can now move into explicit IR lowering and direct ESM emission.

@@ -262,6 +262,10 @@ The third slice adds a lexical analyzer written in Eliscript. It consumes the
 portable syntax tree directly, matches seed acceptance and exact diagnostics,
 and analyzes all current bootstrap sources including itself. See
 [0015-portable-lexical-analyzer.md](0015-portable-lexical-analyzer.md).
+The fourth slice adds a host-independent macro expander with a deterministic
+syntax-value evaluator. Complete expanded ASTs, call-site spans, diagnostics,
+and downstream analysis match the seed over one shared fixture. See
+[0016-portable-macro-expander.md](0016-portable-macro-expander.md).
 
 ### M5: Emacs Acceleration
 

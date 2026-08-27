@@ -1,0 +1,1047 @@
+(module bootstrap.compiler.expander
+  (import "./syntax.mjs"
+    literal-node
+    undefined-node
+    symbol-node
+    keyword-node
+    collection-node
+    node-kind
+    node-span
+    node-value
+    node-name
+    node-items)
+
+  (defconst maximum-depth 100)
+  (defconst raise-error
+    (js* "(message) => { throw new Error(message); }"))
+  (defconst guard
+    (js* "(operation, onError) => { try { return operation(); } catch (error) { return onError(error.message); } }"))
+
+  (defun expander-fail (context span message)
+    (raise-error
+      (str (or (get context :filename)
+               (and span (get span :filename))
+               "<input>")
+           ":" (if span (get span :line) 1)
+           ":" (if span (get span :column) 1)
+           ": " message)))
+
+  (defun symbol-node-p (node)
+    (and node (= (node-kind node) "symbol")))
+
+  (defun keyword-node-p (node)
+    (and node (= (node-kind node) "keyword")))
+
+  (defun literal-node-p (node)
+    (and node (= (node-kind node) "literal")))
+
+  (defun null-node-p (node)
+    (and (literal-node-p node) (null (node-value node))))
+
+  (defun list-node-p (node)
+    (or (null-node-p node)
+        (and node (= (node-kind node) "list"))))
+
+  (defun vector-node-p (node)
+    (and node (= (node-kind node) "vector")))
+
+  (defun list-items (node)
+    (cond
+      ((null-node-p node) [])
+      ((and node (= (node-kind node) "list")) (node-items node))
+      (t undefined)))
+
+  (defun sequence-items (node)
+    (cond
+      ((null-node-p node) [])
+      ((or (and node (= (node-kind node) "list"))
+           (and node (= (node-kind node) "vector")))
+       (node-items node))
+      (t undefined)))
+
+  (defun make-list (items span)
+    (if (= (get items :length) 0)
+        (literal-node nil span)
+      (collection-node "list" items span)))
+
+  (defun rebuild-collection (source items)
+    (if (= (node-kind source) "list")
+        (make-list items (node-span source))
+      (collection-node (node-kind source) items (node-span source))))
+
+  (defun locate-generated (node span)
+    (cond
+      ((= (node-kind node) "literal")
+       (literal-node (node-value node) span))
+      ((= (node-kind node) "undefined") (undefined-node span))
+      ((= (node-kind node) "symbol") (symbol-node (node-name node) span))
+      ((= (node-kind node) "keyword") (keyword-node (node-name node) span))
+      ((or (= (node-kind node) "list") (= (node-kind node) "vector"))
+       (let ((items []))
+         (js-call (node-items node) :forEach
+           (lambda (item)
+             (js-call items :push (locate-generated item span))))
+         (if (= (node-kind node) "list")
+             (make-list items span)
+           (collection-node "vector" items span))))
+      (t (raise-error "macro produced an unsupported value"))))
+
+  (defun node-display (node)
+    (cond
+      ((not node) "nil")
+      ((= (node-kind node) "undefined") "undefined")
+      ((= (node-kind node) "symbol") (node-name node))
+      ((= (node-kind node) "keyword") (str ":" (node-name node)))
+      ((= (node-kind node) "literal")
+       (let ((value (node-value node)))
+         (cond
+           ((null value) "nil")
+           ((eq value t) "t")
+           ((eq value false) "false")
+           ((= (js* "typeof value") "string")
+            (js-call (js* "JSON") :stringify value))
+           (t (str value)))))
+      ((or (= (node-kind node) "list") (= (node-kind node) "vector"))
+       (let* ((items (node-items node))
+              (contents
+               (js-call (js-call items :map node-display) :join " ")))
+         (cond
+           ((and (= (node-kind node) "list")
+                 (= (get items :length) 2)
+                 (symbol-node-p (nth 0 items))
+                 (= (node-name (nth 0 items)) "quote"))
+            (str "'" (node-display (nth 1 items))))
+           ((= (node-kind node) "list") (str "(" contents ")"))
+           (t (str "[" contents "]")))))
+      (t "<unsupported>")))
+
+  (defun form-operator-p (node name)
+    (let ((items (list-items node)))
+      (and (not (eq items undefined))
+           (> (get items :length) 0)
+           (symbol-node-p (nth 0 items))
+           (= (node-name (nth 0 items)) name))))
+
+  (defun make-eval-scope (parent)
+    (object :parent parent :values (new (js* "Map"))))
+
+  (defun scope-bind (scope name value)
+    (js-call (get scope :values) :set name value)
+    value)
+
+  (defun scope-find (scope name)
+    (let ((current scope)
+          (found undefined))
+      (while (and current (eq found undefined))
+        (let ((values (get current :values)))
+          (when (js-call values :has name)
+            (setq found (object :scope current :value (js-call values :get name)))))
+        (setq current (get current :parent)))
+      found))
+
+  (defun scope-value (scope name)
+    (let ((found (scope-find scope name)))
+      (if (eq found undefined)
+          (raise-error (str "void variable: " name))
+        (get found :value))))
+
+  (defun scope-set (scope name value)
+    (let ((found (scope-find scope name)))
+      (if (eq found undefined)
+          (raise-error (str "cannot set unbound macro variable: " name))
+        (progn
+          (js-call (get (get found :scope) :values) :set name value)
+          value))))
+
+  (defun truthy-p (node)
+    (not (or (null-node-p node)
+             (and (literal-node-p node)
+                  (eq (node-value node) false)))))
+
+  (defun make-boolean (value)
+    (literal-node (if value t false) nil))
+
+  (defun value-string (node)
+    (cond
+      ((and (literal-node-p node)
+            (= (js* "typeof node.value") "string"))
+       (node-value node))
+      ((symbol-node-p node) (node-name node))
+      ((keyword-node-p node) (str ":" (node-name node)))
+      ((null-node-p node) "nil")
+      ((literal-node-p node) (str (node-value node)))
+      (t (node-display node))))
+
+  (defun require-number (node operator)
+    (unless (and (literal-node-p node)
+                 (= (js* "typeof node.value") "number"))
+      (raise-error
+        (str operator " expects numbers, got " (node-display node))))
+    (node-value node))
+
+  (defun nodes-equal (left right)
+    (cond
+      ((not (= (node-kind left) (node-kind right))) false)
+      ((= (node-kind left) "literal")
+       (eq (node-value left) (node-value right)))
+      ((= (node-kind left) "undefined") t)
+      ((or (= (node-kind left) "symbol")
+           (= (node-kind left) "keyword"))
+       (= (node-name left) (node-name right)))
+      ((or (= (node-kind left) "list") (= (node-kind left) "vector"))
+       (let ((left-items (node-items left))
+             (right-items (node-items right))
+             (index 0)
+             (same (= (get (node-items left) :length)
+                      (get (node-items right) :length))))
+         (while (and same (< index (get left-items :length)))
+           (unless (nodes-equal (nth index left-items) (nth index right-items))
+             (setq same false))
+           (setq index (1+ index)))
+         same))
+      (t false)))
+
+  (defun eval-sequence (forms scope)
+    (let ((result (literal-node nil nil)))
+      (js-call forms :forEach
+        (lambda (form) (setq result (eval-form form scope))))
+      result))
+
+  (defun eval-args (forms scope)
+    (let ((values []))
+      (js-call forms :forEach
+        (lambda (form) (js-call values :push (eval-form form scope))))
+      values))
+
+  (defun eval-if (args scope)
+    (when (or (< (get args :length) 2) (> (get args :length) 3))
+      (raise-error "if expects 2..3 arguments"))
+    (if (truthy-p (eval-form (nth 0 args) scope))
+        (eval-form (nth 1 args) scope)
+      (if (= (get args :length) 3)
+          (eval-form (nth 2 args) scope)
+        (literal-node nil nil))))
+
+  (defun eval-cond (clauses scope)
+    (let ((result (literal-node nil nil))
+          (done false))
+      (js-call clauses :forEach
+        (lambda (clause)
+          (unless done
+            (let ((items (list-items clause)))
+              (when (or (eq items undefined) (= (get items :length) 0))
+                (raise-error
+                  (str "invalid macro cond clause: " (node-display clause))))
+              (let ((test-value (eval-form (nth 0 items) scope)))
+                (when (truthy-p test-value)
+                  (setq result
+                    (if (= (get items :length) 1)
+                        test-value
+                      (eval-sequence (js-call items :slice 1) scope)))
+                  (setq done t)))))))
+      result))
+
+  (defun parse-eval-binding (binding)
+    (cond
+      ((symbol-node-p binding)
+       (object :name (node-name binding) :value undefined))
+      (t
+       (let ((items (list-items binding)))
+         (unless (and (not (eq items undefined))
+                      (>= (get items :length) 1)
+                      (<= (get items :length) 2)
+                      (symbol-node-p (nth 0 items)))
+           (raise-error
+             (str "invalid macro let binding: " (node-display binding))))
+         (object
+           :name (node-name (nth 0 items))
+           :value (nth 1 items))))))
+
+  (defun eval-let (args scope sequential)
+    (when (= (get args :length) 0)
+      (raise-error "macro let requires a binding list"))
+    (let* ((binding-items (list-items (nth 0 args)))
+           (child (make-eval-scope scope)))
+      (when (eq binding-items undefined)
+        (raise-error "macro let bindings must be a list"))
+      (if sequential
+          (js-call binding-items :forEach
+            (lambda (binding)
+              (let* ((parsed (parse-eval-binding binding))
+                     (value-form (get parsed :value))
+                     (value
+                      (if (eq value-form undefined)
+                          (literal-node nil nil)
+                        (eval-form value-form child))))
+                (scope-bind child (get parsed :name) value))))
+        (let ((parsed-bindings []))
+          (js-call binding-items :forEach
+            (lambda (binding)
+              (let* ((parsed (parse-eval-binding binding))
+                     (value-form (get parsed :value))
+                     (value
+                      (if (eq value-form undefined)
+                          (literal-node nil nil)
+                        (eval-form value-form scope))))
+                (js-call parsed-bindings :push
+                  (object :name (get parsed :name) :value value)))))
+          (js-call parsed-bindings :forEach
+            (lambda (binding)
+              (scope-bind child (get binding :name) (get binding :value))))))
+      (eval-sequence (js-call args :slice 1) child)))
+
+  (defun eval-setq (args scope)
+    (when (or (= (get args :length) 0)
+              (= (% (get args :length) 2) 1))
+      (raise-error "macro setq expects name/value pairs"))
+    (let ((index 0)
+          (result (literal-node nil nil)))
+      (while (< index (get args :length))
+        (let ((name (nth index args)))
+          (unless (symbol-node-p name)
+            (raise-error "macro setq target must be a symbol"))
+          (setq result (eval-form (nth (1+ index) args) scope))
+          (scope-set scope (node-name name) result))
+        (setq index (+ index 2)))
+      result))
+
+  (defun splice-form-p (node depth)
+    (and (= depth 1) (form-operator-p node ",@")))
+
+  (defun quasiquote-items (items scope depth)
+    (let ((result []))
+      (js-call items :forEach
+        (lambda (item)
+          (if (splice-form-p item depth)
+              (let* ((parts (node-items item))
+                     (value
+                      (if (= (get parts :length) 2)
+                          (eval-form (nth 1 parts) scope)
+                        (raise-error ",@ expects one value")))
+                     (spliced (sequence-items value)))
+                (when (eq spliced undefined)
+                  (raise-error
+                    (str "cannot splice " (node-display value))))
+                (js-call spliced :forEach
+                  (lambda (part) (js-call result :push part))))
+            (js-call result :push (quasiquote-node item scope depth)))))
+      result))
+
+  (defun quasiquote-node (node scope depth)
+    (cond
+      ((vector-node-p node)
+       (collection-node
+         "vector"
+         (quasiquote-items (node-items node) scope depth)
+         (node-span node)))
+      ((and (= depth 1) (form-operator-p node ","))
+       (let ((items (node-items node)))
+         (if (= (get items :length) 2)
+             (eval-form (nth 1 items) scope)
+           (raise-error ", expects one value"))))
+      ((and (= depth 1) (form-operator-p node ",@"))
+       (raise-error ",@ is only valid inside a collection"))
+      ((form-operator-p node "`")
+       (let ((items (node-items node)))
+         (if (= (get items :length) 2)
+             (make-list
+               [(nth 0 items)
+                (quasiquote-node (nth 1 items) scope (1+ depth))]
+               (node-span node))
+           (raise-error "` expects one value"))))
+      ((and (> depth 1) (form-operator-p node ","))
+       (let ((items (node-items node)))
+         (make-list
+           [(nth 0 items)
+            (quasiquote-node (nth 1 items) scope (1- depth))]
+           (node-span node))))
+      ((list-node-p node)
+       (make-list
+         (quasiquote-items (list-items node) scope depth)
+         (node-span node)))
+      (t node)))
+
+  (defun eval-list-operation (operator values)
+    (cond
+      ((= operator "list") (make-list values nil))
+      ((= operator "vector") (collection-node "vector" values nil))
+      ((= operator "car")
+       (unless (= (get values :length) 1)
+         (raise-error "car expects 1 argument"))
+       (let ((items (sequence-items (nth 0 values))))
+         (when (eq items undefined)
+           (raise-error "car expects a list or vector"))
+         (if (= (get items :length) 0)
+             (literal-node nil nil)
+           (nth 0 items))))
+      ((= operator "cdr")
+       (unless (= (get values :length) 1)
+         (raise-error "cdr expects 1 argument"))
+       (let ((items (sequence-items (nth 0 values))))
+         (when (eq items undefined)
+           (raise-error "cdr expects a list or vector"))
+         (make-list (js-call items :slice 1) nil)))
+      ((= operator "nth")
+       (unless (= (get values :length) 2)
+         (raise-error "nth expects 2 arguments"))
+       (let* ((index (require-number (nth 0 values) "nth"))
+              (items (sequence-items (nth 1 values))))
+         (when (eq items undefined)
+           (raise-error "nth expects a list or vector"))
+         (if (and (>= index 0) (< index (get items :length)))
+             (nth index items)
+           (literal-node nil nil))))
+      ((= operator "length")
+       (unless (= (get values :length) 1)
+         (raise-error "length expects 1 argument"))
+       (let ((items (sequence-items (nth 0 values))))
+         (cond
+           ((not (eq items undefined))
+            (literal-node (get items :length) nil))
+           ((and (literal-node-p (nth 0 values))
+                 (= (js* "typeof values[0].value") "string"))
+            (literal-node (get (node-value (nth 0 values)) :length) nil))
+           (t (raise-error "length expects a sequence")))))
+      ((= operator "cons")
+       (unless (= (get values :length) 2)
+         (raise-error "cons expects 2 arguments"))
+       (let ((tail (sequence-items (nth 1 values))))
+         (when (eq tail undefined)
+           (raise-error "cons tail must be a list or vector"))
+         (let ((items [(nth 0 values)]))
+           (js-call tail :forEach
+             (lambda (item) (js-call items :push item)))
+           (make-list items nil))))
+      ((= operator "append")
+       (let ((items []))
+         (js-call values :forEach
+           (lambda (value)
+             (let ((parts (sequence-items value)))
+               (when (eq parts undefined)
+                 (raise-error "append expects lists or vectors"))
+               (js-call parts :forEach
+                 (lambda (part) (js-call items :push part))))))
+         (make-list items nil)))
+      (t undefined)))
+
+  (defun eval-predicate (operator values)
+    (cond
+      ((or (= operator "not") (= operator "null"))
+       (unless (= (get values :length) 1)
+         (raise-error (str operator " expects 1 argument")))
+       (make-boolean (not (truthy-p (nth 0 values)))))
+      ((= operator "symbolp")
+       (unless (= (get values :length) 1)
+         (raise-error "symbolp expects 1 argument"))
+       (make-boolean (symbol-node-p (nth 0 values))))
+      ((= operator "keywordp")
+       (unless (= (get values :length) 1)
+         (raise-error "keywordp expects 1 argument"))
+       (make-boolean (keyword-node-p (nth 0 values))))
+      ((= operator "listp")
+       (unless (= (get values :length) 1)
+         (raise-error "listp expects 1 argument"))
+       (make-boolean (list-node-p (nth 0 values))))
+      ((= operator "consp")
+       (unless (= (get values :length) 1)
+         (raise-error "consp expects 1 argument"))
+       (make-boolean
+         (and (not (null-node-p (nth 0 values)))
+              (list-node-p (nth 0 values)))))
+      ((= operator "vectorp")
+       (unless (= (get values :length) 1)
+         (raise-error "vectorp expects 1 argument"))
+       (make-boolean (vector-node-p (nth 0 values))))
+      ((= operator "stringp")
+       (unless (= (get values :length) 1)
+         (raise-error "stringp expects 1 argument"))
+       (make-boolean
+         (and (literal-node-p (nth 0 values))
+              (= (js* "typeof values[0].value") "string"))))
+      ((= operator "numberp")
+       (unless (= (get values :length) 1)
+         (raise-error "numberp expects 1 argument"))
+       (make-boolean
+         (and (literal-node-p (nth 0 values))
+              (= (js* "typeof values[0].value") "number"))))
+      ((= operator "atom")
+       (unless (= (get values :length) 1)
+         (raise-error "atom expects 1 argument"))
+       (make-boolean
+         (not (and (not (null-node-p (nth 0 values)))
+                   (list-node-p (nth 0 values))))))
+      ((= operator "eq")
+       (unless (= (get values :length) 2)
+         (raise-error "eq expects 2 arguments"))
+       (let ((left (nth 0 values))
+             (right (nth 1 values)))
+         (make-boolean
+           (cond
+             ((and (symbol-node-p left) (symbol-node-p right))
+              (= (node-name left) (node-name right)))
+             ((and (keyword-node-p left) (keyword-node-p right))
+              (= (node-name left) (node-name right)))
+             ((and (literal-node-p left) (literal-node-p right))
+              (eq (node-value left) (node-value right)))
+             (t (eq left right))))))
+      ((= operator "equal")
+       (unless (= (get values :length) 2)
+         (raise-error "equal expects 2 arguments"))
+       (make-boolean (nodes-equal (nth 0 values) (nth 1 values))))
+      (t undefined)))
+
+  (defun eval-arithmetic (operator values)
+    (if (not (js-call
+               ["+" "-" "*" "/" "%" "mod" "1+" "1-"
+                "=" "/=" "<" "<=" ">" ">="]
+               :includes operator))
+        undefined
+      (let ((numbers []))
+        (cond
+          ((or (= operator "1+") (= operator "1-"))
+           (unless (= (get values :length) 1)
+             (raise-error (str operator " expects 1 argument"))))
+          ((or (= operator "%") (= operator "mod")
+               (= operator "=") (= operator "/=")
+               (= operator "<") (= operator "<=")
+               (= operator ">") (= operator ">="))
+           (unless (= (get values :length) 2)
+             (raise-error (str operator " expects 2 arguments"))))
+          ((or (= operator "-") (= operator "/"))
+           (when (= (get values :length) 0)
+             (raise-error
+               (str operator " expects one or more numbers")))))
+        (js-call values :forEach
+          (lambda (value)
+            (js-call numbers :push (require-number value operator))))
+        (cond
+          ((= operator "1+")
+           (literal-node (1+ (nth 0 numbers)) nil))
+          ((= operator "1-")
+           (literal-node (1- (nth 0 numbers)) nil))
+          ((= operator "+")
+           (let ((result 0))
+             (js-call numbers :forEach
+               (lambda (number) (setq result (+ result number))))
+             (literal-node result nil)))
+          ((= operator "*")
+           (let ((result 1))
+             (js-call numbers :forEach
+               (lambda (number) (setq result (* result number))))
+             (literal-node result nil)))
+          ((= operator "-")
+           (let ((result (nth 0 numbers)))
+             (if (= (get numbers :length) 1)
+                 (setq result (- result))
+               (let ((index 1))
+                 (while (< index (get numbers :length))
+                   (setq result (- result (nth index numbers)))
+                   (setq index (1+ index)))))
+             (literal-node result nil)))
+          ((= operator "/")
+           (let ((result (nth 0 numbers))
+                 (index 1))
+             (if (= (get numbers :length) 1)
+                 (setq result (/ 1 result))
+               (while (< index (get numbers :length))
+                 (setq result (/ result (nth index numbers)))
+                 (setq index (1+ index))))
+             (literal-node result nil)))
+          ((or (= operator "%") (= operator "mod"))
+           (literal-node (% (nth 0 numbers) (nth 1 numbers)) nil))
+          ((= operator "=")
+           (make-boolean (= (nth 0 numbers) (nth 1 numbers))))
+          ((= operator "/=")
+           (make-boolean (not (= (nth 0 numbers) (nth 1 numbers)))))
+          ((= operator "<")
+           (make-boolean (< (nth 0 numbers) (nth 1 numbers))))
+          ((= operator "<=")
+           (make-boolean (<= (nth 0 numbers) (nth 1 numbers))))
+          ((= operator ">")
+           (make-boolean (> (nth 0 numbers) (nth 1 numbers))))
+          ((= operator ">=")
+           (make-boolean (>= (nth 0 numbers) (nth 1 numbers))))))))
+
+  (defun eval-call (form scope)
+    (let* ((items (node-items form))
+           (operator-node (nth 0 items))
+           (args (js-call items :slice 1)))
+      (unless (symbol-node-p operator-node)
+        (raise-error "macro call operator must be a symbol"))
+      (let ((operator (node-name operator-node)))
+        (cond
+          ((= operator "quote")
+           (unless (= (get args :length) 1)
+             (raise-error "quote expects 1 argument"))
+           (nth 0 args))
+          ((= operator "`")
+           (unless (= (get args :length) 1)
+             (raise-error "` expects 1 argument"))
+           (quasiquote-node (nth 0 args) scope 1))
+          ((= operator "if") (eval-if args scope))
+          ((= operator "when")
+           (if (and (> (get args :length) 0)
+                    (truthy-p (eval-form (nth 0 args) scope)))
+               (eval-sequence (js-call args :slice 1) scope)
+             (literal-node nil nil)))
+          ((= operator "unless")
+           (if (and (> (get args :length) 0)
+                    (not (truthy-p (eval-form (nth 0 args) scope))))
+               (eval-sequence (js-call args :slice 1) scope)
+             (literal-node nil nil)))
+          ((or (= operator "progn") (= operator "do"))
+           (eval-sequence args scope))
+          ((= operator "let") (eval-let args scope false))
+          ((= operator "let*") (eval-let args scope t))
+          ((= operator "setq") (eval-setq args scope))
+          ((= operator "cond") (eval-cond args scope))
+          ((= operator "and")
+           (let ((result (literal-node t nil))
+                 (index 0))
+             (while (and (< index (get args :length)) (truthy-p result))
+               (setq result (eval-form (nth index args) scope))
+               (setq index (1+ index)))
+             result))
+          ((= operator "or")
+           (let ((result (literal-node nil nil))
+                 (index 0))
+             (while (and (< index (get args :length)) (not (truthy-p result)))
+               (setq result (eval-form (nth index args) scope))
+               (setq index (1+ index)))
+             result))
+          ((= operator "error")
+           (unless (> (get args :length) 0)
+             (raise-error "error expects a message"))
+           (raise-error (value-string (eval-form (nth 0 args) scope))))
+          (t
+           (let* ((values (eval-args args scope))
+                  (list-result (eval-list-operation operator values))
+                  (predicate-result
+                   (if (eq list-result undefined)
+                       (eval-predicate operator values)
+                     undefined))
+                  (arithmetic-result
+                   (if (and (eq list-result undefined)
+                            (eq predicate-result undefined))
+                       (eval-arithmetic operator values)
+                     undefined)))
+             (cond
+               ((not (eq list-result undefined)) list-result)
+               ((not (eq predicate-result undefined)) predicate-result)
+               ((not (eq arithmetic-result undefined)) arithmetic-result)
+               ((= operator "symbol-name")
+                (unless (and (= (get values :length) 1)
+                             (symbol-node-p (nth 0 values)))
+                  (raise-error "symbol-name expects a symbol"))
+                (literal-node (node-name (nth 0 values)) nil))
+               ((= operator "intern")
+                (unless (and (= (get values :length) 1)
+                             (literal-node-p (nth 0 values))
+                             (= (js* "typeof values[0].value") "string"))
+                  (raise-error "intern expects a string"))
+                (symbol-node (node-value (nth 0 values)) nil))
+               ((or (= operator "concat") (= operator "str"))
+                (let ((pieces []))
+                  (js-call values :forEach
+                    (lambda (value)
+                      (js-call pieces :push (value-string value))))
+                  (literal-node (js-call pieces :join "") nil)))
+               (t
+                (raise-error
+                  (str "unsupported macro function: " operator))))))))))
+
+  (defun eval-form (form scope)
+    (cond
+      ((symbol-node-p form) (scope-value scope (node-name form)))
+      ((or (literal-node-p form)
+           (keyword-node-p form)
+           (= (node-kind form) "undefined")
+           (vector-node-p form))
+       form)
+      ((= (node-kind form) "list") (eval-call form scope))
+      (t (raise-error (str "unsupported macro value: " (node-display form))))))
+
+  (defun parameter-list-display (parameters)
+    (node-display parameters))
+
+  (defun parse-parameters (parameters context span)
+    (let ((items (list-items parameters)))
+      (when (eq items undefined)
+        (expander-fail
+          context span
+          (str "macro parameters must be a list: "
+               (parameter-list-display parameters))))
+      (let ((required [])
+            (optional [])
+            (rest-name undefined)
+            (mode "required")
+            (index 0))
+        (while (< index (get items :length))
+          (let ((parameter (nth index items)))
+            (unless (symbol-node-p parameter)
+              (expander-fail
+                context span
+                (str "macro parameters must be symbols: "
+                     (parameter-list-display parameters))))
+            (let ((name (node-name parameter)))
+              (cond
+                ((= name "&optional")
+                 (when (or (= mode "rest") (not (eq rest-name undefined)))
+                   (expander-fail context span "invalid macro parameter list"))
+                 (setq mode "optional"))
+                ((or (= name "&rest") (= name "&body"))
+                 (when (or (= mode "rest") (not (eq rest-name undefined)))
+                   (expander-fail context span "invalid macro parameter list"))
+                 (setq mode "rest"))
+                ((= mode "rest")
+                 (setq rest-name name)
+                 (setq mode "done"))
+                ((= mode "done")
+                 (expander-fail context span "invalid macro parameter list"))
+                ((= mode "required") (js-call required :push name))
+                (t (js-call optional :push name)))))
+          (setq index (1+ index)))
+        (when (= mode "rest")
+          (expander-fail context span "invalid macro parameter list"))
+        (object :required required :optional optional :rest rest-name))))
+
+  (defun register-macro (form environment context)
+    (let* ((items (node-items form))
+           (args (js-call items :slice 1))
+           (span (node-span form)))
+      (unless (>= (get args :length) 2)
+        (expander-fail
+          context span "defmacro expects a name and parameter list"))
+      (let ((name-node (nth 0 args))
+            (parameters (nth 1 args)))
+        (unless (symbol-node-p name-node)
+          (expander-fail
+            context span
+            (str "macro name must be a symbol: " (node-display name-node))))
+        (let ((name (node-name name-node)))
+          (when (js-call environment :has name)
+            (expander-fail
+              context span (str "duplicate macro definition: " name)))
+          (js-call environment :set name
+            (object
+              :name name
+              :parameters (parse-parameters parameters context span)
+              :body (js-call args :slice 2)))))))
+
+  (defun bind-macro-args (definition args)
+    (let* ((parameters (get definition :parameters))
+           (required (get parameters :required))
+           (optional (get parameters :optional))
+           (rest-name (get parameters :rest))
+           (minimum (get required :length))
+           (maximum (+ minimum (get optional :length)))
+           (count (get args :length))
+           (scope (make-eval-scope nil)))
+      (when (< count minimum)
+        (raise-error
+          (str "wrong number of arguments for " (get definition :name))))
+      (when (and (eq rest-name undefined) (> count maximum))
+        (raise-error
+          (str "wrong number of arguments for " (get definition :name))))
+      (let ((index 0))
+        (js-call required :forEach
+          (lambda (name)
+            (scope-bind scope name (nth index args))
+            (setq index (1+ index))))
+        (js-call optional :forEach
+          (lambda (name)
+            (scope-bind scope name
+              (if (< index count)
+                  (nth index args)
+                (literal-node nil nil)))
+            (setq index (1+ index))))
+        (unless (eq rest-name undefined)
+          (scope-bind scope rest-name
+            (make-list (js-call args :slice index) nil))))
+      scope))
+
+  (defun invoke-macro (definition args depth context span)
+    (when (>= depth maximum-depth)
+      (expander-fail
+        context span
+        (str "macro expansion exceeded " maximum-depth
+             " steps near " (get definition :name))))
+    (funcall
+      guard
+      (lambda ()
+        (let ((scope (bind-macro-args definition args)))
+          (eval-sequence (get definition :body) scope)))
+      (lambda (message)
+        (expander-fail
+          context span
+          (str "macro " (get definition :name) " failed: " message)))))
+
+  (defun expand-sequence (forms environment depth context)
+    (let ((result []))
+      (js-call forms :forEach
+        (lambda (form)
+          (js-call result :push
+            (expand-expression form environment depth context))))
+      result))
+
+  (defun expand-binding (binding environment depth context)
+    (let ((items (list-items binding)))
+      (if (or (eq items undefined) (= (get items :length) 0))
+          binding
+        (let ((expanded [(nth 0 items)]))
+          (js-call (js-call items :slice 1) :forEach
+            (lambda (item)
+              (js-call expanded :push
+                (expand-expression item environment depth context))))
+          (make-list expanded (node-span binding))))))
+
+  (defun expand-bindings (args environment depth context)
+    (if (= (get args :length) 0)
+        args
+      (let* ((bindings-form (nth 0 args))
+             (bindings (list-items bindings-form))
+             (result []))
+        (if (eq bindings undefined)
+            (js-call result :push bindings-form)
+          (let ((expanded-bindings []))
+            (js-call bindings :forEach
+              (lambda (binding)
+                (js-call expanded-bindings :push
+                  (expand-binding binding environment depth context))))
+            (js-call result :push
+              (make-list expanded-bindings (node-span bindings-form)))))
+        (js-call (expand-sequence
+                   (js-call args :slice 1) environment depth context)
+          :forEach
+          (lambda (item) (js-call result :push item)))
+        result)))
+
+  (defun expand-alternating
+      (args environment depth context expand-even literal-key-mode)
+    (let ((result [])
+          (index 0))
+      (js-call args :forEach
+        (lambda (item)
+          (let ((expand
+                 (if (= (% index 2) 0)
+                     expand-even
+                   t)))
+            (when (and literal-key-mode (= (% index 2) 0)
+                       (or (keyword-node-p item)
+                           (symbol-node-p item)
+                           (and (literal-node-p item)
+                                (= (js* "typeof item.value") "string"))))
+              (setq expand false))
+            (js-call result :push
+              (if expand
+                  (expand-expression item environment depth context)
+                item)))
+          (setq index (1+ index))))
+      result))
+
+  (defun expand-property-call (args environment depth context)
+    (let ((result [])
+          (index 0))
+      (js-call args :forEach
+        (lambda (item)
+          (js-call result :push
+            (if (and (= index 1)
+                     (or (keyword-node-p item)
+                         (and (literal-node-p item)
+                              (= (js* "typeof item.value") "string"))))
+                item
+              (expand-expression item environment depth context)))
+          (setq index (1+ index))))
+      result))
+
+  (defun expand-cond (clauses environment depth context)
+    (let ((result []))
+      (js-call clauses :forEach
+        (lambda (clause)
+          (let ((items (list-items clause)))
+            (js-call result :push
+              (if (eq items undefined)
+                  clause
+                (make-list
+                  (expand-sequence items environment depth context)
+                  (node-span clause)))))))
+      result))
+
+  (defun expand-expression (form environment depth context)
+    (cond
+      ((= (node-kind form) "vector")
+       (collection-node
+         "vector"
+         (expand-sequence (node-items form) environment depth context)
+         (node-span form)))
+      ((not (= (node-kind form) "list")) form)
+      (t
+       (let* ((items (node-items form))
+              (operator-node (nth 0 items))
+              (operator (and (symbol-node-p operator-node)
+                             (node-name operator-node)))
+              (args (js-call items :slice 1))
+              (span (node-span form)))
+         (cond
+           ((= operator "quote") form)
+           ((= operator "defmacro")
+            (expander-fail
+              context span "defmacro is only valid at module top level"))
+           ((= operator "defcomponent")
+            (expander-fail
+              context span "defcomponent is only valid at module top level"))
+           ((and operator (js-call environment :has operator))
+            (expand-expression
+              (locate-generated
+                (invoke-macro
+                  (js-call environment :get operator)
+                  args depth context span)
+                span)
+              environment (1+ depth) context))
+           (t
+            (let ((expanded [operator-node]))
+              (cond
+                ((or (= operator "lambda") (= operator "fn"))
+                 (when (> (get args :length) 0)
+                   (js-call expanded :push (nth 0 args))
+                   (js-call (expand-sequence
+                              (js-call args :slice 1)
+                              environment depth context)
+                     :forEach
+                     (lambda (item) (js-call expanded :push item)))))
+                ((or (= operator "let") (= operator "let*"))
+                 (js-call (expand-bindings args environment depth context)
+                   :forEach
+                   (lambda (item) (js-call expanded :push item))))
+                ((= operator "setq")
+                 (js-call (expand-alternating
+                            args environment depth context false false)
+                   :forEach
+                   (lambda (item) (js-call expanded :push item))))
+                ((= operator "set!")
+                 (when (> (get args :length) 0)
+                   (js-call expanded :push (nth 0 args))
+                   (js-call (expand-sequence
+                              (js-call args :slice 1)
+                              environment depth context)
+                     :forEach
+                     (lambda (item) (js-call expanded :push item)))))
+                ((= operator "cond")
+                 (js-call (expand-cond args environment depth context)
+                   :forEach
+                   (lambda (item) (js-call expanded :push item))))
+                ((= operator "object")
+                 (js-call (expand-alternating
+                            args environment depth context t t)
+                   :forEach
+                   (lambda (item) (js-call expanded :push item))))
+                ((or (= operator "get")
+                     (= operator "put")
+                     (= operator "js-call"))
+                 (js-call (expand-property-call
+                            args environment depth context)
+                   :forEach
+                   (lambda (item) (js-call expanded :push item))))
+                (t
+                 (when (not (symbol-node-p operator-node))
+                   (put expanded 0
+                     (expand-expression
+                       operator-node environment depth context)))
+                 (js-call (expand-sequence args environment depth context)
+                   :forEach
+                   (lambda (item) (js-call expanded :push item)))))
+              (make-list expanded span))))))))
+
+  (defun expand-top-level (form environment depth context)
+    (if (not (= (node-kind form) "list"))
+        [(expand-expression form environment depth context)]
+      (let* ((items (node-items form))
+             (operator-node (nth 0 items))
+             (operator (and (symbol-node-p operator-node)
+                            (node-name operator-node)))
+             (args (js-call items :slice 1))
+             (span (node-span form)))
+        (cond
+          ((= operator "defmacro")
+           (register-macro form environment context)
+           [])
+          ((and operator (js-call environment :has operator))
+           (expand-top-level
+             (locate-generated
+               (invoke-macro
+                 (js-call environment :get operator)
+                 args depth context span)
+               span)
+             environment (1+ depth) context))
+          (t
+           (let ((expanded [operator-node]))
+             (cond
+               ((= operator "module")
+                (when (> (get args :length) 0)
+                  (js-call expanded :push (nth 0 args))
+                  (js-call (expand-top-level-sequence
+                             (js-call args :slice 1)
+                             environment depth context)
+                    :forEach
+                    (lambda (item) (js-call expanded :push item)))))
+               ((or (= operator "defun") (= operator "defn"))
+                (if (>= (get args :length) 2)
+                    (progn
+                      (js-call expanded :push (nth 0 args))
+                      (js-call expanded :push (nth 1 args))
+                      (js-call (expand-sequence
+                                 (js-call args :slice 2)
+                                 environment depth context)
+                        :forEach
+                        (lambda (item) (js-call expanded :push item))))
+                  (setq expanded items)))
+               ((= operator "defcomponent")
+                (unless (>= (get args :length) 2)
+                  (expander-fail
+                    context span
+                    "defcomponent expects a name and parameter list"))
+                (setq expanded
+                  [(symbol-node "defun" (node-span operator-node))
+                   (nth 0 args)
+                   (nth 1 args)])
+                (js-call (expand-sequence
+                           (js-call args :slice 2)
+                           environment depth context)
+                  :forEach
+                  (lambda (item) (js-call expanded :push item))))
+               ((or (= operator "defvar") (= operator "defconst"))
+                (when (> (get args :length) 0)
+                  (js-call expanded :push (nth 0 args))
+                  (js-call (expand-sequence
+                             (js-call args :slice 1)
+                             environment depth context)
+                    :forEach
+                    (lambda (item) (js-call expanded :push item)))))
+               ((or (= operator "import") (= operator "export"))
+                (setq expanded items))
+               ((= operator "export-default")
+                (js-call (expand-sequence args environment depth context)
+                  :forEach
+                  (lambda (item) (js-call expanded :push item))))
+               (t
+                (setq expanded
+                  (node-items
+                    (expand-expression form environment depth context)))))
+             [(make-list expanded span)]))))))
+
+  (defun expand-top-level-sequence (forms environment depth context)
+    (let ((result []))
+      (js-call forms :forEach
+        (lambda (form)
+          (js-call (expand-top-level form environment depth context) :forEach
+            (lambda (expanded) (js-call result :push expanded)))))
+      result))
+
+  (defun expand-module (forms filename)
+    (expand-top-level-sequence
+      forms
+      (new (js* "Map"))
+      0
+      (object :filename filename)))
+
+  (export expand-module))

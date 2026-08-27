@@ -94,5 +94,7 @@ Each phase must expose deterministic data and add shared conformance evidence.
 The first two items are implemented by
 [0014-portable-syntax-reader.md](0014-portable-syntax-reader.md). The lexical
 analyzer portion of item 3 is implemented by
-[0015-portable-lexical-analyzer.md](0015-portable-lexical-analyzer.md); portable
-macro expansion remains.
+[0015-portable-lexical-analyzer.md](0015-portable-lexical-analyzer.md), and the
+macro expander by
+[0016-portable-macro-expander.md](0016-portable-macro-expander.md). The next
+phase is portable IR construction.

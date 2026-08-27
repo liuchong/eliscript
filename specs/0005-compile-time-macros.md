@@ -8,8 +8,10 @@
 
 Eliscript now expands user-defined macros between reading and lexical analysis.
 The seed implementation evaluates macro bodies as trusted Emacs Lisp and treats
-their results as ordinary Eliscript forms. Every expanded form passes through
-the same analyzer and emitter as handwritten application code.
+their results as ordinary Eliscript forms. The Generation 1 implementation
+interprets the shared deterministic macro subset over explicit syntax nodes.
+Every expanded form passes through the same analyzer and emitter as handwritten
+application code.
 
 ```text
 .eli source -> reader -> macro expander -> lexical analyzer -> ESM emitter
@@ -90,5 +92,7 @@ language rules, so macros cannot bypass semantic checks.
 
 - macro expansion traces in diagnostics
 - explicit compiler context and declared file dependencies
-- a portable Eliscript macro evaluator for the self-hosted compiler
 - a standard macro library shared by the seed and self-hosted implementations
+
+The portable evaluator and its exact compatibility boundary are specified in
+[0016-portable-macro-expander.md](0016-portable-macro-expander.md).
