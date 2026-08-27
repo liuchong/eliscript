@@ -164,13 +164,34 @@
         (js-call parts :push ";")
         (combine parts))))
 
+  (defun contains-await-p (value)
+    (cond
+      ((node-p value)
+       (let ((kind (ir-kind value)))
+         (cond
+           ((= kind "await-expression") t)
+           ((= kind "function-expression") false)
+           (t (js-call (children value) :some contains-await-p)))))
+      ((js* "Array.isArray(value)")
+       (js-call value :some contains-await-p))
+      (t false)))
+
+  (defun emit-iife (parameters body invocation asynchronous)
+    (if asynchronous
+        (combine
+          ["(await (async (" parameters ") => {\n" body "\n})("
+           invocation "))"])
+      (combine
+        ["((" parameters ") => {\n" body "\n})(" invocation ")"])))
+
   (defun emit-do (nodes)
     (cond
       ((= (get nodes :length) 0) (text-fragment "null"))
       ((= (get nodes :length) 1) (emit-expression (nth 0 nodes)))
       (t
-       (combine
-         ["(() => {\n" (indent (emit-returning-body nodes)) "\n})()"]))))
+       (emit-iife
+         "" (indent (emit-returning-body nodes)) ""
+         (contains-await-p nodes)))))
 
   (defun split-counted-children (node property)
     (let ((all (children node))
@@ -182,7 +203,7 @@
            (parameters (nth 0 parts))
            (body (nth 1 parts)))
       (combine
-        ["("
+        [(if (ir-property node "async") "async " "") "("
          (join-fragments
            (js-call parameters :map
              (lambda (parameter) (emit-parameter parameter)))
@@ -250,8 +271,7 @@
               ", "))
            (values (join-fragments (emit-binding-values bindings) ", "))
            (body-output (indent (emit-returning-body body))))
-      (combine
-        ["((" names ") => {\n" body-output "\n})(" values ")"])))
+      (emit-iife names body-output values (contains-await-p body))))
 
   (defun emit-sequential-let (bindings body)
     (if (= (get bindings :length) 0)
@@ -260,14 +280,13 @@
         (let* ((name (emit-binding-name binding))
                (initializer (nth 0 (emit-binding-values [binding])))
                (tail (emit-sequential-let (js-call bindings :slice 1) body)))
-          (combine
-            ["(("
-             name
-             ") => {\n"
-             (indent (combine ["return " tail ";"]))
-             "\n})("
-             initializer
-             ")"])))))
+          (emit-iife
+            name
+            (indent (combine ["return " tail ";"]))
+            initializer
+            (or
+              (contains-await-p (js-call bindings :slice 1))
+              (contains-await-p body)))))))
 
   (defun emit-let (node)
     (let* ((parts (split-counted-children node "bindingCount"))
@@ -303,16 +322,17 @@
       (js-call body :forEach
         (lambda (child)
           (js-call statements :push (combine [(emit-expression child) ";"]))))
-      (combine
-        ["(() => {\n"
-         (indent
-           (combine
-             ["while (__eliscript_truthy("
-              test-output
-              ")) {\n"
-              (indent (join-fragments statements "\n"))
-              "\n}\nreturn null;"]))
-         "\n})()"])))
+      (emit-iife
+        ""
+        (indent
+          (combine
+            ["while (__eliscript_truthy("
+             test-output
+             ")) {\n"
+             (indent (join-fragments statements "\n"))
+             "\n}\nreturn null;"]))
+        ""
+        (contains-await-p nodes))))
 
   (defun emit-short-circuit (nodes kind)
     (cond
@@ -323,14 +343,17 @@
        (let ((temporary (fresh-name))
              (first (emit-expression (nth 0 nodes)))
              (rest (emit-short-circuit (js-call nodes :slice 1) kind)))
-         (combine
-           ["((" temporary ") => (__eliscript_truthy(" temporary ") ? "
-            (if (= kind "and") rest temporary)
-            " : "
-            (if (= kind "and") temporary rest)
-            "))("
-            first
-            ")"])))))
+         (let ((body
+                (combine
+                  ["(__eliscript_truthy(" temporary ") ? "
+                   (if (= kind "and") rest temporary)
+                   " : "
+                   (if (= kind "and") temporary rest)
+                   ")"])))
+           (if (contains-await-p (js-call nodes :slice 1))
+               (combine
+                 ["(await (async (" temporary ") => " body ")(" first "))"])
+             (combine ["((" temporary ") => " body ")(" first ")"])))))))
 
   (defun emit-infix (name nodes operator minimum)
     (require-arity name nodes minimum nil)
@@ -656,6 +679,8 @@
           ((= kind "array-literal") (combine ["[" (emit-arguments nodes) "]"]))
           ((= kind "quoted-literal") (emit-quoted (ir-value node)))
           ((= kind "function-expression") (emit-function node))
+          ((= kind "await-expression")
+           (combine ["await (" (emit-expression (nth 0 nodes)) ")"]))
           ((= kind "conditional") (emit-if nodes))
           ((= kind "conditional-sugar") (emit-conditional-sugar node))
           ((= kind "conditional-chain") (emit-cond nodes))
@@ -769,7 +794,8 @@
                   (parameters (nth 0 parts))
                   (body (nth 1 parts)))
              (combine
-               ["function " (binding-name (ir-value node)) "("
+               [(if (ir-property node "async") "async " "")
+                "function " (binding-name (ir-value node)) "("
                 (join-fragments
                   (js-call parameters :map
                     (lambda (parameter) (emit-parameter parameter)))

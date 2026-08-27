@@ -117,14 +117,19 @@
            (eliscript-lower--node
             'quoted-literal form
             (eliscript-form-strip (car arguments))))
-          ((or 'lambda 'fn)
+          ((or 'lambda 'fn 'async)
            (let ((parameters
                   (eliscript-lower--parameter-nodes (car arguments))))
              (eliscript-lower--node
               'function-expression form nil
               (append parameters
                       (mapcar #'eliscript-lower-expression (cdr arguments)))
-              (list :parameter-count (length parameters)))))
+              (list :parameter-count (length parameters)
+                    :async (eq operator 'async)))))
+          ('await
+           (eliscript-lower--node
+            'await-expression form nil
+            (list (eliscript-lower-expression (car arguments)))))
           ('if (eliscript-lower--call-node
                 'conditional form 'if arguments))
           ((or 'when 'unless)
@@ -251,7 +256,7 @@ Mark the resulting declaration PORTABLE when it came from `import-portable'."
                  (list (eliscript-lower-expression (cadr arguments))))
             (list :source-operator operator
                   :mutable (eq operator 'defvar))))
-          ((or 'defun 'defn 'defportable)
+          ((or 'defun 'defn 'defportable 'defasync)
            (let ((parameters
                   (eliscript-lower--parameter-nodes (nth 1 arguments))))
              (eliscript-lower--node
@@ -262,7 +267,8 @@ Mark the resulting declaration PORTABLE when it came from `import-portable'."
                               (nthcdr 2 arguments)))
               (list :parameter-count (length parameters)
                     :source-operator operator
-                    :portable (eq operator 'defportable)))))
+                    :portable (eq operator 'defportable)
+                    :async (eq operator 'defasync)))))
           ('export
            (eliscript-lower--node
             'export-declaration form nil

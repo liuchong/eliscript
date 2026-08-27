@@ -36,6 +36,11 @@
       "source": "(defportable collect (required &optional optional &rest rest)\n  [required optional rest])\n(defconst invoke (lambda (first &optional second &rest tail) [first second tail]))"
     },
     {
+      "name": "async-functions-and-await",
+      "filename": "async.eli",
+      "source": "(defasync resolve-value (value &optional transform)\n  (let ((resolved (await value)))\n    (if transform (await (funcall transform resolved)) resolved)))\n(defconst delayed-double (async (value) (* (await value) 2)))"
+    },
+    {
       "name": "portable-transitive-closure",
       "filename": "portable.eli",
       "source": "(defconst step 2)\n(defportable helper (value) (* value step))\n(defportable work (value) (helper value))"
@@ -156,6 +161,30 @@
       "filename": "parameters.eli",
       "source": "(defun broken (&body forms) forms)",
       "error": "parameters.eli:1:16: invalid function parameter list"
+    },
+    {
+      "name": "top-level-await",
+      "filename": "async.eli",
+      "source": "(await promise)",
+      "error": "async.eli:1:1: await is only valid inside an async function"
+    },
+    {
+      "name": "synchronous-function-await",
+      "filename": "async.eli",
+      "source": "(defun broken (promise)\n  (await promise))",
+      "error": "async.eli:2:3: await is only valid inside an async function"
+    },
+    {
+      "name": "await-arity",
+      "filename": "async.eli",
+      "source": "(defasync broken () (await))",
+      "error": "async.eli:1:21: await expects 1 argument"
+    },
+    {
+      "name": "portable-async-function",
+      "filename": "portable-async.eli",
+      "source": "(defportable work (value) (async () value))",
+      "error": "portable-async.eli:1:27: portable function work cannot use async (asynchronous functions)"
     },
     {
       "name": "output-name-collision",

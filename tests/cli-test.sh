@@ -63,6 +63,33 @@ if [ "$SOURCE_MAPPED_OUTPUT" != "$EXPECTED_OUTPUT" ]; then
   exit 1
 fi
 
+ASYNC_MODULE="$TEMP_DIR/async.mjs"
+"$PROJECT_DIR/bin/eliscript" \
+  --source-map \
+  --output "$ASYNC_MODULE" \
+  "$PROJECT_DIR/tests/fixtures/async.eli"
+
+ASYNC_OUTPUT=$(ELISCRIPT_ASYNC_MODULE="$ASYNC_MODULE" bun --eval '
+  const { pathToFileURL } = await import("node:url");
+  const module = await import(pathToFileURL(process.env.ELISCRIPT_ASYNC_MODULE));
+  console.log(JSON.stringify([
+    await module.resolve_value(21),
+    await module.resolve_value(21, module.delayed_double),
+    await module.delayed_double(10),
+    await module.await_sequence(),
+    await module.count_to(3),
+    await module.choose(false),
+    await module.choose(true),
+    await module.await_function(),
+  ]));
+')
+
+if [ "$ASYNC_OUTPUT" != '[21,42,20,2,3,false,"yes",5]' ]; then
+  printf 'expected async output: [21,42,20,2,3,false,"yes",5]\nactual async output:   %s\n' \
+    "$ASYNC_OUTPUT" >&2
+  exit 1
+fi
+
 "$PROJECT_DIR/bin/eliscript" \
   --source-map \
   --output "$TEMP_DIR/react-counter.mjs" \

@@ -27,7 +27,8 @@
   '(module-declaration import-declaration import-default import-namespace
     import-named variable-declaration function-declaration export-declaration
     export-default expression-statement parameter-binding reference literal
-    array-literal quoted-literal function-expression conditional conditional-sugar
+    array-literal quoted-literal function-expression await-expression
+    conditional conditional-sugar
     conditional-chain conditional-clause sequence lexical-bindings
     lexical-binding assignment assignment-pair loop short-circuit intrinsic
     object-literal object-property property-read property-write method-call
@@ -143,9 +144,9 @@
                          (eliscript-ir-node-children node)))))
     ((or 'function-declaration 'function-expression)
      (let* ((operator
-             (if (eq (eliscript-ir-node-kind node) 'function-declaration)
-                 (or (eliscript-ir-property node :source-operator) 'defun)
-               'lambda))
+            (if (eq (eliscript-ir-node-kind node) 'function-declaration)
+                (or (eliscript-ir-property node :source-operator) 'defun)
+              (if (eliscript-ir-property node :async) 'async 'lambda)))
             (children (eliscript-ir-node-children node))
             (parameter-count (eliscript-ir-property node :parameter-count))
            (parameters
@@ -153,11 +154,15 @@
              (cl-subseq children 0 parameter-count)))
            (body (mapcar #'eliscript-ir-node-to-form
                          (nthcdr parameter-count children))))
-       (if (memq operator '(defun defn defportable))
+       (if (memq operator '(defun defn defportable defasync))
            (cons operator
                  (cons (eliscript-ir-node-value node)
                        (cons parameters body)))
          (cons operator (cons parameters body)))))
+    ('await-expression
+     (list 'await
+           (eliscript-ir-node-to-form
+            (car (eliscript-ir-node-children node)))))
     ('export-declaration
      (cons 'export
            (mapcar #'eliscript-ir-node-value

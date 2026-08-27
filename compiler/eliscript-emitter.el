@@ -87,14 +87,38 @@
                                 ";")))
                  "\n"))))
 
+(defun eliscript-emitter--contains-await-p (form)
+  "Return non-nil when FORM contains `await' in the current function."
+  (cond
+   ((vectorp form)
+    (cl-some #'eliscript-emitter--contains-await-p (append form nil)))
+   ((consp form)
+    (let ((operator (car form)))
+      (cond
+       ((eq operator 'await) t)
+       ((memq operator '(lambda fn async)) nil)
+       (t (cl-some #'eliscript-emitter--contains-await-p form)))))
+   (t nil)))
+
+(defun eliscript-emitter--emit-iife
+    (parameters body arguments asynchronous)
+  "Emit an IIFE with PARAMETERS, BODY, ARGUMENTS, and ASYNCHRONOUS mode."
+  (if asynchronous
+      (format "(await (async (%s) => {\n%s\n})(%s))"
+              parameters body arguments)
+    (format "((%s) => {\n%s\n})(%s)" parameters body arguments)))
+
 (defun eliscript-emitter--emit-do (forms)
   "Emit FORMS as one value-producing expression."
   (pcase (length forms)
     (0 "null")
     (1 (eliscript-emitter-emit-expression (car forms)))
-    (_ (format "(() => {\n%s\n})()"
-               (eliscript-emitter--indent
-                (eliscript-emitter--emit-returning-body forms))))))
+    (_ (eliscript-emitter--emit-iife
+        ""
+        (eliscript-emitter--indent
+         (eliscript-emitter--emit-returning-body forms))
+        ""
+        (eliscript-emitter--contains-await-p forms)))))
 
 (defun eliscript-emitter--parse-binding (binding)
   "Return the name and initializer represented by BINDING."
@@ -126,19 +150,23 @@
              (values (mapcar (lambda (item)
                                (eliscript-emitter-emit-expression (cadr item)))
                              parsed)))
-        (format "((%s) => {\n%s\n})(%s)"
-                (string-join names ", ")
-                (eliscript-emitter--indent
-                 (eliscript-emitter--emit-returning-body body))
-                (string-join values ", "))))))
+        (eliscript-emitter--emit-iife
+         (string-join names ", ")
+         (eliscript-emitter--indent
+          (eliscript-emitter--emit-returning-body body))
+         (string-join values ", ")
+         (eliscript-emitter--contains-await-p body))))))
 
-(defun eliscript-emitter--emit-function (arguments body)
-  "Emit a function with ARGUMENTS and BODY."
+(defun eliscript-emitter--emit-function (arguments body &optional asynchronous)
+  "Emit a function with ARGUMENTS and BODY.
+
+Prefix the function with `async' when ASYNCHRONOUS is non-nil."
   (let ((parameters
          (eliscript-parameters-parse
           arguments
           (lambda (_form message) (eliscript-emitter--fail "%s" message)))))
-    (format "(%s) => {\n%s\n}"
+    (format "%s(%s) => {\n%s\n}"
+            (if asynchronous "async " "")
             (mapconcat #'eliscript-emitter--emit-parameter parameters ", ")
             (eliscript-emitter--indent
              (eliscript-emitter--emit-returning-body body)))))
@@ -182,16 +210,19 @@
   (eliscript-emitter--require-arity "while" arguments 1)
   (let ((test (car arguments))
         (body (cdr arguments)))
-    (format "(() => {\n%s\n})()"
-            (eliscript-emitter--indent
-             (concat
-              (format "while (__eliscript_truthy(%s)) {\n"
-                      (eliscript-emitter-emit-expression test))
-              (eliscript-emitter--indent
-               (mapconcat (lambda (form)
-                            (concat (eliscript-emitter-emit-expression form) ";"))
-                          body "\n"))
-              "\n}\nreturn null;")))))
+    (eliscript-emitter--emit-iife
+     ""
+     (eliscript-emitter--indent
+      (concat
+       (format "while (__eliscript_truthy(%s)) {\n"
+               (eliscript-emitter-emit-expression test))
+       (eliscript-emitter--indent
+        (mapconcat (lambda (form)
+                     (concat (eliscript-emitter-emit-expression form) ";"))
+                   body "\n"))
+       "\n}\nreturn null;"))
+     ""
+     (eliscript-emitter--contains-await-p arguments))))
 
 (defun eliscript-emitter--emit-setq (arguments)
   "Emit assignments represented by setq ARGUMENTS."
@@ -217,11 +248,18 @@
     (let ((temporary (eliscript-emitter--fresh-name))
           (first (eliscript-emitter-emit-expression (car arguments)))
           (rest (eliscript-emitter--emit-short-circuit (cdr arguments) kind)))
-      (format "((%s) => (__eliscript_truthy(%s) ? %s : %s))(%s)"
-              temporary temporary
-              (if (eq kind 'and) rest temporary)
-              (if (eq kind 'and) temporary rest)
-              first)))))
+      (if (eliscript-emitter--contains-await-p (cdr arguments))
+          (format
+           "(await (async (%s) => (__eliscript_truthy(%s) ? %s : %s))(%s))"
+           temporary temporary
+           (if (eq kind 'and) rest temporary)
+           (if (eq kind 'and) temporary rest)
+           first)
+        (format "((%s) => (__eliscript_truthy(%s) ? %s : %s))(%s)"
+                temporary temporary
+                (if (eq kind 'and) rest temporary)
+                (if (eq kind 'and) temporary rest)
+                first))))))
 
 (defun eliscript-emitter--emit-infix (name arguments operator &optional minimum)
   "Emit ARGUMENTS joined by OPERATOR for Lisp function NAME."
@@ -344,6 +382,14 @@
       ((or 'lambda 'fn)
        (eliscript-emitter--require-arity (symbol-name operator) arguments 1)
        (eliscript-emitter--emit-function (car arguments) (cdr arguments)))
+      ('async
+       (eliscript-emitter--require-arity "async" arguments 1)
+       (eliscript-emitter--emit-function
+        (car arguments) (cdr arguments) t))
+      ('await
+       (eliscript-emitter--require-arity "await" arguments 1 1)
+       (format "await (%s)"
+               (eliscript-emitter-emit-expression (car arguments))))
       ('if (eliscript-emitter--emit-if arguments))
       ('when
        (eliscript-emitter--require-arity "when" arguments 1)
@@ -604,14 +650,15 @@
                  (if (eq operator 'defconst) "const" "let")
                  (eliscript-emitter--binding-name (car arguments))
                  (eliscript-emitter-emit-expression (cadr arguments))))
-        ((or 'defun 'defn)
+        ((or 'defun 'defn 'defasync)
          (eliscript-emitter--require-arity (symbol-name operator) arguments 2)
          (let ((name (nth 0 arguments))
                (parameters (nth 1 arguments))
                (body (nthcdr 2 arguments)))
            (unless (symbolp name)
              (eliscript-emitter--fail "function name must be a symbol"))
-           (format "function %s(%s) {\n%s\n}"
+           (format "%sfunction %s(%s) {\n%s\n}"
+                   (if (eq operator 'defasync) "async " "")
                    (eliscript-emitter--binding-name name)
                    (mapconcat
                     #'eliscript-emitter--emit-parameter

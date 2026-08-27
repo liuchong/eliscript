@@ -908,6 +908,9 @@
            ((= operator "defportable")
             (expander-fail
               context span "defportable is only valid at module top level"))
+           ((= operator "defasync")
+            (expander-fail
+              context span "defasync is only valid at module top level"))
            ((and operator (js-call environment :has operator))
             (expand-expression
               (locate-generated
@@ -919,7 +922,8 @@
            (t
             (let ((expanded [operator-node]))
               (cond
-                ((or (= operator "lambda") (= operator "fn"))
+                ((or (= operator "lambda") (= operator "fn")
+                     (= operator "async"))
                  (when (> (get args :length) 0)
                    (js-call expanded :push (nth 0 args))
                    (js-call (expand-sequence
@@ -1003,7 +1007,7 @@
                     :forEach
                     (lambda (item) (js-call expanded :push item)))))
                ((or (= operator "defun") (= operator "defn")
-                    (= operator "defportable"))
+                    (= operator "defportable") (= operator "defasync"))
                 (if (>= (get args :length) 2)
                     (progn
                       (js-call expanded :push (nth 0 args))

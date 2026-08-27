@@ -255,9 +255,11 @@
        `((parameterCount . ,(eliscript-ir-property node :parameter-count))
          (sourceOperator . ,(symbol-name
                              (eliscript-ir-property node :source-operator)))
-         (portable . ,(if (eliscript-ir-property node :portable) t :false))))
+         (portable . ,(if (eliscript-ir-property node :portable) t :false))
+         (async . ,(if (eliscript-ir-property node :async) t :false))))
       ('function-expression
-       `((parameterCount . ,(eliscript-ir-property node :parameter-count))))
+       `((parameterCount . ,(eliscript-ir-property node :parameter-count))
+         (async . ,(if (eliscript-ir-property node :async) t :false))))
       ('parameter-binding
        `((parameterKind . ,(symbol-name
                             (eliscript-ir-property node :parameter-kind)))))

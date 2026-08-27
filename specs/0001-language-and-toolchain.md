@@ -269,7 +269,7 @@ and downstream analysis match the seed over one shared fixture. See
 [0016-portable-macro-expander.md](0016-portable-macro-expander.md).
 The fifth slice adds a JSON-safe IR model and a complete lowering pass written
 in Eliscript. Seed and generated lowerers agree on every node, property,
-quoted datum, and source span across all 43 IR kinds and all ten bootstrap
+quoted datum, and source span across all 44 IR kinds and all ten bootstrap
 modules. See [0017-portable-ir-lowering.md](0017-portable-ir-lowering.md).
 The sixth slice adds direct ESM and Source Map emitters written in Eliscript.
 Seed and generated backends agree on complete JavaScript text and Source Map

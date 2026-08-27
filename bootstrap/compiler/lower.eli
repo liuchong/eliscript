@@ -192,14 +192,17 @@
           :sequential (= operator "let*")
           :bindingCount (get bindings :length)))))
 
-  (defun lower-function (kind form value parameters body)
+  (defun lower-function
+      (kind form value parameters body &optional asynchronous)
     (let ((parameter-nodes (lower-parameter-nodes parameters))
           (children []))
       (append-nodes children parameter-nodes)
       (append-nodes children (lower-sequence body))
       (make-node
         kind (node-span form) value children
-        (object :parameterCount (get parameter-nodes :length)))))
+        (object
+          :parameterCount (get parameter-nodes :length)
+          :async (if asynchronous t false)))))
 
   (defun lower-expression (form)
     (cond
@@ -224,10 +227,16 @@
             (make-node
               "quoted-literal" (node-span form)
               (syntax-datum (nth 0 args)) [] nil))
-           ((or (= operator "lambda") (= operator "fn"))
+           ((or (= operator "lambda") (= operator "fn")
+                (= operator "async"))
             (lower-function
               "function-expression" form nil
-              (nth 0 args) (js-call args :slice 1)))
+              (nth 0 args) (js-call args :slice 1)
+              (= operator "async")))
+           ((= operator "await")
+            (make-node
+              "await-expression" (node-span form) nil
+              [(lower-expression (nth 0 args))] nil))
            ((= operator "if")
             (lower-call-node "conditional" form "if" args))
            ((or (= operator "when") (= operator "unless"))
@@ -343,17 +352,19 @@
                  :sourceOperator operator
                  :mutable (= operator "defvar")))))
           ((or (= operator "defun") (= operator "defn")
-               (= operator "defportable"))
+               (= operator "defportable") (= operator "defasync"))
            (let ((node
                   (lower-function
                     "function-declaration" form (node-name (nth 0 args))
-                    (nth 1 args) (js-call args :slice 2))))
+                    (nth 1 args) (js-call args :slice 2)
+                    (= operator "defasync"))))
              (put node :properties
                (object
                  :parameterCount
                    (get (get node :properties) :parameterCount)
                  :sourceOperator operator
-                 :portable (= operator "defportable")))
+                 :portable (= operator "defportable")
+                 :async (= operator "defasync")))
              node))
           ((= operator "export")
            (let ((children []))

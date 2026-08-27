@@ -214,6 +214,64 @@
     (should-error (eliscript-compile-string source "parameters.eli")
                   :type 'eliscript-analyze-error)))
 
+(ert-deftest eliscript-supports-async-functions-and-await ()
+  (let* ((source
+          "(defasync resolve-value (value &optional transform)
+  (let ((resolved (await value)))
+    (if transform (await (funcall transform resolved)) resolved)))
+(defconst delayed-double
+  (async (value) (* (await value) 2)))")
+         (output (eliscript-compile-string source "async.eli"))
+         (program (eliscript-compile-ir-string source "async.eli"))
+         (declaration (nth 0 (eliscript-ir-program-body program)))
+         (constant (nth 1 (eliscript-ir-program-body program)))
+         (function-expression (car (eliscript-ir-node-children constant)))
+         kinds)
+    (eliscript-ir-walk
+     program
+     (lambda (node) (push (eliscript-ir-node-kind node) kinds)))
+    (should (equal output
+                   (eliscript-tests--legacy-compile-string
+                    source "async.eli")))
+    (should (string-match-p
+             (regexp-quote
+              "async function resolve_value(value, transform = null)")
+             output))
+    (should (string-match-p
+             (regexp-quote "async (value) =>") output))
+    (should (string-match-p
+             (regexp-quote "(await (async (resolved) =>") output))
+    (should (eliscript-ir-property declaration :async))
+    (should (eliscript-ir-property function-expression :async))
+    (should (memq 'await-expression kinds))
+    (should
+     (equal
+      (eliscript-ir-program-to-forms program)
+      '((defasync resolve-value (value &optional transform)
+          (let ((resolved (await value)))
+            (if transform (await (funcall transform resolved)) resolved)))
+        (defconst delayed-double
+          (async (value) (* (await value) 2)))))))
+  (dolist (source
+           '("(await promise)"
+             "(defun broken (promise) (await promise))"
+             "(defasync outer (promise) (funcall (lambda () (await promise))))"
+             "(defasync broken () (await))"
+             "(async)"))
+    (should-error (eliscript-compile-string source "async.eli")
+                  :type 'eliscript-analyze-error))
+  (let ((error-data
+         (should-error
+          (eliscript-compile-portable-string
+           "(defportable work (value) (async () value))"
+           '(work)
+           "portable-async.eli")
+          :type 'eliscript-compile-error)))
+    (should (string-match-p
+             (regexp-quote
+              "portable function work cannot use async (asynchronous functions)")
+             (error-message-string error-data)))))
+
 (ert-deftest eliscript-preserves-lisp-truthiness ()
   (let ((output (eliscript-compile-string
                  "(print (if 0 \"truthy\" \"falsey\"))")))

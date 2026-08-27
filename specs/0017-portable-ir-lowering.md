@@ -44,7 +44,7 @@ serialized, compared, cached, or passed to a future host-neutral driver.
 
 ## Lowering Surface
 
-The portable lowerer implements all 43 public IR kinds from specification
+The portable lowerer implements all 44 public IR kinds from specification
 0007. The surface includes modules and imports, declarations and exports,
 functions and lexical bindings, all control forms, assignments, intrinsics,
 calls, JavaScript interop, objects, and React elements and fragments.

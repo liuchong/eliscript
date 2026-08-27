@@ -35,6 +35,8 @@
     (put . "object mutation")
     (js-call . "host method calls")
     (new . "host constructors")
+    (async . "asynchronous functions")
+    (await . "asynchronous suspension")
     (jsx . "React runtime access")
     (fragment . "React runtime access")))
 
@@ -90,7 +92,7 @@
                  :name (eliscript-portable--value (car arguments))
                  :kind 'variable :form form :initializer (cadr arguments))
                 table))
-              ((or 'defun 'defn 'defportable)
+              ((or 'defun 'defn 'defportable 'defasync)
                (puthash
                 (eliscript-portable--value (car arguments))
                 (eliscript-portable--declaration-create

@@ -1,0 +1,30 @@
+(module test.async
+  (defasync resolve-value (value &optional transform)
+    (let ((resolved (await (Promise/resolve value))))
+      (if transform
+          (await (funcall transform resolved))
+        resolved)))
+
+  (defconst delayed-double
+    (async (value)
+      (* (await (Promise/resolve value)) 2)))
+
+  (defasync await-sequence ()
+    (progn
+      (await (Promise/resolve 1))
+      (await (Promise/resolve 2))))
+
+  (defasync count-to (limit)
+    (let ((current 0))
+      (while (< current limit)
+        (setq current (await (Promise/resolve (1+ current)))))
+      current))
+
+  (defasync choose (ready)
+    (and ready (await (Promise/resolve "yes"))))
+
+  (defasync await-function ()
+    (funcall (await (async (value) value)) 5))
+
+  (export resolve-value delayed-double await-sequence count-to choose
+          await-function))

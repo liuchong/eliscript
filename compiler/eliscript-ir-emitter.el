@@ -81,14 +81,39 @@
                       ";")))
        "\n"))))
 
+(defun eliscript-ir-emitter--contains-await-p (value)
+  "Return non-nil when VALUE contains `await' in the current function."
+  (cond
+   ((eliscript-ir-node-p value)
+    (let ((kind (eliscript-ir-node-kind value)))
+      (cond
+       ((eq kind 'await-expression) t)
+       ((eq kind 'function-expression) nil)
+       (t (cl-some #'eliscript-ir-emitter--contains-await-p
+                   (eliscript-ir-emitter--children value))))))
+   ((consp value)
+    (cl-some #'eliscript-ir-emitter--contains-await-p value))
+   (t nil)))
+
+(defun eliscript-ir-emitter--emit-iife
+    (parameters body arguments asynchronous)
+  "Emit an IIFE with PARAMETERS, BODY, ARGUMENTS, and ASYNCHRONOUS mode."
+  (if asynchronous
+      (format "(await (async (%s) => {\n%s\n})(%s))"
+              parameters body arguments)
+    (format "((%s) => {\n%s\n})(%s)" parameters body arguments)))
+
 (defun eliscript-ir-emitter--emit-do (nodes)
   "Emit NODES as one value-producing expression."
   (pcase (length nodes)
     (0 "null")
     (1 (eliscript-ir-emitter-emit-expression (car nodes)))
-    (_ (format "(() => {\n%s\n})()"
-               (eliscript-emitter--indent
-                (eliscript-ir-emitter--emit-returning-body nodes))))))
+    (_ (eliscript-ir-emitter--emit-iife
+        ""
+        (eliscript-emitter--indent
+         (eliscript-ir-emitter--emit-returning-body nodes))
+        ""
+        (eliscript-ir-emitter--contains-await-p nodes)))))
 
 (defun eliscript-ir-emitter--split-counted-children (node property)
   "Split NODE children using count PROPERTY."
@@ -102,7 +127,8 @@
   (pcase-let ((`(,parameters ,body)
                (eliscript-ir-emitter--split-counted-children
                 node :parameter-count)))
-    (format "(%s) => {\n%s\n}"
+    (format "%s(%s) => {\n%s\n}"
+            (if (eliscript-ir-property node :async) "async " "")
             (mapconcat
              (lambda (parameter)
                (eliscript-ir-emitter--emit-parameter parameter))
@@ -177,24 +203,25 @@
                          (eliscript-ir-emitter-emit-expression initializer)
                        "null")))
                  bindings)))
-    (format "((%s) => {\n%s\n})(%s)"
-            (string-join names ", ")
-            (eliscript-emitter--indent
-             (if sequential-tail
-                 (let* ((tail (car body))
-                        (remaining-bindings (car tail))
-                        (remaining-body (cdr tail)))
-                   (concat
-                    "return "
-                    (if remaining-bindings
-                        (eliscript-ir-emitter--emit-let-parts
-                         (list (car remaining-bindings))
-                         (list (cons (cdr remaining-bindings) remaining-body))
-                         t)
-                      (eliscript-ir-emitter--emit-do remaining-body))
-                    ";"))
-               (eliscript-ir-emitter--emit-returning-body body)))
-            (string-join values ", "))))
+    (eliscript-ir-emitter--emit-iife
+     (string-join names ", ")
+     (eliscript-emitter--indent
+      (if sequential-tail
+          (let* ((tail (car body))
+                 (remaining-bindings (car tail))
+                 (remaining-body (cdr tail)))
+            (concat
+             "return "
+             (if remaining-bindings
+                 (eliscript-ir-emitter--emit-let-parts
+                  (list (car remaining-bindings))
+                  (list (cons (cdr remaining-bindings) remaining-body))
+                  t)
+               (eliscript-ir-emitter--emit-do remaining-body))
+             ";"))
+        (eliscript-ir-emitter--emit-returning-body body)))
+     (string-join values ", ")
+     (eliscript-ir-emitter--contains-await-p body))))
 
 (defun eliscript-ir-emitter--emit-assignment (node)
   "Emit assignment NODE."
@@ -219,17 +246,20 @@
   (let* ((children (eliscript-ir-emitter--children node))
          (test (car children))
          (body (cdr children)))
-    (format "(() => {\n%s\n})()"
-            (eliscript-emitter--indent
-             (concat
-              (format "while (__eliscript_truthy(%s)) {\n"
-                      (eliscript-ir-emitter-emit-expression test))
-              (eliscript-emitter--indent
-               (mapconcat
-                (lambda (child)
-                  (concat (eliscript-ir-emitter-emit-expression child) ";"))
-                body "\n"))
-              "\n}\nreturn null;")))))
+    (eliscript-ir-emitter--emit-iife
+     ""
+     (eliscript-emitter--indent
+      (concat
+       (format "while (__eliscript_truthy(%s)) {\n"
+               (eliscript-ir-emitter-emit-expression test))
+       (eliscript-emitter--indent
+        (mapconcat
+         (lambda (child)
+           (concat (eliscript-ir-emitter-emit-expression child) ";"))
+         body "\n"))
+       "\n}\nreturn null;"))
+     ""
+     (eliscript-ir-emitter--contains-await-p children))))
 
 (defun eliscript-ir-emitter--emit-short-circuit (nodes kind)
   "Emit Lisp-style short-circuit NODES for KIND."
@@ -241,11 +271,18 @@
     (let ((temporary (eliscript-emitter--fresh-name))
           (first (eliscript-ir-emitter-emit-expression (car nodes)))
           (rest (eliscript-ir-emitter--emit-short-circuit (cdr nodes) kind)))
-      (format "((%s) => (__eliscript_truthy(%s) ? %s : %s))(%s)"
-              temporary temporary
-              (if (eq kind 'and) rest temporary)
-              (if (eq kind 'and) temporary rest)
-              first)))))
+      (if (eliscript-ir-emitter--contains-await-p (cdr nodes))
+          (format
+           "(await (async (%s) => (__eliscript_truthy(%s) ? %s : %s))(%s))"
+           temporary temporary
+           (if (eq kind 'and) rest temporary)
+           (if (eq kind 'and) temporary rest)
+           first)
+        (format "((%s) => (__eliscript_truthy(%s) ? %s : %s))(%s)"
+                temporary temporary
+                (if (eq kind 'and) rest temporary)
+                (if (eq kind 'and) temporary rest)
+                first))))))
 
 (defun eliscript-ir-emitter--emit-infix (name nodes operator &optional minimum)
   "Emit NODES joined by OPERATOR for intrinsic NAME."
@@ -569,6 +606,9 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
       ('quoted-literal
        (eliscript-emitter--emit-quoted (eliscript-ir-node-value node)))
       ('function-expression (eliscript-ir-emitter--emit-function node))
+      ('await-expression
+       (format "await (%s)"
+               (eliscript-ir-emitter-emit-expression (car children))))
       ('conditional (eliscript-ir-emitter--emit-if children))
       ('conditional-sugar
        (eliscript-ir-emitter--emit-conditional-sugar node))
@@ -691,7 +731,8 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
        (pcase-let ((`(,parameters ,body)
                     (eliscript-ir-emitter--split-counted-children
                      node :parameter-count)))
-         (format "function %s(%s) {\n%s\n}"
+         (format "%sfunction %s(%s) {\n%s\n}"
+                 (if (eliscript-ir-property node :async) "async " "")
                  (eliscript-emitter--binding-name
                   (eliscript-ir-node-value node))
                  (mapconcat

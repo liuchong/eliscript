@@ -24,7 +24,8 @@
                (:constructor eliscript-analyzer--scope-create))
   parent
   names
-  outputs)
+  outputs
+  function-context)
 
 (defconst eliscript-analyzer--builtin-operators
   '(if when unless progn do while and or not
@@ -46,12 +47,21 @@
                        format-string
                        arguments))))
 
-(defun eliscript-analyzer--make-scope (&optional parent)
-  "Create an empty lexical scope whose parent is PARENT."
+(defun eliscript-analyzer--make-scope (&optional parent function-context)
+  "Create a lexical scope under PARENT with FUNCTION-CONTEXT."
   (eliscript-analyzer--scope-create
    :parent parent
    :names (make-hash-table :test #'eq)
-   :outputs (make-hash-table :test #'equal)))
+   :outputs (make-hash-table :test #'equal)
+   :function-context function-context))
+
+(defun eliscript-analyzer--async-function-p (scope)
+  "Return non-nil when SCOPE is inside its nearest async function."
+  (let (context)
+    (while (and scope (not context))
+      (setq context (eliscript-analyzer--scope-function-context scope))
+      (setq scope (eliscript-analyzer--scope-parent scope)))
+    (eq context 'async)))
 
 (defun eliscript-analyzer--map-binding-name (name)
   "Return NAME's output identifier as an analysis diagnostic."
@@ -149,8 +159,11 @@
           (eliscript-analyzer--declare child (car binding) 'local t))))
     (eliscript-analyzer--analyze-sequence body child)))
 
-(defun eliscript-analyzer--analyze-function (parameters body scope)
-  "Analyze function PARAMETERS and BODY within SCOPE."
+(defun eliscript-analyzer--analyze-function
+    (parameters body scope &optional asynchronous)
+  "Analyze function PARAMETERS and BODY in SCOPE.
+
+When ASYNCHRONOUS is non-nil, allow `await' in this function body."
   (let ((parsed
          (eliscript-parameters-parse
           parameters
@@ -159,7 +172,8 @@
                    (or (eliscript-form-span form)
                        eliscript-analyzer--current-span)))
               (eliscript-analyzer--fail "%s" message))))))
-    (let ((child (eliscript-analyzer--make-scope scope)))
+    (let ((child (eliscript-analyzer--make-scope
+                  scope (if asynchronous 'async 'sync))))
       (dolist (parameter parsed)
         (eliscript-analyzer--declare
          child (eliscript-parameter-form parameter) 'parameter t))
@@ -257,6 +271,18 @@
          (eliscript-analyzer--fail "%s requires an argument list" operator))
        (eliscript-analyzer--analyze-function
         (car arguments) (cdr arguments) scope))
+      ('async
+       (unless arguments
+         (eliscript-analyzer--fail "async requires an argument list"))
+       (eliscript-analyzer--analyze-function
+        (car arguments) (cdr arguments) scope t))
+      ('await
+       (unless (= (length arguments) 1)
+         (eliscript-analyzer--fail "await expects 1 argument"))
+       (unless (eliscript-analyzer--async-function-p scope)
+         (eliscript-analyzer--fail
+          "await is only valid inside an async function"))
+       (eliscript-analyzer--analyze-expression (car arguments) scope))
       ('let (eliscript-analyzer--analyze-let arguments scope nil))
       ('let* (eliscript-analyzer--analyze-let arguments scope t))
       ('setq (eliscript-analyzer--analyze-assignment arguments scope "setq"))
@@ -275,7 +301,7 @@
       ((pred (lambda (name)
                (memq name eliscript-analyzer--builtin-operators)))
        (eliscript-analyzer--analyze-sequence arguments scope))
-      ((or 'defun 'defn 'defportable 'defcomponent 'defvar 'defconst
+      ((or 'defun 'defn 'defportable 'defasync 'defcomponent 'defvar 'defconst
            'export 'export-default 'import 'module)
        (eliscript-analyzer--fail "%s is only valid at module top level" operator))
       (_
@@ -397,7 +423,7 @@ When PORTABLE is non-nil, accept named imports only."
          (unless (<= 1 (length (cdr value)) 2)
            (eliscript-analyzer--fail "defconst expects 1..2 arguments"))
          (eliscript-analyzer--declare scope (cadr value) 'constant nil))
-        ((or 'defun 'defn 'defportable)
+        ((or 'defun 'defn 'defportable 'defasync)
          (unless (>= (length (cdr value)) 2)
            (eliscript-analyzer--fail
             "%s expects 2+ arguments"
@@ -421,11 +447,11 @@ When PORTABLE is non-nil, accept named imports only."
          (when (> (length arguments) 2)
            (eliscript-analyzer--fail "%s expects 1..2 arguments" operator))
          (eliscript-analyzer--analyze-expression (cadr arguments) scope))
-        ((or 'defun 'defn 'defportable)
+        ((or 'defun 'defn 'defportable 'defasync)
          (unless (>= (length arguments) 2)
            (eliscript-analyzer--fail "%s expects 2+ arguments" operator))
          (eliscript-analyzer--analyze-function
-          (cadr arguments) (cddr arguments) scope))
+          (cadr arguments) (cddr arguments) scope (eq operator 'defasync)))
         ('export
          (unless arguments
            (eliscript-analyzer--fail "export expects one or more bindings"))

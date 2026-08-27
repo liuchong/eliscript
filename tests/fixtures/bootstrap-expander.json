@@ -16,6 +16,11 @@
       "source": "(defmacro twice (value) `(+ ,value ,value))\n(defportable work (value) (twice value))"
     },
     {
+      "name": "async-function-bodies",
+      "filename": "async.eli",
+      "source": "(defmacro identity (value) value)\n(defasync load (value) (await (identity value)))\n(defconst loader (async (value) (await (identity value))))"
+    },
+    {
       "name": "body-splicing",
       "filename": "body.eli",
       "source": "(defmacro begin (&body forms) `(progn ,@forms))\n(defun two () (begin 1 2))\n(export two)"

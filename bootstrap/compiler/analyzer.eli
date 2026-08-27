@@ -12,7 +12,8 @@
      "object-keys" "object-has?" "object-assoc" "funcall" "apply"])
 
   (defconst portable-forbidden-operators
-    ["js*" "print" "put" "js-call" "new" "jsx" "fragment"])
+    ["js*" "print" "put" "js-call" "new" "async" "await"
+     "jsx" "fragment"])
 
   (defconst fail
     (js* "(message) => { throw new Error(message); }"))
@@ -129,11 +130,20 @@
            (t (str "[" contents "]")))))
       (t "<unsupported>")))
 
-  (defun make-scope (parent)
+  (defun make-scope (parent &optional function-context)
     (object
       :parent parent
       :names (new (js* "Map"))
-      :outputs (new (js* "Map"))))
+      :outputs (new (js* "Map"))
+      :functionContext function-context))
+
+  (defun async-function-p (scope)
+    (let ((current scope)
+          (function-context nil))
+      (while (and current (not function-context))
+        (setq function-context (get current :functionContext))
+        (setq current (get current :parent)))
+      (= function-context "async")))
 
   (defun guarded-binding-name (name context span)
     (funcall
@@ -245,9 +255,11 @@
                 child (nth 0 pair) "local" t context)))))
       (analyze-sequence body child context)))
 
-  (defun analyze-function (parameters body scope context)
+  (defun analyze-function
+      (parameters body scope context &optional asynchronous)
     (let ((parameter-items (function-parameters parameters context)))
-      (let ((child (make-scope scope)))
+      (let ((child (make-scope
+                    scope (if asynchronous "async" "sync"))))
         (js-call parameter-items :forEach
           (lambda (parameter)
             (declare-binding
@@ -348,6 +360,20 @@
              (str operator " requires an argument list")))
          (analyze-function
            (nth 0 args) (js-call args :slice 1) scope context))
+        ((= operator "async")
+         (when (= (get args :length) 0)
+           (analyzer-fail
+             context form-span "async requires an argument list"))
+         (analyze-function
+           (nth 0 args) (js-call args :slice 1) scope context t))
+        ((= operator "await")
+         (unless (= (get args :length) 1)
+           (analyzer-fail context form-span "await expects 1 argument"))
+         (unless (async-function-p scope)
+           (analyzer-fail
+             context form-span
+             "await is only valid inside an async function"))
+         (analyze-expression (nth 0 args) scope context))
         ((= operator "let")
          (analyze-let args scope false context form-span))
         ((= operator "let*")
@@ -373,7 +399,8 @@
         ((js-call builtin-operators :includes operator)
          (analyze-sequence args scope context))
         ((js-call
-          ["defun" "defn" "defportable" "defcomponent" "defvar" "defconst"
+          ["defun" "defn" "defportable" "defasync" "defcomponent"
+            "defvar" "defconst"
             "export" "export-default" "import" "import-portable" "module"]
            :includes operator)
          (analyzer-fail
@@ -514,7 +541,7 @@
                (declare-binding
                  scope (nth 0 args) "constant" false context))
               ((or (= operator "defun") (= operator "defn")
-                   (= operator "defportable"))
+                   (= operator "defportable") (= operator "defasync"))
                (unless (>= count 2)
                  (analyzer-fail
                    context (node-span form)
@@ -540,7 +567,7 @@
                (str operator " expects 1..2 arguments")))
            (analyze-expression (nth 1 args) scope context))
           ((or (= operator "defun") (= operator "defn")
-               (= operator "defportable"))
+               (= operator "defportable") (= operator "defasync"))
            (unless (>= count 2)
              (analyzer-fail
                context (node-span form)
@@ -548,7 +575,7 @@
            (analyze-function
              (nth 1 args)
              (js-call args :slice 2)
-             scope context))
+             scope context (= operator "defasync")))
           ((= operator "export")
            (when (= count 0)
              (analyzer-fail
@@ -589,7 +616,7 @@
                  (js-call declarations :set (node-name (nth 0 args))
                    (object :kind "variable" :form form)))
                 ((or (= operator "defun") (= operator "defn")
-                     (= operator "defportable"))
+                     (= operator "defportable") (= operator "defasync"))
                  (js-call declarations :set (node-name (nth 0 args))
                    (object
                      :kind (if (= operator "defportable")
@@ -735,6 +762,8 @@
                  ((= operator "put") "object mutation")
                  ((= operator "js-call") "host method calls")
                  ((= operator "new") "host constructors")
+                 ((= operator "async") "asynchronous functions")
+                 ((= operator "await") "asynchronous suspension")
                  (t "React runtime access"))
                ")")))
       (cond

@@ -338,6 +338,9 @@ Current evidence:
 - Named, anonymous, component, and portable functions share required,
   `&optional`, and trailing `&rest` parameters; explicit IR kinds keep both
   compiler generations and compatibility round trips aligned.
+- Named `defasync`, anonymous `async`, and lexically checked `await` forms emit
+  native Promise code. Generated expression IIFEs become async only when they
+  contain suspension in the current function boundary.
 - Deterministic compile-time macros expand sequentially before analysis,
   support backquote and body parameters, reject undeclared host functions, and
   never appear in generated modules.
@@ -378,7 +381,7 @@ Current evidence:
   portable analyzer directly.
 - Portable IR and lowering modules written in Eliscript convert analyzed
   syntax into JSON-safe programs. Complete trees, properties, quoted data, and
-  source spans match the seed across every one of the 43 IR node kinds.
+  source spans match the seed across every one of the 44 IR node kinds.
 - Portable ESM and Source Map emitters consume that IR without Emacs text
   properties. Their output is byte-identical to the seed across examples and
   all ten bootstrap modules, including Unicode mapping columns.
@@ -433,7 +436,7 @@ Current evidence:
 - Repeated `--portable NAME` options make the same builder verify every local
   `import-portable` target, reject bare or escaping source edges, and emit only
   each module's requested transitive closure.
-- Eighty-nine ERT tests cover reading, locations, macro expansion, analysis, IR
+- Ninety ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
 - Eighteen Bun tests cover the compiler and Org Vite adapters, source-map
@@ -539,7 +542,10 @@ generations, and
 for the shared host-independent macro language used by both generations, and
 [specs/0036-function-parameters.md](specs/0036-function-parameters.md)
 for optional and rest parameter grammar, runtime defaults, and explicit IR
-parameter kinds.
+parameter kinds, and
+[specs/0037-async-functions.md](specs/0037-async-functions.md)
+for native Promise functions, lexical await validation, and async generated
+expression wrappers.
 
 ## License
 

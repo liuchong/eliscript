@@ -81,7 +81,9 @@ The implemented binding forms are:
 - `defun` and `defn` for ordinary named functions
 - `defportable` for worker entries with a statically checked dependency closure;
   see [0021-portable-functions.md](0021-portable-functions.md)
+- `defasync` for named asynchronous functions
 - `lambda` and `fn` for anonymous functions
+- `async` for anonymous asynchronous functions
 - `let` for parallel lexical bindings
 - `let*` for sequential lexical bindings
 - `setq` and `set!` for assignment
@@ -93,6 +95,10 @@ special variables, and declarations are not implemented.
 
 A function returns the value of its final body form. An empty function body
 returns `null`.
+
+`await` is valid only within the nearest `defasync` or `async` function and
+suspends on one Promise-compatible value. See
+[0037-async-functions.md](0037-async-functions.md).
 
 ## Control Flow
 
@@ -162,6 +168,7 @@ Exports use `(export name ...)` or `(export-default value)`.
 - `(js-call object method arguments...)` preserves the method receiver.
 - `(new Constructor arguments...)` constructs a JavaScript object.
 - `(funcall function arguments...)` and `(apply function array)` call values.
+- `defasync`, `async`, and `await` use native JavaScript Promise semantics.
 - `(js* "expression")` emits an explicit raw JavaScript escape hatch.
 
 `js*` accepts only a source string literal. It is deliberately visible and

@@ -197,6 +197,9 @@
          ((eq operator 'defportable)
           (eliscript-expander--fail
            "defportable is only valid at module top level"))
+         ((eq operator 'defasync)
+          (eliscript-expander--fail
+           "defasync is only valid at module top level"))
          ((and (symbolp operator) (gethash operator environment))
           (eliscript-expander--expand-expression
            (eliscript-form-locate-generated
@@ -208,7 +211,7 @@
          (t
           (eliscript-form-inherit
            (pcase operator
-             ((or 'lambda 'fn)
+             ((or 'lambda 'fn 'async)
               (if arguments
                   (cons operator-form
                         (cons (car arguments)
@@ -290,7 +293,7 @@
                                (eliscript-expander--expand-top-level-sequence
                                 (cdr arguments) environment depth)))
                  value))
-              ((or 'defun 'defn 'defportable)
+              ((or 'defun 'defn 'defportable 'defasync)
                (if (>= (length arguments) 2)
                    (cons operator-form
                          (cons (nth 0 arguments)
