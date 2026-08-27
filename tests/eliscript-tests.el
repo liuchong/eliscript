@@ -308,6 +308,28 @@
     (should-not (string-match-p "function unused" output))
     (should-not (string-match-p "function ordinary" output))))
 
+(ert-deftest eliscript-portable-imports-compile-as-named-esm-imports ()
+  (let ((output
+         (eliscript-compile-string
+          "(import-portable \"./math.eli\" increment)\n(defportable work (value) (increment value))"
+          "portable.eli")))
+    (should (string-match-p
+             (regexp-quote "import {increment} from \"./math.eli\";")
+             output))
+    (should (string-match-p "function work(value)" output))))
+
+(ert-deftest eliscript-single-file-portable-selection-rejects-imports ()
+  (let ((error-data
+         (should-error
+          (eliscript-compile-portable-string
+           "(import-portable \"./math.eli\" increment)\n(defportable work (value) (increment value))"
+           '(work)
+           "portable.eli")
+          :type 'eliscript-analyze-error)))
+    (should (string-match-p
+             "portable import increment requires a project build"
+             (error-message-string error-data)))))
+
 (ert-deftest eliscript-standard-library-sequence-closure-is-portable ()
   (let* ((source
           (expand-file-name "stdlib/sequence.eli" default-directory))
@@ -339,9 +361,7 @@
 (ert-deftest eliscript-standard-library-object-closure-is-portable ()
   (let* ((source
           (expand-file-name "stdlib/object.eli" default-directory))
-         (output (eliscript-compile-portable-file source '(omit)))
-         (group-output
-          (eliscript-compile-portable-file source '(group-by))))
+         (output (eliscript-compile-portable-file source '(omit))))
     (should (string-match-p "function keys(object)" output))
     (should (string-match-p "function key_in_QMARK_" output))
     (should (string-match-p "function omit(object, omitted_keys)" output))
@@ -353,13 +373,18 @@
     (should (string-match-p
              (regexp-quote
               "[[\"keys\", keys], [\"assoc\", assoc], [\"key-in?\", key_in_QMARK_], [\"omit\", omit]")
+             output))))
+
+(ert-deftest eliscript-standard-library-data-compiles-portable-imports ()
+  (let* ((source
+          (expand-file-name "stdlib/data.eli" default-directory))
+         (output (eliscript-compile-file source)))
+    (should (string-match-p
+             (regexp-quote "import {assoc} from \"./object.eli\";") output))
+    (should (string-match-p
+             (regexp-quote "import {has_QMARK_} from \"./object.eli\";")
              output))
-    (should (string-match-p "function has_QMARK_(object, key)" group-output))
-    (should (string-match-p "function assoc(object, key, value)" group-output))
-    (should (string-match-p "function group_by(key_function, values)"
-                            group-output))
-    (should-not (string-match-p "function index_by" group-output))
-    (should-not (string-match-p "function count_by" group-output))))
+    (should (string-match-p "function group_by(key_function, values)" output))))
 
 (ert-deftest eliscript-portable-functions-reject-non-portable-dependencies ()
   (dolist (source
@@ -547,6 +572,7 @@
   (let ((source
          "(import \"react\" :default React useState)
 (import \"react-dom\" :as ReactDOM)
+(import-portable \"./helper.eli\" helper)
 (defvar state 0)
 (defun optional-branch (value) (let* () (if value value)))
 (defun exercise (value values)

@@ -68,9 +68,9 @@ for exact semantics, dependency closure, and acceptance evidence.
 
 ## Object
 
-`object.eli` exports fourteen immutable operations for own keys, property checks,
+`object.eli` exports eleven immutable operations for own keys, property checks,
 shallow association, removal, merging, value transforms, selection, omission,
-updates, indexing, grouping, and counting:
+and updates:
 
 ```elisp
 (import "../../stdlib/object.eli" assoc merge pick)
@@ -81,9 +81,31 @@ updates, indexing, grouping, and counting:
 
 All transforms return ordinary objects and do not mutate their inputs. The
 module is portable and dependency-prunable; selecting `omit` includes only its
-`keys`, `assoc`, and `key-in?` closure, while selecting `group-by` includes only
-`has?`, `assoc`, and the requested entry. See
+`keys`, `assoc`, and `key-in?` closure. See
 [specs/0026-portable-object-library.md](../specs/0026-portable-object-library.md)
-for primitive semantics and
+for primitive semantics.
+
+## Data
+
+`data.eli` exports `index-by`, `group-by`, and `count-by`. It is the first
+standard module composed from another portable source module:
+
+```elisp
+(import-portable "./object.eli" assoc)
+(import-portable "./object.eli" has?)
+```
+
+Ordinary compilation emits standard named ESM imports. A portable project build
+verifies the imported declarations, follows the local graph, and emits a pruned
+module tree:
+
+```sh
+../bin/eliscript-build --root . --portable group-by \
+  --out-dir ../dist/portable data.eli
+```
+
+See
 [specs/0027-portable-data-indexing.md](../specs/0027-portable-data-indexing.md)
-for keyed collection transforms.
+for keyed collection transforms and
+[specs/0028-portable-module-composition.md](../specs/0028-portable-module-composition.md)
+for the cross-module proof contract.

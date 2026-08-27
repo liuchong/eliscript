@@ -262,6 +262,9 @@
        `((sourceOperator . ,(symbol-name
                              (eliscript-ir-property node :source-operator)))
          (mutable . ,(if (eliscript-ir-property node :mutable) t :false))))
+      ('import-declaration
+       (and (eliscript-ir-property node :portable)
+            '((portable . t))))
       ('lexical-bindings
        `((sequential . ,(if (eliscript-ir-property node :sequential) t :false))
          (bindingCount . ,(eliscript-ir-property node :binding-count))))

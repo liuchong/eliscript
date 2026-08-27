@@ -321,7 +321,7 @@
                                (eliscript-expander--expand-sequence
                                 (cdr arguments) environment depth))
                        nil)))
-              ((or 'import 'export) value)
+              ((or 'import 'import-portable 'export) value)
               ('export-default
                (cons operator-form
                      (eliscript-expander--expand-sequence

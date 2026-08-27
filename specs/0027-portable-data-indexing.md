@@ -6,19 +6,21 @@
 
 ## Summary
 
-The immutable object library now turns ordered values into keyed lookup,
-grouping, and count objects. This application-facing slice is driven by the Org
-React site, whose hash router previously scanned every article on each
-navigation event.
+The `data.eli` library turns ordered values into keyed lookup, grouping, and
+count objects. It composes with immutable primitives from `object.eli`; the Org
+React site drives the slice because its hash router previously scanned every
+article on each navigation event.
 
 ```elisp
-(import "../../stdlib/object.eli" index-by group-by count-by)
+(import "../../stdlib/data.eli" index-by group-by count-by)
 
 (index-by (lambda (article) (get article :slug)) articles)
 ```
 
 All three functions are `defportable`, use the existing immutable object
-primitives, and add no compiler or runtime capability.
+primitives through `import-portable`, and add no runtime capability. The graph
+contract is specified in
+[0028-portable-module-composition.md](0028-portable-module-composition.md).
 
 ## Operations
 
@@ -59,8 +61,8 @@ the generated UI are otherwise unchanged.
 
 ## Acceptance Evidence
 
-- The object runtime fixture verifies duplicate replacement, stable group
-  order, counts, empty input, and all fourteen library exports.
+- The object/data runtime fixture verifies duplicate replacement, stable group
+  order, counts, empty input, and both modules' exports.
 - Direct JavaScript calls verify own-property behavior for `__proto__` keys.
 - ERT proves dependency-pruned `group-by` output includes `has?` and `assoc`
   while excluding the other indexing functions.
@@ -69,9 +71,8 @@ the generated UI are otherwise unchanged.
 - The Org Vite production bundle retains `object.eli` in its source map and
   executes the prebuilt slug-index path.
 
-## Next Slice
+## Composition Update
 
-The next structural M6 gap is portable composition across local `.eli` modules.
-Today a `defportable` closure is intentionally selected within one source file;
-allowing portable standard modules to depend on other portable source modules
-needs an explicit graph and capability contract rather than copied helpers.
+The structural follow-up is implemented: these operations now live in
+`data.eli` and depend on `assoc` and `has?` from `object.eli` without copying
+them. Project-level portable builds prove and prune that local source graph.

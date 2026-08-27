@@ -13,14 +13,15 @@
 
 (defconst eliscript-project-cli--usage
   (concat
-   "Usage: eliscript-build [--root DIR] --out-dir DIR ENTRY\n\n"
-   "Compile ENTRY and its relative .eli imports into an ESM directory tree.\n"))
+   "Usage: eliscript-build [--root DIR] [--portable NAME] --out-dir DIR ENTRY\n\n"
+   "Compile ENTRY and its relative .eli imports into an ESM directory tree.\n"
+   "Repeat --portable to emit a verified, dependency-pruned portable graph.\n"))
 
 (defun eliscript-project-cli--parse (arguments)
-  "Parse ARGUMENTS and return (ENTRY OUT-DIR ROOT)."
+  "Parse ARGUMENTS and return (ENTRY OUT-DIR ROOT PORTABLE-ENTRIES)."
   (when (equal (car arguments) "--")
     (setq arguments (cdr arguments)))
-  (let (entry out-dir root)
+  (let (entry out-dir root portable-entries)
     (while arguments
       (let ((argument (pop arguments)))
         (cond
@@ -35,6 +36,10 @@
           (unless arguments
             (error "%s requires a directory" argument))
           (setq root (pop arguments)))
+         ((equal argument "--portable")
+          (unless arguments
+            (error "%s requires an entry name" argument))
+          (push (pop arguments) portable-entries))
          ((string-prefix-p "-" argument)
           (error "unknown option: %s" argument))
          (entry (error "multiple entry files are not supported"))
@@ -43,14 +48,18 @@
       (error "missing entry file"))
     (unless out-dir
       (error "missing --out-dir"))
-    (list entry out-dir root)))
+    (list entry out-dir root (nreverse portable-entries))))
 
 (defun eliscript-project-cli-main (arguments)
   "Build an Eliscript project according to command-line ARGUMENTS."
   (condition-case error-data
-      (pcase-let ((`(,entry ,out-dir ,root)
+      (pcase-let ((`(,entry ,out-dir ,root ,portable-entries)
                    (eliscript-project-cli--parse arguments)))
-        (let ((result (eliscript-project-build entry out-dir root)))
+        (let ((result
+               (if portable-entries
+                   (eliscript-project-build-portable
+                    entry portable-entries out-dir root)
+                 (eliscript-project-build entry out-dir root))))
           (princ (eliscript-project-build-result-entry-output result))
           (princ "\n")))
     (error

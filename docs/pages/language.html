@@ -153,11 +153,12 @@
 
           <section id="objects">
             <h2>Immutable objects</h2>
-            <pre><code>(import "../../stdlib/object.eli" assoc index-by pick)
+            <pre><code>(import "../../stdlib/object.eli" assoc pick)
+(import "../../stdlib/data.eli" index-by)
 
 (pick (assoc (object :name "Eliscript") :runtime "JavaScript")
       [:name :runtime])</code></pre>
-            <p>Fourteen portable functions enumerate own keys, test own properties, associate without mutation, remove and merge keys, transform values, select fields, and index, group, or count ordered values by computed keys. Empty transforms return ordinary objects. Three minimal core primitives provide key discovery and shallow copying; all higher-level policy remains Eliscript library code.</p>
+            <p>Eleven object functions enumerate own keys, test own properties, associate without mutation, remove and merge keys, transform values, and select fields. The data module adds keyed lookup, grouping, and counting by importing object primitives through explicit <code>import-portable</code> edges. Graph-aware portable builds verify those targets and prune every generated module.</p>
           </section>
 
           <section id="react">

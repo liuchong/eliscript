@@ -1021,7 +1021,9 @@
                              environment depth context)
                     :forEach
                     (lambda (item) (js-call expanded :push item)))))
-               ((or (= operator "import") (= operator "export"))
+               ((or (= operator "import")
+                    (= operator "import-portable")
+                    (= operator "export"))
                 (setq expanded items))
                ((= operator "export-default")
                 (js-call (expand-sequence args environment depth context)

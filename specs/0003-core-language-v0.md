@@ -130,7 +130,13 @@ Imports use these top-level forms:
 (import "react" :default React useState useMemo)
 (import "library" :as Library)
 (import "side-effect-only")
+(import-portable "./object.eli" assoc)
 ```
+
+`import-portable` is named-only. It emits a standard ESM import in complete
+modules and becomes a verified local graph edge during project-level portable
+closure builds; see
+[0028-portable-module-composition.md](0028-portable-module-composition.md).
 
 Exports use `(export name ...)` or `(export-default value)`.
 

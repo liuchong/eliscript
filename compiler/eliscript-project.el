@@ -206,6 +206,149 @@ are rewritten to `.mjs'.  Other import specifiers remain unchanged."
       canonical-entry root-path output-directory)
      :modules modules)))
 
+(defun eliscript-project--portable-imports (forms)
+  "Return portable import descriptions from selected FORMS.
+
+Each description has the shape (SPECIFIER NAMES SPAN)."
+  (let (imports)
+    (dolist (form forms)
+      (let ((value (eliscript-form-value form)))
+        (when (and (consp value)
+                   (eq (eliscript-form-value (car value)) 'import-portable))
+          (push
+           (list
+            (eliscript-form-value (cadr value))
+            (eliscript-portable--import-names (cdr value))
+            (eliscript-form-span form))
+           imports))))
+    (nreverse imports)))
+
+(defun eliscript-project-build-portable (entry entries out-dir &optional root)
+  "Compile portable ENTRIES and their local module graph from ENTRY.
+
+Every `import-portable' edge must name a relative `.eli' module below ROOT.
+The target binding must resolve to `defportable'; each generated module contains
+only the requested declarations, immutable constants, and portable imports."
+  (unless entries
+    (eliscript-project--fail entry nil "portable build requires an entry name"))
+  (let* ((entry-path (expand-file-name entry))
+         (root-path
+          (eliscript-project--canonical-directory
+           (or root (file-name-directory entry-path)) "project root"))
+         (canonical-entry
+          (eliscript-project--canonical-source
+           entry-path root-path entry-path nil))
+         (resolved-out-dir (file-truename (expand-file-name out-dir)))
+         (output-directory (file-name-as-directory resolved-out-dir))
+         (forms-by-source (make-hash-table :test #'equal))
+         (texts-by-source (make-hash-table :test #'equal))
+         (requests (make-hash-table :test #'equal))
+         queue
+         modules)
+    (unless (string-suffix-p ".eli" canonical-entry)
+      (eliscript-project--fail
+       canonical-entry nil "entry file must use the .eli extension"))
+    (when (file-exists-p resolved-out-dir)
+      (unless (file-directory-p resolved-out-dir)
+        (eliscript-project--fail
+         resolved-out-dir nil "output path is not a directory")))
+    (cl-labels
+        ((load-forms
+          (source)
+          (or (gethash source forms-by-source)
+              (let* ((text (eliscript-project--read-source source))
+                     (forms (eliscript--analyzed-string text source)))
+                (puthash source text texts-by-source)
+                (puthash source forms forms-by-source)
+                forms)))
+         (enqueue
+          (source name)
+          (push (cons source (if (symbolp name) name (intern name))) queue))
+         (resolve-import
+          (source specifier span)
+          (unless (eliscript-project--local-import-p specifier)
+            (eliscript-project--fail
+             source span
+             "portable import must be a relative .eli module: %s"
+             specifier))
+          (eliscript-project--canonical-source
+           (expand-file-name specifier (file-name-directory source))
+           root-path source span)))
+      (dolist (name entries) (enqueue canonical-entry name))
+      (while queue
+        (pcase-let* ((`(,source . ,name) (pop queue))
+                     (source-requests
+                      (or (gethash source requests)
+                          (let ((table (make-hash-table :test #'eq)))
+                            (puthash source table requests)
+                            table))))
+          (unless (gethash name source-requests)
+            (puthash name t source-requests)
+            (let* ((forms (load-forms source))
+                   (selected
+                    (eliscript-portable-select-module
+                     forms
+                     (let (names)
+                       (maphash
+                        (lambda (requested _present)
+                          (push requested names))
+                        source-requests)
+                       (sort names
+                             (lambda (left right)
+                               (string-lessp
+                                (symbol-name left) (symbol-name right)))))
+                     source t)))
+              (dolist (import (eliscript-project--portable-imports selected))
+                (let ((dependency
+                       (resolve-import source (nth 0 import) (nth 2 import))))
+                  (dolist (imported-name (nth 1 import))
+                    (enqueue dependency imported-name))))))))
+      (let (sources)
+        (maphash (lambda (source _names) (push source sources)) requests)
+        (dolist (source (sort sources #'string-lessp))
+          (let* ((source-requests (gethash source requests))
+                 names
+                 (forms (load-forms source))
+                 (output-path
+                  (eliscript-project--source-output
+                   source root-path output-directory)))
+            (maphash (lambda (name _present) (push name names)) source-requests)
+            (setq names
+                  (sort names
+                        (lambda (left right)
+                          (string-lessp
+                           (symbol-name left) (symbol-name right)))))
+            (let ((program
+                   (eliscript-lower-module
+                    (eliscript-portable-select-module forms names source t)
+                    source)))
+              (eliscript-ir-walk
+               program
+               (lambda (node)
+                 (when (eq (eliscript-ir-node-kind node) 'import-declaration)
+                   (let* ((specifier (eliscript-ir-node-value node))
+                          (dependency
+                           (resolve-import
+                            source specifier (eliscript-ir-node-span node)))
+                          (dependency-output
+                           (eliscript-project--source-output
+                            dependency root-path output-directory)))
+                     (setf (eliscript-ir-node-value node)
+                           (eliscript-project--relative-import
+                            dependency-output output-path))))))
+              (push
+               (eliscript-project--write-module
+                program source (gethash source texts-by-source) output-path)
+               modules)))))
+    (eliscript-project-build-result-create
+     :root root-path
+     :out-dir output-directory
+     :entry canonical-entry
+     :entry-output
+     (eliscript-project--source-output
+      canonical-entry root-path output-directory)
+     :modules (nreverse modules)))))
+
 (provide 'eliscript-project)
 
 ;;; eliscript-project.el ends here

@@ -151,6 +151,114 @@
                  "output path is not a directory"
                  (error-message-string error-data)))))))
 
+(ert-deftest eliscript-project-builds-pruned-portable-module-graph ()
+  (eliscript-project-tests--with-directory root
+    (let* ((entry (expand-file-name "main.eli" root))
+           (dependency (expand-file-name "lib/math.eli" root))
+           (out-dir (expand-file-name "build" root)))
+      (eliscript-project-tests--write
+       entry
+       (concat
+        "(import-portable \"./lib/math.eli\" increment unused-helper)\n"
+        "(defportable twice (value) (increment (increment value)))\n"
+        "(defportable unused-main () 99)\n"))
+      (eliscript-project-tests--write
+       dependency
+       (concat
+        "(defportable increment (value) (1+ value))\n"
+        "(defportable unused-helper () 42)\n"))
+      (let* ((result
+              (eliscript-project-build-portable
+               entry '(twice) out-dir root))
+             (main-output (expand-file-name "main.mjs" out-dir))
+             (dependency-output
+              (expand-file-name "lib/math.mjs" out-dir))
+             (main-text (eliscript-project-tests--read main-output))
+             (dependency-text
+              (eliscript-project-tests--read dependency-output)))
+        (should (= (length
+                    (eliscript-project-build-result-modules result))
+                   2))
+        (should (string-match-p
+                 (regexp-quote "from \"./lib/math.mjs\"") main-text))
+        (should-not (string-match-p "unused_helper" main-text))
+        (should (string-match-p "function twice(value)" main-text))
+        (should-not (string-match-p "unused_main" main-text))
+        (should (string-match-p
+                 "function increment(value)" dependency-text))
+        (should-not (string-match-p "unused_helper" dependency-text))))))
+
+(ert-deftest eliscript-project-allows-portable-import-cycles ()
+  (eliscript-project-tests--with-directory root
+    (let ((a (expand-file-name "a.eli" root))
+          (b (expand-file-name "b.eli" root))
+          (out-dir (expand-file-name "build" root)))
+      (eliscript-project-tests--write
+       a
+       "(import-portable \"./b.eli\" from-b)\n(defportable from-a (value) (if value (from-b false) 1))\n")
+      (eliscript-project-tests--write
+       b
+       "(import-portable \"./a.eli\" from-a)\n(defportable from-b (value) (if value (from-a false) 2))\n")
+      (let ((result
+             (eliscript-project-build-portable
+              a '(from-a) out-dir root)))
+        (should (= (length
+                    (eliscript-project-build-result-modules result))
+                   2))
+        (should (file-exists-p (expand-file-name "a.mjs" out-dir)))
+        (should (file-exists-p (expand-file-name "b.mjs" out-dir)))))))
+
+(ert-deftest eliscript-project-portable-build-rejects-invalid-target ()
+  (eliscript-project-tests--with-directory root
+    (let ((entry (expand-file-name "main.eli" root))
+          (dependency (expand-file-name "helper.eli" root)))
+      (eliscript-project-tests--write
+       entry
+       "(import-portable \"./helper.eli\" helper)\n(defportable work () (helper))\n")
+      (eliscript-project-tests--write dependency "(defun helper () 1)\n")
+      (should-error
+       (eliscript-project-build-portable
+        entry '(work) (expand-file-name "build" root) root)
+       :type 'eliscript-analyze-error))))
+
+(ert-deftest eliscript-project-portable-build-requires-local-source-imports ()
+  (eliscript-project-tests--with-directory root
+    (let ((entry (expand-file-name "main.eli" root)))
+      (eliscript-project-tests--write
+       entry
+       "(import-portable \"portable-package\" helper)\n(defportable work () (helper))\n")
+      (let ((error-data
+             (should-error
+              (eliscript-project-build-portable
+               entry '(work) (expand-file-name "build" root) root)
+              :type 'eliscript-project-error)))
+        (should (string-match-p
+                 "portable import must be a relative .eli module"
+                 (error-message-string error-data)))))))
+
+(ert-deftest eliscript-project-selects-portable-standard-library-graph ()
+  (eliscript-project-tests--with-directory output
+    (let* ((root (expand-file-name "stdlib" default-directory))
+           (entry (expand-file-name "data.eli" root))
+           (result
+            (eliscript-project-build-portable
+             entry '(group-by) output root))
+           (data-text
+            (eliscript-project-tests--read
+             (expand-file-name "data.mjs" output)))
+           (object-text
+            (eliscript-project-tests--read
+             (expand-file-name "object.mjs" output))))
+      (should (= (length
+                  (eliscript-project-build-result-modules result))
+                 2))
+      (should (string-match-p "function group_by" data-text))
+      (should-not (string-match-p "function index_by" data-text))
+      (should-not (string-match-p "function count_by" data-text))
+      (should (string-match-p "function assoc" object-text))
+      (should (string-match-p "function has_QMARK_" object-text))
+      (should-not (string-match-p "function keys" object-text)))))
+
 (provide 'eliscript-project-tests)
 
 ;;; eliscript-project-tests.el ends here

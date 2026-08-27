@@ -42,3 +42,29 @@ if "$PROJECT_DIR/bin/eliscript-build" "$PROJECT_DIR/examples/stdlib-cli/main.eli
   exit 1
 fi
 grep -q 'missing --out-dir' "$TMP_DIR/stderr"
+
+PORTABLE_OUTPUT=$(
+  cd "$PROJECT_DIR"
+  "$PROJECT_DIR/bin/eliscript-build" \
+    --root "$PROJECT_DIR/stdlib" \
+    --portable group-by \
+    --out-dir "$TMP_DIR/portable" \
+    "$PROJECT_DIR/stdlib/data.eli"
+)
+
+PORTABLE_DATA="$TMP_DIR/portable/data.mjs"
+PORTABLE_OBJECT="$TMP_DIR/portable/object.mjs"
+test "$PORTABLE_OUTPUT" = "$PORTABLE_DATA"
+test -f "$PORTABLE_DATA"
+test -f "$PORTABLE_OBJECT"
+grep -q 'from "./object.mjs"' "$PORTABLE_DATA"
+grep -q 'function group_by' "$PORTABLE_DATA"
+! grep -q 'function index_by' "$PORTABLE_DATA"
+! grep -q 'function count_by' "$PORTABLE_DATA"
+grep -q 'function assoc' "$PORTABLE_OBJECT"
+grep -q 'function has_QMARK_' "$PORTABLE_OBJECT"
+! grep -q 'function keys' "$PORTABLE_OBJECT"
+
+PORTABLE_RESULT=$(bun --eval \
+  "const module = await import('$PORTABLE_DATA'); console.log(JSON.stringify(module.__eliscript_portable__['group-by'](x => x.kind, [{kind: 'a'}, {kind: 'b'}, {kind: 'a'}])))")
+test "$PORTABLE_RESULT" = '{"a":[{"kind":"a"},{"kind":"a"}],"b":[{"kind":"b"}]}'

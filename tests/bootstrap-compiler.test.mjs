@@ -141,6 +141,10 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
       ["object.eli", [
         "function assoc(object, key, value)",
         "function omit(object, omitted_keys)",
+      ]],
+      ["data.eli", [
+        "import {assoc} from \"./object.eli\";",
+        "import {has_QMARK_} from \"./object.eli\";",
         "function group_by(key_function, values)",
       ]],
     ]) {
@@ -190,6 +194,36 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
     expect(seedPortableOutput).toContain("function work(value)");
     expect(seedPortableOutput).not.toContain("function unused");
     expect(seedPortableOutput).not.toContain("function ordinary");
+
+    const importedPortableSource = resolve(directory, "portable-import.eli");
+    await writeFile(
+      importedPortableSource,
+      `(import-portable "./helper.eli" helper)
+(defportable imported-work (value) (helper value))\n`,
+    );
+    const seedImportFailure = await run([
+      seedCliPath,
+      "--portable",
+      "imported-work",
+      importedPortableSource,
+    ], { env: { ...process.env, EMACS: emacs } });
+    const portableImportFailure = await run([
+      portableCliPath,
+      "--portable",
+      "imported-work",
+      importedPortableSource,
+    ], {
+      env: {
+        ...process.env,
+        ELISCRIPT_BOOTSTRAP_MODULE_DIR: generationTwo,
+      },
+    });
+    expect(seedImportFailure.exitCode).toBe(1);
+    expect(portableImportFailure.exitCode).toBe(1);
+    expect(seedImportFailure.stderr)
+      .toContain("portable import helper requires a project build");
+    expect(portableImportFailure.stderr)
+      .toContain("portable import helper requires a project build");
 
     const seedPortableMapped = resolve(directory, "seed-cli/portable.mjs");
     const selfHostedPortableMapped = resolve(

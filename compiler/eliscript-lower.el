@@ -190,8 +190,10 @@
      (t (error "Cannot lower unsupported Eliscript form: %S"
                (eliscript-form-strip form))))))
 
-(defun eliscript-lower--import (form arguments)
-  "Lower import ARGUMENTS from top-level FORM."
+(defun eliscript-lower--import (form arguments &optional portable)
+  "Lower import ARGUMENTS from top-level FORM.
+
+Mark the resulting declaration PORTABLE when it came from `import-portable'."
   (let ((source (eliscript-form-value (car arguments)))
         (specifiers (cdr arguments))
         children)
@@ -214,7 +216,8 @@
                   'import-named specifier-form specifier)
                  children)))))
     (eliscript-lower--node
-     'import-declaration form source (nreverse children))))
+     'import-declaration form source (nreverse children)
+     (and portable (list :portable t)))))
 
 (defun eliscript-lower-top-level (form)
   "Lower analyzed top-level FORM to an IR node."
@@ -232,6 +235,7 @@
             (eliscript-form-value (car arguments))
             (mapcar #'eliscript-lower-top-level (cdr arguments))))
           ('import (eliscript-lower--import form arguments))
+          ('import-portable (eliscript-lower--import form arguments t))
           ((or 'defvar 'defconst)
            (eliscript-lower--node
             'variable-declaration form

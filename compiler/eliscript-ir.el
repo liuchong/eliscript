@@ -107,7 +107,9 @@
                  (mapcar #'eliscript-ir-node-to-form
                          (eliscript-ir-node-children node)))))
     ('import-declaration
-     (cons 'import
+     (cons (if (eliscript-ir-property node :portable)
+               'import-portable
+             'import)
            (cons
             (eliscript-ir-node-value node)
             (apply

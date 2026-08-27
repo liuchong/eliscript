@@ -37,7 +37,7 @@ The initial subset rejects:
 
 - ordinary `defun`/`defn` dependencies
 - mutable top-level `defvar` state
-- imported bindings and qualified JavaScript references
+- ordinary imported bindings and qualified JavaScript references
 - `js*`, `print`, `put`, `js-call`, `new`, `jsx`, and `fragment`
 - assignment to any non-local binding
 
@@ -65,6 +65,11 @@ transitive `defconst`/`defportable` declarations, preserving source order:
 `compile_portable_string` in the self-hosted compiler. Their source-map variants
 return the same closure with a Source Map v3 document, and both command-line
 drivers accept `--portable` together with `--source-map`.
+
+Local named portable imports were added later by
+[0028-portable-module-composition.md](0028-portable-module-composition.md).
+They require the graph-aware project builder; standalone closure compilation
+still rejects unresolved imported bindings.
 
 ## Generated Manifest
 

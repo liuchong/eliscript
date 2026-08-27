@@ -39,13 +39,14 @@ Generate an external Source Map v3 file when debugging generated code:
 
 This writes `dist/basic.mjs.map` and adds its `sourceMappingURL` to the module.
 
-Import portable sequence, text, and object libraries from an Eliscript module handled
-by Vite or the project builder:
+Import portable sequence, text, object, and keyed-data libraries from an
+Eliscript module handled by Vite or the project builder:
 
 ```elisp
 (import "../../stdlib/sequence.eli" map filter reduce range)
 (import "../../stdlib/text.eli" contains? strip-prefix trim)
 (import "../../stdlib/object.eli" assoc pick)
+(import "../../stdlib/data.eli" index-by group-by)
 
 (map (lambda (value) (* value 2)) (range 1 5))
 (trim (strip-prefix "#" "# Eliscript "))
@@ -64,6 +65,23 @@ bun run dist/project/examples/stdlib-cli/main.mjs
 `bin/eliscript-build` recursively discovers relative `.eli` imports after
 macro expansion, preserves the source tree, rewrites imports to `.mjs`, and
 emits an external source map for every module.
+
+Portable libraries can compose across local source modules with an explicit,
+named-only edge:
+
+```elisp
+(import-portable "./object.eli" assoc)
+(defportable index-by (key-function values) ...)
+```
+
+Only the graph-aware project builder may extract that closure. Repeat
+`--portable` to select entry names; every target is verified as `defportable`
+and each emitted module is dependency-pruned:
+
+```sh
+./bin/eliscript-build --root stdlib --portable group-by \
+  --out-dir dist/portable stdlib/data.eli
+```
 
 Run the complete test suite:
 
@@ -196,7 +214,8 @@ Implemented forms include:
   from `stdlib/sequence.eli`
 - portable immutable association, merging, value transforms, selection, and
   omission from `stdlib/object.eli`
-- ESM `module`, `import`, `export`, and `export-default`
+- portable keyed lookup, grouping, and counting from `stdlib/data.eli`
+- ESM `module`, `import`, `import-portable`, `export`, and `export-default`
 - compile-time `defmacro` with backquote, `&rest`, and `&body`
 - `get`, `put`, `js-call`, `new`, and explicit `js*` interop
 - React `defcomponent`, `jsx`, and `fragment` forms using the automatic JSX
@@ -293,9 +312,9 @@ portable execution model. The exact implemented subset is recorded in
 ## Status
 
 The first Emacs Lisp seed compiler is implemented and usable from the command
-line. M0 through M5 are complete. M6 includes portable sequence, text, and
-immutable object libraries plus a multi-file project builder driven entirely
-by Emacs.
+line. M0 through M5 are complete. M6 includes portable sequence, text, object,
+and keyed-data libraries plus graph-verified portable composition driven
+entirely by Emacs.
 
 Current evidence:
 
@@ -373,13 +392,18 @@ Current evidence:
 - `stdlib/text.eli` supplies thirteen literal, UTF-16-indexed string operations
   without regular expressions or host calls. The Org React site uses it with
   sequence `map` in its production source graph.
-- `stdlib/object.eli` supplies fourteen immutable own-property and data-indexing
-  operations above three minimal portable primitives. The Org React site
+- `stdlib/object.eli` supplies eleven immutable own-property operations above
+  three minimal portable primitives.
+- `stdlib/data.eli` composes with the object module through verified portable
+  imports and supplies keyed lookup, grouping, and counting. The Org React site
   prebuilds its slug lookup from this source module.
 - `bin/eliscript-build` walks expanded IR imports, compiles each local `.eli`
   dependency once, preserves its root-relative path as `.mjs`, and emits a
   source map for every module without requiring Vite.
-- Seventy-one ERT tests cover reading, locations, macro expansion, analysis, IR
+- Repeated `--portable NAME` options make the same builder verify every local
+  `import-portable` target, reject bare or escaping source edges, and emit only
+  each module's requested transitive closure.
+- Seventy-nine ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
 - Eighteen Bun tests cover the compiler and Org Vite adapters, source-map
@@ -397,12 +421,12 @@ module cache, automatic restart policy, mapped runtime diagnostics, and
 representative asynchronous indexing workload are integrated across Emacs,
 Bun, and both compiler generations.
 
-M6 is underway. Sequence, text, and immutable object libraries now live in
-Eliscript source, remain statically portable, compile identically through the
-seed and self-hosted compilers, and participate in both Vite and ordinary
-source-mapped module graphs. Object behavior rests on three minimal portable
-primitives; higher-level policy, including keyed grouping and counting, remains
-library code.
+M6 is underway. Sequence, text, immutable object, and keyed-data libraries now
+live in Eliscript source, remain statically portable, compile identically
+through the seed and self-hosted compilers, and participate in Vite and
+source-mapped module graphs. `import-portable` extends closure proof across
+root-contained local modules; object behavior still rests on three minimal
+portable primitives while indexing policy remains library code.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -452,7 +476,10 @@ literal text operations and their indexing semantics, and
 [specs/0026-portable-object-library.md](specs/0026-portable-object-library.md)
 for immutable object operations and their primitive boundary, and
 [specs/0027-portable-data-indexing.md](specs/0027-portable-data-indexing.md) for
-keyed lookup, grouping, and counting.
+keyed lookup, grouping, and counting, and
+[specs/0028-portable-module-composition.md](specs/0028-portable-module-composition.md)
+for graph-verified `import-portable` composition and project-level closure
+builds.
 
 ## License
 

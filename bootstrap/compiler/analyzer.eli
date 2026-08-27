@@ -327,7 +327,7 @@
          (analyze-sequence args scope context))
         ((js-call
           ["defun" "defn" "defportable" "defcomponent" "defvar" "defconst"
-            "export" "export-default" "import" "module"]
+            "export" "export-default" "import" "import-portable" "module"]
            :includes operator)
          (analyzer-fail
            context form-span
@@ -356,7 +356,7 @@
            context (node-span form)
            (str "unsupported form: " (node-display form)))))))
 
-  (defun import-bindings (args context form-span)
+  (defun import-bindings (args context form-span portable)
     (unless (and (> (get args :length) 0)
                  (string-node-p (nth 0 args)))
       (analyzer-fail context form-span "import module must be a string"))
@@ -369,6 +369,10 @@
           (cond
             ((and (keyword-node-p specifier)
                   (= (node-name specifier) "default"))
+             (when portable
+               (analyzer-fail
+                 context form-span
+                 "import-portable only supports named imports"))
              (when default-seen
                (analyzer-fail
                  context form-span "duplicate :default import"))
@@ -380,6 +384,10 @@
              (js-call bindings :push (nth index args)))
             ((and (keyword-node-p specifier)
                   (= (node-name specifier) "as"))
+             (when portable
+               (analyzer-fail
+                 context form-span
+                 "import-portable only supports named imports"))
              (when namespace-seen
                (analyzer-fail
                  context form-span "duplicate :as import"))
@@ -397,6 +405,10 @@
                (str "invalid import specifier: "
                     (node-display specifier)))))
           (setq index (1+ index))))
+      (when (and portable (= (get bindings :length) 0))
+        (analyzer-fail
+          context form-span
+          "import-portable expects one or more bindings"))
       bindings))
 
   (defun append-flattened-modules (forms result context)
@@ -430,12 +442,15 @@
                  (args (js-call items :slice 1))
                  (count (get args :length)))
             (cond
-              ((= operator "import")
+              ((or (= operator "import") (= operator "import-portable"))
                (when (= count 0)
                  (analyzer-fail
-                   context (node-span form) "import expects a module name"))
+                   context (node-span form)
+                   (str operator " expects a module name")))
                (js-call
-                 (import-bindings args context (node-span form))
+                 (import-bindings
+                   args context (node-span form)
+                   (= operator "import-portable"))
                  :forEach
                  (lambda (name)
                    (declare-binding scope name "import" false context))))
@@ -470,7 +485,7 @@
              (args (js-call items :slice 1))
              (count (get args :length)))
         (cond
-          ((= operator "import") nil)
+          ((or (= operator "import") (= operator "import-portable")) nil)
           ((or (= operator "defvar") (= operator "defconst"))
            (when (> count 2)
              (analyzer-fail
@@ -535,13 +550,18 @@
                      :form form
                      :parameters (nth 1 args)
                      :body (js-call args :slice 2))))
-                ((= operator "import")
+                ((or (= operator "import") (= operator "import-portable"))
                  (js-call
-                   (import-bindings args context (node-span form))
+                   (import-bindings
+                     args context (node-span form)
+                     (= operator "import-portable"))
                    :forEach
                    (lambda (name)
                      (js-call declarations :set (node-name name)
-                       (object :kind "import" :form form))))))))))
+                       (object
+                         :kind (if (= operator "import-portable")
+                                   "portable-import" "import")
+                         :form form))))))))))
       declarations))
 
   (defun portable-scope (parameters)
@@ -567,7 +587,8 @@
         (let ((declaration (js-call declarations :get name)))
           (when declaration
             (let ((kind (get declaration :kind)))
-              (if (or (= kind "portable") (= kind "constant"))
+              (if (or (= kind "portable") (= kind "constant")
+                      (= kind "portable-import"))
                   (js-call dependencies :add name)
                 (analyzer-fail
                   context (node-span node)
@@ -763,6 +784,11 @@
           (unless (js-call selected :has name)
             (js-call selected :add name)
             (let ((declaration (js-call declarations :get name)))
+              (when (= (get declaration :kind) "portable-import")
+                (analyzer-fail
+                  context (node-span (get declaration :form))
+                  (str "portable import " name
+                       " requires a project build")))
               (js-call
                 (portable-dependencies
                   declaration declarations name context)
@@ -778,9 +804,16 @@
                    (name (and (> (get items :length) 1)
                               (symbol-node-p (nth 1 items))
                               (node-name (nth 1 items)))))
-              (and (or (= operator "defconst")
-                       (= operator "defportable"))
-                   (js-call selected :has name))))))))
+              (or
+                (and (or (= operator "defconst")
+                         (= operator "defportable"))
+                     (js-call selected :has name))
+                (and (= operator "import-portable")
+                     (js-call
+                       (js-call items :slice 2)
+                       :some
+                       (lambda (imported)
+                         (js-call selected :has (node-name imported))))))))))))
 
   (defun analyze-module (forms filename)
     (let* ((context (object :filename filename))

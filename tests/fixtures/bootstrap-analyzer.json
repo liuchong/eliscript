@@ -31,6 +31,11 @@
       "source": "(defconst step 2)\n(defportable helper (value) (* value step))\n(defportable work (value) (helper value))"
     },
     {
+      "name": "portable-module-import",
+      "filename": "portable-import.eli",
+      "source": "(import-portable \"./helper.eli\" helper)\n(defportable work (value) (helper value))"
+    },
+    {
       "name": "self-symbol-module",
       "filename": "bootstrap/compiler/symbol.eli",
       "file": "bootstrap/compiler/symbol.eli"
@@ -141,6 +146,18 @@
       "filename": "import.eli",
       "source": "(import \"pkg\" :default First :default Second)",
       "error": "import.eli:1:1: duplicate :default import"
+    },
+    {
+      "name": "portable-default-import",
+      "filename": "portable-default.eli",
+      "source": "(import-portable \"./helper.eli\" :default helper)",
+      "error": "portable-default.eli:1:1: import-portable only supports named imports"
+    },
+    {
+      "name": "empty-portable-import",
+      "filename": "portable-empty.eli",
+      "source": "(import-portable \"./helper.eli\")",
+      "error": "portable-empty.eli:1:1: import-portable expects one or more bindings"
     },
     {
       "name": "nested-top-level-form",

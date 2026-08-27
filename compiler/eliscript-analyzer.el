@@ -304,8 +304,10 @@
      (t (eliscript-analyzer--fail
          "unsupported form: %S" (eliscript-form-strip form))))))
 
-(defun eliscript-analyzer--import-bindings (arguments)
-  "Return local binding names declared by import ARGUMENTS."
+(defun eliscript-analyzer--import-bindings (arguments &optional portable)
+  "Return local binding names declared by import ARGUMENTS.
+
+When PORTABLE is non-nil, accept named imports only."
   (unless (stringp (eliscript-form-value (car arguments)))
     (eliscript-analyzer--fail "import module must be a string"))
   (let ((specifiers (cdr arguments))
@@ -317,6 +319,9 @@
              (specifier (eliscript-form-value specifier-form)))
         (pcase specifier
           (:default
+           (when portable
+             (eliscript-analyzer--fail
+              "import-portable only supports named imports"))
            (when default-seen
              (eliscript-analyzer--fail "duplicate :default import"))
            (unless specifiers
@@ -324,6 +329,9 @@
            (setq default-seen t)
            (push (pop specifiers) bindings))
           (:as
+           (when portable
+             (eliscript-analyzer--fail
+              "import-portable only supports named imports"))
            (when namespace-seen
              (eliscript-analyzer--fail "duplicate :as import"))
            (unless specifiers
@@ -333,6 +341,9 @@
           ((pred symbolp) (push specifier-form bindings))
           (_ (eliscript-analyzer--fail
               "invalid import specifier: %S" specifier)))))
+    (when (and portable (null bindings))
+      (eliscript-analyzer--fail
+       "import-portable expects one or more bindings"))
     (nreverse bindings)))
 
 (defun eliscript-analyzer--flatten-modules (forms)
@@ -362,10 +373,14 @@
             (or (eliscript-form-span form) eliscript-analyzer--current-span)))
       (when (consp value)
         (pcase (eliscript-form-value (car value))
-        ('import
+        ((or 'import 'import-portable)
          (unless (cdr value)
-           (eliscript-analyzer--fail "import expects a module name"))
-         (dolist (name (eliscript-analyzer--import-bindings (cdr value)))
+           (eliscript-analyzer--fail "%s expects a module name"
+                                     (eliscript-form-value (car value))))
+         (dolist (name
+                  (eliscript-analyzer--import-bindings
+                   (cdr value)
+                   (eq (eliscript-form-value (car value)) 'import-portable)))
            (eliscript-analyzer--declare scope name 'import nil)))
         ('defvar
          (unless (<= 1 (length (cdr value)) 2)
@@ -394,7 +409,7 @@
              (operator (eliscript-form-value operator-form))
              (arguments (cdr value)))
       (pcase operator
-        ('import nil)
+        ((or 'import 'import-portable) nil)
         ((or 'defvar 'defconst)
          (when (> (length arguments) 2)
            (eliscript-analyzer--fail "%s expects 1..2 arguments" operator))

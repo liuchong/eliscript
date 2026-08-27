@@ -104,6 +104,13 @@
                   name
                   (eliscript-portable--declaration-create
                    :name name :kind 'import :form form)
+                  table)))
+              ('import-portable
+               (dolist (name (eliscript-portable--import-names arguments))
+                 (puthash
+                  name
+                  (eliscript-portable--declaration-create
+                   :name name :kind 'portable-import :form form)
                   table))))))))
     table))
 
@@ -151,7 +158,8 @@
       (let ((declaration (gethash name declarations)))
         (when declaration
           (pcase (eliscript-portable--declaration-kind declaration)
-            ((or 'portable 'constant) (puthash name t dependencies))
+            ((or 'portable 'constant 'portable-import)
+             (puthash name t dependencies))
             (kind
              (eliscript-portable--fail
               "portable function %s depends on non-portable %s: %s"
@@ -314,8 +322,11 @@
       (maphash (lambda (name _present) (push name names)) dependencies)
       (nreverse names))))
 
-(defun eliscript-portable--closure (forms entries filename)
-  "Validate ENTRIES in FORMS and return their transitive declaration names."
+(defun eliscript-portable--closure
+    (forms entries filename &optional allow-portable-imports)
+  "Validate ENTRIES in FORMS and return their transitive declaration names.
+
+ALLOW-PORTABLE-IMPORTS defers cross-module proof to the project builder."
   (let* ((eliscript-portable--filename filename)
          (declarations (eliscript-portable--declarations forms))
          (visited (make-hash-table :test #'eq))
@@ -331,13 +342,22 @@
                 (eliscript-portable--fail
                  "unknown portable entry: %s" name))
               (unless (memq (eliscript-portable--declaration-kind declaration)
-                            '(portable constant))
+                            '(portable constant portable-import))
                 (setq eliscript-portable--entry root
                       eliscript-portable--current-span
                       (eliscript-form-span
                        (eliscript-portable--declaration-form declaration)))
                 (eliscript-portable--fail
                  "portable entry %s is not declared with defportable" name))
+              (when (and (eq (eliscript-portable--declaration-kind declaration)
+                             'portable-import)
+                         (not allow-portable-imports))
+                (setq eliscript-portable--entry root
+                      eliscript-portable--current-span
+                      (eliscript-form-span
+                       (eliscript-portable--declaration-form declaration)))
+                (eliscript-portable--fail
+                 "portable import %s requires a project build" name))
               (push name closure)
               (dolist (dependency
                        (eliscript-portable--dependencies
@@ -362,26 +382,46 @@
         (when (and (consp value)
                    (eq (eliscript-portable--value (car value)) 'defportable))
           (push (eliscript-portable--value (cadr value)) entries))))
-    (eliscript-portable--closure forms (nreverse entries) filename)
+    (eliscript-portable--closure forms (nreverse entries) filename t)
     forms))
 
-(defun eliscript-portable-select-module (forms entries &optional filename)
-  "Return the declaration closure for portable ENTRIES in FORMS."
+(defun eliscript-portable-select-module
+    (forms entries &optional filename allow-portable-imports)
+  "Return the declaration closure for portable ENTRIES in FORMS.
+
+ALLOW-PORTABLE-IMPORTS is reserved for graph-aware project builds."
   (let* ((entry-symbols
           (mapcar (lambda (entry)
                     (if (symbolp entry) entry (intern entry)))
                   entries))
-         (closure (eliscript-portable--closure forms entry-symbols filename))
+         (closure
+          (eliscript-portable--closure
+           forms entry-symbols filename allow-portable-imports))
          (selected (make-hash-table :test #'eq)))
     (dolist (name closure) (puthash name t selected))
-    (cl-remove-if-not
-     (lambda (form)
-       (let ((value (eliscript-portable--value form)))
-         (and (consp value)
-              (memq (eliscript-portable--value (car value))
-                    '(defconst defportable))
-              (gethash (eliscript-portable--value (cadr value)) selected))))
-     (eliscript-portable--flatten forms))))
+    (delq
+     nil
+     (mapcar
+      (lambda (form)
+        (let ((value (eliscript-portable--value form)))
+          (when (consp value)
+            (let ((operator (eliscript-portable--value (car value))))
+              (if (eq operator 'import-portable)
+                  (let ((names
+                         (cl-remove-if-not
+                          (lambda (name-form)
+                            (gethash
+                             (eliscript-portable--value name-form) selected))
+                          (cddr value))))
+                    (when names
+                      (eliscript-form-inherit
+                       (append (list (car value) (cadr value)) names)
+                       form)))
+                (and (memq operator '(defconst defportable))
+                     (gethash
+                      (eliscript-portable--value (cadr value)) selected)
+                     form))))))
+      (eliscript-portable--flatten forms)))))
 
 (provide 'eliscript-portable)
 

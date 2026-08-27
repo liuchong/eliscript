@@ -41,7 +41,7 @@ properties remain explicit host-interoperability concerns.
 
 ## Library Operations
 
-The module exports fourteen `defportable` functions:
+The module exports eleven `defportable` functions:
 
 - `keys(object)`, `has?(object, key)`, and `assoc(object, key, value)` expose
   the portable primitive semantics
@@ -54,9 +54,6 @@ The module exports fourteen `defportable` functions:
 - `omit(object, omitted-keys)` copies keys not present in the omitted list
 - `update(object, key, function)` applies a function to the current value and
   associates the result
-- `index-by(key-function, values)` builds a right-biased value index
-- `group-by(key-function, values)` builds input-ordered value groups
-- `count-by(key-function, values)` counts values by computed key
 
 Every transforming operation returns an ordinary object, including empty
 results. Inputs are never passed to `put`. Reads follow the core `get` contract,
@@ -80,16 +77,16 @@ The command-line standard-library example imports sequence, text, and object
 source modules. The pure Emacs project builder emits a four-module ESM graph,
 rewrites every local import, and writes adjacent source maps.
 
-The Org React site imports `assoc` and `index-by` from `object.eli` to construct
-browser scroll options and a reusable article slug index. Its rendered UI
-remains unchanged while the production bundle exercises a real object-library
-source import.
+The Org React site imports `assoc` from `object.eli` for browser scroll options.
+Its slug index comes from `data.eli`, which composes with this module through
+the contract in
+[0028-portable-module-composition.md](0028-portable-module-composition.md).
 
 ## Acceptance Evidence
 
 - ERT checks exact primitive emission, arity failures, portable analysis, and
-  dependency-pruned compilation of `omit` and `group-by`.
-- A Bun test executes all fourteen exports, empty and `nil` boundaries,
+  dependency-pruned compilation of `omit`.
+- A Bun test executes all eleven exports, empty and `nil` boundaries,
   right-biased merging, own-property behavior, input immutability, and source
   maps.
 - Shared analyzer and IR fixtures exercise all three primitives through both

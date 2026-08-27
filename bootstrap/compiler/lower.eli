@@ -270,7 +270,7 @@
       (t
        (fail (str "cannot lower syntax kind: " (node-kind form))))))
 
-  (defun lower-import (form args)
+  (defun lower-import (form args portable)
     (let ((source (node-value (nth 0 args)))
           (children [])
           (index 1))
@@ -300,7 +300,8 @@
                  [] nil))))
           (setq index (1+ index))))
       (make-node
-        "import-declaration" (node-span form) source children nil)))
+        "import-declaration" (node-span form) source children
+        (if portable (object :portable t) nil))))
 
   (defun lower-top-level (form)
     (if (not (= (node-kind form) "list"))
@@ -321,7 +322,8 @@
              (make-node
                "module-declaration" (node-span form)
                (node-name (nth 0 args)) children nil)))
-          ((= operator "import") (lower-import form args))
+          ((= operator "import") (lower-import form args false))
+          ((= operator "import-portable") (lower-import form args t))
           ((or (= operator "defvar") (= operator "defconst"))
            (let ((children []))
              (when (> (get args :length) 1)

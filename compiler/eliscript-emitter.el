@@ -576,7 +576,8 @@
          (unless (symbolp (car arguments))
            (eliscript-emitter--fail "module name must be a symbol"))
          (mapconcat #'eliscript-emitter-emit-top-level (cdr arguments) "\n"))
-        ('import (eliscript-emitter--emit-import arguments))
+        ((or 'import 'import-portable)
+         (eliscript-emitter--emit-import arguments))
         ((or 'defvar 'defconst)
          (eliscript-emitter--require-arity (symbol-name operator) arguments 1 2)
          (format "%s %s = %s;"
