@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 
-import { resolve } from "node:path";
+import { createHash } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -14,6 +15,7 @@ export const capabilities = [
   "shutdown",
   "module-cache",
   "module-version",
+  "project-manifest",
   "portable-manifest",
 ];
 
@@ -51,10 +53,14 @@ function stackFrames(stack) {
   return frames;
 }
 
-function mappedFrames(frames, sourceMap) {
-  if (!sourceMap) return frames;
+function mappedFrames(frames, sourceMaps) {
+  if (!sourceMaps || sourceMaps.length === 0) return frames;
+  const mapsByFile = new Map(
+    sourceMaps.map((sourceMap) => [sourceMap.generatedFile, sourceMap]),
+  );
   return frames.map((frame) => {
-    if (resolve(frame.file) !== sourceMap.generatedFile) return frame;
+    const sourceMap = mapsByFile.get(resolve(frame.file));
+    if (!sourceMap) return frame;
     const mapping = sourceMap.lines[frame.line - 1];
     if (!mapping) return frame;
     const generatedColumn = Math.max(0, frame.column - 1);
@@ -78,12 +84,12 @@ function mappedFrames(frames, sourceMap) {
   });
 }
 
-function errorPayload(code, message, error, sourceMap) {
+function errorPayload(code, message, error, sourceMaps) {
   const payload = { code, message };
   if (error?.name) payload.name = error.name;
   if (error?.stack) {
     payload.stack = error.stack;
-    const frames = mappedFrames(stackFrames(error.stack), sourceMap);
+    const frames = mappedFrames(stackFrames(error.stack), sourceMaps);
     if (frames.length > 0) {
       payload.frames = frames;
       payload.location = frames.find((frame) => frame.file.endsWith(".eli")) ??
@@ -128,13 +134,13 @@ function jsonValue(value, label) {
   return JSON.parse(encoded);
 }
 
-function requestError(id, code, message, error, timing, sourceMap) {
+function requestError(id, code, message, error, timing, sourceMaps) {
   const response = {
     version: protocolVersion,
     type: "response",
     id,
     ok: false,
-    error: errorPayload(code, message, error, sourceMap),
+    error: errorPayload(code, message, error, sourceMaps),
   };
   if (timing) response.timing = timing;
   writeMessage(response);
@@ -249,10 +255,148 @@ async function moduleFingerprint(url) {
   return `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeNs}`;
 }
 
-async function loadModule(identity, requestedVersion) {
+function projectManifestError(message) {
+  const error = new Error(message);
+  error.code = "invalid-project-manifest";
+  return error;
+}
+
+function projectFile(root, value, label) {
+  if (typeof value !== "string" || value.length === 0 || isAbsolute(value)) {
+    throw projectManifestError(`${label} must be a non-empty relative path`);
+  }
+  const path = resolve(root, value);
+  const fromRoot = relative(root, path);
+  if (fromRoot === ".." || fromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) ||
+      isAbsolute(fromRoot)) {
+    throw projectManifestError(`${label} escapes the project output directory`);
+  }
+  return path;
+}
+
+async function fileDigest(path) {
+  return createHash("sha256").update(await readFile(path)).digest("hex");
+}
+
+function textDigest(value) {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+async function readProjectManifest(identity, entryUrl) {
   const url = moduleUrl(identity);
-  const version = requestedVersion ?? await moduleFingerprint(url);
-  const cached = moduleCache.get(url);
+  let path;
+  try {
+    path = await realpath(fileURLToPath(url));
+  } catch (error) {
+    throw projectManifestError(`could not resolve project manifest: ${error.message}`);
+  }
+  const root = dirname(path);
+  let manifest;
+  try {
+    manifest = JSON.parse(await readFile(path, "utf8"));
+  } catch (error) {
+    throw projectManifestError(`could not read project manifest: ${error.message}`);
+  }
+  if (manifest.format !== "eliscript-project" || manifest.version !== 1 ||
+      typeof manifest.digest !== "string" ||
+      !/^[0-9a-f]{64}$/.test(manifest.digest) ||
+      !Array.isArray(manifest.modules)) {
+    throw projectManifestError("project manifest has an unsupported shape");
+  }
+  const entry = projectFile(root, manifest.entry, "manifest entry");
+  let canonicalEntry;
+  let canonicalModule;
+  try {
+    [canonicalEntry, canonicalModule] = await Promise.all([
+      realpath(entry),
+      realpath(fileURLToPath(entryUrl)),
+    ]);
+  } catch (error) {
+    throw projectManifestError(`could not resolve project entry: ${error.message}`);
+  }
+  if (canonicalEntry !== canonicalModule) {
+    throw projectManifestError("project manifest entry does not match request module");
+  }
+  const identityModules = [];
+  const modules = manifest.modules.map((module, index) => {
+    if (!module || typeof module !== "object" ||
+        typeof module.source !== "string" || module.source.length === 0 ||
+        isAbsolute(module.source) ||
+        module.source.split(/[\\/]/).includes("..") ||
+        !/^[0-9a-f]{64}$/.test(module.sourceDigest ?? "") ||
+        !/^[0-9a-f]{64}$/.test(module.outputDigest ?? "") ||
+        !/^[0-9a-f]{64}$/.test(module.sourceMapDigest ?? "")) {
+      throw projectManifestError(`manifest module ${index} has an unsupported shape`);
+    }
+    identityModules.push({
+      source: module.source,
+      output: module.output,
+      sourceMap: module.sourceMap,
+      sourceDigest: module.sourceDigest,
+      outputDigest: module.outputDigest,
+      sourceMapDigest: module.sourceMapDigest,
+    });
+    return {
+      output: projectFile(root, module.output, `manifest module ${index} output`),
+      sourceMap: projectFile(
+        root,
+        module.sourceMap,
+        `manifest module ${index} source map`,
+      ),
+      outputDigest: module.outputDigest,
+      sourceMapDigest: module.sourceMapDigest,
+    };
+  });
+  const graphIdentity = {
+    format: manifest.format,
+    version: manifest.version,
+    entry: manifest.entry,
+    modules: identityModules,
+  };
+  if (textDigest(JSON.stringify(graphIdentity)) !== manifest.digest) {
+    throw projectManifestError("project manifest graph digest does not match its records");
+  }
+  return { digest: manifest.digest, modules };
+}
+
+async function loadProjectArtifacts(project) {
+  const sourceMaps = await Promise.all(project.modules.map(async (module) => {
+    let outputDigest;
+    let sourceMapDigest;
+    try {
+      [outputDigest, sourceMapDigest] = await Promise.all([
+        fileDigest(module.output),
+        fileDigest(module.sourceMap),
+      ]);
+    } catch (error) {
+      throw projectManifestError(
+        `could not verify generated module ${module.output}: ${error.message}`,
+      );
+    }
+    if (outputDigest !== module.outputDigest ||
+        sourceMapDigest !== module.sourceMapDigest) {
+      throw projectManifestError(
+        `generated module does not match project manifest: ${module.output}`,
+      );
+    }
+    return loadSourceMap(pathToFileURL(module.output).href);
+  }));
+  return sourceMaps.filter(Boolean);
+}
+
+async function loadModule(identity, requestedVersion, projectManifest) {
+  const url = moduleUrl(identity);
+  const projectPromise = projectManifest === undefined
+    ? Promise.resolve(undefined)
+    : readProjectManifest(projectManifest, url);
+  const discoveredProject = projectManifest !== undefined &&
+      requestedVersion === undefined
+    ? await projectPromise
+    : undefined;
+  const version = discoveredProject?.digest ?? requestedVersion ??
+    await moduleFingerprint(url);
+  const cacheKey = `${url}\n${projectManifest === undefined ? "" : moduleUrl(projectManifest)}`;
+  const cached = moduleCache.get(cacheKey);
   if (cached?.version === version) {
     const loaded = await cached.promise;
     return { ...loaded, cacheHit: true, version };
@@ -268,17 +412,30 @@ async function loadModule(identity, requestedVersion) {
   importUrl.searchParams.set("__eliscript_worker_version", version);
   const entry = {
     version,
-    promise: Promise.all([
-      import(importUrl.href),
-      loadSourceMap(url),
-    ]).then(([module, sourceMap]) => ({ module, sourceMap })),
+    promise: (async () => {
+      const project = discoveredProject ?? await projectPromise;
+      if (project && version !== project.digest) {
+        const error = new Error(
+          `requested module version ${version} does not match project manifest ${project.digest}`,
+        );
+        error.code = "module-version-mismatch";
+        throw error;
+      }
+      const [module, sourceMaps] = await Promise.all([
+        import(importUrl.href),
+        project
+          ? loadProjectArtifacts(project)
+          : loadSourceMap(url).then((sourceMap) => sourceMap ? [sourceMap] : []),
+      ]);
+      return { module, sourceMaps };
+    })(),
   };
-  moduleCache.set(url, entry);
+  moduleCache.set(cacheKey, entry);
   try {
     const loaded = await entry.promise;
     return { ...loaded, cacheHit: false, version };
   } catch (error) {
-    if (moduleCache.get(url) === entry) moduleCache.delete(url);
+    if (moduleCache.get(cacheKey) === entry) moduleCache.delete(cacheKey);
     throw error;
   }
 }
@@ -306,6 +463,11 @@ function validateRequest(message) {
        message.moduleVersion.length === 0 || message.moduleVersion.length > 512)) {
     throw new Error("request moduleVersion must be a non-empty string up to 512 characters");
   }
+  if (message.projectManifest !== undefined &&
+      (typeof message.projectManifest !== "string" ||
+       message.projectManifest.length === 0)) {
+    throw new Error("request projectManifest must be a non-empty string");
+  }
   if (message.timeoutMs !== undefined &&
       (!Number.isInteger(message.timeoutMs) || message.timeoutMs <= 0 ||
        message.timeoutMs > 2_147_483_647)) {
@@ -332,7 +494,7 @@ async function executeRequest(message) {
   let serializationMs = 0;
   let moduleCacheHit = false;
   let moduleVersion;
-  let sourceMap;
+  let sourceMaps = [];
   let executionStartedAt;
   const entry = {
     controller: new AbortController(),
@@ -349,9 +511,13 @@ async function executeRequest(message) {
 
   try {
     const moduleLoadStartedAt = performance.now();
-    const loaded = await loadModule(message.module, message.moduleVersion);
+    const loaded = await loadModule(
+      message.module,
+      message.moduleVersion,
+      message.projectManifest,
+    );
     const module = loaded.module;
-    sourceMap = loaded.sourceMap;
+    sourceMaps = loaded.sourceMaps;
     moduleCacheHit = loaded.cacheHit;
     moduleVersion = loaded.version;
     moduleLoadMs = performance.now() - moduleLoadStartedAt;
@@ -404,7 +570,8 @@ async function executeRequest(message) {
         moduleLoadMs,
         moduleCacheHit,
         moduleVersion,
-        sourceMapLoaded: Boolean(sourceMap),
+        sourceMapLoaded: sourceMaps.length > 0,
+        sourceMapCount: sourceMaps.length,
         executionMs,
         serializationMs,
         workerMs: performance.now() - startedAt,
@@ -425,12 +592,13 @@ async function executeRequest(message) {
         moduleLoadMs,
         moduleCacheHit,
         moduleVersion,
-        sourceMapLoaded: Boolean(sourceMap),
+        sourceMapLoaded: sourceMaps.length > 0,
+        sourceMapCount: sourceMaps.length,
         executionMs,
         serializationMs,
         workerMs: performance.now() - startedAt,
       },
-      sourceMap,
+      sourceMaps,
     );
   } finally {
     if (entry.timer !== undefined) clearTimeout(entry.timer);

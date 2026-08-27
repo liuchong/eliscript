@@ -87,7 +87,7 @@ bun --version</code></pre>
             <h2>Build a source graph</h2>
             <pre><code>bun run build:stdlib-cli
 bun run dist/project/examples/stdlib-cli/main.mjs</code></pre>
-            <p>The Emacs project builder discovers relative <code>.eli</code> imports after macro expansion, keeps every source below the selected root, mirrors the directory tree as <code>.mjs</code>, and emits a source map beside each module. This example builds sequence, text, object, and application sources together. Package, JavaScript, CSS, and image imports remain available to the eventual host.</p>
+            <p>The Emacs project builder discovers relative <code>.eli</code> imports after macro expansion, keeps every source below the selected root, mirrors the directory tree as <code>.mjs</code>, and emits a source map beside each module. A deterministic <code>eliscript-project.json</code> records the complete graph and its SHA-256 identities. This example builds sequence, text, object, and application sources together. Package, JavaScript, CSS, and image imports remain available to the eventual host.</p>
           </section>
 
           <section id="react">
@@ -135,7 +135,7 @@ bun run build:org-site</code></pre>
       (eliscript-index-search-sync
        session '(("intro" . "Emacs and JavaScript")) "javascript")
     (eliscript-index-stop session)))</code></pre>
-            <p>The indexing adapter compiles a source-mapped portable project closure, follows its data and object dependencies, tokenizes editor-owned text, scores documents concurrently, and owns cleanup. Module changes and unresponsive timeouts restart the same client object automatically.</p>
+            <p>The indexing adapter compiles a source-mapped portable project closure, follows its data and object dependencies, tokenizes editor-owned text, scores documents concurrently, and owns cleanup. Its graph manifest makes dependency changes restart the same client object automatically and maps imported-module errors to their Eliscript source.</p>
           </section>
 
           <section id="test">

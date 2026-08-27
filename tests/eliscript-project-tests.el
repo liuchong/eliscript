@@ -26,6 +26,13 @@
     (insert-file-contents filename)
     (buffer-string)))
 
+(defun eliscript-project-tests--digest (filename)
+  "Return the SHA-256 digest of FILENAME's exact bytes."
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (insert-file-contents-literally filename)
+    (secure-hash 'sha256 (current-buffer))))
+
 (ert-deftest eliscript-project-builds-expanded-import-graph ()
   (eliscript-project-tests--with-directory root
     (let* ((entry (expand-file-name "src/main.eli" root))
@@ -75,6 +82,51 @@
         (should (equal (alist-get 'file main-map) "main.mjs"))
         (should (equal (alist-get 'sources main-map)
                        '("../../src/main.eli")))))))
+
+(ert-deftest eliscript-project-emits-deterministic-graph-manifest ()
+  (eliscript-project-tests--with-directory root
+    (let* ((entry (expand-file-name "src/main.eli" root))
+           (dependency (expand-file-name "src/lib/value.eli" root))
+           (out-dir (expand-file-name "build" root)))
+      (eliscript-project-tests--write
+       entry
+       "(import \"./lib/value.eli\" answer)\n(print answer)\n")
+      (eliscript-project-tests--write
+       dependency
+       "(defconst answer 42)\n(export answer)\n")
+      (let* ((first (eliscript-project-build entry out-dir root))
+             (manifest-path
+              (eliscript-project-build-result-manifest first))
+             (first-text (eliscript-project-tests--read manifest-path))
+             (manifest
+              (json-parse-string
+               first-text :object-type 'alist :array-type 'list))
+             (modules (alist-get 'modules manifest))
+             (main (cadr modules))
+             (second (eliscript-project-build entry out-dir root)))
+        (should (equal (alist-get 'format manifest) "eliscript-project"))
+        (should (= (alist-get 'version manifest) 1))
+        (should (equal (alist-get 'entry manifest) "src/main.mjs"))
+        (should (equal (mapcar (lambda (module) (alist-get 'source module))
+                               modules)
+                       '("src/lib/value.eli" "src/main.eli")))
+        (should (equal (alist-get 'output main) "src/main.mjs"))
+        (should (equal (alist-get 'sourceMap main) "src/main.mjs.map"))
+        (should (equal
+                 (alist-get 'outputDigest main)
+                 (eliscript-project-tests--digest
+                  (expand-file-name "src/main.mjs" out-dir))))
+        (should (equal
+                 (alist-get 'sourceMapDigest main)
+                 (eliscript-project-tests--digest
+                  (expand-file-name "src/main.mjs.map" out-dir))))
+        (should (equal (alist-get 'digest manifest)
+                       (eliscript-project-build-result-digest first)))
+        (should (equal (eliscript-project-build-result-digest first)
+                       (eliscript-project-build-result-digest second)))
+        (should (equal first-text
+                       (eliscript-project-tests--read
+                        (eliscript-project-build-result-manifest second))))))))
 
 (ert-deftest eliscript-project-allows-cyclic-imports ()
   (eliscript-project-tests--with-directory root

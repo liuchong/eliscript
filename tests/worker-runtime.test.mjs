@@ -129,6 +129,7 @@ test("long-lived worker implements the versioned NDJSON protocol", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "eliscript-worker-"));
   const modulePath = resolve(directory, "worker.mjs");
   const reloadPath = resolve(directory, "reload.mjs");
+  const invalidManifestPath = resolve(directory, "invalid-project.json");
   let client;
   try {
     await runSuccessful(
@@ -136,13 +137,38 @@ test("long-lived worker implements the versioned NDJSON protocol", async () => {
       { env: { ...process.env, EMACS: emacs } },
     );
     await writeFile(reloadPath, "export function value() { return 1; }\n");
+    await writeFile(invalidManifestPath, JSON.stringify({
+      format: "eliscript-project",
+      version: 1,
+      entry: "reload.mjs",
+      modules: [],
+      digest: "0".repeat(64),
+    }));
     client = createWorkerClient();
     const ready = await client.next((message) => message.type === "ready");
     expect(ready.version).toBe(1);
     expect(ready.capabilities).toContain("cancel");
     expect(ready.capabilities).toContain("progress");
     expect(ready.capabilities).toContain("module-version");
+    expect(ready.capabilities).toContain("project-manifest");
     expect(ready.capabilities).toContain("portable-manifest");
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "invalid-project-manifest",
+      module: reloadPath,
+      projectManifest: invalidManifestPath,
+      moduleVersion: "0".repeat(64),
+      export: "value",
+      arguments: [],
+    });
+    expect(await client.next(
+      (message) => message.id === "invalid-project-manifest",
+    )).toMatchObject({
+      ok: false,
+      error: { code: "invalid-project-manifest" },
+    });
 
     client.sendRaw("{not-json");
     expect(await client.next((message) => message.type === "protocol-error"))

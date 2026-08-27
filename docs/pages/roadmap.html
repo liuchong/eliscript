@@ -74,7 +74,7 @@ compiler.js + compiler.eli → next-compiler.js</code></pre>
 
           <section id="acceleration">
             <h2>A path back into Emacs</h2>
-            <p>Emacs now controls a long-lived Bun worker over versioned NDJSON while retaining editor state and interaction. Requests support progress, cooperative cancellation, timeouts, mapped Eliscript errors, immutable module versions, and automatic worker generations.</p>
+            <p>Emacs now controls a long-lived Bun worker over versioned NDJSON while retaining editor state and interaction. Requests support progress, cooperative cancellation, timeouts, whole-graph manifests, dependency-aware mapped Eliscript errors, immutable module versions, and automatic worker generations.</p>
             <p><code>defportable</code> rejects mutable module state and host interop, follows immutable helper dependencies transitively, and emits a frozen manifest that the worker resolves by Eliscript source name. A document-search adapter compiles its scoring closure with a source map and dispatches documents concurrently.</p>
             <div class="callout"><p>The reference workload measured a much larger engine-only speedup than end-to-end speedup because transport and client work remain visible. Coarse-grained tasks are the target; small editor operations stay in Emacs.</p></div>
           </section>

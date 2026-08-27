@@ -71,10 +71,8 @@ removes the directory recursively.
 - Existing object/data runtime coverage continues to prove own-property safety
   for the frequency object.
 
-## Next Slice
+## Follow-up
 
-Project graphs now cross the worker boundary, so graph identity should become
-explicit. The next structural step is a deterministic build manifest containing
-entry, generated modules, source modules, and content digests. The worker can
-then fingerprint the whole graph and load source maps for dependency frames,
-instead of observing only the entry module.
+The deterministic build manifest, whole-graph worker identity, and dependency
+Source Map loading are implemented in
+[0030-project-graph-manifest.md](0030-project-graph-manifest.md).

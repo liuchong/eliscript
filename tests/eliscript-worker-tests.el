@@ -146,6 +146,70 @@
       (when worker (eliscript-worker-stop worker t))
       (delete-directory directory t))))
 
+(ert-deftest eliscript-emacs-client-tracks-project-graph-and-dependency-maps ()
+  (let* ((root (make-temp-file "eliscript-worker-project-" t))
+         (entry (expand-file-name "main.eli" root))
+         (dependency (expand-file-name "dependency.eli" root))
+         (out-dir (expand-file-name "build" root))
+         worker)
+    (unwind-protect
+        (progn
+          (with-temp-file entry
+            (insert
+             "(import-portable \"./dependency.eli\" explode)\n"
+             "(defportable run (value) (explode value))\n"))
+          (with-temp-file dependency
+            (insert "(defportable explode (value)\n  (value))\n"))
+          (let* ((first
+                  (eliscript-project-build-portable
+                   entry '(run) out-dir root))
+                 (module
+                  (eliscript-project-build-result-entry-output first))
+                 (manifest
+                  (eliscript-project-build-result-manifest first))
+                 (entry-text
+                  (with-temp-buffer
+                    (insert-file-contents module)
+                    (buffer-string))))
+            (setq worker (eliscript-worker-start))
+            (let* ((error-data
+                    (should-error
+                     (eliscript-worker-call-portable-sync
+                      worker module "run" '(7)
+                      :project-manifest manifest
+                      :timeout-ms 2000)
+                     :type 'eliscript-worker-request-error))
+                   (error-object (nth 2 error-data))
+                   (location
+                    (eliscript-worker-error-location error-object)))
+              (should (equal (alist-get 'file location)
+                             (file-truename dependency)))
+              (should (= (alist-get 'line location) 2)))
+            (with-temp-file dependency
+              (insert "(defportable explode (value)\n  (1+ value))\n"))
+            (let ((second
+                   (eliscript-project-build-portable
+                    entry '(run) out-dir root)))
+              (should-not
+               (equal (eliscript-project-build-result-digest first)
+                      (eliscript-project-build-result-digest second)))
+              (should
+               (equal entry-text
+                      (with-temp-buffer
+                        (insert-file-contents module)
+                        (buffer-string))))
+              (should
+               (= 8
+                  (eliscript-worker-call-portable-sync
+                   worker module "run" '(7)
+                   :project-manifest
+                   (eliscript-project-build-result-manifest second)
+                   :timeout-ms 2000)))
+              (should (= (eliscript-worker-generation worker) 2))
+              (should (= (eliscript-worker-restart-count worker) 1)))))
+      (when worker (eliscript-worker-stop worker t))
+      (delete-directory root t))))
+
 (ert-deftest eliscript-index-scores-texts-asynchronously ()
   (let (session directory timing-values)
     (unwind-protect
@@ -196,6 +260,7 @@
             (should (= (length timing-values) 3))
             (should (eq (alist-get 'moduleCacheHit (aref timing-values 0))
                         :false))
+            (should (= (alist-get 'sourceMapCount (aref timing-values 0)) 3))
             (should (alist-get 'moduleCacheHit (aref timing-values 1))))
           (let ((duplicate-query
                  (eliscript-index-search-sync

@@ -65,6 +65,11 @@ Dependencies are canonicalized and compiled once. Deterministic path ordering
 keeps result metadata stable. A visiting/done graph state permits ECMAScript
 cycles while preventing recursive compilation loops.
 
+Each build also writes `eliscript-project.json` at the output root. It records
+the relative entry, sorted source/output/map paths, exact SHA-256 content
+digests, and one graph digest. The complete format and worker use are specified
+in [0030-project-graph-manifest.md](0030-project-graph-manifest.md).
+
 The builder creates mapped output directories but does not clean unrelated
 files from the destination.
 
@@ -77,8 +82,9 @@ Emacs Lisp callers use:
 ```
 
 The returned `eliscript-project-build-result` records canonical root, output
-directory, source entry, generated entry, and sorted module records. Each
-module record contains its source, JavaScript output, and source-map path.
+directory, source entry, generated entry, sorted module records, manifest path,
+and graph digest. Each module record contains its source, JavaScript output,
+source-map path, and three content digests.
 
 Shell callers use `bin/eliscript-build`. `--out-dir` is required; the command
 prints the generated entry path after a successful build. The existing

@@ -61,6 +61,13 @@ within a worker generation. A changed version receives
 by restarting before it sends the request. Requests may execute concurrently
 and responses may arrive out of order; the id is the sole correlation key.
 
+Project requests may also provide `projectManifest`, naming a local
+`eliscript-project.json`. Its graph digest becomes the module version, its
+generated file digests are verified on cold load, and its complete Source Map
+set covers imported-module stack frames. This contract is defined in
+[0030-project-graph-manifest.md](0030-project-graph-manifest.md). Requests that
+omit it retain single-file fingerprinting and mapping.
+
 Successful responses contain `ok: true` and a JSON value. Failures contain
 `ok: false` plus an error object with stable `code` and `message`, and optional
 runtime name, stack, structured frames, and mapped Eliscript location. The
@@ -115,6 +122,7 @@ Each worker response reports durations in milliseconds:
 - `moduleCacheHit`
 - `moduleVersion`
 - `sourceMapLoaded`
+- `sourceMapCount`
 - `executionMs`
 - `serializationMs`
 - `workerMs`

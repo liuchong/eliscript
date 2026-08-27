@@ -15,6 +15,7 @@
   (concat
    "Usage: eliscript-build [--root DIR] [--portable NAME] --out-dir DIR ENTRY\n\n"
    "Compile ENTRY and its relative .eli imports into an ESM directory tree.\n"
+   "Write eliscript-project.json with deterministic graph content digests.\n"
    "Repeat --portable to emit a verified, dependency-pruned portable graph.\n"))
 
 (defun eliscript-project-cli--parse (arguments)

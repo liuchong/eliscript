@@ -387,6 +387,10 @@ Current evidence:
   `index -> data -> object` portable graph, dispatches scoring calls
   concurrently, preserves document order, and cleans up the generated tree and
   worker session.
+- Every project build emits a deterministic `eliscript-project.json` with
+  root-relative graph paths and SHA-256 source, ESM, Source Map, and whole-graph
+  identities. The worker verifies the generated graph, restarts for
+  dependency-only changes, and maps errors from imported modules.
 - `stdlib/sequence.eli` supplies twelve non-mutating, higher-order sequence
   operations as dependency-prunable `defportable` declarations. The React
   browser entry imports it as source through Vite.
@@ -404,7 +408,7 @@ Current evidence:
 - Repeated `--portable NAME` options make the same builder verify every local
   `import-portable` target, reject bare or escaping source edges, and emit only
   each module's requested transitive closure.
-- Eighty ERT tests cover reading, locations, macro expansion, analysis, IR
+- Eighty-two ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
 - Eighteen Bun tests cover the compiler and Org Vite adapters, source-map
@@ -431,6 +435,9 @@ portable primitives while indexing policy remains library code.
 The Emacs indexing workload is the second production composition case: its
 portable entry reuses `data/count-by`, and the long-lived worker executes the
 resulting three-module closure rather than a copied single-file helper.
+That project closure now carries an explicit build manifest, so module cache
+identity and mapped diagnostics cover all three modules rather than only the
+entry file.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -485,7 +492,9 @@ keyed lookup, grouping, and counting, and
 for graph-verified `import-portable` composition and project-level closure
 builds, and
 [specs/0029-portable-indexing-composition.md](specs/0029-portable-indexing-composition.md)
-for the first multi-module portable graph executed by the Emacs worker.
+for the first multi-module portable graph executed by the Emacs worker, and
+[specs/0030-project-graph-manifest.md](specs/0030-project-graph-manifest.md)
+for deterministic graph identity, integrity checks, and dependency Source Maps.
 
 ## License
 

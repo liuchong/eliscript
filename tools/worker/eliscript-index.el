@@ -90,7 +90,10 @@ Each document is an alist with `id' and `terms' fields. CALLBACK receives
 when non-nil, receives the vector of worker timing objects after success.
 Return the worker request ids."
   (let* ((worker (eliscript-index-session-worker session))
+         (build (eliscript-index-session-build session))
          (module (eliscript-index-session-module session))
+         (project-manifest
+          (eliscript-project-build-result-manifest build))
          (items (vconcat documents))
          (count (length items))
          (payloads
@@ -135,6 +138,7 @@ Return the worker request ids."
               worker module "score-document" (aref payloads result-index)
               (lambda (value error-object)
                 (complete result-index value error-object))
+              :project-manifest project-manifest
               :metrics (lambda (value) (aset timings result-index value))
               :timeout-ms timeout-ms)
              request-ids))))

@@ -55,6 +55,11 @@ the seed and self-hosted compiler drivers. The worker loads the linked map with
 the module, decodes its Base64 VLQ mappings, and translates generated stack
 frames to original `.eli` locations.
 
+Project calls pass the deterministic `eliscript-project.json` produced by the
+builder. Its digest covers the complete generated graph, and the worker loads
+one map for every declared module. Dependency-only changes therefore trigger a
+new worker generation, while dependency stack frames map to their own sources.
+
 Runtime error objects contain:
 
 - stable `code`, `name`, and `message` fields
@@ -91,10 +96,11 @@ version changes within one generation, reloads fresh code in a new generation,
 and maps a real runtime exception to its Eliscript fixture line.
 
 ERT uses real Emacs and Bun processes to prove source-formatted errors,
-automatic restart after a module rewrite, recovery on the same client after a
-blocking timeout, and concurrent scoring of three text documents. The indexing
-test verifies ordered results and observes one cold module load followed by
-cache hits.
+automatic restart after module and dependency rewrites, recovery on the same
+client after a blocking timeout, and concurrent scoring of three text
+documents. The indexing test verifies ordered results and observes one cold
+module load followed by cache hits. A graph test maps an imported-module error
+and proves that a dependency-only rebuild changes the generation.
 
 The fixed-point compiler test compares seed and self-hosted portable closure
 JavaScript and Source Maps. This keeps diagnostics available on both sides of

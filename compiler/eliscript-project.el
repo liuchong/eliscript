@@ -9,6 +9,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'json)
 (require 'subr-x)
 (require 'eliscript)
 (require 'eliscript-diagnostic)
@@ -22,7 +23,10 @@
                (:constructor eliscript-project-module-create))
   source
   output
-  source-map)
+  source-map
+  source-digest
+  output-digest
+  source-map-digest)
 
 (cl-defstruct (eliscript-project-build-result
                (:constructor eliscript-project-build-result-create))
@@ -30,7 +34,12 @@
   out-dir
   entry
   entry-output
-  modules)
+  modules
+  manifest
+  digest)
+
+(defconst eliscript-project-manifest-filename "eliscript-project.json"
+  "Filename of the deterministic project build manifest.")
 
 (defun eliscript-project--fail (filename span format-string &rest arguments)
   "Signal a project error at SPAN in FILENAME.
@@ -91,6 +100,13 @@ FILENAME and SPAN identify the import responsible for PATH."
     (insert-file-contents filename)
     (buffer-string)))
 
+(defun eliscript-project--file-digest (filename)
+  "Return the lowercase SHA-256 digest of FILENAME's exact bytes."
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (insert-file-contents-literally filename)
+    (secure-hash 'sha256 (current-buffer))))
+
 (defun eliscript-project--write-module
     (program source source-text output-path)
   "Emit PROGRAM for SOURCE and write it to OUTPUT-PATH with a source map."
@@ -114,7 +130,64 @@ FILENAME and SPAN identify the import responsible for PATH."
     (eliscript-project-module-create
      :source source
      :output output-path
-     :source-map map-path)))
+     :source-map map-path
+     :source-digest (eliscript-project--file-digest source)
+     :output-digest (eliscript-project--file-digest output-path)
+     :source-map-digest (eliscript-project--file-digest map-path))))
+
+(defun eliscript-project--manifest-module (module root out-dir)
+  "Return the stable manifest record for MODULE below ROOT and OUT-DIR."
+  `((source . ,(file-relative-name
+                (eliscript-project-module-source module) root))
+    (output . ,(file-relative-name
+                (eliscript-project-module-output module) out-dir))
+    (sourceMap . ,(file-relative-name
+                   (eliscript-project-module-source-map module) out-dir))
+    (sourceDigest . ,(eliscript-project-module-source-digest module))
+    (outputDigest . ,(eliscript-project-module-output-digest module))
+    (sourceMapDigest
+     . ,(eliscript-project-module-source-map-digest module))))
+
+(defun eliscript-project--write-manifest (root out-dir entry-output modules)
+  "Write and return (PATH DIGEST) for the build rooted at ENTRY-OUTPUT.
+
+ROOT and OUT-DIR provide stable relative namespaces for MODULES."
+  (let* ((records
+          (vconcat
+           (mapcar
+            (lambda (module)
+              (eliscript-project--manifest-module module root out-dir))
+            modules)))
+         (identity
+          `((format . "eliscript-project")
+            (version . 1)
+            (entry . ,(file-relative-name entry-output out-dir))
+            (modules . ,records)))
+         (identity-json (json-serialize identity))
+         (digest
+          (secure-hash
+           'sha256 (encode-coding-string identity-json 'utf-8-unix t)))
+         (manifest-path
+          (expand-file-name eliscript-project-manifest-filename out-dir)))
+    (make-directory out-dir t)
+    (with-temp-file manifest-path
+      (insert (json-serialize (append identity `((digest . ,digest)))) "\n"))
+    (list (file-truename manifest-path) digest)))
+
+(defun eliscript-project--build-result (root out-dir entry modules)
+  "Create a complete project build result for ENTRY and MODULES."
+  (let* ((entry-output (eliscript-project--source-output entry root out-dir))
+         (manifest-data
+          (eliscript-project--write-manifest
+           root out-dir entry-output modules)))
+    (eliscript-project-build-result-create
+     :root root
+     :out-dir out-dir
+     :entry entry
+     :entry-output entry-output
+     :modules modules
+     :manifest (car manifest-data)
+     :digest (cadr manifest-data))))
 
 (defun eliscript-project-build (entry out-dir &optional root)
   "Compile the local Eliscript graph rooted at ENTRY into OUT-DIR.
@@ -197,14 +270,8 @@ are rewritten to `.mjs'.  Other import specifiers remain unchanged."
                   (string-lessp
                    (eliscript-project-module-source left)
                    (eliscript-project-module-source right)))))
-    (eliscript-project-build-result-create
-     :root root-path
-     :out-dir output-directory
-     :entry canonical-entry
-     :entry-output
-     (eliscript-project--source-output
-      canonical-entry root-path output-directory)
-     :modules modules)))
+    (eliscript-project--build-result
+     root-path output-directory canonical-entry modules)))
 
 (defun eliscript-project--portable-imports (forms)
   "Return portable import descriptions from selected FORMS.
@@ -340,14 +407,8 @@ only the requested declarations, immutable constants, and portable imports."
                (eliscript-project--write-module
                 program source (gethash source texts-by-source) output-path)
                modules)))))
-    (eliscript-project-build-result-create
-     :root root-path
-     :out-dir output-directory
-     :entry canonical-entry
-     :entry-output
-     (eliscript-project--source-output
-      canonical-entry root-path output-directory)
-     :modules (nreverse modules)))))
+    (eliscript-project--build-result
+     root-path output-directory canonical-entry (nreverse modules)))))
 
 (provide 'eliscript-project)
 

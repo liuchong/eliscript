@@ -354,17 +354,55 @@ COMMAND defaults to `eliscript-worker-program' plus the bundled worker script."
               (file-attribute-inode-number attributes)
               (file-attribute-device-number attributes)))))
 
-(defun eliscript-worker--prepare-module (worker module requested-version)
-  "Resolve MODULE version and restart WORKER when it changed."
+(defun eliscript-worker--project-manifest-version (manifest)
+  "Return the graph digest declared by local project MANIFEST."
+  (let ((file (eliscript-worker--module-file manifest)))
+    (unless (and file (file-regular-p file))
+      (signal 'eliscript-worker-error
+              (list (format "project manifest does not exist: %s" manifest))))
+    (condition-case error-data
+        (let* ((object
+                (with-temp-buffer
+                  (insert-file-contents file)
+                  (json-parse-buffer
+                   :object-type 'alist
+                   :array-type 'array
+                   :null-object nil
+                   :false-object :false)))
+               (digest (alist-get 'digest object)))
+          (unless (and (equal (alist-get 'format object)
+                              "eliscript-project")
+                       (equal (alist-get 'version object) 1)
+                       (stringp digest)
+                       (string-match-p
+                        "\\`[[:xdigit:]]\\{64\\}\\'" digest))
+            (error "unsupported manifest shape"))
+          digest)
+      (error
+       (signal 'eliscript-worker-error
+               (list (format "invalid project manifest %s: %s"
+                             manifest (error-message-string error-data))))))))
+
+(defun eliscript-worker--prepare-module
+    (worker module requested-version project-manifest)
+  "Resolve MODULE version and restart WORKER when it changed.
+
+PROJECT-MANIFEST, when non-nil, supplies the whole generated graph version."
   (let* ((version
           (or requested-version
+              (and project-manifest
+                   (eliscript-worker--project-manifest-version
+                    project-manifest))
               (eliscript-worker--module-fingerprint module)))
          (versions (eliscript-worker-module-versions worker))
-         (previous (gethash module versions)))
+         (key (if project-manifest
+                  (cons module project-manifest)
+                module))
+         (previous (gethash key versions)))
     (when (and version previous (not (equal version previous))
                (eliscript-worker-live-p worker))
       (eliscript-worker-restart worker))
-    (when version (puthash module version versions))
+    (when version (puthash key version versions))
     version))
 
 (defun eliscript-worker--send (worker message)
@@ -393,11 +431,14 @@ COMMAND defaults to `eliscript-worker-program' plus the bundled worker script."
 
 (cl-defun eliscript-worker-call
     (worker module export arguments callback
-            &key operation module-version progress metrics timeout-ms)
+            &key operation module-version project-manifest
+            progress metrics timeout-ms)
   "Call EXPORT from MODULE on WORKER with ARGUMENTS.
 
 When OPERATION is non-nil, resolve its source name through the generated
 portable manifest instead of calling EXPORT. CALLBACK receives (VALUE ERROR).
+PROJECT-MANIFEST names an `eliscript-project.json' file whose digest identifies
+the complete generated module graph and whose source maps cover dependencies.
 PROGRESS receives each progress value.
 TIMEOUT-MS is enforced remotely, with local worker termination after a grace
 period when synchronous code prevents cooperative cancellation. Return request
@@ -416,9 +457,14 @@ id."
           (if (string-prefix-p "file:" module)
               module
             (expand-file-name module)))
+         (project-manifest-name
+          (and project-manifest
+               (if (string-prefix-p "file:" project-manifest)
+                   project-manifest
+                 (expand-file-name project-manifest))))
          (resolved-module-version
           (eliscript-worker--prepare-module
-           worker module-name module-version)))
+           worker module-name module-version project-manifest-name)))
     (puthash id request (eliscript-worker-pending worker))
     (when timeout-ms
       (setf (eliscript-worker-request-timer request)
@@ -439,6 +485,8 @@ id."
             `((export . ,export)))
           (and resolved-module-version
                `((moduleVersion . ,resolved-module-version)))
+          (and project-manifest-name
+               `((projectManifest . ,project-manifest-name)))
           (and timeout-ms `((timeoutMs . ,timeout-ms)))))
       (error
        (remhash id (eliscript-worker-pending worker))
@@ -449,12 +497,13 @@ id."
 
 (cl-defun eliscript-worker-call-portable
     (worker module operation arguments callback
-            &key module-version progress metrics timeout-ms)
+            &key module-version project-manifest progress metrics timeout-ms)
   "Call portable OPERATION from MODULE on WORKER with ARGUMENTS."
   (eliscript-worker-call
    worker module nil arguments callback
    :operation operation
    :module-version module-version
+   :project-manifest project-manifest
    :progress progress
    :metrics metrics
    :timeout-ms timeout-ms))
@@ -471,7 +520,8 @@ id."
 
 (cl-defun eliscript-worker-call-sync
     (worker module export arguments
-            &key operation module-version progress metrics timeout-ms)
+            &key operation module-version project-manifest
+            progress metrics timeout-ms)
   "Synchronously call EXPORT from MODULE on WORKER with ARGUMENTS."
   (let (done value error-object)
     (eliscript-worker-call
@@ -484,6 +534,7 @@ id."
      :metrics metrics
      :operation operation
      :module-version module-version
+     :project-manifest project-manifest
      :timeout-ms timeout-ms)
     (while (and (not done) (eliscript-worker-live-p worker))
       (accept-process-output (eliscript-worker-process worker) 0.05))
@@ -500,12 +551,13 @@ id."
 
 (cl-defun eliscript-worker-call-portable-sync
     (worker module operation arguments
-            &key module-version progress metrics timeout-ms)
+            &key module-version project-manifest progress metrics timeout-ms)
   "Synchronously call portable OPERATION from MODULE on WORKER."
   (eliscript-worker-call-sync
    worker module nil arguments
    :operation operation
    :module-version module-version
+   :project-manifest project-manifest
    :progress progress
    :metrics metrics
    :timeout-ms timeout-ms))
