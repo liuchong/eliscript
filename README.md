@@ -3,10 +3,30 @@
 Eliscript is an Emacs Lisp-flavored language that compiles to modern
 JavaScript and React.
 
-The compiler is intended to be written in Emacs Lisp and runnable with plain
-Emacs, including `emacs --batch`. Its output is standard JavaScript modules,
-so the generated application can run directly in a browser or pass through an
-optional tool such as Vite for development and bundling.
+The seed compiler is written in Emacs Lisp and runs with plain Emacs, including
+`emacs --batch`. It emits standard ECMAScript modules. Bun is the reference
+JavaScript host for development and tests; generated modules do not depend on
+Bun-specific syntax or APIs.
+
+## Quick Start
+
+Requirements:
+
+- Emacs 29 or newer for compilation
+- Bun 1.4 or newer for executing generated modules and running all tests
+
+Compile and run the basic example:
+
+```sh
+./bin/eliscript --output dist/basic.mjs examples/basic/main.eli
+bun run dist/basic.mjs
+```
+
+Run the complete test suite:
+
+```sh
+bun run test
+```
 
 ## Why
 
@@ -40,34 +60,43 @@ React interfaces should be able to live in one coherent toolchain.
 - Reimplementing Emacs in JavaScript.
 - Hiding JavaScript semantics when explicit interop is clearer.
 
-## Language Sketch
+## Current Language
 
-This example is directional; the syntax and names are not frozen yet.
+The first compiler accepts an Emacs Lisp-shaped lexical subset:
 
 ```elisp
-(module example.counter
-  (import "react" useState))
+(module example.basic
+  (defun factorial (n)
+    (if (<= n 1)
+        1
+      (* n (factorial (1- n)))))
 
-(defcomponent Counter ()
-  (let ((state (useState 0)))
-    (let ((count (get state 0))
-          (set-count (get state 1)))
-      (button {:on-click (lambda () (set-count (+ count 1)))}
-        "Count: " count))))
-
-(export Counter)
+  (print (factorial 5))
+  (export factorial))
 ```
 
-The intended result is ordinary ESM that imports React and emits a component
-without requiring a custom virtual DOM.
+Implemented forms include:
+
+- literals, symbols, keywords, vectors, quoted lists, and object literals
+- `defvar`, `defconst`, `defun`, `lambda`, `let`, and `let*`
+- `if`, `when`, `unless`, `cond`, `progn`, `while`, `and`, and `or`
+- `setq`, arithmetic, comparisons, and basic list/vector operations
+- ESM `module`, `import`, `export`, and `export-default`
+- `get`, `put`, `js-call`, `new`, and explicit `js*` interop
+
+Eliscript already differs deliberately from Emacs Lisp: it is lexically scoped,
+uses ECMAScript numbers and arrays, distinguishes `false` from `nil`, and emits
+standard ESM. Full Emacs Lisp compatibility is not a goal.
 
 ## Repository Layout
 
 ```text
+bin/                     Command-line entry point
 compiler/                Emacs Lisp compiler implementation
 runtime/                 Minimal JavaScript runtime helpers
 stdlib/                  Portable Eliscript standard library
 examples/                End-to-end example applications
+  basic/                 Executable language example
   react-counter/         First React compilation target
 specs/                   Numbered language and toolchain decisions
 tests/                   Compiler fixtures and output snapshots
@@ -76,15 +105,14 @@ tools/                   Optional integrations and developer utilities
 
 ## Compilation Pipeline
 
+The current seed compiler is intentionally direct:
+
 ```text
-.eli source
-  -> reader
-  -> macro expansion
-  -> semantic analysis
-  -> language-neutral IR
-  -> JavaScript/ESM emitter
-  -> browser or optional bundler
+.eli source -> Emacs reader -> ECMAScript/ESM emitter -> Bun or browser
 ```
+
+The next compiler stage inserts macro expansion, semantic analysis, a
+language-neutral IR, and source-map generation between the reader and emitter.
 
 ## Bootstrap Strategy
 
@@ -131,20 +159,24 @@ not an assumption that every function becomes faster outside Emacs.
 See [specs/0001-language-and-toolchain.md](specs/0001-language-and-toolchain.md)
 for the language and bootstrap boundary, and
 [specs/0002-emacs-acceleration.md](specs/0002-emacs-acceleration.md) for the
-portable execution model.
+portable execution model. The exact implemented subset is recorded in
+[specs/0003-core-language-v0.md](specs/0003-core-language-v0.md).
 
 ## Status
 
-Eliscript is currently in the specification and bootstrap-scaffold phase.
+The first Emacs Lisp seed compiler is implemented and usable from the command
+line. The M0 vertical slice is complete.
 
-Established decisions:
+Current evidence:
 
-- Emacs Lisp implements the seed compiler.
-- Eliscript targets readable standard ESM.
-- React and Org support live above the language core.
-- The compiler will eventually be rewritten in Eliscript and self-hosted.
-- Portable Eliscript may serve as a JavaScript acceleration layer for Emacs.
+- `.eli` files compile to deterministic, readable `.mjs` modules.
+- The compiler itself has no JavaScript runtime dependency.
+- Eleven ERT tests cover reading, core emission, modules, truthiness, errors, and
+  JavaScript interop.
+- A CLI integration test compares generated output with a checked-in snapshot.
+- Bun 1.4 executes the generated module and verifies recursion, mutation,
+  loops, higher-order functions, objects, arrays, and exports.
 
-The next implementation milestone is M0: a batch-mode Emacs compiler for a
-small lexical Lisp subset, backed by fixtures and JavaScript snapshots. There
-is no usable compiler or runtime yet.
+The next milestone is M1: add a real analyzer with lexical binding validation,
+macro expansion, an explicit IR, source locations, and source maps. React and
+Org publishing remain later milestones.

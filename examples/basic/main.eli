@@ -1,0 +1,36 @@
+(module example.basic
+  (defconst greeting "hello")
+
+  (defun factorial (n)
+    (if (<= n 1)
+        1
+      (* n (factorial (1- n)))))
+
+  (defun classify (n)
+    (cond
+      ((< n 0) "negative")
+      ((= n 0) "zero")
+      (t "positive")))
+
+  (defun sum-to (n)
+    (let ((total 0)
+          (current n))
+      (progn
+        (while (> current 0)
+          (setq total (+ total current)
+                current (1- current)))
+        total)))
+
+  (defvar result
+    (object
+      :message (str greeting " from Eliscript")
+      :values [1 2 3]
+      :factorial (factorial 5)
+      :class (classify 7)
+      :sum (sum-to 5)
+      :doubled (js-call [1 2 3] :map (lambda (value) (* value 2)))
+      :consed (cons 0 '(1 2))
+      :empty-car (car nil)))
+
+  (print (JSON/stringify result))
+  (export factorial classify sum-to result))

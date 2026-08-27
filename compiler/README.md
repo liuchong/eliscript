@@ -1,12 +1,16 @@
 # Compiler
 
-This directory will first contain the Emacs Lisp seed implementation of the
-compiler. After the language core stabilizes, it will also contain the compiler
-rewritten in Eliscript and the adapters needed to run its generated JavaScript.
+This directory contains the first Emacs Lisp seed compiler:
 
-The planned phase boundaries are reader, macro expansion, semantic analysis,
-IR lowering, JavaScript emission, source maps, and diagnostics. Public entry
-points should support both interactive Emacs use and clean batch-mode builds.
+- `eliscript-reader.el` reads one or more `.eli` forms.
+- `eliscript-emitter.el` emits standard ECMAScript modules.
+- `eliscript.el` exposes the public string and file compilation API.
+- `eliscript-cli.el` implements the batch command used by `bin/eliscript`.
+
+The current vertical slice goes directly from read forms to JavaScript. The next
+phase boundaries are macro expansion, semantic analysis, IR lowering, source
+maps, and structured diagnostics. Public entry points support both interactive
+Emacs use and clean batch-mode builds.
 
 The Emacs Lisp and self-hosted implementations must share a conformance suite.
 Generated JavaScript is a build artifact and must never become the hand-edited

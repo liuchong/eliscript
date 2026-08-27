@@ -63,9 +63,11 @@ Emacs command
   -> apply result to Emacs state
 ```
 
-The transport and JavaScript host are adapters. A Node.js, Deno, browser, or
-embedded engine may implement the same protocol without becoming a dependency
-of the core compiler.
+The transport and JavaScript host are adapters. The latest stable Bun runtime
+is the reference worker host because it combines a fast JavaScriptCore runtime,
+ESM execution, package management, testing, and bundling in one tool. A browser
+or embedded engine may later implement the same protocol. Bun does not become
+a dependency of the core compiler.
 
 Requests need:
 
@@ -172,7 +174,7 @@ measure realistic performance.
 ## Open Questions
 
 1. Should portable functions also have a directly executable Emacs backend?
-2. Which JavaScript host should provide the reference worker implementation?
+2. Which parts of the worker protocol must also run unchanged in browsers?
 3. Which data types cross the host boundary without explicit conversion?
 4. How should capabilities such as filesystem and network access be granted?
 5. Can source maps preserve useful Emacs buffer positions for unsaved code?

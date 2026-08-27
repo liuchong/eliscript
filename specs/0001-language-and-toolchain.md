@@ -195,16 +195,20 @@ The core compiler must not depend on files in `tools/`.
 
 ## Roadmap
 
-### M0: Vertical Slice
+### M0: Vertical Slice (Complete)
 
 - Read literals, symbols, calls, `if`, `let`, and functions.
 - Compile one `.eli` file to readable ESM.
 - Run compiler tests entirely in batch-mode Emacs.
 - Compare emitted JavaScript with checked-in snapshots.
 
+Completed on 2026-08-27. The generated module is also executed by Bun as part
+of the CLI integration test.
+
 ### M1: Language Core
 
-- Add modules, lexical binding validation, macros, and source maps.
+- Harden the initial module forms and add lexical binding validation, macros,
+  and source maps.
 - Define the IR and public compiler diagnostics.
 - Execute emitted modules in a JavaScript test runner.
 
