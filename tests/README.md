@@ -45,3 +45,9 @@ The compiler-driver test builds Generation 1 with the Emacs Lisp seed,
 Generation 2 with Generation 1, and Generation 3 with Generation 2. It compares
 all ten ESM and Source Map artifacts byte-for-byte, checks the portable CLI
 against seed output, and verifies mapped file output and located diagnostics.
+
+Worker tests compile one pure Eliscript workload, then exercise the Bun runtime
+and Emacs client over real pipes. They cover framing, version negotiation,
+request correlation, progress, cancellation, timeout, module logging,
+serialization failures, clean shutdown, equivalent results, and segmented
+benchmark output. Performance ratios are reported but never asserted in CI.

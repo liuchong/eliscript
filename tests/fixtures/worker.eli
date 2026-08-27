@@ -1,0 +1,28 @@
+(module test.worker
+  (defun score-values (values rounds)
+    (let ((total 0)
+          (round 0))
+      (while (< round rounds)
+        (let ((index 0))
+          (while (< index (length values))
+            (setq total
+              (% (+ (* total 33) (nth index values) round) 1000000007))
+            (setq index (1+ index))))
+        (setq round (1+ round)))
+      total))
+
+  (defconst delayed-echo
+    (js* "(value, delayMs, context) => new Promise((resolve, reject) => { context.progress({stage: 'started'}); const timer = setTimeout(() => resolve(value), delayMs); context.signal.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('operation aborted')); }, {once: true}); })"))
+
+  (defconst unserializable
+    (js* "() => 1n"))
+
+  (defconst blocking-echo
+    (js* "(value, delayMs) => { const deadline = performance.now() + delayMs; while (performance.now() < deadline) {} return value; }"))
+
+  (defun noisy-echo (value)
+    (print "worker module log")
+    value)
+
+  (export
+    score-values delayed-echo blocking-echo unserializable noisy-echo))

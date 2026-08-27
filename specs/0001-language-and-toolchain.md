@@ -283,7 +283,7 @@ Completed on 2026-08-28. The Emacs Lisp implementation remains the bootstrap
 seed and executable reference, while normal compiler development can proceed in
 Eliscript source.
 
-### M5: Emacs Acceleration
+### M5: Emacs Acceleration (In Progress)
 
 - Define a portable Eliscript subset for explicit, serializable computations.
 - Run compiled modules in a long-lived JavaScript worker controlled by Emacs.
@@ -292,6 +292,12 @@ Eliscript source.
 
 The detailed execution boundary is specified in
 [0002-emacs-acceleration.md](0002-emacs-acceleration.md).
+
+Started on 2026-08-28. Protocol version 1, the long-lived Bun worker, Emacs
+client, cooperative cancellation, hard timeout recovery, and segmented
+cold/warm benchmark are implemented. See
+[0020-worker-protocol.md](0020-worker-protocol.md). Portable function
+declarations and static dependency validation are next.
 
 ## Non-goals for the Initial Implementation
 

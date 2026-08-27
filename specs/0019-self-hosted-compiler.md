@@ -81,7 +81,6 @@ from a clean checkout and to provide independent conformance evidence.
 
 ## Next Phase
 
-M5 will use the portable compiler to define a long-lived JavaScript worker for
-selected Emacs workloads. The next acceptance boundary is a versioned message
-protocol plus end-to-end benchmarks that include startup, serialization,
-transport, execution, and result application.
+M5 now uses the portable compiler through the versioned worker and measurement
+boundary implemented in [0020-worker-protocol.md](0020-worker-protocol.md).
+Portable function declarations and static dependency validation are next.

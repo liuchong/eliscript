@@ -3,14 +3,16 @@ BUN ?= bun
 
 .PHONY: test
 test:
-	$(EMACS) --batch -Q -L compiler -L tools/org -L tests \
+	$(EMACS) --batch -Q -L compiler -L tools/org -L tools/worker -L tests \
 		-l tests/eliscript-tests.el \
 		-l tests/eliscript-org-tests.el \
+		-l tests/eliscript-worker-tests.el \
 		-l tests/bootstrap-tests.el \
 		-f ert-run-tests-batch-and-exit
 	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
 		tests/bootstrap-symbol.test.mjs tests/bootstrap-reader.test.mjs \
 		tests/bootstrap-expander.test.mjs tests/bootstrap-analyzer.test.mjs \
 		tests/bootstrap-ir.test.mjs tests/bootstrap-emitter.test.mjs \
-		tests/bootstrap-compiler.test.mjs
+		tests/bootstrap-compiler.test.mjs tests/worker-runtime.test.mjs \
+		tests/worker-benchmark.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh

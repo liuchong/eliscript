@@ -1,6 +1,6 @@
 # 0002: Emacs Acceleration Through JavaScript
 
-- Status: Draft
+- Status: In Progress
 - Date: 2026-08-27
 - Depends on: 0001 Language and Toolchain Boundary
 
@@ -78,9 +78,11 @@ Requests need:
 - progress events for long-running work
 - protocol version and capability negotiation
 
-The wire representation is intentionally undecided. JSON is a useful baseline,
-but the protocol should not expose JavaScript-specific object semantics as the
-language contract.
+Protocol version 1 uses newline-delimited JSON with one object per line. It
+defines ready, request, response, progress, cancel, protocol-error, and shutdown
+messages. The wire contract contains only explicit JSON values and does not
+expose JavaScript object identity. See
+[0020-worker-protocol.md](0020-worker-protocol.md).
 
 ## Portable Subset
 
@@ -141,25 +143,34 @@ product capabilities:
 - acceleration means Emacs delegates selected Eliscript computations to a
   JavaScript runtime
 
-Self-hosting should be completed before acceleration APIs are treated as
-stable. Early experiments may run sooner to validate runtime boundaries and
-measure realistic performance.
+Self-hosting is complete. Acceleration now reuses generated modules while the
+worker protocol and portable-function boundary mature independently.
 
 ## Roadmap
 
-### A0: Measurement Probe
+### A0: Measurement Probe (Complete)
 
 - Select one pure, compute-heavy transformation.
 - Implement equivalent Emacs Lisp and generated JavaScript paths.
 - Measure cold, warm, transport, and execution costs independently.
 
-### A1: Worker Protocol
+The `score-values` workload now has equivalent Emacs Lisp and generated
+Eliscript paths. Its benchmark reports compilation, worker startup, module
+loading, execution, serialization, transport, client parsing, cold calls, and
+warm calls separately.
+
+### A1: Worker Protocol (Complete)
 
 - Define request, response, progress, cancellation, and diagnostic messages.
 - Maintain one long-lived local JavaScript worker.
 - Add lifecycle handling and deterministic integration tests.
 
-### A2: Portable Functions
+Protocol version 1 is implemented by `runtime/worker.mjs` and
+`tools/worker/eliscript-worker.el`. Real-process tests cover framing, version
+negotiation, progress, cancellation, timeouts, errors, logging isolation, and
+shutdown.
+
+### A2: Portable Functions (Next)
 
 - Define and statically validate the portable subset.
 - Compile portable functions and their transitive dependencies as modules.

@@ -83,6 +83,12 @@ Use the generated self-hosted compiler through its Bun filesystem adapter:
 ./bin/eliscript-portable --output dist/basic-portable.mjs examples/basic/main.eli
 ```
 
+Measure the long-lived Emacs-to-Bun worker boundary:
+
+```sh
+bun run benchmark:worker
+```
+
 ## Why
 
 Emacs Lisp is a productive language for editing, automation, macros, and
@@ -289,19 +295,25 @@ Current evidence:
 - The seed-built Generation 1 compiler reproduces all ten compiler modules and
   Source Maps byte-for-byte; that output compiles them again to the same fixed
   point.
-- Fifty-two ERT tests cover reading, locations, macro expansion, analysis, IR
+- A versioned NDJSON worker keeps Bun alive behind an Emacs client, with
+  correlated requests, progress, cancellation, timeouts, module caching,
+  structured failures, and clean shutdown.
+- The worker benchmark separates compile, startup, module load, execution,
+  serialization, transport, and client costs. Its reference workload verifies
+  equal results without treating a machine-specific speed ratio as a test gate.
+- Fifty-three ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
-  bootstrap conformance, errors, and interop.
-- Thirteen Bun tests cover the compiler and Org Vite adapters, source-map handoff,
-  file filtering, React Refresh, Org module invalidation, and generated
-  bootstrap behavior.
+  bootstrap conformance, worker integration, errors, and interop.
+- Fifteen Bun tests cover the compiler and Org Vite adapters, source-map
+  handoff, file filtering, React Refresh, Org module invalidation, generated
+  bootstrap behavior, the worker protocol, and benchmark reporting.
 - A CLI integration test compares generated output with a checked-in snapshot.
 - Bun 1.4 executes generated modules and verifies recursion, mutation, loops,
   higher-order functions, objects, arrays, exports, React server rendering, and
   production Vite bundles, and deterministic Org publishing.
 
-M5 now continues with a measured worker boundary for accelerating portable
-Eliscript workloads from Emacs.
+M5 has begun with a measured long-lived worker boundary. Portable function
+declarations and static dependency validation are next.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -333,7 +345,9 @@ JSON-safe IR construction and full seed/portable tree equivalence, and
 [specs/0018-portable-emission.md](specs/0018-portable-emission.md) for direct
 portable ESM and Source Map generation, and
 [specs/0019-self-hosted-compiler.md](specs/0019-self-hosted-compiler.md) for the
-portable driver, Bun adapter, and reproducible compiler fixed point.
+portable driver, Bun adapter, and reproducible compiler fixed point, and
+[specs/0020-worker-protocol.md](specs/0020-worker-protocol.md) for the long-lived
+execution protocol and measurement boundary.
 
 ## License
 

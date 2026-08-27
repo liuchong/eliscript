@@ -10,3 +10,7 @@ with the official React plugin for Fast Refresh.
 
 `org/` contains the pure Emacs Org-to-ESM publisher and its Vite virtual-module
 adapter. Org remains the content source; generated modules are build artifacts.
+
+`worker/` contains the Emacs client for the long-lived JavaScript compute
+worker and an end-to-end benchmark. It keeps editor state in Emacs while moving
+explicit JSON-compatible computations across a measured process boundary.
