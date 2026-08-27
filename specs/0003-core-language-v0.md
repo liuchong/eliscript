@@ -106,6 +106,7 @@ The initial collection forms are:
 - `list`, `vector`, and `array`
 - `car`, `cdr`, `cons`, `nth`, `aref`, and `length`
 - `object`, `get`, and `put`
+- `object-keys`, `object-has?`, and `object-assoc`
 
 Lists and vectors currently share the ECMAScript array representation. `equal`
 currently uses strict identity equality; structural equality is deferred to the
@@ -115,6 +116,11 @@ Higher-order, non-mutating sequence operations are implemented as Eliscript
 library code rather than special forms. See
 [0023-portable-sequence-library.md](0023-portable-sequence-library.md) for
 `map`, `filter`, `reduce`, ranges, slicing, predicates, and search.
+
+The object primitives provide own enumerable string-key discovery,
+own-property testing, and shallow immutable association. `nil` is treated as an
+empty object. Higher-level immutable transforms are library code; see
+[0026-portable-object-library.md](0026-portable-object-library.md).
 
 ## ECMAScript Modules
 
@@ -135,6 +141,9 @@ Exports use `(export name ...)` or `(export-default value)`.
 - `(get object key)` reads a property.
 - `(get object key fallback)` uses nullish fallback behavior.
 - `(put object key value)` assigns a property.
+- `(object-keys object)` enumerates own enumerable string keys.
+- `(object-has? object key)` tests only own properties.
+- `(object-assoc object key value)` returns a shallow copy with one property.
 - `(js-call object method arguments...)` preserves the method receiver.
 - `(new Constructor arguments...)` constructs a JavaScript object.
 - `(funcall function arguments...)` and `(apply function array)` call values.

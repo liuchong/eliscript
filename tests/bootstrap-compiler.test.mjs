@@ -138,6 +138,10 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "function slice(start, end, text)",
         "function trim(text)",
       ]],
+      ["object.eli", [
+        "function assoc(object, key, value)",
+        "function omit(object, omitted_keys)",
+      ]],
     ]) {
       const source = resolve(projectDirectory, "stdlib", sourceName);
       const seedLibraryOutput = await runSuccessful([seedCliPath, source], {

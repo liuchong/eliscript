@@ -1,8 +1,10 @@
 (module example.stdlib-cli
   (import "../../stdlib/sequence.eli" map filter reduce range)
   (import "../../stdlib/text.eli" join strip-prefix trim)
+  (import "../../stdlib/object.eli" assoc merge pick)
 
   (defconst values (range 1 8))
+  (defconst profile (object :language "Eliscript" :host "Emacs"))
   (defconst result
     (object
      :values values
@@ -11,7 +13,10 @@
      :sum (reduce (lambda (total value) (+ total value)) 0 values)
      :summary (join ", " (map (lambda (value) (str value)) values))
      :slug (strip-prefix "#" "#eliscript")
-     :title (trim "  Emacs + JavaScript \n")))
+     :title (trim "  Emacs + JavaScript \n")
+     :profile (assoc profile :runtime "JavaScript")
+     :selected (pick (merge profile (object :runtime "JavaScript"))
+                     [:language :runtime])))
 
   (print (JSON/stringify result))
   (export result))

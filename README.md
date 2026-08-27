@@ -39,18 +39,21 @@ Generate an external Source Map v3 file when debugging generated code:
 
 This writes `dist/basic.mjs.map` and adds its `sourceMappingURL` to the module.
 
-Import portable sequence and text libraries from an Eliscript module handled
+Import portable sequence, text, and object libraries from an Eliscript module handled
 by Vite or the project builder:
 
 ```elisp
 (import "../../stdlib/sequence.eli" map filter reduce range)
 (import "../../stdlib/text.eli" contains? strip-prefix trim)
+(import "../../stdlib/object.eli" assoc pick)
 
 (map (lambda (value) (* value 2)) (range 1 5))
 (trim (strip-prefix "#" "# Eliscript "))
+(pick (assoc (object :name "Eliscript") :runtime "JavaScript")
+      [:name :runtime])
 ```
 
-The React counter uses this source-module path in its production build. Build
+The React examples use these source-module paths in production builds. Build
 the same kind of local source graph without Vite and run its generated entry:
 
 ```sh
@@ -191,6 +194,8 @@ Implemented forms include:
 - `setq`, arithmetic, comparisons, and basic list/vector operations
 - portable `map`, `filter`, `reduce`, ranges, slicing, predicates, and search
   from `stdlib/sequence.eli`
+- portable immutable association, merging, value transforms, selection, and
+  omission from `stdlib/object.eli`
 - ESM `module`, `import`, `export`, and `export-default`
 - compile-time `defmacro` with backquote, `&rest`, and `&body`
 - `get`, `put`, `js-call`, `new`, and explicit `js*` interop
@@ -288,8 +293,9 @@ portable execution model. The exact implemented subset is recorded in
 ## Status
 
 The first Emacs Lisp seed compiler is implemented and usable from the command
-line. M0 through M5 are complete. M6 includes portable sequence and text
-libraries plus a multi-file project builder driven entirely by Emacs.
+line. M0 through M5 are complete. M6 includes portable sequence, text, and
+immutable object libraries plus a multi-file project builder driven entirely
+by Emacs.
 
 Current evidence:
 
@@ -367,13 +373,15 @@ Current evidence:
 - `stdlib/text.eli` supplies thirteen literal, UTF-16-indexed string operations
   without regular expressions or host calls. The Org React site uses it with
   sequence `map` and `find` in its production source graph.
+- `stdlib/object.eli` supplies eleven immutable own-property operations above
+  three minimal portable primitives. The Org React site imports it as source.
 - `bin/eliscript-build` walks expanded IR imports, compiles each local `.eli`
   dependency once, preserves its root-relative path as `.mjs`, and emits a
   source map for every module without requiring Vite.
-- Sixty-nine ERT tests cover reading, locations, macro expansion, analysis, IR
+- Seventy-one ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- Seventeen Bun tests cover the compiler and Org Vite adapters, source-map
+- Eighteen Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
   bootstrap behavior, the worker protocol, standard library, and benchmark
   reporting.
@@ -388,10 +396,11 @@ module cache, automatic restart policy, mapped runtime diagnostics, and
 representative asynchronous indexing workload are integrated across Emacs,
 Bun, and both compiler generations.
 
-M6 is underway. Sequence and text libraries now live in Eliscript source,
-remain statically portable, compile identically through the seed and
-self-hosted compilers, and participate in both Vite and ordinary source-mapped
-module graphs without new compiler intrinsics.
+M6 is underway. Sequence, text, and immutable object libraries now live in
+Eliscript source, remain statically portable, compile identically through the
+seed and self-hosted compilers, and participate in both Vite and ordinary
+source-mapped module graphs. Object behavior rests on three minimal portable
+primitives; higher-level policy remains library code.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -437,7 +446,9 @@ for the first portable standard-library module and its sequence semantics, and
 [specs/0024-project-builds.md](specs/0024-project-builds.md) for recursive local
 source imports and generated ESM directory trees, and
 [specs/0025-portable-text-library.md](specs/0025-portable-text-library.md) for
-literal text operations and their indexing semantics.
+literal text operations and their indexing semantics, and
+[specs/0026-portable-object-library.md](specs/0026-portable-object-library.md)
+for immutable object operations and their primitive boundary.
 
 ## License
 

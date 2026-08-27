@@ -433,6 +433,21 @@
        (eliscript-emitter--require-arity "length" arguments 1 1)
        (format "((%s) ?? []).length"
                (eliscript-emitter-emit-expression (car arguments))))
+      ('object-keys
+       (eliscript-emitter--require-arity "object-keys" arguments 1 1)
+       (format "Object.keys((%s) ?? {})"
+               (eliscript-emitter-emit-expression (car arguments))))
+      ('object-has?
+       (eliscript-emitter--require-arity "object-has?" arguments 2 2)
+       (format "Object.prototype.hasOwnProperty.call((%s) ?? {}, %s)"
+               (eliscript-emitter-emit-expression (nth 0 arguments))
+               (eliscript-emitter-emit-expression (nth 1 arguments))))
+      ('object-assoc
+       (eliscript-emitter--require-arity "object-assoc" arguments 3 3)
+       (format "({...((%s) ?? {}), [%s]: %s})"
+               (eliscript-emitter-emit-expression (nth 0 arguments))
+               (eliscript-emitter-emit-expression (nth 1 arguments))
+               (eliscript-emitter-emit-expression (nth 2 arguments))))
       ('object (eliscript-emitter--emit-object arguments))
       ('get (eliscript-emitter--emit-get arguments))
       ('put

@@ -44,6 +44,7 @@
           <a href="#modules">Modules</a>
           <a href="#sequences">Sequences</a>
           <a href="#text">Text</a>
+          <a href="#objects">Objects</a>
           <a href="#react">React</a>
           <a href="#differences">Differences</a>
         </nav>
@@ -98,6 +99,7 @@
                   <article class="form-item"><code>car / cdr / cons / nth</code><p>Basic Lisp collection operations with empty-list handling.</p></article>
                   <article class="form-item"><code>object</code><p>Plain object literals with keyword, string, or computed keys.</p></article>
                   <article class="form-item"><code>get / put</code><p>Property access, fallback, and assignment.</p></article>
+                  <article class="form-item"><code>object-keys / object-has? / object-assoc</code><p>Portable own-key discovery, own-property checks, and shallow immutable association.</p></article>
                 </div>
               </div>
               <div class="language-panel" data-language-panel="interop" hidden>
@@ -147,6 +149,15 @@
 
 (trim (strip-prefix "#" "# article "))</code></pre>
             <p>Thirteen functions provide literal matching, end-exclusive slicing, prefix and suffix removal, ASCII-boundary trimming, blank checks, joining, and repetition. They are written in portable Eliscript without regular expressions or host string methods. Indices follow ECMAScript UTF-16 code units rather than locale-aware grapheme clusters.</p>
+          </section>
+
+          <section id="objects">
+            <h2>Immutable objects</h2>
+            <pre><code>(import "../../stdlib/object.eli" assoc merge pick)
+
+(pick (assoc (object :name "Eliscript") :runtime "JavaScript")
+      [:name :runtime])</code></pre>
+            <p>Eleven portable functions enumerate own keys, test own properties, associate without mutation, remove and merge keys, transform values, and select object fields. Empty transforms return ordinary objects. Three minimal core primitives provide key discovery and shallow copying; all higher-level policy remains Eliscript library code.</p>
           </section>
 
           <section id="react">

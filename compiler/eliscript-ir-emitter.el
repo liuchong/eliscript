@@ -366,6 +366,21 @@
        (eliscript-ir-emitter--require-arity node 1 1)
        (format "((%s) ?? []).length"
                (eliscript-ir-emitter-emit-expression (car nodes))))
+      ('object-keys
+       (eliscript-ir-emitter--require-arity node 1 1)
+       (format "Object.keys((%s) ?? {})"
+               (eliscript-ir-emitter-emit-expression (car nodes))))
+      ('object-has?
+       (eliscript-ir-emitter--require-arity node 2 2)
+       (format "Object.prototype.hasOwnProperty.call((%s) ?? {}, %s)"
+               (eliscript-ir-emitter-emit-expression (nth 0 nodes))
+               (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
+      ('object-assoc
+       (eliscript-ir-emitter--require-arity node 3 3)
+       (format "({...((%s) ?? {}), [%s]: %s})"
+               (eliscript-ir-emitter-emit-expression (nth 0 nodes))
+               (eliscript-ir-emitter-emit-expression (nth 1 nodes))
+               (eliscript-ir-emitter-emit-expression (nth 2 nodes))))
       (_ (eliscript-emitter--fail "unknown IR intrinsic: %S" name)))))
 
 (defun eliscript-ir-emitter--emit-object-key (key)

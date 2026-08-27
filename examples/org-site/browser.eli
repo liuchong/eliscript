@@ -4,6 +4,7 @@
   (import "virtual:eliscript-org" articles)
   (import "../../stdlib/sequence.eli" find map)
   (import "../../stdlib/text.eli" strip-prefix)
+  (import "../../stdlib/object.eli" assoc)
   (import "./site.css")
   (import "../../docs/pages/assets/eliscript-logo.png" :default logo-url)
 
@@ -27,7 +28,7 @@
               (progn
                 (set-selected (article-from-location))
                 (js-call browser-window :scrollTo
-                  (object :top 0 :behavior "auto")))))
+                  (assoc (object :top 0) :behavior "auto")))))
            (effect
             (useEffect
               (lambda ()

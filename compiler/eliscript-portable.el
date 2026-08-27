@@ -24,6 +24,7 @@
   '(if when unless progn do while and or not
     + * - / % mod = /= not= < <= > >= 1+ 1-
     eq equal null list vector array car cdr cons nth aref length
+    object-keys object-has? object-assoc
     str funcall apply object get cond lambda fn let let* setq set! quote))
 
 (defconst eliscript-portable--forbidden-operators

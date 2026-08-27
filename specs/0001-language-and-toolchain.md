@@ -326,9 +326,15 @@ same sequence source graph without Vite. See
 [0024-project-builds.md](0024-project-builds.md).
 
 The second standard module implements thirteen portable text operations with
-explicit UTF-16 indexing and no host string methods. It is consumed by both the
-three-module CLI example and the Org React production site. See
+explicit UTF-16 indexing and no host string methods. It is consumed by the
+standard-library CLI example and the Org React production site. See
 [0025-portable-text-library.md](0025-portable-text-library.md).
+
+The third standard module implements eleven immutable object operations above
+three minimal portable primitives for own keys, own-property checks, and
+shallow association. The command-line example now builds a four-module graph,
+and the Org React site consumes the same source through Vite. See
+[0026-portable-object-library.md](0026-portable-object-library.md).
 
 ## Non-goals for the Initial Implementation
 

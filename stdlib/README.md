@@ -24,7 +24,7 @@ Available operations are `reverse`, `map`, `filter`, `reduce`, `concat`,
 declaration is a statically checked `defportable`; closure-only builds include
 only the requested entries and their transitive helpers.
 
-Compile both current modules and their external source maps with:
+Compile all current modules and their external source maps with:
 
 ```sh
 bun run compile:stdlib
@@ -55,7 +55,7 @@ joining, and repetition:
 ```
 
 Indices address ECMAScript UTF-16 code units. Matching is literal and does not
-use host methods or regular expressions. Compile both current modules with
+use host methods or regular expressions. Compile all current modules with
 `bun run compile:stdlib`, or exercise them together with:
 
 ```sh
@@ -65,3 +65,22 @@ bun run dist/project/examples/stdlib-cli/main.mjs
 
 See [specs/0025-portable-text-library.md](../specs/0025-portable-text-library.md)
 for exact semantics, dependency closure, and acceptance evidence.
+
+## Object
+
+`object.eli` exports eleven immutable operations for own keys, property checks,
+shallow association, removal, merging, value transforms, selection, omission,
+and updates:
+
+```elisp
+(import "../../stdlib/object.eli" assoc merge pick)
+
+(pick (assoc (object :name "Eliscript") :runtime "JavaScript")
+      [:name :runtime])
+```
+
+All transforms return ordinary objects and do not mutate their inputs. The
+module is portable and dependency-prunable; selecting `omit` includes only its
+`keys`, `assoc`, and `key-in?` closure. See
+[specs/0026-portable-object-library.md](../specs/0026-portable-object-library.md)
+for primitive semantics, key ordering, complexity, and acceptance evidence.

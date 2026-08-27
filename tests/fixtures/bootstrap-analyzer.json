@@ -21,6 +21,11 @@
       "source": "(defun exercise (target key)\n  (let ((plain 1))\n    (vector\n      (lambda (value) (put target key value))\n      (get target key false)\n      (js-call target :run plain)\n      (object key plain)\n      (quote missing)\n      (js* \"globalThis\"))))\n(export exercise)"
     },
     {
+      "name": "object-primitives",
+      "filename": "objects.eli",
+      "source": "(defun objects (value key)\n  [(object-keys value)\n   (object-has? value key)\n   (object-assoc value key 1)])\n(export objects)"
+    },
+    {
       "name": "portable-transitive-closure",
       "filename": "portable.eli",
       "source": "(defconst step 2)\n(defportable helper (value) (* value step))\n(defportable work (value) (helper value))"

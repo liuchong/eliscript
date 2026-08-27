@@ -65,9 +65,9 @@ names containing `?` while ECMAScript identifiers remain safely munged.
 
 ## Application Integration
 
-The standard-library CLI example imports both `sequence.eli` and `text.eli`.
-The pure Emacs project builder emits a three-module ESM graph with adjacent
-source maps and rewrites both source imports.
+The standard-library CLI example imports `sequence.eli`, `text.eli`, and the
+later `object.eli` module. The pure Emacs project builder emits a four-module
+ESM graph with adjacent source maps and rewrites every source import.
 
 The Org React site imports `strip-prefix`, `map`, and `find` from Eliscript
 source. Hash parsing, article lookup, and list rendering therefore exercise the
@@ -82,12 +82,12 @@ host string and array methods.
   text functions.
 - The fixed-point compiler test compares complete seed and self-hosted output
   for `text.eli`.
-- The project CLI emits and runs sequence, text, and application modules.
+- The project CLI emits and runs sequence, text, object, and application modules.
 - The Org production source map retains both standard-library source files.
 
 ## Next Slice
 
-M6 can proceed to immutable object helpers. The first step should establish the
-smallest portable primitives needed for key enumeration and non-mutating
-updates, because the current core can read object properties but cannot
-discover or copy arbitrary keys without host interop.
+The immutable object slice is implemented in
+[0026-portable-object-library.md](0026-portable-object-library.md). It adds the
+smallest portable key and association primitives, then keeps higher-level
+object policy in Eliscript library code.

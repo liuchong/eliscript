@@ -191,8 +191,9 @@ if [ -z "$ORG_SITE_SCRIPT" ] || [ -z "$ORG_SITE_STYLE" ] || \
 fi
 
 if ! grep -F 'stdlib/sequence.eli' "$ORG_SITE_MAP" >/dev/null || \
-   ! grep -F 'stdlib/text.eli' "$ORG_SITE_MAP" >/dev/null; then
-  printf 'expected sequence and text sources in Org site source map\n' >&2
+   ! grep -F 'stdlib/text.eli' "$ORG_SITE_MAP" >/dev/null || \
+   ! grep -F 'stdlib/object.eli' "$ORG_SITE_MAP" >/dev/null; then
+  printf 'expected standard-library sources in Org site source map\n' >&2
   exit 1
 fi
 

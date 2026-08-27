@@ -29,6 +29,7 @@
   '(if when unless progn do while and or not
     + * - / % mod = /= not= < <= > >= 1+ 1-
     eq equal null list vector array car cdr cons nth aref length
+    object-keys object-has? object-assoc
     new print str funcall apply))
 
 (defvar eliscript-analyzer--filename nil)

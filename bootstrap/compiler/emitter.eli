@@ -461,6 +461,21 @@
         ((= name "length")
          (require-node-arity node 1 1)
          (combine ["((" (emit-expression (nth 0 nodes)) ") ?? []).length"]))
+        ((= name "object-keys")
+         (require-node-arity node 1 1)
+         (combine ["Object.keys((" (emit-expression (nth 0 nodes)) ") ?? {})"]))
+        ((= name "object-has?")
+         (require-node-arity node 2 2)
+         (combine
+           ["Object.prototype.hasOwnProperty.call(("
+            (emit-expression (nth 0 nodes)) ") ?? {}, "
+            (emit-expression (nth 1 nodes)) ")"]))
+        ((= name "object-assoc")
+         (require-node-arity node 3 3)
+         (combine
+           ["({...((" (emit-expression (nth 0 nodes)) ") ?? {}), ["
+            (emit-expression (nth 1 nodes)) "]: "
+            (emit-expression (nth 2 nodes)) "})"]))
         (t (fail (str "unknown IR intrinsic: " name))))))
 
   (defun emit-object-properties (properties)

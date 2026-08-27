@@ -158,11 +158,27 @@
    (equal (eliscript-emitter-emit-expression '(get user :name "unknown"))
           "((user)[\"name\"] ?? \"unknown\")")))
 
+(ert-deftest eliscript-emits-immutable-object-primitives ()
+  (should
+   (equal (eliscript-emitter-emit-expression '(object-keys value))
+          "Object.keys((value) ?? {})"))
+  (should
+   (equal (eliscript-emitter-emit-expression '(object-has? value key))
+          "Object.prototype.hasOwnProperty.call((value) ?? {}, key)"))
+  (should
+   (equal (eliscript-emitter-emit-expression '(object-assoc value key next))
+          "({...((value) ?? {}), [key]: next})")))
+
 (ert-deftest eliscript-rejects-invalid-arity ()
   (should-error (eliscript-emitter-emit-expression '(if t))
                 :type 'eliscript-compile-error)
   (should-error (eliscript-emitter-emit-expression '(object :name))
-                :type 'eliscript-compile-error))
+                :type 'eliscript-compile-error)
+  (dolist (form '((object-keys)
+                  (object-has? value)
+                  (object-assoc value key)))
+    (should-error (eliscript-emitter-emit-expression form)
+                  :type 'eliscript-compile-error)))
 
 (ert-deftest eliscript-handles-empty-list-operations ()
   (should (equal (eliscript-emitter-emit-expression '(car nil))
@@ -318,6 +334,23 @@
     (should (string-match-p
              (regexp-quote
               "[[\"empty?\", empty_QMARK_], [\"slice\", slice]")
+             output))))
+
+(ert-deftest eliscript-standard-library-object-closure-is-portable ()
+  (let* ((source
+          (expand-file-name "stdlib/object.eli" default-directory))
+         (output (eliscript-compile-portable-file source '(omit))))
+    (should (string-match-p "function keys(object)" output))
+    (should (string-match-p "function key_in_QMARK_" output))
+    (should (string-match-p "function omit(object, omitted_keys)" output))
+    (should-not (string-match-p "function map_values" output))
+    (should-not (string-match-p "function update" output))
+    (should (string-match-p
+             (regexp-quote "Object.keys((object) ?? {})")
+             output))
+    (should (string-match-p
+             (regexp-quote
+              "[[\"keys\", keys], [\"assoc\", assoc], [\"key-in?\", key_in_QMARK_], [\"omit\", omit]")
              output))))
 
 (ert-deftest eliscript-portable-functions-reject-non-portable-dependencies ()

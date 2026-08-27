@@ -1,0 +1,32 @@
+(module test.object-usage
+  (import "./object.mjs"
+          keys has? assoc dissoc merge map-values filter-values pick omit update)
+
+  (defconst source
+    (object :name "Eliscript" :count 2 :ready false :empty nil))
+  (defconst associated (assoc source :count 3))
+  (defconst result
+    (object
+      :keys (keys source)
+      :nil-keys (keys nil)
+      :has-name (has? source :name)
+      :has-missing (has? source :missing)
+      :nil-has (has? nil :name)
+      :from-nil (assoc nil :created t)
+      :associated associated
+      :dissociated (dissoc source :name)
+      :dissociated-empty (dissoc (object :only 1) :only)
+      :merged (merge source (object :count 7 :extra "new"))
+      :merged-empty (merge nil nil)
+      :mapped (map-values (lambda (value) (* value 2))
+                          (object :first 2 :second 4))
+      :filtered (filter-values (lambda (value) (not (null value))) source)
+      :picked (pick source [:ready :name :missing])
+      :picked-empty (pick source [:missing])
+      :omitted (omit source [:count :empty])
+      :updated (update source :count (lambda (value) (+ value 5)))
+      :source-unchanged (= (get source :count) 2)
+      :source-has-no-extra (not (has? source :extra))))
+
+  (print (JSON/stringify result))
+  (export result))
