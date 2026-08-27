@@ -7,6 +7,9 @@
 ;;; Code:
 
 (define-error 'eliscript-compile-error "Eliscript compile error")
+(define-error 'eliscript-expand-error
+  "Eliscript macro expansion error"
+  'eliscript-compile-error)
 (define-error 'eliscript-analyze-error
   "Eliscript analysis error"
   'eliscript-compile-error)

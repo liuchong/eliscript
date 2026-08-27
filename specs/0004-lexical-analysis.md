@@ -8,12 +8,12 @@
 
 Eliscript now has an explicit analysis phase between reading and ECMAScript
 emission. The first analyzer validates lexical bindings while returning the
-original forms unchanged. This pass-through boundary preserves the M0 emitter
-and gives later M1 work a stable place for macro expansion, IR construction,
-source locations, and richer diagnostics.
+expanded forms unchanged. This pass-through boundary preserves the M0 emitter
+and gives later M1 work a stable place for IR construction, source locations,
+and richer diagnostics.
 
 ```text
-.eli source -> reader -> lexical analyzer -> ESM emitter
+.eli source -> reader -> macro expander -> lexical analyzer -> ESM emitter
 ```
 
 ## Module Scope
@@ -87,7 +87,6 @@ Located forms and structured diagnostic records remain later M1 work.
 
 ## Deferred Work
 
-- macro expansion before analysis
 - a documented intermediate representation after analysis
 - source spans on reader forms
 - line-and-column compiler diagnostics

@@ -155,10 +155,11 @@ in one scope that map to the same output identifier.
 - JavaScript modules and objects are first-class interop concepts
 - browser and JavaScript host APIs are explicit
 
-User macros, a language IR, source maps, rich source locations, Emacs object
-interop, and full diagnostics are not implemented yet. Later Eliscript versions
-may add forms that are more expressive than Emacs Lisp rather than preserving
-compatibility for its own sake.
+Compile-time user macros are implemented by the trusted seed expander described
+in specification 0005. A language IR, source maps, rich source locations, Emacs
+object interop, and full diagnostics are not implemented yet. Later Eliscript
+versions may add forms that are more expressive than Emacs Lisp rather than
+preserving compatibility for its own sake.
 
 ## Acceptance Evidence
 

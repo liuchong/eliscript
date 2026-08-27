@@ -159,6 +159,78 @@
     (regexp-quote "console.log(JSON.stringify(null));")
     (eliscript-compile-string "(print (JSON/stringify nil))"))))
 
+(ert-deftest eliscript-expander-expands-user-macros ()
+  (let ((output
+         (eliscript-compile-string
+          "(module macro.example
+  (defmacro twice (value) `(+ ,value ,value))
+  (defun double (value) (twice value)))")))
+    (should (string-match-p
+             (regexp-quote "return (value + value);")
+             output))
+    (should-not (string-match-p "defmacro\\|twice" output))))
+
+(ert-deftest eliscript-expander-supports-body-parameters ()
+  (let ((output
+         (eliscript-compile-string
+          "(defmacro begin (&body forms) `(progn ,@forms))
+(defun two () (begin 1 2))")))
+    (should (string-match-p "function two()" output))
+    (should (string-match-p
+             (regexp-quote "    1;\n    return 2;")
+             output))))
+
+(ert-deftest eliscript-expander-can-generate-top-level-declarations ()
+  (let ((output
+         (eliscript-compile-string
+          "(defmacro define-answer () '(defconst answer 42))
+(define-answer)
+(export answer)")))
+    (should (string-match-p "const answer = 42;" output))
+    (should (string-match-p "export {answer};" output))))
+
+(ert-deftest eliscript-expander-preserves-quoted-data ()
+  (let ((output
+         (eliscript-compile-string
+          "(defmacro twice (value) `(+ ,value ,value))
+(defconst syntax '(twice 1))")))
+    (should (string-match-p
+             (regexp-quote "const syntax = [\"twice\", 1];")
+             output))))
+
+(ert-deftest eliscript-expander-isolates-compilations ()
+  (eliscript-compile-string "(defmacro twice (value) `(+ ,value ,value))")
+  (should-error (eliscript-compile-string "(twice 1)")
+                :type 'eliscript-analyze-error))
+
+(ert-deftest eliscript-expander-rejects-runaway-expansion ()
+  (should-error
+   (eliscript-compile-string
+    "(defmacro forever (value) `(forever ,value)) (forever 1)")
+   :type 'eliscript-expand-error))
+
+(ert-deftest eliscript-expander-reports-macro-failures-with-filename ()
+  (let ((error-data
+         (should-error
+          (eliscript-compile-string
+           "(defmacro boom () (error \"bad expansion\")) (boom)"
+           "macro.eli")
+          :type 'eliscript-expand-error)))
+    (should (string-match-p
+             (regexp-quote "macro.eli: macro boom failed: bad expansion")
+             (error-message-string error-data)))))
+
+(ert-deftest eliscript-expander-validates-expanded-code ()
+  (should-error
+   (eliscript-compile-string
+    "(defmacro missing-reference () 'missing) (missing-reference)")
+   :type 'eliscript-analyze-error))
+
+(ert-deftest eliscript-expander-rejects-nested-definitions ()
+  (should-error
+   (eliscript-compile-string "(defun broken () (defmacro nested () 1))")
+   :type 'eliscript-expand-error))
+
 (provide 'eliscript-tests)
 
 ;;; eliscript-tests.el ends here

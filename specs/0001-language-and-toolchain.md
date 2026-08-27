@@ -212,9 +212,9 @@ of the CLI integration test.
 - Define the IR and public compiler diagnostics.
 - Execute emitted modules in a JavaScript test runner.
 
-Lexical binding validation, public analysis errors, output-name collision
-checks, and JavaScript execution are implemented. Macro expansion, located
-forms, the explicit IR, and source maps remain.
+Lexical binding validation, trusted compile-time macro expansion, public
+compiler errors, output-name collision checks, and JavaScript execution are
+implemented. Located forms, the explicit IR, and source maps remain.
 
 ### M2: React
 
@@ -256,7 +256,7 @@ The detailed execution boundary is specified in
 
 ## Open Questions
 
-1. Should user macros be a safe Eliscript subset or unrestricted Emacs Lisp?
+1. How should trusted seed macros migrate to a portable Eliscript evaluator?
 2. Should maps read as `{...}` or use a Lisp-native constructor form?
 3. Should React output use `createElement`, the automatic JSX runtime, or a
    configurable emitter?

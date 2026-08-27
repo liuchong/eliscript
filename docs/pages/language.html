@@ -28,7 +28,7 @@
     <main id="main">
       <header class="doc-hero">
         <div class="doc-hero-inner">
-          <p class="eyebrow">Core language · M0</p>
+          <p class="eyebrow">Core language · M1</p>
           <h1>Lisp-shaped, lexically scoped, ECMAScript-bound.</h1>
           <p class="doc-lede">Eliscript begins near Emacs Lisp, then chooses explicit semantics that fit modules, browsers, and modern JavaScript runtimes.</p>
         </div>
@@ -39,6 +39,7 @@
           <p class="doc-nav-title">On this page</p>
           <a href="#values">Values</a>
           <a href="#forms">Forms</a>
+          <a href="#macros">Macros</a>
           <a href="#modules">Modules</a>
           <a href="#differences">Differences</a>
         </nav>
@@ -103,6 +104,17 @@
                 </div>
               </div>
             </div>
+          </section>
+
+          <section id="macros">
+            <h2>Compile-time macros</h2>
+            <pre><code>(defmacro twice (value)
+  `(+ ,value ,value))
+
+(defun double (value)
+  (twice value))</code></pre>
+            <p><code>defmacro</code> definitions are processed in source order and removed before emission. Backquote, comma, <code>&amp;rest</code>, and <code>&amp;body</code> are supported, and every expanded form is checked by the lexical analyzer.</p>
+            <div class="callout callout-coral"><p>Seed macros are trusted build code executed by Emacs Lisp. They are powerful by design and are not a sandbox for untrusted source.</p></div>
           </section>
 
           <section id="modules">

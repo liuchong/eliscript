@@ -7,16 +7,19 @@
 ;;; Code:
 
 (require 'eliscript-reader)
+(require 'eliscript-expander)
 (require 'eliscript-analyzer)
 (require 'eliscript-emitter)
 
 (defun eliscript-compile-string (source &optional filename)
   "Compile Eliscript SOURCE to an ECMAScript module.
 
-FILENAME is used for reader diagnostics."
+FILENAME is used for compiler diagnostics."
   (eliscript-emit-module
    (eliscript-analyze-module
-    (eliscript-read-string source filename)
+    (eliscript-expand-module
+     (eliscript-read-string source filename)
+     filename)
     filename)))
 
 (defun eliscript-compile-file (input-file &optional output-file)
@@ -26,7 +29,9 @@ Return the generated ECMAScript source."
   (let ((output
          (eliscript-emit-module
           (eliscript-analyze-module
-           (eliscript-read-file input-file)
+           (eliscript-expand-module
+            (eliscript-read-file input-file)
+            input-file)
            input-file))))
     (when output-file
       (make-directory (file-name-directory (expand-file-name output-file)) t)

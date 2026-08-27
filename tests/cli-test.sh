@@ -33,4 +33,25 @@ if ! grep -F "$TEMP_DIR/broken.eli: unbound symbol: missing" \
   exit 1
 fi
 
+cat > "$TEMP_DIR/macro.eli" <<'EOF'
+(module macro.example
+  (defmacro twice (value) `(+ ,value ,value))
+  (print (twice 21)))
+EOF
+
+"$PROJECT_DIR/bin/eliscript" \
+  --output "$TEMP_DIR/macro.mjs" \
+  "$TEMP_DIR/macro.eli"
+
+if grep -F 'defmacro' "$TEMP_DIR/macro.mjs" >/dev/null; then
+  printf 'compile-time macro leaked into generated module\n' >&2
+  exit 1
+fi
+
+MACRO_OUTPUT=$(bun run "$TEMP_DIR/macro.mjs")
+if [ "$MACRO_OUTPUT" != '42' ]; then
+  printf 'expected macro output 42, got: %s\n' "$MACRO_OUTPUT" >&2
+  exit 1
+fi
+
 printf 'CLI and Bun execution test passed\n'

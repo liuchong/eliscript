@@ -91,6 +91,7 @@ Implemented forms include:
 - `if`, `when`, `unless`, `cond`, `progn`, `while`, `and`, and `or`
 - `setq`, arithmetic, comparisons, and basic list/vector operations
 - ESM `module`, `import`, `export`, and `export-default`
+- compile-time `defmacro` with backquote, `&rest`, and `&body`
 - `get`, `put`, `js-call`, `new`, and explicit `js*` interop
 
 Eliscript already differs deliberately from Emacs Lisp: it is lexically scoped,
@@ -118,11 +119,12 @@ tools/                   Optional integrations and developer utilities
 The current seed compiler is intentionally direct:
 
 ```text
-.eli source -> Emacs reader -> lexical analyzer -> ESM emitter -> Bun or browser
+.eli source -> Emacs reader -> macro expander -> lexical analyzer -> ESM emitter
+            -> Bun or browser
 ```
 
-The next compiler stage adds macro expansion before analysis, then replaces the
-analyzer's pass-through output with a language-neutral IR and source maps.
+The next compiler stage adds located forms, then replaces the analyzer's
+pass-through output with a language-neutral IR and source maps.
 
 ## Bootstrap Strategy
 
@@ -184,17 +186,21 @@ Current evidence:
 - A lexical analyzer resolves module, function, and local bindings before
   emission; it rejects undeclared names, immutable assignment, duplicate
   declarations, invalid exports, and output identifier collisions.
-- Twenty ERT tests cover reading, analysis, core emission, modules,
-  truthiness, errors, and JavaScript interop.
+- Trusted compile-time macros expand sequentially before analysis, support
+  backquote and body parameters, and never appear in generated modules.
+- Twenty-nine ERT tests cover reading, macro expansion, analysis, core
+  emission, modules, truthiness, errors, and JavaScript interop.
 - A CLI integration test compares generated output with a checked-in snapshot.
 - Bun 1.4 executes the generated module and verifies recursion, mutation,
   loops, higher-order functions, objects, arrays, and exports.
 
-The next M1 slice adds macro expansion and located forms, then introduces an
-explicit IR and source maps. React and Org publishing remain later milestones.
+The next M1 slice adds located forms, then introduces an explicit IR and source
+maps. React and Org publishing remain later milestones.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
-implemented analyzer contract.
+implemented analyzer contract and
+[specs/0005-compile-time-macros.md](specs/0005-compile-time-macros.md) for the
+seed macro model.
 
 ## License
 
