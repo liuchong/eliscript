@@ -578,6 +578,24 @@
       "react/jsx-runtime"
       (eliscript-compile-string "(defun identity (value) value)")))))
 
+(ert-deftest eliscript-react-emits-key-as-a-runtime-argument ()
+  (let ((output
+         (eliscript-compile-string
+          "(defun item (slug)
+  (jsx :li (object :key slug :className \"entry\") slug))"
+          "react-key.eli")))
+    (should (string-match-p
+             (regexp-quote
+              "__eliscript_react_jsx_runtime.jsx(\"li\"")
+             output))
+    (should (string-match-p
+             (regexp-quote "\"className\": \"entry\"")
+             output))
+    (should (string-match-p
+             (regexp-quote "children: slug}, slug)")
+             output))
+    (should-not (string-match-p "\"key\":" output))))
+
 (ert-deftest eliscript-react-validates-jsx-and-internal-bindings ()
   (should-error (eliscript-compile-string "(jsx :div)")
                 :type 'eliscript-analyze-error)

@@ -7,4 +7,6 @@ Compiler behavior is tested from Emacs in batch mode. Source fixtures belong in
 ESM with its snapshot, validates and decodes Source Map v3 output, and executes
 ordinary, source-mapped, and React server-rendered modules with Bun. It also
 tests the Vite transform adapter and builds the browser counter with bundled
-Eliscript source maps.
+Eliscript source maps. Org publishing tests cover metadata, deterministic HTML,
+draft and duplicate handling, the watched Vite content module, direct ESM
+execution, and the production Org site bundle.

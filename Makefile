@@ -3,8 +3,9 @@ BUN ?= bun
 
 .PHONY: test
 test:
-	$(EMACS) --batch -Q -L compiler -L tests \
+	$(EMACS) --batch -Q -L compiler -L tools/org -L tests \
 		-l tests/eliscript-tests.el \
+		-l tests/eliscript-org-tests.el \
 		-f ert-run-tests-batch-and-exit
-	$(BUN) test tests/vite-plugin.test.mjs
+	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh

@@ -42,6 +42,12 @@ lexical resolution:
 object. Explicit child forms replace any `children` property supplied by that
 object. With no explicit child, a pre-existing `children` property is retained.
 
+A static `key` property in an object-literal props form is removed from the
+props object and emitted as the automatic runtime's third argument. This
+matches React's runtime contract and avoids spreading `key` into props. When
+the same object contains multiple static `key` properties, the final value
+wins, consistent with ordinary object-literal property ordering.
+
 `fragment` accepts zero or more children:
 
 ```elisp
@@ -91,7 +97,8 @@ The synthetic runtime import has no source mapping.
 
 - IR tests assert dedicated element and fragment nodes and retained spans.
 - Emitter tests cover host elements, imported components, props, children,
-  events, fragments, `jsx`/`jsxs` selection, and conditional runtime imports.
+  events, fragments, React keys, `jsx`/`jsxs` selection, and conditional runtime
+  imports.
 - Diagnostic tests reject malformed forms, unresolved component names, nested
   `defcomponent`, and source names using the compiler-reserved prefix.
 - The React counter compiles through the public CLI with a source map and is

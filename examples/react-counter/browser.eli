@@ -5,10 +5,13 @@
   (import "./counter.css")
   (import "../../docs/pages/assets/eliscript-logo.png" :default logo-url)
 
-  (defconst mount-node (document/getElementById "app"))
-  (defconst root (createRoot mount-node))
+(defconst mount-node (document/getElementById "app"))
+(defconst root
+  (or (get mount-node :eliscriptRoot)
+      (createRoot mount-node)))
+(put mount-node :eliscriptRoot root)
 
-  (js-call root :render
+(js-call root :render
     (jsx StrictMode nil
       (jsx :main (object :className "demo-shell")
         (jsx :header (object :className "demo-header")

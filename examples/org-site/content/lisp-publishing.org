@@ -1,0 +1,25 @@
+#+TITLE: A Lisp-shaped publishing pipeline
+#+DATE: 2026-08-24
+#+SLUG: lisp-publishing-pipeline
+#+DESCRIPTION: Org content, deterministic modules, and a React interface written in Eliscript.
+#+FILETAGS: publishing, react, lisp
+
+A static site does not need a preassembled blog program. It needs reliable
+content data, a rendering target, and enough language power to shape the
+experience around the writing.
+
+* The path from Org to the browser
+
+1. Emacs reads article metadata and exports trusted Org body HTML.
+2. The publisher produces deterministic ESM data.
+3. Vite exposes that data as a watched virtual module.
+4. An Eliscript component renders the final interface with React.
+
+The same module can also be generated from the command line and consumed by
+another bundler, a test runner, or a browser import map.
+
+* Custom by construction
+
+Navigation, typography, article layout, interaction, and deployment remain
+ordinary application code. Org Mode supplies the authoring model, not a fixed
+theme or page hierarchy.

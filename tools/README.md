@@ -7,3 +7,6 @@ Nothing in this directory should be required by the compiler core.
 `vite/` contains the implemented `.eli` transform adapter. It invokes the
 public compiler, returns JavaScript and Source Map v3 data to Vite, and composes
 with the official React plugin for Fast Refresh.
+
+`org/` contains the pure Emacs Org-to-ESM publisher and its Vite virtual-module
+adapter. Org remains the content source; generated modules are build artifacts.

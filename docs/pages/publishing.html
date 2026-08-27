@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Compile Org articles with Emacs and render them in a custom Eliscript React site.">
+    <meta name="theme-color" content="#f2f0e8">
+    <title>Publishing · Eliscript</title>
+    <link rel="icon" type="image/png" href="assets/favicon.png">
+    <link rel="apple-touch-icon" href="assets/eliscript-logo.png">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="nav-shell" aria-label="Primary navigation">
+        <a class="brand" href="../index.html"><img class="brand-mark" src="assets/eliscript-logo.png" alt=""><span>Eliscript</span></a>
+        <div class="nav-links">
+          <a href="getting-started.html">Start</a>
+          <a href="language.html">Language</a>
+          <a class="nav-optional" href="publishing.html" aria-current="page">Publishing</a>
+          <a class="nav-optional" href="roadmap.html">Roadmap</a>
+          <a href="https://github.com/liuchong/eliscript">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <header class="doc-hero">
+        <div class="doc-hero-inner">
+          <p class="eyebrow">Org publishing · M3</p>
+          <h1>Write in Org. Design the site without limits.</h1>
+          <p class="doc-lede">Emacs compiles article metadata and HTML into deterministic ESM. Eliscript and React own the interface, with no blog framework between them.</p>
+        </div>
+      </header>
+
+      <div class="doc-shell">
+        <nav class="doc-nav" aria-label="On this page">
+          <p class="doc-nav-title">On this page</p>
+          <a href="#pipeline">Pipeline</a>
+          <a href="#metadata">Metadata</a>
+          <a href="#module">Module</a>
+          <a href="#vite">Vite</a>
+          <a href="#site">Custom site</a>
+        </nav>
+
+        <article class="doc-content">
+          <section id="pipeline">
+            <h2>A publishing compiler, not a theme</h2>
+            <pre><code>content/*.org
+  → Emacs + ox-html
+  → deterministic article ESM
+  → Eliscript React application
+  → static Vite bundle</code></pre>
+            <p>The Org adapter is optional and lives outside the language compiler. Direct export needs only Emacs; Vite and React enter when the data module becomes a browser application.</p>
+            <div class="callout"><p>The output is ordinary data and HTML. Layout, navigation, interaction, typography, and deployment remain application decisions.</p></div>
+          </section>
+
+          <section id="metadata">
+            <h2>Article metadata</h2>
+            <pre><code>#+TITLE: The Compiler Is the Publishing System
+#+DATE: 2026-08-28
+#+SLUG: compiler-publishing
+#+DESCRIPTION: One programmable path from Org to React.
+#+FILETAGS: :emacs:compiler:react:
+#+DRAFT: false
+
+* A stable section
+
+The body is ordinary Org.</code></pre>
+            <table class="fact-table">
+              <thead><tr><th>Field</th><th>Contract</th></tr></thead>
+              <tbody>
+                <tr><td><code>TITLE</code></td><td>Required, non-empty display title</td></tr>
+                <tr><td><code>DATE</code></td><td>Required real date in <code>YYYY-MM-DD</code> form</td></tr>
+                <tr><td><code>SLUG</code></td><td>Optional stable identity; filename is the fallback</td></tr>
+                <tr><td><code>DESCRIPTION</code></td><td>Optional summary for article lists</td></tr>
+                <tr><td><code>FILETAGS</code></td><td>Optional normalized, deduplicated tags</td></tr>
+                <tr><td><code>DRAFT</code></td><td>Optional publication filter</td></tr>
+              </tbody>
+            </table>
+            <p>Missing heading IDs are assigned deterministically. Explicit Org <code>CUSTOM_ID</code> properties stay untouched.</p>
+          </section>
+
+          <section id="module">
+            <h2>Export a data module</h2>
+            <pre><code>./bin/eliscript-org \
+  --output dist/articles.mjs \
+  content/</code></pre>
+            <p>The generated module exports one date-sorted <code>articles</code> array containing the slug, title, date, description, tags, draft state, source path, and exported HTML. Repeated builds from the same inputs are byte-identical.</p>
+            <div class="callout callout-coral"><p>Org HTML is trusted build output and is rendered directly by the example. Content from untrusted authors needs a separate sanitization boundary.</p></div>
+          </section>
+
+          <section id="vite">
+            <h2>Use Org as a Vite module</h2>
+            <pre><code>import { eliscriptOrg } from "./tools/org/vite-plugin.mjs";
+
+export default {
+  plugins: [
+    eliscriptOrg({ contentDirectory: "content" })
+  ]
+};</code></pre>
+            <p>Application code imports <code>virtual:eliscript-org</code>. The adapter recursively watches Org sources, rebuilds the deterministic module, and invalidates it when content changes.</p>
+          </section>
+
+          <section id="site">
+            <h2>Run the custom site</h2>
+            <pre><code>bun run dev:org-site
+bun run build:org-site</code></pre>
+            <p>The example application is written in Eliscript and compiles through the same React and Vite path as any other browser program. It implements responsive article navigation, hash routes, tags, and trusted Org HTML rendering. Drafts do not enter the production bundle.</p>
+            <p><a class="button" href="https://github.com/liuchong/eliscript/tree/master/examples/org-site">Inspect the example</a></p>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Publishing</p><div class="footer-links"><a href="getting-started.html">Start</a><a href="language.html">Language</a><a href="roadmap.html">Roadmap</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><span>© <span data-year>2026</span></span></div></div></footer>
+  </body>
+</html>

@@ -19,6 +19,7 @@
         <div class="nav-links">
           <a href="getting-started.html" aria-current="page">Start</a>
           <a href="language.html">Language</a>
+          <a class="nav-optional" href="publishing.html">Publishing</a>
           <a class="nav-optional" href="roadmap.html">Roadmap</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
         </div>
@@ -41,6 +42,7 @@
           <a href="#compile">Compile</a>
           <a href="#run">Run</a>
           <a href="#react">React</a>
+          <a href="#publishing">Publishing</a>
           <a href="#test">Test</a>
         </nav>
 
@@ -89,11 +91,21 @@ bun run build:react-counter</code></pre>
             <p>The Vite adapter compiles <code>.eli</code> modules, composes source maps, handles CSS and image assets, and enables React Fast Refresh.</p>
           </section>
 
+          <section id="publishing">
+            <h2>Publish Org content</h2>
+            <p>Export the example articles through Emacs as a deterministic ESM data module:</p>
+            <pre><code>bun run org:export</code></pre>
+            <p>Run the fully custom React publishing site or create its static production bundle:</p>
+            <pre><code>bun run dev:org-site
+bun run build:org-site</code></pre>
+            <p>The application itself is written in Eliscript. Vite exposes the Org directory as <code>virtual:eliscript-org</code> and reloads article changes during development.</p>
+          </section>
+
           <section id="test">
             <h2>Run the test suite</h2>
             <pre><code>bun run test</code></pre>
             <p>This runs the Emacs ERT suite, Vite adapter tests, public CLI fixtures, deterministic snapshots, source-map validation, runtime execution, React server rendering, and a production browser build.</p>
-            <div class="callout callout-coral"><p>M2 React is complete: component compilation, browser mounting, source-mapped Vite builds, and state-preserving Fast Refresh are active. Org publishing is next.</p></div>
+            <div class="callout callout-coral"><p>M3 publishing is complete: pure Emacs Org export, deterministic content modules, live Vite updates, and a custom Eliscript React site are active. Self-hosting is next.</p></div>
           </section>
         </article>
       </div>

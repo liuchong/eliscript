@@ -1,0 +1,31 @@
+#+TITLE: Emacs is the compiler host
+#+DATE: 2026-08-28
+#+SLUG: emacs-compiler-host
+#+DESCRIPTION: Keeping the publishing source, compiler, and editor in one programmable environment.
+#+FILETAGS: :emacs:compiler:publishing:
+
+Eliscript starts with a deliberately practical claim: Emacs can be more than
+the editor around a build. It can host the reader, macro expander, analyzer,
+and the publishing pipeline itself.
+
+* One source of truth
+
+An Org article remains the authored document. The publisher extracts explicit
+metadata and exports the body through Org's own HTML backend. React consumes a
+plain ECMAScript module; generated files never become authoring surfaces.
+
+#+begin_src elisp
+(eliscript-org-publish-directory
+  "content"
+  "dist/articles.mjs")
+#+end_src
+
+* A narrow boundary
+
+The compiler core does not depend on Org, Vite, or React. Each layer meets the
+next through a small inspectable artifact, so the site can stay highly custom
+without turning the language into a blog framework.
+
+#+begin_quote
+Programmability is most useful when the boundaries remain visible.
+#+end_quote

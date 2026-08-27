@@ -229,11 +229,18 @@ hooks, props, children, events, conditional children, fragments, an imported
 React component, server rendering, browser mounting, production bundling, and
 state-preserving React Fast Refresh through the optional Vite adapter.
 
-### M3: Publishing
+### M3: Publishing (Complete)
 
 - Add an Org publishing adapter.
 - Compile article metadata and content into application-consumable modules.
 - Build a fully custom static React site without introducing a blog framework.
+
+Completed on 2026-08-28. A pure Emacs adapter validates Org metadata, exports
+trusted HTML with stable heading IDs, filters drafts, detects duplicate slugs,
+and emits deterministic ESM. A Vite virtual module watches article sources and
+feeds a responsive React publishing site whose application code is written in
+Eliscript. The command-line exporter and production bundle are covered by the
+integration suite. See [0012-org-publishing.md](0012-org-publishing.md).
 
 ### M4: Bootstrap
 
@@ -269,8 +276,7 @@ The detailed execution boundary is specified in
    keys?
 4. Which semantics should distinguish `nil`, JavaScript `null`, and
    `undefined`?
-5. Should Org integration emit Eliscript modules, compiler IR, or plain data?
-6. Can incremental compilation stay deterministic when macros read files?
+5. Can incremental compilation stay deterministic when macros read files?
 
 These questions should be resolved by small executable examples and follow-up
 numbered specifications rather than by expanding this document indefinitely.

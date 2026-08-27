@@ -9,6 +9,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'seq)
 (require 'subr-x)
 (require 'eliscript-emitter)
 (require 'eliscript-ir)
@@ -376,11 +377,9 @@
    ((symbolp key) (eliscript-emitter--json-string (symbol-name key)))
    (t (eliscript-emitter--fail "invalid literal object key: %S" key))))
 
-(defun eliscript-ir-emitter--emit-object (node)
-  "Emit object literal NODE."
-  (format
-   "({%s})"
-   (mapconcat
+(defun eliscript-ir-emitter--emit-object-properties (properties)
+  "Emit object literal PROPERTIES without surrounding braces."
+  (mapconcat
     (lambda (property)
       (let ((children (eliscript-ir-emitter--children property)))
         (eliscript-ir-emitter--locate
@@ -393,8 +392,15 @@
                    (eliscript-ir-emitter--emit-object-key
                     (eliscript-ir-node-value property))
                    (eliscript-ir-emitter-emit-expression (car children)))))))
-    (eliscript-ir-emitter--children node)
-    ", ")))
+    properties
+    ", "))
+
+(defun eliscript-ir-emitter--emit-object (node)
+  "Emit object literal NODE."
+  (format
+   "({%s})"
+   (eliscript-ir-emitter--emit-object-properties
+    (eliscript-ir-emitter--children node))))
 
 (defun eliscript-ir-emitter--emit-property-key (node)
   "Emit property-key NODE for bracket-style access."
@@ -436,15 +442,40 @@
          (if (keywordp value) (substring (symbol-name value) 1) value))
       (eliscript-ir-emitter-emit-expression node))))
 
-(defun eliscript-ir-emitter--emit-react-props (props children)
-  "Emit React PROPS with explicit CHILDREN merged in."
+(defun eliscript-ir-emitter--react-key-property-p (property)
+  "Return non-nil when PROPERTY is a static React key property."
+  (and (eq (eliscript-ir-node-kind property) 'object-property)
+       (not (eliscript-ir-property property :computed))
+       (let ((key (eliscript-ir-node-value property)))
+         (string-equal
+          (cond
+           ((keywordp key) (substring (symbol-name key) 1))
+           ((symbolp key) (symbol-name key))
+           ((stringp key) key)
+           (t ""))
+          "key"))))
+
+(defun eliscript-ir-emitter--emit-react-props
+    (props children &optional omitted-properties)
+  "Emit React PROPS with explicit CHILDREN merged in.
+
+Exclude OMITTED-PROPERTIES from an object-literal props node."
   (let* ((empty-props
           (or (null props)
               (and (eq (eliscript-ir-node-kind props) 'literal)
                    (null (eliscript-ir-node-value props)))))
          (props-output
           (unless empty-props
-            (eliscript-ir-emitter-emit-expression props)))
+            (if (and omitted-properties
+                     (eq (eliscript-ir-node-kind props) 'object-literal))
+                (format
+                 "({%s})"
+                 (eliscript-ir-emitter--emit-object-properties
+                  (seq-remove
+                   (lambda (property)
+                     (memq property omitted-properties))
+                   (eliscript-ir-emitter--children props))))
+              (eliscript-ir-emitter-emit-expression props))))
          (children-output
           (pcase (length children)
             (0 nil)
@@ -467,14 +498,27 @@
               (concat eliscript-ir-emitter--react-runtime-binding ".Fragment")
             (eliscript-ir-emitter--emit-react-type (pop children))))
          (props (unless fragment (pop children)))
+         (key-properties
+          (and props
+               (eq (eliscript-ir-node-kind props) 'object-literal)
+               (seq-filter
+                #'eliscript-ir-emitter--react-key-property-p
+                (eliscript-ir-emitter--children props))))
+         (key-property (car (last key-properties)))
+         (key-output
+          (and key-property
+               (eliscript-ir-emitter-emit-expression
+                (car (eliscript-ir-emitter--children key-property)))))
          (runtime-function (if (> (length children) 1) "jsxs" "jsx")))
-    (format "%s.%s(%s, %s)"
+    (format "%s.%s(%s, %s%s)"
             eliscript-ir-emitter--react-runtime-binding
             runtime-function
             type
             (if fragment
                 (eliscript-ir-emitter--emit-react-props nil children)
-              (eliscript-ir-emitter--emit-react-props props children)))))
+              (eliscript-ir-emitter--emit-react-props
+               props children key-properties))
+            (if key-output (format ", %s" key-output) ""))))
 
 (defun eliscript-ir-emitter-emit-expression (node)
   "Emit expression IR NODE as ECMAScript."

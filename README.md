@@ -61,6 +61,16 @@ bun run dev:react-counter
 
 Create a source-mapped production bundle with `bun run build:react-counter`.
 
+Export Org articles as a deterministic ESM module or run the complete custom
+publishing example:
+
+```sh
+bun run org:export
+bun run dev:org-site
+```
+
+Create its static production bundle with `bun run build:org-site`.
+
 ## Why
 
 Emacs Lisp is a productive language for editing, automation, macros, and
@@ -135,9 +145,11 @@ stdlib/                  Portable Eliscript standard library
 examples/                End-to-end example applications
   basic/                 Executable language example
   react-counter/         First React compilation target
+  org-site/              Org-powered custom React publishing site
 specs/                   Numbered language and toolchain decisions
 tests/                   Compiler fixtures and output snapshots
 tools/                   Optional integrations and developer utilities
+  org/                   Pure Emacs Org exporter and Vite adapter
   vite/                  Vite transform adapter for .eli modules
 ```
 
@@ -204,7 +216,8 @@ portable execution model. The exact implemented subset is recorded in
 ## Status
 
 The first Emacs Lisp seed compiler is implemented and usable from the command
-line. The M0 vertical slice, M1 language core, and M2 React target are complete.
+line. The M0 vertical slice, M1 language core, M2 React target, and M3 Org
+publishing target are complete.
 
 Current evidence:
 
@@ -231,17 +244,25 @@ Current evidence:
 - A pure `.eli` browser entry mounts the counter with `react-dom/client`; the
   Vite adapter preserves compiler source maps and composes with React Fast
   Refresh while keeping Vite outside the compiler core.
-- Forty-one ERT tests cover reading, locations, macro expansion, analysis, IR
-  lowering, direct emission, source maps, React, modules, errors, and interop.
-- Three Bun tests cover the Vite transform, source-map handoff, file filtering,
-  and development-mode React Refresh boundaries.
+- A pure Emacs Org adapter validates article metadata, exports trusted HTML,
+  assigns stable heading IDs, filters drafts, detects duplicate slugs, and
+  emits deterministic ESM sorted by publication date.
+- The Org Vite adapter exposes content as `virtual:eliscript-org`, watches
+  nested `.org` sources, and invalidates the module during development.
+- The custom Org site is written in Eliscript and proves React hooks, article
+  navigation, responsive rendering, content HMR, and production bundling.
+- Forty-five ERT tests cover reading, locations, macro expansion, analysis, IR
+  lowering, direct emission, source maps, React, Org publishing, modules,
+  errors, and interop.
+- Six Bun tests cover the compiler and Org Vite adapters, source-map handoff,
+  file filtering, development-mode React Refresh, and Org module invalidation.
 - A CLI integration test compares generated output with a checked-in snapshot.
 - Bun 1.4 executes generated modules and verifies recursion, mutation, loops,
   higher-order functions, objects, arrays, exports, React server rendering, and
-  a production Vite bundle containing both `.eli` sources in its map.
+  production Vite bundles, and deterministic Org publishing.
 
-The next milestone starts the Org publishing adapter and uses the React target
-to build a fully custom static site.
+The next milestone starts the bootstrap: portable compiler phases move into
+Eliscript on the path to a reproducible self-hosted compiler.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -257,7 +278,9 @@ direct ECMAScript backend, and
 and [specs/0010-react-elements.md](specs/0010-react-elements.md) for React
 element compilation, and
 [specs/0011-vite-adapter.md](specs/0011-vite-adapter.md) for browser development
-and production builds.
+and production builds, and
+[specs/0012-org-publishing.md](specs/0012-org-publishing.md) for deterministic
+Org content modules and the custom React publishing site.
 
 ## License
 

@@ -7,3 +7,7 @@ expected generated JavaScript, and the smallest environment needed to run it.
 exercises components, hooks, props, children, events, fragments, conditional
 children, automatic JSX runtime emission, server rendering, browser mounting,
 Vite production builds, and React Fast Refresh.
+
+`org-site/` adds the publishing vertical slice: Org metadata and body export,
+draft filtering, a watched ESM content module, and a fully custom React reading
+interface written in Eliscript.
