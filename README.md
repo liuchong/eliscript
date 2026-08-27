@@ -53,6 +53,14 @@ bun run compile:react-counter
 bun run react-counter
 ```
 
+Run the same component as an interactive browser application with Vite:
+
+```sh
+bun run dev:react-counter
+```
+
+Create a source-mapped production bundle with `bun run build:react-counter`.
+
 ## Why
 
 Emacs Lisp is a productive language for editing, automation, macros, and
@@ -130,6 +138,7 @@ examples/                End-to-end example applications
 specs/                   Numbered language and toolchain decisions
 tests/                   Compiler fixtures and output snapshots
 tools/                   Optional integrations and developer utilities
+  vite/                  Vite transform adapter for .eli modules
 ```
 
 ## Compilation Pipeline
@@ -195,8 +204,7 @@ portable execution model. The exact implemented subset is recorded in
 ## Status
 
 The first Emacs Lisp seed compiler is implemented and usable from the command
-line. The M0 vertical slice and M1 language core are complete. M2 React work is
-in progress.
+line. The M0 vertical slice, M1 language core, and M2 React target are complete.
 
 Current evidence:
 
@@ -220,14 +228,20 @@ Current evidence:
   `react/jsx-runtime`; React-free modules receive no React import.
 - The executable counter proves components, props and children, a hook, an
   event handler, conditional children, fragments, and an imported component.
+- A pure `.eli` browser entry mounts the counter with `react-dom/client`; the
+  Vite adapter preserves compiler source maps and composes with React Fast
+  Refresh while keeping Vite outside the compiler core.
 - Forty-one ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, modules, errors, and interop.
+- Three Bun tests cover the Vite transform, source-map handoff, file filtering,
+  and development-mode React Refresh boundaries.
 - A CLI integration test compares generated output with a checked-in snapshot.
 - Bun 1.4 executes generated modules and verifies recursion, mutation, loops,
-  higher-order functions, objects, arrays, exports, and React server rendering.
+  higher-order functions, objects, arrays, exports, React server rendering, and
+  a production Vite bundle containing both `.eli` sources in its map.
 
-The next M2 slice mounts the counter in a browser and adds the optional Vite
-adapter. Org publishing remains a later milestone.
+The next milestone starts the Org publishing adapter and uses the React target
+to build a fully custom static site.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -241,7 +255,9 @@ for the explicit IR contract, and
 direct ECMAScript backend, and
 [specs/0009-source-maps.md](specs/0009-source-maps.md) for Source Map v3 output,
 and [specs/0010-react-elements.md](specs/0010-react-elements.md) for React
-element compilation.
+element compilation, and
+[specs/0011-vite-adapter.md](specs/0011-vite-adapter.md) for browser development
+and production builds.
 
 ## License
 

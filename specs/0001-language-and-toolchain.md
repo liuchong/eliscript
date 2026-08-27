@@ -217,17 +217,17 @@ expansion, recursively located forms, filename/line/column diagnostics,
 explicit IR lowering, direct IR emission, output-name collision checks,
 external Source Map v3 output, and JavaScript execution are implemented.
 
-### M2: React (In Progress)
+### M2: React (Complete)
 
 - Add the React library and component macros.
 - Compile and run the counter example.
 - Add an optional Vite adapter with fast refresh where feasible.
 
-The first slice landed on 2026-08-28. `defcomponent`, `jsx`, and `fragment`
-compile through dedicated IR nodes to the automatic JSX runtime. The counter
-example exercises hooks, props, children, events, conditional children,
-fragments, an imported React component, and server rendering. Browser mounting
-and the Vite adapter remain.
+Completed on 2026-08-28. `defcomponent`, `jsx`, and `fragment` compile through
+dedicated IR nodes to the automatic JSX runtime. The counter example exercises
+hooks, props, children, events, conditional children, fragments, an imported
+React component, server rendering, browser mounting, production bundling, and
+state-preserving React Fast Refresh through the optional Vite adapter.
 
 ### M3: Publishing
 

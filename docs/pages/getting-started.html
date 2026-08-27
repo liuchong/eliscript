@@ -79,17 +79,21 @@ bun --version</code></pre>
           </section>
 
           <section id="react">
-            <h2>Compile the React counter</h2>
+            <h2>Run the React counter</h2>
             <pre><code>bun run compile:react-counter
 bun run react-counter</code></pre>
             <p>The first command emits a source-mapped ESM module through <code>react/jsx-runtime</code>. The second renders it with <code>react-dom/server</code>, proving the generated element tree without a bundler.</p>
+            <p>Start the interactive browser application or create its production bundle:</p>
+            <pre><code>bun run dev:react-counter
+bun run build:react-counter</code></pre>
+            <p>The Vite adapter compiles <code>.eli</code> modules, composes source maps, handles CSS and image assets, and enables React Fast Refresh.</p>
           </section>
 
           <section id="test">
             <h2>Run the test suite</h2>
             <pre><code>bun run test</code></pre>
-            <p>This runs the Emacs ERT suite, compiles fixtures through the public CLI, compares deterministic output, validates source maps, executes core modules, and server-renders the React counter in Bun.</p>
-            <div class="callout callout-coral"><p>M2 React is in progress: element compilation and server rendering are active. Browser mounting, Vite integration, and fast refresh come next.</p></div>
+            <p>This runs the Emacs ERT suite, Vite adapter tests, public CLI fixtures, deterministic snapshots, source-map validation, runtime execution, React server rendering, and a production browser build.</p>
+            <div class="callout callout-coral"><p>M2 React is complete: component compilation, browser mounting, source-mapped Vite builds, and state-preserving Fast Refresh are active. Org publishing is next.</p></div>
           </section>
         </article>
       </div>

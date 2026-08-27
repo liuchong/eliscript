@@ -7,7 +7,10 @@
     "compile:example": "./bin/eliscript --output dist/basic.mjs examples/basic/main.eli",
     "example": "bun run dist/basic.mjs",
     "compile:react-counter": "./bin/eliscript --source-map --output dist/react-counter.mjs examples/react-counter/main.eli",
-    "react-counter": "bun run examples/react-counter/render.mjs"
+    "react-counter": "bun run examples/react-counter/render.mjs",
+    "dev:react-counter": "vite --config examples/react-counter/vite.config.mjs",
+    "build:react-counter": "vite build --config examples/react-counter/vite.config.mjs",
+    "preview:react-counter": "vite preview --config examples/react-counter/vite.config.mjs"
   },
   "engines": {
     "bun": ">=1.4.0"
@@ -15,5 +18,9 @@
   "dependencies": {
     "react": "19.2.8",
     "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.1.0",
+    "vite": "8.2.2"
   }
 }

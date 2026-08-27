@@ -101,6 +101,35 @@ if [ "$REACT_OUTPUT" != "$EXPECTED_REACT_OUTPUT" ]; then
   exit 1
 fi
 
+VITE_OUTPUT="$TEMP_DIR/vite-build"
+ELISCRIPT_BUILD_OUT_DIR="$VITE_OUTPUT" \
+  bun run --cwd "$PROJECT_DIR" build:react-counter
+
+if [ ! -f "$VITE_OUTPUT/index.html" ]; then
+  printf 'expected Vite index output\n' >&2
+  exit 1
+fi
+
+VITE_SCRIPT=$(find "$VITE_OUTPUT/assets" -name 'index-*.js' -print -quit)
+VITE_STYLE=$(find "$VITE_OUTPUT/assets" -name 'index-*.css' -print -quit)
+VITE_MAP=$(find "$VITE_OUTPUT/assets" -name 'index-*.js.map' -print -quit)
+
+if [ -z "$VITE_SCRIPT" ] || [ -z "$VITE_STYLE" ] || [ -z "$VITE_MAP" ]; then
+  printf 'expected Vite JavaScript, CSS, and source-map assets\n' >&2
+  exit 1
+fi
+
+if ! grep -F 'Interactive counter' "$VITE_SCRIPT" >/dev/null; then
+  printf 'expected compiled browser counter in Vite bundle\n' >&2
+  exit 1
+fi
+
+if ! grep -F 'examples/react-counter/browser.eli' "$VITE_MAP" >/dev/null || \
+   ! grep -F 'examples/react-counter/main.eli' "$VITE_MAP" >/dev/null; then
+  printf 'expected Eliscript sources in bundled source map\n' >&2
+  exit 1
+fi
+
 printf '%s\n' '(defun broken () missing)' > "$TEMP_DIR/broken.eli"
 if "$PROJECT_DIR/bin/eliscript" "$TEMP_DIR/broken.eli" \
   > "$TEMP_DIR/broken.out" 2> "$TEMP_DIR/broken.err"; then

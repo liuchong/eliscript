@@ -1,0 +1,37 @@
+(module example.react-counter.browser
+  (import "react" StrictMode)
+  (import "react-dom/client" createRoot)
+  (import "./main.eli" :default Counter)
+  (import "./counter.css")
+  (import "../../docs/pages/assets/eliscript-logo.png" :default logo-url)
+
+  (defconst mount-node (document/getElementById "app"))
+  (defconst root (createRoot mount-node))
+
+  (js-call root :render
+    (jsx StrictMode nil
+      (jsx :main (object :className "demo-shell")
+        (jsx :header (object :className "demo-header")
+          (jsx :span (object :className "logo-light")
+            (jsx :img
+              (object :className "demo-logo"
+                      :src logo-url
+                      :alt "Eliscript")))
+          (jsx :span (object :className "wordmark") "Eliscript")
+          (jsx :a
+            (object :className "source-link"
+                    :href "https://github.com/liuchong/eliscript")
+            "Source"))
+        (jsx :section (object :className "intro")
+          (jsx :p (object :className "eyebrow") "ELISCRIPT / REACT")
+          (jsx :h1 nil "A Lisp component, alive in the browser.")
+          (jsx :p (object :className "lede")
+            "Compiled by Emacs, mounted by Vite, rendered by React."))
+        (jsx Counter
+          (object :title "Interactive counter")
+          (jsx :p (object :className "status")
+            "Edit the .eli source and Vite will refresh this module."))
+        (jsx :footer (object :className "demo-footer")
+          (jsx :span nil "Automatic JSX runtime")
+          (jsx :span nil "Source Map v3")
+          (jsx :span nil "Fast Refresh"))))))

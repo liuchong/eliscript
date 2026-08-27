@@ -97,7 +97,8 @@ The synthetic runtime import has no source mapping.
 - The React counter compiles through the public CLI with a source map and is
   rendered with `react-dom/server` during the Bun integration test.
 
-## Remaining M2 Work
+## Adapter Boundary
 
 Browser mounting, Vite integration, and fast refresh are adapter concerns and
-remain outside this language-level contract.
+remain outside this language-level contract. Their implemented contract is
+specified in [0011-vite-adapter.md](0011-vite-adapter.md).
