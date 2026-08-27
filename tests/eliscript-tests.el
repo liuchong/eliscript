@@ -513,6 +513,86 @@
              (= (nth 4 segment) 7)))
       segments))))
 
+(ert-deftest eliscript-react-lowers-components-and-elements-to-ir ()
+  (let* ((source
+         "(import \"react\" StrictMode)
+(defcomponent App (props)
+  (jsx StrictMode nil
+    (fragment (jsx :h1 nil (get props :title)))))
+(export App)")
+         (program (eliscript-compile-ir-string source "react-ir.eli"))
+         node-kinds
+         react-nodes)
+    (eliscript-ir-walk
+     program
+     (lambda (node)
+       (push (eliscript-ir-node-kind node) node-kinds)
+       (when (memq (eliscript-ir-node-kind node)
+                   '(react-element react-fragment))
+         (push node react-nodes))))
+    (should (memq 'function-declaration node-kinds))
+    (should (memq 'react-element node-kinds))
+    (should (memq 'react-fragment node-kinds))
+    (should (cl-every #'eliscript-ir-node-span react-nodes))
+    (should-not (string-match-p
+                 "defcomponent"
+                 (eliscript-compile-string source "react-ir.eli")))))
+
+(ert-deftest eliscript-react-emits-the-automatic-jsx-runtime ()
+  (let ((output
+         (eliscript-compile-string
+          "(import \"react\" useState StrictMode)
+(defcomponent Counter (props)
+  (let* ((state (useState 0))
+         (count (nth 0 state))
+         (set-count (nth 1 state)))
+    (jsx StrictMode nil
+      (jsx :section (object :className \"counter\")
+        (jsx :button
+          (object :onClick (lambda () (set-count (1+ count))))
+          \"Increment\")
+        (fragment
+          (when (> count 0) (jsx :strong nil count))
+          (get props :children))))))
+(export Counter)"
+          "react-emitter.eli")))
+    (should (= (length
+                (split-string output "react/jsx-runtime" t))
+               2))
+    (should (string-match-p
+             (regexp-quote
+              "import * as __eliscript_react_jsx_runtime from \"react/jsx-runtime\";")
+             output))
+    (should (string-match-p
+             (regexp-quote
+              "__eliscript_react_jsx_runtime.jsx(StrictMode")
+             output))
+    (should (string-match-p
+             (regexp-quote
+              "__eliscript_react_jsx_runtime.jsxs(\"section\"")
+             output))
+    (should (string-match-p ".Fragment" output))
+    (should (string-match-p "\"onClick\"" output))
+    (should-not
+     (string-match-p
+      "react/jsx-runtime"
+      (eliscript-compile-string "(defun identity (value) value)")))))
+
+(ert-deftest eliscript-react-validates-jsx-and-internal-bindings ()
+  (should-error (eliscript-compile-string "(jsx :div)")
+                :type 'eliscript-analyze-error)
+  (should-error (eliscript-compile-string "(jsx Missing nil)")
+                :type 'eliscript-analyze-error)
+  (should-error
+   (eliscript-compile-string
+    "(defun outer () (defcomponent Inner () (jsx :span nil)))")
+   :type 'eliscript-expand-error)
+  (should-error (eliscript-compile-string "(defconst __eliscript_truthy 1)")
+                :type 'eliscript-analyze-error)
+  (should-error
+   (eliscript-compile-string "(print __eliscript_react_jsx_runtime/jsx)")
+   :type 'eliscript-analyze-error))
+
 (provide 'eliscript-tests)
 
 ;;; eliscript-tests.el ends here

@@ -2,7 +2,7 @@
 set -eu
 
 PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-TEMP_DIR=$(mktemp -d)
+TEMP_DIR=$(mktemp -d "$PROJECT_DIR/.eliscript-test.XXXXXX")
 trap 'rm -rf "$TEMP_DIR"' EXIT INT TERM
 
 "$PROJECT_DIR/bin/eliscript" \
@@ -60,6 +60,44 @@ fi
 
 if [ "$SOURCE_MAPPED_OUTPUT" != "$EXPECTED_OUTPUT" ]; then
   printf 'source-mapped module output differs: %s\n' "$SOURCE_MAPPED_OUTPUT" >&2
+  exit 1
+fi
+
+"$PROJECT_DIR/bin/eliscript" \
+  --source-map \
+  --output "$TEMP_DIR/react-counter.mjs" \
+  "$PROJECT_DIR/examples/react-counter/main.eli"
+
+if ! grep -F 'react/jsx-runtime' "$TEMP_DIR/react-counter.mjs" >/dev/null; then
+  printf 'expected automatic React JSX runtime import\n' >&2
+  exit 1
+fi
+
+if ! grep -F '"onClick"' "$TEMP_DIR/react-counter.mjs" >/dev/null; then
+  printf 'expected React event handler prop\n' >&2
+  exit 1
+fi
+
+cat > "$TEMP_DIR/render-react.mjs" <<'EOF'
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import Counter from "./react-counter.mjs";
+
+console.log(renderToStaticMarkup(
+  React.createElement(
+    Counter,
+    { title: "Eliscript counter" },
+    React.createElement("span", { className: "status" }, "Ready"),
+  ),
+));
+EOF
+
+REACT_OUTPUT=$(bun run "$TEMP_DIR/render-react.mjs")
+EXPECTED_REACT_OUTPUT='<section class="counter" data-count="0"><h1>Eliscript counter</h1><button type="button">Increment</button><span class="status">Ready</span></section>'
+
+if [ "$REACT_OUTPUT" != "$EXPECTED_REACT_OUTPUT" ]; then
+  printf 'expected React markup: %s\nactual React markup:   %s\n' \
+    "$EXPECTED_REACT_OUTPUT" "$REACT_OUTPUT" >&2
   exit 1
 fi
 

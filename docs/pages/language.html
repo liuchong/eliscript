@@ -41,6 +41,7 @@
           <a href="#forms">Forms</a>
           <a href="#macros">Macros</a>
           <a href="#modules">Modules</a>
+          <a href="#react">React</a>
           <a href="#differences">Differences</a>
         </nav>
 
@@ -126,6 +127,20 @@
 (export Component helper)
 (export-default Component)</code></pre>
             <p>One Eliscript source file emits one ESM file. Module names are source-level identifiers today; path resolution belongs to a later module-resolution stage.</p>
+          </section>
+
+          <section id="react">
+            <h2>React elements</h2>
+            <pre><code>(import "react" useState StrictMode)
+
+(defcomponent Counter (props)
+  (let* ((state (useState 0))
+         (count (nth 0 state)))
+    (jsx StrictMode nil
+      (jsx :button
+        (object :type "button")
+        (str (get props :label "Count") ": " count)))))</code></pre>
+            <p><code>defcomponent</code> defines an ordinary function component. <code>jsx</code> accepts host tags or resolved component expressions, props, and children; <code>fragment</code> groups children without a host node. Modules using these forms import <code>react/jsx-runtime</code> automatically.</p>
           </section>
 
           <section id="differences">

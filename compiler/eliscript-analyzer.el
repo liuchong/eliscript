@@ -2,9 +2,7 @@
 
 ;;; Commentary:
 
-;; The analyzer validates lexical bindings before emission.  It intentionally
-;; returns the original forms for now; a documented IR will replace that pass-
-;; through boundary in a later M1 slice.
+;; The analyzer validates lexical bindings before lowering to explicit IR.
 
 ;;; Code:
 
@@ -228,6 +226,16 @@
       (eliscript-analyzer--analyze-expression (car value) scope)
       (eliscript-analyzer--analyze-sequence (cdr value) scope))))
 
+(defun eliscript-analyzer--analyze-jsx (arguments scope)
+  "Analyze React JSX ARGUMENTS in lexical SCOPE."
+  (when (< (length arguments) 2)
+    (eliscript-analyzer--fail "jsx expects a type, props, and optional children"))
+  (let* ((type (car arguments))
+         (type-value (eliscript-form-value type)))
+    (unless (or (keywordp type-value) (stringp type-value))
+      (eliscript-analyzer--analyze-expression type scope)))
+  (eliscript-analyzer--analyze-sequence (cdr arguments) scope))
+
 (defun eliscript-analyzer--analyze-call (form scope)
   "Analyze call FORM in SCOPE."
   (let* ((items (eliscript-form-value form))
@@ -248,6 +256,8 @@
          (eliscript-analyzer--fail "set! expects 2 arguments"))
        (eliscript-analyzer--analyze-assignment arguments scope "set!"))
       ('cond (eliscript-analyzer--analyze-cond arguments scope))
+      ('jsx (eliscript-analyzer--analyze-jsx arguments scope))
+      ('fragment (eliscript-analyzer--analyze-sequence arguments scope))
       ('quote nil)
       ('object (eliscript-analyzer--analyze-object arguments scope))
       ((or 'get 'put 'js-call)
@@ -256,7 +266,7 @@
       ((pred (lambda (name)
                (memq name eliscript-analyzer--builtin-operators)))
        (eliscript-analyzer--analyze-sequence arguments scope))
-      ((or 'defun 'defn 'defvar 'defconst 'export 'export-default
+      ((or 'defun 'defn 'defcomponent 'defvar 'defconst 'export 'export-default
            'import 'module)
        (eliscript-analyzer--fail "%s is only valid at module top level" operator))
       (_
@@ -272,7 +282,12 @@
      ((or (null value) (eq value t) (numberp value) (stringp value)
           (keywordp value) (eq value 'false) (eq value 'undefined)) nil)
      ((symbolp value)
-      (unless (eliscript-analyzer--qualified-symbol-p value)
+      (if (eliscript-analyzer--qualified-symbol-p value)
+          (condition-case error-data
+              (eliscript-symbol-reference-name value)
+            (eliscript-compile-error
+             (eliscript-analyzer--fail
+              "%s" (error-message-string error-data))))
         (eliscript-analyzer--require-binding scope value)))
      ((vectorp value)
       (mapc (lambda (item)

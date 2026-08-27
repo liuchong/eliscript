@@ -26,6 +26,11 @@ emission, and optional Source Map v3 output. The public compiler never
 reconstructs reader-shaped forms after lowering. Public entry points support
 both interactive Emacs use and clean batch builds.
 
+React `jsx` and `fragment` forms lower to dedicated IR nodes. Modules that use
+those nodes receive one automatic `react/jsx-runtime` namespace import and emit
+`jsx`, `jsxs`, and `Fragment` calls directly; ordinary modules remain free of
+React imports.
+
 The Emacs Lisp and self-hosted implementations must share a conformance suite.
 Generated JavaScript is a build artifact and must never become the hand-edited
 source of the self-hosted compiler.

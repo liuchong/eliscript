@@ -217,11 +217,17 @@ expansion, recursively located forms, filename/line/column diagnostics,
 explicit IR lowering, direct IR emission, output-name collision checks,
 external Source Map v3 output, and JavaScript execution are implemented.
 
-### M2: React
+### M2: React (In Progress)
 
 - Add the React library and component macros.
 - Compile and run the counter example.
 - Add an optional Vite adapter with fast refresh where feasible.
+
+The first slice landed on 2026-08-28. `defcomponent`, `jsx`, and `fragment`
+compile through dedicated IR nodes to the automatic JSX runtime. The counter
+example exercises hooks, props, children, events, conditional children,
+fragments, an imported React component, and server rendering. Browser mounting
+and the Vite adapter remain.
 
 ### M3: Publishing
 
@@ -259,14 +265,12 @@ The detailed execution boundary is specified in
 
 1. How should trusted seed macros migrate to a portable Eliscript evaluator?
 2. Should maps read as `{...}` or use a Lisp-native constructor form?
-3. Should React output use `createElement`, the automatic JSX runtime, or a
-   configurable emitter?
-4. How should Lisp kebab-case symbols map to JavaScript identifiers and object
+3. How should Lisp kebab-case symbols map to JavaScript identifiers and object
    keys?
-5. Which semantics should distinguish `nil`, JavaScript `null`, and
+4. Which semantics should distinguish `nil`, JavaScript `null`, and
    `undefined`?
-6. Should Org integration emit Eliscript modules, compiler IR, or plain data?
-7. Can incremental compilation stay deterministic when macros read files?
+5. Should Org integration emit Eliscript modules, compiler IR, or plain data?
+6. Can incremental compilation stay deterministic when macros read files?
 
 These questions should be resolved by small executable examples and follow-up
 numbered specifications rather than by expanding this document indefinitely.

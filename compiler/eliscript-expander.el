@@ -196,6 +196,9 @@
          ((eq operator 'defmacro)
           (eliscript-expander--fail
            "defmacro is only valid at module top level"))
+         ((eq operator 'defcomponent)
+          (eliscript-expander--fail
+           "defcomponent is only valid at module top level"))
          ((and (symbolp operator) (gethash operator environment))
           (eliscript-expander--expand-expression
            (eliscript-form-locate-generated
@@ -298,6 +301,16 @@
                                       (nthcdr 2 arguments)
                                       environment depth))))
                  value))
+              ('defcomponent
+               (if (>= (length arguments) 2)
+                   (cons (eliscript-form-inherit 'defun operator-form)
+                         (cons (nth 0 arguments)
+                               (cons (nth 1 arguments)
+                                     (eliscript-expander--expand-sequence
+                                      (nthcdr 2 arguments)
+                                      environment depth))))
+                 (eliscript-expander--fail
+                  "defcomponent expects a name and parameter list")))
               ((or 'defvar 'defconst)
                (cons operator-form
                      (if arguments

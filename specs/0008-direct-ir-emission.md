@@ -54,9 +54,11 @@ mapping, arity failures, and quoted-data formatting.
 
 ## Acceptance Evidence
 
-- The direct backend and compatibility backend produce byte-identical output
-  for a broad fixture covering declarations, imports, bindings, control flow,
-  mutation, data, functions, calls, and interop.
+- For the M1 language core, the direct backend and compatibility backend
+  produce byte-identical output for a broad fixture covering declarations,
+  imports, bindings, control flow, mutation, data, functions, calls, and
+  interop. Later target-specific IR extensions, including React elements, are
+  implemented only by the direct backend.
 - A guard test disables IR-to-form conversion and all form-emitter entry points;
   direct IR emission still compiles a complete module.
 - The checked-in CLI snapshot remains unchanged.

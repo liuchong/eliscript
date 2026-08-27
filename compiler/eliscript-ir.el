@@ -31,8 +31,9 @@
     conditional-chain conditional-clause sequence lexical-bindings
     lexical-binding assignment assignment-pair loop short-circuit intrinsic
     object-literal object-property property-read property-write method-call
-    constructor-call raw-javascript print string-concat invoke apply-call call)
-  "Public node kinds emitted by the M1 lowering pass.")
+    constructor-call raw-javascript print string-concat invoke apply-call call
+    react-element react-fragment)
+  "Public node kinds emitted by the lowering pass.")
 
 (defun eliscript-ir-make-program (filename body)
   "Create an IR program for FILENAME from top-level node BODY."
@@ -206,6 +207,14 @@
     ('call
      (mapcar #'eliscript-ir-node-to-form
              (eliscript-ir-node-children node)))
+    ('react-element
+     (cons 'jsx
+           (mapcar #'eliscript-ir-node-to-form
+                   (eliscript-ir-node-children node))))
+    ('react-fragment
+     (cons 'fragment
+           (mapcar #'eliscript-ir-node-to-form
+                   (eliscript-ir-node-children node))))
     ((or 'conditional 'conditional-sugar 'sequence 'loop 'short-circuit
          'intrinsic 'property-read 'property-write 'method-call
          'constructor-call 'raw-javascript 'print 'string-concat 'invoke

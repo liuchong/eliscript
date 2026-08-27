@@ -40,6 +40,7 @@
           <a href="#requirements">Requirements</a>
           <a href="#compile">Compile</a>
           <a href="#run">Run</a>
+          <a href="#react">React</a>
           <a href="#test">Test</a>
         </nav>
 
@@ -49,6 +50,8 @@
             <p>Use Emacs 29 or newer. Bun 1.4 or newer is needed for the reference execution path and complete test suite.</p>
             <pre><code>emacs --version
 bun --version</code></pre>
+            <p>Install the exact JavaScript dependencies used by the examples and integration tests:</p>
+            <pre><code>bun install --frozen-lockfile</code></pre>
             <div class="callout"><p>The compiler itself has no Bun or Node.js dependency. A clean Emacs installation can produce the module.</p></div>
           </section>
 
@@ -75,11 +78,18 @@ bun --version</code></pre>
             <p>The generated file is standard ESM. Bun is the reference host, but the compiler does not emit proprietary Bun syntax.</p>
           </section>
 
+          <section id="react">
+            <h2>Compile the React counter</h2>
+            <pre><code>bun run compile:react-counter
+bun run react-counter</code></pre>
+            <p>The first command emits a source-mapped ESM module through <code>react/jsx-runtime</code>. The second renders it with <code>react-dom/server</code>, proving the generated element tree without a bundler.</p>
+          </section>
+
           <section id="test">
             <h2>Run the test suite</h2>
             <pre><code>bun run test</code></pre>
-            <p>This runs the Emacs ERT suite, compiles the fixture through the public CLI, compares the output with a deterministic snapshot, and executes the module in Bun.</p>
-            <div class="callout callout-coral"><p>The M1 language core is complete: macros, recursive locations, lexical analysis, explicit IR, direct emission, and Source Map v3 output are active. React is next.</p></div>
+            <p>This runs the Emacs ERT suite, compiles fixtures through the public CLI, compares deterministic output, validates source maps, executes core modules, and server-renders the React counter in Bun.</p>
+            <div class="callout callout-coral"><p>M2 React is in progress: element compilation and server rendering are active. Browser mounting, Vite integration, and fast refresh come next.</p></div>
           </section>
         </article>
       </div>

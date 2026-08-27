@@ -42,7 +42,15 @@ This writes `dist/basic.mjs.map` and adds its `sourceMappingURL` to the module.
 Run the complete test suite:
 
 ```sh
+bun install --frozen-lockfile
 bun run test
+```
+
+Compile and render the React counter example:
+
+```sh
+bun run compile:react-counter
+bun run react-counter
 ```
 
 ## Why
@@ -101,6 +109,8 @@ Implemented forms include:
 - ESM `module`, `import`, `export`, and `export-default`
 - compile-time `defmacro` with backquote, `&rest`, and `&body`
 - `get`, `put`, `js-call`, `new`, and explicit `js*` interop
+- React `defcomponent`, `jsx`, and `fragment` forms using the automatic JSX
+  runtime
 
 Eliscript already differs deliberately from Emacs Lisp: it is lexically scoped,
 uses ECMAScript numbers and arrays, distinguishes `false` from `nil`, and emits
@@ -185,7 +195,8 @@ portable execution model. The exact implemented subset is recorded in
 ## Status
 
 The first Emacs Lisp seed compiler is implemented and usable from the command
-line. The M0 vertical slice and M1 language core are complete.
+line. The M0 vertical slice and M1 language core are complete. M2 React work is
+in progress.
 
 Current evidence:
 
@@ -205,14 +216,18 @@ Current evidence:
 - Optional external Source Map v3 output maps generated expressions and
   structural names back to `.eli` source with UTF-16 columns; macro-generated
   code maps to its call site.
-- Thirty-eight ERT tests cover reading, locations, macro expansion, analysis,
-  IR lowering, direct emission, source maps, modules, errors, and interop.
+- React elements and fragments lower to explicit IR and emit through
+  `react/jsx-runtime`; React-free modules receive no React import.
+- The executable counter proves components, props and children, a hook, an
+  event handler, conditional children, fragments, and an imported component.
+- Forty-one ERT tests cover reading, locations, macro expansion, analysis, IR
+  lowering, direct emission, source maps, React, modules, errors, and interop.
 - A CLI integration test compares generated output with a checked-in snapshot.
-- Bun 1.4 executes the generated module and verifies recursion, mutation,
-  loops, higher-order functions, objects, arrays, and exports.
+- Bun 1.4 executes generated modules and verifies recursion, mutation, loops,
+  higher-order functions, objects, arrays, exports, and React server rendering.
 
-The next milestone adds the React component layer and compiles the counter
-example. Org publishing remains a later milestone.
+The next M2 slice mounts the counter in a browser and adds the optional Vite
+adapter. Org publishing remains a later milestone.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -224,7 +239,9 @@ forms and diagnostic positions, and
 for the explicit IR contract, and
 [specs/0008-direct-ir-emission.md](specs/0008-direct-ir-emission.md) for the
 direct ECMAScript backend, and
-[specs/0009-source-maps.md](specs/0009-source-maps.md) for Source Map v3 output.
+[specs/0009-source-maps.md](specs/0009-source-maps.md) for Source Map v3 output,
+and [specs/0010-react-elements.md](specs/0010-react-elements.md) for React
+element compilation.
 
 ## License
 

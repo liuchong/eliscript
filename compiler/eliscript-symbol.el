@@ -19,6 +19,9 @@
     "super" "switch" "this" "throw" "true" "try" "typeof" "var"
     "void" "while" "with" "yield"))
 
+(defconst eliscript-symbol-internal-prefix "__eliscript_"
+  "ECMAScript identifier prefix reserved for generated compiler bindings.")
+
 (defun eliscript-symbol--fail (format-string &rest arguments)
   "Signal an identifier error using FORMAT-STRING and ARGUMENTS."
   (signal 'eliscript-compile-error
@@ -65,13 +68,22 @@
   (let ((name (symbol-name symbol)))
     (when (string-match-p "[./]" name)
       (eliscript-symbol--fail "qualified name cannot be a binding: %s" name))
-    (eliscript-symbol-munge-segment name)))
+    (let ((output-name (eliscript-symbol-munge-segment name)))
+      (when (string-prefix-p eliscript-symbol-internal-prefix output-name)
+        (eliscript-symbol--fail
+         "binding name uses reserved compiler prefix: %s" name))
+      output-name)))
 
 (defun eliscript-symbol-reference-name (symbol)
   "Return an ECMAScript reference for SYMBOL."
-  (mapconcat #'eliscript-symbol-munge-segment
-             (split-string (symbol-name symbol) "[./]" t)
-             "."))
+  (let ((reference
+         (mapconcat #'eliscript-symbol-munge-segment
+                    (split-string (symbol-name symbol) "[./]" t)
+                    ".")))
+    (when (string-prefix-p eliscript-symbol-internal-prefix reference)
+      (eliscript-symbol--fail
+       "reference uses reserved compiler prefix: %s" symbol))
+    reference))
 
 (provide 'eliscript-symbol)
 

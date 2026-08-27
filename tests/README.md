@@ -5,4 +5,4 @@ Compiler behavior is tested from Emacs in batch mode. Source fixtures belong in
 
 `make test` runs the ERT suite, invokes the public CLI, compares the generated
 ESM with its snapshot, validates and decodes Source Map v3 output, and executes
-both ordinary and source-mapped modules with Bun.
+ordinary, source-mapped, and React server-rendered modules with Bun.
