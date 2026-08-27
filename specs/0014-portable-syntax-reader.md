@@ -11,9 +11,9 @@ to ordinary ESM; the generated reader then parses fixture programs and all
 current bootstrap compiler sources, including its own source.
 
 This stage replaces dependency on native Emacs symbols, cons cells, vectors,
-and located-form structs at the portable reader boundary. It does not yet
-replace macro expansion, lexical analysis, IR lowering, emission, or the
-compiler driver.
+and located-form structs at the portable reader boundary. The portable lexical
+analyzer is implemented separately; macro expansion, IR lowering, emission,
+and the compiler driver still use the seed implementation.
 
 ## Syntax Nodes
 
@@ -115,7 +115,7 @@ lower, or emit that syntax tree.
 
 ## Next Phase
 
-The next dependency boundary is portable macro expansion and lexical analysis.
-Those phases must consume these syntax nodes without converting them back into
-Emacs objects, preserve spans through generated forms, and share diagnostics
-with the seed implementations.
+The portable lexical analyzer that consumes these nodes is specified in
+[0015-portable-lexical-analyzer.md](0015-portable-lexical-analyzer.md). The next
+dependency boundary is macro expansion, which must preserve spans through
+generated forms and feed explicit syntax directly to that analyzer.

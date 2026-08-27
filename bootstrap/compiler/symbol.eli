@@ -9,6 +9,7 @@
      "void" "while" "with" "yield"])
 
   (defconst reserved-values ["nil" "t" "false" "undefined"])
+  (defconst strict-binding-names ["arguments" "eval"])
   (defconst internal-prefix "__eliscript_")
   (defconst fail
     (js* "(message) => { throw new Error(message); }"))
@@ -65,6 +66,8 @@
               (js-call name :includes "/"))
       (fail (str "qualified name cannot be a binding: " name)))
     (let ((output-name (munge-segment name)))
+      (when (js-call strict-binding-names :includes output-name)
+        (setq output-name (str output-name "$")))
       (when (js-call output-name :startsWith internal-prefix)
         (fail (str "binding name uses reserved compiler prefix: " name)))
       output-name))

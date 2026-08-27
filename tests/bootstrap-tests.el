@@ -4,6 +4,7 @@
 
 (require 'ert)
 (require 'json)
+(require 'eliscript-analyzer)
 (require 'eliscript-reader)
 (require 'eliscript-symbol)
 
@@ -14,6 +15,10 @@
 (defconst eliscript-bootstrap-tests--reader-fixture
   (expand-file-name "tests/fixtures/bootstrap-reader.json" default-directory)
   "Shared reader conformance fixture.")
+
+(defconst eliscript-bootstrap-tests--analyzer-fixture
+  (expand-file-name "tests/fixtures/bootstrap-analyzer.json" default-directory)
+  "Shared analyzer conformance fixture.")
 
 (defun eliscript-bootstrap-tests--field (name object)
   "Read field NAME from parsed JSON OBJECT."
@@ -96,12 +101,12 @@
         (span . ,span)))
      (t (error "unsupported seed reader value: %S" value)))))
 
-(defun eliscript-bootstrap-tests--reader-case-source (case)
-  "Return inline or file-backed source for reader fixture CASE."
+(defun eliscript-bootstrap-tests--case-source (case)
+  "Return inline or file-backed source for fixture CASE."
   (or (eliscript-bootstrap-tests--field 'source case)
       (let ((filename (eliscript-bootstrap-tests--field 'file case)))
         (unless filename
-          (error "reader case has neither source nor file: %S" case))
+          (error "fixture case has neither source nor file: %S" case))
         (with-temp-buffer
           (let ((coding-system-for-read 'utf-8-unix))
             (insert-file-contents (expand-file-name filename default-directory)))
@@ -111,7 +116,7 @@
   "Return normalized seed reader output for fixture CASE."
   (let ((name (eliscript-bootstrap-tests--field 'name case))
         (filename (eliscript-bootstrap-tests--field 'filename case))
-        (source (eliscript-bootstrap-tests--reader-case-source case)))
+        (source (eliscript-bootstrap-tests--case-source case)))
     (condition-case error-data
         (let ((forms (eliscript-read-located-string source filename)))
           `((name . ,name)
@@ -135,6 +140,31 @@
           (append (eliscript-bootstrap-tests--field 'valid fixture)
                   (eliscript-bootstrap-tests--field 'invalid fixture))))
     (vconcat (mapcar #'eliscript-bootstrap-tests--seed-reader-result cases))))
+
+(defun eliscript-bootstrap-tests--seed-analyzer-result (case)
+  "Return normalized seed analyzer output for fixture CASE."
+  (let ((name (eliscript-bootstrap-tests--field 'name case))
+        (filename (eliscript-bootstrap-tests--field 'filename case))
+        (source (eliscript-bootstrap-tests--case-source case)))
+    (condition-case error-data
+        (progn
+          (eliscript-analyze-module
+           (eliscript-read-located-string source filename)
+           filename)
+          `((name . ,name) (status . "ok")))
+      ((eliscript-read-error eliscript-analyze-error)
+       `((name . ,name) (status . "error")
+         (message . ,(cadr error-data)))))))
+
+(defun eliscript-bootstrap-tests-analyzer-results (&optional fixture-file)
+  "Return normalized seed results for analyzer FIXTURE-FILE."
+  (let* ((fixture
+          (eliscript-bootstrap-tests--read-json
+           (or fixture-file eliscript-bootstrap-tests--analyzer-fixture)))
+         (cases
+          (append (eliscript-bootstrap-tests--field 'valid fixture)
+                  (eliscript-bootstrap-tests--field 'invalid fixture))))
+    (vconcat (mapcar #'eliscript-bootstrap-tests--seed-analyzer-result cases))))
 
 (defun eliscript-bootstrap-tests--seed-symbol-result (operation input)
   "Run seed symbol OPERATION for INPUT and return a result object."
@@ -171,6 +201,22 @@
         (should (equal (eliscript-bootstrap-tests--field 'status result) "ok"))))
     (dolist (case invalid)
       (let ((result (eliscript-bootstrap-tests--seed-reader-result case)))
+        (should (equal (eliscript-bootstrap-tests--field 'status result)
+                       "error"))
+        (should (equal (eliscript-bootstrap-tests--field 'message result)
+                       (eliscript-bootstrap-tests--field 'error case)))))))
+
+(ert-deftest eliscript-seed-analyzer-satisfies-bootstrap-cases ()
+  (let* ((fixture
+          (eliscript-bootstrap-tests--read-json
+           eliscript-bootstrap-tests--analyzer-fixture))
+         (valid (eliscript-bootstrap-tests--field 'valid fixture))
+         (invalid (eliscript-bootstrap-tests--field 'invalid fixture)))
+    (dolist (case valid)
+      (let ((result (eliscript-bootstrap-tests--seed-analyzer-result case)))
+        (should (equal (eliscript-bootstrap-tests--field 'status result) "ok"))))
+    (dolist (case invalid)
+      (let ((result (eliscript-bootstrap-tests--seed-analyzer-result case)))
         (should (equal (eliscript-bootstrap-tests--field 'status result)
                        "error"))
         (should (equal (eliscript-bootstrap-tests--field 'message result)

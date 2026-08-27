@@ -231,6 +231,14 @@
 (ert-deftest eliscript-symbol-mapping-preserves-leading-digit-handling ()
   (should (equal (eliscript-symbol-binding-name '1value) "_1value")))
 
+(ert-deftest eliscript-symbol-mapping-avoids-strict-mode-bindings ()
+  (let ((output
+         (eliscript-compile-string
+          "(defun add (arguments eval) (+ arguments eval))")))
+    (should (string-match-p
+             (regexp-quote "function add(arguments$, eval$)")
+             output))))
+
 (ert-deftest eliscript-analyzer-validates-assignment-mutability ()
   (should-error
    (eliscript-compile-string "(defconst answer 42) (setq answer 43)")

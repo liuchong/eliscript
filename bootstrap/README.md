@@ -10,7 +10,8 @@ The bootstrap grows along this dependency order:
 symbol semantics (implemented)
   -> syntax data model (implemented)
   -> reader (implemented)
-  -> macro expander and analyzer
+  -> lexical analyzer (implemented)
+  -> macro expander
   -> IR and emitter
   -> compiler driver
   -> reproducible self-compilation
@@ -19,8 +20,10 @@ symbol semantics (implemented)
 `compiler/symbol.eli` owns deterministic mapping from Lisp-style names to
 ECMAScript identifiers. `compiler/syntax.eli` defines serializable syntax nodes
 and source spans. `compiler/reader.eli` parses the portable source grammar into
-that representation and can read every current bootstrap module, including
-itself.
+that representation. `compiler/analyzer.eli` consumes those nodes directly,
+validates lexical scope and special forms, and returns the original tree. The
+generated reader and analyzer can process every current bootstrap module,
+including their own sources.
 
 Build the current bootstrap modules with the seed compiler:
 
@@ -29,9 +32,10 @@ bun run build:bootstrap
 ```
 
 Generated files are written below `dist/bootstrap/` and are not source
-artifacts. Shared fixtures cover symbol behavior and reader syntax. The reader
-test normalizes the seed AST, compares every generated node and span, and
-checks that repeated ESM and source-map builds are byte-identical.
+artifacts. Shared fixtures cover symbol behavior, reader syntax, and lexical
+analysis. The analyzer oracle compares acceptance and exact diagnostics between
+the seed and generated front ends. Repeated ESM and source-map builds must be
+byte-identical.
 
 This is the beginning of Generation 1, not a self-hosted compiler yet.
 Self-hosting requires a portable compiler driver, the full shared conformance

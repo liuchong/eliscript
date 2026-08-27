@@ -258,6 +258,10 @@ The second slice adds serializable syntax nodes and a portable reader whose
 complete ASTs and diagnostics match the normalized seed reader. It reads all
 current bootstrap sources, including itself. See
 [0014-portable-syntax-reader.md](0014-portable-syntax-reader.md).
+The third slice adds a lexical analyzer written in Eliscript. It consumes the
+portable syntax tree directly, matches seed acceptance and exact diagnostics,
+and analyzes all current bootstrap sources including itself. See
+[0015-portable-lexical-analyzer.md](0015-portable-lexical-analyzer.md).
 
 ### M5: Emacs Acceleration
 

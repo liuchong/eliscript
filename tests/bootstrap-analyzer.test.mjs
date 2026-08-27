@@ -7,24 +7,14 @@ import { pathToFileURL } from "node:url";
 const projectDirectory = resolve(import.meta.dir, "..");
 const fixturePath = resolve(
   projectDirectory,
-  "tests/fixtures/bootstrap-reader.json",
+  "tests/fixtures/bootstrap-analyzer.json",
 );
 const buildPath = resolve(projectDirectory, "bin/eliscript-bootstrap");
 const oraclePath = resolve(
   projectDirectory,
-  "tests/bootstrap-reader-oracle.el",
+  "tests/bootstrap-analyzer-oracle.el",
 );
 const emacs = process.env.EMACS ?? "emacs";
-const artifactNames = [
-  "symbol.mjs",
-  "symbol.mjs.map",
-  "syntax.mjs",
-  "syntax.mjs.map",
-  "reader.mjs",
-  "reader.mjs.map",
-  "analyzer.mjs",
-  "analyzer.mjs.map",
-];
 
 async function run(command, options) {
   const child = Bun.spawn(command, {
@@ -45,13 +35,11 @@ async function run(command, options) {
   return stdout;
 }
 
-async function buildBootstrap(outputDirectory) {
-  await run([buildPath], {
-    env: {
-      ...process.env,
-      ELISCRIPT_BOOTSTRAP_OUT_DIR: outputDirectory,
-    },
-  });
+async function caseSource(testCase) {
+  if (Object.hasOwn(testCase, "source")) {
+    return testCase.source;
+  }
+  return Bun.file(resolve(projectDirectory, testCase.file)).text();
 }
 
 async function seedResults() {
@@ -70,20 +58,17 @@ async function seedResults() {
     {
       env: {
         ...process.env,
-        ELISCRIPT_READER_FIXTURE: fixturePath,
+        ELISCRIPT_ANALYZER_FIXTURE: fixturePath,
       },
     },
   );
   return JSON.parse(output);
 }
 
-function generatedResult(readString, testCase, source) {
+function generatedResult(readString, analyzeModule, testCase, source) {
   try {
-    return {
-      name: testCase.name,
-      status: "ok",
-      forms: readString(source, testCase.filename),
-    };
+    analyzeModule(readString(source, testCase.filename), testCase.filename);
+    return { name: testCase.name, status: "ok" };
   } catch (error) {
     return {
       name: testCase.name,
@@ -93,30 +78,20 @@ function generatedResult(readString, testCase, source) {
   }
 }
 
-async function caseSource(testCase) {
-  if (Object.hasOwn(testCase, "source")) {
-    return testCase.source;
-  }
-  return Bun.file(resolve(projectDirectory, testCase.file)).text();
-}
-
-test("bootstrapped reader matches normalized seed syntax and diagnostics", async () => {
-  const directory = await mkdtemp(resolve(tmpdir(), "eliscript-reader-"));
+test("bootstrapped analyzer matches seed acceptance and diagnostics", async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), "eliscript-analyzer-"));
   try {
-    await buildBootstrap(directory);
-    const firstArtifacts = new Map();
-    for (const name of artifactNames) {
-      firstArtifacts.set(name, await Bun.file(resolve(directory, name)).text());
-    }
-
-    await buildBootstrap(directory);
-    for (const name of artifactNames) {
-      expect(await Bun.file(resolve(directory, name)).text())
-        .toBe(firstArtifacts.get(name));
-    }
-
+    await run([buildPath], {
+      env: {
+        ...process.env,
+        ELISCRIPT_BOOTSTRAP_OUT_DIR: directory,
+      },
+    });
     const reader = await import(
       `${pathToFileURL(resolve(directory, "reader.mjs")).href}?test`
+    );
+    const analyzer = await import(
+      `${pathToFileURL(resolve(directory, "analyzer.mjs")).href}?test`
     );
     const fixture = await Bun.file(fixturePath).json();
     const cases = [...fixture.valid, ...fixture.invalid];
@@ -124,14 +99,15 @@ test("bootstrapped reader matches normalized seed syntax and diagnostics", async
     for (const testCase of cases) {
       generated.push(generatedResult(
         reader.read_string,
+        analyzer.analyze_module,
         testCase,
         await caseSource(testCase),
       ));
     }
 
     expect(generated).toEqual(await seedResults());
-    expect(firstArtifacts.get("reader.mjs.map"))
-      .toContain("bootstrap/compiler/reader.eli");
+    expect(await Bun.file(resolve(directory, "analyzer.mjs.map")).text())
+      .toContain("bootstrap/compiler/analyzer.eli");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

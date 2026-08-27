@@ -264,10 +264,13 @@ Current evidence:
 - Portable syntax nodes replace Emacs runtime objects at the Generation 1
   reader boundary. The generated Eliscript reader matches normalized seed ASTs
   and diagnostics, then reads all bootstrap sources including itself.
-- Forty-seven ERT tests cover reading, locations, macro expansion, analysis, IR
+- A lexical analyzer written in Eliscript consumes portable syntax directly,
+  matches seed acceptance and exact diagnostics, and analyzes every bootstrap
+  module including itself.
+- Forty-nine ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, errors, and interop.
-- Eight Bun tests cover the compiler and Org Vite adapters, source-map handoff,
+- Nine Bun tests cover the compiler and Org Vite adapters, source-map handoff,
   file filtering, React Refresh, Org module invalidation, and generated
   bootstrap behavior.
 - A CLI integration test compares generated output with a checked-in snapshot.
@@ -275,8 +278,8 @@ Current evidence:
   higher-order functions, objects, arrays, exports, React server rendering, and
   production Vite bundles, and deterministic Org publishing.
 
-M4 now continues with portable macro expansion and lexical analysis, followed
-by IR, emission, the compiler driver, and reproducible self-compilation.
+M4 now continues with portable macro expansion, followed by IR, emission, the
+compiler driver, and reproducible self-compilation.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -298,7 +301,9 @@ Org content modules and the custom React publishing site, and
 [specs/0013-bootstrap-foundation.md](specs/0013-bootstrap-foundation.md) for
 the first shared seed/portable compiler contract, and
 [specs/0014-portable-syntax-reader.md](specs/0014-portable-syntax-reader.md) for
-the serializable syntax model and self-reading Generation 1 reader.
+the serializable syntax model and self-reading Generation 1 reader, and
+[specs/0015-portable-lexical-analyzer.md](specs/0015-portable-lexical-analyzer.md)
+for direct portable syntax analysis and dual-implementation diagnostics.
 
 ## License
 

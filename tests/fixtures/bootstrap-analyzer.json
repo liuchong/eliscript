@@ -1,0 +1,142 @@
+{
+  "valid": [
+    {
+      "name": "forward-functions-and-export",
+      "filename": "forward.eli",
+      "source": "(defun first () (second))\n(defun second () 42)\n(export first second)"
+    },
+    {
+      "name": "lexical-bindings-and-assignment",
+      "filename": "scope.eli",
+      "source": "(defvar total 0)\n(defun add (value)\n  (let* ((next (+ total value)) (text (str next)))\n    (setq total next)\n    (print text console/log)))\n(export add total)"
+    },
+    {
+      "name": "imports-and-special-forms",
+      "filename": "forms.eli",
+      "source": "(import \"react\" :default React useState)\n(defun view (ready items)\n  (cond\n    (ready (jsx :main (object :className \"ready\") items))\n    (t (fragment \"waiting\" (get React :version)))))\n(export React useState view)"
+    },
+    {
+      "name": "expression-surface",
+      "filename": "surface.eli",
+      "source": "(defun exercise (target key)\n  (let ((plain 1))\n    (vector\n      (lambda (value) (put target key value))\n      (get target key false)\n      (js-call target :run plain)\n      (object key plain)\n      (quote missing)\n      (js* \"globalThis\"))))\n(export exercise)"
+    },
+    {
+      "name": "self-symbol-module",
+      "filename": "bootstrap/compiler/symbol.eli",
+      "file": "bootstrap/compiler/symbol.eli"
+    },
+    {
+      "name": "self-syntax-module",
+      "filename": "bootstrap/compiler/syntax.eli",
+      "file": "bootstrap/compiler/syntax.eli"
+    },
+    {
+      "name": "self-reader-module",
+      "filename": "bootstrap/compiler/reader.eli",
+      "file": "bootstrap/compiler/reader.eli"
+    },
+    {
+      "name": "self-analyzer-module",
+      "filename": "bootstrap/compiler/analyzer.eli",
+      "file": "bootstrap/compiler/analyzer.eli"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "unbound-symbol",
+      "filename": "unbound.eli",
+      "source": "(defun broken ()\n  missing)",
+      "error": "unbound.eli:2:3: unbound symbol: missing"
+    },
+    {
+      "name": "parallel-let-scope",
+      "filename": "let.eli",
+      "source": "(defun broken ()\n  (let ((value 1) (next value)) next))",
+      "error": "let.eli:2:25: unbound symbol: value"
+    },
+    {
+      "name": "duplicate-parameter",
+      "filename": "duplicate.eli",
+      "source": "(defun duplicate (value value) value)",
+      "error": "duplicate.eli:1:25: duplicate parameter binding: value"
+    },
+    {
+      "name": "output-name-collision",
+      "filename": "collision.eli",
+      "source": "(defconst foo-bar 1)\n(defconst foo_bar 2)",
+      "error": "collision.eli:2:11: binding foo_bar emits foo_bar, which collides with foo-bar"
+    },
+    {
+      "name": "immutable-assignment",
+      "filename": "immutable.eli",
+      "source": "(defconst answer 42)\n(setq answer 43)",
+      "error": "immutable.eli:2:7: cannot assign to immutable binding: answer"
+    },
+    {
+      "name": "missing-export",
+      "filename": "export.eli",
+      "source": "(export missing)",
+      "error": "export.eli:1:9: unbound symbol: missing"
+    },
+    {
+      "name": "duplicate-default-import",
+      "filename": "import.eli",
+      "source": "(import \"pkg\" :default First :default Second)",
+      "error": "import.eli:1:1: duplicate :default import"
+    },
+    {
+      "name": "nested-top-level-form",
+      "filename": "nested.eli",
+      "source": "(defun outer ()\n  (defun inner () 1))",
+      "error": "nested.eli:2:3: defun is only valid at module top level"
+    },
+    {
+      "name": "invalid-let-binding",
+      "filename": "binding.eli",
+      "source": "(let ((1 2)) 1)",
+      "error": "binding.eli:1:7: invalid let binding: (1 2)"
+    },
+    {
+      "name": "non-list-let-bindings",
+      "filename": "bindings.eli",
+      "source": "(let [value 1] value)",
+      "error": "bindings.eli:1:6: let bindings must be a list"
+    },
+    {
+      "name": "non-symbol-assignment",
+      "filename": "assignment.eli",
+      "source": "(defvar value 1)\n(setq (quote value) 2)",
+      "error": "assignment.eli:2:1: assignment target must be a symbol: 'value"
+    },
+    {
+      "name": "invalid-cond-clause",
+      "filename": "cond.eli",
+      "source": "(cond [])",
+      "error": "cond.eli:1:7: invalid cond clause: []"
+    },
+    {
+      "name": "invalid-property-arity",
+      "filename": "property.eli",
+      "source": "(get nil)",
+      "error": "property.eli:1:1: get expects 2..3 arguments"
+    },
+    {
+      "name": "invalid-object-arity",
+      "filename": "object.eli",
+      "source": "(object :ready)",
+      "error": "object.eli:1:1: object expects key/value pairs"
+    },
+    {
+      "name": "invalid-jsx-arity",
+      "filename": "jsx.eli",
+      "source": "(jsx :main)",
+      "error": "jsx.eli:1:1: jsx expects a type, props, and optional children"
+    },
+    {
+      "name": "invalid-module-name",
+      "filename": "module.eli",
+      "source": "(module \"wrong\" 1)",
+      "error": "module.eli:1:1: module name must be a symbol"
+    }
+  ]
+}

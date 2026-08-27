@@ -1,0 +1,515 @@
+(module bootstrap.compiler.analyzer
+  (import "./symbol.mjs" binding-name reference-name)
+  (import "./syntax.mjs"
+    node-kind node-span node-value node-name node-items)
+
+  (defconst builtin-operators
+    ["if" "when" "unless" "progn" "do" "while" "and" "or" "not"
+     "+" "*" "-" "/" "%" "mod" "=" "/=" "not=" "<" "<=" ">" ">="
+     "1+" "1-" "eq" "equal" "null" "list" "vector" "array" "car"
+     "cdr" "cons" "nth" "aref" "length" "new" "print" "str"
+     "funcall" "apply"])
+
+  (defconst fail
+    (js* "(message) => { throw new Error(message); }"))
+  (defconst guard
+    (js* "(operation, onError) => { try { return operation(); } catch (error) { return onError(error.message); } }"))
+
+  (defun analyzer-fail (context span message)
+    (fail
+      (str (or (get context :filename)
+               (and span (get span :filename))
+               "<input>")
+           ":" (if span (get span :line) 1)
+           ":" (if span (get span :column) 1)
+           ": " message)))
+
+  (defun symbol-node-p (node)
+    (and node (= (node-kind node) "symbol")))
+
+  (defun keyword-node-p (node)
+    (and node (= (node-kind node) "keyword")))
+
+  (defun string-node-p (node)
+    (and node
+         (= (node-kind node) "literal")
+         (= (js* "typeof node.value") "string")))
+
+  (defun null-node-p (node)
+    (and node
+         (= (node-kind node) "literal")
+         (null (node-value node))))
+
+  (defun list-items (node)
+    (cond
+      ((and node (= (node-kind node) "list")) (node-items node))
+      ((null-node-p node) [])
+      (t undefined)))
+
+  (defun node-display (node)
+    (cond
+      ((not node) "nil")
+      ((= (node-kind node) "undefined") "undefined")
+      ((= (node-kind node) "symbol") (node-name node))
+      ((= (node-kind node) "keyword") (str ":" (node-name node)))
+      ((= (node-kind node) "literal")
+       (let ((value (node-value node)))
+         (cond
+           ((null value) "nil")
+           ((eq value t) "t")
+           ((eq value false) "false")
+           ((= (js* "typeof value") "string")
+            (js-call (js* "JSON") :stringify value))
+           (t (str value)))))
+      ((or (= (node-kind node) "list") (= (node-kind node) "vector"))
+       (let* ((items (node-items node))
+              (contents
+               (js-call
+                 (js-call items :map node-display)
+                 :join " ")))
+         (cond
+           ((and (= (node-kind node) "list")
+                 (= (get items :length) 2)
+                 (symbol-node-p (nth 0 items))
+                 (= (node-name (nth 0 items)) "quote"))
+            (str "'" (node-display (nth 1 items))))
+           ((= (node-kind node) "list") (str "(" contents ")"))
+           (t (str "[" contents "]")))))
+      (t "<unsupported>")))
+
+  (defun make-scope (parent)
+    (object
+      :parent parent
+      :names (new (js* "Map"))
+      :outputs (new (js* "Map"))))
+
+  (defun guarded-binding-name (name context span)
+    (funcall
+      guard
+      (lambda () (binding-name name))
+      (lambda (message) (analyzer-fail context span message))))
+
+  (defun guarded-reference-name (name context span)
+    (funcall
+      guard
+      (lambda () (reference-name name))
+      (lambda (message) (analyzer-fail context span message))))
+
+  (defun declare-binding (scope name-node kind mutable context)
+    (unless (symbol-node-p name-node)
+      (analyzer-fail
+        context (and name-node (node-span name-node))
+        (str "expected binding name, got " (node-display name-node))))
+    (let* ((name (node-name name-node))
+           (span (node-span name-node))
+           (names (get scope :names))
+           (outputs (get scope :outputs))
+           (output-name (guarded-binding-name name context span))
+           (existing-name (js-call names :get name))
+           (existing-output (js-call outputs :get output-name)))
+      (when existing-name
+        (analyzer-fail
+          context span (str "duplicate " kind " binding: " name)))
+      (when existing-output
+        (analyzer-fail
+          context span
+          (str "binding " name " emits " output-name
+               ", which collides with " (get existing-output :name))))
+      (let ((binding
+             (object
+               :name name
+               :outputName output-name
+               :kind kind
+               :mutable mutable)))
+        (js-call names :set name binding)
+        (js-call outputs :set output-name binding)
+        binding)))
+
+  (defun lookup-binding (scope name)
+    (let ((current scope)
+          (binding undefined))
+      (while (and current (not binding))
+        (setq binding (js-call (get current :names) :get name))
+        (setq current (get current :parent)))
+      binding))
+
+  (defun require-binding (scope node context)
+    (let* ((name (node-name node))
+           (binding (lookup-binding scope name)))
+      (or binding
+          (analyzer-fail
+            context (node-span node) (str "unbound symbol: " name)))))
+
+  (defun qualified-name-p (name)
+    (or (js-call name :includes ".")
+        (js-call name :includes "/")))
+
+  (defun analyze-sequence (forms scope context)
+    (js-call forms :forEach
+      (lambda (form) (analyze-expression form scope context))))
+
+  (defun binding-pair (binding context)
+    (cond
+      ((symbol-node-p binding) [binding undefined])
+      (t
+       (let ((items (list-items binding)))
+         (if (and (not (eq items undefined))
+                  (>= (get items :length) 1)
+                  (<= (get items :length) 2)
+                  (symbol-node-p (nth 0 items)))
+             [(nth 0 items) (nth 1 items)]
+           (analyzer-fail
+             context (node-span binding)
+             (str "invalid let binding: " (node-display binding))))))))
+
+  (defun analyze-let (args scope sequential context form-span)
+    (when (= (get args :length) 0)
+      (analyzer-fail
+        context form-span
+        (str (if sequential "let*" "let") " requires a binding list")))
+    (let* ((bindings-form (nth 0 args))
+           (bindings (list-items bindings-form))
+           (body (js-call args :slice 1))
+           (child (make-scope scope)))
+      (when (eq bindings undefined)
+        (analyzer-fail
+          context (node-span bindings-form) "let bindings must be a list"))
+      (if sequential
+          (js-call bindings :forEach
+            (lambda (binding)
+              (let ((pair (binding-pair binding context)))
+                (analyze-expression (nth 1 pair) child context)
+                (declare-binding
+                  child (nth 0 pair) "local" t context))))
+        (let ((parsed
+               (js-call bindings :map
+                 (lambda (binding) (binding-pair binding context)))))
+          (js-call parsed :forEach
+            (lambda (pair)
+              (analyze-expression (nth 1 pair) scope context)))
+          (js-call parsed :forEach
+            (lambda (pair)
+              (declare-binding
+                child (nth 0 pair) "local" t context)))))
+      (analyze-sequence body child context)))
+
+  (defun analyze-function (parameters body scope context)
+    (let ((parameter-items (list-items parameters)))
+      (when (eq parameter-items undefined)
+        (analyzer-fail
+          context (node-span parameters) "function arguments must be a list"))
+      (let ((child (make-scope scope)))
+        (js-call parameter-items :forEach
+          (lambda (parameter)
+            (declare-binding child parameter "parameter" t context)))
+        (analyze-sequence body child context))))
+
+  (defun analyze-assignment
+      (args scope form-name context form-span)
+    (when (or (= (get args :length) 0)
+              (= (% (get args :length) 2) 1))
+      (analyzer-fail
+        context form-span
+        (str form-name " expects one or more name/value pairs")))
+    (let ((index 0))
+      (while (< index (get args :length))
+        (let* ((name-node (nth index args))
+               (value (nth (1+ index) args)))
+          (unless (symbol-node-p name-node)
+            (analyzer-fail
+              context form-span
+              (str "assignment target must be a symbol: "
+                   (node-display name-node))))
+          (let ((binding (require-binding scope name-node context)))
+            (unless (get binding :mutable)
+              (analyzer-fail
+                context (node-span name-node)
+                (str "cannot assign to immutable binding: "
+                     (node-name name-node)))))
+          (analyze-expression value scope context))
+        (setq index (+ index 2)))))
+
+  (defun analyze-object (args scope context form-span)
+    (when (= (% (get args :length) 2) 1)
+      (analyzer-fail context form-span "object expects key/value pairs"))
+    (let ((index 0))
+      (while (< index (get args :length))
+        (let ((key (nth index args))
+              (value (nth (1+ index) args)))
+          (unless (or (keyword-node-p key)
+                      (string-node-p key)
+                      (symbol-node-p key))
+            (analyze-expression key scope context))
+          (analyze-expression value scope context))
+        (setq index (+ index 2)))))
+
+  (defun analyze-property-call
+      (operator args scope context form-span)
+    (cond
+      ((= operator "get")
+       (when (or (< (get args :length) 2)
+                 (> (get args :length) 3))
+         (analyzer-fail context form-span "get expects 2..3 arguments")))
+      ((= operator "put")
+       (unless (= (get args :length) 3)
+         (analyzer-fail context form-span "put expects 3 arguments")))
+      ((= operator "js-call")
+       (when (< (get args :length) 2)
+         (analyzer-fail context form-span "js-call expects 2+ arguments"))))
+    (analyze-expression (nth 0 args) scope context)
+    (let ((key (nth 1 args)))
+      (unless (or (keyword-node-p key) (string-node-p key))
+        (analyze-expression key scope context)))
+    (analyze-sequence (js-call args :slice 2) scope context))
+
+  (defun analyze-cond (clauses scope context)
+    (js-call clauses :forEach
+      (lambda (clause)
+        (let ((items (list-items clause)))
+          (when (or (eq items undefined) (= (get items :length) 0))
+            (analyzer-fail
+              context (node-span clause)
+              (str "invalid cond clause: " (node-display clause))))
+          (analyze-expression (nth 0 items) scope context)
+          (analyze-sequence (js-call items :slice 1) scope context)))))
+
+  (defun analyze-jsx (args scope context form-span)
+    (when (< (get args :length) 2)
+      (analyzer-fail
+        context form-span
+        "jsx expects a type, props, and optional children"))
+    (let ((type (nth 0 args)))
+      (unless (or (keyword-node-p type) (string-node-p type))
+        (analyze-expression type scope context)))
+    (analyze-sequence (js-call args :slice 1) scope context))
+
+  (defun analyze-call (form scope context)
+    (let* ((items (node-items form))
+           (operator-node (nth 0 items))
+           (operator (and (symbol-node-p operator-node)
+                          (node-name operator-node)))
+           (args (js-call items :slice 1))
+           (form-span (node-span form)))
+      (cond
+        ((or (= operator "lambda") (= operator "fn"))
+         (when (= (get args :length) 0)
+           (analyzer-fail
+             context form-span
+             (str operator " requires an argument list")))
+         (analyze-function
+           (nth 0 args) (js-call args :slice 1) scope context))
+        ((= operator "let")
+         (analyze-let args scope false context form-span))
+        ((= operator "let*")
+         (analyze-let args scope t context form-span))
+        ((= operator "setq")
+         (analyze-assignment args scope "setq" context form-span))
+        ((= operator "set!")
+         (unless (= (get args :length) 2)
+           (analyzer-fail context form-span "set! expects 2 arguments"))
+         (analyze-assignment args scope "set!" context form-span))
+        ((= operator "cond") (analyze-cond args scope context))
+        ((= operator "jsx")
+         (analyze-jsx args scope context form-span))
+        ((= operator "fragment")
+         (analyze-sequence args scope context))
+        ((= operator "quote") nil)
+        ((= operator "object")
+         (analyze-object args scope context form-span))
+        ((or (= operator "get") (= operator "put") (= operator "js-call"))
+         (analyze-property-call
+           operator args scope context form-span))
+        ((= operator "js*") nil)
+        ((js-call builtin-operators :includes operator)
+         (analyze-sequence args scope context))
+        ((js-call
+           ["defun" "defn" "defcomponent" "defvar" "defconst"
+            "export" "export-default" "import" "module"]
+           :includes operator)
+         (analyzer-fail
+           context form-span
+           (str operator " is only valid at module top level")))
+        (t
+         (analyze-expression operator-node scope context)
+         (analyze-sequence args scope context)))))
+
+  (defun analyze-expression (form scope context)
+    (when form
+      (cond
+        ((or (= (node-kind form) "literal")
+             (= (node-kind form) "undefined")
+             (= (node-kind form) "keyword")) nil)
+        ((= (node-kind form) "symbol")
+         (let ((name (node-name form)))
+           (if (qualified-name-p name)
+               (guarded-reference-name name context (node-span form))
+             (require-binding scope form context))))
+        ((= (node-kind form) "vector")
+         (analyze-sequence (node-items form) scope context))
+        ((= (node-kind form) "list")
+         (analyze-call form scope context))
+        (t
+         (analyzer-fail
+           context (node-span form)
+           (str "unsupported form: " (node-display form)))))))
+
+  (defun import-bindings (args context form-span)
+    (unless (and (> (get args :length) 0)
+                 (string-node-p (nth 0 args)))
+      (analyzer-fail context form-span "import module must be a string"))
+    (let ((bindings [])
+          (index 1)
+          (default-seen false)
+          (namespace-seen false))
+      (while (< index (get args :length))
+        (let ((specifier (nth index args)))
+          (cond
+            ((and (keyword-node-p specifier)
+                  (= (node-name specifier) "default"))
+             (when default-seen
+               (analyzer-fail
+                 context form-span "duplicate :default import"))
+             (when (>= (1+ index) (get args :length))
+               (analyzer-fail
+                 context form-span ":default requires a binding"))
+             (setq default-seen t)
+             (setq index (1+ index))
+             (js-call bindings :push (nth index args)))
+            ((and (keyword-node-p specifier)
+                  (= (node-name specifier) "as"))
+             (when namespace-seen
+               (analyzer-fail
+                 context form-span "duplicate :as import"))
+             (when (>= (1+ index) (get args :length))
+               (analyzer-fail
+                 context form-span ":as requires a namespace binding"))
+             (setq namespace-seen t)
+             (setq index (1+ index))
+             (js-call bindings :push (nth index args)))
+            ((symbol-node-p specifier)
+             (js-call bindings :push specifier))
+            (t
+             (analyzer-fail
+               context form-span
+               (str "invalid import specifier: "
+                    (node-display specifier)))))
+          (setq index (1+ index))))
+      bindings))
+
+  (defun append-flattened-modules (forms result context)
+    (js-call forms :forEach
+      (lambda (form)
+        (if (and (= (node-kind form) "list")
+                 (symbol-node-p (nth 0 (node-items form)))
+                 (= (node-name (nth 0 (node-items form))) "module"))
+            (let ((items (node-items form)))
+              (unless (and (> (get items :length) 1)
+                           (symbol-node-p (nth 1 items)))
+                (analyzer-fail
+                  context (node-span form) "module name must be a symbol"))
+              (append-flattened-modules
+                (js-call items :slice 2) result context))
+          (js-call result :push form)))))
+
+  (defun flatten-modules (forms context)
+    (let ((result []))
+      (append-flattened-modules forms result context)
+      result))
+
+  (defun predeclare-top-level (forms scope context)
+    (js-call forms :forEach
+      (lambda (form)
+        (when (= (node-kind form) "list")
+          (let* ((items (node-items form))
+                 (operator-node (nth 0 items))
+                 (operator (and (symbol-node-p operator-node)
+                                (node-name operator-node)))
+                 (args (js-call items :slice 1))
+                 (count (get args :length)))
+            (cond
+              ((= operator "import")
+               (when (= count 0)
+                 (analyzer-fail
+                   context (node-span form) "import expects a module name"))
+               (js-call
+                 (import-bindings args context (node-span form))
+                 :forEach
+                 (lambda (name)
+                   (declare-binding scope name "import" false context))))
+              ((= operator "defvar")
+               (unless (and (>= count 1) (<= count 2))
+                 (analyzer-fail
+                   context (node-span form) "defvar expects 1..2 arguments"))
+               (declare-binding
+                 scope (nth 0 args) "variable" t context))
+              ((= operator "defconst")
+               (unless (and (>= count 1) (<= count 2))
+                 (analyzer-fail
+                   context (node-span form) "defconst expects 1..2 arguments"))
+               (declare-binding
+                 scope (nth 0 args) "constant" false context))
+              ((or (= operator "defun") (= operator "defn"))
+               (unless (>= count 2)
+                 (analyzer-fail
+                   context (node-span form)
+                   (str operator " expects 2+ arguments")))
+               (declare-binding
+                 scope (nth 0 args) "function" false context))))))))
+
+  (defun analyze-top-level (form scope context)
+    (if (not (= (node-kind form) "list"))
+        (analyze-expression form scope context)
+      (let* ((items (node-items form))
+             (operator-node (nth 0 items))
+             (operator (and (symbol-node-p operator-node)
+                            (node-name operator-node)))
+             (args (js-call items :slice 1))
+             (count (get args :length)))
+        (cond
+          ((= operator "import") nil)
+          ((or (= operator "defvar") (= operator "defconst"))
+           (when (> count 2)
+             (analyzer-fail
+               context (node-span form)
+               (str operator " expects 1..2 arguments")))
+           (analyze-expression (nth 1 args) scope context))
+          ((or (= operator "defun") (= operator "defn"))
+           (unless (>= count 2)
+             (analyzer-fail
+               context (node-span form)
+               (str operator " expects 2+ arguments")))
+           (analyze-function
+             (nth 1 args)
+             (js-call args :slice 2)
+             scope context))
+          ((= operator "export")
+           (when (= count 0)
+             (analyzer-fail
+               context (node-span form)
+               "export expects one or more bindings"))
+           (js-call args :forEach
+             (lambda (name)
+               (unless (symbol-node-p name)
+                 (analyzer-fail
+                   context (node-span name)
+                   (str "export name must be a symbol: "
+                        (node-display name))))
+               (require-binding scope name context))))
+          ((= operator "export-default")
+           (unless (= count 1)
+             (analyzer-fail
+               context (node-span form)
+               "export-default expects 1 argument"))
+           (analyze-expression (nth 0 args) scope context))
+          (t (analyze-expression form scope context))))))
+
+  (defun analyze-module (forms filename)
+    (let* ((context (object :filename filename))
+           (flattened (flatten-modules forms context))
+           (scope (make-scope nil)))
+      (predeclare-top-level flattened scope context)
+      (js-call flattened :forEach
+        (lambda (form) (analyze-top-level form scope context)))
+      forms))
+
+  (export analyze-module))

@@ -19,3 +19,8 @@ The portable reader comparison covers full normalized syntax trees, recursive
 character-based spans, diagnostics, deterministic build artifacts, and all
 current bootstrap sources. The generated reader must successfully read its own
 `.eli` implementation.
+
+The analyzer fixture runs after both readers. It compares success and complete
+diagnostic strings for scope resolution, declaration collisions, mutability,
+imports, exports, and malformed special forms. Both analyzers must accept all
+current bootstrap sources, including `analyzer.eli` itself.

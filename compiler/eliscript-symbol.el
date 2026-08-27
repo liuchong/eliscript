@@ -22,6 +22,9 @@
 (defconst eliscript-symbol-internal-prefix "__eliscript_"
   "ECMAScript identifier prefix reserved for generated compiler bindings.")
 
+(defconst eliscript-symbol-strict-binding-names '("arguments" "eval")
+  "Identifiers forbidden as bindings in strict ECMAScript modules.")
+
 (defun eliscript-symbol--fail (format-string &rest arguments)
   "Signal an identifier error using FORMAT-STRING and ARGUMENTS."
   (signal 'eliscript-compile-error
@@ -69,6 +72,8 @@
     (when (string-match-p "[./]" name)
       (eliscript-symbol--fail "qualified name cannot be a binding: %s" name))
     (let ((output-name (eliscript-symbol-munge-segment name)))
+      (when (member output-name eliscript-symbol-strict-binding-names)
+        (setq output-name (concat output-name "$")))
       (when (string-prefix-p eliscript-symbol-internal-prefix output-name)
         (eliscript-symbol--fail
          "binding name uses reserved compiler prefix: %s" name))

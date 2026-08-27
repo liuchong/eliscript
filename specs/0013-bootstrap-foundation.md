@@ -92,4 +92,7 @@ The remaining Generation 1 dependency order is:
 Each phase must expose deterministic data and add shared conformance evidence.
 
 The first two items are implemented by
-[0014-portable-syntax-reader.md](0014-portable-syntax-reader.md).
+[0014-portable-syntax-reader.md](0014-portable-syntax-reader.md). The lexical
+analyzer portion of item 3 is implemented by
+[0015-portable-lexical-analyzer.md](0015-portable-lexical-analyzer.md); portable
+macro expansion remains.
