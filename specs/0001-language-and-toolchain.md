@@ -213,9 +213,9 @@ of the CLI integration test.
 - Execute emitted modules in a JavaScript test runner.
 
 Lexical binding validation, trusted compile-time macro expansion, recursively
-located forms, filename/line/column diagnostics, output-name collision checks,
-and JavaScript execution are implemented. The explicit IR and source maps
-remain.
+located forms, filename/line/column diagnostics, explicit IR lowering,
+output-name collision checks, and JavaScript execution are implemented. Direct
+IR emission and source maps remain.
 
 ### M2: React
 

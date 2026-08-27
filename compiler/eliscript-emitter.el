@@ -12,6 +12,7 @@
 (require 'json)
 (require 'subr-x)
 (require 'eliscript-diagnostic)
+(require 'eliscript-ir)
 (require 'eliscript-symbol)
 
 (defalias 'eliscript-emitter--munge-segment
@@ -600,6 +601,10 @@
      "const __eliscript_truthy = (value) => value !== false && value != null;\n\n"
      (mapconcat #'eliscript-emitter-emit-top-level forms "\n\n")
      "\n")))
+
+(defun eliscript-emit-ir-module (program)
+  "Emit analyzed IR PROGRAM as one ECMAScript module."
+  (eliscript-emit-module (eliscript-ir-program-to-forms program)))
 
 (provide 'eliscript-emitter)
 

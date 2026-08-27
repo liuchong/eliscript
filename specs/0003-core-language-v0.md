@@ -156,11 +156,11 @@ in one scope that map to the same output identifier.
 - browser and JavaScript host APIs are explicit
 
 Compile-time user macros and recursive source locations are implemented by the
-front end described in specifications 0005 and 0006. A language IR, source
-maps, structured diagnostic records, Emacs object interop, and full diagnostics
-are not implemented yet. Later Eliscript versions may add forms that are more
-expressive than Emacs Lisp rather than preserving compatibility for its own
-sake.
+front end described in specifications 0005 and 0006. Explicit IR lowering is
+specified in 0007. Source maps, structured diagnostic records, Emacs object
+interop, and full diagnostics are not implemented yet. Later Eliscript versions
+may add forms that are more expressive than Emacs Lisp rather than preserving
+compatibility for its own sake.
 
 ## Acceptance Evidence
 

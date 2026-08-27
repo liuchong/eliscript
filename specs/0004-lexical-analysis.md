@@ -85,5 +85,5 @@ diagnostic records remain later M1 work.
 
 ## Deferred Work
 
-- a documented intermediate representation after analysis
+- direct IR-based ECMAScript emission
 - source maps from emitted JavaScript back to Eliscript source

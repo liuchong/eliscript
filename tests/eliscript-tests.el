@@ -264,6 +264,78 @@
    (eliscript-compile-string "(defun broken () (defmacro nested () 1))")
    :type 'eliscript-expand-error))
 
+(ert-deftest eliscript-lowerer-builds-explicit-ir ()
+  (let* ((program
+          (eliscript-compile-ir-string
+           "(module ir.example
+  (defconst answer 42)
+  (defun choose (value)
+    (let ((fallback answer))
+      (if value value fallback)))
+  (export choose))"
+           "ir.eli"))
+         (module (car (eliscript-ir-program-body program)))
+         (declarations (eliscript-ir-node-children module))
+         (constant (nth 0 declarations))
+         (function (nth 1 declarations))
+         (lexical-bindings
+          (nth (eliscript-ir-property function :parameter-count)
+               (eliscript-ir-node-children function)))
+         (binding (car (eliscript-ir-node-children lexical-bindings)))
+         (conditional
+          (nth (eliscript-ir-property lexical-bindings :binding-count)
+               (eliscript-ir-node-children lexical-bindings)))
+         nodes-without-spans)
+    (eliscript-ir-walk
+     program
+     (lambda (node)
+       (unless (eliscript-ir-node-span node)
+         (push node nodes-without-spans))))
+    (should (eliscript-ir-program-p program))
+    (should-not nodes-without-spans)
+    (should (eq (eliscript-ir-node-kind module) 'module-declaration))
+    (should (eq (eliscript-ir-node-kind constant) 'variable-declaration))
+    (should-not (eliscript-ir-property constant :mutable))
+    (should (eq (eliscript-ir-node-kind function) 'function-declaration))
+    (should (eq (eliscript-ir-node-kind lexical-bindings) 'lexical-bindings))
+    (should (eq (eliscript-ir-node-kind binding) 'lexical-binding))
+    (should (eq (eliscript-ir-node-kind conditional) 'conditional))
+    (should (= (eliscript-source-span-line
+                (eliscript-ir-node-span lexical-bindings))
+               4))))
+
+(ert-deftest eliscript-lowerer-preserves-macro-call-origin ()
+  (let* ((program
+          (eliscript-compile-ir-string
+           "(defmacro twice (value) `(+ ,value ,value))
+
+(defun double (value)
+  (twice value))"
+         "macro-ir.eli"))
+         (function (car (eliscript-ir-program-body program)))
+         (intrinsic
+          (nth (eliscript-ir-property function :parameter-count)
+               (eliscript-ir-node-children function)))
+         (span (eliscript-ir-node-span intrinsic)))
+    (should (eq (eliscript-ir-node-kind intrinsic) 'intrinsic))
+    (should (eq (eliscript-ir-node-value intrinsic) '+))
+    (should (= (eliscript-source-span-line span) 4))
+    (should (= (eliscript-source-span-column span) 3))))
+
+(ert-deftest eliscript-ir-round-trip-preserves-computed-calls ()
+  (let* ((source "(defun invoke (value) ((lambda (item) item) value))")
+         (program (eliscript-compile-ir-string source "call.eli"))
+         (function (car (eliscript-ir-program-body program)))
+         (call
+          (nth (eliscript-ir-property function :parameter-count)
+               (eliscript-ir-node-children function)))
+         (callee (car (eliscript-ir-node-children call))))
+    (should (eq (eliscript-ir-node-kind call) 'call))
+    (should (eq (eliscript-ir-node-kind callee) 'function-expression))
+    (should
+     (equal (eliscript-ir-program-to-forms program)
+            '((defun invoke (value) ((lambda (item) item) value)))))))
+
 (provide 'eliscript-tests)
 
 ;;; eliscript-tests.el ends here

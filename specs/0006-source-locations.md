@@ -85,5 +85,4 @@ source-map emitter.
 
 - structured diagnostic values in addition to formatted condition messages
 - expansion stacks with definition and nested call origins
-- preserving spans in the explicit compiler IR
 - source-map generation from emitted ECMAScript back to Eliscript

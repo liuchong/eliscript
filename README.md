@@ -119,12 +119,12 @@ tools/                   Optional integrations and developer utilities
 The current seed compiler is intentionally direct:
 
 ```text
-.eli source -> Emacs reader -> macro expander -> lexical analyzer -> ESM emitter
-            -> Bun or browser
+.eli source -> Emacs reader -> macro expander -> lexical analyzer -> IR lowerer
+            -> ESM emitter -> Bun or browser
 ```
 
-The next compiler stage replaces the analyzer's pass-through output with a
-language-neutral IR, then emits source maps from the preserved source spans.
+The next compiler stage emits ECMAScript directly from IR and produces source
+maps from the preserved source spans.
 
 ## Bootstrap Strategy
 
@@ -190,13 +190,15 @@ Current evidence:
   backquote and body parameters, and never appear in generated modules.
 - Located forms preserve source spans through macro expansion and lexical
   analysis; compiler errors report filename, line, and column.
-- Thirty ERT tests cover reading, locations, macro expansion, analysis, core
-  emission, modules, truthiness, errors, and JavaScript interop.
+- An explicit IR separates declarations, bindings, control flow, calls, data,
+  and JavaScript interop while retaining a span on every node.
+- Thirty-three ERT tests cover reading, locations, macro expansion, analysis,
+  IR lowering, core emission, modules, errors, and JavaScript interop.
 - A CLI integration test compares generated output with a checked-in snapshot.
 - Bun 1.4 executes the generated module and verifies recursion, mutation,
   loops, higher-order functions, objects, arrays, and exports.
 
-The next M1 slice introduces an explicit IR and source maps. React and Org
+The next M1 slice adds direct IR emission and source maps. React and Org
 publishing remain later milestones.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
@@ -204,7 +206,9 @@ implemented analyzer contract and
 [specs/0005-compile-time-macros.md](specs/0005-compile-time-macros.md) for the
 seed macro model, and
 [specs/0006-source-locations.md](specs/0006-source-locations.md) for located
-forms and diagnostic positions.
+forms and diagnostic positions, and
+[specs/0007-intermediate-representation.md](specs/0007-intermediate-representation.md)
+for the explicit IR contract.
 
 ## License
 

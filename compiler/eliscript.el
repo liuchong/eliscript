@@ -7,37 +7,44 @@
 ;;; Code:
 
 (require 'eliscript-reader)
-(require 'eliscript-form)
 (require 'eliscript-expander)
 (require 'eliscript-analyzer)
+(require 'eliscript-lower)
 (require 'eliscript-emitter)
+
+(defun eliscript-compile-ir-string (source &optional filename)
+  "Compile Eliscript SOURCE from FILENAME into an IR program."
+  (eliscript-lower-module
+   (eliscript-analyze-module
+    (eliscript-expand-module
+     (eliscript-read-located-string source filename)
+     filename)
+    filename)
+   filename))
 
 (defun eliscript-compile-string (source &optional filename)
   "Compile Eliscript SOURCE to an ECMAScript module.
 
 FILENAME is used for compiler diagnostics."
-  (eliscript-emit-module
-   (mapcar
-    #'eliscript-form-strip
-    (eliscript-analyze-module
-     (eliscript-expand-module
-      (eliscript-read-located-string source filename)
-      filename)
-     filename))))
+  (eliscript-emit-ir-module
+   (eliscript-compile-ir-string source filename)))
+
+(defun eliscript-compile-ir-file (input-file)
+  "Compile INPUT-FILE into an IR program."
+  (eliscript-lower-module
+   (eliscript-analyze-module
+    (eliscript-expand-module
+     (eliscript-read-located-file input-file)
+     input-file)
+    input-file)
+   input-file))
 
 (defun eliscript-compile-file (input-file &optional output-file)
   "Compile INPUT-FILE and optionally write it to OUTPUT-FILE.
 
 Return the generated ECMAScript source."
-  (let ((output
-         (eliscript-emit-module
-          (mapcar
-           #'eliscript-form-strip
-           (eliscript-analyze-module
-            (eliscript-expand-module
-             (eliscript-read-located-file input-file)
-             input-file)
-            input-file)))))
+  (let ((output (eliscript-emit-ir-module
+                 (eliscript-compile-ir-file input-file))))
     (when output-file
       (make-directory (file-name-directory (expand-file-name output-file)) t)
       (with-temp-file output-file
