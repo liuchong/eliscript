@@ -242,12 +242,18 @@ feeds a responsive React publishing site whose application code is written in
 Eliscript. The command-line exporter and production bundle are covered by the
 integration suite. See [0012-org-publishing.md](0012-org-publishing.md).
 
-### M4: Bootstrap
+### M4: Bootstrap (In Progress)
 
 - Rewrite portable compiler phases in Eliscript.
 - Use the Emacs Lisp seed compiler to produce the first `compiler.js`.
 - Run one compiler conformance suite against both implementations.
 - Reach a reproducible fixed point by compiling the compiler with itself.
+
+Started on 2026-08-28. The first compiler module written in Eliscript owns
+identifier mapping and is compiled to ESM by the seed compiler. The seed and
+generated implementations consume one shared conformance fixture and agree on
+valid names, diagnostics, reserved words, qualified references, and Unicode
+code points. See [0013-bootstrap-foundation.md](0013-bootstrap-foundation.md).
 
 ### M5: Emacs Acceleration
 

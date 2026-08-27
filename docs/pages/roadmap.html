@@ -52,7 +52,7 @@
               <article class="milestone"><span class="milestone-id">M1</span><div><h3>Language core</h3><p>Macros, locations, analysis, explicit IR, direct emission, source maps, CLI, and runtime execution.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M2</span><div><h3>React</h3><p>Element IR, components, hooks, automatic JSX runtime, browser mounting, source-mapped Vite builds, and Fast Refresh.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M3</span><div><h3>Publishing</h3><p>Pure Emacs Org export, deterministic article modules, live content updates, and a fully custom Eliscript React site.</p></div><span class="status status-done">Complete</span></article>
-              <article class="milestone"><span class="milestone-id">M4</span><div><h3>Bootstrap</h3><p>Rewrite portable compiler phases in Eliscript and reach a reproducible self-hosted fixed point.</p></div><span class="status">Planned</span></article>
+              <article class="milestone"><span class="milestone-id">M4</span><div><h3>Bootstrap</h3><p>The first compiler module now compiles from Eliscript to ESM and shares its symbol conformance suite with the seed implementation.</p></div><span class="status status-next">In progress</span></article>
               <article class="milestone"><span class="milestone-id">M5</span><div><h3>Emacs acceleration</h3><p>Run selected portable workloads in a long-lived Bun worker controlled by Emacs.</p></div><span class="status">Research</span></article>
             </div>
           </section>
@@ -68,6 +68,7 @@ Emacs Lisp seed + compiler.eli → compiler.js
 Generation 2
 compiler.js + compiler.eli → next-compiler.js</code></pre>
             <p>Self-hosting is complete only when both compilers pass the same conformance suite and the generated compiler can reproduce itself without semantic drift.</p>
+            <div class="callout"><p>Generation 1 has started with deterministic identifier mapping. The portable syntax model and reader are the next dependency boundary.</p></div>
           </section>
 
           <section id="acceleration">

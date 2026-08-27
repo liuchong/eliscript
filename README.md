@@ -71,6 +71,12 @@ bun run dev:org-site
 
 Create its static production bundle with `bun run build:org-site`.
 
+Build the first compiler module written in Eliscript:
+
+```sh
+bun run build:bootstrap
+```
+
 ## Why
 
 Emacs Lisp is a productive language for editing, automation, macros, and
@@ -138,6 +144,7 @@ standard ESM. Full Emacs Lisp compatibility is not a goal.
 
 ```text
 bin/                     Command-line entry point
+bootstrap/               Compiler modules written in Eliscript
 compiler/                Emacs Lisp compiler implementation
 docs/                    GitHub Pages website
 runtime/                 Minimal JavaScript runtime helpers
@@ -217,7 +224,7 @@ portable execution model. The exact implemented subset is recorded in
 
 The first Emacs Lisp seed compiler is implemented and usable from the command
 line. The M0 vertical slice, M1 language core, M2 React target, and M3 Org
-publishing target are complete.
+publishing target are complete. M4 self-hosting is in progress.
 
 Current evidence:
 
@@ -251,18 +258,22 @@ Current evidence:
   nested `.org` sources, and invalidates the module during development.
 - The custom Org site is written in Eliscript and proves React hooks, article
   navigation, responsive rendering, content HMR, and production bundling.
-- Forty-five ERT tests cover reading, locations, macro expansion, analysis, IR
+- The first portable compiler module is written in Eliscript, compiled by the
+  seed to ESM, and matches seed identifier semantics over one shared
+  conformance fixture, including Unicode and diagnostic cases.
+- Forty-six ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
-  errors, and interop.
-- Six Bun tests cover the compiler and Org Vite adapters, source-map handoff,
-  file filtering, development-mode React Refresh, and Org module invalidation.
+  bootstrap conformance, errors, and interop.
+- Seven Bun tests cover the compiler and Org Vite adapters, source-map handoff,
+  file filtering, React Refresh, Org module invalidation, and generated
+  bootstrap behavior.
 - A CLI integration test compares generated output with a checked-in snapshot.
 - Bun 1.4 executes generated modules and verifies recursion, mutation, loops,
   higher-order functions, objects, arrays, exports, React server rendering, and
   production Vite bundles, and deterministic Org publishing.
 
-The next milestone starts the bootstrap: portable compiler phases move into
-Eliscript on the path to a reproducible self-hosted compiler.
+M4 now continues with the portable syntax model and reader, followed by the
+analyzer, IR, emitter, compiler driver, and reproducible self-compilation.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -280,7 +291,9 @@ element compilation, and
 [specs/0011-vite-adapter.md](specs/0011-vite-adapter.md) for browser development
 and production builds, and
 [specs/0012-org-publishing.md](specs/0012-org-publishing.md) for deterministic
-Org content modules and the custom React publishing site.
+Org content modules and the custom React publishing site, and
+[specs/0013-bootstrap-foundation.md](specs/0013-bootstrap-foundation.md) for
+the first shared seed/portable compiler contract.
 
 ## License
 

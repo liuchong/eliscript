@@ -43,6 +43,7 @@
           <a href="#run">Run</a>
           <a href="#react">React</a>
           <a href="#publishing">Publishing</a>
+          <a href="#bootstrap">Bootstrap</a>
           <a href="#test">Test</a>
         </nav>
 
@@ -101,11 +102,17 @@ bun run build:org-site</code></pre>
             <p>The application itself is written in Eliscript. Vite exposes the Org directory as <code>virtual:eliscript-org</code> and reloads article changes during development.</p>
           </section>
 
+          <section id="bootstrap">
+            <h2>Build the bootstrap module</h2>
+            <pre><code>bun run build:bootstrap</code></pre>
+            <p>The Emacs Lisp seed compiler writes the first compiler module maintained in Eliscript to <code>dist/bootstrap/symbol.mjs</code>, together with its source map. The test suite checks its behavior against the same conformance fixture used by the seed implementation.</p>
+          </section>
+
           <section id="test">
             <h2>Run the test suite</h2>
             <pre><code>bun run test</code></pre>
             <p>This runs the Emacs ERT suite, Vite adapter tests, public CLI fixtures, deterministic snapshots, source-map validation, runtime execution, React server rendering, and a production browser build.</p>
-            <div class="callout callout-coral"><p>M3 publishing is complete: pure Emacs Org export, deterministic content modules, live Vite updates, and a custom Eliscript React site are active. Self-hosting is next.</p></div>
+            <div class="callout callout-coral"><p>M4 is underway. Identifier mapping now runs from compiler source written in Eliscript; the portable syntax model and reader are next.</p></div>
           </section>
         </article>
       </div>

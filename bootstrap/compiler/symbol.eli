@@ -1,0 +1,84 @@
+(module bootstrap.compiler.symbol
+  (defconst reserved-words
+    ["await" "break" "case" "catch" "class" "const" "continue"
+     "debugger" "default" "delete" "do" "else" "enum" "export"
+     "extends" "false" "finally" "for" "function" "if" "implements"
+     "import" "in" "instanceof" "interface" "let" "new" "null"
+     "package" "private" "protected" "public" "return" "static"
+     "super" "switch" "this" "throw" "true" "try" "typeof" "var"
+     "void" "while" "with" "yield"])
+
+  (defconst reserved-values ["nil" "t" "false" "undefined"])
+  (defconst internal-prefix "__eliscript_")
+  (defconst fail
+    (js* "(message) => { throw new Error(message); }"))
+
+  (defun ascii-identifier-code-p (code)
+    (or (and (>= code 65) (<= code 90))
+        (and (>= code 97) (<= code 122))
+        (and (>= code 48) (<= code 57))
+        (= code 95)
+        (= code 36)))
+
+  (defun unicode-escape (code)
+    (let* ((hex (js-call code :toString 16))
+           (upper (js-call hex :toUpperCase))
+           (padded (js-call upper :padStart 4 "0")))
+      (str "_U" padded "_")))
+
+  (defun munge-character (code)
+    (cond
+      ((ascii-identifier-code-p code)
+       (js-call (js* "String") :fromCodePoint code))
+      ((= code 45) "_")
+      ((= code 63) "_QMARK_")
+      ((= code 33) "_BANG_")
+      ((= code 42) "_STAR_")
+      ((= code 43) "_PLUS_")
+      ((= code 61) "_EQ_")
+      ((= code 60) "_LT_")
+      ((= code 62) "_GT_")
+      (t (unicode-escape code))))
+
+  (defun munge-segment (name)
+    (let ((index 0)
+          (pieces []))
+      (while (< index (get name :length))
+        (let ((code (js-call name :codePointAt index)))
+          (js-call pieces :push (munge-character code))
+          (setq index (+ index (if (> code 65535) 2 1)))))
+      (let ((result (js-call pieces :join "")))
+        (when (= result "")
+          (fail "empty identifier"))
+        (when (and (>= (js-call result :charCodeAt 0) 48)
+                   (<= (js-call result :charCodeAt 0) 57))
+          (setq result (str "_" result)))
+        (when (js-call reserved-words :includes result)
+          (setq result (str result "$")))
+        result)))
+
+  (defun binding-name (name)
+    (when (or (js-call reserved-values :includes name)
+              (js-call name :startsWith "&"))
+      (fail (str "reserved value cannot be a binding: " name)))
+    (when (or (js-call name :includes ".")
+              (js-call name :includes "/"))
+      (fail (str "qualified name cannot be a binding: " name)))
+    (let ((output-name (munge-segment name)))
+      (when (js-call output-name :startsWith internal-prefix)
+        (fail (str "binding name uses reserved compiler prefix: " name)))
+      output-name))
+
+  (defun reference-name (name)
+    (let* ((normalized (js-call name :replaceAll "/" "."))
+           (segments (js-call normalized :split "."))
+           (present
+            (js-call segments :filter
+              (lambda (segment) (> (get segment :length) 0))))
+           (munged (js-call present :map munge-segment))
+           (reference (js-call munged :join ".")))
+      (when (js-call reference :startsWith internal-prefix)
+        (fail (str "reference uses reserved compiler prefix: " name)))
+      reference))
+
+  (export munge-segment binding-name reference-name))

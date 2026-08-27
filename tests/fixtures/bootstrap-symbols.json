@@ -1,0 +1,37 @@
+{
+  "segment": [
+    { "input": "hello-world", "output": "hello_world" },
+    { "input": "ready?", "output": "ready_QMARK_" },
+    { "input": "save!", "output": "save_BANG_" },
+    { "input": "a*b+c=d<e>f", "output": "a_STAR_b_PLUS_c_EQ_d_LT_e_GT_f" },
+    { "input": "$value", "output": "$value" },
+    { "input": "9lives", "output": "_9lives" },
+    { "input": "class", "output": "class$" },
+    { "input": "true", "output": "true$" },
+    { "input": "你好", "output": "_U4F60__U597D_" },
+    { "input": "😀", "output": "_U1F600_" },
+    { "input": "topic:name", "output": "topic_U003A_name" },
+    { "input": "", "error": "empty identifier" }
+  ],
+  "binding": [
+    { "input": "compile-file", "output": "compile_file" },
+    { "input": "do", "output": "do$" },
+    { "input": "nil", "error": "reserved value cannot be a binding: nil" },
+    { "input": "t", "error": "reserved value cannot be a binding: t" },
+    { "input": "false", "error": "reserved value cannot be a binding: false" },
+    { "input": "undefined", "error": "reserved value cannot be a binding: undefined" },
+    { "input": "&rest", "error": "reserved value cannot be a binding: &rest" },
+    { "input": "module/name", "error": "qualified name cannot be a binding: module/name" },
+    { "input": "module.name", "error": "qualified name cannot be a binding: module.name" },
+    { "input": "__eliscript_hidden", "error": "binding name uses reserved compiler prefix: __eliscript_hidden" },
+    { "input": "", "error": "empty identifier" }
+  ],
+  "reference": [
+    { "input": "console/log", "output": "console.log" },
+    { "input": "package.render-item", "output": "package$.render_item" },
+    { "input": "one//two...three", "output": "one.two.three" },
+    { "input": "世界/ready?", "output": "_U4E16__U754C_.ready_QMARK_" },
+    { "input": "__eliscript_private/run", "error": "reference uses reserved compiler prefix: __eliscript_private/run" },
+    { "input": "", "output": "" }
+  ]
+}
