@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Eliscript is an Emacs Lisp-flavored language that compiles to modern ECMAScript modules.">
+    <meta name="theme-color" content="#181916">
+    <meta property="og:title" content="Eliscript">
+    <meta property="og:description" content="A Lisp-shaped path from Emacs to modern ECMAScript.">
+    <meta property="og:image" content="pages/assets/eliscript-hero.jpg">
+    <title>Eliscript — Emacs Lisp to ECMAScript</title>
+    <link rel="icon" type="image/png" href="pages/assets/favicon.png">
+    <link rel="apple-touch-icon" href="pages/assets/eliscript-logo.png">
+    <link rel="stylesheet" href="pages/assets/site.css">
+    <script defer src="pages/assets/site.js"></script>
+  </head>
+  <body class="home">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="nav-shell" aria-label="Primary navigation">
+        <a class="brand" href="index.html" aria-current="page">
+          <img class="brand-mark" src="pages/assets/eliscript-logo-light.png" alt="">
+          <span>Eliscript</span>
+        </a>
+        <div class="nav-links">
+          <a href="pages/getting-started.html">Start</a>
+          <a href="pages/language.html">Language</a>
+          <a class="nav-optional" href="pages/roadmap.html">Roadmap</a>
+          <a href="https://github.com/liuchong/eliscript">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-inner">
+          <span class="hero-logo" aria-hidden="true">
+            <img src="pages/assets/eliscript-logo-light.png" alt="">
+          </span>
+          <p class="eyebrow">Emacs Lisp → ECMAScript</p>
+          <h1 id="hero-title">Eliscript</h1>
+          <p class="hero-copy">
+            A Lisp-shaped language compiled by Emacs into readable, standard ESM.
+            Built to grow beyond Emacs Lisp without losing its programmable spirit.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-light" href="pages/getting-started.html">Get started</a>
+            <a class="button button-outline-light" href="https://github.com/liuchong/eliscript">View source</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="band band-white" aria-labelledby="pipeline-title">
+        <div class="section-shell">
+          <div class="section-heading">
+            <h2 id="pipeline-title">A small compiler with a long path.</h2>
+            <p>
+              The first generation is intentionally direct: Emacs reads Lisp forms,
+              Eliscript emits standard modules, and Bun or a browser runs the result.
+            </p>
+          </div>
+          <div class="pipeline" aria-label="Compilation pipeline">
+            <article class="pipeline-step">
+              <span class="step-number">01</span>
+              <h3>Write Lisp</h3>
+              <p>Use lexical bindings, functions, data forms, modules, and explicit JavaScript interop.</p>
+            </article>
+            <article class="pipeline-step">
+              <span class="step-number">02</span>
+              <h3>Read in Emacs</h3>
+              <p>The seed compiler runs with plain Emacs, including deterministic batch builds.</p>
+            </article>
+            <article class="pipeline-step">
+              <span class="step-number">03</span>
+              <h3>Emit ESM</h3>
+              <p>Generated output stays readable, inspectable, and free of host-specific syntax.</p>
+            </article>
+            <article class="pipeline-step">
+              <span class="step-number">04</span>
+              <h3>Run anywhere</h3>
+              <p>Bun is the reference host today; browsers and other ECMAScript runtimes remain valid targets.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="band band-dark" aria-labelledby="compiler-title">
+        <div class="section-shell">
+          <div class="section-heading">
+            <h2 id="compiler-title">See the compiler think.</h2>
+            <p>
+              The output is ordinary ECMAScript. Switch between real language forms
+              to inspect how the current seed compiler lowers them.
+            </p>
+          </div>
+          <div class="code-lab">
+            <div class="code-toolbar">
+              <span class="code-toolbar-label">compiler / vertical slice</span>
+              <div class="segments" role="tablist" aria-label="Code examples">
+                <button class="segment" type="button" role="tab" aria-selected="true" data-example="factorial">factorial</button>
+                <button class="segment" type="button" role="tab" aria-selected="false" data-example="data">data</button>
+                <button class="segment" type="button" role="tab" aria-selected="false" data-example="interop">interop</button>
+              </div>
+            </div>
+            <div class="code-grid">
+              <div class="code-pane">
+                <span class="code-label">Eliscript</span>
+                <pre><code data-source-code>(defun factorial (n)
+  (if (&lt;= n 1)
+      1
+    (* n (factorial (1- n)))))</code></pre>
+              </div>
+              <div class="code-pane">
+                <span class="code-label">ECMAScript</span>
+                <pre><code data-output-code>function factorial(n) {
+  return (__eliscript_truthy(n &lt;= 1)
+    ? 1
+    : n * factorial(n - 1));
+}</code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="band" aria-labelledby="core-title">
+        <div class="section-shell">
+          <div class="section-heading">
+            <h2 id="core-title">The core that exists today.</h2>
+            <p>
+              M0 is complete. This is a working compiler with a deliberately small,
+              documented language surface, not a mock syntax or future-only proposal.
+            </p>
+          </div>
+          <div class="feature-grid">
+            <article class="feature">
+              <span class="feature-kicker">Bindings</span>
+              <h3>Lexical by design</h3>
+              <p><code>defvar</code>, <code>defconst</code>, <code>defun</code>, <code>lambda</code>, <code>let</code>, and <code>let*</code>.</p>
+            </article>
+            <article class="feature">
+              <span class="feature-kicker">Control</span>
+              <h3>Lisp truthiness</h3>
+              <p><code>if</code>, <code>cond</code>, <code>while</code>, <code>and</code>, and <code>or</code> preserve Lisp value semantics.</p>
+            </article>
+            <article class="feature">
+              <span class="feature-kicker">Data</span>
+              <h3>Host-friendly values</h3>
+              <p>Vectors, quoted lists, objects, keywords, strings, numbers, booleans, null, and undefined.</p>
+            </article>
+            <article class="feature">
+              <span class="feature-kicker">Modules</span>
+              <h3>Standard ESM</h3>
+              <p>Named, default, namespace, and side-effect imports plus named and default exports.</p>
+            </article>
+            <article class="feature">
+              <span class="feature-kicker">Interop</span>
+              <h3>JavaScript stays visible</h3>
+              <p>Property access, method calls, constructors, qualified symbols, and a narrow raw escape hatch.</p>
+            </article>
+            <article class="feature">
+              <span class="feature-kicker">Evidence</span>
+              <h3>Executed, not imagined</h3>
+              <p>ERT semantics, deterministic snapshots, CLI tests, and real ESM execution in Bun.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="band band-cyan">
+        <div class="section-shell roadmap-strip">
+          <h2>Seed compiler first. Self-hosted language next.</h2>
+          <div>
+            <p>
+              The Emacs Lisp compiler establishes semantics. Later, an Eliscript
+              compiler will compile itself into JavaScript and become the primary implementation.
+            </p>
+            <a class="button" href="pages/roadmap.html">Read the roadmap</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-shell">
+        <p>Eliscript · Lisp ideas, ECMAScript reach.</p>
+        <div class="footer-links">
+          <a href="pages/language.html">Language</a>
+          <a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a>
+          <a href="https://github.com/liuchong/eliscript">GitHub</a>
+          <span>© <span data-year>2026</span></span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

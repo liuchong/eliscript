@@ -1,7 +1,16 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/pages/assets/eliscript-logo-light.png">
+    <img src="docs/pages/assets/eliscript-logo.png" width="144" alt="Eliscript logo">
+  </picture>
+</p>
+
 # Eliscript
 
 Eliscript is an Emacs Lisp-flavored language that compiles to modern
 JavaScript and React.
+
+Website source: [`docs/index.html`](docs/index.html)
 
 The seed compiler is written in Emacs Lisp and runs with plain Emacs, including
 `emacs --batch`. It emits standard ECMAScript modules. Bun is the reference
@@ -93,6 +102,7 @@ standard ESM. Full Emacs Lisp compatibility is not a goal.
 ```text
 bin/                     Command-line entry point
 compiler/                Emacs Lisp compiler implementation
+docs/                    GitHub Pages website
 runtime/                 Minimal JavaScript runtime helpers
 stdlib/                  Portable Eliscript standard library
 examples/                End-to-end example applications
@@ -180,3 +190,8 @@ Current evidence:
 The next milestone is M1: add a real analyzer with lexical binding validation,
 macro expansion, an explicit IR, source locations, and source maps. React and
 Org publishing remain later milestones.
+
+## License
+
+Eliscript is free software licensed under the
+[GNU General Public License, version 3 or later](LICENSE).

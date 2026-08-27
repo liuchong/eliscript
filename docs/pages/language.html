@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="The implemented Eliscript core language and its semantics.">
+    <meta name="theme-color" content="#f2f0e8">
+    <title>Language · Eliscript</title>
+    <link rel="icon" type="image/png" href="assets/favicon.png">
+    <link rel="apple-touch-icon" href="assets/eliscript-logo.png">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="nav-shell" aria-label="Primary navigation">
+        <a class="brand" href="../index.html"><img class="brand-mark" src="assets/eliscript-logo.png" alt=""><span>Eliscript</span></a>
+        <div class="nav-links">
+          <a href="getting-started.html">Start</a>
+          <a href="language.html" aria-current="page">Language</a>
+          <a class="nav-optional" href="roadmap.html">Roadmap</a>
+          <a href="https://github.com/liuchong/eliscript">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <header class="doc-hero">
+        <div class="doc-hero-inner">
+          <p class="eyebrow">Core language · M0</p>
+          <h1>Lisp-shaped, lexically scoped, ECMAScript-bound.</h1>
+          <p class="doc-lede">Eliscript begins near Emacs Lisp, then chooses explicit semantics that fit modules, browsers, and modern JavaScript runtimes.</p>
+        </div>
+      </header>
+
+      <div class="doc-shell">
+        <nav class="doc-nav" aria-label="On this page">
+          <p class="doc-nav-title">On this page</p>
+          <a href="#values">Values</a>
+          <a href="#forms">Forms</a>
+          <a href="#modules">Modules</a>
+          <a href="#differences">Differences</a>
+        </nav>
+
+        <article class="doc-content">
+          <section id="values">
+            <h2>Value model</h2>
+            <table class="fact-table">
+              <thead><tr><th>Eliscript</th><th>ECMAScript</th></tr></thead>
+              <tbody>
+                <tr><td><code>nil</code></td><td><code>null</code></td></tr>
+                <tr><td><code>t</code> / <code>false</code></td><td><code>true</code> / <code>false</code></td></tr>
+                <tr><td>numbers and strings</td><td>ECMAScript numbers and strings</td></tr>
+                <tr><td>keywords</td><td>strings without the leading colon</td></tr>
+                <tr><td>vectors and quoted lists</td><td>arrays</td></tr>
+                <tr><td><code>(object ...)</code></td><td>plain object literal</td></tr>
+              </tbody>
+            </table>
+            <div class="callout"><p>Truthiness is Lisp-like: only <code>false</code>, <code>null</code>, and <code>undefined</code> are false. Zero and empty strings remain true.</p></div>
+          </section>
+
+          <section id="forms">
+            <h2>Implemented forms</h2>
+            <div class="language-tabs">
+              <div class="segments" role="tablist" aria-label="Language form categories">
+                <button class="segment" type="button" role="tab" aria-selected="true" data-language-tab="bindings">Bindings</button>
+                <button class="segment" type="button" role="tab" aria-selected="false" data-language-tab="control">Control</button>
+                <button class="segment" type="button" role="tab" aria-selected="false" data-language-tab="data">Data</button>
+                <button class="segment" type="button" role="tab" aria-selected="false" data-language-tab="interop">Interop</button>
+              </div>
+
+              <div class="language-panel" data-language-panel="bindings">
+                <div class="form-list">
+                  <article class="form-item"><code>defvar / defconst</code><p>Top-level mutable and immutable bindings.</p></article>
+                  <article class="form-item"><code>defun / defn</code><p>Named functions with implicit final return.</p></article>
+                  <article class="form-item"><code>lambda / fn</code><p>First-class anonymous functions.</p></article>
+                  <article class="form-item"><code>let / let*</code><p>Parallel and sequential lexical bindings.</p></article>
+                </div>
+              </div>
+              <div class="language-panel" data-language-panel="control" hidden>
+                <div class="form-list">
+                  <article class="form-item"><code>if / when / unless</code><p>Value-producing conditional forms.</p></article>
+                  <article class="form-item"><code>cond</code><p>Ordered condition branches with a final value.</p></article>
+                  <article class="form-item"><code>while</code><p>Loop with Lisp truthiness and explicit mutation.</p></article>
+                  <article class="form-item"><code>and / or / not</code><p>Short-circuit operators that return operand values.</p></article>
+                </div>
+              </div>
+              <div class="language-panel" data-language-panel="data" hidden>
+                <div class="form-list">
+                  <article class="form-item"><code>list / vector / array</code><p>Ordered values represented as ECMAScript arrays.</p></article>
+                  <article class="form-item"><code>car / cdr / cons / nth</code><p>Basic Lisp collection operations with empty-list handling.</p></article>
+                  <article class="form-item"><code>object</code><p>Plain object literals with keyword, string, or computed keys.</p></article>
+                  <article class="form-item"><code>get / put</code><p>Property access, fallback, and assignment.</p></article>
+                </div>
+              </div>
+              <div class="language-panel" data-language-panel="interop" hidden>
+                <div class="form-list">
+                  <article class="form-item"><code>js-call</code><p>Method invocation that preserves its receiver.</p></article>
+                  <article class="form-item"><code>new</code><p>Construct native JavaScript values.</p></article>
+                  <article class="form-item"><code>funcall / apply</code><p>Call first-class functions directly or from arrays.</p></article>
+                  <article class="form-item"><code>js*</code><p>A narrow, explicit raw JavaScript escape hatch.</p></article>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section id="modules">
+            <h2>ECMAScript modules</h2>
+            <pre><code>(import "react" :default React useState)
+(import "library" :as Library)
+(import "side-effect-only")
+
+(export Component helper)
+(export-default Component)</code></pre>
+            <p>One Eliscript source file emits one ESM file. Module names are source-level identifiers today; path resolution belongs to a later analyzer stage.</p>
+          </section>
+
+          <section id="differences">
+            <h2>Intentional differences</h2>
+            <ul>
+              <li>Lexical scope is mandatory; dynamic scope is not inherited.</li>
+              <li>Numbers follow ECMAScript behavior rather than Emacs integer semantics.</li>
+              <li>Lists and vectors currently share an array representation.</li>
+              <li><code>false</code> is distinct from <code>nil</code>.</li>
+              <li>Modules, objects, promises, and browser APIs are explicit language concerns.</li>
+            </ul>
+            <div class="callout callout-coral"><p>Compatibility is a starting point, not a ceiling. Later versions may add more expressive forms when Emacs Lisp syntax or semantics would hold the language back.</p></div>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Language</p><div class="footer-links"><a href="getting-started.html">Start</a><a href="roadmap.html">Roadmap</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><span>© <span data-year>2026</span></span></div></div></footer>
+  </body>
+</html>

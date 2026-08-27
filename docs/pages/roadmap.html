@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="The Eliscript roadmap from seed compiler to self-hosted language and Emacs acceleration.">
+    <meta name="theme-color" content="#f2f0e8">
+    <title>Roadmap · Eliscript</title>
+    <link rel="icon" type="image/png" href="assets/favicon.png">
+    <link rel="apple-touch-icon" href="assets/eliscript-logo.png">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="nav-shell" aria-label="Primary navigation">
+        <a class="brand" href="../index.html"><img class="brand-mark" src="assets/eliscript-logo.png" alt=""><span>Eliscript</span></a>
+        <div class="nav-links">
+          <a href="getting-started.html">Start</a>
+          <a href="language.html">Language</a>
+          <a class="nav-optional" href="roadmap.html" aria-current="page">Roadmap</a>
+          <a href="https://github.com/liuchong/eliscript">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <header class="doc-hero">
+        <div class="doc-hero-inner">
+          <p class="eyebrow">Roadmap</p>
+          <h1>From a trusted seed to a self-hosted compiler.</h1>
+          <p class="doc-lede">Each phase has one job: establish semantics, grow the language, prove React and publishing, then let Eliscript compile itself.</p>
+        </div>
+      </header>
+
+      <div class="doc-shell">
+        <nav class="doc-nav" aria-label="On this page">
+          <p class="doc-nav-title">On this page</p>
+          <a href="#milestones">Milestones</a>
+          <a href="#bootstrap">Bootstrap</a>
+          <a href="#acceleration">Acceleration</a>
+          <a href="#principles">Principles</a>
+        </nav>
+
+        <article class="doc-content">
+          <section id="milestones">
+            <h2>Milestones</h2>
+            <div class="milestones">
+              <article class="milestone"><span class="milestone-id">M0</span><div><h3>Vertical slice</h3><p>Reader, core forms, deterministic ESM, CLI, snapshots, and Bun execution.</p></div><span class="status status-done">Complete</span></article>
+              <article class="milestone"><span class="milestone-id">M1</span><div><h3>Language core</h3><p>Analyzer, lexical validation, macros, explicit IR, source locations, and source maps.</p></div><span class="status status-next">Next</span></article>
+              <article class="milestone"><span class="milestone-id">M2</span><div><h3>React</h3><p>Components, hooks, automatic JSX runtime, third-party imports, and Bun-powered development.</p></div><span class="status">Planned</span></article>
+              <article class="milestone"><span class="milestone-id">M3</span><div><h3>Publishing</h3><p>Org content, article metadata, static output, and a fully custom React site.</p></div><span class="status">Planned</span></article>
+              <article class="milestone"><span class="milestone-id">M4</span><div><h3>Bootstrap</h3><p>Rewrite portable compiler phases in Eliscript and reach a reproducible self-hosted fixed point.</p></div><span class="status">Planned</span></article>
+              <article class="milestone"><span class="milestone-id">M5</span><div><h3>Emacs acceleration</h3><p>Run selected portable workloads in a long-lived Bun worker controlled by Emacs.</p></div><span class="status">Research</span></article>
+            </div>
+          </section>
+
+          <section id="bootstrap">
+            <h2>Bootstrap chain</h2>
+            <pre><code>Generation 0
+Emacs Lisp seed + program.eli → program.js
+
+Generation 1
+Emacs Lisp seed + compiler.eli → compiler.js
+
+Generation 2
+compiler.js + compiler.eli → next-compiler.js</code></pre>
+            <p>Self-hosting is complete only when both compilers pass the same conformance suite and the generated compiler can reproduce itself without semantic drift.</p>
+          </section>
+
+          <section id="acceleration">
+            <h2>A path back into Emacs</h2>
+            <p>Once portable Eliscript runs efficiently in JavaScriptCore, Emacs can retain editor state and interaction while delegating coarse-grained parsing, indexing, transformation, and publishing workloads.</p>
+            <div class="callout"><p>Bun is a compute host, not a replacement for Emacs. End-to-end measurements must include worker startup, serialization, transport, and result application.</p></div>
+          </section>
+
+          <section id="principles">
+            <h2>Principles that stay fixed</h2>
+            <ul>
+              <li>Emacs remains enough to build the seed compiler.</li>
+              <li>Generated code stays readable and standards-based.</li>
+              <li>JavaScript interop is explicit rather than magical.</li>
+              <li>Compatibility never blocks a clearly better language design.</li>
+              <li>Self-hosting is proven by reproducibility and conformance, not branding.</li>
+            </ul>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Roadmap</p><div class="footer-links"><a href="language.html">Language</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><a href="https://github.com/liuchong/eliscript">GitHub</a><span>© <span data-year>2026</span></span></div></div></footer>
+  </body>
+</html>
