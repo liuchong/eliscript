@@ -17,6 +17,6 @@ interface written in Eliscript.
 portable scoring kernel compiled with a source map and driven concurrently by a
 high-level Emacs adapter.
 
-`sequence-cli/` exercises ordinary multi-file project builds by importing the
-portable sequence library as Eliscript source, then running the emitted ESM
-tree directly with Bun.
+`stdlib-cli/` exercises ordinary multi-file project builds by importing the
+portable sequence and text libraries as Eliscript source, then running the
+three-module ESM tree directly with Bun.

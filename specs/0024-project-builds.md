@@ -14,7 +14,7 @@ Eliscript dependencies into a runnable ESM directory tree:
 ./bin/eliscript-build \
   --root . \
   --out-dir dist/project \
-  examples/sequence-cli/main.eli
+  examples/stdlib-cli/main.eli
 ```
 
 The builder is a host-aware layer around the existing compiler. It owns file
@@ -51,8 +51,9 @@ Every source path relative to the project root maps to the same path below the
 output directory with its extension changed from `.eli` to `.mjs`:
 
 ```text
-examples/sequence-cli/main.eli -> dist/project/examples/sequence-cli/main.mjs
+examples/stdlib-cli/main.eli   -> dist/project/examples/stdlib-cli/main.mjs
 stdlib/sequence.eli            -> dist/project/stdlib/sequence.mjs
+stdlib/text.eli                -> dist/project/stdlib/text.mjs
 ```
 
 Local imports are rewritten between the mapped output paths. Every generated
@@ -90,12 +91,14 @@ single-file `bin/eliscript` interface remains unchanged.
 - Cyclic local imports emit each source exactly once.
 - Missing, bare, direct escaping, and symbolic-link escaping imports fail, as
   does selecting an existing file as the output directory.
-- The public CLI builds `examples/sequence-cli/main.eli` and
-  `stdlib/sequence.eli`, verifies rewritten imports and all source maps, then
+- The public CLI builds `examples/stdlib-cli/main.eli`, `stdlib/sequence.eli`,
+  and `stdlib/text.eli`, verifies rewritten imports and all source maps, then
   executes the generated entry with Bun.
 
 ## Next Slice
 
-M6 can now grow object and text modules against both browser and ordinary
-project builds. Incremental rebuild metadata should be introduced only after
-real projects reveal where full graph recompilation becomes expensive.
+The text module is implemented in
+[0025-portable-text-library.md](0025-portable-text-library.md). M6 can now grow
+immutable object helpers against both browser and ordinary project builds.
+Incremental rebuild metadata should wait until real projects reveal where full
+graph recompilation becomes expensive.

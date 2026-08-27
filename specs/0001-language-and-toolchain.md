@@ -325,6 +325,11 @@ and emits a source map for every module. Its command-line example executes the
 same sequence source graph without Vite. See
 [0024-project-builds.md](0024-project-builds.md).
 
+The second standard module implements thirteen portable text operations with
+explicit UTF-16 indexing and no host string methods. It is consumed by both the
+three-module CLI example and the Org React production site. See
+[0025-portable-text-library.md](0025-portable-text-library.md).
+
 ## Non-goals for the Initial Implementation
 
 - Emacs byte-code or native-comp compatibility

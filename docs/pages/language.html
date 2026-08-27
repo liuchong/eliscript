@@ -43,6 +43,7 @@
           <a href="#macros">Macros</a>
           <a href="#modules">Modules</a>
           <a href="#sequences">Sequences</a>
+          <a href="#text">Text</a>
           <a href="#react">React</a>
           <a href="#differences">Differences</a>
         </nav>
@@ -138,6 +139,14 @@
 
 (map (lambda (value) (* value 2)) (range 1 5))</code></pre>
             <p>The first standard-library module is written entirely in Eliscript. It provides <code>reverse</code>, <code>map</code>, <code>filter</code>, <code>reduce</code>, <code>concat</code>, ranges, slicing, predicate checks, and search without adding compiler intrinsics or mutating input arrays.</p>
+          </section>
+
+          <section id="text">
+            <h2>Portable text</h2>
+            <pre><code>(import "../../stdlib/text.eli" contains? strip-prefix trim)
+
+(trim (strip-prefix "#" "# article "))</code></pre>
+            <p>Thirteen functions provide literal matching, end-exclusive slicing, prefix and suffix removal, ASCII-boundary trimming, blank checks, joining, and repetition. They are written in portable Eliscript without regular expressions or host string methods. Indices follow ECMAScript UTF-16 code units rather than locale-aware grapheme clusters.</p>
           </section>
 
           <section id="react">

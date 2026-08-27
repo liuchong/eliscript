@@ -1,0 +1,38 @@
+(module test.text-usage
+  (import "./text.mjs"
+          empty? slice starts-at? starts-with? ends-with? contains?
+          strip-prefix strip-suffix whitespace? trim blank? join repeat)
+
+  (defconst result
+    (object
+      :empty (empty? "")
+      :not-empty (empty? "x")
+      :slice (slice 1 4 "abcde")
+      :slice-clamped (slice -3 20 "abc")
+      :slice-reversed (slice 4 2 "abcde")
+      :starts-at (starts-at? "bc" 1 "abcd")
+      :starts-at-negative (starts-at? "a" -1 "abc")
+      :starts (starts-with? "eli" "eliscript")
+      :starts-missing (starts-with? "script" "eliscript")
+      :ends (ends-with? "script" "eliscript")
+      :ends-too-long (ends-with? "longer" "tiny")
+      :contains (contains? "is" "eliscript")
+      :contains-empty (contains? "" "eliscript")
+      :contains-missing (contains? "xyz" "eliscript")
+      :stripped-prefix (strip-prefix "#" "#article")
+      :kept-prefix (strip-prefix "#" "article")
+      :stripped-suffix (strip-suffix ".eli" "text.eli")
+      :kept-suffix (strip-suffix ".eli" "text.mjs")
+      :space (whitespace? " ")
+      :letter-space (whitespace? "a")
+      :trimmed (trim " \tEliscript\r\n")
+      :trimmed-empty (trim " \t\r\n")
+      :blank (blank? " \n")
+      :not-blank (blank? " e ")
+      :joined (join "/" ["a" 2 false])
+      :joined-empty (join "," [])
+      :repeated (repeat 3 "ab")
+      :repeat-negative (repeat -1 "ab")))
+
+  (print (JSON/stringify result))
+  (export result))

@@ -129,22 +129,34 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
     });
     expect(portableOutput).toBe(seedOutput);
 
-    const sequenceSource = resolve(projectDirectory, "stdlib/sequence.eli");
-    const seedSequenceOutput = await runSuccessful([seedCliPath, sequenceSource], {
-      env: { ...process.env, EMACS: emacs },
-    });
-    const selfHostedSequenceOutput = await runSuccessful(
-      [portableCliPath, sequenceSource],
-      {
-        env: {
-          ...process.env,
-          ELISCRIPT_BOOTSTRAP_MODULE_DIR: generationTwo,
+    for (const [sourceName, expectedFunctions] of [
+      ["sequence.eli", [
+        "function map(function$, values)",
+        "function range_by(start, end, step)",
+      ]],
+      ["text.eli", [
+        "function slice(start, end, text)",
+        "function trim(text)",
+      ]],
+    ]) {
+      const source = resolve(projectDirectory, "stdlib", sourceName);
+      const seedLibraryOutput = await runSuccessful([seedCliPath, source], {
+        env: { ...process.env, EMACS: emacs },
+      });
+      const selfHostedLibraryOutput = await runSuccessful(
+        [portableCliPath, source],
+        {
+          env: {
+            ...process.env,
+            ELISCRIPT_BOOTSTRAP_MODULE_DIR: generationTwo,
+          },
         },
-      },
-    );
-    expect(selfHostedSequenceOutput).toBe(seedSequenceOutput);
-    expect(seedSequenceOutput).toContain("function map(function$, values)");
-    expect(seedSequenceOutput).toContain("function range_by(start, end, step)");
+      );
+      expect(selfHostedLibraryOutput).toBe(seedLibraryOutput);
+      for (const expectedFunction of expectedFunctions) {
+        expect(seedLibraryOutput).toContain(expectedFunction);
+      }
+    }
 
     const portableSource = resolve(directory, "portable.eli");
     await writeFile(

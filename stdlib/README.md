@@ -24,7 +24,7 @@ Available operations are `reverse`, `map`, `filter`, `reduce`, `concat`,
 declaration is a statically checked `defportable`; closure-only builds include
 only the requested entries and their transitive helpers.
 
-Compile the complete module and its external source map with:
+Compile both current modules and their external source maps with:
 
 ```sh
 bun run compile:stdlib
@@ -33,11 +33,35 @@ bun run compile:stdlib
 Build and run a complete project that imports the `.eli` source directly:
 
 ```sh
-bun run build:sequence-cli
-bun run dist/project/examples/sequence-cli/main.mjs
+bun run build:stdlib-cli
+bun run dist/project/examples/stdlib-cli/main.mjs
 ```
 
 See [specs/0023-portable-sequence-library.md](../specs/0023-portable-sequence-library.md)
 for exact semantics and acceptance evidence, and
 [specs/0024-project-builds.md](../specs/0024-project-builds.md) for recursive
 source-module builds.
+
+## Text
+
+`text.eli` exports thirteen portable string operations for slicing, literal
+matching, prefix and suffix removal, ASCII-boundary trimming, blank checks,
+joining, and repetition:
+
+```elisp
+(import "../../stdlib/text.eli" contains? strip-prefix trim)
+
+(trim (strip-prefix "#" "# article "))
+```
+
+Indices address ECMAScript UTF-16 code units. Matching is literal and does not
+use host methods or regular expressions. Compile both current modules with
+`bun run compile:stdlib`, or exercise them together with:
+
+```sh
+bun run build:stdlib-cli
+bun run dist/project/examples/stdlib-cli/main.mjs
+```
+
+See [specs/0025-portable-text-library.md](../specs/0025-portable-text-library.md)
+for exact semantics, dependency closure, and acceptance evidence.

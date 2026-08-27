@@ -2,6 +2,8 @@
   (import "react" useEffect useState StrictMode)
   (import "react-dom/client" createRoot)
   (import "virtual:eliscript-org" articles)
+  (import "../../stdlib/sequence.eli" find map)
+  (import "../../stdlib/text.eli" strip-prefix)
   (import "./site.css")
   (import "../../docs/pages/assets/eliscript-logo.png" :default logo-url)
 
@@ -9,10 +11,11 @@
 
   (defun article-from-location ()
     (let* ((hash (get window/location :hash ""))
-           (slug (js-call hash :replace "#" "")))
-      (or (js-call articles :find
-            (lambda (article)
-              (= (get article :slug) slug)))
+           (slug (strip-prefix "#" hash)))
+      (or (find
+           (lambda (article)
+             (= (get article :slug) slug))
+           articles)
           (nth 0 articles))))
 
   (defcomponent OrgSite ()
@@ -48,7 +51,7 @@
           (jsx :aside (object :className "article-index")
             (jsx :p (object :className "index-label") "PUBLISHED NOTES")
             (jsx :ol nil
-              (js-call articles :map
+              (map
                 (lambda (article)
                   (let* ((slug (get article :slug))
                          (active
@@ -61,7 +64,8 @@
                         (jsx :time
                           (object :dateTime (get article :date))
                           (get article :date))
-                        (jsx :span nil (get article :title))))))))
+                      (jsx :span nil (get article :title))))))
+                articles))
             (jsx :p (object :className "index-note")
               (str (get articles :length) " articles, authored in Org Mode.")))
           (if selected
@@ -71,9 +75,10 @@
                     (jsx :time
                       (object :dateTime (get selected :date))
                       (get selected :date))
-                    (js-call (get selected :tags) :map
+                    (map
                       (lambda (tag)
-                        (jsx :span (object :key tag :className "tag") tag))))
+                        (jsx :span (object :key tag :className "tag") tag))
+                      (get selected :tags)))
                   (jsx :h1 nil (get selected :title))
                   (jsx :p (object :className "description")
                     (get selected :description)))

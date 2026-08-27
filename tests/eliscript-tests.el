@@ -305,6 +305,21 @@
               "Object.fromEntries([[\"reverse\", reverse], [\"map\", map]])")
              output))))
 
+(ert-deftest eliscript-standard-library-text-closure-is-portable ()
+  (let* ((source
+          (expand-file-name "stdlib/text.eli" default-directory))
+         (output (eliscript-compile-portable-file source '(blank?))))
+    (should (string-match-p "function slice(start, end, text)" output))
+    (should (string-match-p "function whitespace" output))
+    (should (string-match-p "function trim(text)" output))
+    (should (string-match-p "function blank" output))
+    (should-not (string-match-p "function join" output))
+    (should-not (string-match-p "function repeat" output))
+    (should (string-match-p
+             (regexp-quote
+              "[[\"empty?\", empty_QMARK_], [\"slice\", slice]")
+             output))))
+
 (ert-deftest eliscript-portable-functions-reject-non-portable-dependencies ()
   (dolist (source
            '("(defun helper () 1) (defportable work () (helper))"

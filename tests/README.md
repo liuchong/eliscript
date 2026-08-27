@@ -47,16 +47,17 @@ all ten ESM and Source Map artifacts byte-for-byte, checks the portable CLI
 against seed output, and verifies mapped file output and located diagnostics.
 It also compares seed and self-hosted `defportable` closure builds.
 
-Standard-library tests compile `stdlib/sequence.eli` with the seed and
-self-hosted compiler, compare complete JavaScript output, execute an importing
-ESM fixture, inspect its source map, and retain the library source in the React
-production bundle map. ERT separately proves that selecting portable `map`
-includes `reverse` but excludes unrelated sequence operations.
+Standard-library tests compile `stdlib/sequence.eli` and `stdlib/text.eli` with
+the seed and self-hosted compiler, compare complete JavaScript output, execute
+importing ESM fixtures, inspect their source maps, and retain library sources
+in React production bundle maps. ERT separately proves that selecting portable
+`map` or `blank?` includes transitive helpers but excludes unrelated operations.
 
 Project-build tests inspect expanded IR imports, retain non-Eliscript
 specifiers, support cycles, enforce canonical root containment, and verify
-per-module source maps. The public CLI builds and executes a source graph that
-crosses from `examples/` into `stdlib/` without Vite.
+per-module source maps. The public CLI builds and executes a three-module
+source graph that crosses from `examples/` into two `stdlib/` modules without
+Vite.
 
 Worker tests compile one pure Eliscript workload, then exercise the Bun runtime
 and Emacs client over real pipes. They cover framing, version negotiation,

@@ -39,20 +39,23 @@ Generate an external Source Map v3 file when debugging generated code:
 
 This writes `dist/basic.mjs.map` and adds its `sourceMappingURL` to the module.
 
-Import the portable sequence library from an Eliscript module handled by Vite:
+Import portable sequence and text libraries from an Eliscript module handled
+by Vite or the project builder:
 
 ```elisp
 (import "../../stdlib/sequence.eli" map filter reduce range)
+(import "../../stdlib/text.eli" contains? strip-prefix trim)
 
 (map (lambda (value) (* value 2)) (range 1 5))
+(trim (strip-prefix "#" "# Eliscript "))
 ```
 
 The React counter uses this source-module path in its production build. Build
 the same kind of local source graph without Vite and run its generated entry:
 
 ```sh
-bun run build:sequence-cli
-bun run dist/project/examples/sequence-cli/main.mjs
+bun run build:stdlib-cli
+bun run dist/project/examples/stdlib-cli/main.mjs
 ```
 
 `bin/eliscript-build` recursively discovers relative `.eli` imports after
@@ -211,7 +214,7 @@ stdlib/                  Portable Eliscript standard library
 examples/                End-to-end example applications
   basic/                 Executable language example
   emacs-index/           Portable document scoring workload
-  sequence-cli/          Multi-file command-line build
+  stdlib-cli/            Multi-file standard-library build
   react-counter/         First React compilation target
   org-site/              Org-powered custom React publishing site
 specs/                   Numbered language and toolchain decisions
@@ -285,8 +288,8 @@ portable execution model. The exact implemented subset is recorded in
 ## Status
 
 The first Emacs Lisp seed compiler is implemented and usable from the command
-line. M0 through M5 are complete. M6 includes the first standard-library module
-and a multi-file project builder driven entirely by Emacs.
+line. M0 through M5 are complete. M6 includes portable sequence and text
+libraries plus a multi-file project builder driven entirely by Emacs.
 
 Current evidence:
 
@@ -361,13 +364,16 @@ Current evidence:
 - `stdlib/sequence.eli` supplies twelve non-mutating, higher-order sequence
   operations as dependency-prunable `defportable` declarations. The React
   browser entry imports it as source through Vite.
+- `stdlib/text.eli` supplies thirteen literal, UTF-16-indexed string operations
+  without regular expressions or host calls. The Org React site uses it with
+  sequence `map` and `find` in its production source graph.
 - `bin/eliscript-build` walks expanded IR imports, compiles each local `.eli`
   dependency once, preserves its root-relative path as `.mjs`, and emits a
   source map for every module without requiring Vite.
-- Sixty-eight ERT tests cover reading, locations, macro expansion, analysis, IR
+- Sixty-nine ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- Sixteen Bun tests cover the compiler and Org Vite adapters, source-map
+- Seventeen Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
   bootstrap behavior, the worker protocol, standard library, and benchmark
   reporting.
@@ -382,9 +388,9 @@ module cache, automatic restart policy, mapped runtime diagnostics, and
 representative asynchronous indexing workload are integrated across Emacs,
 Bun, and both compiler generations.
 
-M6 is underway. A useful sequence library now lives in Eliscript source,
-remains statically portable, compiles identically through the seed and
-self-hosted compilers, and participates in both Vite and ordinary source-mapped
+M6 is underway. Sequence and text libraries now live in Eliscript source,
+remain statically portable, compile identically through the seed and
+self-hosted compilers, and participate in both Vite and ordinary source-mapped
 module graphs without new compiler intrinsics.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
@@ -429,7 +435,9 @@ document indexing adapter, and
 [specs/0023-portable-sequence-library.md](specs/0023-portable-sequence-library.md)
 for the first portable standard-library module and its sequence semantics, and
 [specs/0024-project-builds.md](specs/0024-project-builds.md) for recursive local
-source imports and generated ESM directory trees.
+source imports and generated ESM directory trees, and
+[specs/0025-portable-text-library.md](specs/0025-portable-text-library.md) for
+literal text operations and their indexing semantics.
 
 ## License
 

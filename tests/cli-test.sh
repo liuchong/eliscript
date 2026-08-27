@@ -182,9 +182,17 @@ ELISCRIPT_BUILD_OUT_DIR="$ORG_SITE_OUTPUT" \
 
 ORG_SITE_SCRIPT=$(find "$ORG_SITE_OUTPUT/assets" -name 'index-*.js' -print -quit)
 ORG_SITE_STYLE=$(find "$ORG_SITE_OUTPUT/assets" -name 'index-*.css' -print -quit)
+ORG_SITE_MAP=$(find "$ORG_SITE_OUTPUT/assets" -name 'index-*.js.map' -print -quit)
 
-if [ -z "$ORG_SITE_SCRIPT" ] || [ -z "$ORG_SITE_STYLE" ]; then
-  printf 'expected Org site JavaScript and CSS assets\n' >&2
+if [ -z "$ORG_SITE_SCRIPT" ] || [ -z "$ORG_SITE_STYLE" ] || \
+   [ -z "$ORG_SITE_MAP" ]; then
+  printf 'expected Org site JavaScript, CSS, and source-map assets\n' >&2
+  exit 1
+fi
+
+if ! grep -F 'stdlib/sequence.eli' "$ORG_SITE_MAP" >/dev/null || \
+   ! grep -F 'stdlib/text.eli' "$ORG_SITE_MAP" >/dev/null; then
+  printf 'expected sequence and text sources in Org site source map\n' >&2
   exit 1
 fi
 

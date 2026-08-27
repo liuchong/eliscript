@@ -1,5 +1,6 @@
-(module example.sequence-cli
+(module example.stdlib-cli
   (import "../../stdlib/sequence.eli" map filter reduce range)
+  (import "../../stdlib/text.eli" join strip-prefix trim)
 
   (defconst values (range 1 8))
   (defconst result
@@ -7,7 +8,10 @@
      :values values
      :squares (map (lambda (value) (* value value)) values)
      :even (filter (lambda (value) (= (% value 2) 0)) values)
-     :sum (reduce (lambda (total value) (+ total value)) 0 values)))
+     :sum (reduce (lambda (total value) (+ total value)) 0 values)
+     :summary (join ", " (map (lambda (value) (str value)) values))
+     :slug (strip-prefix "#" "#eliscript")
+     :title (trim "  Emacs + JavaScript \n")))
 
   (print (JSON/stringify result))
   (export result))
