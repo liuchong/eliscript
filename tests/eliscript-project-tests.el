@@ -39,6 +39,19 @@
            :key (lambda (module) (alist-get 'source module))
            :test #'equal))
 
+(defun eliscript-project-tests--assert-timings (report)
+  "Assert REPORT has a complete, non-negative timing record."
+  (let* ((timings (alist-get 'timings report))
+         (total (alist-get 'totalMs timings)))
+    (dolist (field '(cacheReadMs workMs manifestWriteMs totalMs))
+      (let ((value (alist-get field timings)))
+        (should (numberp value))
+        (should (>= value 0.0))))
+    (should (>= total (alist-get 'cacheReadMs timings)))
+    (should (>= total (alist-get 'workMs timings)))
+    (should (>= total (alist-get 'manifestWriteMs timings)))
+    timings))
+
 (ert-deftest eliscript-project-builds-expanded-import-graph ()
   (eliscript-project-tests--with-directory root
     (let* ((entry (expand-file-name "src/main.eli" root))
@@ -246,7 +259,11 @@
           (should (equal (append (alist-get 'portableEntries report) nil)
                          '("twice")))
           (should (equal (alist-get 'status (alist-get 'cache report))
-                         "hit"))))
+                         "hit"))
+          (should (= (alist-get
+                      'manifestWriteMs
+                      (eliscript-project-tests--assert-timings report))
+                     0.0))))
       (eliscript-project-tests--write
        dependency "(defportable increment (value) (+ value 2))\n")
       (let ((third
@@ -280,6 +297,16 @@
         (should (equal (alist-get 'reason cache) "manifest-missing"))
         (should (= (alist-get 'compiled counts) 2))
         (should (= (alist-get 'reused counts) 0))
+        (eliscript-project-tests--assert-timings report)
+        (should (numberp
+                 (eliscript-project-build-result-total-ms first)))
+        (should-not
+         (assq
+          'timings
+          (json-parse-string
+           (eliscript-project-tests--read
+            (eliscript-project-build-result-manifest first))
+           :object-type 'alist)))
         (should (equal
                  (alist-get
                   'reason
@@ -289,6 +316,7 @@
       (let* ((second (eliscript-project-build entry out-dir root))
              (report (eliscript-project-build-report second))
              (cache (alist-get 'cache report)))
+        (eliscript-project-tests--assert-timings report)
         (should (equal (alist-get 'status cache) "hit"))
         (should (equal (alist-get 'reason cache) "verified"))
         (should (equal
@@ -305,6 +333,7 @@
               (eliscript-project-tests--report-module report "main.eli"))
              (value
               (eliscript-project-tests--report-module report "value.eli")))
+        (eliscript-project-tests--assert-timings report)
         (should (equal (alist-get 'status cache) "partial"))
         (should (equal (alist-get 'reason cache) "dirty-modules"))
         (should (equal (alist-get 'status main) "reused"))
@@ -315,6 +344,7 @@
         (let* ((forced (eliscript-project-build entry out-dir root))
                (report (eliscript-project-build-report forced))
                (cache (alist-get 'cache report)))
+          (eliscript-project-tests--assert-timings report)
           (should (eq (alist-get 'enabled cache) :false))
           (should (equal (alist-get 'status cache) "disabled"))
           (should (equal (alist-get 'reason cache) "cache-disabled"))))
@@ -330,6 +360,7 @@
         (let* ((rebuilt (eliscript-project-build entry out-dir root))
                (report (eliscript-project-build-report rebuilt))
                (cache (alist-get 'cache report)))
+          (eliscript-project-tests--assert-timings report)
           (should (equal (alist-get 'status cache) "miss"))
           (should (equal (alist-get 'reason cache) "cache-missing")))))))
 

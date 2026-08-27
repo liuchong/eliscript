@@ -47,7 +47,11 @@
   portable-entries
   cache-enabled
   cache-status
-  cache-reason)
+  cache-reason
+  cache-read-ms
+  work-ms
+  manifest-write-ms
+  total-ms)
 
 (cl-defstruct (eliscript-project-cache
                (:constructor eliscript-project-cache-create))
@@ -81,6 +85,14 @@
 (defconst eliscript-project--compiler-directory
   (file-name-directory (or load-file-name buffer-file-name))
   "Directory whose compiler sources determine incremental cache validity.")
+
+(defun eliscript-project--elapsed-ms (started-at)
+  "Return non-negative milliseconds elapsed since STARTED-AT."
+  (max 0.0 (* 1000.0 (- (float-time) started-at))))
+
+(defun eliscript-project--report-ms (milliseconds)
+  "Round MILLISECONDS to three decimal places for a build report."
+  (/ (float (round (* milliseconds 1000.0))) 1000.0))
 
 (defun eliscript-project--fail (filename span format-string &rest arguments)
   "Signal a project error at SPAN in FILENAME.
@@ -384,8 +396,10 @@ the entries recorded by CACHE for complete-graph reuse."
         :reason "artifact-unreadable")))))
 
 (defun eliscript-project--cached-build-result
-    (root out-dir entry cache mode portable-entries)
-  "Return a fully reused result for ENTRY from CACHE, or nil."
+    (root out-dir entry cache mode portable-entries started-at cache-read-ms)
+  "Return a fully reused result for ENTRY from CACHE, or nil.
+
+STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
   (when cache
     (let (modules valid)
       (setq valid t)
@@ -411,21 +425,27 @@ the entries recorded by CACHE for complete-graph reuse."
                       (string-lessp
                        (eliscript-project-module-source left)
                        (eliscript-project-module-source right)))))
-        (eliscript-project-build-result-create
-         :root root
-         :out-dir out-dir
-         :entry entry
-         :entry-output (eliscript-project--source-output entry root out-dir)
-         :modules modules
-         :manifest (eliscript-project-cache-manifest cache)
-         :digest (eliscript-project-cache-digest cache)
-         :compiled-count 0
-         :reused-count (length modules)
-         :mode mode
-         :portable-entries portable-entries
-         :cache-enabled t
-         :cache-status "hit"
-         :cache-reason "verified")))))
+        (let* ((total-ms (eliscript-project--elapsed-ms started-at))
+               (work-ms (max 0.0 (- total-ms cache-read-ms))))
+          (eliscript-project-build-result-create
+           :root root
+           :out-dir out-dir
+           :entry entry
+           :entry-output (eliscript-project--source-output entry root out-dir)
+           :modules modules
+           :manifest (eliscript-project-cache-manifest cache)
+           :digest (eliscript-project-cache-digest cache)
+           :compiled-count 0
+           :reused-count (length modules)
+           :mode mode
+           :portable-entries portable-entries
+           :cache-enabled t
+           :cache-status "hit"
+           :cache-reason "verified"
+           :cache-read-ms cache-read-ms
+           :work-ms work-ms
+           :manifest-write-ms 0.0
+           :total-ms total-ms))))))
 
 (defun eliscript-project--write-module
     (program source source-text output-path dependencies portable-entries reason)
@@ -516,13 +536,21 @@ ROOT and OUT-DIR provide stable relative namespaces for MODULES."
 
 (defun eliscript-project--build-result
     (root out-dir entry modules mode portable-entries compiler-digest
-          cache-lookup)
-  "Create a complete project build result for ENTRY and MODULES."
+          cache-lookup started-at cache-read-ms)
+  "Create a complete project build result for ENTRY and MODULES.
+
+STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
   (let* ((entry-output (eliscript-project--source-output entry root out-dir))
+         (manifest-started-at (float-time))
          (manifest-data
           (eliscript-project--write-manifest
            root out-dir entry-output modules mode portable-entries
            compiler-digest))
+         (manifest-write-ms
+          (eliscript-project--elapsed-ms manifest-started-at))
+         (total-ms (eliscript-project--elapsed-ms started-at))
+         (work-ms
+          (max 0.0 (- total-ms cache-read-ms manifest-write-ms)))
          (compiled-count
           (cl-count-if-not #'eliscript-project-module-reused modules))
          (reused-count
@@ -558,7 +586,11 @@ ROOT and OUT-DIR provide stable relative namespaces for MODULES."
      :portable-entries portable-entries
      :cache-enabled cache-enabled
      :cache-status cache-status
-     :cache-reason cache-reason)))
+     :cache-reason cache-reason
+     :cache-read-ms cache-read-ms
+     :work-ms work-ms
+     :manifest-write-ms manifest-write-ms
+     :total-ms total-ms)))
 
 (defun eliscript-project-build-report (result)
   "Return a stable JSON-compatible report for project build RESULT."
@@ -596,6 +628,19 @@ ROOT and OUT-DIR provide stable relative namespaces for MODULES."
            . ,(length (eliscript-project-build-result-modules result)))
           (compiled . ,(eliscript-project-build-result-compiled-count result))
           (reused . ,(eliscript-project-build-result-reused-count result))))
+      (timings
+       . ((cacheReadMs
+           . ,(eliscript-project--report-ms
+               (eliscript-project-build-result-cache-read-ms result)))
+          (workMs
+           . ,(eliscript-project--report-ms
+               (eliscript-project-build-result-work-ms result)))
+          (manifestWriteMs
+           . ,(eliscript-project--report-ms
+               (eliscript-project-build-result-manifest-write-ms result)))
+          (totalMs
+           . ,(eliscript-project--report-ms
+               (eliscript-project-build-result-total-ms result)))))
       (modules
        . ,(vconcat
            (mapcar
@@ -632,7 +677,8 @@ ROOT and OUT-DIR provide stable relative namespaces for MODULES."
 ROOT defaults to ENTRY's directory.  Relative `.eli' imports are recursively
 compiled, remain within ROOT, preserve their source directory structure, and
 are rewritten to `.mjs'.  Other import specifiers remain unchanged."
-  (let* ((entry-path (expand-file-name entry))
+  (let* ((started-at (float-time))
+         (entry-path (expand-file-name entry))
          (root-path
           (eliscript-project--canonical-directory
            (or root (file-name-directory entry-path)) "project root"))
@@ -646,10 +692,13 @@ are rewritten to `.mjs'.  Other import specifiers remain unchanged."
          (entry-output
           (eliscript-project--source-output
            canonical-entry root-path output-directory))
+         (cache-started-at (float-time))
          (cache-lookup
           (eliscript-project--read-cache
            output-directory entry-output "standard" nil
            compiler-digest))
+         (cache-read-ms
+          (eliscript-project--elapsed-ms cache-started-at))
          (cache (eliscript-project-cache-lookup-cache cache-lookup))
          (states (make-hash-table :test #'equal))
          modules)
@@ -735,7 +784,7 @@ are rewritten to `.mjs'.  Other import specifiers remain unchanged."
                    (eliscript-project-module-source right)))))
     (eliscript-project--build-result
      root-path output-directory canonical-entry modules "standard" nil
-     compiler-digest cache-lookup)))
+     compiler-digest cache-lookup started-at cache-read-ms)))
 
 (defun eliscript-project--portable-imports (forms)
   "Return portable import descriptions from selected FORMS.
@@ -762,7 +811,8 @@ The target binding must resolve to `defportable'; each generated module contains
 only the requested declarations, immutable constants, and portable imports."
   (unless entries
     (eliscript-project--fail entry nil "portable build requires an entry name"))
-  (let* ((entry-path (expand-file-name entry))
+  (let* ((started-at (float-time))
+         (entry-path (expand-file-name entry))
          (root-path
           (eliscript-project--canonical-directory
            (or root (file-name-directory entry-path)) "project root"))
@@ -777,15 +827,18 @@ only the requested declarations, immutable constants, and portable imports."
          (entry-output
           (eliscript-project--source-output
            canonical-entry root-path output-directory))
+         (cache-started-at (float-time))
          (cache-lookup
           (eliscript-project--read-cache
            output-directory entry-output "portable"
            portable-entry-names compiler-digest))
+         (cache-read-ms
+          (eliscript-project--elapsed-ms cache-started-at))
          (cache (eliscript-project-cache-lookup-cache cache-lookup))
          (cached-result
           (eliscript-project--cached-build-result
            root-path output-directory canonical-entry cache
-           "portable" portable-entry-names))
+           "portable" portable-entry-names started-at cache-read-ms))
          (forms-by-source (make-hash-table :test #'equal))
          (texts-by-source (make-hash-table :test #'equal))
          (requests (make-hash-table :test #'equal))
@@ -918,7 +971,7 @@ only the requested declarations, immutable constants, and portable imports."
          (eliscript-project--build-result
           root-path output-directory canonical-entry (nreverse modules)
           "portable" portable-entry-names compiler-digest
-          cache-lookup))))))
+          cache-lookup started-at cache-read-ms))))))
 
 (provide 'eliscript-project)
 

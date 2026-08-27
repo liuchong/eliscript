@@ -48,6 +48,13 @@ printf '%s' "$JSON_REPORT" | bun --eval '
       report.cache.status !== "hit" ||
       report.counts.compiled !== 0 ||
       report.counts.reused !== 4 ||
+      !["cacheReadMs", "workMs", "manifestWriteMs", "totalMs"].every(
+        (field) => typeof report.timings[field] === "number" &&
+          report.timings[field] >= 0
+      ) ||
+      report.timings.totalMs < report.timings.cacheReadMs ||
+      report.timings.totalMs < report.timings.workMs ||
+      report.timings.totalMs < report.timings.manifestWriteMs ||
       report.modules.some((module) => module.status !== "reused" ||
         module.reason !== "verified")) {
     throw new Error("unexpected incremental build report");

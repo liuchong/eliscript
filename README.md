@@ -66,8 +66,9 @@ bun run dist/project/examples/stdlib-cli/main.mjs
 macro expansion, preserves the source tree, rewrites imports to `.mjs`, and
 emits an external source map for every module.
 
-Repeat builds reuse verified modules. Request a stable machine-readable summary
-of cache and per-module decisions when integrating the builder with other tools:
+Repeat builds reuse verified modules. Request a stable machine-readable schema
+with cache decisions, per-module outcomes, and non-identity phase timings when
+integrating the builder with other tools:
 
 ```sh
 ./bin/eliscript-build --json --root . --out-dir dist/project \
@@ -408,6 +409,8 @@ Current evidence:
 - `eliscript-project-build-report` and `eliscript-build --json` expose a
   versioned graph summary with stable cache statuses, invalidation reasons, and
   per-module compiled or reused decisions without changing default CLI output.
+  The same report measures cache reading, build work, manifest writing, and
+  total elapsed time without placing timing data in deterministic identity.
 - `stdlib/sequence.eli` supplies twelve non-mutating, higher-order sequence
   operations as dependency-prunable `defportable` declarations. The React
   browser entry imports it as source through Vite.
@@ -457,6 +460,8 @@ identity and mapped diagnostics cover all three modules rather than only the
 entry file.
 The same manifest carries separately hashed incremental metadata, allowing
 repeat builds to avoid compiler work without weakening runtime graph identity.
+The versioned build report makes those decisions and phase timings observable
+without writing machine-dependent measurements back into the manifest.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -518,7 +523,10 @@ and
 [specs/0031-incremental-project-builds.md](specs/0031-incremental-project-builds.md)
 for verified module reuse and conservative cache invalidation, and
 [specs/0032-build-decision-reports.md](specs/0032-build-decision-reports.md)
-for machine-readable build summaries and stable per-module decision reasons.
+for machine-readable build summaries and stable per-module decision reasons,
+and
+[specs/0033-build-phase-timings.md](specs/0033-build-phase-timings.md)
+for non-identity cache, work, manifest, and total build measurements.
 
 ## License
 

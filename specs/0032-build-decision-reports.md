@@ -64,6 +64,12 @@ Version 1 has this shape:
     "compiled": 1,
     "reused": 1
   },
+  "timings": {
+    "cacheReadMs": 0.318,
+    "workMs": 2.741,
+    "manifestWriteMs": 0.407,
+    "totalMs": 3.466
+  },
   "modules": [
     {
       "source": "source/main.eli",
@@ -149,9 +155,8 @@ or structural changes require a new report version.
 - The existing CLI tests continue to verify the default entry-path output and
   `--no-cache` behavior.
 
-## Next Slice
+## Follow-up
 
-The report is sufficient for CI summaries and editor integrations. A later
-tooling slice may persist build timings or macro dependency evidence, but those
-measurements must remain separate from deterministic graph identity and cache
-validity.
+Non-deterministic phase measurements are implemented in
+[0033-build-phase-timings.md](0033-build-phase-timings.md). They remain outside
+the project manifest, graph identity, and cache validity.

@@ -345,6 +345,13 @@ project builder to select and execute a three-module `index -> data -> object`
 graph in the worker. See
 [0029-portable-indexing-composition.md](0029-portable-indexing-composition.md).
 
+Project builds now publish deterministic graph manifests, verified incremental
+metadata, stable per-module decision reports, and non-identity phase timings.
+These make the same source graphs observable in workers, command-line builds,
+CI, and editor integrations without coupling runtime identity to local
+performance. See [0030-project-graph-manifest.md](0030-project-graph-manifest.md)
+through [0033-build-phase-timings.md](0033-build-phase-timings.md).
+
 ## Non-goals for the Initial Implementation
 
 - Emacs byte-code or native-comp compatibility

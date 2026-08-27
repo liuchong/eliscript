@@ -1,8 +1,9 @@
 # Standard library CLI project
 
-This example imports sequence and text modules directly from `stdlib/`. The
-project builder discovers both dependencies after macro expansion, emits three
-modules with source maps, and rewrites generated ESM imports to `.mjs`.
+This example imports sequence, text, and object modules directly from `stdlib/`.
+The project builder discovers all three dependencies after macro expansion,
+emits four modules with source maps, and rewrites generated ESM imports to
+`.mjs`.
 
 ```sh
 bun run build:stdlib-cli
