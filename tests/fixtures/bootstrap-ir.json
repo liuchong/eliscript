@@ -11,6 +11,21 @@
       "source": "[1 2]"
     },
     {
+      "name": "quoted-literal-identity",
+      "filename": "quoted.eli",
+      "source": "(defconst values '(false undefined :ready nil t))\n(export values)"
+    },
+    {
+      "name": "unicode-source-map",
+      "filename": "unicode.eli",
+      "source": "(defconst 你好 \"😀\")\n(print 你好)\n(export 你好)"
+    },
+    {
+      "name": "executable-basic-module",
+      "filename": "examples/basic/main.eli",
+      "file": "examples/basic/main.eli"
+    },
+    {
       "name": "macro-call-site-spans",
       "filename": "macro.eli",
       "source": "(defmacro twice (value) `(+ ,value ,value))\n(defconst answer (twice 21))\n(export answer)"
@@ -49,6 +64,16 @@
       "name": "self-lower-module",
       "filename": "bootstrap/compiler/lower.eli",
       "file": "bootstrap/compiler/lower.eli"
+    },
+    {
+      "name": "self-source-map-module",
+      "filename": "bootstrap/compiler/source-map.eli",
+      "file": "bootstrap/compiler/source-map.eli"
+    },
+    {
+      "name": "self-emitter-module",
+      "filename": "bootstrap/compiler/emitter.eli",
+      "file": "bootstrap/compiler/emitter.eli"
     }
   ]
 }

@@ -98,5 +98,7 @@ analyzer portion of item 3 is implemented by
 macro expander by
 [0016-portable-macro-expander.md](0016-portable-macro-expander.md). Portable IR
 construction is implemented by
-[0017-portable-ir-lowering.md](0017-portable-ir-lowering.md). The next phase is
-direct ESM and Source Map emission from that IR.
+[0017-portable-ir-lowering.md](0017-portable-ir-lowering.md), and direct ESM and
+Source Map generation by
+[0018-portable-emission.md](0018-portable-emission.md). The next phase is the
+host-neutral compiler driver.

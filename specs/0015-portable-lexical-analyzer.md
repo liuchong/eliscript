@@ -98,7 +98,7 @@ generated analyzer, then compares acceptance and complete diagnostic strings.
 
 Coverage includes forward declarations, lexical scope, mutable state, imports,
 exports, special forms, lambdas, JavaScript references, duplicate bindings,
-identifier collisions, invalid arities, malformed clauses, and all seven
+identifier collisions, invalid arities, malformed clauses, and all nine
 bootstrap modules. Repeated bootstrap builds remain byte-identical, including
 the new analyzer and its source map.
 
@@ -108,4 +108,6 @@ The portable macro expander that feeds this analyzer is specified in
 [0016-portable-macro-expander.md](0016-portable-macro-expander.md), and the
 implemented lowering stage in
 [0017-portable-ir-lowering.md](0017-portable-ir-lowering.md). Generation 1 can
-now move into direct ESM and Source Map emission.
+now emit direct ESM and Source Map output as specified in
+[0018-portable-emission.md](0018-portable-emission.md); the compiler driver is
+the next dependency boundary.

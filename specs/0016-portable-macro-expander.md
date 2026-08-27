@@ -109,7 +109,8 @@ expander, and analyzer, then compares:
 - recursive macro calls and generated top-level declarations
 - quoted and syntax-specific expansion boundaries
 - definition, nesting, execution, and depth-limit diagnostics
-- all seven bootstrap compiler modules, including `ir.eli` and `lower.eli`
+- all nine bootstrap compiler modules, including `source-map.eli` and
+  `emitter.eli`
 - acceptance of every valid expanded result by the portable analyzer
 
 The position oracle now indexes each source once, keeping normalization linear
@@ -120,4 +121,6 @@ as portable compiler sources grow.
 The portable front end covers symbol mapping, syntax, reading, macro expansion,
 and lexical analysis. Portable IR lowering is specified in
 [0017-portable-ir-lowering.md](0017-portable-ir-lowering.md); direct ESM and
-Source Map emission is now the next dependency boundary.
+Source Map emission is implemented in
+[0018-portable-emission.md](0018-portable-emission.md). The host-neutral
+compiler driver is now the next dependency boundary.

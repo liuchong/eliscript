@@ -105,14 +105,14 @@ bun run build:org-site</code></pre>
           <section id="bootstrap">
             <h2>Build the bootstrap modules</h2>
             <pre><code>bun run build:bootstrap</code></pre>
-            <p>The Emacs Lisp seed compiler writes seven source-mapped modules below <code>dist/bootstrap/</code>: symbol semantics, syntax, reader, expander, analyzer, IR, and lowering. The generated pipeline matches complete seed syntax, diagnostics, IR trees, properties, and spans across all bootstrap sources.</p>
+            <p>The Emacs Lisp seed compiler writes nine source-mapped modules below <code>dist/bootstrap/</code>: symbol semantics, syntax, reader, expander, analyzer, IR, lowering, Source Map encoding, and ESM emission. The generated pipeline matches complete seed syntax, diagnostics, IR trees, JavaScript, and mappings across all bootstrap sources.</p>
           </section>
 
           <section id="test">
             <h2>Run the test suite</h2>
             <pre><code>bun run test</code></pre>
             <p>This runs the Emacs ERT suite, Vite adapter tests, public CLI fixtures, deterministic snapshots, source-map validation, runtime execution, React server rendering, and a production browser build.</p>
-            <div class="callout callout-coral"><p>M4 is underway. The portable front end and complete IR lowering pass now run from compiler source written in Eliscript; direct ESM and Source Map emission is next.</p></div>
+            <div class="callout callout-coral"><p>M4 is underway. The portable compiler now reaches direct ESM and Source Map output from source written in Eliscript; the host-neutral compiler driver is next.</p></div>
           </section>
         </article>
       </div>

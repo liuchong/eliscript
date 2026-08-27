@@ -52,6 +52,13 @@ independent reference backend during the seed-compiler phase. Shared helpers
 are limited to scalar formatting, indentation, temporary names, identifier
 mapping, arity failures, and quoted-data formatting.
 
+Generation 1 implements the same boundary in
+`bootstrap/compiler/emitter.eli`. Because portable JavaScript strings do not
+carry Emacs text properties, this backend composes explicit `{text, marks}`
+fragments. Concatenation, joining, indentation, and source location operations
+move marks together with text, preserving one formatter for plain and
+source-mapped output.
+
 ## Acceptance Evidence
 
 - For the M1 language core, the direct backend and compatibility backend
@@ -64,9 +71,10 @@ mapping, arity failures, and quoted-data formatting.
 - The checked-in CLI snapshot remains unchanged.
 - Bun executes the generated fixture and validates its exports and behavior.
 - Every existing IR node retains its source span through emission.
+- The generated Eliscript backend matches the seed ESM byte-for-byte across
+  the shared IR fixture and all nine compiler modules.
 
 ## Deferred Work
 
-- structured serialization for cross-implementation conformance fixtures
 - optional IR validation at backend boundaries
 - optimization and canonicalization passes

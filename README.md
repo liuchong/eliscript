@@ -273,10 +273,13 @@ Current evidence:
 - Portable IR and lowering modules written in Eliscript convert analyzed
   syntax into JSON-safe programs. Complete trees, properties, quoted data, and
   source spans match the seed across every one of the 43 IR node kinds.
-- Fifty-one ERT tests cover reading, locations, macro expansion, analysis, IR
+- Portable ESM and Source Map emitters consume that IR without Emacs text
+  properties. Their output is byte-identical to the seed across examples and
+  all nine bootstrap modules, including Unicode mapping columns.
+- Fifty-two ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, errors, and interop.
-- Eleven Bun tests cover the compiler and Org Vite adapters, source-map handoff,
+- Twelve Bun tests cover the compiler and Org Vite adapters, source-map handoff,
   file filtering, React Refresh, Org module invalidation, and generated
   bootstrap behavior.
 - A CLI integration test compares generated output with a checked-in snapshot.
@@ -284,8 +287,8 @@ Current evidence:
   higher-order functions, objects, arrays, exports, React server rendering, and
   production Vite bundles, and deterministic Org publishing.
 
-M4 now continues with portable direct ESM and Source Map emission, followed by
-the compiler driver and reproducible self-compilation.
+M4 now continues with the host-neutral compiler driver, followed by
+reproducible self-compilation.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -313,7 +316,9 @@ for direct portable syntax analysis and dual-implementation diagnostics, and
 [specs/0016-portable-macro-expander.md](specs/0016-portable-macro-expander.md)
 for deterministic host-independent macro evaluation, and
 [specs/0017-portable-ir-lowering.md](specs/0017-portable-ir-lowering.md) for
-JSON-safe IR construction and full seed/portable tree equivalence.
+JSON-safe IR construction and full seed/portable tree equivalence, and
+[specs/0018-portable-emission.md](specs/0018-portable-emission.md) for direct
+portable ESM and Source Map generation.
 
 ## License
 

@@ -11,5 +11,5 @@ test:
 	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
 		tests/bootstrap-symbol.test.mjs tests/bootstrap-reader.test.mjs \
 		tests/bootstrap-expander.test.mjs tests/bootstrap-analyzer.test.mjs \
-		tests/bootstrap-ir.test.mjs
+		tests/bootstrap-ir.test.mjs tests/bootstrap-emitter.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh

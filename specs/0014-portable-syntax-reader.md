@@ -92,6 +92,8 @@ bootstrap/compiler/expander.eli -> dist/bootstrap/expander.mjs
 bootstrap/compiler/analyzer.eli -> dist/bootstrap/analyzer.mjs
 bootstrap/compiler/ir.eli -> dist/bootstrap/ir.mjs
 bootstrap/compiler/lower.eli -> dist/bootstrap/lower.mjs
+bootstrap/compiler/source-map.eli -> dist/bootstrap/source-map.mjs
+bootstrap/compiler/emitter.eli -> dist/bootstrap/emitter.mjs
 ```
 
 Each module receives an external Source Map v3 file. The generated reader uses
@@ -114,8 +116,8 @@ Acceptance covers:
 - reading every current bootstrap module with both readers
 
 The generated reader reading its own source proves reader-level closure. The
-Generation 1 pipeline can now expand, analyze, and lower that syntax tree, but
-it cannot yet emit or drive a complete compilation without the seed.
+Generation 1 pipeline can now expand, analyze, lower, and emit that syntax tree,
+but it cannot yet drive a complete filesystem compilation without the seed.
 
 ## Next Phase
 

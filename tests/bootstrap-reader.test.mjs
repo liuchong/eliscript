@@ -30,6 +30,10 @@ const artifactNames = [
   "ir.mjs.map",
   "lower.mjs",
   "lower.mjs.map",
+  "source-map.mjs",
+  "source-map.mjs.map",
+  "emitter.mjs",
+  "emitter.mjs.map",
 ];
 
 async function run(command, options) {

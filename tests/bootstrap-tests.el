@@ -4,9 +4,11 @@
 
 (require 'ert)
 (require 'json)
+(require 'eliscript)
 (require 'eliscript-analyzer)
 (require 'eliscript-expander)
 (require 'eliscript-ir)
+(require 'eliscript-ir-emitter)
 (require 'eliscript-lower)
 (require 'eliscript-reader)
 (require 'eliscript-symbol)
@@ -226,7 +228,7 @@
   (cond
    ((null value) nil)
    ((eq value t) t)
-   ((eq value 'false) :false)
+   ((eq value 'false) '((kind . "symbol") (name . "false")))
    ((eq value 'undefined) '((kind . "undefined")))
    ((or (numberp value) (stringp value)) value)
    ((keywordp value)
@@ -345,6 +347,40 @@
          (cases (eliscript-bootstrap-tests--field 'valid fixture)))
     (vconcat (mapcar #'eliscript-bootstrap-tests--seed-ir-result cases))))
 
+(defun eliscript-bootstrap-tests--seed-emitter-result (case)
+  "Return seed ESM and Source Map output for fixture CASE."
+  (let ((name (eliscript-bootstrap-tests--field 'name case))
+        (filename (eliscript-bootstrap-tests--field 'filename case))
+        (source (eliscript-bootstrap-tests--case-source case)))
+    (condition-case error-data
+        (let ((emission
+               (eliscript-compile-string-with-source-map
+                source filename "fixture.mjs" filename)))
+          `((name . ,name)
+            (status . "ok")
+            (javascript . ,(decode-coding-string
+                            (substring-no-properties
+                             (eliscript-emission-javascript emission))
+                            'utf-8-unix))
+            (sourceMap . ,(json-parse-string
+                           (eliscript-emission-source-map emission)
+                           :object-type 'alist
+                           :array-type 'array
+                           :null-object nil
+                           :false-object :false))))
+      ((eliscript-read-error eliscript-expand-error eliscript-analyze-error
+        eliscript-compile-error)
+       `((name . ,name) (status . "error")
+         (message . ,(cadr error-data)))))))
+
+(defun eliscript-bootstrap-tests-emitter-results (&optional fixture-file)
+  "Return normalized seed emission results for FIXTURE-FILE."
+  (let* ((fixture
+          (eliscript-bootstrap-tests--read-json
+           (or fixture-file eliscript-bootstrap-tests--ir-fixture)))
+         (cases (eliscript-bootstrap-tests--field 'valid fixture)))
+    (vconcat (mapcar #'eliscript-bootstrap-tests--seed-emitter-result cases))))
+
 (defun eliscript-bootstrap-tests--seed-symbol-result (operation input)
   "Run seed symbol OPERATION for INPUT and return a result object."
   (condition-case error-data
@@ -424,6 +460,16 @@
          (valid (eliscript-bootstrap-tests--field 'valid fixture)))
     (dolist (case valid)
       (let ((result (eliscript-bootstrap-tests--seed-ir-result case)))
+        (should (equal (eliscript-bootstrap-tests--field 'status result)
+                       "ok"))))))
+
+(ert-deftest eliscript-seed-emitter-satisfies-bootstrap-cases ()
+  (let* ((fixture
+          (eliscript-bootstrap-tests--read-json
+           eliscript-bootstrap-tests--ir-fixture))
+         (valid (eliscript-bootstrap-tests--field 'valid fixture)))
+    (dolist (case valid)
+      (let ((result (eliscript-bootstrap-tests--seed-emitter-result case)))
         (should (equal (eliscript-bootstrap-tests--field 'status result)
                        "ok"))))))
 

@@ -35,7 +35,10 @@
 
   (defun syntax-datum (node)
     (cond
-      ((= (node-kind node) "literal") (node-value node))
+      ((= (node-kind node) "literal")
+       (if (= (node-value node) false)
+           (object :kind "symbol" :name "false")
+         (node-value node)))
       ((= (node-kind node) "undefined") (object :kind "undefined"))
       ((= (node-kind node) "symbol")
        (object :kind "symbol" :name (node-name node)))

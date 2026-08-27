@@ -62,6 +62,12 @@ source once, which avoids display-column differences caused by tabs.
 Macro expansions retain the call-site span established by specification 0006.
 Generated macro code therefore maps to the invocation that produced it.
 
+The portable implementation in `bootstrap/compiler/source-map.eli` consumes
+explicit `{offset, span}` marks from the Generation 1 emitter. It scans source
+code points separately from generated UTF-16 code units, groups segments by
+generated line, and encodes signed Base64 VLQ fields without host-specific
+bitwise assumptions.
+
 ## Document Shape
 
 The emitted JSON contains:
@@ -86,6 +92,9 @@ file, so indexed sections and multiple source entries are unnecessary.
   map from ESM, and rejects `--source-map` without `--output`.
 - Default CLI output still matches the checked-in snapshot byte-for-byte.
 - Bun executes both ordinary and source-mapped generated modules.
+- The generated Source Map encoder matches complete parsed seed documents,
+  including Unicode source content and mapping strings for its own compiler
+  sources.
 
 ## Deferred Work
 

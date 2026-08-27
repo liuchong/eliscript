@@ -1,0 +1,824 @@
+(module bootstrap.compiler.emitter
+  (import "./symbol.mjs" binding-name reference-name)
+  (import "./ir.mjs"
+    node-p
+    program-filename
+    program-body
+    ir-kind
+    ir-span
+    ir-value
+    ir-children
+    ir-property)
+  (import "./source-map.mjs" create-source-map)
+
+  (defconst react-runtime-binding "__eliscript_react_jsx_runtime")
+  (defconst fail
+    (js* "(message) => { throw new Error(message); }"))
+  (defvar temporary-counter 0)
+
+  (defun make-fragment (text marks)
+    (object :text text :marks marks))
+
+  (defun text-fragment (text)
+    (make-fragment text []))
+
+  (defun as-fragment (part)
+    (if (= (js* "typeof part") "string")
+        (text-fragment part)
+      part))
+
+  (defun combine (parts)
+    (let ((text "")
+          (marks []))
+      (js-call parts :forEach
+        (lambda (part)
+          (let* ((fragment (as-fragment part))
+                 (offset (get text :length)))
+            (js-call (get fragment :marks) :forEach
+              (lambda (mark)
+                (js-call marks :push
+                  (object
+                    :offset (+ offset (get mark :offset))
+                    :span (get mark :span)))))
+            (setq text (str text (get fragment :text))))))
+      (make-fragment text marks)))
+
+  (defun join-fragments (parts separator)
+    (let ((joined [])
+          (index 0))
+      (while (< index (get parts :length))
+        (when (> index 0)
+          (js-call joined :push separator))
+        (js-call joined :push (nth index parts))
+        (setq index (1+ index)))
+      (combine joined)))
+
+  (defun indent (fragment)
+    (let* ((input (as-fragment fragment))
+           (source (get input :text))
+           (source-marks (get input :marks))
+           (text "")
+           (marks [])
+           (index 0)
+           (mark-index 0)
+           (line-start t))
+      (while (< index (get source :length))
+        (let ((code (js-call source :charCodeAt index)))
+          (when (and line-start (not (= code 10)))
+            (setq text (str text "  ")))
+          (while (and (< mark-index (get source-marks :length))
+                      (= (get (nth mark-index source-marks) :offset) index))
+            (js-call marks :push
+              (object
+                :offset (get text :length)
+                :span (get (nth mark-index source-marks) :span)))
+            (setq mark-index (1+ mark-index)))
+          (setq text (str text (js-call source :charAt index)))
+          (setq line-start (= code 10))
+          (setq index (1+ index))))
+      (make-fragment text marks)))
+
+  (defun locate (node output)
+    (let* ((fragment (as-fragment output))
+           (marks (get fragment :marks))
+           (has-start
+            (js-call marks :some
+              (lambda (mark) (= (get mark :offset) 0)))))
+      (if (or (= (get (get fragment :text) :length) 0)
+              (not (ir-span node))
+              has-start)
+          fragment
+        (let ((located
+               [(object :offset 0 :span (ir-span node))]))
+          (js-call marks :forEach
+            (lambda (mark) (js-call located :push mark)))
+          (make-fragment (get fragment :text) located)))))
+
+  (defun fresh-name ()
+    (setq temporary-counter (1+ temporary-counter))
+    (str "__eliscript_value_" temporary-counter))
+
+  (defun json-string (value)
+    (JSON/stringify value))
+
+  (defun children (node)
+    (or (ir-children node) []))
+
+  (defun require-arity (name nodes minimum maximum)
+    (let ((count (get nodes :length)))
+      (when (or (< count minimum)
+                (and maximum (> count maximum)))
+        (let ((expected
+               (if (and maximum (= minimum maximum))
+                   (str minimum)
+                 (str minimum (if maximum (str ".." maximum) "+"))))
+              (plural
+               (if (and maximum (= minimum maximum) (= minimum 1))
+                   ""
+                 "s")))
+          (fail
+            (str name " expects " expected " argument" plural
+                 ", got " count))))))
+
+  (defun require-node-arity (node minimum maximum)
+    (require-arity
+      (or (ir-value node) (ir-kind node))
+      (children node)
+      minimum
+      maximum))
+
+  (defun emit-binding-name (node)
+    (locate node (binding-name (ir-value node))))
+
+  (defun emit-arguments (nodes)
+    (join-fragments
+      (js-call nodes :map (lambda (node) (emit-expression node)))
+      ", "))
+
+  (defun emit-callee (node)
+    (let ((output (emit-expression node)))
+      (if (= (ir-kind node) "reference")
+          output
+        (combine ["(" output ")"]))))
+
+  (defun emit-returning-body (nodes)
+    (if (= (get nodes :length) 0)
+        (text-fragment "return null;")
+      (let ((parts [])
+            (index 0)
+            (last-index (1- (get nodes :length))))
+        (while (< index last-index)
+          (js-call parts :push (emit-expression (nth index nodes)))
+          (js-call parts :push ";\n")
+          (setq index (1+ index)))
+        (js-call parts :push "return ")
+        (js-call parts :push (emit-expression (nth last-index nodes)))
+        (js-call parts :push ";")
+        (combine parts))))
+
+  (defun emit-do (nodes)
+    (cond
+      ((= (get nodes :length) 0) (text-fragment "null"))
+      ((= (get nodes :length) 1) (emit-expression (nth 0 nodes)))
+      (t
+       (combine
+         ["(() => {\n" (indent (emit-returning-body nodes)) "\n})()"]))))
+
+  (defun split-counted-children (node property)
+    (let ((all (children node))
+          (count (ir-property node property)))
+      [(js-call all :slice 0 count) (js-call all :slice count)]))
+
+  (defun emit-function (node)
+    (let* ((parts (split-counted-children node "parameterCount"))
+           (parameters (nth 0 parts))
+           (body (nth 1 parts)))
+      (combine
+        ["("
+         (join-fragments
+           (js-call parameters :map
+             (lambda (parameter) (emit-binding-name parameter)))
+           ", ")
+         ") => {\n"
+         (indent (emit-returning-body body))
+         "\n}"])))
+
+  (defun emit-if (nodes)
+    (combine
+      ["(__eliscript_truthy("
+       (emit-expression (nth 0 nodes))
+       ") ? "
+       (emit-expression (nth 1 nodes))
+       " : "
+       (if (> (get nodes :length) 2)
+           (emit-expression (nth 2 nodes))
+         "null")
+       ")"]))
+
+  (defun emit-conditional-sugar (node)
+    (let* ((nodes (children node))
+           (test (emit-expression (nth 0 nodes)))
+           (body (emit-do (js-call nodes :slice 1))))
+      (if (= (ir-value node) "when")
+          (combine ["(__eliscript_truthy(" test ") ? " body " : null)"])
+        (combine
+          ["(__eliscript_truthy((!__eliscript_truthy("
+           test "))) ? " body " : null)"]))))
+
+  (defun emit-cond (clauses)
+    (if (= (get clauses :length) 0)
+        (text-fragment "null")
+      (let* ((clause (nth 0 clauses))
+             (nodes (children clause))
+             (test (nth 0 nodes))
+             (body (js-call nodes :slice 1)))
+        (locate
+          clause
+          (if (and (= (ir-kind test) "literal") (= (ir-value test) t))
+              (emit-do body)
+            (combine
+              ["(__eliscript_truthy("
+               (emit-expression test)
+               ") ? "
+               (emit-do body)
+               " : "
+               (emit-cond (js-call clauses :slice 1))
+               ")"]))))))
+
+  (defun emit-binding-values (bindings)
+    (let ((result []))
+      (js-call bindings :forEach
+        (lambda (binding)
+          (let ((initializer (nth 0 (children binding))))
+            (js-call result :push
+              (if initializer (emit-expression initializer) "null")))))
+      result))
+
+  (defun emit-parallel-let (bindings body)
+    (let* ((names
+            (join-fragments
+              (js-call bindings :map
+                (lambda (binding) (emit-binding-name binding)))
+              ", "))
+           (values (join-fragments (emit-binding-values bindings) ", "))
+           (body-output (indent (emit-returning-body body))))
+      (combine
+        ["((" names ") => {\n" body-output "\n})(" values ")"])))
+
+  (defun emit-sequential-let (bindings body)
+    (if (= (get bindings :length) 0)
+        (emit-do body)
+      (let ((binding (nth 0 bindings)))
+        (let* ((name (emit-binding-name binding))
+               (initializer (nth 0 (emit-binding-values [binding])))
+               (tail (emit-sequential-let (js-call bindings :slice 1) body)))
+          (combine
+            ["(("
+             name
+             ") => {\n"
+             (indent (combine ["return " tail ";"]))
+             "\n})("
+             initializer
+             ")"])))))
+
+  (defun emit-let (node)
+    (let* ((parts (split-counted-children node "bindingCount"))
+           (bindings (nth 0 parts))
+           (body (nth 1 parts)))
+      (if (ir-property node "sequential")
+          (emit-sequential-let bindings body)
+        (emit-parallel-let bindings body))))
+
+  (defun emit-assignment (node)
+    (let ((assignments []))
+      (js-call (children node) :forEach
+        (lambda (pair)
+          (js-call assignments :push
+            (locate
+              pair
+              (combine
+                ["("
+                 (emit-binding-name pair)
+                 " = "
+                 (emit-expression (nth 0 (children pair)))
+                 ")"])))))
+      (if (= (ir-value node) "set!")
+          (nth 0 assignments)
+        (combine ["(" (join-fragments assignments ", ") ")"]))))
+
+  (defun emit-loop (node)
+    (let* ((nodes (children node))
+           (test (nth 0 nodes))
+           (body (js-call nodes :slice 1))
+           (test-output (emit-expression test))
+           (statements []))
+      (js-call body :forEach
+        (lambda (child)
+          (js-call statements :push (combine [(emit-expression child) ";"]))))
+      (combine
+        ["(() => {\n"
+         (indent
+           (combine
+             ["while (__eliscript_truthy("
+              test-output
+              ")) {\n"
+              (indent (join-fragments statements "\n"))
+              "\n}\nreturn null;"]))
+         "\n})()"])))
+
+  (defun emit-short-circuit (nodes kind)
+    (cond
+      ((= (get nodes :length) 0)
+       (text-fragment (if (= kind "and") "true" "null")))
+      ((= (get nodes :length) 1) (emit-expression (nth 0 nodes)))
+      (t
+       (let ((temporary (fresh-name))
+             (first (emit-expression (nth 0 nodes)))
+             (rest (emit-short-circuit (js-call nodes :slice 1) kind)))
+         (combine
+           ["((" temporary ") => (__eliscript_truthy(" temporary ") ? "
+            (if (= kind "and") rest temporary)
+            " : "
+            (if (= kind "and") temporary rest)
+            "))("
+            first
+            ")"])))))
+
+  (defun emit-infix (name nodes operator minimum)
+    (require-arity name nodes minimum nil)
+    (combine
+      ["("
+       (join-fragments
+         (js-call nodes :map (lambda (node) (emit-expression node)))
+         (str " " operator " "))
+       ")"]))
+
+  (defun temporary-names (nodes)
+    (let ((result []))
+      (js-call nodes :forEach
+        (lambda (_node) (js-call result :push (fresh-name))))
+      result))
+
+  (defun emit-comparison (name nodes operator)
+    (require-arity name nodes 2 nil)
+    (let ((parameters (temporary-names nodes))
+          (comparisons [])
+          (index 0))
+      (while (< index (1- (get parameters :length)))
+        (js-call comparisons :push
+          (str (nth index parameters) " " operator " "
+               (nth (1+ index) parameters)))
+        (setq index (1+ index)))
+      (combine
+        ["(("
+         (js-call parameters :join ", ")
+         ") => ("
+         (js-call comparisons :join " && ")
+         "))("
+         (emit-arguments nodes)
+         ")"])))
+
+  (defun emit-distinct (name nodes)
+    (require-arity name nodes 2 nil)
+    (let ((parameters (temporary-names nodes))
+          (comparisons [])
+          (left 0))
+      (while (< left (get parameters :length))
+        (let ((right (1+ left)))
+          (while (< right (get parameters :length))
+            (js-call comparisons :push
+              (str (nth left parameters) " !== " (nth right parameters)))
+            (setq right (1+ right))))
+        (setq left (1+ left)))
+      (combine
+        ["(("
+         (js-call parameters :join ", ")
+         ") => ("
+         (js-call comparisons :join " && ")
+         "))("
+         (emit-arguments nodes)
+         ")"])))
+
+  (defun emit-intrinsic (node)
+    (let ((name (ir-value node))
+          (nodes (children node)))
+      (cond
+        ((= name "not")
+         (require-node-arity node 1 1)
+         (combine ["(!__eliscript_truthy(" (emit-expression (nth 0 nodes)) "))"]))
+        ((= name "+")
+         (if (= (get nodes :length) 0)
+             (text-fragment "0")
+           (combine
+             ["("
+              (join-fragments
+                (js-call nodes :map (lambda (node) (emit-expression node)))
+                " + ")
+              ")"])))
+        ((= name "*")
+         (if (= (get nodes :length) 0)
+             (text-fragment "1")
+           (combine
+             ["("
+              (join-fragments
+                (js-call nodes :map (lambda (node) (emit-expression node)))
+                " * ")
+              ")"])))
+        ((= name "-")
+         (require-node-arity node 1 nil)
+         (if (= (get nodes :length) 1)
+             (combine ["(-" (emit-expression (nth 0 nodes)) ")"])
+           (emit-infix "-" nodes "-" 2)))
+        ((= name "/")
+         (require-node-arity node 1 nil)
+         (if (= (get nodes :length) 1)
+             (combine ["(1 / " (emit-expression (nth 0 nodes)) ")"])
+           (emit-infix "/" nodes "/" 2)))
+        ((or (= name "%") (= name "mod")) (emit-infix name nodes "%" 2))
+        ((= name "=") (emit-comparison name nodes "==="))
+        ((or (= name "/=") (= name "not=")) (emit-distinct name nodes))
+        ((= name "<") (emit-comparison name nodes "<"))
+        ((= name "<=") (emit-comparison name nodes "<="))
+        ((= name ">") (emit-comparison name nodes ">"))
+        ((= name ">=") (emit-comparison name nodes ">="))
+        ((= name "1+")
+         (require-node-arity node 1 1)
+         (combine ["(" (emit-expression (nth 0 nodes)) " + 1)"]))
+        ((= name "1-")
+         (require-node-arity node 1 1)
+         (combine ["(" (emit-expression (nth 0 nodes)) " - 1)"]))
+        ((or (= name "eq") (= name "equal"))
+         (require-node-arity node 2 2)
+         (combine
+           ["(" (emit-expression (nth 0 nodes)) " === "
+            (emit-expression (nth 1 nodes)) ")"]))
+        ((= name "null")
+         (require-node-arity node 1 1)
+         (combine ["(" (emit-expression (nth 0 nodes)) " == null)"]))
+        ((or (= name "list") (= name "vector") (= name "array"))
+         (combine ["[" (emit-arguments nodes) "]"]))
+        ((= name "car")
+         (require-node-arity node 1 1)
+         (combine ["(((" (emit-expression (nth 0 nodes)) ") ?? [])[0] ?? null)"]))
+        ((= name "cdr")
+         (require-node-arity node 1 1)
+         (combine ["((" (emit-expression (nth 0 nodes)) ") ?? []).slice(1)"]))
+        ((= name "cons")
+         (require-node-arity node 2 2)
+         (combine
+           ["[" (emit-expression (nth 0 nodes)) ", ...(("
+            (emit-expression (nth 1 nodes)) ") ?? [])]"]))
+        ((= name "nth")
+         (require-node-arity node 2 2)
+         (combine
+           ["((((" (emit-expression (nth 1 nodes)) ") ?? [])["
+            (emit-expression (nth 0 nodes)) "]) ?? null)"]))
+        ((= name "aref")
+         (require-node-arity node 2 2)
+         (combine
+           ["(" (emit-expression (nth 0 nodes)) ")["
+            (emit-expression (nth 1 nodes)) "]"]))
+        ((= name "length")
+         (require-node-arity node 1 1)
+         (combine ["((" (emit-expression (nth 0 nodes)) ") ?? []).length"]))
+        (t (fail (str "unknown IR intrinsic: " name))))))
+
+  (defun emit-object-properties (properties)
+    (let ((result []))
+      (js-call properties :forEach
+        (lambda (property)
+          (let ((nodes (children property)))
+            (js-call result :push
+              (locate
+                property
+                (if (ir-property property "computed")
+                    (combine
+                      ["[" (emit-expression (nth 0 nodes)) "]: "
+                       (emit-expression (nth 1 nodes))])
+                  (combine
+                    [(json-string (ir-value property)) ": "
+                     (emit-expression (nth 0 nodes))])))))))
+      (join-fragments result ", ")))
+
+  (defun emit-object (node)
+    (combine ["({" (emit-object-properties (children node)) "})"]))
+
+  (defun literal-kind (node)
+    (ir-property node "literalKind"))
+
+  (defun emit-literal (node)
+    (let ((value (ir-value node))
+          (kind (literal-kind node)))
+      (cond
+        ((= kind "undefined") (text-fragment "undefined"))
+        ((= kind "keyword") (text-fragment (json-string value)))
+        ((null value) (text-fragment "null"))
+        ((eq value t) (text-fragment "true"))
+        ((eq value false) (text-fragment "false"))
+        ((= (js* "typeof value") "number")
+         (unless (Number/isFinite value)
+           (fail (str "non-finite numbers are not supported: " value)))
+         (text-fragment (str value)))
+        ((= (js* "typeof value") "string")
+         (text-fragment (json-string value)))
+        (t (fail (str "unsupported IR literal: " value))))))
+
+  (defun datum-kind (value)
+    (and value
+         (= (js* "typeof value") "object")
+         (get value :kind)))
+
+  (defun emit-quoted (value)
+    (let ((kind (datum-kind value)))
+      (cond
+        ((null value) (text-fragment "[]"))
+        ((eq value t) (text-fragment "true"))
+        ((eq value false) (text-fragment (json-string "false")))
+        ((= (js* "typeof value") "number") (text-fragment (str value)))
+        ((= (js* "typeof value") "string")
+         (text-fragment (json-string value)))
+        ((= kind "undefined") (text-fragment (json-string "undefined")))
+        ((= kind "symbol") (text-fragment (json-string (get value :name))))
+        ((= kind "keyword")
+         (text-fragment (json-string (str ":" (get value :name)))))
+        ((or (= kind "list") (= kind "vector"))
+         (combine
+           ["["
+            (join-fragments
+              (js-call (get value :items) :map
+                (lambda (item) (emit-quoted item)))
+              ", ")
+            "]"]))
+        (t (fail "cannot emit quoted IR datum")))))
+
+  (defun emit-property-key (node)
+    (locate
+      node
+      (if (and (= (ir-kind node) "literal")
+               (or (= (literal-kind node) "keyword")
+                   (= (js* "typeof node.value") "string")))
+          (text-fragment (json-string (ir-value node)))
+        (emit-expression node))))
+
+  (defun react-key-property-p (property)
+    (and (= (ir-kind property) "object-property")
+         (not (ir-property property "computed"))
+         (= (ir-value property) "key")))
+
+  (defun emit-react-type (node)
+    (if (and (= (ir-kind node) "literal")
+             (or (= (literal-kind node) "keyword")
+                 (= (js* "typeof node.value") "string")))
+        (text-fragment (json-string (ir-value node)))
+      (emit-expression node)))
+
+  (defun emit-react-props (props child-nodes omitted-properties)
+    (let* ((empty-props
+            (or (not props)
+                (and (= (ir-kind props) "literal")
+                     (null (ir-value props)))))
+           (props-output
+            (unless empty-props
+              (if (and (> (get omitted-properties :length) 0)
+                       (= (ir-kind props) "object-literal"))
+                  (combine
+                    ["({"
+                     (emit-object-properties
+                       (js-call (children props) :filter
+                         (lambda (property)
+                           (not (js-call omitted-properties :includes property)))))
+                     "})"])
+                (emit-expression props))))
+           (children-output
+            (cond
+              ((= (get child-nodes :length) 0) nil)
+              ((= (get child-nodes :length) 1)
+               (emit-expression (nth 0 child-nodes)))
+              (t (combine ["[" (emit-arguments child-nodes) "]"])))))
+      (cond
+        ((and empty-props (not children-output)) (text-fragment "{}"))
+        (empty-props (combine ["{children: " children-output "}"]))
+        ((not children-output) (combine ["{...((" props-output ") ?? {})}"]))
+        (t
+         (combine
+           ["{...((" props-output ") ?? {}), children: " children-output "}"])))))
+
+  (defun emit-react-element (node)
+    (let* ((fragment (= (ir-kind node) "react-fragment"))
+           (all-children (children node))
+           (type-node (unless fragment (nth 0 all-children)))
+           (props (unless fragment (nth 1 all-children)))
+           (child-nodes
+            (if fragment all-children (js-call all-children :slice 2)))
+           (key-properties
+            (if (and props (= (ir-kind props) "object-literal"))
+                (js-call (children props) :filter
+                  (lambda (property) (react-key-property-p property)))
+              []))
+           (key-property
+            (if (> (get key-properties :length) 0)
+                (nth (1- (get key-properties :length)) key-properties)
+              nil))
+           (key-output
+            (and key-property
+                 (emit-expression (nth 0 (children key-property)))))
+           (runtime-function
+            (if (> (get child-nodes :length) 1) "jsxs" "jsx")))
+      (combine
+        [react-runtime-binding "." runtime-function "("
+         (if fragment
+             (str react-runtime-binding ".Fragment")
+           (emit-react-type type-node))
+         ", "
+         (emit-react-props props child-nodes key-properties)
+         (if key-output (combine [", " key-output]) "")
+         ")"])))
+
+  (defun emit-expression (node)
+    (unless (node-p node)
+      (fail "expected an IR expression node"))
+    (let ((kind (ir-kind node))
+          (nodes (children node)))
+      (locate
+        node
+        (cond
+          ((= kind "literal") (emit-literal node))
+          ((= kind "reference") (text-fragment (reference-name (ir-value node))))
+          ((= kind "array-literal") (combine ["[" (emit-arguments nodes) "]"]))
+          ((= kind "quoted-literal") (emit-quoted (ir-value node)))
+          ((= kind "function-expression") (emit-function node))
+          ((= kind "conditional") (emit-if nodes))
+          ((= kind "conditional-sugar") (emit-conditional-sugar node))
+          ((= kind "conditional-chain") (emit-cond nodes))
+          ((= kind "sequence") (emit-do nodes))
+          ((= kind "lexical-bindings") (emit-let node))
+          ((= kind "assignment") (emit-assignment node))
+          ((= kind "loop") (emit-loop node))
+          ((= kind "short-circuit") (emit-short-circuit nodes (ir-value node)))
+          ((= kind "intrinsic") (emit-intrinsic node))
+          ((= kind "object-literal") (emit-object node))
+          ((or (= kind "react-element") (= kind "react-fragment"))
+           (emit-react-element node))
+          ((= kind "property-read")
+           (let ((access
+                  (combine
+                    ["(" (emit-expression (nth 0 nodes)) ")["
+                     (emit-property-key (nth 1 nodes)) "]"])))
+             (if (= (get nodes :length) 3)
+                 (combine ["(" access " ?? " (emit-expression (nth 2 nodes)) ")"])
+               access)))
+          ((= kind "property-write")
+           (combine
+             ["((" (emit-expression (nth 0 nodes)) ")["
+              (emit-property-key (nth 1 nodes)) "] = "
+              (emit-expression (nth 2 nodes)) ")"]))
+          ((= kind "method-call")
+          (combine
+            ["(" (emit-expression (nth 0 nodes)) ")["
+              (emit-property-key (nth 1 nodes)) "]("
+              (emit-arguments (js-call nodes :slice 2)) ")"]))
+          ((= kind "constructor-call")
+           (combine
+             ["new " (emit-expression (nth 0 nodes)) "("
+              (emit-arguments (js-call nodes :slice 1)) ")"]))
+          ((= kind "raw-javascript")
+           (text-fragment (ir-value (nth 0 nodes))))
+          ((= kind "print") (combine ["console.log(" (emit-arguments nodes) ")"]))
+          ((= kind "string-concat")
+           (if (= (get nodes :length) 0)
+               (text-fragment "\"\"")
+             (let ((parts []))
+               (js-call nodes :forEach
+                 (lambda (child)
+                   (js-call parts :push
+                     (combine ["String(" (emit-expression child) ")"]))))
+               (combine ["(" (join-fragments parts " + ") ")"]))))
+          ((= kind "invoke")
+           (combine
+             [(emit-callee (nth 0 nodes)) "("
+              (emit-arguments (js-call nodes :slice 1)) ")"]))
+          ((= kind "apply-call")
+           (combine
+             [(emit-callee (nth 0 nodes)) "(..."
+              (emit-expression (nth 1 nodes)) ")"]))
+          ((= kind "call")
+           (combine
+             [(emit-callee (nth 0 nodes)) "("
+              (emit-arguments (js-call nodes :slice 1)) ")"]))
+          (t (fail (str "IR node is not valid in expression position: " kind)))))))
+
+  (defun emit-import (node)
+    (let ((default-binding nil)
+          (namespace-binding nil)
+          (named-bindings []))
+      (js-call (children node) :forEach
+        (lambda (specifier)
+          (let ((name (emit-binding-name specifier))
+                (kind (ir-kind specifier)))
+            (cond
+              ((= kind "import-default") (setq default-binding name))
+              ((= kind "import-namespace") (setq namespace-binding name))
+              ((= kind "import-named") (js-call named-bindings :push name))
+              (t (fail (str "invalid IR import specifier: " kind)))))))
+      (let ((clauses []))
+        (when default-binding (js-call clauses :push default-binding))
+        (when namespace-binding
+          (js-call clauses :push (combine ["* as " namespace-binding])))
+        (when (> (get named-bindings :length) 0)
+          (js-call clauses :push
+            (combine ["{" (join-fragments named-bindings ", ") "}"])))
+        (if (= (get clauses :length) 0)
+            (text-fragment (str "import " (json-string (ir-value node)) ";"))
+          (combine
+            ["import " (join-fragments clauses ", ") " from "
+             (json-string (ir-value node)) ";"])))))
+
+  (defun emit-top-level (node)
+    (unless (node-p node)
+      (fail "expected a top-level IR node"))
+    (let ((kind (ir-kind node))
+          (nodes (children node)))
+      (locate
+        node
+        (cond
+          ((= kind "module-declaration")
+           (join-fragments
+             (js-call nodes :map (lambda (child) (emit-top-level child)))
+             "\n"))
+          ((= kind "import-declaration") (emit-import node))
+          ((= kind "variable-declaration")
+           (combine
+             [(if (ir-property node "mutable") "let " "const ")
+              (binding-name (ir-value node))
+              " = "
+              (if (> (get nodes :length) 0)
+                  (emit-expression (nth 0 nodes))
+                "null")
+              ";"]))
+          ((= kind "function-declaration")
+           (let* ((parts (split-counted-children node "parameterCount"))
+                  (parameters (nth 0 parts))
+                  (body (nth 1 parts)))
+             (combine
+               ["function " (binding-name (ir-value node)) "("
+                (join-fragments
+                  (js-call parameters :map
+                    (lambda (parameter) (emit-binding-name parameter)))
+                  ", ")
+                ") {\n"
+                (indent (emit-returning-body body))
+                "\n}"])))
+          ((= kind "export-declaration")
+           (combine
+             ["export {"
+              (join-fragments
+                (js-call nodes :map
+                  (lambda (reference) (emit-binding-name reference)))
+                ", ")
+              "};"]))
+          ((= kind "export-default")
+           (combine ["export default " (emit-expression (nth 0 nodes)) ";"]))
+          ((= kind "expression-statement")
+           (combine [(emit-expression (nth 0 nodes)) ";"]))
+          (t (fail (str "IR node is not valid at module top level: " kind)))))))
+
+  (defun node-uses-react-p (node)
+    (if (or (= (ir-kind node) "react-element")
+            (= (ir-kind node) "react-fragment"))
+        t
+      (let ((found false))
+        (js-call (children node) :forEach
+          (lambda (child)
+            (when (node-uses-react-p child)
+              (setq found t))))
+        found)))
+
+  (defun program-uses-react-p (program)
+    (let ((found false))
+      (js-call (program-body program) :forEach
+        (lambda (node)
+          (when (node-uses-react-p node)
+            (setq found t))))
+      found))
+
+  (defun emit-module-artifact (program)
+    (setq temporary-counter 0)
+    (let ((body
+           (join-fragments
+             (js-call (program-body program) :map
+               (lambda (node) (emit-top-level node)))
+             "\n\n")))
+      (combine
+        ["// Generated by Eliscript. Do not edit.\n"
+         (if (program-uses-react-p program)
+             (str "import * as " react-runtime-binding
+                  " from \"react/jsx-runtime\";\n")
+           "")
+         "const __eliscript_truthy = (value) => value !== false && value != null;\n\n"
+         body
+         "\n"])))
+
+  (defun emit-module (program)
+    (get (emit-module-artifact program) :text))
+
+  (defun emit-module-with-source-map
+      (program source generated-name source-name)
+    (let* ((artifact (emit-module-artifact program))
+           (javascript (get artifact :text))
+           (resolved-source-name
+            (or source-name (program-filename program) "<string>")))
+      (object
+        :javascript javascript
+        :sourceMap
+        (create-source-map
+          javascript
+          (get artifact :marks)
+          source
+          resolved-source-name
+          generated-name))))
+
+  (export
+    emit-expression
+    emit-top-level
+    emit-module
+    emit-module-with-source-map))

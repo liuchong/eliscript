@@ -1,0 +1,149 @@
+(module bootstrap.compiler.source-map
+  (defconst base64
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+  (defconst fail
+    (js* "(message) => { throw new Error(message); }"))
+
+  (defun signed-vlq (value)
+    (if (< value 0)
+        (1+ (* (- value) 2))
+      (* value 2)))
+
+  (defun encode-vlq (value)
+    (let ((remaining (signed-vlq value))
+          (characters []))
+      (while (>= remaining 32)
+        (js-call characters :push
+          (js-call base64 :charAt (+ (% remaining 32) 32)))
+        (setq remaining (Math/floor (/ remaining 32))))
+      (js-call characters :push (js-call base64 :charAt remaining))
+      (js-call characters :join "")))
+
+  (defun collect-generated-marks (generated marks)
+    (let ((index 0)
+          (mark-index 0)
+          (line 0)
+          (column 0)
+          (result []))
+      (while (< index (get generated :length))
+        (while (and (< mark-index (get marks :length))
+                    (= (get (nth mark-index marks) :offset) index))
+          (js-call result :push
+            [line column (get (nth mark-index marks) :span)])
+          (setq mark-index (1+ mark-index)))
+        (if (= (js-call generated :charCodeAt index) 10)
+            (progn
+              (setq line (1+ line))
+              (setq column 0))
+          (setq column (1+ column)))
+        (setq index (1+ index)))
+      result))
+
+  (defun source-locations (source marks)
+    (let ((wanted (new (js* "Map")))
+          (locations (new (js* "Map"))))
+      (js-call marks :forEach
+        (lambda (mark)
+          (let ((start (get (nth 2 mark) :start)))
+            (unless (eq start undefined)
+              (js-call wanted :set start t)))))
+      (let ((index 0)
+            (offset 0)
+            (line 0)
+            (column 0))
+        (while (<= index (get source :length))
+          (when (js-call wanted :has offset)
+            (js-call locations :set offset [line column]))
+          (when (< index (get source :length))
+            (let* ((code (js-call source :codePointAt index))
+                   (width (if (> code 65535) 2 1)))
+              (if (= code 10)
+                  (progn
+                    (setq line (1+ line))
+                    (setq column 0))
+                (setq column (+ column width)))
+              (setq index (+ index width))
+              (setq offset (1+ offset))))
+          (when (= index (get source :length))
+            (setq index (1+ index)))))
+      locations))
+
+  (defun original-location (span locations)
+    (let ((start (get span :start)))
+      (if (and (not (eq start undefined))
+               (js-call locations :has start))
+          (js-call locations :get start)
+        [(1- (get span :line)) (1- (get span :column))])))
+
+  (defun group-marks (marks locations)
+    (let ((current-line 0)
+          (current-segments [])
+          (lines []))
+      (js-call marks :forEach
+        (lambda (mark)
+          (let ((generated-line (nth 0 mark)))
+            (while (< current-line generated-line)
+              (js-call lines :push current-segments)
+              (setq current-segments [])
+              (setq current-line (1+ current-line)))
+            (let ((original (original-location (nth 2 mark) locations)))
+              (js-call current-segments :push
+                [(nth 1 mark) 0 (nth 0 original) (nth 1 original)])))))
+      (js-call lines :push current-segments)
+      lines))
+
+  (defun encode-segment (segment state)
+    (let ((generated-column (nth 0 segment))
+          (source (nth 1 segment))
+          (original-line (nth 2 segment))
+          (original-column (nth 3 segment)))
+      (let ((encoded
+             (str
+               (encode-vlq
+                 (- generated-column (get state :generatedColumn)))
+               (encode-vlq (- source (get state :source)))
+               (encode-vlq
+                 (- original-line (get state :originalLine)))
+               (encode-vlq
+                 (- original-column (get state :originalColumn))))))
+        (put state :generatedColumn generated-column)
+        (put state :source source)
+        (put state :originalLine original-line)
+        (put state :originalColumn original-column)
+        encoded)))
+
+  (defun encode-mappings (lines)
+    (let ((state
+           (object
+             :generatedColumn 0
+             :source 0
+             :originalLine 0
+             :originalColumn 0))
+          (encoded-lines []))
+      (js-call lines :forEach
+        (lambda (segments)
+          (put state :generatedColumn 0)
+          (let ((encoded []))
+            (js-call segments :forEach
+              (lambda (segment)
+                (js-call encoded :push (encode-segment segment state))))
+            (js-call encoded-lines :push (js-call encoded :join ",")))))
+      (js-call encoded-lines :join ";")))
+
+  (defun create-source-map
+      (generated marks source source-name generated-name)
+    (unless (js* "Array.isArray(marks)")
+      (fail "source map marks must be an array"))
+    (let* ((generated-marks (collect-generated-marks generated marks))
+           (locations (source-locations source generated-marks))
+           (mappings (encode-mappings (group-marks generated-marks locations)))
+           (document (object :version 3)))
+      (when generated-name
+        (put document :file generated-name))
+      (put document :sources [source-name])
+      (put document :sourcesContent [source])
+      (put document :names [])
+      (put document :mappings mappings)
+      (str (JSON/stringify document) "\n")))
+
+  (export encode-vlq create-source-map))
