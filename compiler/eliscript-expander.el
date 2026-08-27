@@ -65,7 +65,13 @@
             :name name
             :function
             (eval `(lambda ,(eliscript-expander--normalize-parameters parameters)
-                     ,@body)
+                     (cl-flet ((nil? (value) (eq value nil))
+                               (undefined? (value) (eq value 'undefined))
+                               (nullish? (value)
+                                 (or (eq value nil) (eq value 'undefined)))
+                               (null (value)
+                                 (or (eq value nil) (eq value 'undefined))))
+                       ,@body))
                   t))
            environment)
         (error

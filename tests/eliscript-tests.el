@@ -113,6 +113,33 @@
                   '(object :name "Ada" :active t))
                  "({\"name\": \"Ada\", \"active\": true})")))
 
+(ert-deftest eliscript-distinguishes-nullish-values ()
+  (let* ((source
+          "(defun classify (value)
+  [(nil? value) (undefined? value) (nullish? value) (null value)])")
+         (output (eliscript-compile-string source "nullish.eli")))
+    (should (equal output
+                   (eliscript-tests--legacy-compile-string
+                    source "nullish.eli")))
+    (should (string-match-p "(value === null)" output))
+    (should (string-match-p "(value === undefined)" output))
+    (should (= (length (split-string output "(value == null)" t)) 3)))
+  (should
+   (string-match-p
+    "function portable_classify(value)"
+    (eliscript-compile-string
+     "(defportable portable-classify (value)
+  [(nil? value) (undefined? value) (nullish? value)])"
+     "portable-nullish.eli")))
+  (dolist (operator '(nil? undefined? nullish? null))
+    (let ((error-data
+           (should-error
+            (eliscript-compile-string (format "(%s)" operator) "nullish.eli")
+            :type 'eliscript-compile-error)))
+      (should (string-match-p
+               (regexp-quote (format "%s expects 1 argument" operator))
+               (error-message-string error-data))))))
+
 (ert-deftest eliscript-emits-functions-and-lexical-bindings ()
   (let ((output
          (eliscript-compile-string

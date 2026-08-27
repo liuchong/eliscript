@@ -333,7 +333,15 @@
        (format "(%s === %s)"
                (eliscript-ir-emitter-emit-expression (nth 0 nodes))
                (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
-      ('null
+      ('nil?
+       (eliscript-ir-emitter--require-arity node 1 1)
+       (format "(%s === null)"
+               (eliscript-ir-emitter-emit-expression (car nodes))))
+      ('undefined?
+       (eliscript-ir-emitter--require-arity node 1 1)
+       (format "(%s === undefined)"
+               (eliscript-ir-emitter-emit-expression (car nodes))))
+      ((or 'null 'nullish?)
        (eliscript-ir-emitter--require-arity node 1 1)
        (format "(%s == null)"
                (eliscript-ir-emitter-emit-expression (car nodes))))

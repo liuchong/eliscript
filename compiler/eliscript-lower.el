@@ -12,7 +12,8 @@
 (require 'eliscript-ir)
 
 (defconst eliscript-lower--intrinsics
-  '(not + * - / % mod = /= not= < <= > >= 1+ 1- eq equal null
+  '(not + * - / % mod = /= not= < <= > >= 1+ 1-
+    eq equal null nil? undefined? nullish?
     list vector array car cdr cons nth aref length
     object-keys object-has? object-assoc)
   "Operators represented by the generic intrinsic IR node.")

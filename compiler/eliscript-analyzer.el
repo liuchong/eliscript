@@ -28,7 +28,8 @@
 (defconst eliscript-analyzer--builtin-operators
   '(if when unless progn do while and or not
     + * - / % mod = /= not= < <= > >= 1+ 1-
-    eq equal null list vector array car cdr cons nth aref length
+    eq equal null nil? undefined? nullish?
+    list vector array car cdr cons nth aref length
     object-keys object-has? object-assoc
     new print str funcall apply))
 

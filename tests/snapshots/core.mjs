@@ -23,6 +23,6 @@ function sum_to(n) {
 }
 let result = ({"message": (String(greeting) + String(" from Eliscript")), "values": [1, 2, 3], "factorial": factorial(5), "class": classify(7), "sum": sum_to(5), "doubled": ([1, 2, 3])["map"]((value) => {
   return (value * 2);
-}), "consed": [0, ...(([1, 2]) ?? [])], "empty-car": (((null) ?? [])[0] ?? null)});
+}), "consed": [0, ...(([1, 2]) ?? [])], "empty-car": (((null) ?? [])[0] ?? null), "nil-only": [(null === null), (undefined === null)], "undefined-only": [(null === undefined), (undefined === undefined)], "nullish": [(null == null), (undefined == null), (false == null)], "legacy-null": [(null == null), (undefined == null), (false == null)]});
 console.log(JSON.stringify(result));
 export {factorial, classify, sum_to, result};

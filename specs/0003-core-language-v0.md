@@ -66,6 +66,12 @@ an empty array, is true.
 The seed compiler emits a local `__eliscript_truthy` helper to preserve this
 rule in `if`, `when`, `unless`, `cond`, `while`, `and`, `or`, and `not`.
 
+`nil?` tests strictly for JavaScript `null`, `undefined?` tests strictly for
+JavaScript `undefined`, and `nullish?` tests for either value. The historical
+`null` operator remains a compatibility alias of `nullish?`. These predicates
+do not use truthiness, so all four return false for `false`, `0`, and empty
+strings. See [0034-nullish-values.md](0034-nullish-values.md).
+
 ## Bindings and Functions
 
 The implemented binding forms are:
@@ -99,7 +105,8 @@ The initial arithmetic and comparison forms are:
 - `+`, `-`, `*`, `/`, `%`, and `mod`
 - `1+` and `1-`
 - `=`, `/=`, `not=`, `<`, `<=`, `>`, and `>=`
-- `eq`, `equal`, `null`, and `not`
+- `eq`, `equal`, `nil?`, `undefined?`, `nullish?`, compatibility `null`, and
+  `not`
 
 The initial collection forms are:
 

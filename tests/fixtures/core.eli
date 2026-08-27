@@ -30,7 +30,11 @@
       :sum (sum-to 5)
       :doubled (js-call [1 2 3] :map (lambda (value) (* value 2)))
       :consed (cons 0 '(1 2))
-      :empty-car (car nil)))
+      :empty-car (car nil)
+      :nil-only [(nil? nil) (nil? undefined)]
+      :undefined-only [(undefined? nil) (undefined? undefined)]
+      :nullish [(nullish? nil) (nullish? undefined) (nullish? false)]
+      :legacy-null [(null nil) (null undefined) (null false)]))
 
   (print (JSON/stringify result))
   (export factorial classify sum-to result))

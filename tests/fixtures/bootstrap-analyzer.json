@@ -26,6 +26,11 @@
       "source": "(defun objects (value key)\n  [(object-keys value)\n   (object-has? value key)\n   (object-assoc value key 1)])\n(export objects)"
     },
     {
+      "name": "portable-nullish-predicates",
+      "filename": "nullish.eli",
+      "source": "(defportable classify (value)\n  [(nil? value) (undefined? value) (nullish? value) (null value)])"
+    },
+    {
       "name": "portable-transitive-closure",
       "filename": "portable.eli",
       "source": "(defconst step 2)\n(defportable helper (value) (* value step))\n(defportable work (value) (helper value))"

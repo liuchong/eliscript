@@ -155,6 +155,7 @@
 
   (defun truthy-p (node)
     (not (or (null-node-p node)
+             (= (node-kind node) "undefined")
              (and (literal-node-p node)
                   (eq (node-value node) false)))))
 
@@ -426,10 +427,24 @@
 
   (defun eval-predicate (operator values)
     (cond
-      ((or (= operator "not") (= operator "null"))
+      ((= operator "not")
        (unless (= (get values :length) 1)
          (raise-error (str operator " expects 1 argument")))
        (make-boolean (not (truthy-p (nth 0 values)))))
+      ((= operator "nil?")
+       (unless (= (get values :length) 1)
+         (raise-error "nil? expects 1 argument"))
+       (make-boolean (null-node-p (nth 0 values))))
+      ((= operator "undefined?")
+       (unless (= (get values :length) 1)
+         (raise-error "undefined? expects 1 argument"))
+       (make-boolean (= (node-kind (nth 0 values)) "undefined")))
+      ((or (= operator "null") (= operator "nullish?"))
+       (unless (= (get values :length) 1)
+         (raise-error (str operator " expects 1 argument")))
+       (make-boolean
+         (or (null-node-p (nth 0 values))
+             (= (node-kind (nth 0 values)) "undefined"))))
       ((= operator "symbolp")
        (unless (= (get values :length) 1)
          (raise-error "symbolp expects 1 argument"))

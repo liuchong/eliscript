@@ -36,6 +36,11 @@
       "source": "(defmacro choose (test yes no) (if (null test) no yes))\n(defconst answer (choose nil 1 2))\n(export answer)"
     },
     {
+      "name": "nullish-predicate-macros",
+      "filename": "nullish.eli",
+      "source": "(defmacro classify-nullish (value)\n  (cond\n    ((nil? value) '(quote nil-only))\n    ((undefined? value) '(quote undefined-only))\n    ((nullish? value) '(quote nullish))\n    (t '(quote other))))\n(defmacro legacy-nullish (value)\n  (if (null value) '(quote nullish) '(quote other)))\n(defconst nil-kind (classify-nullish nil))\n(defconst undefined-kind (classify-nullish undefined))\n(defconst false-kind (classify-nullish false))\n(defconst legacy-kind (legacy-nullish undefined))\n(export nil-kind undefined-kind false-kind legacy-kind)"
+    },
+    {
       "name": "macro-evaluator-core",
       "filename": "evaluator.eli",
       "source": "(defmacro calculate (value)\n  (let ((current value))\n    (setq current (+ current 2))\n    (cond\n      ((and (> current 3) (equal current 4)) (list 'quote current))\n      (t current))))\n(defmacro condition-value (value) (cond (value)))\n(defconst answer (calculate 2))\n(defconst direct (condition-value 5))\n(export answer direct)"

@@ -432,7 +432,13 @@
          (combine
            ["(" (emit-expression (nth 0 nodes)) " === "
             (emit-expression (nth 1 nodes)) ")"]))
-        ((= name "null")
+        ((= name "nil?")
+         (require-node-arity node 1 1)
+         (combine ["(" (emit-expression (nth 0 nodes)) " === null)"]))
+        ((= name "undefined?")
+         (require-node-arity node 1 1)
+         (combine ["(" (emit-expression (nth 0 nodes)) " === undefined)"]))
+        ((or (= name "null") (= name "nullish?"))
          (require-node-arity node 1 1)
          (combine ["(" (emit-expression (nth 0 nodes)) " == null)"]))
         ((or (= name "list") (= name "vector") (= name "array"))

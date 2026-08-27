@@ -51,7 +51,7 @@ fi
 
 ACTUAL_OUTPUT=$(bun run "$TEMP_DIR/core.mjs")
 SOURCE_MAPPED_OUTPUT=$(bun run "$TEMP_DIR/core-with-map.mjs")
-EXPECTED_OUTPUT='{"message":"hello from Eliscript","values":[1,2,3],"factorial":120,"class":"positive","sum":15,"doubled":[2,4,6],"consed":[0,1,2],"empty-car":null}'
+EXPECTED_OUTPUT='{"message":"hello from Eliscript","values":[1,2,3],"factorial":120,"class":"positive","sum":15,"doubled":[2,4,6],"consed":[0,1,2],"empty-car":null,"nil-only":[true,false],"undefined-only":[false,true],"nullish":[true,true,false],"legacy-null":[true,true,false]}'
 
 if [ "$ACTUAL_OUTPUT" != "$EXPECTED_OUTPUT" ]; then
   printf 'expected: %s\nactual:   %s\n' "$EXPECTED_OUTPUT" "$ACTUAL_OUTPUT" >&2

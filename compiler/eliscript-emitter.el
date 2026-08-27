@@ -400,8 +400,17 @@
        (format "(%s === %s)"
                (eliscript-emitter-emit-expression (nth 0 arguments))
                (eliscript-emitter-emit-expression (nth 1 arguments))))
-      ('null
-       (eliscript-emitter--require-arity "null" arguments 1 1)
+      ('nil?
+       (eliscript-emitter--require-arity "nil?" arguments 1 1)
+       (format "(%s === null)"
+               (eliscript-emitter-emit-expression (car arguments))))
+      ('undefined?
+       (eliscript-emitter--require-arity "undefined?" arguments 1 1)
+       (format "(%s === undefined)"
+               (eliscript-emitter-emit-expression (car arguments))))
+      ((or 'null 'nullish?)
+       (eliscript-emitter--require-arity
+        (symbol-name operator) arguments 1 1)
        (format "(%s == null)"
                (eliscript-emitter-emit-expression (car arguments))))
       ((or 'list 'vector 'array)

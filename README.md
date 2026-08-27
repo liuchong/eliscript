@@ -220,7 +220,8 @@ Implemented forms include:
 - literals, symbols, keywords, vectors, quoted lists, and object literals
 - `defvar`, `defconst`, `defun`, `defportable`, `lambda`, `let`, and `let*`
 - `if`, `when`, `unless`, `cond`, `progn`, `while`, `and`, and `or`
-- `setq`, arithmetic, comparisons, and basic list/vector operations
+- `setq`, arithmetic, comparisons, explicit nullish predicates, and basic
+  list/vector operations
 - portable `map`, `filter`, `reduce`, ranges, slicing, predicates, and search
   from `stdlib/sequence.eli`
 - portable immutable association, merging, value transforms, selection, and
@@ -428,7 +429,7 @@ Current evidence:
 - Repeated `--portable NAME` options make the same builder verify every local
   `import-portable` target, reject bare or escaping source edges, and emit only
   each module's requested transitive closure.
-- Eighty-six ERT tests cover reading, locations, macro expansion, analysis, IR
+- Eighty-seven ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
 - Eighteen Bun tests cover the compiler and Org Vite adapters, source-map
@@ -526,7 +527,10 @@ for verified module reuse and conservative cache invalidation, and
 for machine-readable build summaries and stable per-module decision reasons,
 and
 [specs/0033-build-phase-timings.md](specs/0033-build-phase-timings.md)
-for non-identity cache, work, manifest, and total build measurements.
+for non-identity cache, work, manifest, and total build measurements, and
+[specs/0034-nullish-values.md](specs/0034-nullish-values.md)
+for explicit `nil`, `undefined`, and nullish predicates across both compiler
+generations.
 
 ## License
 

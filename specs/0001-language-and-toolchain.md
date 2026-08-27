@@ -363,13 +363,16 @@ through [0033-build-phase-timings.md](0033-build-phase-timings.md).
 
 ## Open Questions
 
+The distinction between `nil`, JavaScript `null`, and `undefined` is resolved:
+`nil` is the source spelling for JavaScript `null`, while strict and combined
+predicates expose the boundary explicitly. See
+[0034-nullish-values.md](0034-nullish-values.md).
+
 1. How should trusted seed macros migrate to a portable Eliscript evaluator?
 2. Should maps read as `{...}` or use a Lisp-native constructor form?
 3. How should Lisp kebab-case symbols map to JavaScript identifiers and object
    keys?
-4. Which semantics should distinguish `nil`, JavaScript `null`, and
-   `undefined`?
-5. Can incremental compilation stay deterministic when macros read files?
+4. Can incremental compilation stay deterministic when macros read files?
 
 These questions should be resolved by small executable examples and follow-up
 numbered specifications rather than by expanding this document indefinitely.
