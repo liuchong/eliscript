@@ -157,6 +157,45 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
     expect(seedPortableOutput).not.toContain("function unused");
     expect(seedPortableOutput).not.toContain("function ordinary");
 
+    const seedPortableMapped = resolve(directory, "seed-cli/portable.mjs");
+    const selfHostedPortableMapped = resolve(
+      directory,
+      "portable-cli/portable.mjs",
+    );
+    await runSuccessful(
+      [
+        seedCliPath,
+        "--source-map",
+        "--portable",
+        "work",
+        "--output",
+        seedPortableMapped,
+        portableSource,
+      ],
+      { env: { ...process.env, EMACS: emacs } },
+    );
+    await runSuccessful(
+      [
+        portableCliPath,
+        "--source-map",
+        "--portable",
+        "work",
+        "--output",
+        selfHostedPortableMapped,
+        portableSource,
+      ],
+      {
+        env: {
+          ...process.env,
+          ELISCRIPT_BOOTSTRAP_MODULE_DIR: generationTwo,
+        },
+      },
+    );
+    expect(await Bun.file(selfHostedPortableMapped).text())
+      .toBe(await Bun.file(seedPortableMapped).text());
+    expect(await Bun.file(`${selfHostedPortableMapped}.map`).text())
+      .toBe(await Bun.file(`${seedPortableMapped}.map`).text());
+
     const seedMapped = resolve(directory, "seed-cli/core.mjs");
     const portableMapped = resolve(directory, "portable-cli/core.mjs");
     await runSuccessful(

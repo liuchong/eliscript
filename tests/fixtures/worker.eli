@@ -11,6 +11,9 @@
         (setq round (1+ round)))
       total))
 
+  (defportable crash-at-source (value)
+    (value))
+
   (defconst delayed-echo
     (js* "(value, delayMs, context) => new Promise((resolve, reject) => { context.progress({stage: 'started'}); const timer = setTimeout(() => resolve(value), delayMs); context.signal.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('operation aborted')); }, {once: true}); })"))
 
@@ -25,4 +28,4 @@
     value)
 
   (export
-    score-values delayed-echo blocking-echo unserializable noisy-echo))
+    score-values crash-at-source delayed-echo blocking-echo unserializable noisy-echo))

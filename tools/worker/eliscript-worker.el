@@ -9,6 +9,8 @@
 (require 'cl-lib)
 (require 'json)
 (require 'subr-x)
+(require 'url-parse)
+(require 'url-util)
 
 (define-error 'eliscript-worker-error "Eliscript worker error")
 (define-error 'eliscript-worker-protocol-error "Eliscript worker protocol error"
@@ -41,6 +43,11 @@
   :type 'number
   :group 'eliscript-worker)
 
+(defcustom eliscript-worker-auto-restart t
+  "Whether a stopped worker should restart before its next request."
+  :type 'boolean
+  :group 'eliscript-worker)
+
 (cl-defstruct (eliscript-worker-request
                (:constructor eliscript-worker-request--create))
   callback
@@ -54,12 +61,18 @@
 (cl-defstruct (eliscript-worker
                (:constructor eliscript-worker--create))
   process
+  command
+  auto-restart
   stderr-buffer
   stderr-output
   receive-buffer
   pending
+  module-versions
   next-id
   state
+  generation
+  restart-count
+  last-exit
   capabilities
   protocol-error)
 
@@ -74,14 +87,41 @@
 (defun eliscript-worker-stderr (worker)
   "Return captured stderr output for WORKER."
   (let ((buffer (eliscript-worker-stderr-buffer worker)))
-    (if (buffer-live-p buffer)
-        (with-current-buffer buffer (buffer-string))
-      (or (eliscript-worker-stderr-output worker) ""))))
+    (concat
+     (or (eliscript-worker-stderr-output worker) "")
+     (if (buffer-live-p buffer)
+         (with-current-buffer buffer (buffer-string))
+       ""))))
+
+(defun eliscript-worker--capture-stderr (worker)
+  "Retain and release WORKER's current stderr buffer."
+  (let ((buffer (eliscript-worker-stderr-buffer worker)))
+    (when (buffer-live-p buffer)
+      (setf (eliscript-worker-stderr-output worker)
+            (concat (or (eliscript-worker-stderr-output worker) "")
+                    (with-current-buffer buffer (buffer-string))))
+      (kill-buffer buffer))
+    (setf (eliscript-worker-stderr-buffer worker) nil)))
 
 (defun eliscript-worker--error-message (error-object)
   "Return a readable message from protocol ERROR-OBJECT."
   (or (alist-get 'message error-object)
       "unknown worker error"))
+
+(defun eliscript-worker-error-location (error-object)
+  "Return structured source location from protocol ERROR-OBJECT."
+  (alist-get 'location error-object))
+
+(defun eliscript-worker-format-error (error-object)
+  "Format protocol ERROR-OBJECT with its best source location."
+  (let* ((message (eliscript-worker--error-message error-object))
+         (location (eliscript-worker-error-location error-object))
+         (file (and location (alist-get 'file location)))
+         (line (and location (alist-get 'line location)))
+         (column (and location (alist-get 'column location))))
+    (if (and file line column)
+        (format "%s:%s:%s: %s" file line column message)
+      message)))
 
 (defun eliscript-worker--finish-request (worker id value error-object timing)
   "Complete request ID on WORKER with VALUE, ERROR-OBJECT, and TIMING."
@@ -193,42 +233,43 @@
 (defun eliscript-worker--sentinel (process event)
   "Handle PROCESS lifecycle EVENT."
   (let ((worker (process-get process 'eliscript-worker)))
-    (when worker
-      (unless (eq (eliscript-worker-state worker) 'stopping)
+    (when (and worker (eq process (eliscript-worker-process worker)))
+      (setf (eliscript-worker-last-exit worker) (string-trim event))
+      (unless (memq (eliscript-worker-state worker) '(stopping closed))
         (eliscript-worker--fail-pending
          worker "worker-exit"
          (format "worker exited: %s%s"
                  (string-trim event)
                  (let ((stderr (string-trim (eliscript-worker-stderr worker))))
                    (if (string-empty-p stderr) "" (concat ": " stderr))))))
-      (setf (eliscript-worker-state worker) 'stopped))))
+      (unless (eq (eliscript-worker-state worker) 'closed)
+        (setf (eliscript-worker-state worker) 'stopped))
+      (eliscript-worker--capture-stderr worker))))
 
-(defun eliscript-worker-start (&optional command)
-  "Start a worker and wait for readiness.
-
-COMMAND defaults to `eliscript-worker-program' plus the bundled worker script."
+(defun eliscript-worker--launch (worker)
+  "Launch or relaunch WORKER and wait for readiness."
+  (when (eliscript-worker-live-p worker)
+    (signal 'eliscript-worker-error (list "worker is already running")))
+  (eliscript-worker--capture-stderr worker)
   (let* ((stderr-buffer (generate-new-buffer " *eliscript-worker-stderr*"))
-         (worker
-          (eliscript-worker--create
-           :stderr-buffer stderr-buffer
-           :receive-buffer ""
-           :pending (make-hash-table :test #'equal)
-           :next-id 0
-           :state 'starting))
          (default-directory eliscript-worker--project-directory)
          (process
           (make-process
            :name "eliscript-worker"
-           :command (or command
-                        (list eliscript-worker-program
-                              (eliscript-worker--script)))
+           :command (eliscript-worker-command worker)
            :coding 'utf-8-unix
            :connection-type 'pipe
            :noquery t
            :stderr stderr-buffer
            :filter #'eliscript-worker--filter
            :sentinel #'eliscript-worker--sentinel)))
-    (setf (eliscript-worker-process worker) process)
+    (setf (eliscript-worker-process worker) process
+          (eliscript-worker-stderr-buffer worker) stderr-buffer
+          (eliscript-worker-receive-buffer worker) ""
+          (eliscript-worker-capabilities worker) nil
+          (eliscript-worker-protocol-error worker) nil
+          (eliscript-worker-state worker) 'starting)
+    (clrhash (eliscript-worker-module-versions worker))
     (process-put process 'eliscript-worker worker)
     (let ((deadline (+ (float-time) eliscript-worker-startup-timeout)))
       (while (and (eq (eliscript-worker-state worker) 'starting)
@@ -243,9 +284,88 @@ COMMAND defaults to `eliscript-worker-program' plus the bundled worker script."
                         (eliscript-worker-protocol-error worker)))
                   (and (not (string-empty-p stderr)) stderr)
                   "worker did not become ready")))
-        (eliscript-worker-stop worker t)
+        (when (process-live-p process)
+          (setf (eliscript-worker-state worker) 'stopping)
+          (delete-process process))
+        (setf (eliscript-worker-state worker) 'stopped)
+        (eliscript-worker--capture-stderr worker)
         (signal 'eliscript-worker-error (list message))))
+    (cl-incf (eliscript-worker-generation worker))
     worker))
+
+(defun eliscript-worker-start (&optional command)
+  "Start a worker and wait for readiness.
+
+COMMAND defaults to `eliscript-worker-program' plus the bundled worker script."
+  (eliscript-worker--launch
+   (eliscript-worker--create
+    :command (or command
+                 (list eliscript-worker-program (eliscript-worker--script)))
+    :auto-restart eliscript-worker-auto-restart
+    :pending (make-hash-table :test #'equal)
+    :module-versions (make-hash-table :test #'equal)
+    :next-id 0
+    :generation 0
+    :restart-count 0
+    :state 'stopped)))
+
+(defun eliscript-worker-restart (worker)
+  "Restart WORKER explicitly and return it after readiness."
+  (when (eliscript-worker-live-p worker)
+    (setf (eliscript-worker-state worker) 'stopping)
+    (delete-process (eliscript-worker-process worker)))
+  (eliscript-worker--fail-pending
+   worker "worker-restart" "worker restarted before the request completed")
+  (setf (eliscript-worker-state worker) 'stopped)
+  (cl-incf (eliscript-worker-restart-count worker))
+  (eliscript-worker--launch worker))
+
+(defun eliscript-worker--ensure-ready (worker)
+  "Ensure WORKER is ready, automatically restarting it when configured."
+  (cond
+   ((and (eq (eliscript-worker-state worker) 'ready)
+         (eliscript-worker-live-p worker)) worker)
+   ((eq (eliscript-worker-state worker) 'closed)
+    (signal 'eliscript-worker-error (list "worker has been closed")))
+   ((and (not (eliscript-worker-live-p worker))
+         (eliscript-worker-auto-restart worker))
+    (setf (eliscript-worker-state worker) 'stopped)
+    (cl-incf (eliscript-worker-restart-count worker))
+    (eliscript-worker--launch worker))
+   (t
+    (signal 'eliscript-worker-error (list "worker is not ready")))))
+
+(defun eliscript-worker--module-file (module)
+  "Return the local filename represented by MODULE, or nil."
+  (cond
+   ((string-prefix-p "file:" module)
+    (url-unhex-string (url-filename (url-generic-parse-url module))))
+   ((file-name-absolute-p module) module)
+   (t (expand-file-name module))))
+
+(defun eliscript-worker--module-fingerprint (module)
+  "Return a stable current-file fingerprint for MODULE."
+  (let* ((file (eliscript-worker--module-file module))
+         (attributes (and file (file-attributes file 'string))))
+    (when attributes
+      (format "%S:%s:%S:%S"
+              (file-attribute-modification-time attributes)
+              (file-attribute-size attributes)
+              (file-attribute-inode-number attributes)
+              (file-attribute-device-number attributes)))))
+
+(defun eliscript-worker--prepare-module (worker module requested-version)
+  "Resolve MODULE version and restart WORKER when it changed."
+  (let* ((version
+          (or requested-version
+              (eliscript-worker--module-fingerprint module)))
+         (versions (eliscript-worker-module-versions worker))
+         (previous (gethash module versions)))
+    (when (and version previous (not (equal version previous))
+               (eliscript-worker-live-p worker))
+      (eliscript-worker-restart worker))
+    (when version (puthash module version versions))
+    version))
 
 (defun eliscript-worker--send (worker message)
   "Send protocol MESSAGE to WORKER."
@@ -273,7 +393,7 @@ COMMAND defaults to `eliscript-worker-program' plus the bundled worker script."
 
 (cl-defun eliscript-worker-call
     (worker module export arguments callback
-            &key operation progress metrics timeout-ms)
+            &key operation module-version progress metrics timeout-ms)
   "Call EXPORT from MODULE on WORKER with ARGUMENTS.
 
 When OPERATION is non-nil, resolve its source name through the generated
@@ -282,8 +402,7 @@ PROGRESS receives each progress value.
 TIMEOUT-MS is enforced remotely, with local worker termination after a grace
 period when synchronous code prevents cooperative cancellation. Return request
 id."
-  (unless (eq (eliscript-worker-state worker) 'ready)
-    (signal 'eliscript-worker-error (list "worker is not ready")))
+  (eliscript-worker--ensure-ready worker)
   (when (and timeout-ms
              (or (not (integerp timeout-ms)) (<= timeout-ms 0)))
     (signal 'wrong-type-argument (list 'positive-integer-p timeout-ms)))
@@ -296,7 +415,10 @@ id."
          (module-name
           (if (string-prefix-p "file:" module)
               module
-            (expand-file-name module))))
+            (expand-file-name module)))
+         (resolved-module-version
+          (eliscript-worker--prepare-module
+           worker module-name module-version)))
     (puthash id request (eliscript-worker-pending worker))
     (when timeout-ms
       (setf (eliscript-worker-request-timer request)
@@ -315,6 +437,8 @@ id."
           (if operation
               `((operation . ,operation))
             `((export . ,export)))
+          (and resolved-module-version
+               `((moduleVersion . ,resolved-module-version)))
           (and timeout-ms `((timeoutMs . ,timeout-ms)))))
       (error
        (remhash id (eliscript-worker-pending worker))
@@ -325,11 +449,12 @@ id."
 
 (cl-defun eliscript-worker-call-portable
     (worker module operation arguments callback
-            &key progress metrics timeout-ms)
+            &key module-version progress metrics timeout-ms)
   "Call portable OPERATION from MODULE on WORKER with ARGUMENTS."
   (eliscript-worker-call
    worker module nil arguments callback
    :operation operation
+   :module-version module-version
    :progress progress
    :metrics metrics
    :timeout-ms timeout-ms))
@@ -346,7 +471,7 @@ id."
 
 (cl-defun eliscript-worker-call-sync
     (worker module export arguments
-            &key operation progress metrics timeout-ms)
+            &key operation module-version progress metrics timeout-ms)
   "Synchronously call EXPORT from MODULE on WORKER with ARGUMENTS."
   (let (done value error-object)
     (eliscript-worker-call
@@ -358,6 +483,7 @@ id."
      :progress progress
      :metrics metrics
      :operation operation
+     :module-version module-version
      :timeout-ms timeout-ms)
     (while (and (not done) (eliscript-worker-live-p worker))
       (accept-process-output (eliscript-worker-process worker) 0.05))
@@ -365,7 +491,7 @@ id."
       (signal 'eliscript-worker-error (list "worker exited without a response")))
     (when error-object
       (let ((code (alist-get 'code error-object))
-            (message (eliscript-worker--error-message error-object)))
+            (message (eliscript-worker-format-error error-object)))
         (signal (if (equal code "timeout")
                     'eliscript-worker-timeout
                   'eliscript-worker-request-error)
@@ -373,11 +499,13 @@ id."
     value))
 
 (cl-defun eliscript-worker-call-portable-sync
-    (worker module operation arguments &key progress metrics timeout-ms)
+    (worker module operation arguments
+            &key module-version progress metrics timeout-ms)
   "Synchronously call portable OPERATION from MODULE on WORKER."
   (eliscript-worker-call-sync
    worker module nil arguments
    :operation operation
+   :module-version module-version
    :progress progress
    :metrics metrics
    :timeout-ms timeout-ms))
@@ -386,24 +514,21 @@ id."
   "Stop WORKER, using immediate termination when FORCE is non-nil."
   (let ((process (eliscript-worker-process worker)))
     (when (process-live-p process)
-      (setf (eliscript-worker-state worker) 'stopping)
       (unless force
         (ignore-errors
           (eliscript-worker--send
            worker
            `((version . ,eliscript-worker-protocol-version)
-             (type . "shutdown"))))
+             (type . "shutdown")))))
+      (setf (eliscript-worker-state worker) 'closed)
+      (unless force
         (let ((deadline (+ (float-time) 1.0)))
           (while (and (process-live-p process) (< (float-time) deadline))
             (accept-process-output process 0.05))))
       (when (process-live-p process) (delete-process process)))
     (eliscript-worker--fail-pending worker "worker-stop" "worker stopped")
-    (setf (eliscript-worker-state worker) 'stopped)
-    (when (buffer-live-p (eliscript-worker-stderr-buffer worker))
-      (setf (eliscript-worker-stderr-output worker)
-            (with-current-buffer (eliscript-worker-stderr-buffer worker)
-              (buffer-string)))
-      (kill-buffer (eliscript-worker-stderr-buffer worker)))))
+    (setf (eliscript-worker-state worker) 'closed)
+    (eliscript-worker--capture-stderr worker)))
 
 (provide 'eliscript-worker)
 

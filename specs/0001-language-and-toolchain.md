@@ -283,7 +283,7 @@ Completed on 2026-08-28. The Emacs Lisp implementation remains the bootstrap
 seed and executable reference, while normal compiler development can proceed in
 Eliscript source.
 
-### M5: Emacs Acceleration (In Progress)
+### M5: Emacs Acceleration (Complete)
 
 - Define a portable Eliscript subset for explicit, serializable computations.
 - Run compiled modules in a long-lived JavaScript worker controlled by Emacs.
@@ -300,6 +300,10 @@ cold/warm benchmark are implemented. See
 dependency validation, closure-only compilation, generated manifests, and
 source-name worker calls are also implemented in both compilers. See
 [0021-portable-functions.md](0021-portable-functions.md).
+Automatic worker generations, immutable module caching, portable source maps,
+mapped runtime diagnostics, and the representative asynchronous document
+indexing adapter complete the milestone. See
+[0022-emacs-worker-integration.md](0022-emacs-worker-integration.md).
 
 ## Non-goals for the Initial Implementation
 

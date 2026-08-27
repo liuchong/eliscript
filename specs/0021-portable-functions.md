@@ -62,8 +62,9 @@ transitive `defconst`/`defportable` declarations, preserving source order:
 
 `--portable` is repeatable. The equivalent public APIs are
 `eliscript-compile-portable-string` in the seed compiler and
-`compile_portable_string` in the self-hosted compiler. Portable closure builds
-do not yet support external source-map output.
+`compile_portable_string` in the self-hosted compiler. Their source-map variants
+return the same closure with a Source Map v3 document, and both command-line
+drivers accept `--portable` together with `--source-map`.
 
 ## Generated Manifest
 
@@ -101,9 +102,9 @@ compiler artifacts before comparing seed and self-hosted portable closure
 output. Real Bun and Emacs worker tests invoke `score-values` through its source
 name and manifest.
 
-## Next Phase
+## Integration
 
-A3 will add source-mapped runtime diagnostics, automatic worker restart and
-cache policy, then integrate a representative publishing, parsing, or indexing
-workload. Explicit capability declarations for filesystem or network access
-remain future work.
+Source-mapped runtime diagnostics, automatic worker restart, cache policy, and
+the document indexing workload are implemented in
+[0022-emacs-worker-integration.md](0022-emacs-worker-integration.md). Explicit
+capability declarations for filesystem or network access remain future work.

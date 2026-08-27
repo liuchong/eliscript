@@ -25,6 +25,14 @@
   (defun compile-portable-string (source entries filename)
     (emit-module (compile-portable-ir-string source entries filename)))
 
+  (defun compile-portable-string-with-source-map
+      (source entries filename generated-name source-name)
+    (emit-module-with-source-map
+      (compile-portable-ir-string source entries filename)
+      source
+      generated-name
+      (or source-name filename "<string>")))
+
   (defun compile-string-with-source-map
       (source filename generated-name source-name)
     (emit-module-with-source-map
@@ -38,4 +46,5 @@
     compile-string
     compile-portable-ir-string
     compile-portable-string
+    compile-portable-string-with-source-map
     compile-string-with-source-map))

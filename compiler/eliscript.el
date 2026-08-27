@@ -40,6 +40,15 @@
   (eliscript-emit-ir-module
    (eliscript-compile-portable-ir-string source entries filename)))
 
+(defun eliscript-compile-portable-string-with-source-map
+    (source entries &optional filename generated-name source-name)
+  "Compile portable ENTRIES from SOURCE with a Source Map v3 document."
+  (eliscript-emit-ir-module-with-source-map
+   (eliscript-compile-portable-ir-string source entries filename)
+   source
+   generated-name
+   (or source-name filename "<string>")))
+
 (defun eliscript-compile-string (source &optional filename)
   "Compile Eliscript SOURCE to an ECMAScript module.
 
@@ -83,6 +92,44 @@ files recorded in the source map.  The return value is an `eliscript-emission'."
       (with-temp-file output-file
         (insert output)))
     output))
+
+(defun eliscript-compile-portable-file-with-source-map
+    (input-file entries output-file &optional source-map-file)
+  "Compile portable ENTRIES from INPUT-FILE with an external source map."
+  (unless output-file
+    (error "portable source-map compilation requires OUTPUT-FILE"))
+  (let* ((input-path (expand-file-name input-file))
+         (output-path (expand-file-name output-file))
+         (map-path
+          (expand-file-name (or source-map-file (concat output-path ".map"))))
+         (map-directory (file-name-directory map-path))
+         (source
+          (with-temp-buffer
+            (insert-file-contents input-path)
+            (buffer-string)))
+         (generated-name (file-relative-name output-path map-directory))
+         (source-name (file-relative-name input-path map-directory))
+         (emission
+          (eliscript-compile-portable-string-with-source-map
+           source entries input-path generated-name source-name))
+         (map-url
+          (file-relative-name map-path (file-name-directory output-path)))
+         (javascript
+          (concat (eliscript-emission-javascript emission)
+                  "//# sourceMappingURL=" map-url "\n")))
+    (when (string-equal output-path map-path)
+      (error "source map path must differ from output path"))
+    (setq emission
+          (eliscript-emission-create
+           :javascript javascript
+           :source-map (eliscript-emission-source-map emission)))
+    (make-directory map-directory t)
+    (with-temp-file map-path
+      (insert (eliscript-emission-source-map emission)))
+    (make-directory (file-name-directory output-path) t)
+    (with-temp-file output-path
+      (insert javascript))
+    emission))
 
 (defun eliscript-compile-file (input-file &optional output-file)
   "Compile INPUT-FILE and optionally write it to OUTPUT-FILE.

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
@@ -128,17 +128,20 @@ function scoreValues(values, rounds) {
 test("long-lived worker implements the versioned NDJSON protocol", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "eliscript-worker-"));
   const modulePath = resolve(directory, "worker.mjs");
+  const reloadPath = resolve(directory, "reload.mjs");
   let client;
   try {
     await runSuccessful(
-      [compilerPath, "--output", modulePath, fixturePath],
+      [compilerPath, "--source-map", "--output", modulePath, fixturePath],
       { env: { ...process.env, EMACS: emacs } },
     );
+    await writeFile(reloadPath, "export function value() { return 1; }\n");
     client = createWorkerClient();
     const ready = await client.next((message) => message.type === "ready");
     expect(ready.version).toBe(1);
     expect(ready.capabilities).toContain("cancel");
     expect(ready.capabilities).toContain("progress");
+    expect(ready.capabilities).toContain("module-version");
     expect(ready.capabilities).toContain("portable-manifest");
 
     client.sendRaw("{not-json");
@@ -164,6 +167,8 @@ test("long-lived worker implements the versioned NDJSON protocol", async () => {
     expect(score).toMatchObject({ ok: true, value: scoreValues(values, 4) });
     expect(score.timing).toMatchObject({
       moduleLoadMs: expect.any(Number),
+      moduleCacheHit: false,
+      moduleVersion: expect.any(String),
       executionMs: expect.any(Number),
       serializationMs: expect.any(Number),
       workerMs: expect.any(Number),
@@ -178,7 +183,117 @@ test("long-lived worker implements the versioned NDJSON protocol", async () => {
       arguments: [values, 2],
     });
     expect(await client.next((message) => message.id === "portable-score"))
-      .toMatchObject({ ok: true, value: scoreValues(values, 2) });
+      .toMatchObject({
+        ok: true,
+        value: scoreValues(values, 2),
+        timing: { moduleCacheHit: true },
+      });
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "source-error",
+      module: modulePath,
+      operation: "crash-at-source",
+      arguments: [1],
+    });
+    const sourceError = await client.next(
+      (message) => message.id === "source-error",
+    );
+    expect(sourceError).toMatchObject({
+      ok: false,
+      error: {
+        code: "runtime",
+        location: {
+          file: fixturePath,
+          line: expect.any(Number),
+          column: expect.any(Number),
+        },
+      },
+    });
+    expect(sourceError.error.frames.some(
+      (frame) => frame.file === fixturePath,
+    )).toBe(true);
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "reload-cold",
+      module: reloadPath,
+      export: "value",
+      arguments: [],
+    });
+    expect(await client.next((message) => message.id === "reload-cold"))
+      .toMatchObject({ ok: true, value: 1, timing: { moduleCacheHit: false } });
+    client.send({
+      version: 1,
+      type: "request",
+      id: "reload-warm",
+      module: reloadPath,
+      export: "value",
+      arguments: [],
+    });
+    expect(await client.next((message) => message.id === "reload-warm"))
+      .toMatchObject({ ok: true, value: 1, timing: { moduleCacheHit: true } });
+
+    await writeFile(reloadPath, "export function value() { return 22; }\n");
+    client.send({
+      version: 1,
+      type: "request",
+      id: "reload-changed",
+      module: reloadPath,
+      export: "value",
+      arguments: [],
+    });
+    expect(await client.next((message) => message.id === "reload-changed"))
+      .toMatchObject({
+        ok: false,
+        error: { code: "module-version-changed" },
+      });
+
+    await client.close();
+    client = createWorkerClient();
+    await client.next((message) => message.type === "ready");
+    client.send({
+      version: 1,
+      type: "request",
+      id: "version-one",
+      module: reloadPath,
+      moduleVersion: "fixed",
+      export: "value",
+      arguments: [],
+    });
+    expect(await client.next((message) => message.id === "version-one"))
+      .toMatchObject({ ok: true, value: 22, timing: { moduleCacheHit: false } });
+
+    await writeFile(reloadPath, "export function value() { return 3; }\n");
+    client.send({
+      version: 1,
+      type: "request",
+      id: "version-one-warm",
+      module: reloadPath,
+      moduleVersion: "fixed",
+      export: "value",
+      arguments: [],
+    });
+    expect(await client.next((message) => message.id === "version-one-warm"))
+      .toMatchObject({ ok: true, value: 22, timing: { moduleCacheHit: true } });
+
+    await writeFile(reloadPath, "export function value() { return 4; }\n");
+    client.send({
+      version: 1,
+      type: "request",
+      id: "version-two",
+      module: reloadPath,
+      moduleVersion: "next",
+      export: "value",
+      arguments: [],
+    });
+    expect(await client.next((message) => message.id === "version-two"))
+      .toMatchObject({
+        ok: false,
+        error: { code: "module-version-changed" },
+      });
 
     client.send({
       version: 1,

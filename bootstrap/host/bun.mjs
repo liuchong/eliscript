@@ -51,9 +51,6 @@ export function parseArguments(arguments_) {
   if (sourceMap && !output) {
     throw new Error("--source-map requires --output");
   }
-  if (sourceMap && portableEntries.length > 0) {
-    throw new Error("--source-map is not supported with --portable yet");
-  }
   return { input, output, sourceMap, portableEntries };
 }
 
@@ -92,12 +89,20 @@ export async function compileFile(options) {
   const mapDirectory = dirname(mapPath);
   const generatedName = relative(mapDirectory, outputPath);
   const sourceName = relative(mapDirectory, inputPath);
-  const emission = compiler.compile_string_with_source_map(
-    source,
-    inputPath,
-    generatedName,
-    sourceName,
-  );
+  const emission = options.portableEntries?.length > 0
+    ? compiler.compile_portable_string_with_source_map(
+      source,
+      options.portableEntries,
+      inputPath,
+      generatedName,
+      sourceName,
+    )
+    : compiler.compile_string_with_source_map(
+      source,
+      inputPath,
+      generatedName,
+      sourceName,
+    );
   const mapUrl = relative(dirname(outputPath), mapPath);
   const javascript = `${emission.javascript}//# sourceMappingURL=${mapUrl}\n`;
 

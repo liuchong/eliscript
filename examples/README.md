@@ -11,3 +11,7 @@ Vite production builds, and React Fast Refresh.
 `org-site/` adds the publishing vertical slice: Org metadata and body export,
 draft filtering, a watched ESM content module, and a fully custom React reading
 interface written in Eliscript.
+
+`emacs-index/` adds the Emacs acceleration vertical slice: a statically checked
+portable scoring kernel compiled with a source map and driven concurrently by a
+high-level Emacs adapter.

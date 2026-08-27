@@ -120,13 +120,21 @@ bun run build:org-site</code></pre>
             <p><code>defportable</code> validates the complete immutable dependency closure. The generated manifest lets Emacs call <code>score-values</code> without knowing its JavaScript identifier.</p>
             <pre><code>bun run benchmark:worker</code></pre>
             <p>The benchmark compiles one pure workload, starts a long-lived Bun worker, verifies equal Emacs and Eliscript results, and reports cold and warm compilation, startup, execution, serialization, transport, and client costs separately.</p>
+            <pre><code>(require 'eliscript-index)
+
+(let ((session (eliscript-index-start)))
+  (unwind-protect
+      (eliscript-index-search-sync
+       session '(("intro" . "Emacs and JavaScript")) "javascript")
+    (eliscript-index-stop session)))</code></pre>
+            <p>The indexing adapter compiles a source-mapped portable closure, tokenizes editor-owned text, scores documents concurrently, and owns cleanup. Module changes and unresponsive timeouts restart the same client object automatically.</p>
           </section>
 
           <section id="test">
             <h2>Run the test suite</h2>
             <pre><code>bun run test</code></pre>
             <p>This runs the Emacs ERT suite, Vite adapter tests, public CLI fixtures, deterministic snapshots, source-map validation, runtime execution, React server rendering, and a production browser build.</p>
-            <div class="callout callout-coral"><p>M5 is underway. Protocol version 1, closure-checked portable functions, source-name calls, cancellation, timeout recovery, and measured overhead are implemented.</p></div>
+            <div class="callout callout-coral"><p>M5 is complete. Protocol version 1, closure-checked portable functions, source-name calls, immutable module caching, mapped diagnostics, automatic recovery, and the indexing workload are implemented.</p></div>
           </section>
         </article>
       </div>

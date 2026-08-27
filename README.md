@@ -89,6 +89,18 @@ Measure the long-lived Emacs-to-Bun worker boundary:
 bun run benchmark:worker
 ```
 
+Run the representative document-search adapter from Emacs:
+
+```elisp
+(require 'eliscript-index)
+
+(let ((session (eliscript-index-start)))
+  (unwind-protect
+      (eliscript-index-search-sync
+       session '(("intro" . "Emacs and JavaScript")) "javascript")
+    (eliscript-index-stop session)))
+```
+
 Declare and compile one statically checked worker entry with only its
 transitive dependencies:
 
@@ -176,6 +188,7 @@ runtime/                 Minimal JavaScript runtime helpers
 stdlib/                  Portable Eliscript standard library
 examples/                End-to-end example applications
   basic/                 Executable language example
+  emacs-index/           Portable document scoring workload
   react-counter/         First React compilation target
   org-site/              Org-powered custom React publishing site
 specs/                   Numbered language and toolchain decisions
@@ -183,6 +196,7 @@ tests/                   Compiler fixtures and output snapshots
 tools/                   Optional integrations and developer utilities
   org/                   Pure Emacs Org exporter and Vite adapter
   vite/                  Vite transform adapter for .eli modules
+  worker/                Resilient Emacs worker and indexing adapter
 ```
 
 ## Compilation Pipeline
@@ -309,14 +323,19 @@ Current evidence:
   point.
 - A versioned NDJSON worker keeps Bun alive behind an Emacs client, with
   correlated requests, progress, cancellation, timeouts, module caching,
-  structured failures, and clean shutdown.
+  structured failures, mapped `.eli` runtime locations, automatic generation
+  restart, and clean shutdown.
 - The worker benchmark separates compile, startup, module load, execution,
   serialization, transport, and client costs. Its reference workload verifies
   equal results without treating a machine-specific speed ratio as a test gate.
 - `defportable` entries are checked across their transitive immutable closure,
   compiled without unrelated declarations, exported through a source-name
-  manifest, and callable from Emacs without exposing generated JS identifiers.
-- Fifty-nine ERT tests cover reading, locations, macro expansion, analysis, IR
+  manifest, source-mapped by both compilers, and callable from Emacs without
+  exposing generated JS identifiers.
+- The Emacs indexing adapter tokenizes editor-owned text, dispatches portable
+  scoring calls concurrently, preserves document order, and cleans up its
+  generated module and worker session.
+- Sixty-one ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
 - Fifteen Bun tests cover the compiler and Org Vite adapters, source-map
@@ -327,10 +346,10 @@ Current evidence:
   higher-order functions, objects, arrays, exports, React server rendering, and
   production Vite bundles, and deterministic Org publishing.
 
-M5 now has a measured long-lived worker boundary and a statically checked
-portable-function path shared by the seed and self-hosted compilers. A3 will
-focus on source-mapped runtime diagnostics, restart/cache policy, and a
-representative editor workload.
+M5 is complete: the measured worker boundary, portable-function path, immutable
+module cache, automatic restart policy, mapped runtime diagnostics, and
+representative asynchronous indexing workload are integrated across Emacs,
+Bun, and both compiler generations.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -367,7 +386,10 @@ portable driver, Bun adapter, and reproducible compiler fixed point, and
 execution protocol and measurement boundary, and
 [specs/0021-portable-functions.md](specs/0021-portable-functions.md) for
 `defportable`, closure validation, generated manifests, and source-name worker
-calls.
+calls, and
+[specs/0022-emacs-worker-integration.md](specs/0022-emacs-worker-integration.md)
+for automatic worker generations, mapped diagnostics, cache policy, and the
+document indexing adapter.
 
 ## License
 

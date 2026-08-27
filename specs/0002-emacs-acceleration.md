@@ -1,6 +1,6 @@
 # 0002: Emacs Acceleration Through JavaScript
 
-- Status: In Progress
+- Status: Implemented
 - Date: 2026-08-27
 - Depends on: 0001 Language and Toolchain Boundary
 
@@ -183,11 +183,18 @@ The seed and self-hosted compilers now implement `defportable`, matching static
 diagnostics, closure-only builds, IR metadata, and a generated ESM manifest.
 Worker and Emacs clients can invoke manifest entries by Eliscript source name.
 
-### A3: Emacs Integration
+### A3: Emacs Integration (Complete)
 
 - Add ergonomic asynchronous calls from Emacs Lisp.
 - Add module caching, source-mapped diagnostics, and worker restart.
 - Validate the design with publishing, parsing, or indexing workloads.
+
+The Emacs client now automatically recovers the same worker object after
+process failure, timeout termination, or generated-module changes. Worker
+generations cache immutable module versions and return source-mapped structured
+runtime errors. The document indexing adapter compiles a portable scoring
+kernel, dispatches document requests asynchronously, and preserves ordered
+results. See [0022-emacs-worker-integration.md](0022-emacs-worker-integration.md).
 
 ## Open Questions
 

@@ -27,7 +27,28 @@ Generated `defportable` modules can be called by their Eliscript source name:
 and accept result/error, progress, and timing callbacks.
 `eliscript-worker-cancel` requests cooperative cancellation.
 Remote timeouts are followed by a short client grace period; the process is
-terminated if synchronous JavaScript prevents the worker from responding.
+terminated if synchronous JavaScript prevents the worker from responding. The
+same client object automatically starts a new generation on its next request.
+Local module changes also trigger a generation restart, while unchanged
+modules remain cached. Runtime errors expose mapped `.eli` locations through
+`eliscript-worker-error-location` and `eliscript-worker-format-error`.
+
+`eliscript-index.el` is the representative high-level integration. It compiles
+the portable kernel in `examples/emacs-index/`, owns its temporary module and
+worker, and scores tokenized documents concurrently:
+
+```elisp
+(require 'eliscript-index)
+
+(let ((session (eliscript-index-start)))
+  (unwind-protect
+      (eliscript-index-search-sync
+       session
+       '(("compiler" . "Emacs compiler JavaScript")
+         ("publishing" . "Org React publishing"))
+       "emacs javascript")
+    (eliscript-index-stop session)))
+```
 
 Run the reference measurement probe with:
 

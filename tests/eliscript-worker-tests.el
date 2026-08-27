@@ -5,6 +5,7 @@
 (require 'ert)
 (require 'eliscript)
 (require 'eliscript-worker)
+(require 'eliscript-index)
 
 (defun eliscript-worker-tests--score-values (values rounds)
   "Return the reference score for VALUES over ROUNDS."
@@ -33,7 +34,7 @@
          worker)
     (unwind-protect
         (progn
-          (eliscript-compile-file fixture module)
+          (eliscript-compile-file-with-source-map fixture module)
           (setq worker (eliscript-worker-start))
           (should (member "request" (eliscript-worker-capabilities worker)))
           (let* ((values (vconcat (number-sequence 0 499)))
@@ -79,6 +80,19 @@
               "does not export a function"
               (error-message-string error-data))))
 
+          (let* ((error-data
+                  (should-error
+                   (eliscript-worker-call-portable-sync
+                    worker module "crash-at-source" '(7) :timeout-ms 2000)
+                   :type 'eliscript-worker-request-error))
+                 (error-object (nth 2 error-data))
+                 (location (eliscript-worker-error-location error-object)))
+            (should (equal (alist-get 'file location) fixture))
+            (should (= (alist-get 'line location) 15))
+            (should (string-match-p
+                     (regexp-quote "tests/fixtures/worker.eli:15")
+                     (error-message-string error-data))))
+
           (should
            (equal
             (eliscript-worker-call-sync
@@ -98,14 +112,67 @@
            :type 'eliscript-worker-timeout)
           (should-not (eliscript-worker-live-p worker))
 
-          (setq worker (eliscript-worker-start))
           (should
            (= (eliscript-worker-call-sync
                worker module "score_values" (list [1 2 3] 2)
                :timeout-ms 2000)
-              (eliscript-worker-tests--score-values [1 2 3] 2))))
+              (eliscript-worker-tests--score-values [1 2 3] 2)))
+          (should (= (eliscript-worker-generation worker) 2))
+          (should (= (eliscript-worker-restart-count worker) 1)))
       (when worker (eliscript-worker-stop worker t))
       (delete-directory directory t))))
+
+(ert-deftest eliscript-emacs-client-restarts-after-module-change ()
+  (let* ((directory (make-temp-file "eliscript-worker-reload-" t))
+         (module (expand-file-name "reload.mjs" directory))
+         worker)
+    (unwind-protect
+        (progn
+          (with-temp-file module
+            (insert "export function value() { return 1; }\n"))
+          (setq worker (eliscript-worker-start))
+          (should (= 1 (eliscript-worker-call-sync
+                        worker module "value" nil :timeout-ms 2000)))
+          (with-temp-file module
+            (insert "export function value() { return 22; }\n"))
+          (should (= 22 (eliscript-worker-call-sync
+                         worker module "value" nil :timeout-ms 2000)))
+          (should (= (eliscript-worker-generation worker) 2))
+          (delete-process (eliscript-worker-process worker))
+          (should (= 22 (eliscript-worker-call-sync
+                         worker module "value" nil :timeout-ms 2000)))
+          (should (= (eliscript-worker-generation worker) 3))
+          (should (= (eliscript-worker-restart-count worker) 2)))
+      (when worker (eliscript-worker-stop worker t))
+      (delete-directory directory t))))
+
+(ert-deftest eliscript-index-scores-texts-asynchronously ()
+  (let (session timing-values)
+    (unwind-protect
+        (progn
+          (setq session (eliscript-index-start))
+          (let ((results
+                 (eliscript-index-search-sync
+                  session
+                  '(("compiler" . "Emacs compiler JavaScript compiler")
+                    ("site" . "Org React publishing")
+                    ("runtime" . "JavaScript worker for Emacs"))
+                  "emacs javascript"
+                  :metrics (lambda (values) (setq timing-values values))
+                  :timeout-ms 2000)))
+            (should (equal (mapcar (lambda (result)
+                                    (alist-get 'id result))
+                                  (append results nil))
+                           '("compiler" "site" "runtime")))
+            (should (equal (mapcar (lambda (result)
+                                    (alist-get 'matches result))
+                                  (append results nil))
+                           '(2 0 2)))
+            (should (= (length timing-values) 3))
+            (should (eq (alist-get 'moduleCacheHit (aref timing-values 0))
+                        :false))
+            (should (alist-get 'moduleCacheHit (aref timing-values 1)))))
+      (when session (eliscript-index-stop session)))))
 
 (provide 'eliscript-worker-tests)
 

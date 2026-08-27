@@ -50,7 +50,9 @@ It also compares seed and self-hosted `defportable` closure builds.
 Worker tests compile one pure Eliscript workload, then exercise the Bun runtime
 and Emacs client over real pipes. They cover framing, version negotiation,
 request correlation, progress, cancellation, timeout, module logging,
-serialization failures, clean shutdown, equivalent results, and segmented
+serialization failures, immutable module caching, automatic restart,
+source-mapped runtime errors, clean shutdown, equivalent results, and segmented
 benchmark output. Both generated export names and manifest-backed Eliscript
-operation names are exercised. Performance ratios are reported but never
-asserted in CI.
+operation names are exercised. A representative adapter concurrently scores
+tokenized documents and preserves input order. Performance ratios are reported
+but never asserted in CI.

@@ -47,8 +47,6 @@
       (error "missing input file"))
     (when (and source-map (null output))
       (error "--source-map requires --output"))
-    (when (and source-map portable-entries)
-      (error "--source-map is not supported with --portable yet"))
     (list input output source-map (nreverse portable-entries))))
 
 (defun eliscript-cli-main (arguments)
@@ -57,7 +55,10 @@
       (pcase-let ((`(,input ,output ,source-map ,portable-entries)
                    (eliscript-cli--parse arguments)))
         (if source-map
-            (eliscript-compile-file-with-source-map input output)
+            (if portable-entries
+                (eliscript-compile-portable-file-with-source-map
+                 input portable-entries output)
+              (eliscript-compile-file-with-source-map input output))
           (let ((generated
                  (if portable-entries
                      (eliscript-compile-portable-file

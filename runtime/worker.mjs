@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 
 import { resolve } from "node:path";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { createInterface } from "node:readline";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const protocolVersion = 1;
 export const capabilities = [
@@ -12,6 +13,7 @@ export const capabilities = [
   "timeout",
   "shutdown",
   "module-cache",
+  "module-version",
   "portable-manifest",
 ];
 
@@ -25,10 +27,69 @@ for (const method of ["log", "info", "debug"]) {
   console[method] = (...values) => console.error(...values);
 }
 
-function errorPayload(code, message, error) {
+function stackFrames(stack) {
+  if (typeof stack !== "string") return [];
+  const frames = [];
+  for (const line of stack.split("\n")) {
+    const match = line.match(/^\s*at (?:(.*?) \()?(.+):(\d+):(\d+)\)?$/);
+    if (!match) continue;
+    let file = match[2];
+    if (file.startsWith("file:")) {
+      try {
+        file = fileURLToPath(file);
+      } catch {
+        // Preserve an unrecognized URL as reported by the runtime.
+      }
+    }
+    frames.push({
+      function: match[1] || undefined,
+      file,
+      line: Number(match[3]),
+      column: Number(match[4]),
+    });
+  }
+  return frames;
+}
+
+function mappedFrames(frames, sourceMap) {
+  if (!sourceMap) return frames;
+  return frames.map((frame) => {
+    if (resolve(frame.file) !== sourceMap.generatedFile) return frame;
+    const mapping = sourceMap.lines[frame.line - 1];
+    if (!mapping) return frame;
+    const generatedColumn = Math.max(0, frame.column - 1);
+    let segment;
+    for (const candidate of mapping) {
+      if (candidate.generatedColumn > generatedColumn) break;
+      segment = candidate;
+    }
+    if (!segment || segment.source === undefined) return frame;
+    return {
+      ...frame,
+      generated: {
+        file: frame.file,
+        line: frame.line,
+        column: frame.column,
+      },
+      file: sourceMap.sources[segment.source],
+      line: segment.originalLine + 1,
+      column: segment.originalColumn + 1,
+    };
+  });
+}
+
+function errorPayload(code, message, error, sourceMap) {
   const payload = { code, message };
   if (error?.name) payload.name = error.name;
-  if (error?.stack) payload.stack = error.stack;
+  if (error?.stack) {
+    payload.stack = error.stack;
+    const frames = mappedFrames(stackFrames(error.stack), sourceMap);
+    if (frames.length > 0) {
+      payload.frames = frames;
+      payload.location = frames.find((frame) => frame.file.endsWith(".eli")) ??
+        frames[0];
+    }
+  }
   return payload;
 }
 
@@ -67,13 +128,13 @@ function jsonValue(value, label) {
   return JSON.parse(encoded);
 }
 
-function requestError(id, code, message, error, timing) {
+function requestError(id, code, message, error, timing, sourceMap) {
   const response = {
     version: protocolVersion,
     type: "response",
     id,
     ok: false,
-    error: errorPayload(code, message, error),
+    error: errorPayload(code, message, error, sourceMap),
   };
   if (timing) response.timing = timing;
   writeMessage(response);
@@ -102,10 +163,124 @@ function moduleUrl(identity) {
   return url.href;
 }
 
-function loadModule(identity) {
+const base64Vlq = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+function decodeVlq(segment) {
+  const values = [];
+  let index = 0;
+  while (index < segment.length) {
+    let value = 0;
+    let shift = 0;
+    let continuation;
+    do {
+      const digit = base64Vlq.indexOf(segment[index]);
+      if (digit === -1) throw new Error("invalid Base64 VLQ digit");
+      index += 1;
+      value |= (digit & 31) << shift;
+      continuation = (digit & 32) !== 0;
+      shift += 5;
+    } while (continuation);
+    const negative = (value & 1) === 1;
+    value >>= 1;
+    values.push(negative ? -value : value);
+  }
+  return values;
+}
+
+function decodeMappings(mappings) {
+  let source = 0;
+  let originalLine = 0;
+  let originalColumn = 0;
+  return mappings.split(";").map((encodedLine) => {
+    let generatedColumn = 0;
+    const line = [];
+    for (const encoded of encodedLine.split(",")) {
+      if (!encoded) continue;
+      const values = decodeVlq(encoded);
+      generatedColumn += values[0];
+      const decoded = { generatedColumn };
+      if (values.length >= 4) {
+        source += values[1];
+        originalLine += values[2];
+        originalColumn += values[3];
+        decoded.source = source;
+        decoded.originalLine = originalLine;
+        decoded.originalColumn = originalColumn;
+      }
+      line.push(decoded);
+    }
+    return line;
+  });
+}
+
+export async function loadSourceMap(moduleUrl_) {
+  try {
+    const cleanUrl = new URL(moduleUrl_);
+    cleanUrl.search = "";
+    cleanUrl.hash = "";
+    const javascript = await readFile(fileURLToPath(cleanUrl), "utf8");
+    const match = javascript.match(/\/\/# sourceMappingURL=([^\s]+)\s*$/);
+    if (!match || match[1].startsWith("data:")) return undefined;
+    const mapUrl = new URL(match[1], cleanUrl);
+    const map = JSON.parse(await readFile(fileURLToPath(mapUrl), "utf8"));
+    if (map.version !== 3 || typeof map.mappings !== "string" ||
+        !Array.isArray(map.sources)) return undefined;
+    return {
+      generatedFile: resolve(await realpath(fileURLToPath(cleanUrl))),
+      sources: map.sources.map((source) => {
+        const sourceUrl = new URL(source, mapUrl);
+        return sourceUrl.protocol === "file:"
+          ? resolve(fileURLToPath(sourceUrl))
+          : sourceUrl.href;
+      }),
+      lines: decodeMappings(map.mappings),
+    };
+  } catch (error) {
+    console.error(`could not load source map for ${moduleUrl_}: ${error.message}`);
+    return undefined;
+  }
+}
+
+async function moduleFingerprint(url) {
+  const fileUrl = new URL(url);
+  fileUrl.search = "";
+  fileUrl.hash = "";
+  const metadata = await stat(fileURLToPath(fileUrl), { bigint: true });
+  return `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeNs}`;
+}
+
+async function loadModule(identity, requestedVersion) {
   const url = moduleUrl(identity);
-  if (!moduleCache.has(url)) moduleCache.set(url, import(url));
-  return moduleCache.get(url);
+  const version = requestedVersion ?? await moduleFingerprint(url);
+  const cached = moduleCache.get(url);
+  if (cached?.version === version) {
+    const loaded = await cached.promise;
+    return { ...loaded, cacheHit: true, version };
+  }
+  if (cached) {
+    const error = new Error(
+      `module version changed from ${cached.version} to ${version}; restart the worker before loading it`,
+    );
+    error.code = "module-version-changed";
+    throw error;
+  }
+  const importUrl = new URL(url);
+  importUrl.searchParams.set("__eliscript_worker_version", version);
+  const entry = {
+    version,
+    promise: Promise.all([
+      import(importUrl.href),
+      loadSourceMap(url),
+    ]).then(([module, sourceMap]) => ({ module, sourceMap })),
+  };
+  moduleCache.set(url, entry);
+  try {
+    const loaded = await entry.promise;
+    return { ...loaded, cacheHit: false, version };
+  } catch (error) {
+    if (moduleCache.get(url) === entry) moduleCache.delete(url);
+    throw error;
+  }
 }
 
 function validateRequest(message) {
@@ -125,6 +300,11 @@ function validateRequest(message) {
   }
   if (!Array.isArray(message.arguments)) {
     throw new Error("request arguments must be an array");
+  }
+  if (message.moduleVersion !== undefined &&
+      (typeof message.moduleVersion !== "string" ||
+       message.moduleVersion.length === 0 || message.moduleVersion.length > 512)) {
+    throw new Error("request moduleVersion must be a non-empty string up to 512 characters");
   }
   if (message.timeoutMs !== undefined &&
       (!Number.isInteger(message.timeoutMs) || message.timeoutMs <= 0 ||
@@ -150,6 +330,9 @@ async function executeRequest(message) {
   let moduleLoadMs = 0;
   let executionMs = 0;
   let serializationMs = 0;
+  let moduleCacheHit = false;
+  let moduleVersion;
+  let sourceMap;
   let executionStartedAt;
   const entry = {
     controller: new AbortController(),
@@ -166,7 +349,11 @@ async function executeRequest(message) {
 
   try {
     const moduleLoadStartedAt = performance.now();
-    const module = await loadModule(message.module);
+    const loaded = await loadModule(message.module, message.moduleVersion);
+    const module = loaded.module;
+    sourceMap = loaded.sourceMap;
+    moduleCacheHit = loaded.cacheHit;
+    moduleVersion = loaded.version;
     moduleLoadMs = performance.now() - moduleLoadStartedAt;
     const manifest = module.__eliscript_portable__;
     const operation = message.operation === undefined
@@ -215,6 +402,9 @@ async function executeRequest(message) {
       value: serializedValue,
       timing: {
         moduleLoadMs,
+        moduleCacheHit,
+        moduleVersion,
+        sourceMapLoaded: Boolean(sourceMap),
         executionMs,
         serializationMs,
         workerMs: performance.now() - startedAt,
@@ -226,12 +416,22 @@ async function executeRequest(message) {
     }
     const code = error.code ??
       (entry.controller.signal.aborted ? entry.abortCode : "runtime");
-    requestError(message.id, code, error.message, error, {
-      moduleLoadMs,
-      executionMs,
-      serializationMs,
-      workerMs: performance.now() - startedAt,
-    });
+    requestError(
+      message.id,
+      code,
+      error.message,
+      error,
+      {
+        moduleLoadMs,
+        moduleCacheHit,
+        moduleVersion,
+        sourceMapLoaded: Boolean(sourceMap),
+        executionMs,
+        serializationMs,
+        workerMs: performance.now() - startedAt,
+      },
+      sourceMap,
+    );
   } finally {
     if (entry.timer !== undefined) clearTimeout(entry.timer);
     pending.delete(message.id);

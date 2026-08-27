@@ -32,7 +32,7 @@ error.
 On startup the worker sends:
 
 ```json
-{"version":1,"type":"ready","capabilities":["request","progress","cancel","timeout","shutdown","module-cache"],"pid":123}
+{"version":1,"type":"ready","capabilities":["request","progress","cancel","timeout","shutdown","module-cache","module-version"],"pid":123}
 ```
 
 stdout is reserved for protocol frames. The worker redirects module
@@ -54,13 +54,20 @@ source-level `operation` name. The worker resolves it only through the frozen
 required. A missing operation returns `missing-portable`.
 
 The worker accepts only local `file:` modules and caches import promises by
-normalized URL. Requests may execute concurrently and responses may arrive out
-of order; the id is the sole correlation key.
+normalized URL and module version. `moduleVersion` is optional; without it the
+worker derives a filesystem fingerprint. One module version is immutable
+within a worker generation. A changed version receives
+`module-version-changed`, and the Emacs client normally prevents that response
+by restarting before it sends the request. Requests may execute concurrently
+and responses may arrive out of order; the id is the sole correlation key.
 
 Successful responses contain `ok: true` and a JSON value. Failures contain
 `ok: false` plus an error object with stable `code` and `message`, and optional
-runtime name and stack. Unsupported return values such as `undefined`, BigInt,
-or cyclic objects produce `serialization` rather than damaging the stream.
+runtime name, stack, structured frames, and mapped Eliscript location. The
+worker reads the module's external source map directly, so diagnostics do not
+depend on runtime stack-map support. Unsupported return values such as
+`undefined`, BigInt, or cyclic objects produce `serialization` rather than
+damaging the stream.
 
 ## Progress, Cancellation, and Timeout
 
@@ -78,8 +85,9 @@ Cancellation and timeout race the operation promise against an AbortSignal.
 They can interrupt cooperative asynchronous operations. Synchronous CPU work
 blocks the JavaScript event loop and therefore cannot consume an in-process
 cancel message. The Emacs client enforces a 250ms grace period after remote
-timeout, then terminates the worker when necessary. Callers may start a fresh
-worker; no partial result is applied to editor state.
+timeout, then terminates the worker when necessary. The next request
+automatically starts a fresh worker generation on the same client object; no
+partial result is applied to editor state.
 
 ## Emacs Client
 
@@ -92,6 +100,8 @@ worker; no partial result is applied to editor state.
 - request cancellation and client-side timeout enforcement
 - buffering for arbitrarily split or coalesced process-filter chunks
 - structured failure of all pending requests when the worker exits
+- automatic restart after crashes, unresponsive timeouts, and module changes
+- source-location extraction and human-readable mapped error formatting
 
 JSON arrays cross the Emacs boundary as vectors, objects as alists, JSON false
 as `:false`, and JSON null as nil. This is the initial transport representation,
@@ -102,6 +112,9 @@ not a promise of transparent Emacs object serialization.
 Each worker response reports durations in milliseconds:
 
 - `moduleLoadMs`
+- `moduleCacheHit`
+- `moduleVersion`
+- `sourceMapLoaded`
 - `executionMs`
 - `serializationMs`
 - `workerMs`
@@ -129,14 +142,17 @@ cancellation, timeout, unserializable values, logging isolation, and shutdown.
 
 The ERT integration test compiles the same Eliscript fixture, starts the real
 worker, verifies result equivalence, receives progress, cancels a request,
-checks structured failures, and confirms stderr framing. It also runs a
-synchronous blocking operation, proves the client timeout terminates the stuck
-worker, then starts a replacement and executes another request. Every test
-stops its own worker in cleanup.
+checks structured failures and mapped runtime locations, and confirms stderr
+framing. It also runs a synchronous blocking operation, proves the client
+timeout terminates the stuck worker, then reuses the same client object to
+execute another request. Additional ERT coverage rewrites an imported module
+and verifies a transparent generation restart. Every test stops its own worker
+in cleanup.
 
-## Next Phase
+## Integration
 
-A2 is specified in [0021-portable-functions.md](0021-portable-functions.md).
-A3 will add ergonomic editor commands, cache policy, automatic
-restart, source-mapped runtime diagnostics, and a representative publishing,
-parsing, or indexing integration.
+Portable functions are specified in
+[0021-portable-functions.md](0021-portable-functions.md). Automatic lifecycle,
+source-mapped errors, cache policy, and the representative indexing workload
+are specified in
+[0022-emacs-worker-integration.md](0022-emacs-worker-integration.md).
