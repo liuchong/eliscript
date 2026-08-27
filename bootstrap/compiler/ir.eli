@@ -1,0 +1,85 @@
+(module bootstrap.compiler.ir
+  (defconst node-kinds
+    ["module-declaration" "import-declaration" "import-default"
+     "import-namespace" "import-named" "variable-declaration"
+     "function-declaration" "export-declaration" "export-default"
+     "expression-statement" "parameter-binding" "reference" "literal"
+     "array-literal" "quoted-literal" "function-expression" "conditional"
+     "conditional-sugar" "conditional-chain" "conditional-clause"
+     "sequence" "lexical-bindings" "lexical-binding" "assignment"
+     "assignment-pair" "loop" "short-circuit" "intrinsic"
+     "object-literal" "object-property" "property-read" "property-write"
+     "method-call" "constructor-call" "raw-javascript" "print"
+     "string-concat" "invoke" "apply-call" "call" "react-element"
+     "react-fragment"])
+
+  (defconst fail
+    (js* "(message) => { throw new Error(message); }"))
+
+  (defun make-program (filename body)
+    (unless (js* "Array.isArray(body)")
+      (fail "IR program body must be an array"))
+    (unless (js-call body :every node-p)
+      (fail "IR program body must contain only IR nodes"))
+    (object :filename filename :body body))
+
+  (defun node-p (value)
+    (and value
+         (= (js* "typeof value") "object")
+         (js-call node-kinds :includes (get value :kind))))
+
+  (defun make-node (kind span value children properties)
+    (unless (js-call node-kinds :includes kind)
+      (fail (str "unknown Eliscript IR node kind: " kind)))
+    (unless (js* "Array.isArray(children)")
+      (fail "IR node children must be an array"))
+    (unless (js-call children :every node-p)
+      (fail "IR node children must all be IR nodes"))
+    (let ((node
+           (object
+             :kind kind
+             :span span
+             :value value
+             :children children)))
+      (when properties
+        (put node :properties properties))
+      node))
+
+  (defun program-filename (program)
+    (get program :filename))
+
+  (defun program-body (program)
+    (get program :body))
+
+  (defun ir-kind (node)
+    (get node :kind))
+
+  (defun ir-span (node)
+    (get node :span))
+
+  (defun ir-value (node)
+    (get node :value))
+
+  (defun ir-children (node)
+    (get node :children))
+
+  (defun ir-properties (node)
+    (get node :properties))
+
+  (defun ir-property (node name)
+    (let ((properties (ir-properties node)))
+      (and properties (get properties name))))
+
+  (export
+    node-kinds
+    node-p
+    make-program
+    make-node
+    program-filename
+    program-body
+    ir-kind
+    ir-span
+    ir-value
+    ir-children
+    ir-properties
+    ir-property))

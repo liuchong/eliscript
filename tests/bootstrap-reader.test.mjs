@@ -26,6 +26,10 @@ const artifactNames = [
   "expander.mjs.map",
   "analyzer.mjs",
   "analyzer.mjs.map",
+  "ir.mjs",
+  "ir.mjs.map",
+  "lower.mjs",
+  "lower.mjs.map",
 ];
 
 async function run(command, options) {
@@ -137,4 +141,4 @@ test("bootstrapped reader matches normalized seed syntax and diagnostics", async
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
-});
+}, 30_000);

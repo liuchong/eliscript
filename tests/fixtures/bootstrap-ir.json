@@ -1,0 +1,54 @@
+{
+  "valid": [
+    {
+      "name": "complete-ir-surface",
+      "filename": "surface.eli",
+      "source": "(module demo.surface\n  (import \"react\" :default React :as ReactNS useState)\n  (defvar counter 0)\n  (defconst answer 42)\n  (defun exercise (target key ready items)\n    (let ((plain 1) lone)\n      (let* ((next (+ plain answer)))\n        (setq counter next)\n        (set! counter (1+ counter))\n        (while ready (setq ready false))\n        (vector\n          nil t false undefined 1 \"x\" :kw\n          '(alpha :beta [1 undefined])\n          (lambda (value) value)\n          (if ready plain next)\n          (when ready plain next)\n          (unless ready plain)\n          (cond (ready plain next) (t answer))\n          (progn plain next)\n          (do plain next)\n          (and ready plain)\n          (or ready next)\n          (not ready)\n          (object :fixed plain \"text\" next literal-key answer key plain)\n          (get target key)\n          (put target key plain)\n          (js-call target :run plain)\n          (new React plain)\n          (js* \"globalThis\")\n          (print plain)\n          (str plain)\n          (funcall target plain)\n          (apply target items)\n          (target plain)\n          ((get target key) plain)\n          (jsx :main (object :className \"ready\") plain)\n          (fragment plain next)))))\n  (export React ReactNS useState counter answer exercise)\n  (export-default exercise)\n  answer)"
+    },
+    {
+      "name": "array-literal",
+      "filename": "array.eli",
+      "source": "[1 2]"
+    },
+    {
+      "name": "macro-call-site-spans",
+      "filename": "macro.eli",
+      "source": "(defmacro twice (value) `(+ ,value ,value))\n(defconst answer (twice 21))\n(export answer)"
+    },
+    {
+      "name": "self-symbol-module",
+      "filename": "bootstrap/compiler/symbol.eli",
+      "file": "bootstrap/compiler/symbol.eli"
+    },
+    {
+      "name": "self-syntax-module",
+      "filename": "bootstrap/compiler/syntax.eli",
+      "file": "bootstrap/compiler/syntax.eli"
+    },
+    {
+      "name": "self-reader-module",
+      "filename": "bootstrap/compiler/reader.eli",
+      "file": "bootstrap/compiler/reader.eli"
+    },
+    {
+      "name": "self-expander-module",
+      "filename": "bootstrap/compiler/expander.eli",
+      "file": "bootstrap/compiler/expander.eli"
+    },
+    {
+      "name": "self-analyzer-module",
+      "filename": "bootstrap/compiler/analyzer.eli",
+      "file": "bootstrap/compiler/analyzer.eli"
+    },
+    {
+      "name": "self-ir-module",
+      "filename": "bootstrap/compiler/ir.eli",
+      "file": "bootstrap/compiler/ir.eli"
+    },
+    {
+      "name": "self-lower-module",
+      "filename": "bootstrap/compiler/lower.eli",
+      "file": "bootstrap/compiler/lower.eli"
+    }
+  ]
+}

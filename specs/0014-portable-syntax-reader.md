@@ -90,6 +90,8 @@ bootstrap/compiler/syntax.eli -> dist/bootstrap/syntax.mjs
 bootstrap/compiler/reader.eli -> dist/bootstrap/reader.mjs
 bootstrap/compiler/expander.eli -> dist/bootstrap/expander.mjs
 bootstrap/compiler/analyzer.eli -> dist/bootstrap/analyzer.mjs
+bootstrap/compiler/ir.eli -> dist/bootstrap/ir.mjs
+bootstrap/compiler/lower.eli -> dist/bootstrap/lower.mjs
 ```
 
 Each module receives an external Source Map v3 file. The generated reader uses
@@ -111,9 +113,9 @@ Acceptance covers:
 - byte-identical repeated builds of all generated ESM and source maps
 - reading every current bootstrap module with both readers
 
-The generated reader reading its own source proves reader-level closure. It is
-not compiler self-hosting: the generated reader cannot yet expand, analyze,
-lower, or emit that syntax tree.
+The generated reader reading its own source proves reader-level closure. The
+Generation 1 pipeline can now expand, analyze, and lower that syntax tree, but
+it cannot yet emit or drive a complete compilation without the seed.
 
 ## Next Phase
 

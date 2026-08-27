@@ -1,0 +1,76 @@
+# 0017: Portable IR Lowering
+
+- Status: Implemented
+- Date: 2026-08-28
+- Depends on: 0007 Explicit IR, 0015 Portable Lexical Analyzer,
+  0016 Portable Macro Expander
+
+## Summary
+
+Generation 1 now owns its intermediate representation and lowering pass.
+`bootstrap/compiler/ir.eli` defines a host-neutral data model, while
+`bootstrap/compiler/lower.eli` converts analyzed portable syntax into that
+model without consulting Emacs objects or reader-shaped seed forms.
+
+```text
+portable syntax -> macro expansion -> lexical analysis -> portable IR lowering
+```
+
+The generated reader, expander, analyzer, and lowerer can process all seven
+bootstrap compiler modules, including `ir.eli` and `lower.eli` themselves.
+
+## Data Contract
+
+A program is an ordinary object with `filename` and an ordered `body` array.
+Every node contains `kind`, `span`, `value`, and `children`; nodes with
+kind-specific metadata also contain `properties`. Constructors validate node
+kinds, arrays, and child-node membership.
+
+No Emacs struct, symbol identity, cons cell, or property list crosses this
+boundary. Kinds and operators are strings. Properties use camel-case names:
+`parameterCount`, `sourceOperator`, `mutable`, `childCount`, `sequential`,
+`bindingCount`, `style`, and `computed`.
+
+## Literal and Quoted Data
+
+Ordinary null, boolean, number, and string literals stay JSON values. Keywords
+and JavaScript `undefined` use explicit `literalKind` tags so their semantics
+do not depend on host identity.
+
+Quoted compound data is recursively encoded with tagged `symbol`, `keyword`,
+`undefined`, `list`, and `vector` objects. Literal object keys are normalized
+to strings; computed keys remain child expressions. This representation can be
+serialized, compared, cached, or passed to a future host-neutral driver.
+
+## Lowering Surface
+
+The portable lowerer implements all 43 public IR kinds from specification
+0007. The surface includes modules and imports, declarations and exports,
+functions and lexical bindings, all control forms, assignments, intrinsics,
+calls, JavaScript interop, objects, and React elements and fragments.
+
+Lowering only consumes syntax that has passed macro expansion and lexical
+analysis. It preserves operator distinctions and source order, performs no
+optimization, and retains a source span on every semantic and structural node.
+
+## Conformance Evidence
+
+`tests/fixtures/bootstrap-ir.json` is shared by both implementations. The
+Emacs oracle runs the seed reader, expander, analyzer, and lowerer, then
+normalizes the seed structs into the portable object contract. Bun runs the
+same sources through the generated pipeline and compares complete programs.
+
+The fixture verifies:
+
+- every public IR kind is reached
+- complete recursive values, children, and kind-specific properties
+- literal tags and recursively quoted data
+- narrow structural spans and macro call-site origins
+- all seven bootstrap compiler sources
+- deterministic generated modules and Source Map files
+
+## Next Phase
+
+Generation 1 now reaches stable portable IR. The next phase is a direct ESM and
+Source Map emitter written in Eliscript, followed by a host-neutral compiler
+driver and reproducible self-compilation.

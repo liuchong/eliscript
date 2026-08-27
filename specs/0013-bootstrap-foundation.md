@@ -96,5 +96,7 @@ The first two items are implemented by
 analyzer portion of item 3 is implemented by
 [0015-portable-lexical-analyzer.md](0015-portable-lexical-analyzer.md), and the
 macro expander by
-[0016-portable-macro-expander.md](0016-portable-macro-expander.md). The next
-phase is portable IR construction.
+[0016-portable-macro-expander.md](0016-portable-macro-expander.md). Portable IR
+construction is implemented by
+[0017-portable-ir-lowering.md](0017-portable-ir-lowering.md). The next phase is
+direct ESM and Source Map emission from that IR.

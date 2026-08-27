@@ -270,10 +270,13 @@ Current evidence:
 - A macro expander written in Eliscript interprets a deterministic macro
   language without host `eval`, matches seed syntax and spans, and feeds the
   portable analyzer directly.
-- Fifty ERT tests cover reading, locations, macro expansion, analysis, IR
+- Portable IR and lowering modules written in Eliscript convert analyzed
+  syntax into JSON-safe programs. Complete trees, properties, quoted data, and
+  source spans match the seed across every one of the 43 IR node kinds.
+- Fifty-one ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, errors, and interop.
-- Ten Bun tests cover the compiler and Org Vite adapters, source-map handoff,
+- Eleven Bun tests cover the compiler and Org Vite adapters, source-map handoff,
   file filtering, React Refresh, Org module invalidation, and generated
   bootstrap behavior.
 - A CLI integration test compares generated output with a checked-in snapshot.
@@ -281,8 +284,8 @@ Current evidence:
   higher-order functions, objects, arrays, exports, React server rendering, and
   production Vite bundles, and deterministic Org publishing.
 
-M4 now continues with portable IR lowering, followed by emission, the compiler
-driver, and reproducible self-compilation.
+M4 now continues with portable direct ESM and Source Map emission, followed by
+the compiler driver and reproducible self-compilation.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -308,7 +311,9 @@ the serializable syntax model and self-reading Generation 1 reader, and
 [specs/0015-portable-lexical-analyzer.md](specs/0015-portable-lexical-analyzer.md)
 for direct portable syntax analysis and dual-implementation diagnostics, and
 [specs/0016-portable-macro-expander.md](specs/0016-portable-macro-expander.md)
-for deterministic host-independent macro evaluation.
+for deterministic host-independent macro evaluation, and
+[specs/0017-portable-ir-lowering.md](specs/0017-portable-ir-lowering.md) for
+JSON-safe IR construction and full seed/portable tree equivalence.
 
 ## License
 

@@ -109,7 +109,7 @@ expander, and analyzer, then compares:
 - recursive macro calls and generated top-level declarations
 - quoted and syntax-specific expansion boundaries
 - definition, nesting, execution, and depth-limit diagnostics
-- all five bootstrap compiler modules, including `expander.eli` itself
+- all seven bootstrap compiler modules, including `ir.eli` and `lower.eli`
 - acceptance of every valid expanded result by the portable analyzer
 
 The position oracle now indexes each source once, keeping normalization linear
@@ -117,6 +117,7 @@ as portable compiler sources grow.
 
 ## Next Phase
 
-The portable front end now covers symbol mapping, syntax, reading, macro
-expansion, and lexical analysis. The next dependency boundary is explicit IR
-lowering over portable syntax, followed by direct ESM and Source Map emission.
+The portable front end covers symbol mapping, syntax, reading, macro expansion,
+and lexical analysis. Portable IR lowering is specified in
+[0017-portable-ir-lowering.md](0017-portable-ir-lowering.md); direct ESM and
+Source Map emission is now the next dependency boundary.

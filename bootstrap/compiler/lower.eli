@@ -1,0 +1,359 @@
+(module bootstrap.compiler.lower
+  (import "./syntax.mjs"
+    node-kind node-span node-value node-name node-items)
+  (import "./ir.mjs" make-program make-node)
+
+  (defconst intrinsics
+    ["not" "+" "*" "-" "/" "%" "mod" "=" "/=" "not=" "<" "<="
+     ">" ">=" "1+" "1-" "eq" "equal" "null" "list" "vector"
+     "array" "car" "cdr" "cons" "nth" "aref" "length"])
+
+  (defconst fail
+    (js* "(message) => { throw new Error(message); }"))
+
+  (defun symbol-node-p (node)
+    (and node (= (node-kind node) "symbol")))
+
+  (defun keyword-node-p (node)
+    (and node (= (node-kind node) "keyword")))
+
+  (defun string-node-p (node)
+    (and node
+         (= (node-kind node) "literal")
+         (= (js* "typeof node.value") "string")))
+
+  (defun null-node-p (node)
+    (and node
+         (= (node-kind node) "literal")
+         (null (node-value node))))
+
+  (defun list-items (node)
+    (cond
+      ((null-node-p node) [])
+      ((and node (= (node-kind node) "list")) (node-items node))
+      (t undefined)))
+
+  (defun syntax-datum (node)
+    (cond
+      ((= (node-kind node) "literal") (node-value node))
+      ((= (node-kind node) "undefined") (object :kind "undefined"))
+      ((= (node-kind node) "symbol")
+       (object :kind "symbol" :name (node-name node)))
+      ((= (node-kind node) "keyword")
+       (object :kind "keyword" :name (node-name node)))
+      ((or (= (node-kind node) "list") (= (node-kind node) "vector"))
+       (let ((items []))
+         (js-call (node-items node) :forEach
+           (lambda (item) (js-call items :push (syntax-datum item))))
+         (object :kind (node-kind node) :items items)))
+      (t
+       (fail (str "cannot encode quoted syntax kind: " (node-kind node))))))
+
+  (defun lower-sequence (forms)
+    (let ((nodes []))
+      (js-call forms :forEach
+        (lambda (form) (js-call nodes :push (lower-expression form))))
+      nodes))
+
+  (defun append-nodes (target nodes)
+    (js-call nodes :forEach
+      (lambda (node) (js-call target :push node)))
+    target)
+
+  (defun lower-literal (form)
+    (cond
+      ((= (node-kind form) "undefined")
+       (make-node
+         "literal" (node-span form) nil []
+         (object :literalKind "undefined")))
+      ((= (node-kind form) "keyword")
+       (make-node
+         "literal" (node-span form) (node-name form) []
+         (object :literalKind "keyword")))
+      (t
+       (make-node
+         "literal" (node-span form) (node-value form) [] nil))))
+
+  (defun lower-parameter-nodes (parameters)
+    (let ((result [])
+          (items (list-items parameters)))
+      (js-call items :forEach
+        (lambda (parameter)
+          (js-call result :push
+            (make-node
+              "parameter-binding"
+              (node-span parameter)
+              (node-name parameter)
+              [] nil))))
+      result))
+
+  (defun lower-binding (binding)
+    (if (symbol-node-p binding)
+        (make-node
+          "lexical-binding" (node-span binding) (node-name binding) []
+          (object :style "symbol"))
+      (let* ((items (list-items binding))
+             (name (nth 0 items))
+             (children []))
+        (when (> (get items :length) 1)
+          (js-call children :push (lower-expression (nth 1 items))))
+        (make-node
+          "lexical-binding" (node-span binding) (node-name name) children
+          (object :style "list")))))
+
+  (defun lower-call-node (kind form operator args)
+    (make-node
+      kind (node-span form) operator (lower-sequence args) nil))
+
+  (defun lower-assignments (form operator args)
+    (let ((pairs [])
+          (index 0))
+      (while (< index (get args :length))
+        (let ((name (nth index args))
+              (value (nth (1+ index) args)))
+          (js-call pairs :push
+            (make-node
+              "assignment-pair"
+              (node-span name)
+              (node-name name)
+              [(lower-expression value)]
+              nil)))
+        (setq index (+ index 2)))
+      (make-node "assignment" (node-span form) operator pairs nil)))
+
+  (defun literal-object-key-p (node)
+    (or (keyword-node-p node) (string-node-p node) (symbol-node-p node)))
+
+  (defun literal-object-key (node)
+    (if (or (keyword-node-p node) (symbol-node-p node))
+        (node-name node)
+      (node-value node)))
+
+  (defun lower-object (form args)
+    (let ((properties [])
+          (index 0))
+      (while (< index (get args :length))
+        (let ((key (nth index args))
+              (value (nth (1+ index) args)))
+          (if (literal-object-key-p key)
+              (js-call properties :push
+                (make-node
+                  "object-property"
+                  (node-span key)
+                  (literal-object-key key)
+                  [(lower-expression value)]
+                  (object :computed false)))
+            (js-call properties :push
+              (make-node
+                "object-property"
+                (node-span key)
+                nil
+                [(lower-expression key) (lower-expression value)]
+                (object :computed t)))))
+        (setq index (+ index 2)))
+      (make-node "object-literal" (node-span form) nil properties nil)))
+
+  (defun lower-cond (form args)
+    (let ((clauses []))
+      (js-call args :forEach
+        (lambda (clause)
+          (js-call clauses :push
+            (make-node
+              "conditional-clause"
+              (node-span clause)
+              nil
+              (lower-sequence (list-items clause))
+              nil))))
+      (make-node "conditional-chain" (node-span form) nil clauses nil)))
+
+  (defun lower-let (form operator args)
+    (let ((bindings [])
+          (children []))
+      (js-call (list-items (nth 0 args)) :forEach
+        (lambda (binding)
+          (js-call bindings :push (lower-binding binding))))
+      (append-nodes children bindings)
+      (append-nodes children (lower-sequence (js-call args :slice 1)))
+      (make-node
+        "lexical-bindings" (node-span form) nil children
+        (object
+          :sequential (= operator "let*")
+          :bindingCount (get bindings :length)))))
+
+  (defun lower-function (kind form value parameters body)
+    (let ((parameter-nodes (lower-parameter-nodes parameters))
+          (children []))
+      (append-nodes children parameter-nodes)
+      (append-nodes children (lower-sequence body))
+      (make-node
+        kind (node-span form) value children
+        (object :parameterCount (get parameter-nodes :length)))))
+
+  (defun lower-expression (form)
+    (cond
+      ((or (= (node-kind form) "literal")
+           (= (node-kind form) "undefined")
+           (= (node-kind form) "keyword"))
+       (lower-literal form))
+      ((= (node-kind form) "symbol")
+       (make-node "reference" (node-span form) (node-name form) [] nil))
+      ((= (node-kind form) "vector")
+       (make-node
+         "array-literal" (node-span form) nil
+         (lower-sequence (node-items form)) nil))
+      ((= (node-kind form) "list")
+       (let* ((items (node-items form))
+              (operator-node (nth 0 items))
+              (operator (and (symbol-node-p operator-node)
+                             (node-name operator-node)))
+              (args (js-call items :slice 1)))
+         (cond
+           ((= operator "quote")
+            (make-node
+              "quoted-literal" (node-span form)
+              (syntax-datum (nth 0 args)) [] nil))
+           ((or (= operator "lambda") (= operator "fn"))
+            (lower-function
+              "function-expression" form nil
+              (nth 0 args) (js-call args :slice 1)))
+           ((= operator "if")
+            (lower-call-node "conditional" form "if" args))
+           ((or (= operator "when") (= operator "unless"))
+            (lower-call-node "conditional-sugar" form operator args))
+           ((= operator "cond") (lower-cond form args))
+           ((or (= operator "progn") (= operator "do"))
+            (lower-call-node "sequence" form operator args))
+           ((or (= operator "let") (= operator "let*"))
+            (lower-let form operator args))
+           ((or (= operator "setq") (= operator "set!"))
+            (lower-assignments form operator args))
+           ((= operator "while")
+            (lower-call-node "loop" form "while" args))
+           ((or (= operator "and") (= operator "or"))
+            (lower-call-node "short-circuit" form operator args))
+           ((= operator "jsx")
+            (make-node
+              "react-element" (node-span form) nil (lower-sequence args)
+              (object :childCount (- (get args :length) 2))))
+           ((= operator "fragment")
+            (make-node
+              "react-fragment" (node-span form) nil (lower-sequence args)
+              (object :childCount (get args :length))))
+           ((js-call intrinsics :includes operator)
+            (lower-call-node "intrinsic" form operator args))
+           ((= operator "object") (lower-object form args))
+           ((= operator "get")
+            (lower-call-node "property-read" form "get" args))
+           ((= operator "put")
+            (lower-call-node "property-write" form "put" args))
+           ((= operator "js-call")
+            (lower-call-node "method-call" form "js-call" args))
+           ((= operator "new")
+            (lower-call-node "constructor-call" form "new" args))
+           ((= operator "js*")
+            (lower-call-node "raw-javascript" form "js*" args))
+           ((= operator "print")
+            (lower-call-node "print" form "print" args))
+           ((= operator "str")
+            (lower-call-node "string-concat" form "str" args))
+           ((= operator "funcall")
+            (lower-call-node "invoke" form "funcall" args))
+           ((= operator "apply")
+            (lower-call-node "apply-call" form "apply" args))
+           (t
+            (make-node
+              "call" (node-span form) nil (lower-sequence items) nil)))))
+      (t
+       (fail (str "cannot lower syntax kind: " (node-kind form))))))
+
+  (defun lower-import (form args)
+    (let ((source (node-value (nth 0 args)))
+          (children [])
+          (index 1))
+      (while (< index (get args :length))
+        (let ((specifier (nth index args)))
+          (cond
+            ((and (keyword-node-p specifier)
+                  (= (node-name specifier) "default"))
+             (setq index (1+ index))
+             (let ((name (nth index args)))
+               (js-call children :push
+                 (make-node
+                   "import-default" (node-span name) (node-name name) [] nil))))
+            ((and (keyword-node-p specifier)
+                  (= (node-name specifier) "as"))
+             (setq index (1+ index))
+             (let ((name (nth index args)))
+               (js-call children :push
+                 (make-node
+                   "import-namespace" (node-span name) (node-name name) [] nil))))
+            (t
+             (js-call children :push
+               (make-node
+                 "import-named"
+                 (node-span specifier)
+                 (node-name specifier)
+                 [] nil))))
+          (setq index (1+ index))))
+      (make-node
+        "import-declaration" (node-span form) source children nil)))
+
+  (defun lower-top-level (form)
+    (if (not (= (node-kind form) "list"))
+        (make-node
+          "expression-statement" (node-span form) nil
+          [(lower-expression form)] nil)
+      (let* ((items (node-items form))
+             (operator-node (nth 0 items))
+             (operator (and (symbol-node-p operator-node)
+                            (node-name operator-node)))
+             (args (js-call items :slice 1)))
+        (cond
+          ((= operator "module")
+           (let ((children []))
+             (js-call (js-call args :slice 1) :forEach
+               (lambda (child)
+                 (js-call children :push (lower-top-level child))))
+             (make-node
+               "module-declaration" (node-span form)
+               (node-name (nth 0 args)) children nil)))
+          ((= operator "import") (lower-import form args))
+          ((or (= operator "defvar") (= operator "defconst"))
+           (let ((children []))
+             (when (> (get args :length) 1)
+               (js-call children :push (lower-expression (nth 1 args))))
+             (make-node
+               "variable-declaration" (node-span form)
+               (node-name (nth 0 args)) children
+               (object
+                 :sourceOperator operator
+                 :mutable (= operator "defvar")))))
+          ((or (= operator "defun") (= operator "defn"))
+           (lower-function
+             "function-declaration" form (node-name (nth 0 args))
+             (nth 1 args) (js-call args :slice 2)))
+          ((= operator "export")
+           (let ((children []))
+             (js-call args :forEach
+               (lambda (name)
+                 (js-call children :push
+                   (make-node
+                     "reference" (node-span name) (node-name name) [] nil))))
+             (make-node
+               "export-declaration" (node-span form) nil children nil)))
+          ((= operator "export-default")
+           (make-node
+             "export-default" (node-span form) nil
+             [(lower-expression (nth 0 args))] nil))
+          (t
+           (make-node
+             "expression-statement" (node-span form) nil
+             [(lower-expression form)] nil))))))
+
+  (defun lower-module (forms filename)
+    (let ((body []))
+      (js-call forms :forEach
+        (lambda (form) (js-call body :push (lower-top-level form))))
+      (make-program filename body)))
+
+  (export lower-expression lower-top-level lower-module))

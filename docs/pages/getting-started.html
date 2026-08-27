@@ -103,16 +103,16 @@ bun run build:org-site</code></pre>
           </section>
 
           <section id="bootstrap">
-            <h2>Build the bootstrap module</h2>
+            <h2>Build the bootstrap modules</h2>
             <pre><code>bun run build:bootstrap</code></pre>
-            <p>The Emacs Lisp seed compiler writes <code>symbol.mjs</code>, <code>syntax.mjs</code>, <code>reader.mjs</code>, <code>expander.mjs</code>, and <code>analyzer.mjs</code> below <code>dist/bootstrap/</code>, together with source maps. The generated front end matches complete seed syntax, spans, acceptance, and exact diagnostics across all bootstrap sources.</p>
+            <p>The Emacs Lisp seed compiler writes seven source-mapped modules below <code>dist/bootstrap/</code>: symbol semantics, syntax, reader, expander, analyzer, IR, and lowering. The generated pipeline matches complete seed syntax, diagnostics, IR trees, properties, and spans across all bootstrap sources.</p>
           </section>
 
           <section id="test">
             <h2>Run the test suite</h2>
             <pre><code>bun run test</code></pre>
             <p>This runs the Emacs ERT suite, Vite adapter tests, public CLI fixtures, deterministic snapshots, source-map validation, runtime execution, React server rendering, and a production browser build.</p>
-            <div class="callout callout-coral"><p>M4 is underway. The portable reader, deterministic macro expander, and lexical analyzer now run from compiler source written in Eliscript; explicit IR lowering is next.</p></div>
+            <div class="callout callout-coral"><p>M4 is underway. The portable front end and complete IR lowering pass now run from compiler source written in Eliscript; direct ESM and Source Map emission is next.</p></div>
           </section>
         </article>
       </div>

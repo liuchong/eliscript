@@ -38,6 +38,7 @@ The node-kind vocabulary covers the complete implemented language surface:
   short-circuit expressions
 - intrinsics, ordinary and computed calls, invocation, and application
 - objects, properties, method calls, constructors, and raw JavaScript interop
+- React elements and fragments
 
 Import specifiers, function parameters, lexical bindings, assignment pairs,
 conditional clauses, and object properties are first-class nodes rather than
@@ -91,9 +92,11 @@ implemented language surface.
   byte-for-byte.
 - The complete existing ERT suite passes through the direct IR pipeline.
 - CLI snapshots remain byte-for-byte stable and Bun executes the emitted ESM.
+- The portable `ir.eli` and `lower.eli` implementations serialize this model
+  as ordinary JavaScript objects and arrays. A shared oracle compares complete
+  seed and portable trees for all 43 node kinds and all bootstrap sources.
 
 ## Deferred Work
 
-- structured serialization for cross-implementation conformance fixtures
 - optimization and canonicalization passes over IR
 - replacing internal condition messages with structured diagnostics

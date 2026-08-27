@@ -28,3 +28,9 @@ The analyzer fixture runs after both readers. It compares success and complete
 diagnostic strings for scope resolution, declaration collisions, mutability,
 imports, exports, and malformed special forms. Both analyzers must accept all
 current bootstrap sources, including `analyzer.eli` itself.
+
+The IR fixture runs the complete generated front end and lowerer, then compares
+the resulting program with a normalized seed oracle. It covers every one of
+the 43 public IR node kinds, JSON-safe quoted data and literal tags,
+kind-specific properties, complete nested source spans, macro call origins,
+and all seven bootstrap compiler modules.

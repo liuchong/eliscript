@@ -6,6 +6,8 @@
 (require 'json)
 (require 'eliscript-analyzer)
 (require 'eliscript-expander)
+(require 'eliscript-ir)
+(require 'eliscript-lower)
 (require 'eliscript-reader)
 (require 'eliscript-symbol)
 
@@ -24,6 +26,10 @@
 (defconst eliscript-bootstrap-tests--expander-fixture
   (expand-file-name "tests/fixtures/bootstrap-expander.json" default-directory)
   "Shared macro expander conformance fixture.")
+
+(defconst eliscript-bootstrap-tests--ir-fixture
+  (expand-file-name "tests/fixtures/bootstrap-ir.json" default-directory)
+  "Shared IR lowering conformance fixture.")
 
 (defvar eliscript-bootstrap-tests--position-index-cache
   (make-hash-table :test #'equal)
@@ -215,6 +221,130 @@
                   (eliscript-bootstrap-tests--field 'invalid fixture))))
     (vconcat (mapcar #'eliscript-bootstrap-tests--seed-expander-result cases))))
 
+(defun eliscript-bootstrap-tests--normalize-datum (value)
+  "Convert quoted seed VALUE to its JSON-safe portable representation."
+  (cond
+   ((null value) nil)
+   ((eq value t) t)
+   ((eq value 'false) :false)
+   ((eq value 'undefined) '((kind . "undefined")))
+   ((or (numberp value) (stringp value)) value)
+   ((keywordp value)
+    `((kind . "keyword") (name . ,(substring (symbol-name value) 1))))
+   ((symbolp value)
+    `((kind . "symbol") (name . ,(symbol-name value))))
+   ((vectorp value)
+    `((kind . "vector")
+      (items . ,(vconcat
+                 (mapcar #'eliscript-bootstrap-tests--normalize-datum
+                         (append value nil))))))
+   ((proper-list-p value)
+    `((kind . "list")
+      (items . ,(vconcat
+                 (mapcar #'eliscript-bootstrap-tests--normalize-datum
+                         value)))))
+   (t (error "unsupported quoted IR datum: %S" value))))
+
+(defun eliscript-bootstrap-tests--normalize-ir-properties (node)
+  "Convert seed IR NODE properties to portable camel-case fields."
+  (let ((kind (eliscript-ir-node-kind node)))
+    (pcase kind
+      ((or 'function-declaration 'function-expression)
+       `((parameterCount . ,(eliscript-ir-property node :parameter-count))))
+      ('variable-declaration
+       `((sourceOperator . ,(symbol-name
+                             (eliscript-ir-property node :source-operator)))
+         (mutable . ,(if (eliscript-ir-property node :mutable) t :false))))
+      ('lexical-bindings
+       `((sequential . ,(if (eliscript-ir-property node :sequential) t :false))
+         (bindingCount . ,(eliscript-ir-property node :binding-count))))
+      ('lexical-binding
+       `((style . ,(symbol-name (eliscript-ir-property node :style)))))
+      ((or 'react-element 'react-fragment)
+       `((childCount . ,(eliscript-ir-property node :child-count))))
+      ('object-property
+       `((computed . ,(if (eliscript-ir-property node :computed) t :false))))
+      (_ nil))))
+
+(defun eliscript-bootstrap-tests--normalize-ir-value (node)
+  "Convert seed IR NODE value to its portable JSON representation."
+  (let ((kind (eliscript-ir-node-kind node))
+        (value (eliscript-ir-node-value node)))
+    (cond
+     ((null value) nil)
+     ((eq value t) t)
+     ((eq kind 'quoted-literal)
+      (eliscript-bootstrap-tests--normalize-datum value))
+     ((and (eq kind 'literal) (eq value 'undefined)) nil)
+     ((and (eq kind 'literal) (keywordp value))
+      (substring (symbol-name value) 1))
+     ((and (eq kind 'object-property)
+           (not (eliscript-ir-property node :computed))
+           (symbolp value))
+      (if (keywordp value)
+          (substring (symbol-name value) 1)
+        (symbol-name value)))
+     ((eq value 'false) :false)
+     ((symbolp value) (symbol-name value))
+     (t value))))
+
+(defun eliscript-bootstrap-tests--normalize-ir-node (node source)
+  "Convert seed IR NODE from SOURCE to the portable object shape."
+  (let* ((kind (eliscript-ir-node-kind node))
+         (properties (eliscript-bootstrap-tests--normalize-ir-properties node)))
+    (when (eq kind 'literal)
+      (let ((value (eliscript-ir-node-value node)))
+        (cond
+         ((eq value 'undefined)
+          (setq properties '((literalKind . "undefined"))))
+         ((keywordp value)
+          (setq properties '((literalKind . "keyword")))))))
+    (append
+     `((kind . ,(symbol-name kind))
+       (span . ,(eliscript-bootstrap-tests--normalize-span
+                 (eliscript-ir-node-span node) source))
+       (value . ,(eliscript-bootstrap-tests--normalize-ir-value node))
+       (children . ,(vconcat
+                     (mapcar
+                      (lambda (child)
+                        (eliscript-bootstrap-tests--normalize-ir-node
+                         child source))
+                      (eliscript-ir-node-children node)))))
+     (and properties `((properties . ,properties))))))
+
+(defun eliscript-bootstrap-tests--seed-ir-result (case)
+  "Return normalized seed IR output for fixture CASE."
+  (let ((name (eliscript-bootstrap-tests--field 'name case))
+        (filename (eliscript-bootstrap-tests--field 'filename case))
+        (source (eliscript-bootstrap-tests--case-source case)))
+    (condition-case error-data
+        (let* ((forms
+                (eliscript-expand-module
+                 (eliscript-read-located-string source filename)
+                 filename))
+               (_analysis (eliscript-analyze-module forms filename))
+               (program (eliscript-lower-module forms filename)))
+          `((name . ,name)
+            (status . "ok")
+            (program . ((filename . ,(eliscript-ir-program-filename program))
+                        (body . ,(vconcat
+                                  (mapcar
+                                   (lambda (node)
+                                     (eliscript-bootstrap-tests--normalize-ir-node
+                                      node source))
+                                   (eliscript-ir-program-body program))))))))
+      ((eliscript-read-error eliscript-expand-error eliscript-analyze-error)
+       `((name . ,name) (status . "error")
+         (message . ,(cadr error-data)))))))
+
+(defun eliscript-bootstrap-tests-ir-results (&optional fixture-file)
+  "Return normalized seed results for IR FIXTURE-FILE."
+  (let* ((fixture
+          (eliscript-bootstrap-tests--read-json
+           (or fixture-file eliscript-bootstrap-tests--ir-fixture)))
+         (cases (eliscript-bootstrap-tests--field 'valid fixture)))
+    (vconcat (mapcar #'eliscript-bootstrap-tests--seed-ir-result cases))))
+
 (defun eliscript-bootstrap-tests--seed-symbol-result (operation input)
   "Run seed symbol OPERATION for INPUT and return a result object."
   (condition-case error-data
@@ -286,6 +416,16 @@
                        "error"))
         (should (equal (eliscript-bootstrap-tests--field 'message result)
                        (eliscript-bootstrap-tests--field 'error case)))))))
+
+(ert-deftest eliscript-seed-ir-lowering-satisfies-bootstrap-cases ()
+  (let* ((fixture
+          (eliscript-bootstrap-tests--read-json
+           eliscript-bootstrap-tests--ir-fixture))
+         (valid (eliscript-bootstrap-tests--field 'valid fixture)))
+    (dolist (case valid)
+      (let ((result (eliscript-bootstrap-tests--seed-ir-result case)))
+        (should (equal (eliscript-bootstrap-tests--field 'status result)
+                       "ok"))))))
 
 (provide 'bootstrap-tests)
 
