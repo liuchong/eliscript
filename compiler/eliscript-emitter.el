@@ -11,17 +11,15 @@
 (require 'cl-lib)
 (require 'json)
 (require 'subr-x)
+(require 'eliscript-diagnostic)
+(require 'eliscript-symbol)
 
-(define-error 'eliscript-compile-error "Eliscript compile error")
-
-(defconst eliscript-emitter--reserved-words
-  '("await" "break" "case" "catch" "class" "const" "continue"
-    "debugger" "default" "delete" "do" "else" "enum" "export"
-    "extends" "false" "finally" "for" "function" "if" "implements"
-    "import" "in" "instanceof" "interface" "let" "new" "null"
-    "package" "private" "protected" "public" "return" "static"
-    "super" "switch" "this" "throw" "true" "try" "typeof" "var"
-    "void" "while" "with" "yield"))
+(defalias 'eliscript-emitter--munge-segment
+  #'eliscript-symbol-munge-segment)
+(defalias 'eliscript-emitter--binding-name
+  #'eliscript-symbol-binding-name)
+(defalias 'eliscript-emitter--reference-name
+  #'eliscript-symbol-reference-name)
 
 (defvar eliscript-emitter--temporary-counter 0)
 
@@ -33,55 +31,6 @@
 (defun eliscript-emitter--json-string (value)
   "Encode string VALUE as an ECMAScript string literal."
   (json-serialize value))
-
-(defun eliscript-emitter--munge-segment (name)
-  "Convert Lisp identifier segment NAME to a valid ECMAScript identifier."
-  (let ((index 0)
-        pieces)
-    (while (< index (length name))
-      (let ((character (aref name index)))
-        (push
-         (cond
-          ((string-match-p "[A-Za-z0-9_$]" (char-to-string character))
-           (char-to-string character))
-          ((eq character ?-) "_")
-          ((eq character ??) "_QMARK_")
-          ((eq character ?!) "_BANG_")
-          ((eq character ?*) "_STAR_")
-          ((eq character ?+) "_PLUS_")
-          ((eq character ?=) "_EQ_")
-          ((eq character ?<) "_LT_")
-          ((eq character ?>) "_GT_")
-          (t (format "_U%04X_" character)))
-         pieces))
-      (setq index (1+ index)))
-    (let ((result (apply #'concat (nreverse pieces))))
-      (when (string-empty-p result)
-        (eliscript-emitter--fail "empty identifier"))
-      (when (string-match-p "\\`[0-9]" result)
-        (setq result (concat "_" result)))
-      (when (member result eliscript-emitter--reserved-words)
-        (setq result (concat result "$")))
-      result)))
-
-(defun eliscript-emitter--binding-name (symbol)
-  "Return the ECMAScript binding name for SYMBOL."
-  (unless (symbolp symbol)
-    (eliscript-emitter--fail "expected binding name, got %S" symbol))
-  (when (or (keywordp symbol)
-            (memq symbol '(t false undefined))
-            (string-prefix-p "&" (symbol-name symbol)))
-    (eliscript-emitter--fail "reserved value cannot be a binding: %S" symbol))
-  (let ((name (symbol-name symbol)))
-    (when (string-match-p "[./]" name)
-      (eliscript-emitter--fail "qualified name cannot be a binding: %s" name))
-    (eliscript-emitter--munge-segment name)))
-
-(defun eliscript-emitter--reference-name (symbol)
-  "Return an ECMAScript reference for SYMBOL."
-  (mapconcat #'eliscript-emitter--munge-segment
-             (split-string (symbol-name symbol) "[./]" t)
-             "."))
 
 (defun eliscript-emitter--fresh-name ()
   "Return a fresh internal ECMAScript identifier."

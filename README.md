@@ -118,11 +118,11 @@ tools/                   Optional integrations and developer utilities
 The current seed compiler is intentionally direct:
 
 ```text
-.eli source -> Emacs reader -> ECMAScript/ESM emitter -> Bun or browser
+.eli source -> Emacs reader -> lexical analyzer -> ESM emitter -> Bun or browser
 ```
 
-The next compiler stage inserts macro expansion, semantic analysis, a
-language-neutral IR, and source-map generation between the reader and emitter.
+The next compiler stage adds macro expansion before analysis, then replaces the
+analyzer's pass-through output with a language-neutral IR and source maps.
 
 ## Bootstrap Strategy
 
@@ -175,21 +175,26 @@ portable execution model. The exact implemented subset is recorded in
 ## Status
 
 The first Emacs Lisp seed compiler is implemented and usable from the command
-line. The M0 vertical slice is complete.
+line. The M0 vertical slice is complete and M1 is in progress.
 
 Current evidence:
 
 - `.eli` files compile to deterministic, readable `.mjs` modules.
 - The compiler itself has no JavaScript runtime dependency.
-- Eleven ERT tests cover reading, core emission, modules, truthiness, errors, and
-  JavaScript interop.
+- A lexical analyzer resolves module, function, and local bindings before
+  emission; it rejects undeclared names, immutable assignment, duplicate
+  declarations, invalid exports, and output identifier collisions.
+- Twenty ERT tests cover reading, analysis, core emission, modules,
+  truthiness, errors, and JavaScript interop.
 - A CLI integration test compares generated output with a checked-in snapshot.
 - Bun 1.4 executes the generated module and verifies recursion, mutation,
   loops, higher-order functions, objects, arrays, and exports.
 
-The next milestone is M1: add a real analyzer with lexical binding validation,
-macro expansion, an explicit IR, source locations, and source maps. React and
-Org publishing remain later milestones.
+The next M1 slice adds macro expansion and located forms, then introduces an
+explicit IR and source maps. React and Org publishing remain later milestones.
+
+See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
+implemented analyzer contract.
 
 ## License
 

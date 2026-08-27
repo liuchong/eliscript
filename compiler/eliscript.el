@@ -7,19 +7,27 @@
 ;;; Code:
 
 (require 'eliscript-reader)
+(require 'eliscript-analyzer)
 (require 'eliscript-emitter)
 
 (defun eliscript-compile-string (source &optional filename)
   "Compile Eliscript SOURCE to an ECMAScript module.
 
 FILENAME is used for reader diagnostics."
-  (eliscript-emit-module (eliscript-read-string source filename)))
+  (eliscript-emit-module
+   (eliscript-analyze-module
+    (eliscript-read-string source filename)
+    filename)))
 
 (defun eliscript-compile-file (input-file &optional output-file)
   "Compile INPUT-FILE and optionally write it to OUTPUT-FILE.
 
 Return the generated ECMAScript source."
-  (let ((output (eliscript-emit-module (eliscript-read-file input-file))))
+  (let ((output
+         (eliscript-emit-module
+          (eliscript-analyze-module
+           (eliscript-read-file input-file)
+           input-file))))
     (when output-file
       (make-directory (file-name-directory (expand-file-name output-file)) t)
       (with-temp-file output-file
@@ -29,4 +37,3 @@ Return the generated ECMAScript source."
 (provide 'eliscript)
 
 ;;; eliscript.el ends here
-

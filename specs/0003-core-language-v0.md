@@ -143,8 +143,8 @@ exclamation marks, stars, and other punctuation receive deterministic textual
 escapes. ECMAScript reserved words gain a trailing `$`. Qualified references
 split on `/` or `.` and emit property paths.
 
-This mapping is deterministic but not yet protected by lexical collision
-analysis. M1 must diagnose source names that map to the same output identifier.
+This mapping is deterministic. The M1 lexical analyzer diagnoses source names
+in one scope that map to the same output identifier.
 
 ## Intentional Differences from Emacs Lisp
 
@@ -169,4 +169,3 @@ The implementation is accepted by:
 - a checked-in `.eli` fixture and deterministic `.mjs` snapshot
 - compilation through the public `bin/eliscript` command
 - execution of the generated module by Bun 1.4
-

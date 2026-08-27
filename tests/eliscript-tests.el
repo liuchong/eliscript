@@ -84,10 +84,80 @@
                  "[1, ...((null) ?? [])]")))
 
 (ert-deftest eliscript-rejects-special-binding-names ()
+  (should-error (eliscript-compile-string "(defvar nil 1)")
+                :type 'eliscript-compile-error)
   (should-error (eliscript-compile-string "(defvar false 1)")
                 :type 'eliscript-compile-error)
   (should-error (eliscript-compile-string "(defun f (&optional x) x)")
                 :type 'eliscript-compile-error))
+
+(ert-deftest eliscript-analyzer-resolves-module-and-lexical-bindings ()
+  (let ((output
+         (eliscript-compile-string
+          "(defun first () (second))
+(defun second () (let* ((value 1) (next (+ value 1))) next))
+(export first second)")))
+    (should (string-match-p "function first()" output))
+    (should (string-match-p "function second()" output))))
+
+(ert-deftest eliscript-analyzer-rejects-unbound-symbols ()
+  (let ((error-data
+         (should-error
+          (eliscript-compile-string "(defun broken () missing)" "broken.eli")
+          :type 'eliscript-analyze-error)))
+    (should (string-match-p
+             (regexp-quote "broken.eli: unbound symbol: missing")
+             (error-message-string error-data)))))
+
+(ert-deftest eliscript-analyzer-distinguishes-let-and-let-star ()
+  (should-error
+   (eliscript-compile-string
+    "(defun broken () (let ((value 1) (next value)) next))")
+   :type 'eliscript-analyze-error)
+  (should
+   (string-match-p
+    "function valid()"
+    (eliscript-compile-string
+     "(defun valid () (let* ((value 1) (next value)) next))"))))
+
+(ert-deftest eliscript-analyzer-rejects-duplicate-bindings ()
+  (should-error
+   (eliscript-compile-string "(defun duplicate (value value) value)")
+   :type 'eliscript-analyze-error)
+  (should-error
+   (eliscript-compile-string "(let ((value 1) (value 2)) value)")
+   :type 'eliscript-analyze-error))
+
+(ert-deftest eliscript-analyzer-rejects-output-name-collisions ()
+  (let ((error-data
+         (should-error
+          (eliscript-compile-string
+           "(defconst foo-bar 1) (defconst foo_bar 2)")
+          :type 'eliscript-analyze-error)))
+    (should (string-match-p "collides with foo-bar"
+                            (error-message-string error-data)))))
+
+(ert-deftest eliscript-symbol-mapping-preserves-leading-digit-handling ()
+  (should (equal (eliscript-symbol-binding-name '1value) "_1value")))
+
+(ert-deftest eliscript-analyzer-validates-assignment-mutability ()
+  (should-error
+   (eliscript-compile-string "(defconst answer 42) (setq answer 43)")
+   :type 'eliscript-analyze-error)
+  (should
+   (string-match-p
+    "(answer = 43)"
+    (eliscript-compile-string "(defvar answer 42) (setq answer 43)"))))
+
+(ert-deftest eliscript-analyzer-validates-exports ()
+  (should-error (eliscript-compile-string "(export missing)")
+                :type 'eliscript-analyze-error))
+
+(ert-deftest eliscript-analyzer-allows-qualified-javascript-references ()
+  (should
+   (string-match-p
+    (regexp-quote "console.log(JSON.stringify(null));")
+    (eliscript-compile-string "(print (JSON/stringify nil))"))))
 
 (provide 'eliscript-tests)
 

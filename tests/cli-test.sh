@@ -19,4 +19,18 @@ if [ "$ACTUAL_OUTPUT" != "$EXPECTED_OUTPUT" ]; then
   exit 1
 fi
 
+printf '%s\n' '(defun broken () missing)' > "$TEMP_DIR/broken.eli"
+if "$PROJECT_DIR/bin/eliscript" "$TEMP_DIR/broken.eli" \
+  > "$TEMP_DIR/broken.out" 2> "$TEMP_DIR/broken.err"; then
+  printf 'expected invalid module compilation to fail\n' >&2
+  exit 1
+fi
+
+if ! grep -F "$TEMP_DIR/broken.eli: unbound symbol: missing" \
+  "$TEMP_DIR/broken.err" >/dev/null; then
+  printf 'expected filename-bearing analyzer diagnostic, got:\n' >&2
+  cat "$TEMP_DIR/broken.err" >&2
+  exit 1
+fi
+
 printf 'CLI and Bun execution test passed\n'
