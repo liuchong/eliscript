@@ -2,20 +2,22 @@
 
 ;;; Commentary:
 
-;; The seed expander evaluates trusted macro bodies as Emacs Lisp, then walks
-;; the returned Eliscript forms until no user macro remains at the call site.
-;; Macro environments are local to one compilation.
+;; The seed expander evaluates macro bodies through a deterministic language
+;; subset, then walks returned forms until no user macro remains at the call
+;; site.  Macro environments are local to one compilation.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'eliscript-diagnostic)
 (require 'eliscript-form)
+(require 'eliscript-macro-eval)
 
 (cl-defstruct (eliscript-expander--macro
                (:constructor eliscript-expander--macro-create))
   name
-  function)
+  parameters
+  body)
 
 (defconst eliscript-expander--maximum-depth 100
   "Maximum number of recursive macro expansions at one call site.")
@@ -32,14 +34,8 @@
                        format-string
                        arguments))))
 
-(defun eliscript-expander--normalize-parameters (parameters)
-  "Return Emacs Lisp lambda PARAMETERS, translating `&body' to `&rest'."
-  (mapcar (lambda (parameter)
-            (if (eq parameter '&body) '&rest parameter))
-          parameters))
-
 (defun eliscript-expander--register (form environment)
-  "Compile macro definition FORM and add it to ENVIRONMENT."
+  "Validate macro definition FORM and add it to ENVIRONMENT."
   (let* ((items (eliscript-form-value form))
          (arguments (cdr items))
          (eliscript-expander--current-span (eliscript-form-span form)))
@@ -48,14 +44,8 @@
     (let ((name (eliscript-form-value (nth 0 arguments)))
           (parameters (eliscript-form-strip (nth 1 arguments)))
           (body (mapcar #'eliscript-form-strip (nthcdr 2 arguments))))
-      (unless (symbolp name)
+      (unless (eliscript-macro-eval-symbol-p name)
         (eliscript-expander--fail "macro name must be a symbol: %S" name))
-      (unless (proper-list-p parameters)
-        (eliscript-expander--fail "macro parameters must be a list: %S"
-                                  parameters))
-      (when (cl-find-if-not #'symbolp parameters)
-        (eliscript-expander--fail "macro parameters must be symbols: %S"
-                                  parameters))
       (when (gethash name environment)
         (eliscript-expander--fail "duplicate macro definition: %s" name))
       (condition-case error-data
@@ -63,20 +53,11 @@
            name
            (eliscript-expander--macro-create
             :name name
-            :function
-            (eval `(lambda ,(eliscript-expander--normalize-parameters parameters)
-                     (cl-flet ((nil? (value) (eq value nil))
-                               (undefined? (value) (eq value 'undefined))
-                               (nullish? (value)
-                                 (or (eq value nil) (eq value 'undefined)))
-                               (null (value)
-                                 (or (eq value nil) (eq value 'undefined))))
-                       ,@body))
-                  t))
+            :parameters (eliscript-macro-eval-parse-parameters parameters)
+            :body body)
            environment)
-        (error
-         (eliscript-expander--fail
-          "invalid macro %s: %s" name (error-message-string error-data)))))))
+        (eliscript-macro-eval-error
+         (eliscript-expander--fail "%s" (cadr error-data)))))))
 
 (defun eliscript-expander--invoke (definition arguments depth)
   "Invoke macro DEFINITION with raw ARGUMENTS at expansion DEPTH."
@@ -86,8 +67,16 @@
      eliscript-expander--maximum-depth
      (eliscript-expander--macro-name definition)))
   (condition-case error-data
-      (apply (eliscript-expander--macro-function definition)
-             (mapcar #'eliscript-form-strip arguments))
+      (eliscript-macro-eval-run
+       (eliscript-expander--macro-name definition)
+       (eliscript-expander--macro-parameters definition)
+       (eliscript-expander--macro-body definition)
+       (mapcar #'eliscript-form-strip arguments))
+    (eliscript-macro-eval-error
+     (eliscript-expander--fail
+      "macro %s failed: %s"
+      (eliscript-expander--macro-name definition)
+      (cadr error-data)))
     (error
      (eliscript-expander--fail
       "macro %s failed: %s"

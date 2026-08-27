@@ -12,9 +12,8 @@ the portable lexical analyzer.
 
 The portable expander does not call JavaScript `eval` and does not require an
 Emacs runtime. Macro bodies execute in a deterministic interpreter over syntax
-values. The Emacs Lisp seed retains its trusted host evaluation capability,
-while shared conformance defines the language subset available in both
-generations.
+values. The Emacs Lisp seed now interprets the same subset over native data;
+neither generation exposes arbitrary host evaluation.
 
 ## Macro Values
 
@@ -48,12 +47,13 @@ current macro contract:
 
 Backquote handles nested quotation depth and collection splicing. Unsupported
 host functions fail explicitly instead of escaping into JavaScript or Emacs.
-This makes Generation 1 macros reproducible from their arguments and source.
+This makes macros reproducible from their arguments and source in both
+generations.
 
-The portable subset is intentionally smaller than arbitrary trusted Emacs
-Lisp. A macro that depends on buffers, files, process state, or an unlisted
-host function remains seed-only until an explicit compiler context API or a
-portable library defines that dependency.
+The portable subset is intentionally smaller than Emacs Lisp. A macro cannot
+depend on buffers, files, environment variables, process state, or an unlisted
+host function until an explicit compiler context API or portable library
+defines that capability and its dependency evidence.
 
 ## Expansion Walk
 

@@ -506,6 +506,18 @@
               "macro.eli:3:1: macro boom failed: bad expansion")
              (error-message-string error-data)))))
 
+(ert-deftest eliscript-expander-rejects-host-functions ()
+  (let ((error-data
+         (should-error
+          (eliscript-compile-string
+           "(defmacro host-value () (getenv \"HOME\"))\n(host-value)"
+           "host.eli")
+          :type 'eliscript-expand-error)))
+    (should (string-match-p
+             (regexp-quote
+              "host.eli:2:1: macro host-value failed: unsupported macro function: getenv")
+             (error-message-string error-data)))))
+
 (ert-deftest eliscript-expander-validates-expanded-code ()
   (let ((error-data
          (should-error

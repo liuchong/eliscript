@@ -6,6 +6,11 @@
       "source": "(defmacro twice (value) `(+ ,value ,value))\n(defmacro four-times (value) `(twice (twice ,value)))\n(defun scale (value) (four-times value))\n(export scale)"
     },
     {
+      "name": "nested-quasiquote-depth",
+      "filename": "nested-quote.eli",
+      "source": "(defmacro nested-template (value)\n  (list 'quote ``(outer ,value ,,value)))\n(defconst syntax (nested-template inner))\n(export syntax)"
+    },
+    {
       "name": "portable-function-body",
       "filename": "portable.eli",
       "source": "(defmacro twice (value) `(+ ,value ,value))\n(defportable work (value) (twice value))"
@@ -44,6 +49,11 @@
       "name": "macro-evaluator-core",
       "filename": "evaluator.eli",
       "source": "(defmacro calculate (value)\n  (let ((current value))\n    (setq current (+ current 2))\n    (cond\n      ((and (> current 3) (equal current 4)) (list 'quote current))\n      (t current))))\n(defmacro condition-value (value) (cond (value)))\n(defconst answer (calculate 2))\n(defconst direct (condition-value 5))\n(export answer direct)"
+    },
+    {
+      "name": "portable-truthiness-and-numbers",
+      "filename": "portable-values.eli",
+      "source": "(defmacro falsey? (value) (not value))\n(defmacro computed-values ()\n  (list 'quote\n    (list (/ 1 2)\n          (length \"😀\")\n          (concat \"flag-\" t \"-\" false \"-\" undefined))))\n(defconst false-result (falsey? false))\n(defconst undefined-result (falsey? undefined))\n(defconst zero-result (falsey? 0))\n(defconst computed (computed-values))\n(export false-result undefined-result zero-result computed)"
     },
     {
       "name": "quoted-data-boundary",
@@ -166,6 +176,24 @@
       "filename": "failure.eli",
       "source": "(defmacro boom () (error \"bad expansion\"))\n\n(boom)",
       "error": "failure.eli:3:1: macro boom failed: bad expansion"
+    },
+    {
+      "name": "host-function-escape",
+      "filename": "host.eli",
+      "source": "(defmacro host-value () (getenv \"HOME\"))\n(host-value)",
+      "error": "host.eli:2:1: macro host-value failed: unsupported macro function: getenv"
+    },
+    {
+      "name": "macro-argument-arity",
+      "filename": "arity.eli",
+      "source": "(defmacro pair (left right) `(list ,left ,right))\n(pair 1)",
+      "error": "arity.eli:2:1: macro pair failed: wrong number of arguments for pair"
+    },
+    {
+      "name": "incomplete-rest-parameter",
+      "filename": "rest.eli",
+      "source": "(defmacro invalid (&rest) nil)",
+      "error": "rest.eli:1:1: invalid macro parameter list"
     },
     {
       "name": "runaway-expansion",

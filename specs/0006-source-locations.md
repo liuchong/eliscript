@@ -2,7 +2,7 @@
 
 - Status: Implemented
 - Date: 2026-08-28
-- Depends on: 0004 Lexical Analysis, 0005 Trusted Compile-time Macros
+- Depends on: 0004 Lexical Analysis, 0005 Compile-time Macros
 
 ## Summary
 
@@ -39,10 +39,10 @@ preserving their public behavior.
 ## Macro Origins
 
 Handwritten forms retain their original spans while the expander walks them.
-Macro arguments are stripped to ordinary Emacs Lisp data before trusted macro
-code runs. The returned expansion is recursively located at the macro call
-span, providing a stable origin even though generated syntax has no direct
-character range in the input.
+Macro arguments are stripped to ordinary Emacs Lisp data before the
+deterministic seed evaluator runs. The returned expansion is recursively
+located at the macro call span, providing a stable origin even though generated
+syntax has no direct character range in the input.
 
 This is intentionally one origin per generated expansion tree. Detailed macro
 expansion traces and mixed definition/call-site provenance remain future work.

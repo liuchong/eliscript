@@ -68,14 +68,15 @@ Exact spellings are provisional until the first end-to-end example is built.
 
 ## Macro Model
 
-Macros execute at compile time inside Emacs. The first implementation may
-represent Eliscript forms using native Emacs Lisp lists, vectors, symbols, and
-hash tables, but expansion results must pass through the normal analyzer.
+Macros execute at compile time through a deterministic interpreter. The seed
+represents syntax values with native Emacs Lisp data while the self-hosted
+compiler uses explicit syntax nodes; shared conformance fixes their observable
+behavior, and expansion results pass through the normal analyzer.
 
 The compiler must distinguish clearly between:
 
 - compiler implementation code written in Emacs Lisp
-- user macro code evaluated during compilation
+- user macro code interpreted during compilation
 - application code emitted as JavaScript
 
 Arbitrary editor state must not become an implicit build input. Macro APIs
@@ -212,8 +213,8 @@ of the CLI integration test.
 - Define the IR and public compiler diagnostics.
 - Execute emitted modules in a JavaScript test runner.
 
-Completed on 2026-08-28. Lexical binding validation, trusted compile-time macro
-expansion, recursively located forms, filename/line/column diagnostics,
+Completed on 2026-08-28. Lexical binding validation, deterministic compile-time
+macro expansion, recursively located forms, filename/line/column diagnostics,
 explicit IR lowering, direct IR emission, output-name collision checks,
 external Source Map v3 output, and JavaScript execution are implemented.
 
@@ -363,16 +364,21 @@ through [0033-build-phase-timings.md](0033-build-phase-timings.md).
 
 ## Open Questions
 
+The seed macro migration is resolved: both compiler generations now interpret
+the same host-independent macro subset, and undeclared host functions are
+rejected. See
+[0035-deterministic-seed-macros.md](0035-deterministic-seed-macros.md).
+
 The distinction between `nil`, JavaScript `null`, and `undefined` is resolved:
 `nil` is the source spelling for JavaScript `null`, while strict and combined
 predicates expose the boundary explicitly. See
 [0034-nullish-values.md](0034-nullish-values.md).
 
-1. How should trusted seed macros migrate to a portable Eliscript evaluator?
-2. Should maps read as `{...}` or use a Lisp-native constructor form?
-3. How should Lisp kebab-case symbols map to JavaScript identifiers and object
+1. Should maps read as `{...}` or use a Lisp-native constructor form?
+2. How should Lisp kebab-case symbols map to JavaScript identifiers and object
    keys?
-4. Can incremental compilation stay deterministic when macros read files?
+3. What explicit compiler context should declare file dependencies if macros
+   eventually gain file access?
 
 These questions should be resolved by small executable examples and follow-up
 numbered specifications rather than by expanding this document indefinitely.

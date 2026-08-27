@@ -335,8 +335,9 @@ Current evidence:
 - A lexical analyzer resolves module, function, and local bindings before
   emission; it rejects undeclared names, immutable assignment, duplicate
   declarations, invalid exports, and output identifier collisions.
-- Trusted compile-time macros expand sequentially before analysis, support
-  backquote and body parameters, and never appear in generated modules.
+- Deterministic compile-time macros expand sequentially before analysis,
+  support backquote and body parameters, reject undeclared host functions, and
+  never appear in generated modules.
 - Located forms preserve source spans through macro expansion and lexical
   analysis; compiler errors report filename, line, and column.
 - An explicit IR separates declarations, bindings, control flow, calls, data,
@@ -429,7 +430,7 @@ Current evidence:
 - Repeated `--portable NAME` options make the same builder verify every local
   `import-portable` target, reject bare or escaping source edges, and emit only
   each module's requested transitive closure.
-- Eighty-seven ERT tests cover reading, locations, macro expansion, analysis, IR
+- Eighty-eight ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
 - Eighteen Bun tests cover the compiler and Org Vite adapters, source-map
@@ -530,7 +531,9 @@ and
 for non-identity cache, work, manifest, and total build measurements, and
 [specs/0034-nullish-values.md](specs/0034-nullish-values.md)
 for explicit `nil`, `undefined`, and nullish predicates across both compiler
-generations.
+generations, and
+[specs/0035-deterministic-seed-macros.md](specs/0035-deterministic-seed-macros.md)
+for the shared host-independent macro language used by both generations.
 
 ## License
 

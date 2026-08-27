@@ -5,7 +5,8 @@ This directory contains the first Emacs Lisp seed compiler:
 - `eliscript-reader.el` reads one or more `.eli` forms.
 - `eliscript-form.el` carries source spans through front-end phases.
 - `eliscript-diagnostic.el` defines shared compiler condition types.
-- `eliscript-expander.el` evaluates trusted compile-time macros.
+- `eliscript-macro-eval.el` interprets the deterministic macro language.
+- `eliscript-expander.el` registers macros and recursively expands their output.
 - `eliscript-symbol.el` owns identifier validation and ECMAScript name mapping.
 - `eliscript-analyzer.el` validates module and lexical bindings.
 - `eliscript-ir.el` defines the explicit, source-located compiler IR.

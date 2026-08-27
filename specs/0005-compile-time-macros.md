@@ -1,4 +1,4 @@
-# 0005: Trusted Compile-time Macros
+# 0005: Compile-time Macros
 
 - Status: Implemented
 - Date: 2026-08-27
@@ -7,11 +7,10 @@
 ## Summary
 
 Eliscript now expands user-defined macros between reading and lexical analysis.
-The seed implementation evaluates macro bodies as trusted Emacs Lisp and treats
-their results as ordinary Eliscript forms. The Generation 1 implementation
-interprets the shared deterministic macro subset over explicit syntax nodes.
-Every expanded form passes through the same analyzer and emitter as handwritten
-application code.
+Both compiler generations interpret one deterministic macro subset. The seed
+uses native, location-free Lisp data while Generation 1 evaluates explicit
+syntax nodes. Every expanded form passes through the same analyzer and emitter
+as handwritten application code.
 
 ```text
 .eli source -> reader -> macro expander -> lexical analyzer -> ESM emitter
@@ -34,10 +33,9 @@ module. A definition is available only to forms that follow it. Macro calls
 receive their unevaluated argument forms, and their results are recursively
 expanded until the call site no longer names a registered macro.
 
-The initial parameter model supports ordinary Emacs Lisp macro parameters,
-including `&optional`, `&rest`, and `&body`. `&body` is normalized to `&rest`
-inside the seed implementation. Native backquote, comma, and comma-splicing
-provide syntax construction.
+The parameter model supports required parameters, `&optional`, and one trailing
+parameter after `&rest` or `&body`. Backquote, comma, and comma-splicing provide
+syntax construction in the shared interpreter.
 
 ## Expansion Boundaries
 
@@ -55,18 +53,17 @@ every list:
 each call to the public string or file compiler, so definitions cannot leak
 between builds.
 
-## Trust and Reproducibility
+## Determinism and Capabilities
 
-Seed macro bodies execute as Emacs Lisp with the compiler process's authority.
-They are not sandboxed and may call available Emacs Lisp functions. This is an
-intentional bootstrap capability, not a security boundary: projects must treat
-macro code with the same trust as build scripts.
+Macro bodies can call only the syntax, collection, predicate, arithmetic, and
+string operations named by the language contract. They cannot call arbitrary
+Emacs Lisp or JavaScript functions, inspect editor state, read files or
+environment variables, access the network, or start processes. Unsupported
+functions fail explicitly in both compiler generations.
 
-Reproducible macros should derive output only from their arguments and explicit
-inputs. The current compiler does not track files, environment variables,
-network access, buffers, or other editor state read by macro code. A future
-compiler context API must make such dependencies explicit before incremental
-build caching is considered reliable.
+Current expansion is therefore a deterministic function of macro source and
+arguments. A future compiler context API must make external capabilities and
+their dependency evidence explicit before adding any stateful macro operation.
 
 ## Diagnostics and Termination
 
@@ -95,4 +92,6 @@ language rules, so macros cannot bypass semantic checks.
 - a standard macro library shared by the seed and self-hosted implementations
 
 The portable evaluator and its exact compatibility boundary are specified in
-[0016-portable-macro-expander.md](0016-portable-macro-expander.md).
+[0016-portable-macro-expander.md](0016-portable-macro-expander.md). The seed
+migration is specified in
+[0035-deterministic-seed-macros.md](0035-deterministic-seed-macros.md).
