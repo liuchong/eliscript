@@ -117,10 +117,30 @@ code {
   object-fit: contain;
 }
 
-.home .brand-mark {
-  filter:
-    drop-shadow(0 0 1px rgba(242, 240, 232, 0.92))
-    drop-shadow(0 0 5px rgba(242, 240, 232, 0.28));
+.home .brand {
+  position: relative;
+  isolation: isolate;
+}
+
+.home .brand::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  width: 36px;
+  height: 36px;
+  pointer-events: none;
+  background: url("eliscript-logo-light.png") center / contain no-repeat;
+  filter: blur(6px) saturate(1.12);
+  mix-blend-mode: screen;
+  opacity: 0.34;
+  transform: translate(-2px, 2px) scale(1.06);
+}
+
+.home .brand > * {
+  position: relative;
+  z-index: 1;
 }
 
 .nav-links {
@@ -846,6 +866,11 @@ code {
   }
 
   .brand-mark {
+    width: 32px;
+    height: 32px;
+  }
+
+  .home .brand::before {
     width: 32px;
     height: 32px;
   }
