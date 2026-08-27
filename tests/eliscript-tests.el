@@ -11,8 +11,32 @@
           '((defconst answer 42) (+ answer 1)))))
 
 (ert-deftest eliscript-reader-rejects-incomplete-input ()
-  (should-error (eliscript-read-string "(defun broken (")
-                :type 'eliscript-read-error))
+  (let ((error-data
+         (should-error
+          (eliscript-read-string "; comment\n(defun broken (" "reader.eli")
+          :type 'eliscript-read-error)))
+    (should (string-match-p
+             (regexp-quote
+              "reader.eli:2:1: unexpected end of input")
+             (error-message-string error-data)))))
+
+(ert-deftest eliscript-reader-locates-nested-forms ()
+  (let* ((forms
+          (eliscript-read-located-string
+           "(defconst answer 42)\n\n(defun broken ()\n  missing)"
+           "located.eli"))
+         (function-form (nth 1 forms))
+         (function-items (eliscript-form-value function-form))
+         (missing-form (nth 3 function-items))
+         (function-span (eliscript-form-span function-form))
+         (missing-span (eliscript-form-span missing-form)))
+    (should (= (eliscript-source-span-line function-span) 3))
+    (should (= (eliscript-source-span-column function-span) 1))
+    (should (= (eliscript-source-span-line missing-span) 4))
+    (should (= (eliscript-source-span-column missing-span) 3))
+    (should (equal (mapcar #'eliscript-form-strip forms)
+                   '((defconst answer 42)
+                     (defun broken () missing))))))
 
 (ert-deftest eliscript-emits-literals-and-data ()
   (should (equal (eliscript-emitter-emit-expression nil) "null"))
@@ -103,10 +127,12 @@
 (ert-deftest eliscript-analyzer-rejects-unbound-symbols ()
   (let ((error-data
          (should-error
-          (eliscript-compile-string "(defun broken () missing)" "broken.eli")
+          (eliscript-compile-string
+           "(defun broken ()\n  missing)"
+           "broken.eli")
           :type 'eliscript-analyze-error)))
     (should (string-match-p
-             (regexp-quote "broken.eli: unbound symbol: missing")
+             (regexp-quote "broken.eli:2:3: unbound symbol: missing")
              (error-message-string error-data)))))
 
 (ert-deftest eliscript-analyzer-distinguishes-let-and-let-star ()
@@ -213,18 +239,25 @@
   (let ((error-data
          (should-error
           (eliscript-compile-string
-           "(defmacro boom () (error \"bad expansion\")) (boom)"
+           "(defmacro boom () (error \"bad expansion\"))\n\n(boom)"
            "macro.eli")
           :type 'eliscript-expand-error)))
     (should (string-match-p
-             (regexp-quote "macro.eli: macro boom failed: bad expansion")
+             (regexp-quote
+              "macro.eli:3:1: macro boom failed: bad expansion")
              (error-message-string error-data)))))
 
 (ert-deftest eliscript-expander-validates-expanded-code ()
-  (should-error
-   (eliscript-compile-string
-    "(defmacro missing-reference () 'missing) (missing-reference)")
-   :type 'eliscript-analyze-error))
+  (let ((error-data
+         (should-error
+          (eliscript-compile-string
+           "(defmacro missing-reference () 'missing)\n\n(missing-reference)"
+           "expanded.eli")
+          :type 'eliscript-analyze-error)))
+    (should (string-match-p
+             (regexp-quote
+              "expanded.eli:3:1: unbound symbol: missing")
+             (error-message-string error-data)))))
 
 (ert-deftest eliscript-expander-rejects-nested-definitions ()
   (should-error

@@ -88,8 +88,8 @@ language rules, so macros cannot bypass semantic checks.
 
 ## Deferred Work
 
-- located forms and source spans preserved through expansion
 - macro expansion traces in diagnostics
+- source maps that represent macro call origins
 - explicit compiler context and declared file dependencies
 - a portable Eliscript macro evaluator for the self-hosted compiler
 - a standard macro library shared by the seed and self-hosted implementations

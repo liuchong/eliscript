@@ -7,6 +7,7 @@
 ;;; Code:
 
 (require 'eliscript-reader)
+(require 'eliscript-form)
 (require 'eliscript-expander)
 (require 'eliscript-analyzer)
 (require 'eliscript-emitter)
@@ -16,11 +17,13 @@
 
 FILENAME is used for compiler diagnostics."
   (eliscript-emit-module
-   (eliscript-analyze-module
-    (eliscript-expand-module
-     (eliscript-read-string source filename)
-     filename)
-    filename)))
+   (mapcar
+    #'eliscript-form-strip
+    (eliscript-analyze-module
+     (eliscript-expand-module
+      (eliscript-read-located-string source filename)
+      filename)
+     filename))))
 
 (defun eliscript-compile-file (input-file &optional output-file)
   "Compile INPUT-FILE and optionally write it to OUTPUT-FILE.
@@ -28,11 +31,13 @@ FILENAME is used for compiler diagnostics."
 Return the generated ECMAScript source."
   (let ((output
          (eliscript-emit-module
-          (eliscript-analyze-module
-           (eliscript-expand-module
-            (eliscript-read-file input-file)
-            input-file)
-           input-file))))
+          (mapcar
+           #'eliscript-form-strip
+           (eliscript-analyze-module
+            (eliscript-expand-module
+             (eliscript-read-located-file input-file)
+             input-file)
+            input-file)))))
     (when output-file
       (make-directory (file-name-directory (expand-file-name output-file)) t)
       (with-temp-file output-file

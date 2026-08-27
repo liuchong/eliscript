@@ -71,11 +71,9 @@ This rule catches accidental undeclared names without hiding host interop.
 ## Diagnostics
 
 Analysis failures signal `eliscript-analyze-error`, a subtype of the existing
-public `eliscript-compile-error`. Diagnostics include the input filename when
-one is supplied to `eliscript-compile-string` or `eliscript-compile-file`.
-
-This slice does not yet attach line and column locations to individual forms.
-Located forms and structured diagnostic records remain later M1 work.
+public `eliscript-compile-error`. The located-form layer added in specification
+0006 now lets diagnostics include filename, line, and column. Structured
+diagnostic records remain later M1 work.
 
 ## Acceptance Evidence
 
@@ -88,6 +86,4 @@ Located forms and structured diagnostic records remain later M1 work.
 ## Deferred Work
 
 - a documented intermediate representation after analysis
-- source spans on reader forms
-- line-and-column compiler diagnostics
 - source maps from emitted JavaScript back to Eliscript source

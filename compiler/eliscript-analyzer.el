@@ -10,6 +10,7 @@
 
 (require 'cl-lib)
 (require 'eliscript-diagnostic)
+(require 'eliscript-form)
 (require 'eliscript-symbol)
 
 (cl-defstruct (eliscript-analyzer--binding
@@ -32,12 +33,14 @@
     new print str funcall apply))
 
 (defvar eliscript-analyzer--filename nil)
+(defvar eliscript-analyzer--current-span nil)
 
 (defun eliscript-analyzer--fail (format-string &rest arguments)
   "Signal an analysis error using FORMAT-STRING and ARGUMENTS."
   (signal 'eliscript-analyze-error
-          (list (apply #'eliscript-diagnostic-format
+          (list (apply #'eliscript-diagnostic-format-at
                        eliscript-analyzer--filename
+                       eliscript-analyzer--current-span
                        format-string
                        arguments))))
 
@@ -57,7 +60,10 @@
 
 (defun eliscript-analyzer--declare (scope name kind mutable)
   "Declare NAME with KIND and MUTABLE status in SCOPE."
-  (let* ((names (eliscript-analyzer--scope-names scope))
+  (let* ((eliscript-analyzer--current-span
+          (or (eliscript-form-span name) eliscript-analyzer--current-span))
+         (name (eliscript-form-value name))
+         (names (eliscript-analyzer--scope-names scope))
          (outputs (eliscript-analyzer--scope-outputs scope))
          (output-name (eliscript-analyzer--map-binding-name name))
          (existing-name (gethash name names))
@@ -101,25 +107,33 @@
 
 (defun eliscript-analyzer--binding-pair (binding)
   "Return the source name and initializer represented by BINDING."
-  (cond
-   ((symbolp binding) (list binding nil))
-   ((and (proper-list-p binding)
-         (<= 1 (length binding))
-         (<= (length binding) 2)
-         (symbolp (car binding)))
-    (list (car binding) (cadr binding)))
-   (t (eliscript-analyzer--fail "invalid let binding: %S" binding))))
+  (let* ((eliscript-analyzer--current-span
+          (or (eliscript-form-span binding) eliscript-analyzer--current-span))
+         (value (eliscript-form-value binding)))
+    (cond
+     ((symbolp value) (list binding nil))
+     ((and (proper-list-p value)
+           (<= 1 (length value))
+           (<= (length value) 2)
+           (symbolp (eliscript-form-value (car value))))
+      (list (car value) (cadr value)))
+     (t (eliscript-analyzer--fail
+         "invalid let binding: %S" (eliscript-form-strip binding))))))
 
 (defun eliscript-analyzer--analyze-let (arguments scope sequential)
   "Analyze let ARGUMENTS in SCOPE, honoring SEQUENTIAL semantics."
   (unless arguments
     (eliscript-analyzer--fail "%s requires a binding list"
                               (if sequential "let*" "let")))
-  (let ((bindings (car arguments))
+  (let* ((bindings-form (car arguments))
+        (bindings (eliscript-form-value bindings-form))
         (body (cdr arguments))
         (child (eliscript-analyzer--make-scope scope)))
     (unless (proper-list-p bindings)
-      (eliscript-analyzer--fail "let bindings must be a list"))
+      (let ((eliscript-analyzer--current-span
+             (or (eliscript-form-span bindings-form)
+                 eliscript-analyzer--current-span)))
+        (eliscript-analyzer--fail "let bindings must be a list")))
     (if sequential
         (dolist (binding bindings)
           (pcase-let ((`(,name ,value)
@@ -135,8 +149,10 @@
 
 (defun eliscript-analyzer--analyze-function (parameters body scope)
   "Analyze function PARAMETERS and BODY within SCOPE."
-  (unless (proper-list-p parameters)
-    (eliscript-analyzer--fail "function arguments must be a list"))
+  (let ((parameter-values (eliscript-form-value parameters)))
+    (unless (proper-list-p parameter-values)
+      (eliscript-analyzer--fail "function arguments must be a list"))
+    (setq parameters parameter-values))
   (let ((child (eliscript-analyzer--make-scope scope)))
     (dolist (parameter parameters)
       (eliscript-analyzer--declare child parameter 'parameter t))
@@ -149,13 +165,21 @@
      "%s expects one or more name/value pairs" form-name))
   (while arguments
     (let* ((name (pop arguments))
+           (name-value (eliscript-form-value name))
            (value (pop arguments))
-           (binding (and (symbolp name)
-                         (eliscript-analyzer--require-binding scope name))))
+           (binding (and (symbolp name-value)
+                         (eliscript-analyzer--require-binding
+                          scope name-value))))
       (unless binding
-        (eliscript-analyzer--fail "assignment target must be a symbol: %S" name))
+        (eliscript-analyzer--fail
+         "assignment target must be a symbol: %S"
+         (eliscript-form-strip name)))
       (unless (eliscript-analyzer--binding-mutable binding)
-        (eliscript-analyzer--fail "cannot assign to immutable binding: %s" name))
+        (let ((eliscript-analyzer--current-span
+               (or (eliscript-form-span name)
+                   eliscript-analyzer--current-span)))
+          (eliscript-analyzer--fail
+           "cannot assign to immutable binding: %s" name-value)))
       (eliscript-analyzer--analyze-expression value scope))))
 
 (defun eliscript-analyzer--analyze-object (arguments scope)
@@ -165,7 +189,10 @@
   (while arguments
     (let ((key (pop arguments))
           (value (pop arguments)))
-      (unless (or (keywordp key) (stringp key) (symbolp key))
+      (unless (let ((key-value (eliscript-form-value key)))
+                (or (keywordp key-value)
+                    (stringp key-value)
+                    (symbolp key-value)))
         (eliscript-analyzer--analyze-expression key scope))
       (eliscript-analyzer--analyze-expression value scope))))
 
@@ -183,22 +210,30 @@
        (eliscript-analyzer--fail "js-call expects 2+ arguments"))))
   (eliscript-analyzer--analyze-expression (car arguments) scope)
   (let ((key (cadr arguments)))
-    (unless (or (keywordp key) (stringp key))
+    (unless (let ((key-value (eliscript-form-value key)))
+              (or (keywordp key-value) (stringp key-value)))
       (eliscript-analyzer--analyze-expression key scope)))
   (eliscript-analyzer--analyze-sequence (nthcdr 2 arguments) scope))
 
 (defun eliscript-analyzer--analyze-cond (clauses scope)
   "Analyze cond CLAUSES in SCOPE."
   (dolist (clause clauses)
-    (unless (and (proper-list-p clause) clause)
-      (eliscript-analyzer--fail "invalid cond clause: %S" clause))
-    (eliscript-analyzer--analyze-expression (car clause) scope)
-    (eliscript-analyzer--analyze-sequence (cdr clause) scope)))
+    (let ((value (eliscript-form-value clause)))
+      (unless (and (proper-list-p value) value)
+        (let ((eliscript-analyzer--current-span
+               (or (eliscript-form-span clause)
+                   eliscript-analyzer--current-span)))
+          (eliscript-analyzer--fail
+           "invalid cond clause: %S" (eliscript-form-strip clause))))
+      (eliscript-analyzer--analyze-expression (car value) scope)
+      (eliscript-analyzer--analyze-sequence (cdr value) scope))))
 
 (defun eliscript-analyzer--analyze-call (form scope)
   "Analyze call FORM in SCOPE."
-  (let ((operator (car form))
-        (arguments (cdr form)))
+  (let* ((items (eliscript-form-value form))
+         (operator-form (car items))
+         (operator (eliscript-form-value operator-form))
+         (arguments (cdr items)))
     (pcase operator
       ((or 'lambda 'fn)
        (unless arguments
@@ -225,37 +260,44 @@
            'import 'module)
        (eliscript-analyzer--fail "%s is only valid at module top level" operator))
       (_
-       (eliscript-analyzer--analyze-expression operator scope)
+       (eliscript-analyzer--analyze-expression operator-form scope)
        (eliscript-analyzer--analyze-sequence arguments scope)))))
 
 (defun eliscript-analyzer--analyze-expression (form scope)
   "Analyze expression FORM in lexical SCOPE."
-  (cond
-   ((or (null form) (eq form t) (numberp form) (stringp form)
-        (keywordp form) (eq form 'false) (eq form 'undefined)) nil)
-   ((symbolp form)
-    (unless (eliscript-analyzer--qualified-symbol-p form)
-      (eliscript-analyzer--require-binding scope form)))
-   ((vectorp form)
-    (mapc (lambda (item)
-            (eliscript-analyzer--analyze-expression item scope))
-          (append form nil)))
-   ((consp form)
-    (unless (proper-list-p form)
-      (eliscript-analyzer--fail "dotted call forms are not supported: %S" form))
-    (eliscript-analyzer--analyze-call form scope))
-   (t (eliscript-analyzer--fail "unsupported form: %S" form))))
+  (let* ((eliscript-analyzer--current-span
+          (or (eliscript-form-span form) eliscript-analyzer--current-span))
+         (value (eliscript-form-value form)))
+    (cond
+     ((or (null value) (eq value t) (numberp value) (stringp value)
+          (keywordp value) (eq value 'false) (eq value 'undefined)) nil)
+     ((symbolp value)
+      (unless (eliscript-analyzer--qualified-symbol-p value)
+        (eliscript-analyzer--require-binding scope value)))
+     ((vectorp value)
+      (mapc (lambda (item)
+              (eliscript-analyzer--analyze-expression item scope))
+            (append value nil)))
+     ((consp value)
+      (unless (proper-list-p value)
+        (eliscript-analyzer--fail
+         "dotted call forms are not supported: %S"
+         (eliscript-form-strip form)))
+      (eliscript-analyzer--analyze-call form scope))
+     (t (eliscript-analyzer--fail
+         "unsupported form: %S" (eliscript-form-strip form))))))
 
 (defun eliscript-analyzer--import-bindings (arguments)
   "Return local binding names declared by import ARGUMENTS."
-  (unless (stringp (car arguments))
+  (unless (stringp (eliscript-form-value (car arguments)))
     (eliscript-analyzer--fail "import module must be a string"))
   (let ((specifiers (cdr arguments))
         bindings
         default-seen
         namespace-seen)
     (while specifiers
-      (let ((specifier (pop specifiers)))
+      (let* ((specifier-form (pop specifiers))
+             (specifier (eliscript-form-value specifier-form)))
         (pcase specifier
           (:default
            (when default-seen
@@ -271,7 +313,7 @@
              (eliscript-analyzer--fail ":as requires a namespace binding"))
            (setq namespace-seen t)
            (push (pop specifiers) bindings))
-          ((pred symbolp) (push specifier bindings))
+          ((pred symbolp) (push specifier-form bindings))
           (_ (eliscript-analyzer--fail
               "invalid import specifier: %S" specifier)))))
     (nreverse bindings)))
@@ -282,43 +324,58 @@
    #'append
    (mapcar
     (lambda (form)
-      (if (and (consp form) (eq (car form) 'module))
-          (progn
-            (unless (and (cdr form) (symbolp (cadr form)))
-              (eliscript-analyzer--fail "module name must be a symbol"))
-            (eliscript-analyzer--flatten-modules (cddr form)))
-        (list form)))
+      (let ((value (eliscript-form-value form)))
+        (if (and (consp value)
+                 (eq (eliscript-form-value (car value)) 'module))
+            (let ((eliscript-analyzer--current-span
+                   (or (eliscript-form-span form)
+                       eliscript-analyzer--current-span)))
+              (unless (and (cdr value)
+                           (symbolp (eliscript-form-value (cadr value))))
+                (eliscript-analyzer--fail "module name must be a symbol"))
+              (eliscript-analyzer--flatten-modules (cddr value)))
+          (list form))))
     forms)))
 
 (defun eliscript-analyzer--predeclare-top-level (forms scope)
   "Declare all top-level bindings from FORMS in SCOPE."
   (dolist (form forms)
-    (when (consp form)
-      (pcase (car form)
+    (let* ((value (eliscript-form-value form))
+           (eliscript-analyzer--current-span
+            (or (eliscript-form-span form) eliscript-analyzer--current-span)))
+      (when (consp value)
+        (pcase (eliscript-form-value (car value))
         ('import
-         (unless (cdr form)
+         (unless (cdr value)
            (eliscript-analyzer--fail "import expects a module name"))
-         (dolist (name (eliscript-analyzer--import-bindings (cdr form)))
+         (dolist (name (eliscript-analyzer--import-bindings (cdr value)))
            (eliscript-analyzer--declare scope name 'import nil)))
         ('defvar
-         (unless (<= 1 (length (cdr form)) 2)
+         (unless (<= 1 (length (cdr value)) 2)
            (eliscript-analyzer--fail "defvar expects 1..2 arguments"))
-         (eliscript-analyzer--declare scope (cadr form) 'variable t))
+         (eliscript-analyzer--declare scope (cadr value) 'variable t))
         ('defconst
-         (unless (<= 1 (length (cdr form)) 2)
+         (unless (<= 1 (length (cdr value)) 2)
            (eliscript-analyzer--fail "defconst expects 1..2 arguments"))
-         (eliscript-analyzer--declare scope (cadr form) 'constant nil))
+         (eliscript-analyzer--declare scope (cadr value) 'constant nil))
         ((or 'defun 'defn)
-         (unless (>= (length (cdr form)) 2)
-           (eliscript-analyzer--fail "%s expects 2+ arguments" (car form)))
-         (eliscript-analyzer--declare scope (cadr form) 'function nil))))))
+         (unless (>= (length (cdr value)) 2)
+           (eliscript-analyzer--fail
+            "%s expects 2+ arguments"
+            (eliscript-form-value (car value))))
+         (eliscript-analyzer--declare
+          scope (cadr value) 'function nil)))))))
 
 (defun eliscript-analyzer--analyze-top-level (form scope)
   "Analyze top-level FORM in module SCOPE."
-  (if (not (consp form))
-      (eliscript-analyzer--analyze-expression form scope)
-    (let ((operator (car form))
-          (arguments (cdr form)))
+  (let* ((value (eliscript-form-value form))
+         (eliscript-analyzer--current-span
+          (or (eliscript-form-span form) eliscript-analyzer--current-span)))
+    (if (not (consp value))
+        (eliscript-analyzer--analyze-expression form scope)
+      (let* ((operator-form (car value))
+             (operator (eliscript-form-value operator-form))
+             (arguments (cdr value)))
       (pcase operator
         ('import nil)
         ((or 'defvar 'defconst)
@@ -334,20 +391,27 @@
          (unless arguments
            (eliscript-analyzer--fail "export expects one or more bindings"))
          (dolist (name arguments)
-           (unless (symbolp name)
-             (eliscript-analyzer--fail "export name must be a symbol: %S" name))
-           (eliscript-analyzer--require-binding scope name)))
+           (let ((name-value (eliscript-form-value name))
+                 (eliscript-analyzer--current-span
+                  (or (eliscript-form-span name)
+                      eliscript-analyzer--current-span)))
+             (unless (symbolp name-value)
+               (eliscript-analyzer--fail
+                "export name must be a symbol: %S"
+                (eliscript-form-strip name)))
+             (eliscript-analyzer--require-binding scope name-value))))
         ('export-default
          (unless (= (length arguments) 1)
            (eliscript-analyzer--fail "export-default expects 1 argument"))
          (eliscript-analyzer--analyze-expression (car arguments) scope))
-        (_ (eliscript-analyzer--analyze-expression form scope))))))
+        (_ (eliscript-analyzer--analyze-expression form scope)))))))
 
 (defun eliscript-analyze-module (forms &optional filename)
   "Validate lexical bindings in module FORMS read from FILENAME.
 
 Return FORMS unchanged for the emitter."
   (let* ((eliscript-analyzer--filename filename)
+         (eliscript-analyzer--current-span nil)
          (flattened (eliscript-analyzer--flatten-modules forms))
          (scope (eliscript-analyzer--make-scope)))
     (eliscript-analyzer--predeclare-top-level flattened scope)

@@ -212,9 +212,10 @@ of the CLI integration test.
 - Define the IR and public compiler diagnostics.
 - Execute emitted modules in a JavaScript test runner.
 
-Lexical binding validation, trusted compile-time macro expansion, public
-compiler errors, output-name collision checks, and JavaScript execution are
-implemented. Located forms, the explicit IR, and source maps remain.
+Lexical binding validation, trusted compile-time macro expansion, recursively
+located forms, filename/line/column diagnostics, output-name collision checks,
+and JavaScript execution are implemented. The explicit IR and source maps
+remain.
 
 ### M2: React
 

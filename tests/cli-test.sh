@@ -26,9 +26,9 @@ if "$PROJECT_DIR/bin/eliscript" "$TEMP_DIR/broken.eli" \
   exit 1
 fi
 
-if ! grep -F "$TEMP_DIR/broken.eli: unbound symbol: missing" \
+if ! grep -F "$TEMP_DIR/broken.eli:1:18: unbound symbol: missing" \
   "$TEMP_DIR/broken.err" >/dev/null; then
-  printf 'expected filename-bearing analyzer diagnostic, got:\n' >&2
+  printf 'expected located analyzer diagnostic, got:\n' >&2
   cat "$TEMP_DIR/broken.err" >&2
   exit 1
 fi

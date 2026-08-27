@@ -10,6 +10,7 @@
 
 (require 'cl-lib)
 (require 'eliscript-diagnostic)
+(require 'eliscript-form)
 
 (cl-defstruct (eliscript-expander--macro
                (:constructor eliscript-expander--macro-create))
@@ -20,12 +21,14 @@
   "Maximum number of recursive macro expansions at one call site.")
 
 (defvar eliscript-expander--filename nil)
+(defvar eliscript-expander--current-span nil)
 
 (defun eliscript-expander--fail (format-string &rest arguments)
   "Signal an expansion error using FORMAT-STRING and ARGUMENTS."
   (signal 'eliscript-expand-error
-          (list (apply #'eliscript-diagnostic-format
+          (list (apply #'eliscript-diagnostic-format-at
                        eliscript-expander--filename
+                       eliscript-expander--current-span
                        format-string
                        arguments))))
 
@@ -37,12 +40,14 @@
 
 (defun eliscript-expander--register (form environment)
   "Compile macro definition FORM and add it to ENVIRONMENT."
-  (let ((arguments (cdr form)))
+  (let* ((items (eliscript-form-value form))
+         (arguments (cdr items))
+         (eliscript-expander--current-span (eliscript-form-span form)))
     (unless (>= (length arguments) 2)
       (eliscript-expander--fail "defmacro expects a name and parameter list"))
-    (let ((name (nth 0 arguments))
-          (parameters (nth 1 arguments))
-          (body (nthcdr 2 arguments)))
+    (let ((name (eliscript-form-value (nth 0 arguments)))
+          (parameters (eliscript-form-strip (nth 1 arguments)))
+          (body (mapcar #'eliscript-form-strip (nthcdr 2 arguments))))
       (unless (symbolp name)
         (eliscript-expander--fail "macro name must be a symbol: %S" name))
       (unless (proper-list-p parameters)
@@ -75,7 +80,8 @@
      eliscript-expander--maximum-depth
      (eliscript-expander--macro-name definition)))
   (condition-case error-data
-      (apply (eliscript-expander--macro-function definition) arguments)
+      (apply (eliscript-expander--macro-function definition)
+             (mapcar #'eliscript-form-strip arguments))
     (error
      (eliscript-expander--fail
       "macro %s failed: %s"
@@ -90,24 +96,30 @@
 
 (defun eliscript-expander--expand-binding (binding environment depth)
   "Expand initializer in one let BINDING using ENVIRONMENT at DEPTH."
-  (if (and (consp binding) (proper-list-p binding))
-      (cons (car binding)
-            (eliscript-expander--expand-sequence
-             (cdr binding) environment depth))
-    binding))
+  (let ((value (eliscript-form-value binding)))
+    (if (and (consp value) (proper-list-p value))
+        (eliscript-form-inherit
+         (cons (car value)
+               (eliscript-expander--expand-sequence
+                (cdr value) environment depth))
+         binding)
+      binding)))
 
 (defun eliscript-expander--expand-bindings (arguments environment depth)
   "Expand let ARGUMENTS in ENVIRONMENT at DEPTH."
   (if (null arguments)
       arguments
-    (let ((bindings (car arguments)))
+    (let* ((bindings-form (car arguments))
+           (bindings (eliscript-form-value bindings-form)))
       (cons
-       (if (proper-list-p bindings)
-           (mapcar (lambda (binding)
-                     (eliscript-expander--expand-binding
-                      binding environment depth))
-                   bindings)
-         bindings)
+       (eliscript-form-inherit
+        (if (proper-list-p bindings)
+            (mapcar (lambda (binding)
+                      (eliscript-expander--expand-binding
+                       binding environment depth))
+                    bindings)
+          bindings)
+        bindings-form)
        (eliscript-expander--expand-sequence
         (cdr arguments) environment depth)))))
 
@@ -125,10 +137,11 @@
   (cl-loop for argument in arguments
            for index from 0
            collect
-           (if (or (cl-oddp index)
-                   (not (or (keywordp argument)
-                            (stringp argument)
-                            (symbolp argument))))
+           (if (let ((value (eliscript-form-value argument)))
+                 (or (cl-oddp index)
+                     (not (or (keywordp value)
+                              (stringp value)
+                              (symbolp value)))))
                (eliscript-expander--expand-expression
                 argument environment depth)
              argument)))
@@ -139,7 +152,8 @@
            for index from 0
            collect
            (if (and (= index 1)
-                    (or (keywordp argument) (stringp argument)))
+                    (let ((value (eliscript-form-value argument)))
+                      (or (keywordp value) (stringp value))))
                argument
              (eliscript-expander--expand-expression
               argument environment depth))))
@@ -148,127 +162,159 @@
   "Expand COND CLAUSES in ENVIRONMENT at DEPTH."
   (mapcar
    (lambda (clause)
-     (if (proper-list-p clause)
-         (eliscript-expander--expand-sequence clause environment depth)
-       clause))
+     (let ((value (eliscript-form-value clause)))
+       (if (proper-list-p value)
+           (eliscript-form-inherit
+            (eliscript-expander--expand-sequence value environment depth)
+            clause)
+         clause)))
    clauses))
 
 (defun eliscript-expander--expand-expression (form environment depth)
   "Expand expression FORM in macro ENVIRONMENT at DEPTH."
-  (cond
-   ((vectorp form)
-    (apply #'vector
-           (eliscript-expander--expand-sequence
-            (append form nil) environment depth)))
-   ((not (consp form)) form)
-   ((not (proper-list-p form))
-    (eliscript-expander--fail "dotted call forms are not supported: %S" form))
-   ((eq (car form) 'quote) form)
-   ((eq (car form) 'defmacro)
-    (eliscript-expander--fail "defmacro is only valid at module top level"))
-   ((and (symbolp (car form)) (gethash (car form) environment))
-    (eliscript-expander--expand-expression
-     (eliscript-expander--invoke
-      (gethash (car form) environment) (cdr form) depth)
-     environment
-     (1+ depth)))
-   (t
-    (let ((operator (car form))
-          (arguments (cdr form)))
-      (pcase operator
-        ((or 'lambda 'fn)
-         (if arguments
-             (cons operator
-                   (cons (car arguments)
-                         (eliscript-expander--expand-sequence
-                          (cdr arguments) environment depth)))
-           form))
-        ((or 'let 'let*)
-         (cons operator
-               (eliscript-expander--expand-bindings
-                arguments environment depth)))
-        ('setq
-         (cons operator
-               (eliscript-expander--expand-assignment
-                arguments environment depth)))
-        ('set!
-         (cons operator
-               (if arguments
-                   (cons (car arguments)
-                         (eliscript-expander--expand-sequence
-                          (cdr arguments) environment depth))
-                 nil)))
-        ('cond
-         (cons operator
-               (eliscript-expander--expand-cond
-                arguments environment depth)))
-        ('object
-         (cons operator
-               (eliscript-expander--expand-object
-                arguments environment depth)))
-        ((or 'get 'put 'js-call)
-         (cons operator
-               (eliscript-expander--expand-property-call
-                arguments environment depth)))
-        (_
-         (cons (if (symbolp operator)
-                   operator
-                 (eliscript-expander--expand-expression
-                  operator environment depth))
-               (eliscript-expander--expand-sequence
-                arguments environment depth))))))))
+  (let* ((value (eliscript-form-value form))
+         (eliscript-expander--current-span
+          (or (eliscript-form-span form) eliscript-expander--current-span)))
+    (cond
+     ((vectorp value)
+      (eliscript-form-inherit
+       (apply #'vector
+              (eliscript-expander--expand-sequence
+               (append value nil) environment depth))
+       form))
+     ((not (consp value)) form)
+     ((not (proper-list-p value))
+      (eliscript-expander--fail
+       "dotted call forms are not supported: %S"
+       (eliscript-form-strip form)))
+     (t
+      (let* ((operator-form (car value))
+             (operator (eliscript-form-value operator-form))
+             (arguments (cdr value)))
+        (cond
+         ((eq operator 'quote) form)
+         ((eq operator 'defmacro)
+          (eliscript-expander--fail
+           "defmacro is only valid at module top level"))
+         ((and (symbolp operator) (gethash operator environment))
+          (eliscript-expander--expand-expression
+           (eliscript-form-locate-generated
+            (eliscript-expander--invoke
+             (gethash operator environment) arguments depth)
+            eliscript-expander--current-span)
+           environment
+           (1+ depth)))
+         (t
+          (eliscript-form-inherit
+           (pcase operator
+             ((or 'lambda 'fn)
+              (if arguments
+                  (cons operator-form
+                        (cons (car arguments)
+                              (eliscript-expander--expand-sequence
+                               (cdr arguments) environment depth)))
+                value))
+             ((or 'let 'let*)
+              (cons operator-form
+                    (eliscript-expander--expand-bindings
+                     arguments environment depth)))
+             ('setq
+              (cons operator-form
+                    (eliscript-expander--expand-assignment
+                     arguments environment depth)))
+             ('set!
+              (cons operator-form
+                    (if arguments
+                        (cons (car arguments)
+                              (eliscript-expander--expand-sequence
+                               (cdr arguments) environment depth))
+                      nil)))
+             ('cond
+              (cons operator-form
+                    (eliscript-expander--expand-cond
+                     arguments environment depth)))
+             ('object
+              (cons operator-form
+                    (eliscript-expander--expand-object
+                     arguments environment depth)))
+             ((or 'get 'put 'js-call)
+              (cons operator-form
+                    (eliscript-expander--expand-property-call
+                     arguments environment depth)))
+             (_
+              (cons (if (symbolp operator)
+                        operator-form
+                      (eliscript-expander--expand-expression
+                       operator-form environment depth))
+                    (eliscript-expander--expand-sequence
+                     arguments environment depth))))
+           form))))))))
 
 (defun eliscript-expander--expand-top-level (form environment depth)
   "Expand top-level FORM in ENVIRONMENT at DEPTH and return zero or one forms."
-  (cond
-   ((not (consp form))
-    (list (eliscript-expander--expand-expression form environment depth)))
-   ((not (proper-list-p form))
-    (eliscript-expander--fail "dotted top-level form is not supported: %S" form))
-   ((eq (car form) 'defmacro)
-    (eliscript-expander--register form environment)
-    nil)
-   ((and (symbolp (car form)) (gethash (car form) environment))
-    (eliscript-expander--expand-top-level
-     (eliscript-expander--invoke
-      (gethash (car form) environment) (cdr form) depth)
-     environment
-     (1+ depth)))
-   (t
-    (let ((operator (car form))
-          (arguments (cdr form)))
-      (list
-       (pcase operator
-         ('module
-          (if arguments
-              (cons 'module
-                    (cons (car arguments)
-                          (eliscript-expander--expand-top-level-sequence
-                           (cdr arguments) environment depth)))
-            form))
-         ((or 'defun 'defn)
-          (if (>= (length arguments) 2)
-              (cons operator
-                    (cons (nth 0 arguments)
-                          (cons (nth 1 arguments)
-                                (eliscript-expander--expand-sequence
-                                 (nthcdr 2 arguments) environment depth))))
-            form))
-         ((or 'defvar 'defconst)
-          (cons operator
-                (if arguments
-                    (cons (car arguments)
-                          (eliscript-expander--expand-sequence
-                           (cdr arguments) environment depth))
-                  nil)))
-         ((or 'import 'export) form)
-         ('export-default
-          (cons operator
-                (eliscript-expander--expand-sequence
-                 arguments environment depth)))
-         (_
-          (eliscript-expander--expand-expression
-           form environment depth))))))))
+  (let* ((value (eliscript-form-value form))
+         (eliscript-expander--current-span
+          (or (eliscript-form-span form) eliscript-expander--current-span)))
+    (cond
+     ((not (consp value))
+      (list (eliscript-expander--expand-expression form environment depth)))
+     ((not (proper-list-p value))
+      (eliscript-expander--fail
+       "dotted top-level form is not supported: %S"
+       (eliscript-form-strip form)))
+     (t
+      (let* ((operator-form (car value))
+             (operator (eliscript-form-value operator-form))
+             (arguments (cdr value)))
+        (cond
+         ((eq operator 'defmacro)
+          (eliscript-expander--register form environment)
+          nil)
+         ((and (symbolp operator) (gethash operator environment))
+          (eliscript-expander--expand-top-level
+           (eliscript-form-locate-generated
+            (eliscript-expander--invoke
+             (gethash operator environment) arguments depth)
+            eliscript-expander--current-span)
+           environment
+           (1+ depth)))
+         (t
+          (list
+           (eliscript-form-inherit
+            (pcase operator
+              ('module
+               (if arguments
+                   (cons operator-form
+                         (cons (car arguments)
+                               (eliscript-expander--expand-top-level-sequence
+                                (cdr arguments) environment depth)))
+                 value))
+              ((or 'defun 'defn)
+               (if (>= (length arguments) 2)
+                   (cons operator-form
+                         (cons (nth 0 arguments)
+                               (cons (nth 1 arguments)
+                                     (eliscript-expander--expand-sequence
+                                      (nthcdr 2 arguments)
+                                      environment depth))))
+                 value))
+              ((or 'defvar 'defconst)
+               (cons operator-form
+                     (if arguments
+                         (cons (car arguments)
+                               (eliscript-expander--expand-sequence
+                                (cdr arguments) environment depth))
+                       nil)))
+              ((or 'import 'export) value)
+              ('export-default
+               (cons operator-form
+                     (eliscript-expander--expand-sequence
+                      arguments environment depth)))
+              (_
+               (eliscript-form-value
+                (eliscript-expander--expand-expression
+                 form environment depth))))
+            form)))))))))
 
 (defun eliscript-expander--expand-top-level-sequence
     (forms environment depth)
