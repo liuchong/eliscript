@@ -72,7 +72,9 @@ The implemented binding forms are:
 
 - `defconst` for top-level immutable bindings
 - `defvar` for top-level mutable bindings
-- `defun` and `defn` for named functions
+- `defun` and `defn` for ordinary named functions
+- `defportable` for worker entries with a statically checked dependency closure;
+  see [0021-portable-functions.md](0021-portable-functions.md)
 - `lambda` and `fn` for anonymous functions
 - `let` for parallel lexical bindings
 - `let*` for sequential lexical bindings

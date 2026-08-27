@@ -48,6 +48,11 @@ ESM export name, JSON argument array, and optional positive `timeoutMs`:
 {"version":1,"type":"request","id":"7","module":"/tmp/work.mjs","export":"score_values","arguments":[[1,2,3],4],"timeoutMs":30000}
 ```
 
+Requests for statically checked modules may replace `export` with an Eliscript
+source-level `operation` name. The worker resolves it only through the frozen
+`__eliscript_portable__` manifest; exactly one of `export` and `operation` is
+required. A missing operation returns `missing-portable`.
+
 The worker accepts only local `file:` modules and caches import promises by
 normalized URL. Requests may execute concurrently and responses may arrive out
 of order; the id is the sole correlation key.
@@ -131,7 +136,7 @@ stops its own worker in cleanup.
 
 ## Next Phase
 
-A2 will define portable function declarations and static transitive-dependency
-validation. A3 will add ergonomic editor commands, cache policy, automatic
+A2 is specified in [0021-portable-functions.md](0021-portable-functions.md).
+A3 will add ergonomic editor commands, cache policy, automatic
 restart, source-mapped runtime diagnostics, and a representative publishing,
 parsing, or indexing integration.

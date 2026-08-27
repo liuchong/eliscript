@@ -13,15 +13,16 @@
 
 (defconst eliscript-cli--usage
   (concat
-   "Usage: eliscript [--output FILE] [--source-map] INPUT\n\n"
+   "Usage: eliscript [--output FILE] [--source-map] [--portable NAME] INPUT\n\n"
    "Compile INPUT to an ECMAScript module. Write to stdout when --output "
-   "is absent.\n--source-map writes FILE.map and requires --output.\n"))
+   "is absent.\n--source-map writes FILE.map and requires --output.\n"
+   "Repeat --portable to emit only those worker entries and dependencies.\n"))
 
 (defun eliscript-cli--parse (arguments)
-  "Parse command line ARGUMENTS and return (INPUT OUTPUT SOURCE-MAP)."
+  "Parse ARGUMENTS and return (INPUT OUTPUT SOURCE-MAP PORTABLE-ENTRIES)."
   (when (equal (car arguments) "--")
     (setq arguments (cdr arguments)))
-  (let (input output source-map)
+  (let (input output source-map portable-entries)
     (while arguments
       (let ((argument (pop arguments)))
         (cond
@@ -34,6 +35,10 @@
           (setq output (pop arguments)))
          ((equal argument "--source-map")
           (setq source-map t))
+         ((equal argument "--portable")
+          (unless arguments
+            (error "%s requires a function name" argument))
+          (push (pop arguments) portable-entries))
          ((string-prefix-p "-" argument)
           (error "unknown option: %s" argument))
          (input (error "multiple input files are not supported yet"))
@@ -42,16 +47,22 @@
       (error "missing input file"))
     (when (and source-map (null output))
       (error "--source-map requires --output"))
-    (list input output source-map)))
+    (when (and source-map portable-entries)
+      (error "--source-map is not supported with --portable yet"))
+    (list input output source-map (nreverse portable-entries))))
 
 (defun eliscript-cli-main (arguments)
   "Compile according to command-line ARGUMENTS."
   (condition-case error-data
-      (pcase-let ((`(,input ,output ,source-map)
+      (pcase-let ((`(,input ,output ,source-map ,portable-entries)
                    (eliscript-cli--parse arguments)))
         (if source-map
             (eliscript-compile-file-with-source-map input output)
-          (let ((generated (eliscript-compile-file input output)))
+          (let ((generated
+                 (if portable-entries
+                     (eliscript-compile-portable-file
+                      input portable-entries output)
+                   (eliscript-compile-file input output))))
             (unless output
               (princ generated)))))
     (error

@@ -127,10 +127,10 @@
                  (mapcar #'eliscript-ir-node-to-form
                          (eliscript-ir-node-children node)))))
     ((or 'function-declaration 'function-expression)
-     (let* ((operator (if (eq (eliscript-ir-node-kind node)
-                              'function-declaration)
-                          'defun
-                        'lambda))
+     (let* ((operator
+             (if (eq (eliscript-ir-node-kind node) 'function-declaration)
+                 (or (eliscript-ir-property node :source-operator) 'defun)
+               'lambda))
             (children (eliscript-ir-node-children node))
             (parameter-count (eliscript-ir-property node :parameter-count))
            (parameters
@@ -138,7 +138,7 @@
                     (cl-subseq children 0 parameter-count)))
            (body (mapcar #'eliscript-ir-node-to-form
                          (nthcdr parameter-count children))))
-       (if (eq operator 'defun)
+       (if (memq operator '(defun defn defportable))
            (cons operator
                  (cons (eliscript-ir-node-value node)
                        (cons parameters body)))

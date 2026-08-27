@@ -296,8 +296,10 @@ The detailed execution boundary is specified in
 Started on 2026-08-28. Protocol version 1, the long-lived Bun worker, Emacs
 client, cooperative cancellation, hard timeout recovery, and segmented
 cold/warm benchmark are implemented. See
-[0020-worker-protocol.md](0020-worker-protocol.md). Portable function
-declarations and static dependency validation are next.
+[0020-worker-protocol.md](0020-worker-protocol.md). `defportable`, transitive
+dependency validation, closure-only compilation, generated manifests, and
+source-name worker calls are also implemented in both compilers. See
+[0021-portable-functions.md](0021-portable-functions.md).
 
 ## Non-goals for the Initial Implementation
 

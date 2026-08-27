@@ -251,7 +251,12 @@
   "Convert seed IR NODE properties to portable camel-case fields."
   (let ((kind (eliscript-ir-node-kind node)))
     (pcase kind
-      ((or 'function-declaration 'function-expression)
+      ('function-declaration
+       `((parameterCount . ,(eliscript-ir-property node :parameter-count))
+         (sourceOperator . ,(symbol-name
+                             (eliscript-ir-property node :source-operator)))
+         (portable . ,(if (eliscript-ir-property node :portable) t :false))))
+      ('function-expression
        `((parameterCount . ,(eliscript-ir-property node :parameter-count))))
       ('variable-declaration
        `((sourceOperator . ,(symbol-name

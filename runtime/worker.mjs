@@ -12,6 +12,7 @@ export const capabilities = [
   "timeout",
   "shutdown",
   "module-cache",
+  "portable-manifest",
 ];
 
 const maximumLineBytes = 16 * 1024 * 1024;
@@ -114,8 +115,13 @@ function validateRequest(message) {
   if (typeof message.module !== "string" || message.module.length === 0) {
     throw new Error("request module must be a non-empty string");
   }
-  if (typeof message.export !== "string" || message.export.length === 0) {
-    throw new Error("request export must be a non-empty string");
+  const hasExport = typeof message.export === "string" && message.export.length > 0;
+  const hasOperation = typeof message.operation === "string" &&
+    message.operation.length > 0;
+  if (hasExport === hasOperation) {
+    throw new Error(
+      "request must contain exactly one non-empty export or operation",
+    );
   }
   if (!Array.isArray(message.arguments)) {
     throw new Error("request arguments must be an array");
@@ -162,12 +168,22 @@ async function executeRequest(message) {
     const moduleLoadStartedAt = performance.now();
     const module = await loadModule(message.module);
     moduleLoadMs = performance.now() - moduleLoadStartedAt;
-    const operation = module[message.export];
+    const manifest = module.__eliscript_portable__;
+    const operation = message.operation === undefined
+      ? module[message.export]
+      : manifest && Object.hasOwn(manifest, message.operation)
+        ? manifest[message.operation]
+        : undefined;
     if (typeof operation !== "function") {
+      const operationName = message.operation ?? message.export;
       const error = new Error(
-        `module does not export a function named ${message.export}`,
+        message.operation === undefined
+          ? `module does not export a function named ${operationName}`
+          : `module does not declare a portable function named ${operationName}`,
       );
-      error.code = "missing-export";
+      error.code = message.operation === undefined
+        ? "missing-export"
+        : "missing-portable";
       throw error;
     }
     const context = {

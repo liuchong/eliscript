@@ -15,4 +15,6 @@ runtime for element construction.
 versioned NDJSON, imports local generated modules, correlates concurrent
 requests, and supports progress, cooperative cancellation, timeouts, structured
 errors, module caching, and shutdown. Protocol stdout is isolated from module
-logs, which are redirected to stderr.
+logs, which are redirected to stderr. Requests may address a raw generated ESM
+export or resolve a `defportable` source name through the module's frozen
+`__eliscript_portable__` manifest.

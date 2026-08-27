@@ -89,6 +89,18 @@ Measure the long-lived Emacs-to-Bun worker boundary:
 bun run benchmark:worker
 ```
 
+Declare and compile one statically checked worker entry with only its
+transitive dependencies:
+
+```elisp
+(defportable score-values (values)
+  (length values))
+```
+
+```sh
+./bin/eliscript --portable score-values --output dist/score.mjs source.eli
+```
+
 ## Why
 
 Emacs Lisp is a productive language for editing, automation, macros, and
@@ -139,7 +151,7 @@ The first compiler accepts an Emacs Lisp-shaped lexical subset:
 Implemented forms include:
 
 - literals, symbols, keywords, vectors, quoted lists, and object literals
-- `defvar`, `defconst`, `defun`, `lambda`, `let`, and `let*`
+- `defvar`, `defconst`, `defun`, `defportable`, `lambda`, `let`, and `let*`
 - `if`, `when`, `unless`, `cond`, `progn`, `while`, `and`, and `or`
 - `setq`, arithmetic, comparisons, and basic list/vector operations
 - ESM `module`, `import`, `export`, and `export-default`
@@ -301,7 +313,10 @@ Current evidence:
 - The worker benchmark separates compile, startup, module load, execution,
   serialization, transport, and client costs. Its reference workload verifies
   equal results without treating a machine-specific speed ratio as a test gate.
-- Fifty-three ERT tests cover reading, locations, macro expansion, analysis, IR
+- `defportable` entries are checked across their transitive immutable closure,
+  compiled without unrelated declarations, exported through a source-name
+  manifest, and callable from Emacs without exposing generated JS identifiers.
+- Fifty-nine ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
 - Fifteen Bun tests cover the compiler and Org Vite adapters, source-map
@@ -312,8 +327,10 @@ Current evidence:
   higher-order functions, objects, arrays, exports, React server rendering, and
   production Vite bundles, and deterministic Org publishing.
 
-M5 has begun with a measured long-lived worker boundary. Portable function
-declarations and static dependency validation are next.
+M5 now has a measured long-lived worker boundary and a statically checked
+portable-function path shared by the seed and self-hosted compilers. A3 will
+focus on source-mapped runtime diagnostics, restart/cache policy, and a
+representative editor workload.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -347,7 +364,10 @@ portable ESM and Source Map generation, and
 [specs/0019-self-hosted-compiler.md](specs/0019-self-hosted-compiler.md) for the
 portable driver, Bun adapter, and reproducible compiler fixed point, and
 [specs/0020-worker-protocol.md](specs/0020-worker-protocol.md) for the long-lived
-execution protocol and measurement boundary.
+execution protocol and measurement boundary, and
+[specs/0021-portable-functions.md](specs/0021-portable-functions.md) for
+`defportable`, closure validation, generated manifests, and source-name worker
+calls.
 
 ## License
 

@@ -15,8 +15,17 @@ and worker directories on `load-path`:
     (eliscript-worker-stop worker)))
 ```
 
-`eliscript-worker-call` is asynchronous and accepts result/error, progress, and
-timing callbacks. `eliscript-worker-cancel` requests cooperative cancellation.
+Generated `defportable` modules can be called by their Eliscript source name:
+
+```elisp
+(eliscript-worker-call-portable-sync
+ worker "/absolute/path/to/module.mjs" "score-values" (list [1 2 3])
+ :timeout-ms 5000)
+```
+
+`eliscript-worker-call` and `eliscript-worker-call-portable` are asynchronous
+and accept result/error, progress, and timing callbacks.
+`eliscript-worker-cancel` requests cooperative cancellation.
 Remote timeouts are followed by a short client grace period; the process is
 terminated if synchronous JavaScript prevents the worker from responding.
 

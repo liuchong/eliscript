@@ -890,6 +890,9 @@
            ((= operator "defcomponent")
             (expander-fail
               context span "defcomponent is only valid at module top level"))
+           ((= operator "defportable")
+            (expander-fail
+              context span "defportable is only valid at module top level"))
            ((and operator (js-call environment :has operator))
             (expand-expression
               (locate-generated
@@ -984,7 +987,8 @@
                              environment depth context)
                     :forEach
                     (lambda (item) (js-call expanded :push item)))))
-               ((or (= operator "defun") (= operator "defn"))
+               ((or (= operator "defun") (= operator "defn")
+                    (= operator "defportable"))
                 (if (>= (get args :length) 2)
                     (progn
                       (js-call expanded :push (nth 0 args))

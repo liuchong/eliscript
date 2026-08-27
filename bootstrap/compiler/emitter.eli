@@ -781,6 +781,50 @@
             (setq found t))))
       found))
 
+  (defun collect-portable-metadata (node portable exported)
+    (when (and (= (ir-kind node) "function-declaration")
+               (ir-property node "portable"))
+      (js-call portable :push node))
+    (when (= (ir-kind node) "export-declaration")
+      (js-call (children node) :forEach
+        (lambda (reference)
+          (js-call exported :push (ir-value reference)))))
+    (js-call (children node) :forEach
+      (lambda (child)
+        (collect-portable-metadata child portable exported))))
+
+  (defun emit-portable-manifest (program)
+    (let ((portable [])
+          (exported []))
+      (js-call (program-body program) :forEach
+        (lambda (node)
+          (collect-portable-metadata node portable exported)))
+      (if (= (get portable :length) 0)
+          (text-fragment "")
+        (let ((implicit
+               (js-call portable :filter
+                 (lambda (node)
+                   (not (js-call exported :includes (ir-value node)))))))
+          (combine
+            [(if (> (get implicit :length) 0)
+                 (combine
+                   ["\n\nexport {"
+                    (join-fragments
+                      (js-call implicit :map
+                        (lambda (node) (binding-name (ir-value node))))
+                      ", ")
+                    "};"])
+               "")
+             "\nexport const __eliscript_portable__ = Object.freeze(Object.fromEntries(["
+             (join-fragments
+               (js-call portable :map
+                 (lambda (node)
+                   (combine
+                     ["[" (json-string (ir-value node)) ", "
+                      (binding-name (ir-value node)) "]"])))
+               ", ")
+             "]));"])))))
+
   (defun emit-module-artifact (program)
     (setq temporary-counter 0)
     (let ((body
@@ -796,6 +840,7 @@
            "")
          "const __eliscript_truthy = (value) => value !== false && value != null;\n\n"
          body
+         (emit-portable-manifest program)
          "\n"])))
 
   (defun emit-module (program)

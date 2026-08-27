@@ -75,7 +75,24 @@ async function expectArtifactDirectoriesEqual(left, right) {
 
 test("portable compiler driver reaches a reproducible fixed point", async () => {
   expect(parseArguments(["--", "-o", "out.mjs", "input.eli"]))
-    .toEqual({ input: "input.eli", output: "out.mjs", sourceMap: false });
+    .toEqual({
+      input: "input.eli",
+      output: "out.mjs",
+      sourceMap: false,
+      portableEntries: [],
+    });
+  expect(parseArguments([
+    "--portable",
+    "work",
+    "--portable",
+    "index",
+    "input.eli",
+  ])).toEqual({
+    input: "input.eli",
+    output: undefined,
+    sourceMap: false,
+    portableEntries: ["work", "index"],
+  });
   expect(parseArguments(["--help"])).toEqual({ help: true });
   expect(() => parseArguments(["--source-map", "input.eli"]))
     .toThrow("--source-map requires --output");
@@ -111,6 +128,34 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
       },
     });
     expect(portableOutput).toBe(seedOutput);
+
+    const portableSource = resolve(directory, "portable.eli");
+    await writeFile(
+      portableSource,
+      `(defconst step 2)
+(defportable helper (value) (* value step))
+(defportable work (value) (helper value))
+(defportable unused () 99)
+(defun ordinary () 1)\n`,
+    );
+    const seedPortableOutput = await runSuccessful(
+      [seedCliPath, "--portable", "work", portableSource],
+      { env: { ...process.env, EMACS: emacs } },
+    );
+    const selfHostedPortableOutput = await runSuccessful(
+      [portableCliPath, "--portable", "work", portableSource],
+      {
+        env: {
+          ...process.env,
+          ELISCRIPT_BOOTSTRAP_MODULE_DIR: generationTwo,
+        },
+      },
+    );
+    expect(selfHostedPortableOutput).toBe(seedPortableOutput);
+    expect(seedPortableOutput).toContain("function helper(value)");
+    expect(seedPortableOutput).toContain("function work(value)");
+    expect(seedPortableOutput).not.toContain("function unused");
+    expect(seedPortableOutput).not.toContain("function ordinary");
 
     const seedMapped = resolve(directory, "seed-cli/core.mjs");
     const portableMapped = resolve(directory, "portable-cli/core.mjs");

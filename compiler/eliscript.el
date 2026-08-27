@@ -12,16 +12,33 @@
 (require 'eliscript-lower)
 (require 'eliscript-emitter)
 (require 'eliscript-ir-emitter)
+(require 'eliscript-portable)
+
+(defun eliscript--analyzed-string (source filename)
+  "Read, expand, and analyze SOURCE from FILENAME."
+  (eliscript-analyze-module
+   (eliscript-expand-module
+    (eliscript-read-located-string source filename)
+    filename)
+   filename))
 
 (defun eliscript-compile-ir-string (source &optional filename)
   "Compile Eliscript SOURCE from FILENAME into an IR program."
   (eliscript-lower-module
-   (eliscript-analyze-module
-    (eliscript-expand-module
-     (eliscript-read-located-string source filename)
-     filename)
-    filename)
+   (eliscript--analyzed-string source filename)
    filename))
+
+(defun eliscript-compile-portable-ir-string (source entries &optional filename)
+  "Compile portable ENTRIES from Eliscript SOURCE into an IR program."
+  (let ((forms (eliscript--analyzed-string source filename)))
+    (eliscript-lower-module
+     (eliscript-portable-select-module forms entries filename)
+     filename)))
+
+(defun eliscript-compile-portable-string (source entries &optional filename)
+  "Compile portable ENTRIES and their dependencies from SOURCE to ESM."
+  (eliscript-emit-ir-module
+   (eliscript-compile-portable-ir-string source entries filename)))
 
 (defun eliscript-compile-string (source &optional filename)
   "Compile Eliscript SOURCE to an ECMAScript module.
@@ -51,6 +68,21 @@ files recorded in the source map.  The return value is an `eliscript-emission'."
      input-file)
     input-file)
    input-file))
+
+(defun eliscript-compile-portable-file (input-file entries &optional output-file)
+  "Compile portable ENTRIES from INPUT-FILE, optionally to OUTPUT-FILE."
+  (let* ((input-path (expand-file-name input-file))
+         (source
+          (with-temp-buffer
+            (insert-file-contents input-path)
+            (buffer-string)))
+         (output
+          (eliscript-compile-portable-string source entries input-path)))
+    (when output-file
+      (make-directory (file-name-directory (expand-file-name output-file)) t)
+      (with-temp-file output-file
+        (insert output)))
+    output))
 
 (defun eliscript-compile-file (input-file &optional output-file)
   "Compile INPUT-FILE and optionally write it to OUTPUT-FILE.

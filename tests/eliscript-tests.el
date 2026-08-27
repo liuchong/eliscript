@@ -258,6 +258,71 @@
     (regexp-quote "console.log(JSON.stringify(null));")
     (eliscript-compile-string "(print (JSON/stringify nil))"))))
 
+(ert-deftest eliscript-portable-functions-emit-worker-manifest ()
+  (let ((output
+         (eliscript-compile-string
+          "(defportable score-values (values) (length values))")))
+    (should (string-match-p "function score_values(values)" output))
+    (should (string-match-p
+             (regexp-quote "export {score_values};") output))
+    (should (string-match-p
+             (regexp-quote
+              "export const __eliscript_portable__ = Object.freeze(Object.fromEntries([[\"score-values\", score_values]]));")
+             output))))
+
+(ert-deftest eliscript-portable-functions-do-not-duplicate-explicit-exports ()
+  (let ((output
+         (eliscript-compile-string
+          "(defportable work (value) value)\n(export work)")))
+    (should (= (length (split-string output "export {work};" t)) 2))))
+
+(ert-deftest eliscript-portable-selection-emits-transitive-closure-only ()
+  (let ((output
+         (eliscript-compile-portable-string
+          "(defconst step 2)
+(defportable helper (value) (* value step))
+(defportable work (value) (helper value))
+(defportable unused () 99)
+(defun ordinary () 1)"
+          '(work)
+          "portable.eli")))
+    (should (string-match-p "const step = 2;" output))
+    (should (string-match-p "function helper(value)" output))
+    (should (string-match-p "function work(value)" output))
+    (should-not (string-match-p "function unused" output))
+    (should-not (string-match-p "function ordinary" output))))
+
+(ert-deftest eliscript-portable-functions-reject-non-portable-dependencies ()
+  (dolist (source
+           '("(defun helper () 1) (defportable work () (helper))"
+             "(defvar total 0) (defportable work () total)"
+             "(import \"pkg\" helper) (defportable work () (helper))"))
+    (let ((error-data
+           (should-error
+            (eliscript-compile-string source "portable.eli")
+            :type 'eliscript-analyze-error)))
+      (should (string-match-p "portable function work depends on non-portable"
+                              (error-message-string error-data))))))
+
+(ert-deftest eliscript-portable-functions-reject-host-interop ()
+  (dolist (source
+           '("(defportable work () (js* \"globalThis\"))"
+             "(defportable work (value) (put value :changed t))"
+             "(defportable work () console/log)"))
+    (should-error
+     (eliscript-compile-string source "portable.eli")
+     :type 'eliscript-analyze-error)))
+
+(ert-deftest eliscript-portable-functions-allow-local-mutation ()
+  (should
+   (string-match-p
+    "function count_to(limit)"
+    (eliscript-compile-string
+     "(defportable count-to (limit)
+        (let ((index 0))
+          (while (< index limit) (setq index (1+ index)))
+          index))"))))
+
 (ert-deftest eliscript-expander-expands-user-macros ()
   (let ((output
          (eliscript-compile-string

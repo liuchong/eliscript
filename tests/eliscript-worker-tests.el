@@ -43,6 +43,11 @@
              (= expected
                 (eliscript-worker-call-sync
                  worker module "score_values" (list values 3)
+                 :timeout-ms 2000)))
+            (should
+             (= (eliscript-worker-tests--score-values values 2)
+                (eliscript-worker-call-portable-sync
+                 worker module "score-values" (list values 2)
                  :timeout-ms 2000))))
 
           (let (progress done request-error)

@@ -273,10 +273,12 @@ COMMAND defaults to `eliscript-worker-program' plus the bundled worker script."
 
 (cl-defun eliscript-worker-call
     (worker module export arguments callback
-            &key progress metrics timeout-ms)
+            &key operation progress metrics timeout-ms)
   "Call EXPORT from MODULE on WORKER with ARGUMENTS.
 
-CALLBACK receives (VALUE ERROR). PROGRESS receives each progress value.
+When OPERATION is non-nil, resolve its source name through the generated
+portable manifest instead of calling EXPORT. CALLBACK receives (VALUE ERROR).
+PROGRESS receives each progress value.
 TIMEOUT-MS is enforced remotely, with local worker termination after a grace
 period when synchronous code prevents cooperative cancellation. Return request
 id."
@@ -309,8 +311,10 @@ id."
             (type . "request")
             (id . ,id)
             (module . ,module-name)
-            (export . ,export)
             (arguments . ,(vconcat arguments)))
+          (if operation
+              `((operation . ,operation))
+            `((export . ,export)))
           (and timeout-ms `((timeoutMs . ,timeout-ms)))))
       (error
        (remhash id (eliscript-worker-pending worker))
@@ -318,6 +322,17 @@ id."
          (cancel-timer (eliscript-worker-request-timer request)))
        (signal (car error-data) (cdr error-data))))
     id))
+
+(cl-defun eliscript-worker-call-portable
+    (worker module operation arguments callback
+            &key progress metrics timeout-ms)
+  "Call portable OPERATION from MODULE on WORKER with ARGUMENTS."
+  (eliscript-worker-call
+   worker module nil arguments callback
+   :operation operation
+   :progress progress
+   :metrics metrics
+   :timeout-ms timeout-ms))
 
 (defun eliscript-worker-cancel (worker id)
   "Request cancellation of pending request ID on WORKER."
@@ -330,7 +345,8 @@ id."
     t))
 
 (cl-defun eliscript-worker-call-sync
-    (worker module export arguments &key progress metrics timeout-ms)
+    (worker module export arguments
+            &key operation progress metrics timeout-ms)
   "Synchronously call EXPORT from MODULE on WORKER with ARGUMENTS."
   (let (done value error-object)
     (eliscript-worker-call
@@ -341,6 +357,7 @@ id."
              done t))
      :progress progress
      :metrics metrics
+     :operation operation
      :timeout-ms timeout-ms)
     (while (and (not done) (eliscript-worker-live-p worker))
       (accept-process-output (eliscript-worker-process worker) 0.05))
@@ -354,6 +371,16 @@ id."
                   'eliscript-worker-request-error)
                 (list message error-object))))
     value))
+
+(cl-defun eliscript-worker-call-portable-sync
+    (worker module operation arguments &key progress metrics timeout-ms)
+  "Synchronously call portable OPERATION from MODULE on WORKER."
+  (eliscript-worker-call-sync
+   worker module nil arguments
+   :operation operation
+   :progress progress
+   :metrics metrics
+   :timeout-ms timeout-ms))
 
 (defun eliscript-worker-stop (worker &optional force)
   "Stop WORKER, using immediate termination when FORCE is non-nil."

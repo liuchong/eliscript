@@ -1,7 +1,7 @@
 (module bootstrap.compiler.compiler
   (import "./reader.mjs" read-string)
   (import "./expander.mjs" expand-module)
-  (import "./analyzer.mjs" analyze-module)
+  (import "./analyzer.mjs" analyze-module select-portable-module)
   (import "./lower.mjs" lower-module)
   (import "./emitter.mjs" emit-module emit-module-with-source-map)
 
@@ -14,6 +14,17 @@
   (defun compile-string (source filename)
     (emit-module (compile-ir-string source filename)))
 
+  (defun compile-portable-ir-string (source entries filename)
+    (let* ((read-forms (read-string source filename))
+           (expanded-forms (expand-module read-forms filename)))
+      (analyze-module expanded-forms filename)
+      (lower-module
+        (select-portable-module expanded-forms entries filename)
+        filename)))
+
+  (defun compile-portable-string (source entries filename)
+    (emit-module (compile-portable-ir-string source entries filename)))
+
   (defun compile-string-with-source-map
       (source filename generated-name source-name)
     (emit-module-with-source-map
@@ -25,4 +36,6 @@
   (export
     compile-ir-string
     compile-string
+    compile-portable-ir-string
+    compile-portable-string
     compile-string-with-source-map))

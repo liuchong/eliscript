@@ -239,7 +239,7 @@
                  (list (eliscript-lower-expression (cadr arguments))))
             (list :source-operator operator
                   :mutable (eq operator 'defvar))))
-          ((or 'defun 'defn)
+          ((or 'defun 'defn 'defportable)
            (let ((parameters
                   (eliscript-lower--parameter-nodes (nth 1 arguments))))
              (eliscript-lower--node
@@ -248,7 +248,9 @@
               (append parameters
                       (mapcar #'eliscript-lower-expression
                               (nthcdr 2 arguments)))
-              (list :parameter-count (length parameters)))))
+              (list :parameter-count (length parameters)
+                    :source-operator operator
+                    :portable (eq operator 'defportable)))))
           ('export
            (eliscript-lower--node
             'export-declaration form nil

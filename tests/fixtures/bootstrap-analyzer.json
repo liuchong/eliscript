@@ -21,6 +21,11 @@
       "source": "(defun exercise (target key)\n  (let ((plain 1))\n    (vector\n      (lambda (value) (put target key value))\n      (get target key false)\n      (js-call target :run plain)\n      (object key plain)\n      (quote missing)\n      (js* \"globalThis\"))))\n(export exercise)"
     },
     {
+      "name": "portable-transitive-closure",
+      "filename": "portable.eli",
+      "source": "(defconst step 2)\n(defportable helper (value) (* value step))\n(defportable work (value) (helper value))"
+    },
+    {
       "name": "self-symbol-module",
       "filename": "bootstrap/compiler/symbol.eli",
       "file": "bootstrap/compiler/symbol.eli"
@@ -77,6 +82,24 @@
       "filename": "unbound.eli",
       "source": "(defun broken ()\n  missing)",
       "error": "unbound.eli:2:3: unbound symbol: missing"
+    },
+    {
+      "name": "portable-ordinary-function",
+      "filename": "portable-function.eli",
+      "source": "(defun helper () 1)\n(defportable work () (helper))",
+      "error": "portable-function.eli:2:23: portable function work depends on non-portable function: helper"
+    },
+    {
+      "name": "portable-mutable-state",
+      "filename": "portable-state.eli",
+      "source": "(defvar total 0)\n(defportable work () total)",
+      "error": "portable-state.eli:2:22: portable function work depends on non-portable variable: total"
+    },
+    {
+      "name": "portable-host-interop",
+      "filename": "portable-host.eli",
+      "source": "(defportable work () (js* \"globalThis\"))",
+      "error": "portable-host.eli:1:22: portable function work cannot use js* (raw JavaScript)"
     },
     {
       "name": "parallel-let-scope",

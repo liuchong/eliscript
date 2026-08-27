@@ -9,6 +9,7 @@
 (require 'cl-lib)
 (require 'eliscript-diagnostic)
 (require 'eliscript-form)
+(require 'eliscript-portable)
 (require 'eliscript-symbol)
 
 (cl-defstruct (eliscript-analyzer--binding
@@ -266,8 +267,8 @@
       ((pred (lambda (name)
                (memq name eliscript-analyzer--builtin-operators)))
        (eliscript-analyzer--analyze-sequence arguments scope))
-      ((or 'defun 'defn 'defcomponent 'defvar 'defconst 'export 'export-default
-           'import 'module)
+      ((or 'defun 'defn 'defportable 'defcomponent 'defvar 'defconst
+           'export 'export-default 'import 'module)
        (eliscript-analyzer--fail "%s is only valid at module top level" operator))
       (_
        (eliscript-analyzer--analyze-expression operator-form scope)
@@ -373,7 +374,7 @@
          (unless (<= 1 (length (cdr value)) 2)
            (eliscript-analyzer--fail "defconst expects 1..2 arguments"))
          (eliscript-analyzer--declare scope (cadr value) 'constant nil))
-        ((or 'defun 'defn)
+        ((or 'defun 'defn 'defportable)
          (unless (>= (length (cdr value)) 2)
            (eliscript-analyzer--fail
             "%s expects 2+ arguments"
@@ -397,7 +398,7 @@
          (when (> (length arguments) 2)
            (eliscript-analyzer--fail "%s expects 1..2 arguments" operator))
          (eliscript-analyzer--analyze-expression (cadr arguments) scope))
-        ((or 'defun 'defn)
+        ((or 'defun 'defn 'defportable)
          (unless (>= (length arguments) 2)
            (eliscript-analyzer--fail "%s expects 2+ arguments" operator))
          (eliscript-analyzer--analyze-function
@@ -432,6 +433,7 @@ Return FORMS unchanged for the emitter."
     (eliscript-analyzer--predeclare-top-level flattened scope)
     (dolist (form flattened)
       (eliscript-analyzer--analyze-top-level form scope))
+    (eliscript-portable-validate-module forms filename)
     forms))
 
 (provide 'eliscript-analyzer)

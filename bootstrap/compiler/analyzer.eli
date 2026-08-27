@@ -10,6 +10,9 @@
      "cdr" "cons" "nth" "aref" "length" "new" "print" "str"
      "funcall" "apply"])
 
+  (defconst portable-forbidden-operators
+    ["js*" "print" "put" "js-call" "new" "jsx" "fragment"])
+
   (defconst fail
     (js* "(message) => { throw new Error(message); }"))
   (defconst guard
@@ -323,7 +326,7 @@
         ((js-call builtin-operators :includes operator)
          (analyze-sequence args scope context))
         ((js-call
-           ["defun" "defn" "defcomponent" "defvar" "defconst"
+          ["defun" "defn" "defportable" "defcomponent" "defvar" "defconst"
             "export" "export-default" "import" "module"]
            :includes operator)
          (analyzer-fail
@@ -448,7 +451,8 @@
                    context (node-span form) "defconst expects 1..2 arguments"))
                (declare-binding
                  scope (nth 0 args) "constant" false context))
-              ((or (= operator "defun") (= operator "defn"))
+              ((or (= operator "defun") (= operator "defn")
+                   (= operator "defportable"))
                (unless (>= count 2)
                  (analyzer-fail
                    context (node-span form)
@@ -473,7 +477,8 @@
                context (node-span form)
                (str operator " expects 1..2 arguments")))
            (analyze-expression (nth 1 args) scope context))
-          ((or (= operator "defun") (= operator "defn"))
+          ((or (= operator "defun") (= operator "defn")
+               (= operator "defportable"))
            (unless (>= count 2)
              (analyzer-fail
                context (node-span form)
@@ -503,6 +508,280 @@
            (analyze-expression (nth 0 args) scope context))
           (t (analyze-expression form scope context))))))
 
+  (defun portable-declarations (forms context)
+    (let ((declarations (new (js* "Map"))))
+      (js-call forms :forEach
+        (lambda (form)
+          (when (= (node-kind form) "list")
+            (let* ((items (node-items form))
+                   (operator-node (nth 0 items))
+                   (operator (and (symbol-node-p operator-node)
+                                  (node-name operator-node)))
+                   (args (js-call items :slice 1)))
+              (cond
+                ((= operator "defconst")
+                 (js-call declarations :set (node-name (nth 0 args))
+                   (object :kind "constant" :form form
+                           :initializer (nth 1 args))))
+                ((= operator "defvar")
+                 (js-call declarations :set (node-name (nth 0 args))
+                   (object :kind "variable" :form form)))
+                ((or (= operator "defun") (= operator "defn")
+                     (= operator "defportable"))
+                 (js-call declarations :set (node-name (nth 0 args))
+                   (object
+                     :kind (if (= operator "defportable")
+                               "portable" "function")
+                     :form form
+                     :parameters (nth 1 args)
+                     :body (js-call args :slice 2))))
+                ((= operator "import")
+                 (js-call
+                   (import-bindings args context (node-span form))
+                   :forEach
+                   (lambda (name)
+                     (js-call declarations :set (node-name name)
+                       (object :kind "import" :form form))))))))))
+      declarations))
+
+  (defun portable-scope (parameters)
+    (let ((scope (new (js* "Set"))))
+      (when parameters
+        (js-call (list-items parameters) :forEach
+          (lambda (parameter)
+            (js-call scope :add (node-name parameter)))))
+      scope))
+
+  (defun copy-portable-scope (scope)
+    (new (js* "Set") scope))
+
+  (defun portable-reference
+      (node scope declarations dependencies entry context)
+    (let ((name (node-name node)))
+      (unless (js-call scope :has name)
+        (when (qualified-name-p name)
+          (analyzer-fail
+            context (node-span node)
+            (str "portable function " entry
+                 " uses qualified host reference: " name)))
+        (let ((declaration (js-call declarations :get name)))
+          (when declaration
+            (let ((kind (get declaration :kind)))
+              (if (or (= kind "portable") (= kind "constant"))
+                  (js-call dependencies :add name)
+                (analyzer-fail
+                  context (node-span node)
+                  (str "portable function " entry
+                       " depends on non-portable " kind ": " name)))))))))
+
+  (defun portable-sequence
+      (forms scope declarations dependencies entry context)
+    (js-call forms :forEach
+      (lambda (form)
+        (portable-expression
+          form scope declarations dependencies entry context))))
+
+  (defun portable-function-expression
+      (args scope declarations dependencies entry context)
+    (let ((child (copy-portable-scope scope)))
+      (js-call (list-items (nth 0 args)) :forEach
+        (lambda (parameter)
+          (js-call child :add (node-name parameter))))
+      (portable-sequence
+        (js-call args :slice 1)
+        child declarations dependencies entry context)))
+
+  (defun portable-let-expression
+      (args scope sequential declarations dependencies entry context)
+    (let ((bindings (list-items (nth 0 args)))
+          (child (copy-portable-scope scope)))
+      (if sequential
+          (js-call bindings :forEach
+            (lambda (binding)
+              (let* ((items (list-items binding))
+                     (name (if items (nth 0 items) binding))
+                     (initializer (and items (nth 1 items))))
+                (portable-expression
+                  initializer child declarations dependencies entry context)
+                (js-call child :add (node-name name)))))
+        (progn
+          (js-call bindings :forEach
+            (lambda (binding)
+              (let ((items (list-items binding)))
+                (when items
+                  (portable-expression
+                    (nth 1 items) scope declarations dependencies entry context)))))
+          (js-call bindings :forEach
+            (lambda (binding)
+              (let ((items (list-items binding)))
+                (js-call child :add
+                  (node-name (if items (nth 0 items) binding))))))))
+      (portable-sequence
+        (js-call args :slice 1)
+        child declarations dependencies entry context)))
+
+  (defun portable-assignment
+      (args scope declarations dependencies entry context)
+    (let ((index 0))
+      (while (< index (get args :length))
+        (let ((name (nth index args))
+              (value (nth (1+ index) args)))
+          (unless (js-call scope :has (node-name name))
+            (analyzer-fail
+              context (node-span name)
+              (str "portable function " entry
+                   " may only assign local bindings: " (node-name name))))
+          (portable-expression
+            value scope declarations dependencies entry context))
+        (setq index (+ index 2)))))
+
+  (defun portable-object
+      (args scope declarations dependencies entry context)
+    (let ((index 0))
+      (while (< index (get args :length))
+        (let ((key (nth index args))
+              (value (nth (1+ index) args)))
+          (unless (or (keyword-node-p key)
+                      (string-node-p key)
+                      (symbol-node-p key))
+            (portable-expression
+              key scope declarations dependencies entry context))
+          (portable-expression
+            value scope declarations dependencies entry context))
+        (setq index (+ index 2)))))
+
+  (defun portable-call
+      (form scope declarations dependencies entry context)
+    (let* ((items (node-items form))
+           (operator-node (nth 0 items))
+           (operator (and (symbol-node-p operator-node)
+                          (node-name operator-node)))
+           (args (js-call items :slice 1)))
+      (when (js-call portable-forbidden-operators :includes operator)
+        (analyzer-fail
+          context (node-span form)
+          (str "portable function " entry " cannot use " operator " ("
+               (cond
+                 ((= operator "js*") "raw JavaScript")
+                 ((= operator "print") "console output")
+                 ((= operator "put") "object mutation")
+                 ((= operator "js-call") "host method calls")
+                 ((= operator "new") "host constructors")
+                 (t "React runtime access"))
+               ")")))
+      (cond
+        ((= operator "quote") nil)
+        ((or (= operator "lambda") (= operator "fn"))
+         (portable-function-expression
+           args scope declarations dependencies entry context))
+        ((= operator "let")
+         (portable-let-expression
+           args scope false declarations dependencies entry context))
+        ((= operator "let*")
+         (portable-let-expression
+           args scope t declarations dependencies entry context))
+        ((or (= operator "setq") (= operator "set!"))
+         (portable-assignment
+           args scope declarations dependencies entry context))
+        ((= operator "object")
+         (portable-object
+           args scope declarations dependencies entry context))
+        (t
+         (unless (js-call builtin-operators :includes operator)
+           (portable-expression
+             operator-node scope declarations dependencies entry context))
+         (portable-sequence
+           args scope declarations dependencies entry context)))))
+
+  (defun portable-expression
+      (form scope declarations dependencies entry context)
+    (when form
+      (cond
+        ((or (= (node-kind form) "literal")
+             (= (node-kind form) "undefined")
+             (= (node-kind form) "keyword")) nil)
+        ((= (node-kind form) "symbol")
+         (portable-reference
+           form scope declarations dependencies entry context))
+        ((= (node-kind form) "vector")
+         (portable-sequence
+           (node-items form) scope declarations dependencies entry context))
+        ((= (node-kind form) "list")
+         (portable-call
+           form scope declarations dependencies entry context)))))
+
+  (defun portable-dependencies (declaration declarations entry context)
+    (let ((dependencies (new (js* "Set")))
+          (scope (portable-scope (get declaration :parameters))))
+      (if (= (get declaration :kind) "portable")
+          (portable-sequence
+            (get declaration :body)
+            scope declarations dependencies entry context)
+        (portable-expression
+          (get declaration :initializer)
+          scope declarations dependencies entry context))
+      dependencies))
+
+  (defun validate-portable-module (forms context)
+    (let ((declarations (portable-declarations forms context))
+          (pending [])
+          (visited (new (js* "Set"))))
+      (js-call declarations :forEach
+        (lambda (declaration name)
+          (when (= (get declaration :kind) "portable")
+            (js-call pending :push name))))
+      (while (> (get pending :length) 0)
+        (let ((name (js-call pending :pop)))
+          (unless (js-call visited :has name)
+            (js-call visited :add name)
+            (let ((declaration (js-call declarations :get name)))
+              (js-call
+                (portable-dependencies
+                  declaration declarations name context)
+                :forEach
+                (lambda (dependency)
+                  (js-call pending :push dependency)))))))
+      forms))
+
+  (defun select-portable-module (forms entries filename)
+    (let* ((context (object :filename filename))
+           (flattened (flatten-modules forms context))
+           (declarations (portable-declarations flattened context))
+           (pending [])
+           (selected (new (js* "Set"))))
+      (js-call entries :forEach
+        (lambda (entry)
+          (let ((declaration (js-call declarations :get entry)))
+            (unless (and declaration (= (get declaration :kind) "portable"))
+              (analyzer-fail
+                context nil
+                (str "portable entry " entry
+                     " is not declared with defportable")))
+            (js-call pending :push entry))))
+      (while (> (get pending :length) 0)
+        (let ((name (js-call pending :pop)))
+          (unless (js-call selected :has name)
+            (js-call selected :add name)
+            (let ((declaration (js-call declarations :get name)))
+              (js-call
+                (portable-dependencies
+                  declaration declarations name context)
+                :forEach
+                (lambda (dependency)
+                  (js-call pending :push dependency)))))))
+      (js-call flattened :filter
+        (lambda (form)
+          (when (= (node-kind form) "list")
+            (let* ((items (node-items form))
+                   (operator (and (symbol-node-p (nth 0 items))
+                                  (node-name (nth 0 items))))
+                   (name (and (> (get items :length) 1)
+                              (symbol-node-p (nth 1 items))
+                              (node-name (nth 1 items)))))
+              (and (or (= operator "defconst")
+                       (= operator "defportable"))
+                   (js-call selected :has name))))))))
+
   (defun analyze-module (forms filename)
     (let* ((context (object :filename filename))
            (flattened (flatten-modules forms context))
@@ -510,6 +789,7 @@
       (predeclare-top-level flattened scope context)
       (js-call flattened :forEach
         (lambda (form) (analyze-top-level form scope context)))
+      (validate-portable-module flattened context)
       forms))
 
-  (export analyze-module))
+  (export analyze-module select-portable-module))

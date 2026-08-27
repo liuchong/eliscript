@@ -139,6 +139,7 @@ test("long-lived worker implements the versioned NDJSON protocol", async () => {
     expect(ready.version).toBe(1);
     expect(ready.capabilities).toContain("cancel");
     expect(ready.capabilities).toContain("progress");
+    expect(ready.capabilities).toContain("portable-manifest");
 
     client.sendRaw("{not-json");
     expect(await client.next((message) => message.type === "protocol-error"))
@@ -171,6 +172,17 @@ test("long-lived worker implements the versioned NDJSON protocol", async () => {
     client.send({
       version: 1,
       type: "request",
+      id: "portable-score",
+      module: modulePath,
+      operation: "score-values",
+      arguments: [values, 2],
+    });
+    expect(await client.next((message) => message.id === "portable-score"))
+      .toMatchObject({ ok: true, value: scoreValues(values, 2) });
+
+    client.send({
+      version: 1,
+      type: "request",
       id: "missing",
       module: modulePath,
       export: "absent",
@@ -178,6 +190,28 @@ test("long-lived worker implements the versioned NDJSON protocol", async () => {
     });
     expect(await client.next((message) => message.id === "missing"))
       .toMatchObject({ ok: false, error: { code: "missing-export" } });
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "missing-portable",
+      module: modulePath,
+      operation: "absent",
+      arguments: [],
+    });
+    expect(await client.next((message) => message.id === "missing-portable"))
+      .toMatchObject({ ok: false, error: { code: "missing-portable" } });
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "inherited-portable",
+      module: modulePath,
+      operation: "toString",
+      arguments: [],
+    });
+    expect(await client.next((message) => message.id === "inherited-portable"))
+      .toMatchObject({ ok: false, error: { code: "missing-portable" } });
 
     client.send({
       version: 1,

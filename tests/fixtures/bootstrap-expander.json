@@ -6,6 +6,11 @@
       "source": "(defmacro twice (value) `(+ ,value ,value))\n(defmacro four-times (value) `(twice (twice ,value)))\n(defun scale (value) (four-times value))\n(export scale)"
     },
     {
+      "name": "portable-function-body",
+      "filename": "portable.eli",
+      "source": "(defmacro twice (value) `(+ ,value ,value))\n(defportable work (value) (twice value))"
+    },
+    {
       "name": "body-splicing",
       "filename": "body.eli",
       "source": "(defmacro begin (&body forms) `(progn ,@forms))\n(defun two () (begin 1 2))\n(export two)"
@@ -138,6 +143,12 @@
       "filename": "component.eli",
       "source": "(defun broken ()\n  (defcomponent Nested () nil))",
       "error": "component.eli:2:3: defcomponent is only valid at module top level"
+    },
+    {
+      "name": "nested-portable-function",
+      "filename": "portable-nested.eli",
+      "source": "(defun broken ()\n  (defportable nested () 1))",
+      "error": "portable-nested.eli:2:3: defportable is only valid at module top level"
     },
     {
       "name": "invalid-component",

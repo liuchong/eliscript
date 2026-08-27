@@ -331,10 +331,18 @@
                (object
                  :sourceOperator operator
                  :mutable (= operator "defvar")))))
-          ((or (= operator "defun") (= operator "defn"))
-           (lower-function
-             "function-declaration" form (node-name (nth 0 args))
-             (nth 1 args) (js-call args :slice 2)))
+          ((or (= operator "defun") (= operator "defn")
+               (= operator "defportable"))
+           (let ((node
+                  (lower-function
+                    "function-declaration" form (node-name (nth 0 args))
+                    (nth 1 args) (js-call args :slice 2))))
+             (put node :properties
+               (object
+                 :parameterCount (get (list-items (nth 1 args)) :length)
+                 :sourceOperator operator
+                 :portable (= operator "defportable")))
+             node))
           ((= operator "export")
            (let ((children []))
              (js-call args :forEach

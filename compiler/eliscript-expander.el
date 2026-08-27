@@ -199,6 +199,9 @@
          ((eq operator 'defcomponent)
           (eliscript-expander--fail
            "defcomponent is only valid at module top level"))
+         ((eq operator 'defportable)
+          (eliscript-expander--fail
+           "defportable is only valid at module top level"))
          ((and (symbolp operator) (gethash operator environment))
           (eliscript-expander--expand-expression
            (eliscript-form-locate-generated
@@ -292,7 +295,7 @@
                                (eliscript-expander--expand-top-level-sequence
                                 (cdr arguments) environment depth)))
                  value))
-              ((or 'defun 'defn)
+              ((or 'defun 'defn 'defportable)
                (if (>= (length arguments) 2)
                    (cons operator-form
                          (cons (nth 0 arguments)

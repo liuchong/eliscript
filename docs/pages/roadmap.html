@@ -53,7 +53,7 @@
               <article class="milestone"><span class="milestone-id">M2</span><div><h3>React</h3><p>Element IR, components, hooks, automatic JSX runtime, browser mounting, source-mapped Vite builds, and Fast Refresh.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M3</span><div><h3>Publishing</h3><p>Pure Emacs Org export, deterministic article modules, live content updates, and a fully custom Eliscript React site.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M4</span><div><h3>Bootstrap</h3><p>The portable compiler driver, Bun adapter, complete conformance suite, and reproducible compiler fixed point.</p></div><span class="status status-done">Complete</span></article>
-              <article class="milestone"><span class="milestone-id">M5</span><div><h3>Emacs acceleration</h3><p>A versioned long-lived worker, Emacs client, cooperative cancellation, and segmented cold/warm benchmarks are implemented; portable function validation is next.</p></div><span class="status status-next">In progress</span></article>
+              <article class="milestone"><span class="milestone-id">M5</span><div><h3>Emacs acceleration</h3><p>The worker, Emacs client, segmented benchmarks, statically checked portable declarations, dependency-only builds, and source-name calls are implemented.</p></div><span class="status status-next">In progress</span></article>
             </div>
           </section>
 
@@ -74,6 +74,7 @@ compiler.js + compiler.eli → next-compiler.js</code></pre>
           <section id="acceleration">
             <h2>A path back into Emacs</h2>
             <p>Emacs now controls a long-lived Bun worker over versioned NDJSON while retaining editor state and interaction. Requests support progress, cooperative cancellation, timeouts, structured errors, and cached generated modules.</p>
+            <p><code>defportable</code> rejects mutable module state and host interop, follows immutable helper dependencies transitively, and emits a frozen manifest that the worker resolves by Eliscript source name.</p>
             <div class="callout"><p>The reference workload measured a much larger engine-only speedup than end-to-end speedup because transport and client work remain visible. Coarse-grained tasks are the target; small editor operations stay in Emacs.</p></div>
           </section>
 

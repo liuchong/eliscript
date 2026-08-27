@@ -9,6 +9,7 @@ const usage = `Usage: eliscript-portable [OPTIONS] INPUT
 Options:
   -o, --output FILE  Write the generated ECMAScript module to FILE
   --source-map       Write FILE.map and add a sourceMappingURL comment
+  --portable NAME    Emit a worker entry and its transitive dependencies
   -h, --help         Show this help
 `;
 
@@ -18,6 +19,7 @@ export function parseArguments(arguments_) {
   let input;
   let output;
   let sourceMap = false;
+  const portableEntries = [];
 
   while (argumentsList.length > 0) {
     const argument = argumentsList.shift();
@@ -31,6 +33,11 @@ export function parseArguments(arguments_) {
       output = argumentsList.shift();
     } else if (argument === "--source-map") {
       sourceMap = true;
+    } else if (argument === "--portable") {
+      if (argumentsList.length === 0) {
+        throw new Error(`${argument} requires a function name`);
+      }
+      portableEntries.push(argumentsList.shift());
     } else if (argument.startsWith("-")) {
       throw new Error(`unknown option: ${argument}`);
     } else if (input) {
@@ -44,7 +51,10 @@ export function parseArguments(arguments_) {
   if (sourceMap && !output) {
     throw new Error("--source-map requires --output");
   }
-  return { input, output, sourceMap };
+  if (sourceMap && portableEntries.length > 0) {
+    throw new Error("--source-map is not supported with --portable yet");
+  }
+  return { input, output, sourceMap, portableEntries };
 }
 
 export async function loadCompiler(moduleDirectory) {
@@ -63,7 +73,13 @@ export async function compileFile(options) {
   const compiler = options.compiler ?? await loadCompiler(options.moduleDirectory);
 
   if (!options.sourceMap) {
-    const javascript = compiler.compile_string(source, inputPath);
+    const javascript = options.portableEntries?.length > 0
+      ? compiler.compile_portable_string(
+        source,
+        options.portableEntries,
+        inputPath,
+      )
+      : compiler.compile_string(source, inputPath);
     if (outputPath) {
       await mkdir(dirname(outputPath), { recursive: true });
       await writeFile(outputPath, javascript);

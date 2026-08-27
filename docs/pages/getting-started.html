@@ -113,6 +113,11 @@ bun run build:org-site</code></pre>
 
           <section id="worker">
             <h2>Measure the Emacs worker</h2>
+            <pre><code>(defportable score-values (values)
+  (length values))
+
+./bin/eliscript --portable score-values --output dist/score.mjs source.eli</code></pre>
+            <p><code>defportable</code> validates the complete immutable dependency closure. The generated manifest lets Emacs call <code>score-values</code> without knowing its JavaScript identifier.</p>
             <pre><code>bun run benchmark:worker</code></pre>
             <p>The benchmark compiles one pure workload, starts a long-lived Bun worker, verifies equal Emacs and Eliscript results, and reports cold and warm compilation, startup, execution, serialization, transport, and client costs separately.</p>
           </section>
@@ -121,7 +126,7 @@ bun run build:org-site</code></pre>
             <h2>Run the test suite</h2>
             <pre><code>bun run test</code></pre>
             <p>This runs the Emacs ERT suite, Vite adapter tests, public CLI fixtures, deterministic snapshots, source-map validation, runtime execution, React server rendering, and a production browser build.</p>
-            <div class="callout callout-coral"><p>M5 is underway. Protocol version 1 now connects Emacs to a long-lived worker with correlated requests, progress, cancellation, timeout handling, and measured overhead.</p></div>
+            <div class="callout callout-coral"><p>M5 is underway. Protocol version 1, closure-checked portable functions, source-name calls, cancellation, timeout recovery, and measured overhead are implemented.</p></div>
           </section>
         </article>
       </div>

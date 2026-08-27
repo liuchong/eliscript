@@ -98,8 +98,11 @@ Portable code should avoid:
 - synchronous callbacks into the editor during a computation
 - values that cannot cross the runtime boundary predictably
 
-The language may eventually provide a declaration such as `portable` or
-`js-worker`, but its spelling and enforcement model are not yet specified.
+The top-level `defportable` declaration marks worker entries. The compiler
+statically validates their transitive `defconst` and `defportable` dependency
+closure, rejects mutable module state and host interop, emits a source-name
+manifest, and can build a module containing only selected entries. See
+[0021-portable-functions.md](0021-portable-functions.md).
 
 ## Performance Contract
 
@@ -170,11 +173,15 @@ Protocol version 1 is implemented by `runtime/worker.mjs` and
 negotiation, progress, cancellation, timeouts, errors, logging isolation, and
 shutdown.
 
-### A2: Portable Functions (Next)
+### A2: Portable Functions (Complete)
 
 - Define and statically validate the portable subset.
 - Compile portable functions and their transitive dependencies as modules.
 - Share conformance tests between Emacs and JavaScript execution.
+
+The seed and self-hosted compilers now implement `defportable`, matching static
+diagnostics, closure-only builds, IR metadata, and a generated ESM manifest.
+Worker and Emacs clients can invoke manifest entries by Eliscript source name.
 
 ### A3: Emacs Integration
 
