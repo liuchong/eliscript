@@ -16,8 +16,8 @@ model without consulting Emacs objects or reader-shaped seed forms.
 portable syntax -> macro expansion -> lexical analysis -> portable IR lowering
 ```
 
-The generated reader, expander, analyzer, and lowerer can process all nine
-bootstrap compiler modules, including the emitter and Source Map sources.
+The generated reader, expander, analyzer, and lowerer can process all ten
+bootstrap compiler modules, including the compiler driver source.
 
 ## Data Contract
 
@@ -66,12 +66,12 @@ The fixture verifies:
 - complete recursive values, children, and kind-specific properties
 - literal tags and recursively quoted data
 - narrow structural spans and macro call-site origins
-- all nine bootstrap compiler sources
+- all ten bootstrap compiler sources
 - deterministic generated modules and Source Map files
 
 ## Next Phase
 
 Generation 1 now reaches stable portable IR. Direct ESM and Source Map emission
 is implemented in [0018-portable-emission.md](0018-portable-emission.md). The
-next phase is a host-neutral compiler driver, followed by reproducible
-self-compilation.
+host-neutral driver and reproducible self-compilation are implemented in
+[0019-self-hosted-compiler.md](0019-self-hosted-compiler.md).

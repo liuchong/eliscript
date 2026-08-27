@@ -34,6 +34,8 @@ const artifactNames = [
   "source-map.mjs.map",
   "emitter.mjs",
   "emitter.mjs.map",
+  "compiler.mjs",
+  "compiler.mjs.map",
 ];
 
 async function run(command, options) {

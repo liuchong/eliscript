@@ -100,5 +100,6 @@ macro expander by
 construction is implemented by
 [0017-portable-ir-lowering.md](0017-portable-ir-lowering.md), and direct ESM and
 Source Map generation by
-[0018-portable-emission.md](0018-portable-emission.md). The next phase is the
-host-neutral compiler driver.
+[0018-portable-emission.md](0018-portable-emission.md). The host-neutral driver
+and reproducible fixed point are implemented by
+[0019-self-hosted-compiler.md](0019-self-hosted-compiler.md).

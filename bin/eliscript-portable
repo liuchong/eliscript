@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
+: "${BUN:=bun}"
+: "${ELISCRIPT_BOOTSTRAP_MODULE_DIR:=$PROJECT_DIR/dist/bootstrap}"
+
+if [ ! -f "$ELISCRIPT_BOOTSTRAP_MODULE_DIR/compiler.mjs" ]; then
+  printf '%s\n' \
+    'eliscript: portable compiler is missing; run bun run build:bootstrap first' \
+    >&2
+  exit 1
+fi
+
+export ELISCRIPT_BOOTSTRAP_MODULE_DIR
+exec "$BUN" "$PROJECT_DIR/bootstrap/host/bun.mjs" "$@"

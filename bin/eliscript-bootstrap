@@ -7,7 +7,7 @@ OUTPUT_DIR=${ELISCRIPT_BOOTSTRAP_OUT_DIR:-"$PROJECT_DIR/dist/bootstrap"}
 
 mkdir -p "$OUTPUT_DIR"
 
-for module in symbol syntax reader expander analyzer ir lower source-map emitter; do
+for module in symbol syntax reader expander analyzer ir lower source-map emitter compiler; do
   "$PROJECT_DIR/bin/eliscript" \
     --source-map \
     --output "$OUTPUT_DIR/$module.mjs" \

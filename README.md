@@ -77,6 +77,12 @@ Build the current compiler modules written in Eliscript:
 bun run build:bootstrap
 ```
 
+Use the generated self-hosted compiler through its Bun filesystem adapter:
+
+```sh
+./bin/eliscript-portable --output dist/basic-portable.mjs examples/basic/main.eli
+```
+
 ## Why
 
 Emacs Lisp is a productive language for editing, automation, macros, and
@@ -145,6 +151,7 @@ standard ESM. Full Emacs Lisp compatibility is not a goal.
 ```text
 bin/                     Command-line entry point
 bootstrap/               Compiler modules written in Eliscript
+  host/                  Thin runtime-specific filesystem adapters
 compiler/                Emacs Lisp compiler implementation
 docs/                    GitHub Pages website
 runtime/                 Minimal JavaScript runtime helpers
@@ -223,8 +230,8 @@ portable execution model. The exact implemented subset is recorded in
 ## Status
 
 The first Emacs Lisp seed compiler is implemented and usable from the command
-line. The M0 vertical slice, M1 language core, M2 React target, and M3 Org
-publishing target are complete. M4 self-hosting is in progress.
+line. The M0 vertical slice, M1 language core, M2 React target, M3 Org
+publishing target, and M4 self-hosting compiler are complete.
 
 Current evidence:
 
@@ -275,11 +282,17 @@ Current evidence:
   source spans match the seed across every one of the 43 IR node kinds.
 - Portable ESM and Source Map emitters consume that IR without Emacs text
   properties. Their output is byte-identical to the seed across examples and
-  all nine bootstrap modules, including Unicode mapping columns.
+  all ten bootstrap modules, including Unicode mapping columns.
+- A host-neutral compiler driver composes the complete in-memory pipeline. Its
+  thin Bun adapter provides file and CLI operations without adding host APIs to
+  the compiler core.
+- The seed-built Generation 1 compiler reproduces all ten compiler modules and
+  Source Maps byte-for-byte; that output compiles them again to the same fixed
+  point.
 - Fifty-two ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, errors, and interop.
-- Twelve Bun tests cover the compiler and Org Vite adapters, source-map handoff,
+- Thirteen Bun tests cover the compiler and Org Vite adapters, source-map handoff,
   file filtering, React Refresh, Org module invalidation, and generated
   bootstrap behavior.
 - A CLI integration test compares generated output with a checked-in snapshot.
@@ -287,8 +300,8 @@ Current evidence:
   higher-order functions, objects, arrays, exports, React server rendering, and
   production Vite bundles, and deterministic Org publishing.
 
-M4 now continues with the host-neutral compiler driver, followed by
-reproducible self-compilation.
+M5 now continues with a measured worker boundary for accelerating portable
+Eliscript workloads from Emacs.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -318,7 +331,9 @@ for deterministic host-independent macro evaluation, and
 [specs/0017-portable-ir-lowering.md](specs/0017-portable-ir-lowering.md) for
 JSON-safe IR construction and full seed/portable tree equivalence, and
 [specs/0018-portable-emission.md](specs/0018-portable-emission.md) for direct
-portable ESM and Source Map generation.
+portable ESM and Source Map generation, and
+[specs/0019-self-hosted-compiler.md](specs/0019-self-hosted-compiler.md) for the
+portable driver, Bun adapter, and reproducible compiler fixed point.
 
 ## License
 

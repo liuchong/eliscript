@@ -52,8 +52,8 @@
               <article class="milestone"><span class="milestone-id">M1</span><div><h3>Language core</h3><p>Macros, locations, analysis, explicit IR, direct emission, source maps, CLI, and runtime execution.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M2</span><div><h3>React</h3><p>Element IR, components, hooks, automatic JSX runtime, browser mounting, source-mapped Vite builds, and Fast Refresh.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M3</span><div><h3>Publishing</h3><p>Pure Emacs Org export, deterministic article modules, live content updates, and a fully custom Eliscript React site.</p></div><span class="status status-done">Complete</span></article>
-              <article class="milestone"><span class="milestone-id">M4</span><div><h3>Bootstrap</h3><p>The portable compiler reaches direct ESM and Source Map output; the host-neutral driver and reproducible fixed point remain.</p></div><span class="status status-next">In progress</span></article>
-              <article class="milestone"><span class="milestone-id">M5</span><div><h3>Emacs acceleration</h3><p>Run selected portable workloads in a long-lived Bun worker controlled by Emacs.</p></div><span class="status">Research</span></article>
+              <article class="milestone"><span class="milestone-id">M4</span><div><h3>Bootstrap</h3><p>The portable compiler driver, Bun adapter, complete conformance suite, and reproducible compiler fixed point.</p></div><span class="status status-done">Complete</span></article>
+              <article class="milestone"><span class="milestone-id">M5</span><div><h3>Emacs acceleration</h3><p>Run selected portable workloads in a long-lived Bun worker controlled by Emacs.</p></div><span class="status status-next">Next</span></article>
             </div>
           </section>
 
@@ -68,7 +68,7 @@ Emacs Lisp seed + compiler.eli → compiler.js
 Generation 2
 compiler.js + compiler.eli → next-compiler.js</code></pre>
             <p>Self-hosting is complete only when both compilers pass the same conformance suite and the generated compiler can reproduce itself without semantic drift.</p>
-            <div class="callout"><p>Generation 1 can now read, expand, analyze, lower, and emit its own source with seed-identical ESM and Source Maps. The compiler driver is the next dependency boundary.</p></div>
+            <div class="callout"><p>Generation 1 builds Generation 2, and Generation 2 builds the same Generation 3. All ten ESM modules and all ten Source Maps match byte-for-byte.</p></div>
           </section>
 
           <section id="acceleration">

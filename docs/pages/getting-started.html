@@ -105,14 +105,16 @@ bun run build:org-site</code></pre>
           <section id="bootstrap">
             <h2>Build the bootstrap modules</h2>
             <pre><code>bun run build:bootstrap</code></pre>
-            <p>The Emacs Lisp seed compiler writes nine source-mapped modules below <code>dist/bootstrap/</code>: symbol semantics, syntax, reader, expander, analyzer, IR, lowering, Source Map encoding, and ESM emission. The generated pipeline matches complete seed syntax, diagnostics, IR trees, JavaScript, and mappings across all bootstrap sources.</p>
+            <p>The Emacs Lisp seed compiler writes ten source-mapped modules below <code>dist/bootstrap/</code>, including the complete portable compiler driver. Compile through that generated compiler with:</p>
+            <pre><code>./bin/eliscript-portable --output dist/program.mjs source/program.eli</code></pre>
+            <p>The conformance suite uses Generation 1 to build Generation 2, then Generation 2 to build Generation 3. Every compiler module and Source Map remains byte-identical.</p>
           </section>
 
           <section id="test">
             <h2>Run the test suite</h2>
             <pre><code>bun run test</code></pre>
             <p>This runs the Emacs ERT suite, Vite adapter tests, public CLI fixtures, deterministic snapshots, source-map validation, runtime execution, React server rendering, and a production browser build.</p>
-            <div class="callout callout-coral"><p>M4 is underway. The portable compiler now reaches direct ESM and Source Map output from source written in Eliscript; the host-neutral compiler driver is next.</p></div>
+            <div class="callout callout-coral"><p>M4 is complete. The portable compiler now compiles and reproduces itself; the Emacs Lisp seed remains the clean-checkout bootstrap and reference implementation.</p></div>
           </section>
         </article>
       </div>

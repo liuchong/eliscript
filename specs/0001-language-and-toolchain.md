@@ -242,7 +242,7 @@ feeds a responsive React publishing site whose application code is written in
 Eliscript. The command-line exporter and production bundle are covered by the
 integration suite. See [0012-org-publishing.md](0012-org-publishing.md).
 
-### M4: Bootstrap (In Progress)
+### M4: Bootstrap (Complete)
 
 - Rewrite portable compiler phases in Eliscript.
 - Use the Emacs Lisp seed compiler to produce the first `compiler.js`.
@@ -268,12 +268,20 @@ and downstream analysis match the seed over one shared fixture. See
 [0016-portable-macro-expander.md](0016-portable-macro-expander.md).
 The fifth slice adds a JSON-safe IR model and a complete lowering pass written
 in Eliscript. Seed and generated lowerers agree on every node, property,
-quoted datum, and source span across all 43 IR kinds and all nine bootstrap
+quoted datum, and source span across all 43 IR kinds and all ten bootstrap
 modules. See [0017-portable-ir-lowering.md](0017-portable-ir-lowering.md).
 The sixth slice adds direct ESM and Source Map emitters written in Eliscript.
 Seed and generated backends agree on complete JavaScript text and Source Map
-documents, and the generated backend emits all nine compiler modules. See
+documents, and the generated backend emits all ten compiler modules. See
 [0018-portable-emission.md](0018-portable-emission.md).
+The seventh slice adds the host-neutral compiler driver and thin Bun filesystem
+adapter. The seed-built compiler produces a byte-identical Generation 2, which
+in turn produces the same Generation 3 fixed point. See
+[0019-self-hosted-compiler.md](0019-self-hosted-compiler.md).
+
+Completed on 2026-08-28. The Emacs Lisp implementation remains the bootstrap
+seed and executable reference, while normal compiler development can proceed in
+Eliscript source.
 
 ### M5: Emacs Acceleration
 

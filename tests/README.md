@@ -33,10 +33,15 @@ The IR fixture runs the complete generated front end and lowerer, then compares
 the resulting program with a normalized seed oracle. It covers every one of
 the 43 public IR node kinds, JSON-safe quoted data and literal tags,
 kind-specific properties, complete nested source spans, macro call origins,
-and all nine bootstrap compiler modules.
+and all ten bootstrap compiler modules.
 
 The emitter fixture sends the same portable IR through the generated backend
 and the Emacs seed backend. It compares complete ESM text and parsed Source Map
 documents, checks signed Base64 VLQ boundaries and Unicode columns, and runs a
 generated module in a fresh Bun process. The emitter and Source Map modules are
 also part of the self-source fixture set.
+
+The compiler-driver test builds Generation 1 with the Emacs Lisp seed,
+Generation 2 with Generation 1, and Generation 3 with Generation 2. It compares
+all ten ESM and Source Map artifacts byte-for-byte, checks the portable CLI
+against seed output, and verifies mapped file output and located diagnostics.

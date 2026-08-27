@@ -1,0 +1,28 @@
+(module bootstrap.compiler.compiler
+  (import "./reader.mjs" read-string)
+  (import "./expander.mjs" expand-module)
+  (import "./analyzer.mjs" analyze-module)
+  (import "./lower.mjs" lower-module)
+  (import "./emitter.mjs" emit-module emit-module-with-source-map)
+
+  (defun compile-ir-string (source filename)
+    (let* ((read-forms (read-string source filename))
+           (expanded-forms (expand-module read-forms filename)))
+      (analyze-module expanded-forms filename)
+      (lower-module expanded-forms filename)))
+
+  (defun compile-string (source filename)
+    (emit-module (compile-ir-string source filename)))
+
+  (defun compile-string-with-source-map
+      (source filename generated-name source-name)
+    (emit-module-with-source-map
+      (compile-ir-string source filename)
+      source
+      generated-name
+      (or source-name filename "<string>")))
+
+  (export
+    compile-ir-string
+    compile-string
+    compile-string-with-source-map))

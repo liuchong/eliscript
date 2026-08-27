@@ -53,11 +53,11 @@ Emacs objects, text properties, Bun APIs, or Node.js modules.
 
 ## Build Boundary
 
-`bin/eliscript-bootstrap` now emits nine compiler modules in dependency order:
+`bin/eliscript-bootstrap` emits ten compiler modules in dependency order:
 
 ```text
 symbol -> syntax -> reader -> expander -> analyzer -> ir -> lower
-       -> source-map -> emitter
+       -> source-map -> emitter -> compiler
 ```
 
 The generated emitter imports the portable symbol, IR, and Source Map modules.
@@ -70,7 +70,7 @@ adapters without moving host concerns into these modules.
 `tests/fixtures/bootstrap-ir.json` is shared by the Emacs seed and generated
 backends. The emission oracle compares complete JavaScript strings and parsed
 Source Map documents for the full IR surface, quoted literal identity, Unicode
-columns, executable programs, macro call-site spans, and all nine bootstrap
+columns, executable programs, macro call-site spans, and all ten bootstrap
 compiler sources.
 
 Additional checks verify signed VLQ boundaries, execute a generated module in a
@@ -80,7 +80,6 @@ the complete Source Map document.
 
 ## Next Phase
 
-The next M4 slice is a host-neutral compiler driver that composes reading,
-expansion, analysis, lowering, and emission. It must support in-memory
-compilation first, then thin filesystem and CLI adapters. Reproducible
-self-compilation follows after the generated driver passes the shared suite.
+The host-neutral driver, thin filesystem adapter, and reproducible compiler
+fixed point are implemented in
+[0019-self-hosted-compiler.md](0019-self-hosted-compiler.md).

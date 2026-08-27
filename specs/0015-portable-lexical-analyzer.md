@@ -98,7 +98,7 @@ generated analyzer, then compares acceptance and complete diagnostic strings.
 
 Coverage includes forward declarations, lexical scope, mutable state, imports,
 exports, special forms, lambdas, JavaScript references, duplicate bindings,
-identifier collisions, invalid arities, malformed clauses, and all nine
+identifier collisions, invalid arities, malformed clauses, and all ten
 bootstrap modules. Repeated bootstrap builds remain byte-identical, including
 the new analyzer and its source map.
 
@@ -110,4 +110,4 @@ implemented lowering stage in
 [0017-portable-ir-lowering.md](0017-portable-ir-lowering.md). Generation 1 can
 now emit direct ESM and Source Map output as specified in
 [0018-portable-emission.md](0018-portable-emission.md); the compiler driver is
-the next dependency boundary.
+implemented in [0019-self-hosted-compiler.md](0019-self-hosted-compiler.md).
