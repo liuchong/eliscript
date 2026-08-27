@@ -3,7 +3,19 @@
 ;;; Code:
 
 (require 'ert)
+(require 'cl-lib)
 (require 'eliscript)
+
+(defun eliscript-tests--legacy-compile-string (source &optional filename)
+  "Compile SOURCE from FILENAME through the compatibility form emitter."
+  (eliscript-emit-module
+   (mapcar
+    #'eliscript-form-strip
+    (eliscript-analyze-module
+     (eliscript-expand-module
+      (eliscript-read-located-string source filename)
+      filename)
+     filename))))
 
 (ert-deftest eliscript-reader-reads-multiple-forms ()
   (should
@@ -335,6 +347,57 @@
     (should
      (equal (eliscript-ir-program-to-forms program)
             '((defun invoke (value) ((lambda (item) item) value)))))))
+
+(ert-deftest eliscript-ir-emitter-matches-compatibility-backend ()
+  (let ((source
+         "(import \"react\" :default React useState)
+(import \"react-dom\" :as ReactDOM)
+(defvar state 0)
+(defun optional-branch (value) (let* () (if value value)))
+(defun exercise (value values)
+  (let* ((next (1+ value))
+         (record (object :next next (+ value 1) value)))
+    (progn
+      (setq state next)
+      (set! state (if (and value next) next state))
+      (when value (print (get record :next)))
+      (unless false (put record :done t))
+      (while (> state 10) (set! state (1- state)))
+      (or (null values)
+          (apply (lambda (item) item) values)
+          (js-call values :map (lambda (item) (* item 2))))
+      (cond ((= state 0) '(zero)) (t (str state))))))
+(export exercise optional-branch state)
+(export-default exercise)")
+        (filename "emitter-parity.eli"))
+    (should
+     (equal (eliscript-compile-string source filename)
+            (eliscript-tests--legacy-compile-string source filename)))))
+
+(ert-deftest eliscript-ir-emitter-does-not-call-form-backend ()
+  (let ((program
+         (eliscript-compile-ir-string
+          "(defun identity (value) value) (export identity)"
+          "direct-ir.eli")))
+    (cl-letf (((symbol-function 'eliscript-ir-program-to-forms)
+               (lambda (&rest _arguments)
+                 (error "IR form bridge must not run")))
+              ((symbol-function 'eliscript-ir-node-to-form)
+               (lambda (&rest _arguments)
+                 (error "IR node bridge must not run")))
+              ((symbol-function 'eliscript-emit-module)
+               (lambda (&rest _arguments)
+                 (error "form module emitter must not run")))
+              ((symbol-function 'eliscript-emitter-emit-top-level)
+               (lambda (&rest _arguments)
+                 (error "form top-level emitter must not run")))
+              ((symbol-function 'eliscript-emitter-emit-expression)
+               (lambda (&rest _arguments)
+                 (error "form expression emitter must not run"))))
+      (should
+       (string-match-p
+        (regexp-quote "function identity(value)")
+        (eliscript-emit-ir-module program))))))
 
 (provide 'eliscript-tests)
 

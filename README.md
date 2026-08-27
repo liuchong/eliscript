@@ -123,8 +123,8 @@ The current seed compiler is intentionally direct:
             -> ESM emitter -> Bun or browser
 ```
 
-The next compiler stage emits ECMAScript directly from IR and produces source
-maps from the preserved source spans.
+ECMAScript is emitted directly from IR. The next compiler stage produces source
+maps from the spans already retained by every IR node.
 
 ## Bootstrap Strategy
 
@@ -192,14 +192,16 @@ Current evidence:
   analysis; compiler errors report filename, line, and column.
 - An explicit IR separates declarations, bindings, control flow, calls, data,
   and JavaScript interop while retaining a span on every node.
-- Thirty-three ERT tests cover reading, locations, macro expansion, analysis,
-  IR lowering, core emission, modules, errors, and JavaScript interop.
+- A dedicated IR backend emits ESM without reconstructing reader forms; a
+  compatibility test keeps its output byte-identical to the seed formatter.
+- Thirty-five ERT tests cover reading, locations, macro expansion, analysis,
+  IR lowering, direct emission, modules, errors, and JavaScript interop.
 - A CLI integration test compares generated output with a checked-in snapshot.
 - Bun 1.4 executes the generated module and verifies recursion, mutation,
   loops, higher-order functions, objects, arrays, and exports.
 
-The next M1 slice adds direct IR emission and source maps. React and Org
-publishing remain later milestones.
+The next M1 slice adds source maps driven by IR spans. React and Org publishing
+remain later milestones.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -208,7 +210,9 @@ seed macro model, and
 [specs/0006-source-locations.md](specs/0006-source-locations.md) for located
 forms and diagnostic positions, and
 [specs/0007-intermediate-representation.md](specs/0007-intermediate-representation.md)
-for the explicit IR contract.
+for the explicit IR contract, and
+[specs/0008-direct-ir-emission.md](specs/0008-direct-ir-emission.md) for the
+direct ECMAScript backend.
 
 ## License
 

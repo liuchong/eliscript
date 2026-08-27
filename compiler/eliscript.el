@@ -11,6 +11,7 @@
 (require 'eliscript-analyzer)
 (require 'eliscript-lower)
 (require 'eliscript-emitter)
+(require 'eliscript-ir-emitter)
 
 (defun eliscript-compile-ir-string (source &optional filename)
   "Compile Eliscript SOURCE from FILENAME into an IR program."

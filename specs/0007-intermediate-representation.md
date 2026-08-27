@@ -70,13 +70,14 @@ and source maps; later backends do not need to inspect reader forms.
 ## Emission Boundary
 
 The public compiler now sends an `eliscript-ir-program` to
-`eliscript-emit-ir-module`. The current implementation uses a normalization
-bridge from IR back to canonical forms before invoking the stable M0 formatter.
-This preserves byte-for-byte output while the direct IR emitter is developed.
+`eliscript-emit-ir-module`. The dedicated IR backend recursively emits every
+expression, declaration, structural child, and module wrapper without invoking
+the canonical-form conversion functions or the original form backend.
 
-The bridge is a compatibility backend, not the front-end contract. New compiler
-phases and public APIs consume IR, and direct ECMAScript emission must not
-reintroduce reader-shaped forms as its semantic interface.
+The original formatter remains available as a compatibility API and an
+independent regression oracle. It is not part of the production compilation
+path. The two backends are required to produce byte-identical ESM for the
+implemented language surface.
 
 ## Acceptance Evidence
 
@@ -84,12 +85,15 @@ reintroduce reader-shaped forms as its semantic interface.
   bindings, conditionals, computed callees, and node kinds directly.
 - Span tests verify that lowered handwritten and macro-generated nodes retain
   their source origins.
-- The complete existing ERT suite passes through the IR pipeline.
+- A guard test replaces every form-conversion and form-emission entry point
+  with a failure and verifies that IR emission still succeeds.
+- A broad language fixture compares the direct and compatibility backends
+  byte-for-byte.
+- The complete existing ERT suite passes through the direct IR pipeline.
 - CLI snapshots remain byte-for-byte stable and Bun executes the emitted ESM.
 
 ## Deferred Work
 
-- direct ECMAScript formatting from IR nodes
 - source-map generation driven by IR spans
 - structured serialization for cross-implementation conformance fixtures
 - optimization and canonicalization passes over IR
