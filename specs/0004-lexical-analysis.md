@@ -6,14 +6,14 @@
 
 ## Summary
 
-Eliscript now has an explicit analysis phase between reading and ECMAScript
-emission. The first analyzer validates lexical bindings while returning the
-expanded forms unchanged. This pass-through boundary preserves the M0 emitter
-and gives later M1 work a stable place for IR construction, source locations,
-and richer diagnostics.
+Eliscript has an explicit analysis phase between expansion and IR lowering. The
+first implementation validated lexical bindings while returning expanded forms
+unchanged; specifications 0006 through 0009 subsequently carried locations
+through IR, direct emission, and source maps without changing this analyzer
+contract.
 
 ```text
-.eli source -> reader -> macro expander -> lexical analyzer -> ESM emitter
+.eli source -> reader -> macro expander -> lexical analyzer -> IR lowerer
 ```
 
 ## Module Scope
@@ -73,7 +73,7 @@ This rule catches accidental undeclared names without hiding host interop.
 Analysis failures signal `eliscript-analyze-error`, a subtype of the existing
 public `eliscript-compile-error`. The located-form layer added in specification
 0006 now lets diagnostics include filename, line, and column. Structured
-diagnostic records remain later M1 work.
+diagnostic records remain future work.
 
 ## Acceptance Evidence
 
@@ -85,5 +85,4 @@ diagnostic records remain later M1 work.
 
 ## Deferred Work
 
-- direct IR-based ECMAScript emission
-- source maps from emitted JavaScript back to Eliscript source
+- structured diagnostic records in addition to formatted conditions

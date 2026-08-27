@@ -205,17 +205,17 @@ The core compiler must not depend on files in `tools/`.
 Completed on 2026-08-27. The generated module is also executed by Bun as part
 of the CLI integration test.
 
-### M1: Language Core (In Progress)
+### M1: Language Core (Complete)
 
 - Harden the initial module forms and add lexical binding validation, macros,
   and source maps.
 - Define the IR and public compiler diagnostics.
 - Execute emitted modules in a JavaScript test runner.
 
-Lexical binding validation, trusted compile-time macro expansion, recursively
-located forms, filename/line/column diagnostics, explicit IR lowering, direct
-IR emission, output-name collision checks, and JavaScript execution are
-implemented. Source maps remain.
+Completed on 2026-08-28. Lexical binding validation, trusted compile-time macro
+expansion, recursively located forms, filename/line/column diagnostics,
+explicit IR lowering, direct IR emission, output-name collision checks,
+external Source Map v3 output, and JavaScript execution are implemented.
 
 ### M2: React
 

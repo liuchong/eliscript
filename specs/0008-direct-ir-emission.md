@@ -65,7 +65,6 @@ mapping, arity failures, and quoted-data formatting.
 
 ## Deferred Work
 
-- source-map generation from IR spans
 - structured serialization for cross-implementation conformance fixtures
 - optional IR validation at backend boundaries
 - optimization and canonicalization passes

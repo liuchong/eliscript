@@ -11,11 +11,55 @@ trap 'rm -rf "$TEMP_DIR"' EXIT INT TERM
 
 diff -u "$PROJECT_DIR/tests/snapshots/core.mjs" "$TEMP_DIR/core.mjs"
 
+"$PROJECT_DIR/bin/eliscript" \
+  --source-map \
+  --output "$TEMP_DIR/core-with-map.mjs" \
+  "$PROJECT_DIR/tests/fixtures/core.eli"
+
+if [ ! -f "$TEMP_DIR/core-with-map.mjs.map" ]; then
+  printf 'expected external source map to be written\n' >&2
+  exit 1
+fi
+
+if ! grep -F '//# sourceMappingURL=core-with-map.mjs.map' \
+  "$TEMP_DIR/core-with-map.mjs" >/dev/null; then
+  printf 'expected generated module to reference its source map\n' >&2
+  exit 1
+fi
+
+SOURCE_MAP_FILE="$TEMP_DIR/core-with-map.mjs.map" bun -e '
+  const map = await Bun.file(process.env.SOURCE_MAP_FILE).json();
+  if (map.version !== 3 || map.file !== "core-with-map.mjs") process.exit(1);
+  if (map.sources.length !== 1 || map.sourcesContent.length !== 1) process.exit(1);
+  if (!map.sourcesContent[0].includes("(module test.core")) process.exit(1);
+  if (typeof map.mappings !== "string" || map.mappings.length === 0) process.exit(1);
+'
+
+if "$PROJECT_DIR/bin/eliscript" --source-map \
+  "$PROJECT_DIR/tests/fixtures/core.eli" \
+  > "$TEMP_DIR/map-without-output.out" \
+  2> "$TEMP_DIR/map-without-output.err"; then
+  printf 'expected --source-map without --output to fail\n' >&2
+  exit 1
+fi
+
+if ! grep -F -- '--source-map requires --output' \
+  "$TEMP_DIR/map-without-output.err" >/dev/null; then
+  printf 'expected source-map option diagnostic\n' >&2
+  exit 1
+fi
+
 ACTUAL_OUTPUT=$(bun run "$TEMP_DIR/core.mjs")
+SOURCE_MAPPED_OUTPUT=$(bun run "$TEMP_DIR/core-with-map.mjs")
 EXPECTED_OUTPUT='{"message":"hello from Eliscript","values":[1,2,3],"factorial":120,"class":"positive","sum":15,"doubled":[2,4,6],"consed":[0,1,2],"empty-car":null}'
 
 if [ "$ACTUAL_OUTPUT" != "$EXPECTED_OUTPUT" ]; then
   printf 'expected: %s\nactual:   %s\n' "$EXPECTED_OUTPUT" "$ACTUAL_OUTPUT" >&2
+  exit 1
+fi
+
+if [ "$SOURCE_MAPPED_OUTPUT" != "$EXPECTED_OUTPUT" ]; then
+  printf 'source-mapped module output differs: %s\n' "$SOURCE_MAPPED_OUTPUT" >&2
   exit 1
 fi
 

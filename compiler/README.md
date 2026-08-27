@@ -11,6 +11,7 @@ This directory contains the first Emacs Lisp seed compiler:
 - `eliscript-ir.el` defines the explicit, source-located compiler IR.
 - `eliscript-lower.el` lowers analyzed forms into IR nodes.
 - `eliscript-ir-emitter.el` emits standard ECMAScript modules directly from IR.
+- `eliscript-source-map.el` encodes IR span markers as Source Map v3 mappings.
 - `eliscript-emitter.el` retains the original form emitter as a compatibility
   backend and supplies shared formatting helpers.
 - `eliscript.el` exposes the public string and file compilation API.
@@ -20,10 +21,10 @@ The current pipeline expands user macros before passing forms through lexical
 analysis and JavaScript emission. Macro environments are isolated per
 compilation, and expanded forms are validated for resolution, mutability,
 exports, duplicate declarations, and output-name collisions. Located forms
-carry source spans through expansion, analysis, IR lowering, and direct IR
-emission. The public compiler never reconstructs reader-shaped forms after
-lowering. Source-map generation is the next phase boundary. Public entry points
-support both interactive Emacs use and clean batch builds.
+carry source spans through expansion, analysis, IR lowering, direct IR
+emission, and optional Source Map v3 output. The public compiler never
+reconstructs reader-shaped forms after lowering. Public entry points support
+both interactive Emacs use and clean batch builds.
 
 The Emacs Lisp and self-hosted implementations must share a conformance suite.
 Generated JavaScript is a build artifact and must never become the hand-edited

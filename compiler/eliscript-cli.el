@@ -12,13 +12,16 @@
 (require 'eliscript)
 
 (defconst eliscript-cli--usage
-  "Usage: eliscript [--output FILE] INPUT\n\nCompile INPUT to an ECMAScript module. Write to stdout when --output is absent.\n")
+  (concat
+   "Usage: eliscript [--output FILE] [--source-map] INPUT\n\n"
+   "Compile INPUT to an ECMAScript module. Write to stdout when --output "
+   "is absent.\n--source-map writes FILE.map and requires --output.\n"))
 
 (defun eliscript-cli--parse (arguments)
-  "Parse command line ARGUMENTS and return (INPUT OUTPUT)."
+  "Parse command line ARGUMENTS and return (INPUT OUTPUT SOURCE-MAP)."
   (when (equal (car arguments) "--")
     (setq arguments (cdr arguments)))
-  (let (input output)
+  (let (input output source-map)
     (while arguments
       (let ((argument (pop arguments)))
         (cond
@@ -29,21 +32,28 @@
           (unless arguments
             (error "%s requires a file" argument))
           (setq output (pop arguments)))
+         ((equal argument "--source-map")
+          (setq source-map t))
          ((string-prefix-p "-" argument)
           (error "unknown option: %s" argument))
          (input (error "multiple input files are not supported yet"))
          (t (setq input argument)))))
     (unless input
       (error "missing input file"))
-    (list input output)))
+    (when (and source-map (null output))
+      (error "--source-map requires --output"))
+    (list input output source-map)))
 
 (defun eliscript-cli-main (arguments)
   "Compile according to command-line ARGUMENTS."
   (condition-case error-data
-      (pcase-let ((`(,input ,output) (eliscript-cli--parse arguments)))
-        (let ((generated (eliscript-compile-file input output)))
-          (unless output
-            (princ generated))))
+      (pcase-let ((`(,input ,output ,source-map)
+                   (eliscript-cli--parse arguments)))
+        (if source-map
+            (eliscript-compile-file-with-source-map input output)
+          (let ((generated (eliscript-compile-file input output)))
+            (unless output
+              (princ generated)))))
     (error
      (message "eliscript: %s" (error-message-string error-data))
      (kill-emacs 1))))

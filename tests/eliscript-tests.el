@@ -17,6 +17,59 @@
       filename)
      filename))))
 
+(defun eliscript-tests--decode-vlq-segment (segment)
+  "Decode Base64 VLQ values from source-map SEGMENT."
+  (let ((index 0)
+        values)
+    (while (< index (length segment))
+      (let ((shift 0)
+            (value 0)
+            continuation)
+        (while
+            (progn
+              (let* ((digit
+                      (cl-position
+                       (aref segment index)
+                       eliscript-source-map--base64))
+                     (payload (logand digit 31)))
+                (setq index (1+ index)
+                      value (logior value (ash payload shift))
+                      shift (+ shift 5)
+                      continuation (/= (logand digit 32) 0)))
+              continuation))
+        (push (if (= (logand value 1) 1)
+                  (- (ash value -1))
+                (ash value -1))
+              values)))
+    (nreverse values)))
+
+(defun eliscript-tests--decode-mappings (mappings)
+  "Decode source-map MAPPINGS into absolute five-field segments."
+  (let ((generated-line 0)
+        (previous-source 0)
+        (previous-original-line 0)
+        (previous-original-column 0)
+        decoded)
+    (dolist (line (split-string mappings ";" nil))
+      (let ((previous-generated-column 0))
+        (dolist (encoded (split-string line "," t))
+          (pcase-let ((`(,generated-column-delta ,source-delta
+                         ,original-line-delta ,original-column-delta)
+                       (eliscript-tests--decode-vlq-segment encoded)))
+            (setq previous-generated-column
+                  (+ previous-generated-column generated-column-delta)
+                  previous-source (+ previous-source source-delta)
+                  previous-original-line
+                  (+ previous-original-line original-line-delta)
+                  previous-original-column
+                  (+ previous-original-column original-column-delta))
+            (push (list generated-line previous-generated-column
+                        previous-source previous-original-line
+                        previous-original-column)
+                  decoded))))
+      (setq generated-line (1+ generated-line)))
+    (nreverse decoded)))
+
 (ert-deftest eliscript-reader-reads-multiple-forms ()
   (should
    (equal (eliscript-read-string "; comment\n(defconst answer 42)\n(+ answer 1)")
@@ -398,6 +451,67 @@
        (string-match-p
         (regexp-quote "function identity(value)")
         (eliscript-emit-ir-module program))))))
+
+(ert-deftest eliscript-source-map-encodes-signed-vlq-values ()
+  (should (equal (eliscript-source-map--encode-vlq 0) "A"))
+  (should (equal (eliscript-source-map--encode-vlq 1) "C"))
+  (should (equal (eliscript-source-map--encode-vlq -1) "D"))
+  (should (equal (eliscript-source-map--encode-vlq 16) "gB"))
+  (should (equal (eliscript-source-map--encode-vlq -16) "hB")))
+
+(ert-deftest eliscript-source-map-records-ir-spans-and-utf16-columns ()
+  (let* ((source "(defun choose (value)\n\t(if value value nil))\n(print \"😀\" \"after\")")
+         (emission
+          (eliscript-compile-string-with-source-map
+           source "source.eli" "output.mjs" "source.eli"))
+         (map
+          (json-parse-string
+           (eliscript-emission-source-map emission)
+           :object-type 'alist
+           :array-type 'list))
+         (segments
+          (eliscript-tests--decode-mappings
+           (alist-get 'mappings map))))
+    (should (= (alist-get 'version map) 3))
+    (should (equal (alist-get 'file map) "output.mjs"))
+    (should (equal (alist-get 'sources map) '("source.eli")))
+    (should (equal (alist-get 'sourcesContent map) (list source)))
+    (should (equal-including-properties
+             (eliscript-emission-javascript emission)
+             (substring-no-properties
+              (eliscript-emission-javascript emission))))
+    (should (member '(3 0 0 0 0) segments))
+    (should (cl-find-if
+             (lambda (segment)
+               (and (= (nth 3 segment) 1)
+                    (= (nth 4 segment) 1)))
+             segments))
+    (should (cl-find-if
+             (lambda (segment)
+               (and (= (nth 1 segment) 20)
+                    (= (nth 3 segment) 2)
+                    (= (nth 4 segment) 12)))
+             segments))))
+
+(ert-deftest eliscript-source-map-points-expanded-code-to-macro-call ()
+  (let* ((source
+          "(defmacro twice (value) `(+ ,value ,value))\n\n(print (twice 21))")
+         (emission
+          (eliscript-compile-string-with-source-map
+           source "macro-map.eli" "macro-map.mjs"))
+         (map
+          (json-parse-string
+           (eliscript-emission-source-map emission)
+           :object-type 'alist))
+         (segments
+          (eliscript-tests--decode-mappings
+           (alist-get 'mappings map))))
+    (should
+     (cl-find-if
+      (lambda (segment)
+        (and (= (nth 3 segment) 2)
+             (= (nth 4 segment) 7)))
+      segments))))
 
 (provide 'eliscript-tests)
 

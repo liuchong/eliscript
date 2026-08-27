@@ -30,6 +30,18 @@ FILENAME is used for compiler diagnostics."
   (eliscript-emit-ir-module
    (eliscript-compile-ir-string source filename)))
 
+(defun eliscript-compile-string-with-source-map
+    (source &optional filename generated-name source-name)
+  "Compile SOURCE and return JavaScript plus a Source Map v3 document.
+
+FILENAME is used for diagnostics.  GENERATED-NAME and SOURCE-NAME identify the
+files recorded in the source map.  The return value is an `eliscript-emission'."
+  (eliscript-emit-ir-module-with-source-map
+   (eliscript-compile-ir-string source filename)
+   source
+   generated-name
+   (or source-name filename "<string>")))
+
 (defun eliscript-compile-ir-file (input-file)
   "Compile INPUT-FILE into an IR program."
   (eliscript-lower-module
@@ -51,6 +63,58 @@ Return the generated ECMAScript source."
       (with-temp-file output-file
         (insert output)))
     output))
+
+(defun eliscript-compile-file-with-source-map
+    (input-file &optional output-file source-map-file)
+  "Compile INPUT-FILE with a Source Map v3 document.
+
+When OUTPUT-FILE is non-nil, write JavaScript there and write the map to
+SOURCE-MAP-FILE or OUTPUT-FILE with `.map' appended.  The JavaScript receives
+an external `sourceMappingURL' comment.  Return an `eliscript-emission'."
+  (when (and source-map-file (null output-file))
+    (error "SOURCE-MAP-FILE requires OUTPUT-FILE"))
+  (let* ((input-path (expand-file-name input-file))
+         (output-path (and output-file (expand-file-name output-file)))
+         (map-path
+          (and output-path
+               (expand-file-name (or source-map-file
+                                     (concat output-path ".map")))))
+         (source
+          (with-temp-buffer
+            (insert-file-contents input-path)
+            (buffer-string)))
+         (map-directory
+          (and map-path (file-name-directory map-path)))
+         (generated-name
+          (and output-path
+               (file-relative-name output-path map-directory)))
+         (source-name
+          (if map-directory
+              (file-relative-name input-path map-directory)
+            input-file))
+         (emission
+          (eliscript-compile-string-with-source-map
+           source input-path generated-name source-name)))
+    (when (and output-path (string-equal output-path map-path))
+      (error "source map path must differ from output path"))
+    (when output-path
+      (let* ((map-url
+              (file-relative-name
+               map-path (file-name-directory output-path)))
+             (javascript
+              (concat (eliscript-emission-javascript emission)
+                      "//# sourceMappingURL=" map-url "\n")))
+        (setq emission
+              (eliscript-emission-create
+               :javascript javascript
+               :source-map (eliscript-emission-source-map emission)))
+        (make-directory map-directory t)
+        (with-temp-file map-path
+          (insert (eliscript-emission-source-map emission)))
+        (make-directory (file-name-directory output-path) t)
+        (with-temp-file output-path
+          (insert javascript))))
+    emission))
 
 (provide 'eliscript)
 

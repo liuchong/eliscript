@@ -12,6 +12,21 @@
 (require 'subr-x)
 (require 'eliscript-emitter)
 (require 'eliscript-ir)
+(require 'eliscript-source-map)
+
+(defvar eliscript-ir-emitter--record-source-spans nil)
+
+(defun eliscript-ir-emitter--locate (node output)
+  "Mark OUTPUT with NODE's source span when source-map recording is active."
+  (if eliscript-ir-emitter--record-source-spans
+      (eliscript-source-map-mark output (eliscript-ir-node-span node))
+    output))
+
+(defun eliscript-ir-emitter--emit-binding-name (node)
+  "Emit the binding name represented by NODE with its source location."
+  (eliscript-ir-emitter--locate
+   node
+   (eliscript-emitter--binding-name (eliscript-ir-node-value node))))
 
 (defun eliscript-ir-emitter--children (node)
   "Return NODE's child list."
@@ -77,8 +92,7 @@
     (format "(%s) => {\n%s\n}"
             (mapconcat
              (lambda (parameter)
-               (eliscript-emitter--binding-name
-                (eliscript-ir-node-value parameter)))
+               (eliscript-ir-emitter--emit-binding-name parameter))
              parameters ", ")
             (eliscript-emitter--indent
              (eliscript-ir-emitter--emit-returning-body body)))))
@@ -106,16 +120,19 @@
   "Emit nested conditional expressions for IR CLAUSES."
   (if (null clauses)
       "null"
-    (let* ((children (eliscript-ir-emitter--children (car clauses)))
+    (let* ((clause (car clauses))
+           (children (eliscript-ir-emitter--children clause))
            (test (car children))
            (body (cdr children)))
-      (if (and (eq (eliscript-ir-node-kind test) 'literal)
-               (eq (eliscript-ir-node-value test) t))
-          (eliscript-ir-emitter--emit-do body)
-        (format "(__eliscript_truthy(%s) ? %s : %s)"
-                (eliscript-ir-emitter-emit-expression test)
-                (eliscript-ir-emitter--emit-do body)
-                (eliscript-ir-emitter--emit-cond (cdr clauses)))))))
+      (eliscript-ir-emitter--locate
+       clause
+       (if (and (eq (eliscript-ir-node-kind test) 'literal)
+                (eq (eliscript-ir-node-value test) t))
+           (eliscript-ir-emitter--emit-do body)
+         (format "(__eliscript_truthy(%s) ? %s : %s)"
+                 (eliscript-ir-emitter-emit-expression test)
+                 (eliscript-ir-emitter--emit-do body)
+                 (eliscript-ir-emitter--emit-cond (cdr clauses))))))))
 
 (defun eliscript-ir-emitter--emit-let (node)
   "Emit lexical binding NODE."
@@ -137,8 +154,7 @@
   "Emit BINDINGS and BODY, nesting SEQUENTIAL-TAIL when requested."
   (let ((names
          (mapcar (lambda (binding)
-                   (eliscript-emitter--binding-name
-                    (eliscript-ir-node-value binding)))
+                   (eliscript-ir-emitter--emit-binding-name binding))
                  bindings))
         (values
          (mapcar (lambda (binding)
@@ -174,11 +190,12 @@
          (assignments
           (mapcar
            (lambda (pair)
-             (format "(%s = %s)"
-                     (eliscript-emitter--binding-name
-                      (eliscript-ir-node-value pair))
-                     (eliscript-ir-emitter-emit-expression
-                      (car (eliscript-ir-emitter--children pair)))))
+             (eliscript-ir-emitter--locate
+              pair
+              (format "(%s = %s)"
+                      (eliscript-ir-emitter--emit-binding-name pair)
+                      (eliscript-ir-emitter-emit-expression
+                       (car (eliscript-ir-emitter--children pair))))))
            pairs)))
     (if (eq operator 'set!)
         (car assignments)
@@ -362,27 +379,31 @@
    (mapconcat
     (lambda (property)
       (let ((children (eliscript-ir-emitter--children property)))
-        (if (eliscript-ir-property property :computed)
-            (format "[%s]: %s"
-                    (eliscript-ir-emitter-emit-expression (nth 0 children))
-                    (eliscript-ir-emitter-emit-expression (nth 1 children)))
-          (format "%s: %s"
-                  (eliscript-ir-emitter--emit-object-key
-                   (eliscript-ir-node-value property))
-                  (eliscript-ir-emitter-emit-expression (car children))))))
+        (eliscript-ir-emitter--locate
+         property
+         (if (eliscript-ir-property property :computed)
+             (format "[%s]: %s"
+                     (eliscript-ir-emitter-emit-expression (nth 0 children))
+                     (eliscript-ir-emitter-emit-expression (nth 1 children)))
+           (format "%s: %s"
+                   (eliscript-ir-emitter--emit-object-key
+                    (eliscript-ir-node-value property))
+                   (eliscript-ir-emitter-emit-expression (car children)))))))
     (eliscript-ir-emitter--children node)
     ", ")))
 
 (defun eliscript-ir-emitter--emit-property-key (node)
   "Emit property-key NODE for bracket-style access."
-  (if (eq (eliscript-ir-node-kind node) 'literal)
-      (let ((value (eliscript-ir-node-value node)))
-        (cond
-         ((keywordp value)
-          (eliscript-emitter--json-string (substring (symbol-name value) 1)))
-         ((stringp value) (eliscript-emitter--json-string value))
-         (t (eliscript-ir-emitter-emit-expression node))))
-    (eliscript-ir-emitter-emit-expression node)))
+  (eliscript-ir-emitter--locate
+   node
+   (if (eq (eliscript-ir-node-kind node) 'literal)
+       (let ((value (eliscript-ir-node-value node)))
+         (cond
+          ((keywordp value)
+           (eliscript-emitter--json-string (substring (symbol-name value) 1)))
+          ((stringp value) (eliscript-emitter--json-string value))
+          (t (eliscript-ir-emitter-emit-expression node))))
+     (eliscript-ir-emitter-emit-expression node))))
 
 (defun eliscript-ir-emitter--emit-literal (value)
   "Emit scalar literal VALUE."
@@ -408,7 +429,9 @@
     (eliscript-emitter--fail "expected an IR expression node: %S" node))
   (let ((kind (eliscript-ir-node-kind node))
         (children (eliscript-ir-emitter--children node)))
-    (pcase kind
+    (eliscript-ir-emitter--locate
+     node
+     (pcase kind
       ('literal (eliscript-ir-emitter--emit-literal
                  (eliscript-ir-node-value node)))
       ('reference
@@ -480,8 +503,8 @@
        (format "%s(%s)"
                (eliscript-ir-emitter--emit-callee (car children))
                (eliscript-ir-emitter--emit-arguments (cdr children))))
-      (_ (eliscript-emitter--fail
-          "IR node %S is not valid in expression position" kind)))))
+       (_ (eliscript-emitter--fail
+           "IR node %S is not valid in expression position" kind))))))
 
 (defun eliscript-ir-emitter--emit-import (node)
   "Emit import declaration NODE."
@@ -490,8 +513,7 @@
         namespace-binding
         named-bindings)
     (dolist (specifier (eliscript-ir-emitter--children node))
-      (let ((name (eliscript-emitter--binding-name
-                   (eliscript-ir-node-value specifier))))
+      (let ((name (eliscript-ir-emitter--emit-binding-name specifier)))
         (pcase (eliscript-ir-node-kind specifier)
           ('import-default (setq default-binding name))
           ('import-namespace (setq namespace-binding name))
@@ -521,7 +543,9 @@
     (eliscript-emitter--fail "expected a top-level IR node: %S" node))
   (let ((kind (eliscript-ir-node-kind node))
         (children (eliscript-ir-emitter--children node)))
-    (pcase kind
+    (eliscript-ir-emitter--locate
+     node
+     (pcase kind
       ('module-declaration
        (mapconcat #'eliscript-ir-emitter-emit-top-level children "\n"))
       ('import-declaration (eliscript-ir-emitter--emit-import node))
@@ -542,8 +566,7 @@
                   (eliscript-ir-node-value node))
                  (mapconcat
                   (lambda (parameter)
-                    (eliscript-emitter--binding-name
-                     (eliscript-ir-node-value parameter)))
+                    (eliscript-ir-emitter--emit-binding-name parameter))
                   parameters ", ")
                  (eliscript-emitter--indent
                   (eliscript-ir-emitter--emit-returning-body body)))))
@@ -551,19 +574,18 @@
        (format "export {%s};"
                (mapconcat
                 (lambda (reference)
-                  (eliscript-emitter--binding-name
-                   (eliscript-ir-node-value reference)))
+                  (eliscript-ir-emitter--emit-binding-name reference))
                 children ", ")))
       ('export-default
        (format "export default %s;"
                (eliscript-ir-emitter-emit-expression (car children))))
       ('expression-statement
        (concat (eliscript-ir-emitter-emit-expression (car children)) ";"))
-      (_ (eliscript-emitter--fail
-          "IR node %S is not valid at module top level" kind)))))
+       (_ (eliscript-emitter--fail
+           "IR node %S is not valid at module top level" kind))))))
 
-(defun eliscript-emit-ir-module (program)
-  "Emit analyzed IR PROGRAM directly as one ECMAScript module."
+(defun eliscript-ir-emitter--emit-module (program)
+  "Emit IR PROGRAM, retaining source marks when recording is active."
   (unless (eliscript-ir-program-p program)
     (eliscript-emitter--fail "expected an IR program: %S" program))
   (let ((eliscript-emitter--temporary-counter 0))
@@ -574,6 +596,27 @@
                 (eliscript-ir-program-body program)
                 "\n\n")
      "\n")))
+
+(defun eliscript-emit-ir-module (program)
+  "Emit analyzed IR PROGRAM directly as one ECMAScript module."
+  (substring-no-properties
+   (eliscript-ir-emitter--emit-module program)))
+
+(defun eliscript-emit-ir-module-with-source-map
+    (program source &optional generated-name source-name)
+  "Emit IR PROGRAM and a Source Map v3 document for SOURCE.
+
+GENERATED-NAME and SOURCE-NAME identify files in the source map.  Return an
+`eliscript-emission' containing plain JavaScript and source-map JSON."
+  (let* ((eliscript-ir-emitter--record-source-spans t)
+         (generated (eliscript-ir-emitter--emit-module program))
+         (resolved-source-name
+          (or source-name (eliscript-ir-program-filename program) "<string>")))
+    (eliscript-emission-create
+     :javascript (substring-no-properties generated)
+     :source-map
+     (eliscript-source-map-create
+      generated source resolved-source-name generated-name))))
 
 (provide 'eliscript-ir-emitter)
 

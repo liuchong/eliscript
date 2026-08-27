@@ -64,6 +64,9 @@ bun --version</code></pre>
             <p>Compile it through the public command:</p>
             <pre><code>./bin/eliscript --output dist/hello.mjs hello.eli</code></pre>
             <p>Without <code>--output</code>, generated ECMAScript is written to standard output.</p>
+            <p>For debugger-ready output, generate an external Source Map v3 file:</p>
+            <pre><code>./bin/eliscript --source-map --output dist/hello.mjs hello.eli</code></pre>
+            <p>This writes <code>dist/hello.mjs.map</code> and links it from the generated module.</p>
           </section>
 
           <section id="run">
@@ -76,7 +79,7 @@ bun --version</code></pre>
             <h2>Run the test suite</h2>
             <pre><code>bun run test</code></pre>
             <p>This runs the Emacs ERT suite, compiles the fixture through the public CLI, compares the output with a deterministic snapshot, and executes the module in Bun.</p>
-            <div class="callout callout-coral"><p>Compile-time macros, recursive source locations, lexical analysis, explicit IR, and direct IR emission are active. Source maps are next.</p></div>
+            <div class="callout callout-coral"><p>The M1 language core is complete: macros, recursive locations, lexical analysis, explicit IR, direct emission, and Source Map v3 output are active. React is next.</p></div>
           </section>
         </article>
       </div>

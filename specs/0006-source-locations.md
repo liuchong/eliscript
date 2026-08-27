@@ -12,8 +12,8 @@ compiler errors can identify the filename, line, and column of the relevant
 source form.
 
 ```text
-source -> located forms -> expanded located forms -> analysis -> plain forms
-       -> ESM emitter
+source -> located forms -> expanded located forms -> analysis -> IR
+       -> direct ESM and optional source-map emission
 ```
 
 Location wrappers are an internal front-end representation. Existing reader
@@ -68,10 +68,10 @@ Conditions remain compatible with the existing hierarchy:
 
 ## Emission Boundary
 
-The analyzer still returns its input unchanged. The public compiler strips
-location wrappers immediately before the existing ESM emitter. This keeps M0
-output byte-for-byte stable while leaving spans available for a future IR and
-source-map emitter.
+The analyzer returns located forms to the lowering pass. IR nodes retain their
+spans, and the direct backend uses those spans for optional Source Map v3
+output. Ordinary compilation still preserves the original M0 output
+byte-for-byte.
 
 ## Acceptance Evidence
 
@@ -79,10 +79,10 @@ source-map emitter.
 - Reader diagnostics report the starting line and column of incomplete input.
 - Analyzer diagnostics identify the exact unbound symbol occurrence.
 - Macro failures and semantic errors in generated forms identify the call site.
+- Source maps point emitted IR nodes back to handwritten or macro-call spans.
 - Existing snapshots and Bun execution remain unchanged.
 
 ## Deferred Work
 
 - structured diagnostic values in addition to formatted condition messages
 - expansion stacks with definition and nested call origins
-- source-map generation from emitted ECMAScript back to Eliscript

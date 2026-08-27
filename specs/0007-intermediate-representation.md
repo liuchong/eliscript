@@ -94,7 +94,6 @@ implemented language surface.
 
 ## Deferred Work
 
-- source-map generation driven by IR spans
 - structured serialization for cross-implementation conformance fixtures
 - optimization and canonicalization passes over IR
 - replacing internal condition messages with structured diagnostics

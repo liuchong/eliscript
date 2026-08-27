@@ -31,6 +31,14 @@ Compile and run the basic example:
 bun run dist/basic.mjs
 ```
 
+Generate an external Source Map v3 file when debugging generated code:
+
+```sh
+./bin/eliscript --source-map --output dist/basic.mjs examples/basic/main.eli
+```
+
+This writes `dist/basic.mjs.map` and adds its `sourceMappingURL` to the module.
+
 Run the complete test suite:
 
 ```sh
@@ -120,11 +128,11 @@ The current seed compiler is intentionally direct:
 
 ```text
 .eli source -> Emacs reader -> macro expander -> lexical analyzer -> IR lowerer
-            -> ESM emitter -> Bun or browser
+            -> ESM + source-map emitter -> Bun or browser
 ```
 
-ECMAScript is emitted directly from IR. The next compiler stage produces source
-maps from the spans already retained by every IR node.
+ECMAScript and optional Source Map v3 files are emitted directly from IR. Every
+mapping is driven by the source spans retained on IR nodes.
 
 ## Bootstrap Strategy
 
@@ -177,7 +185,7 @@ portable execution model. The exact implemented subset is recorded in
 ## Status
 
 The first Emacs Lisp seed compiler is implemented and usable from the command
-line. The M0 vertical slice is complete and M1 is in progress.
+line. The M0 vertical slice and M1 language core are complete.
 
 Current evidence:
 
@@ -194,14 +202,17 @@ Current evidence:
   and JavaScript interop while retaining a span on every node.
 - A dedicated IR backend emits ESM without reconstructing reader forms; a
   compatibility test keeps its output byte-identical to the seed formatter.
-- Thirty-five ERT tests cover reading, locations, macro expansion, analysis,
-  IR lowering, direct emission, modules, errors, and JavaScript interop.
+- Optional external Source Map v3 output maps generated expressions and
+  structural names back to `.eli` source with UTF-16 columns; macro-generated
+  code maps to its call site.
+- Thirty-eight ERT tests cover reading, locations, macro expansion, analysis,
+  IR lowering, direct emission, source maps, modules, errors, and interop.
 - A CLI integration test compares generated output with a checked-in snapshot.
 - Bun 1.4 executes the generated module and verifies recursion, mutation,
   loops, higher-order functions, objects, arrays, and exports.
 
-The next M1 slice adds source maps driven by IR spans. React and Org publishing
-remain later milestones.
+The next milestone adds the React component layer and compiles the counter
+example. Org publishing remains a later milestone.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -212,7 +223,8 @@ forms and diagnostic positions, and
 [specs/0007-intermediate-representation.md](specs/0007-intermediate-representation.md)
 for the explicit IR contract, and
 [specs/0008-direct-ir-emission.md](specs/0008-direct-ir-emission.md) for the
-direct ECMAScript backend.
+direct ECMAScript backend, and
+[specs/0009-source-maps.md](specs/0009-source-maps.md) for Source Map v3 output.
 
 ## License
 
