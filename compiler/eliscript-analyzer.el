@@ -9,6 +9,7 @@
 (require 'cl-lib)
 (require 'eliscript-diagnostic)
 (require 'eliscript-form)
+(require 'eliscript-parameters)
 (require 'eliscript-portable)
 (require 'eliscript-symbol)
 
@@ -150,14 +151,19 @@
 
 (defun eliscript-analyzer--analyze-function (parameters body scope)
   "Analyze function PARAMETERS and BODY within SCOPE."
-  (let ((parameter-values (eliscript-form-value parameters)))
-    (unless (proper-list-p parameter-values)
-      (eliscript-analyzer--fail "function arguments must be a list"))
-    (setq parameters parameter-values))
-  (let ((child (eliscript-analyzer--make-scope scope)))
-    (dolist (parameter parameters)
-      (eliscript-analyzer--declare child parameter 'parameter t))
-    (eliscript-analyzer--analyze-sequence body child)))
+  (let ((parsed
+         (eliscript-parameters-parse
+          parameters
+          (lambda (form message)
+            (let ((eliscript-analyzer--current-span
+                   (or (eliscript-form-span form)
+                       eliscript-analyzer--current-span)))
+              (eliscript-analyzer--fail "%s" message))))))
+    (let ((child (eliscript-analyzer--make-scope scope)))
+      (dolist (parameter parsed)
+        (eliscript-analyzer--declare
+         child (eliscript-parameter-form parameter) 'parameter t))
+      (eliscript-analyzer--analyze-sequence body child))))
 
 (defun eliscript-analyzer--analyze-assignment (arguments scope form-name)
   "Analyze assignment ARGUMENTS in SCOPE for FORM-NAME."

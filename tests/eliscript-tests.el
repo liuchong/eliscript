@@ -149,6 +149,71 @@
              (regexp-quote "((step) => {\n    return (value + step);\n  })(1)")
              output))))
 
+(ert-deftest eliscript-supports-optional-and-rest-parameters ()
+  (let* ((source
+          "(defun collect (required &optional optional &rest rest)
+  [required optional rest])
+(defconst invoke
+  (lambda (first &optional second &rest tail)
+    [first second tail]))")
+         (output (eliscript-compile-string source "parameters.eli"))
+         (program (eliscript-compile-ir-string source "parameters.eli"))
+         (function (nth 0 (eliscript-ir-program-body program)))
+         (lambda-node
+          (car (eliscript-ir-node-children
+                (nth 1 (eliscript-ir-program-body program)))))
+         (function-parameters
+          (cl-subseq
+           (eliscript-ir-node-children function)
+           0 (eliscript-ir-property function :parameter-count)))
+         (lambda-parameters
+          (cl-subseq
+           (eliscript-ir-node-children lambda-node)
+           0 (eliscript-ir-property lambda-node :parameter-count))))
+    (should (equal output
+                   (eliscript-tests--legacy-compile-string
+                    source "parameters.eli")))
+    (should (string-match-p
+             (regexp-quote
+              "function collect(required, optional = null, ...rest)")
+             output))
+    (should (string-match-p
+             (regexp-quote "(first, second = null, ...tail) =>")
+             output))
+    (should (equal
+             (mapcar (lambda (node)
+                       (eliscript-ir-property node :parameter-kind))
+                     function-parameters)
+             '(required optional rest)))
+    (should (equal
+             (mapcar (lambda (node)
+                       (eliscript-ir-property node :parameter-kind))
+                     lambda-parameters)
+             '(required optional rest)))
+    (should (equal
+             (eliscript-ir-program-to-forms program)
+             '((defun collect
+                   (required &optional optional &rest rest)
+                 [required optional rest])
+               (defconst invoke
+                 (lambda (first &optional second &rest tail)
+                   [first second tail]))))))
+  (should
+   (string-match-p
+    (regexp-quote "function collect(required, optional = null, ...rest)")
+    (eliscript-compile-portable-string
+     "(defportable collect (required &optional optional &rest rest)
+  [required optional rest])"
+     '(collect)
+     "portable-parameters.eli")))
+  (dolist (source
+           '("(defun broken (&optional value &optional next) value)"
+             "(defun broken (value &rest) value)"
+             "(defun broken (value &rest rest extra) value)"
+             "(defun broken (&body forms) forms)"))
+    (should-error (eliscript-compile-string source "parameters.eli")
+                  :type 'eliscript-analyze-error)))
+
 (ert-deftest eliscript-preserves-lisp-truthiness ()
   (let ((output (eliscript-compile-string
                  "(print (if 0 \"truthy\" \"falsey\"))")))
@@ -220,7 +285,7 @@
                 :type 'eliscript-compile-error)
   (should-error (eliscript-compile-string "(defvar false 1)")
                 :type 'eliscript-compile-error)
-  (should-error (eliscript-compile-string "(defun f (&optional x) x)")
+  (should-error (eliscript-compile-string "(defun f (nil) nil)")
                 :type 'eliscript-compile-error))
 
 (ert-deftest eliscript-analyzer-resolves-module-and-lexical-bindings ()

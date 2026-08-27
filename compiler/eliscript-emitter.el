@@ -12,6 +12,7 @@
 (require 'json)
 (require 'subr-x)
 (require 'eliscript-diagnostic)
+(require 'eliscript-parameters)
 (require 'eliscript-symbol)
 
 (defalias 'eliscript-emitter--munge-segment
@@ -133,14 +134,24 @@
 
 (defun eliscript-emitter--emit-function (arguments body)
   "Emit a function with ARGUMENTS and BODY."
-  (unless (listp arguments)
-    (eliscript-emitter--fail "function arguments must be a list"))
-  (when (cl-find-if-not #'symbolp arguments)
-    (eliscript-emitter--fail "function arguments must be symbols: %S" arguments))
-  (format "(%s) => {\n%s\n}"
-          (mapconcat #'eliscript-emitter--binding-name arguments ", ")
-          (eliscript-emitter--indent
-           (eliscript-emitter--emit-returning-body body))))
+  (let ((parameters
+         (eliscript-parameters-parse
+          arguments
+          (lambda (_form message) (eliscript-emitter--fail "%s" message)))))
+    (format "(%s) => {\n%s\n}"
+            (mapconcat #'eliscript-emitter--emit-parameter parameters ", ")
+            (eliscript-emitter--indent
+             (eliscript-emitter--emit-returning-body body)))))
+
+(defun eliscript-emitter--emit-parameter (parameter)
+  "Emit parsed function PARAMETER."
+  (let ((name
+         (eliscript-emitter--binding-name
+          (eliscript-form-value (eliscript-parameter-form parameter)))))
+    (pcase (eliscript-parameter-kind parameter)
+      ('optional (format "%s = null" name))
+      ('rest (format "...%s" name))
+      (_ name))))
 
 (defun eliscript-emitter--emit-if (arguments)
   "Emit an if expression from ARGUMENTS."
@@ -600,11 +611,15 @@
                (body (nthcdr 2 arguments)))
            (unless (symbolp name)
              (eliscript-emitter--fail "function name must be a symbol"))
-           (unless (listp parameters)
-             (eliscript-emitter--fail "function arguments must be a list"))
            (format "function %s(%s) {\n%s\n}"
                    (eliscript-emitter--binding-name name)
-                   (mapconcat #'eliscript-emitter--binding-name parameters ", ")
+                   (mapconcat
+                    #'eliscript-emitter--emit-parameter
+                    (eliscript-parameters-parse
+                     parameters
+                     (lambda (_form message)
+                       (eliscript-emitter--fail "%s" message)))
+                    ", ")
                    (eliscript-emitter--indent
                     (eliscript-emitter--emit-returning-body body)))))
         ('export

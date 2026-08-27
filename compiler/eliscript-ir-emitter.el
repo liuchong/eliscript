@@ -33,6 +33,14 @@
    node
    (eliscript-emitter--binding-name (eliscript-ir-node-value node))))
 
+(defun eliscript-ir-emitter--emit-parameter (node)
+  "Emit function parameter binding NODE."
+  (let ((name (eliscript-ir-emitter--emit-binding-name node)))
+    (pcase (eliscript-ir-property node :parameter-kind)
+      ('optional (concat name " = null"))
+      ('rest (concat "..." name))
+      (_ name))))
+
 (defun eliscript-ir-emitter--children (node)
   "Return NODE's child list."
   (or (eliscript-ir-node-children node) nil))
@@ -97,7 +105,7 @@
     (format "(%s) => {\n%s\n}"
             (mapconcat
              (lambda (parameter)
-               (eliscript-ir-emitter--emit-binding-name parameter))
+               (eliscript-ir-emitter--emit-parameter parameter))
              parameters ", ")
             (eliscript-emitter--indent
              (eliscript-ir-emitter--emit-returning-body body)))))
@@ -688,7 +696,7 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
                   (eliscript-ir-node-value node))
                  (mapconcat
                   (lambda (parameter)
-                    (eliscript-ir-emitter--emit-binding-name parameter))
+                    (eliscript-ir-emitter--emit-parameter parameter))
                   parameters ", ")
                  (eliscript-emitter--indent
                   (eliscript-ir-emitter--emit-returning-body body)))))

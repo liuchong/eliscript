@@ -21,6 +21,9 @@
                 current (1- current)))
         total)))
 
+  (defun collect (required &optional optional &rest rest)
+    [required optional rest])
+
   (defvar result
     (object
       :message (str greeting " from Eliscript")
@@ -36,5 +39,10 @@
       :nullish [(nullish? nil) (nullish? undefined) (nullish? false)]
       :legacy-null [(null nil) (null undefined) (null false)]))
 
+  (put result :parameters
+    [(collect "required")
+     (collect "required" undefined)
+     (collect "required" "optional" 3 4)])
+
   (print (JSON/stringify result))
-  (export factorial classify sum-to result))
+  (export factorial classify sum-to collect result))

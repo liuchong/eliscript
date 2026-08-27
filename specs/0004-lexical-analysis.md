@@ -37,7 +37,8 @@ analyzed as an ordinary expression.
 
 Function parameters and local bindings are resolved lexically.
 
-- Function parameters share one child scope and must be unique.
+- Required, optional, and rest function parameters share one child scope and
+  must be unique. Parameter markers do not introduce bindings.
 - `let` initializers are analyzed in the parent scope before its local names
   become visible.
 - `let*` initializers are analyzed in declaration order, so each initializer

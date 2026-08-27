@@ -258,6 +258,9 @@
          (portable . ,(if (eliscript-ir-property node :portable) t :false))))
       ('function-expression
        `((parameterCount . ,(eliscript-ir-property node :parameter-count))))
+      ('parameter-binding
+       `((parameterKind . ,(symbol-name
+                            (eliscript-ir-property node :parameter-kind)))))
       ('variable-declaration
        `((sourceOperator . ,(symbol-name
                              (eliscript-ir-property node :source-operator)))

@@ -81,15 +81,22 @@
 
   (defun lower-parameter-nodes (parameters)
     (let ((result [])
-          (items (list-items parameters)))
+          (items (list-items parameters))
+          (mode "required"))
       (js-call items :forEach
         (lambda (parameter)
-          (js-call result :push
-            (make-node
-              "parameter-binding"
-              (node-span parameter)
-              (node-name parameter)
-              [] nil))))
+          (let ((name (node-name parameter)))
+            (cond
+              ((= name "&optional") (setq mode "optional"))
+              ((= name "&rest") (setq mode "rest"))
+              (t
+               (js-call result :push
+                 (make-node
+                   "parameter-binding"
+                   (node-span parameter)
+                   name
+                   [] (object :parameterKind mode)))
+               (when (= mode "rest") (setq mode "done")))))))
       result))
 
   (defun lower-binding (binding)
@@ -343,7 +350,8 @@
                     (nth 1 args) (js-call args :slice 2))))
              (put node :properties
                (object
-                 :parameterCount (get (list-items (nth 1 args)) :length)
+                 :parameterCount
+                   (get (get node :properties) :parameterCount)
                  :sourceOperator operator
                  :portable (= operator "defportable")))
              node))

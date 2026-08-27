@@ -335,6 +335,9 @@ Current evidence:
 - A lexical analyzer resolves module, function, and local bindings before
   emission; it rejects undeclared names, immutable assignment, duplicate
   declarations, invalid exports, and output identifier collisions.
+- Named, anonymous, component, and portable functions share required,
+  `&optional`, and trailing `&rest` parameters; explicit IR kinds keep both
+  compiler generations and compatibility round trips aligned.
 - Deterministic compile-time macros expand sequentially before analysis,
   support backquote and body parameters, reject undeclared host functions, and
   never appear in generated modules.
@@ -430,7 +433,7 @@ Current evidence:
 - Repeated `--portable NAME` options make the same builder verify every local
   `import-portable` target, reject bare or escaping source edges, and emit only
   each module's requested transitive closure.
-- Eighty-eight ERT tests cover reading, locations, macro expansion, analysis, IR
+- Eighty-nine ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
 - Eighteen Bun tests cover the compiler and Org Vite adapters, source-map
@@ -533,7 +536,10 @@ for non-identity cache, work, manifest, and total build measurements, and
 for explicit `nil`, `undefined`, and nullish predicates across both compiler
 generations, and
 [specs/0035-deterministic-seed-macros.md](specs/0035-deterministic-seed-macros.md)
-for the shared host-independent macro language used by both generations.
+for the shared host-independent macro language used by both generations, and
+[specs/0036-function-parameters.md](specs/0036-function-parameters.md)
+for optional and rest parameter grammar, runtime defaults, and explicit IR
+parameter kinds.
 
 ## License
 

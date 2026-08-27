@@ -86,8 +86,10 @@ The implemented binding forms are:
 - `let*` for sequential lexical bindings
 - `setq` and `set!` for assignment
 
-All local bindings are lexical. Dynamic scope, special variables, optional
-arguments, rest arguments, and declarations are not implemented.
+All local bindings are lexical. Function signatures may contain an
+`&optional` section and one trailing `&rest` binding; see
+[0036-function-parameters.md](0036-function-parameters.md). Dynamic scope,
+special variables, and declarations are not implemented.
 
 A function returns the value of its final body form. An empty function body
 returns `null`.

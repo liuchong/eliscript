@@ -88,6 +88,19 @@
         (mapcar #'eliscript-ir-node-to-form
                 (eliscript-ir-node-children node))))
 
+(defun eliscript-ir--parameters-to-form (nodes)
+  "Convert parameter binding NODES to a canonical parameter list."
+  (let (forms optional-marker)
+    (dolist (node nodes)
+      (pcase (eliscript-ir-property node :parameter-kind)
+        ('optional
+         (unless optional-marker
+           (push '&optional forms)
+           (setq optional-marker t)))
+        ('rest (push '&rest forms)))
+      (push (eliscript-ir-node-value node) forms))
+    (nreverse forms)))
+
 (defun eliscript-ir-node-to-form (node)
   "Convert IR NODE to a canonical reader-shaped form for compatibility."
   (unless (eliscript-ir-node-p node)
@@ -136,8 +149,8 @@
             (children (eliscript-ir-node-children node))
             (parameter-count (eliscript-ir-property node :parameter-count))
            (parameters
-            (mapcar #'eliscript-ir-node-value
-                    (cl-subseq children 0 parameter-count)))
+            (eliscript-ir--parameters-to-form
+             (cl-subseq children 0 parameter-count)))
            (body (mapcar #'eliscript-ir-node-to-form
                          (nthcdr parameter-count children))))
        (if (memq operator '(defun defn defportable))

@@ -130,6 +130,14 @@
   (defun emit-binding-name (node)
     (locate node (binding-name (ir-value node))))
 
+  (defun emit-parameter (node)
+    (let ((name (emit-binding-name node))
+          (kind (ir-property node "parameterKind")))
+      (cond
+        ((= kind "optional") (combine [name " = null"]))
+        ((= kind "rest") (combine ["..." name]))
+        (t name))))
+
   (defun emit-arguments (nodes)
     (join-fragments
       (js-call nodes :map (lambda (node) (emit-expression node)))
@@ -177,7 +185,7 @@
         ["("
          (join-fragments
            (js-call parameters :map
-             (lambda (parameter) (emit-binding-name parameter)))
+             (lambda (parameter) (emit-parameter parameter)))
            ", ")
          ") => {\n"
          (indent (emit-returning-body body))
@@ -764,7 +772,7 @@
                ["function " (binding-name (ir-value node)) "("
                 (join-fragments
                   (js-call parameters :map
-                    (lambda (parameter) (emit-binding-name parameter)))
+                    (lambda (parameter) (emit-parameter parameter)))
                   ", ")
                 ") {\n"
                 (indent (emit-returning-body body))

@@ -50,6 +50,54 @@
       ((null-node-p node) [])
       (t undefined)))
 
+  (defun function-parameters (parameters context)
+    (let ((items (list-items parameters))
+          (parsed [])
+          (mode "required")
+          (index 0))
+      (when (eq items undefined)
+        (analyzer-fail
+          context (node-span parameters) "function arguments must be a list"))
+      (while (< index (get items :length))
+        (let* ((parameter (nth index items))
+               (name (and (symbol-node-p parameter) (node-name parameter))))
+          (unless name
+            (analyzer-fail
+              context (node-span parameter)
+              (str "function arguments must be symbols: "
+                   (node-display parameters))))
+          (cond
+            ((= name "&optional")
+             (unless (= mode "required")
+               (analyzer-fail
+                 context (node-span parameter)
+                 "invalid function parameter list"))
+             (setq mode "optional"))
+            ((= name "&rest")
+             (unless (or (= mode "required") (= mode "optional"))
+               (analyzer-fail
+                 context (node-span parameter)
+                 "invalid function parameter list"))
+             (setq mode "rest"))
+            ((= name "&body")
+             (analyzer-fail
+               context (node-span parameter)
+               "invalid function parameter list"))
+            ((= mode "rest")
+             (js-call parsed :push (object :kind "rest" :node parameter))
+             (setq mode "done"))
+            ((= mode "done")
+             (analyzer-fail
+               context (node-span parameter)
+               "invalid function parameter list"))
+            (t
+             (js-call parsed :push (object :kind mode :node parameter)))))
+        (setq index (1+ index)))
+      (when (= mode "rest")
+        (analyzer-fail
+          context (node-span parameters) "invalid function parameter list"))
+      parsed))
+
   (defun node-display (node)
     (cond
       ((not node) "nil")
@@ -198,14 +246,12 @@
       (analyze-sequence body child context)))
 
   (defun analyze-function (parameters body scope context)
-    (let ((parameter-items (list-items parameters)))
-      (when (eq parameter-items undefined)
-        (analyzer-fail
-          context (node-span parameters) "function arguments must be a list"))
+    (let ((parameter-items (function-parameters parameters context)))
       (let ((child (make-scope scope)))
         (js-call parameter-items :forEach
           (lambda (parameter)
-            (declare-binding child parameter "parameter" t context)))
+            (declare-binding
+              child (get parameter :node) "parameter" t context)))
         (analyze-sequence body child context))))
 
   (defun analyze-assignment
@@ -565,12 +611,12 @@
                          :form form))))))))))
       declarations))
 
-  (defun portable-scope (parameters)
+  (defun portable-scope (parameters context)
     (let ((scope (new (js* "Set"))))
       (when parameters
-        (js-call (list-items parameters) :forEach
+        (js-call (function-parameters parameters context) :forEach
           (lambda (parameter)
-            (js-call scope :add (node-name parameter)))))
+            (js-call scope :add (node-name (get parameter :node))))))
       scope))
 
   (defun copy-portable-scope (scope)
@@ -606,9 +652,9 @@
   (defun portable-function-expression
       (args scope declarations dependencies entry context)
     (let ((child (copy-portable-scope scope)))
-      (js-call (list-items (nth 0 args)) :forEach
+      (js-call (function-parameters (nth 0 args) context) :forEach
         (lambda (parameter)
-          (js-call child :add (node-name parameter))))
+          (js-call child :add (node-name (get parameter :node)))))
       (portable-sequence
         (js-call args :slice 1)
         child declarations dependencies entry context)))
@@ -734,7 +780,7 @@
 
   (defun portable-dependencies (declaration declarations entry context)
     (let ((dependencies (new (js* "Set")))
-          (scope (portable-scope (get declaration :parameters))))
+          (scope (portable-scope (get declaration :parameters) context)))
       (if (= (get declaration :kind) "portable")
           (portable-sequence
             (get declaration :body)

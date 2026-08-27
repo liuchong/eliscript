@@ -10,6 +10,7 @@
 (require 'cl-lib)
 (require 'eliscript-form)
 (require 'eliscript-ir)
+(require 'eliscript-parameters)
 
 (defconst eliscript-lower--intrinsics
   '(not + * - / % mod = /= not= < <= > >= 1+ 1-
@@ -39,10 +40,15 @@
 
 (defun eliscript-lower--parameter-nodes (parameters)
   "Lower located function PARAMETERS to binding nodes."
-  (mapcar (lambda (parameter)
-            (eliscript-lower--node
-             'parameter-binding parameter (eliscript-form-value parameter)))
-          (eliscript-form-value parameters)))
+  (mapcar
+   (lambda (parameter)
+     (let ((form (eliscript-parameter-form parameter)))
+       (eliscript-lower--node
+        'parameter-binding form (eliscript-form-value form) nil
+        (list :parameter-kind (eliscript-parameter-kind parameter)))))
+   (eliscript-parameters-parse
+    parameters
+    (lambda (_form message) (error "%s" message)))))
 
 (defun eliscript-lower--call-node (kind form operator arguments)
   "Lower operator FORM and ARGUMENTS into an IR node of KIND."

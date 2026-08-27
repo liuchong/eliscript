@@ -11,6 +11,11 @@
       "source": "[1 2]"
     },
     {
+      "name": "function-parameter-kinds",
+      "filename": "parameters.eli",
+      "source": "(defun collect (required &optional optional &rest rest)\n  [required optional rest])\n(defconst invoke\n  (lambda (first &optional second &rest tail)\n    [first second tail]))"
+    },
+    {
       "name": "object-primitives",
       "filename": "objects.eli",
       "source": "(defun objects (value key)\n  [(object-keys value)\n   (object-has? value key)\n   (object-assoc value key 1)])\n(export objects)"

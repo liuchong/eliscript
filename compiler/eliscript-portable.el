@@ -10,6 +10,7 @@
 (require 'cl-lib)
 (require 'eliscript-diagnostic)
 (require 'eliscript-form)
+(require 'eliscript-parameters)
 
 (cl-defstruct (eliscript-portable--declaration
                (:constructor eliscript-portable--declaration-create))
@@ -137,6 +138,14 @@
   "Return a shallow copy of local SCOPE."
   (copy-hash-table scope))
 
+(defun eliscript-portable--parameter-forms (parameters)
+  "Return binding forms from function PARAMETERS."
+  (mapcar
+   #'eliscript-parameter-form
+   (eliscript-parameters-parse
+    parameters
+    (lambda (_form message) (eliscript-portable--fail "%s" message)))))
+
 (defun eliscript-portable--binding-name (binding)
   "Return the name form from lexical BINDING."
   (let ((value (eliscript-portable--value binding)))
@@ -195,7 +204,7 @@
 (defun eliscript-portable--function
     (arguments scope declarations dependencies)
   "Validate a lambda-like ARGUMENT list."
-  (let* ((parameters (eliscript-portable--value (car arguments)))
+  (let* ((parameters (eliscript-portable--parameter-forms (car arguments)))
          (child (eliscript-portable--copy-scope scope)))
     (dolist (parameter parameters)
       (puthash (eliscript-portable--value parameter) t child))
@@ -308,7 +317,7 @@
          (dependencies (make-hash-table :test #'eq))
          (scope
           (eliscript-portable--local-scope
-           (eliscript-portable--value
+           (eliscript-portable--parameter-forms
             (eliscript-portable--declaration-parameters declaration)))))
     (pcase (eliscript-portable--declaration-kind declaration)
       ('portable
