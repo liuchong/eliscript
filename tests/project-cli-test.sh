@@ -21,6 +21,17 @@ OBJECT="$TMP_DIR/build/stdlib/object.mjs"
 MANIFEST="$TMP_DIR/build/eliscript-project.json"
 
 test "$OUTPUT" = "$ENTRY"
+
+NO_CACHE_OUTPUT=$(
+  cd "$PROJECT_DIR"
+  "$PROJECT_DIR/bin/eliscript-build" \
+    --no-cache \
+    --root "$PROJECT_DIR" \
+    --out-dir "$TMP_DIR/build" \
+    "$PROJECT_DIR/examples/stdlib-cli/main.eli"
+)
+test "$NO_CACHE_OUTPUT" = "$ENTRY"
+
 test -f "$ENTRY"
 test -f "$ENTRY.map"
 test -f "$SEQUENCE"

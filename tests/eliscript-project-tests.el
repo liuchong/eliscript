@@ -102,11 +102,18 @@
               (json-parse-string
                first-text :object-type 'alist :array-type 'list))
              (modules (alist-get 'modules manifest))
+             (cache (alist-get 'cache manifest))
              (main (cadr modules))
-             (second (eliscript-project-build entry out-dir root)))
+             (second
+              (let ((eliscript-project-use-cache nil))
+                (eliscript-project-build entry out-dir root))))
         (should (equal (alist-get 'format manifest) "eliscript-project"))
         (should (= (alist-get 'version manifest) 1))
         (should (equal (alist-get 'entry manifest) "src/main.mjs"))
+        (should (equal (alist-get 'mode cache) "standard"))
+        (should (string-match-p
+                 "\\`[[:xdigit:]]\\{64\\}\\'"
+                 (alist-get 'compilerDigest cache)))
         (should (equal (mapcar (lambda (module) (alist-get 'source module))
                                modules)
                        '("src/lib/value.eli" "src/main.eli")))
@@ -127,6 +134,131 @@
         (should (equal first-text
                        (eliscript-project-tests--read
                         (eliscript-project-build-result-manifest second))))))))
+
+(ert-deftest eliscript-project-reuses-clean-modules-and-rebuilds-dirty-ones ()
+  (eliscript-project-tests--with-directory root
+    (let* ((entry (expand-file-name "main.eli" root))
+           (dependency (expand-file-name "value.eli" root))
+           (out-dir (expand-file-name "build" root))
+           (entry-output (expand-file-name "main.mjs" out-dir))
+           (dependency-output (expand-file-name "value.mjs" out-dir))
+           (old-time (seconds-to-time 1000000000)))
+      (eliscript-project-tests--write
+       entry "(import \"./value.eli\" answer)\n(print answer)\n")
+      (eliscript-project-tests--write
+       dependency "(defconst answer 1)\n(export answer)\n")
+      (let ((first (eliscript-project-build entry out-dir root)))
+        (should (= (eliscript-project-build-result-compiled-count first) 2))
+        (should (= (eliscript-project-build-result-reused-count first) 0)))
+      (dolist (path (list entry-output (concat entry-output ".map")
+                          dependency-output
+                          (concat dependency-output ".map")))
+        (set-file-times path old-time))
+      (let ((second (eliscript-project-build entry out-dir root)))
+        (should (= (eliscript-project-build-result-compiled-count second) 0))
+        (should (= (eliscript-project-build-result-reused-count second) 2))
+        (should (equal (file-attribute-modification-time
+                        (file-attributes entry-output))
+                       old-time)))
+      (eliscript-project-tests--write
+       dependency "(defconst answer 2)\n(export answer)\n")
+      (let ((third (eliscript-project-build entry out-dir root)))
+        (should (= (eliscript-project-build-result-compiled-count third) 1))
+        (should (= (eliscript-project-build-result-reused-count third) 1))
+        (should (equal (file-attribute-modification-time
+                        (file-attributes entry-output))
+                       old-time))
+        (should-not (equal (file-attribute-modification-time
+                            (file-attributes dependency-output))
+                           old-time)))
+      (with-temp-file entry-output (insert "tampered\n"))
+      (let ((repaired (eliscript-project-build entry out-dir root)))
+        (should (= (eliscript-project-build-result-compiled-count repaired) 1))
+        (should (= (eliscript-project-build-result-reused-count repaired) 1))
+        (should (string-match-p
+                 (regexp-quote "from \"./value.mjs\"")
+                 (eliscript-project-tests--read entry-output))))
+      (let ((eliscript-project-use-cache nil))
+        (let ((forced (eliscript-project-build entry out-dir root)))
+          (should (= (eliscript-project-build-result-compiled-count forced) 2))
+          (should (= (eliscript-project-build-result-reused-count forced) 0))))
+      (let* ((manifest-path
+              (expand-file-name eliscript-project-manifest-filename out-dir))
+             (manifest
+              (json-parse-string
+               (eliscript-project-tests--read manifest-path)
+               :object-type 'alist :array-type 'array))
+             (cache (alist-get 'cache manifest))
+             (cache-modules (alist-get 'modules cache)))
+        (setf (alist-get 'dependencies (aref cache-modules 0))
+              ["missing.eli"])
+        (with-temp-file manifest-path
+          (insert (json-serialize manifest) "\n"))
+        (let ((rebuilt (eliscript-project-build entry out-dir root)))
+          (should (= (eliscript-project-build-result-compiled-count rebuilt) 2))
+          (should (= (eliscript-project-build-result-reused-count rebuilt)
+                     0)))
+        (setq manifest
+              (json-parse-string
+               (eliscript-project-tests--read manifest-path)
+               :object-type 'alist :array-type 'array))
+        (setf (alist-get 'digest manifest) (make-string 64 ?0))
+        (with-temp-file manifest-path
+          (insert (json-serialize manifest) "\n"))
+        (let ((rebuilt (eliscript-project-build entry out-dir root)))
+          (should (= (eliscript-project-build-result-compiled-count rebuilt) 2))
+          (should (= (eliscript-project-build-result-reused-count rebuilt)
+                     0))))
+      (delete-file dependency)
+      (should-error (eliscript-project-build entry out-dir root)
+                    :type 'eliscript-project-error))))
+
+(ert-deftest eliscript-project-portable-cache-preserves-closure-validation ()
+  (eliscript-project-tests--with-directory root
+    (let* ((entry (expand-file-name "main.eli" root))
+           (dependency (expand-file-name "math.eli" root))
+           (out-dir (expand-file-name "build" root)))
+      (eliscript-project-tests--write
+       entry
+       (concat
+        "(import-portable \"./math.eli\" increment)\n"
+        "(defportable twice (value) (increment (increment value)))\n"))
+      (eliscript-project-tests--write
+       dependency "(defportable increment (value) (1+ value))\n")
+      (let ((first
+             (eliscript-project-build-portable
+              entry '(twice) out-dir root)))
+        (should (= (eliscript-project-build-result-compiled-count first) 2))
+        (should (= (eliscript-project-build-result-reused-count first) 0)))
+      (let ((second
+             (eliscript-project-build-portable
+              entry '(twice) out-dir root)))
+        (should (= (eliscript-project-build-result-compiled-count second) 0))
+        (should (= (eliscript-project-build-result-reused-count second) 2)))
+      (eliscript-project-tests--write
+       dependency "(defportable increment (value) (+ value 2))\n")
+      (let ((third
+             (eliscript-project-build-portable
+              entry '(twice) out-dir root)))
+        (should (= (eliscript-project-build-result-compiled-count third) 1))
+        (should (= (eliscript-project-build-result-reused-count third) 1)))
+      (eliscript-project-tests--write
+       dependency "(defun increment (value) (1+ value))\n")
+      (should-error
+       (eliscript-project-build-portable entry '(twice) out-dir root)
+       :type 'eliscript-analyze-error))))
+
+(ert-deftest eliscript-project-invalidates-cache-when-compiler-changes ()
+  (eliscript-project-tests--with-directory root
+    (let ((entry (expand-file-name "main.eli" root))
+          (out-dir (expand-file-name "build" root)))
+      (eliscript-project-tests--write entry "(print 1)\n")
+      (eliscript-project-build entry out-dir root)
+      (cl-letf (((symbol-function 'eliscript-project--compiler-digest)
+                 (lambda () (make-string 64 ?0))))
+        (let ((result (eliscript-project-build entry out-dir root)))
+          (should (= (eliscript-project-build-result-compiled-count result) 1))
+          (should (= (eliscript-project-build-result-reused-count result) 0)))))))
 
 (ert-deftest eliscript-project-allows-cyclic-imports ()
   (eliscript-project-tests--with-directory root

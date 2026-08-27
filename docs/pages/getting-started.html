@@ -87,7 +87,7 @@ bun --version</code></pre>
             <h2>Build a source graph</h2>
             <pre><code>bun run build:stdlib-cli
 bun run dist/project/examples/stdlib-cli/main.mjs</code></pre>
-            <p>The Emacs project builder discovers relative <code>.eli</code> imports after macro expansion, keeps every source below the selected root, mirrors the directory tree as <code>.mjs</code>, and emits a source map beside each module. A deterministic <code>eliscript-project.json</code> records the complete graph and its SHA-256 identities. This example builds sequence, text, object, and application sources together. Package, JavaScript, CSS, and image imports remain available to the eventual host.</p>
+            <p>The Emacs project builder discovers relative <code>.eli</code> imports after macro expansion, keeps every source below the selected root, mirrors the directory tree as <code>.mjs</code>, and emits a source map beside each module. A deterministic <code>eliscript-project.json</code> records the complete graph, SHA-256 identities, and separately verified incremental metadata. Repeat builds reuse unchanged modules; pass <code>--no-cache</code> to force compilation. This example builds sequence, text, object, and application sources together. Package, JavaScript, CSS, and image imports remain available to the eventual host.</p>
           </section>
 
           <section id="react">

@@ -13,16 +13,18 @@
 
 (defconst eliscript-project-cli--usage
   (concat
-   "Usage: eliscript-build [--root DIR] [--portable NAME] --out-dir DIR ENTRY\n\n"
+   "Usage: eliscript-build [--root DIR] [--portable NAME] [--no-cache] --out-dir DIR ENTRY\n\n"
    "Compile ENTRY and its relative .eli imports into an ESM directory tree.\n"
    "Write eliscript-project.json with deterministic graph content digests.\n"
+   "Reuse verified modules by default; --no-cache forces complete compilation.\n"
    "Repeat --portable to emit a verified, dependency-pruned portable graph.\n"))
 
 (defun eliscript-project-cli--parse (arguments)
-  "Parse ARGUMENTS and return (ENTRY OUT-DIR ROOT PORTABLE-ENTRIES)."
+  "Parse ARGUMENTS and return (ENTRY OUT-DIR ROOT PORTABLE-ENTRIES USE-CACHE)."
   (when (equal (car arguments) "--")
     (setq arguments (cdr arguments)))
-  (let (entry out-dir root portable-entries)
+  (let ((use-cache t)
+        entry out-dir root portable-entries)
     (while arguments
       (let ((argument (pop arguments)))
         (cond
@@ -41,6 +43,8 @@
           (unless arguments
             (error "%s requires an entry name" argument))
           (push (pop arguments) portable-entries))
+         ((equal argument "--no-cache")
+          (setq use-cache nil))
          ((string-prefix-p "-" argument)
           (error "unknown option: %s" argument))
          (entry (error "multiple entry files are not supported"))
@@ -49,18 +53,19 @@
       (error "missing entry file"))
     (unless out-dir
       (error "missing --out-dir"))
-    (list entry out-dir root (nreverse portable-entries))))
+    (list entry out-dir root (nreverse portable-entries) use-cache)))
 
 (defun eliscript-project-cli-main (arguments)
   "Build an Eliscript project according to command-line ARGUMENTS."
   (condition-case error-data
-      (pcase-let ((`(,entry ,out-dir ,root ,portable-entries)
+      (pcase-let ((`(,entry ,out-dir ,root ,portable-entries ,use-cache)
                    (eliscript-project-cli--parse arguments)))
-        (let ((result
-               (if portable-entries
-                   (eliscript-project-build-portable
-                    entry portable-entries out-dir root)
-                 (eliscript-project-build entry out-dir root))))
+        (let* ((eliscript-project-use-cache use-cache)
+               (result
+                (if portable-entries
+                    (eliscript-project-build-portable
+                     entry portable-entries out-dir root)
+                  (eliscript-project-build entry out-dir root))))
           (princ (eliscript-project-build-result-entry-output result))
           (princ "\n")))
     (error

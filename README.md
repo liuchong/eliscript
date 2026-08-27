@@ -391,6 +391,10 @@ Current evidence:
   root-relative graph paths and SHA-256 source, ESM, Source Map, and whole-graph
   identities. The worker verifies the generated graph, restarts for
   dependency-only changes, and maps errors from imported modules.
+- Verified manifest metadata now drives incremental builds. Standard projects
+  skip unchanged modules entirely; portable projects reuse a clean graph or
+  revalidate its closure before emitting only dirty modules. `--no-cache`
+  remains available for forced builds.
 - `stdlib/sequence.eli` supplies twelve non-mutating, higher-order sequence
   operations as dependency-prunable `defportable` declarations. The React
   browser entry imports it as source through Vite.
@@ -408,7 +412,7 @@ Current evidence:
 - Repeated `--portable NAME` options make the same builder verify every local
   `import-portable` target, reject bare or escaping source edges, and emit only
   each module's requested transitive closure.
-- Eighty-two ERT tests cover reading, locations, macro expansion, analysis, IR
+- Eighty-five ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
 - Eighteen Bun tests cover the compiler and Org Vite adapters, source-map
@@ -438,6 +442,8 @@ resulting three-module closure rather than a copied single-file helper.
 That project closure now carries an explicit build manifest, so module cache
 identity and mapped diagnostics cover all three modules rather than only the
 entry file.
+The same manifest carries separately hashed incremental metadata, allowing
+repeat builds to avoid compiler work without weakening runtime graph identity.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -494,7 +500,10 @@ builds, and
 [specs/0029-portable-indexing-composition.md](specs/0029-portable-indexing-composition.md)
 for the first multi-module portable graph executed by the Emacs worker, and
 [specs/0030-project-graph-manifest.md](specs/0030-project-graph-manifest.md)
-for deterministic graph identity, integrity checks, and dependency Source Maps.
+for deterministic graph identity, integrity checks, and dependency Source Maps,
+and
+[specs/0031-incremental-project-builds.md](specs/0031-incremental-project-builds.md)
+for verified module reuse and conservative cache invalidation.
 
 ## License
 

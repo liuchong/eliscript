@@ -94,8 +94,8 @@ Timing data keeps `sourceMapLoaded` for compatibility and adds
   restart with the new behavior.
 - Existing single-file worker protocol tests continue to pass unchanged.
 
-## Next Slice
+## Follow-up
 
-The manifest now supplies the inputs needed for an incremental project cache.
-A later build slice can compare source digests, recompile only dirty modules and
-their affected dependents, and still emit the same complete manifest contract.
+Verified module reuse, compiler invalidation, portable closure revalidation,
+and the private cache metadata contract are implemented in
+[0031-incremental-project-builds.md](0031-incremental-project-builds.md).

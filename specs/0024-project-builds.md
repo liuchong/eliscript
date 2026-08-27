@@ -70,6 +70,11 @@ the relative entry, sorted source/output/map paths, exact SHA-256 content
 digests, and one graph digest. The complete format and worker use are specified
 in [0030-project-graph-manifest.md](0030-project-graph-manifest.md).
 
+Subsequent builds verify private cache metadata and reuse unchanged generated
+modules. Standard graphs follow cached dependency edges directly; portable
+graphs rerun closure validation whenever any module is dirty. See
+[0031-incremental-project-builds.md](0031-incremental-project-builds.md).
+
 The builder creates mapped output directories but does not clean unrelated
 files from the destination.
 
@@ -85,6 +90,7 @@ The returned `eliscript-project-build-result` records canonical root, output
 directory, source entry, generated entry, sorted module records, manifest path,
 and graph digest. Each module record contains its source, JavaScript output,
 source-map path, and three content digests.
+Build results also report compiled and reused module counts.
 
 Shell callers use `bin/eliscript-build`. `--out-dir` is required; the command
 prints the generated entry path after a successful build. The existing
