@@ -372,9 +372,10 @@ Current evidence:
   browser entry imports it as source through Vite.
 - `stdlib/text.eli` supplies thirteen literal, UTF-16-indexed string operations
   without regular expressions or host calls. The Org React site uses it with
-  sequence `map` and `find` in its production source graph.
-- `stdlib/object.eli` supplies eleven immutable own-property operations above
-  three minimal portable primitives. The Org React site imports it as source.
+  sequence `map` in its production source graph.
+- `stdlib/object.eli` supplies fourteen immutable own-property and data-indexing
+  operations above three minimal portable primitives. The Org React site
+  prebuilds its slug lookup from this source module.
 - `bin/eliscript-build` walks expanded IR imports, compiles each local `.eli`
   dependency once, preserves its root-relative path as `.mjs`, and emits a
   source map for every module without requiring Vite.
@@ -400,7 +401,8 @@ M6 is underway. Sequence, text, and immutable object libraries now live in
 Eliscript source, remain statically portable, compile identically through the
 seed and self-hosted compilers, and participate in both Vite and ordinary
 source-mapped module graphs. Object behavior rests on three minimal portable
-primitives; higher-level policy remains library code.
+primitives; higher-level policy, including keyed grouping and counting, remains
+library code.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -448,7 +450,9 @@ source imports and generated ESM directory trees, and
 [specs/0025-portable-text-library.md](specs/0025-portable-text-library.md) for
 literal text operations and their indexing semantics, and
 [specs/0026-portable-object-library.md](specs/0026-portable-object-library.md)
-for immutable object operations and their primitive boundary.
+for immutable object operations and their primitive boundary, and
+[specs/0027-portable-data-indexing.md](specs/0027-portable-data-indexing.md) for
+keyed lookup, grouping, and counting.
 
 ## License
 

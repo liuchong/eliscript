@@ -68,9 +68,9 @@ for exact semantics, dependency closure, and acceptance evidence.
 
 ## Object
 
-`object.eli` exports eleven immutable operations for own keys, property checks,
+`object.eli` exports fourteen immutable operations for own keys, property checks,
 shallow association, removal, merging, value transforms, selection, omission,
-and updates:
+updates, indexing, grouping, and counting:
 
 ```elisp
 (import "../../stdlib/object.eli" assoc merge pick)
@@ -81,6 +81,9 @@ and updates:
 
 All transforms return ordinary objects and do not mutate their inputs. The
 module is portable and dependency-prunable; selecting `omit` includes only its
-`keys`, `assoc`, and `key-in?` closure. See
+`keys`, `assoc`, and `key-in?` closure, while selecting `group-by` includes only
+`has?`, `assoc`, and the requested entry. See
 [specs/0026-portable-object-library.md](../specs/0026-portable-object-library.md)
-for primitive semantics, key ordering, complexity, and acceptance evidence.
+for primitive semantics and
+[specs/0027-portable-data-indexing.md](../specs/0027-portable-data-indexing.md)
+for keyed collection transforms.

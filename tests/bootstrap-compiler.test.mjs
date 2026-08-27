@@ -141,6 +141,7 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
       ["object.eli", [
         "function assoc(object, key, value)",
         "function omit(object, omitted_keys)",
+        "function group_by(key_function, values)",
       ]],
     ]) {
       const source = resolve(projectDirectory, "stdlib", sourceName);

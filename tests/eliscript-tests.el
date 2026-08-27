@@ -339,7 +339,9 @@
 (ert-deftest eliscript-standard-library-object-closure-is-portable ()
   (let* ((source
           (expand-file-name "stdlib/object.eli" default-directory))
-         (output (eliscript-compile-portable-file source '(omit))))
+         (output (eliscript-compile-portable-file source '(omit)))
+         (group-output
+          (eliscript-compile-portable-file source '(group-by))))
     (should (string-match-p "function keys(object)" output))
     (should (string-match-p "function key_in_QMARK_" output))
     (should (string-match-p "function omit(object, omitted_keys)" output))
@@ -351,7 +353,13 @@
     (should (string-match-p
              (regexp-quote
               "[[\"keys\", keys], [\"assoc\", assoc], [\"key-in?\", key_in_QMARK_], [\"omit\", omit]")
-             output))))
+             output))
+    (should (string-match-p "function has_QMARK_(object, key)" group-output))
+    (should (string-match-p "function assoc(object, key, value)" group-output))
+    (should (string-match-p "function group_by(key_function, values)"
+                            group-output))
+    (should-not (string-match-p "function index_by" group-output))
+    (should-not (string-match-p "function count_by" group-output))))
 
 (ert-deftest eliscript-portable-functions-reject-non-portable-dependencies ()
   (dolist (source

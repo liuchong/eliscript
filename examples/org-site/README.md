@@ -12,4 +12,6 @@ bun run build:org-site
 
 The site discovers all `.org` files under `content/`, filters drafts, sorts
 articles by date, supports hash navigation, and reloads content changes during
-development. The generated module and production bundle are build artifacts.
+development. Its Eliscript application prebuilds an immutable slug index for
+direct route lookup. The generated module and production bundle are build
+artifacts.

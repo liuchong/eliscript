@@ -330,11 +330,14 @@ explicit UTF-16 indexing and no host string methods. It is consumed by the
 standard-library CLI example and the Org React production site. See
 [0025-portable-text-library.md](0025-portable-text-library.md).
 
-The third standard module implements eleven immutable object operations above
+The third standard module implements fourteen immutable object operations above
 three minimal portable primitives for own keys, own-property checks, and
 shallow association. The command-line example now builds a four-module graph,
 and the Org React site consumes the same source through Vite. See
-[0026-portable-object-library.md](0026-portable-object-library.md).
+[0026-portable-object-library.md](0026-portable-object-library.md). Its first
+application-facing extension adds keyed lookup, grouping, and counting; the Org
+site now prebuilds its slug index instead of scanning articles on every hash
+change. See [0027-portable-data-indexing.md](0027-portable-data-indexing.md).
 
 ## Non-goals for the Initial Implementation
 

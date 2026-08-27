@@ -27,7 +27,7 @@ async function runSuccessful(command) {
   return stdout;
 }
 
-test("portable object library preserves immutable own-property semantics", async () => {
+test("portable object library preserves immutable indexing and own-property semantics", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "eliscript-object-"));
   const objectSource = resolve(projectDirectory, "stdlib/object.eli");
   const usageSource = resolve(projectDirectory, "tests/fixtures/object-usage.eli");
@@ -75,6 +75,21 @@ test("portable object library preserves immutable own-property semantics", async
       "picked-empty": {},
       omitted: { name: "Eliscript", ready: false },
       updated: { name: "Eliscript", count: 7, ready: false, empty: null },
+      indexed: {
+        intro: { slug: "intro", kind: "guide", order: 3 },
+        compiler: { slug: "compiler", kind: "guide", order: 2 },
+      },
+      grouped: {
+        note: [{ slug: "intro", kind: "note", order: 1 }],
+        guide: [
+          { slug: "compiler", kind: "guide", order: 2 },
+          { slug: "intro", kind: "guide", order: 3 },
+        ],
+      },
+      counted: { note: 1, guide: 2 },
+      "indexed-empty": {},
+      "grouped-empty": {},
+      "counted-empty": {},
       "source-unchanged": true,
       "source-has-no-extra": true,
     });
@@ -89,10 +104,30 @@ test("portable object library preserves immutable own-property semantics", async
     const changed = portable.assoc(inherited, "own", 3);
     expect(inherited.own).toBe(2);
     expect(changed.own).toBe(3);
+    const prototypeGroup = portable["group-by"](
+      () => "__proto__",
+      [1, 2],
+    );
+    expect(Object.hasOwn(prototypeGroup, "__proto__")).toBe(true);
+    expect(prototypeGroup.__proto__).toEqual([1, 2]);
+    expect(portable["count-by"](() => "__proto__", [1, 2, 3]).__proto__)
+      .toBe(3);
+    const input = [{ key: "left" }, { key: "right" }];
+    const inputBefore = JSON.stringify(input);
+    for (const name of ["index-by", "group-by", "count-by"]) {
+      const calls = [];
+      portable[name]((value) => {
+        calls.push(value.key);
+        return value.key;
+      }, input);
+      expect(calls).toEqual(["left", "right"]);
+      expect(JSON.stringify(input)).toBe(inputBefore);
+    }
 
     const map = await Bun.file(`${objectModule}.map`).json();
     expect(map.sourcesContent).toHaveLength(1);
     expect(map.sourcesContent[0]).toContain("(defportable assoc");
+    expect(map.sourcesContent[0]).toContain("(defportable index-by");
     expect(map.mappings.length).toBeGreaterThan(0);
   } finally {
     await rm(directory, { recursive: true, force: true });

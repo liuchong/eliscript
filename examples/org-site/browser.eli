@@ -2,21 +2,20 @@
   (import "react" useEffect useState StrictMode)
   (import "react-dom/client" createRoot)
   (import "virtual:eliscript-org" articles)
-  (import "../../stdlib/sequence.eli" find map)
+  (import "../../stdlib/sequence.eli" map)
   (import "../../stdlib/text.eli" strip-prefix)
-  (import "../../stdlib/object.eli" assoc)
+  (import "../../stdlib/object.eli" assoc index-by)
   (import "./site.css")
   (import "../../docs/pages/assets/eliscript-logo.png" :default logo-url)
 
   (defconst browser-window (js* "window"))
+  (defconst articles-by-slug
+    (index-by (lambda (article) (get article :slug)) articles))
 
   (defun article-from-location ()
     (let* ((hash (get window/location :hash ""))
            (slug (strip-prefix "#" hash)))
-      (or (find
-           (lambda (article)
-             (= (get article :slug) slug))
-           articles)
+      (or (get articles-by-slug slug nil)
           (nth 0 articles))))
 
   (defcomponent OrgSite ()

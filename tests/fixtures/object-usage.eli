@@ -1,10 +1,15 @@
 (module test.object-usage
   (import "./object.mjs"
-          keys has? assoc dissoc merge map-values filter-values pick omit update)
+          keys has? assoc dissoc merge map-values filter-values pick omit update
+          index-by group-by count-by)
 
   (defconst source
     (object :name "Eliscript" :count 2 :ready false :empty nil))
   (defconst associated (assoc source :count 3))
+  (defconst records
+    [(object :slug "intro" :kind "note" :order 1)
+     (object :slug "compiler" :kind "guide" :order 2)
+     (object :slug "intro" :kind "guide" :order 3)])
   (defconst result
     (object
       :keys (keys source)
@@ -25,6 +30,12 @@
       :picked-empty (pick source [:missing])
       :omitted (omit source [:count :empty])
       :updated (update source :count (lambda (value) (+ value 5)))
+      :indexed (index-by (lambda (value) (get value :slug)) records)
+      :grouped (group-by (lambda (value) (get value :kind)) records)
+      :counted (count-by (lambda (value) (get value :kind)) records)
+      :indexed-empty (index-by (lambda (value) value) nil)
+      :grouped-empty (group-by (lambda (value) value) nil)
+      :counted-empty (count-by (lambda (value) value) nil)
       :source-unchanged (= (get source :count) 2)
       :source-has-no-extra (not (has? source :extra))))
 
