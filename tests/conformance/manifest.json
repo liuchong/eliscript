@@ -594,6 +594,22 @@
         { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics preserve generated cross-family invariants" },
         { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value hashing traverses one million persistent values" }
       ]
+    },
+    {
+      "id": "runtime.protocol-dispatch-core",
+      "title": "Open protocol dispatch core",
+      "status": "accepted",
+      "spec": "0058",
+      "contracts": ["Dispatches through direct slots, exact types, host categories, and explicit defaults", "Keeps protocol metadata immutable and extension registries private", "Migrates persistent value equality and hashing onto IEquiv and IHash", "Allows external immutable value types without prototype mutation"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/protocol.test.mjs", "contains": "protocol definitions expose frozen operation identities" },
+        { "kind": "bun-test", "file": "tests/protocol.test.mjs", "contains": "protocol dispatch follows direct, exact, category, and default priority" },
+        { "kind": "bun-test", "file": "tests/protocol.test.mjs", "contains": "protocol extensions are exact, atomic, and do not modify host prototypes" },
+        { "kind": "bun-test", "file": "tests/protocol.test.mjs", "contains": "host categories provide explicit cross-realm adaptation" },
+        { "kind": "bun-test", "file": "tests/protocol.test.mjs", "contains": "missing protocol diagnostics identify protocol, operation, and host type" },
+        { "kind": "bun-test", "file": "tests/protocol.test.mjs", "contains": "open IEquiv and IHash extensions preserve persistent key semantics" },
+        { "kind": "bun-test", "file": "tests/protocol.test.mjs", "contains": "protocol dispatch agrees under Bun and Node and remains stable at scale" }
+      ]
     }
   ]
 }

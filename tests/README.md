@@ -107,6 +107,15 @@ collision, opaque host identity, and nested `undefined` are checked directly.
 Two thousand generated cross-family cases enforce equality/hash invariants,
 and one-million-value traversals prove iterative bounded-stack behavior.
 
+The protocol suite exercises immutable protocol definitions, direct Symbol
+slots, exact prototype extensions, stable host categories, explicit defaults,
+atomic validation, and structured missing diagnostics. It proves that
+extensions do not modify built-in prototypes, that categories adapt values
+across JavaScript realms, and that external immutable types retain value-key
+semantics through `IEquiv`, `IHash`, and persistent Map. Bun and Node execute
+the same dispatch report, followed by one million direct calls in the default
+test host.
+
 Persistent-vector tests exercise the provisional M8 runtime independently of
 literal compilation. They compare generated operations with a simple mutable
 array model, retain and probe previous versions after each update, cross tail

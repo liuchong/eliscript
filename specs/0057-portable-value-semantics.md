@@ -165,10 +165,12 @@ or protocol adapter is accepted. BigInt is hashed from its string form, but
 exact cross-runtime parity for BigInt and Symbol is not yet frozen. Symbols
 and user-defined value types remain outside the ordinary supported key set.
 
-The first implementation dispatches directly over the four core persistent
-representations. This is deliberately narrower than the open single-dispatch
-protocol planned by 0041 P2. It supplies one correct semantic center for that
-protocol to delegate to later.
+The portable `.eli` implementation dispatches directly over the four core
+persistent representations. The JavaScript reference runtime now uses the
+open `IEquiv` and `IHash` protocol core specified by
+[0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md). Bringing the
+portable collection algorithms onto the broader collection protocols remains
+later P2 work.
 
 ## Hosted-Language Role
 

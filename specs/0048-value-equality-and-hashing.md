@@ -14,10 +14,16 @@ semantics from JavaScript host identity, gives persistent vectors recursive
 value equality, and freezes deterministic Bun/Node fixtures used by persistent
 HAMT keys.
 
-The implementation lives in `runtime/core/value.mjs`. It exports:
+The original implementation lives in `runtime/core/value.mjs`. Its primary
+operations are:
 
 - `equalValues(left, right)`
 - `hashValue(value)`
+
+[0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md) subsequently
+adds the `IEquiv`, `IHash`, and `extendValueType` exports while preserving the
+scalar rules, frozen hashes, identity fallback, and cache behavior defined
+here.
 
 These JavaScript names are provisional runtime APIs. Compiler forms still keep
 their Compatibility Baseline 1 behavior: `eq`, `equal`, and `=` currently emit

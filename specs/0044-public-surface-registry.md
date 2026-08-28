@@ -126,7 +126,7 @@ The first validated surface contains:
 - 5 commands with 20 long options
 - 6 versioned schemas
 - 4 JavaScript adapters with 17 exports including defaults
-- 8 JavaScript runtime modules with 29 exports: four provisional public
+- 9 JavaScript runtime modules with 42 exports: five provisional public
   modules and four internal test adapters
 - 10 standard-library modules with 102 exports
 - 91 Emacs public functions

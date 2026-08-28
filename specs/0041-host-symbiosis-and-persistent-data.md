@@ -679,6 +679,12 @@ Map/Set constructors, nullish preservation, collision discipline, and
 cross-family generated evidence. Transients, keyword/symbol values, protocols,
 metadata, printer/reader integration, and literal migration remain open P1-P4
 work.
+The reusable dispatch mechanism now begins in
+[0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md): frozen
+protocol objects own direct Symbol slots and private exact-type/category/default
+tables, and the JavaScript value runtime migrates `IEquiv` and `IHash` onto
+that path. The remaining collection protocol set and portable algorithm
+migration stay open.
 
 ### P0: Semantics and Prototype
 
@@ -734,6 +740,15 @@ the complete all-host P1 exit audit remain required.
 
 **Exit:** generic algorithms operate on all core collections and native
 adapters without concrete representation checks in user-facing functions.
+
+**Status:** Underway since 2026-08-28. The dispatch-mechanism step is
+implemented in
+[0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md), including
+direct, exact-type, host-category, default, and missing paths; atomic external
+registration; cross-realm adaptation; and `IEquiv`/`IHash` production use.
+`ICounted`, `IEmptyable`, `IConj`, `ILookup`, `IAssociative`, `IIndexed`,
+`ISeqable`, `IReduce`, transient protocols, algorithm migration, and
+transducers remain required for the P2 exit.
 
 ### P3: Language Integration and Migration
 

@@ -147,6 +147,7 @@ Every suite report contains a SHA-256 digest over the exact files that define
 keys, hashing, node behavior, orchestration, and measurement:
 
 - `runtime/core/map-internals.mjs`
+- `runtime/core/protocol.mjs`
 - `runtime/core/value.mjs`
 - `runtime/core/value-internals.mjs`
 - `tools/collections/benchmark.mjs`
@@ -191,12 +192,12 @@ The macOS arm64 baseline in
 `benchmarks/hamt-layout-macos-arm64.json` produces:
 
 - at 16 branches, no host selects Array for the mixed workload; median Array
-  mixed cost is about 1.72 times Bitmap and precise retained heap is about
+  mixed cost is about 1.71 times Bitmap and precise retained heap is about
   1.57 times Bitmap
-- at 24 branches, no host selects Array; median Array mixed cost is about 1.37
+- at 24 branches, no host selects Array; median Array mixed cost is about 1.34
   times Bitmap and retained heap is about 1.22 times Bitmap
 - at 32 branches, Array wins on at least two hosts; median mixed cost is about
-  1.00 times Bitmap and retained heap is about 0.95 times Bitmap
+  0.99 times Bitmap and retained heap is about 0.95 times Bitmap
 
 The recomputed promotion candidate is 32 and demotion candidate is 24. The
 runtime constants and Map/Set transition tests use those exact values.

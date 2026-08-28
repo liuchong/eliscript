@@ -1,5 +1,15 @@
-export const VALUE_EQUAL = Symbol("eliscript.value.equal");
-export const VALUE_HASH = Symbol("eliscript.value.hash");
+import {
+  defineProtocol,
+  protocolMethod,
+  protocolSlot,
+} from "./protocol.mjs";
+
+export const I_EQUIV = defineProtocol("IEquiv", ["equal"]);
+export const I_HASH = defineProtocol("IHash", ["hash"]);
+export const VALUE_EQUAL = protocolSlot(I_EQUIV, "equal");
+export const VALUE_HASH = protocolSlot(I_HASH, "hash");
+export const dispatchValueEqual = protocolMethod(I_EQUIV, "equal");
+export const dispatchValueHash = protocolMethod(I_HASH, "hash");
 
 const BOOLEAN_TAG = 0x4b1d_9f73;
 const BIGINT_TAG = 0x7845_9ad1;

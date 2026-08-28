@@ -96,6 +96,10 @@ The common policy layer follows in
 defines recursive scalar/List/Vector/Map/Set equality and hashing in portable
 Eliscript, supplies default Map/Set constructors, preserves nested nullish
 values, and records the remaining host-identity and open-protocol boundary.
+The P2 dispatch foundation begins in
+[`0058-open-protocol-dispatch.md`](0058-open-protocol-dispatch.md), which adds
+immutable protocol definitions, direct and external dispatch, structured
+missing diagnostics, and the first production `IEquiv`/`IHash` migration.
 
 ## Adding a Specification
 

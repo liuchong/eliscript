@@ -1,7 +1,9 @@
 import {
-  VALUE_EQUAL,
-  VALUE_HASH,
+  I_EQUIV,
+  I_HASH,
   cachedProtocolHash,
+  dispatchValueEqual,
+  dispatchValueHash,
   hashBigInt,
   hashBoolean,
   hashGlobalSymbol,
@@ -12,6 +14,26 @@ import {
   hostIdentityHash,
   recordHashValueCall,
 } from "./value-internals.mjs";
+import {
+  extendProtocolType,
+  implementsProtocolOperation,
+} from "./protocol.mjs";
+
+export const IEquiv = I_EQUIV;
+export const IHash = I_HASH;
+
+export function extendValueType(constructor, implementations) {
+  if (implementations === null || typeof implementations !== "object" ||
+      typeof implementations.equal !== "function" ||
+      typeof implementations.hash !== "function") {
+    throw new TypeError(
+      "value type extension requires equal and hash functions",
+    );
+  }
+  extendProtocolType(IEquiv, constructor, { equal: implementations.equal });
+  extendProtocolType(IHash, constructor, { hash: implementations.hash });
+  return constructor;
+}
 
 export function equalValues(left, right) {
   if (left === right) {
@@ -26,12 +48,11 @@ export function equalValues(left, right) {
     return false;
   }
 
-  const leftEqual = left[VALUE_EQUAL];
-  const rightEqual = right[VALUE_EQUAL];
-  if (typeof leftEqual !== "function" || typeof rightEqual !== "function") {
+  if (!implementsProtocolOperation(IEquiv, "equal", left) ||
+      !implementsProtocolOperation(IEquiv, "equal", right)) {
     return false;
   }
-  return leftEqual.call(left, right, equalValues) === true;
+  return dispatchValueEqual(left, right, equalValues) === true;
 }
 
 export function hashValue(value) {
@@ -58,11 +79,10 @@ export function hashValue(value) {
     }
     case "function":
     case "object": {
-      const protocol = value[VALUE_HASH];
-      if (typeof protocol === "function") {
+      if (implementsProtocolOperation(IHash, "hash", value)) {
         return cachedProtocolHash(
           value,
-          () => protocol.call(value, hashValue),
+          () => dispatchValueHash(value, hashValue),
         );
       }
       return hostIdentityHash(value);

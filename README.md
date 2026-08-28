@@ -307,6 +307,8 @@ Implemented forms include:
 - portable keyed lookup, grouping, and counting from `stdlib/data.eli`
 - portable scalar/List/Vector/Map/Set equality and hashing plus ordinary
   persistent Map/Set constructors from `stdlib/value.eli`
+- open runtime protocols with direct Symbol slots, exact-type and host-category
+  extensions, explicit defaults, and structured missing-method diagnostics
 - exact portable runtime type, UTF-16 code-unit, and float64 word inspection
   forms used by language-authored value algorithms
 - ESM `module`, `import`, `import-portable`, `export`, and `export-default`
@@ -542,6 +544,11 @@ Current evidence:
   outputs and frozen fixtures agree across both compilers and JavaScript hosts;
   generated, collision, nullish, and million-value tests extend the default
   conformance run.
+- `runtime/core/protocol.mjs` supplies frozen protocol definitions and private
+  open-extension tables without modifying JavaScript prototypes. Existing
+  persistent value equality and hashing now use its `IEquiv` and `IHash`
+  direct slots, while external immutable value types can register matching
+  equality and hash implementations.
 - `bin/eliscript-build` walks expanded IR imports, compiles each local `.eli`
   dependency once, preserves its root-relative path as `.mjs`, and emits a
   source map for every module without requiring Vite.
@@ -551,7 +558,7 @@ Current evidence:
 - Ninety-eight ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- Ninety-six Bun tests cover the compiler and Org Vite adapters, source-map
+- One hundred three Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
   bootstrap behavior, the worker protocol, standard library, and benchmark
   reporting, plus persistent vector correctness, structural bounds, recursive
@@ -653,8 +660,12 @@ run through both compiler generations and hosts. `stdlib/value.eli` now
 completes P1 construction step 2: one language-authored policy recursively
 defines scalar, List, Vector, Map, and Set equality and hashing, supplies
 ordinary Map/Set constructors, preserves nested `undefined`, and freezes
-cross-host collision behavior. Open protocol dispatch, efficient host identity
-hashing, metadata, and reader/printer integration are the next P1 boundary.
+cross-host collision behavior. The generic runtime protocol core now supplies
+direct Symbol dispatch, exact-type and host-category extensions, explicit
+defaults, and structured missing diagnostics; `IEquiv`/`IHash` are its first
+production protocols. The remaining collection protocols, efficient host
+identity hashing, metadata, and reader/printer integration are the next
+boundary.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -780,7 +791,10 @@ for the Map-backed portable Set, collection algebra, explicit policy
 compatibility, and million-member sharing, and
 [specs/0057-portable-value-semantics.md](specs/0057-portable-value-semantics.md)
 for the portable shared value policy, default Map/Set constructors, nullish
-preservation, cross-family invariants, and host-identity limits.
+preservation, cross-family invariants, and host-identity limits, and
+[specs/0058-open-protocol-dispatch.md](specs/0058-open-protocol-dispatch.md)
+for immutable protocol definitions, open dispatch precedence, external value
+types, diagnostics, and cross-runtime evidence.
 
 ## License
 

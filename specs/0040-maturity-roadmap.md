@@ -508,8 +508,13 @@ exist in Eliscript. The shared portable value layer in
 recursive scalar/List/Vector/Map/Set equality and hashing, ordinary Map/Set
 constructors, nested `undefined` preservation, cross-family generated
 invariants, and one-million-value traversal. P1 construction steps 1 and 2 are
-complete; open protocols, efficient host identity hashing, metadata, printing,
-and reading remain open.
+complete. The generic runtime dispatch core in
+[0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md) then begins P2
+with immutable protocol definitions, direct Symbol slots, exact-type and
+host-category extension tables, explicit defaults, structured diagnostics,
+and production `IEquiv`/`IHash` integration. The remaining collection
+protocols, efficient host identity hashing, metadata, printing, and reading
+remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 
