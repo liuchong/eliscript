@@ -566,6 +566,19 @@
         { "kind": "bun-test", "file": "tests/portable-persistent-map.test.mjs", "contains": "Eliscript-authored HAMT Map promotes and demotes measured layouts" },
         { "kind": "bun-test", "file": "tests/portable-persistent-map.test.mjs", "contains": "Eliscript-authored HAMT Map shares the million-key update path" }
       ]
+    },
+    {
+      "id": "stdlib.persistent-set-prototype",
+      "title": "Eliscript-authored persistent Map-backed Set",
+      "status": "accepted",
+      "spec": "0056",
+      "contracts": ["Reuses the portable HAMT Map without duplicating node algorithms", "Keeps seed and self-hosted Set/Map ESM and Source Maps byte-identical", "Preserves generated value-key histories, Set algebra, collisions, and measured transitions", "Shares every million-member trie item outside the selected insertion path"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/portable-persistent-set.test.mjs", "contains": "Eliscript-authored persistent Set compiles and agrees across hosts" },
+        { "kind": "bun-test", "file": "tests/portable-persistent-set.test.mjs", "contains": "Eliscript-authored persistent Set preserves generated value-key histories" },
+        { "kind": "bun-test", "file": "tests/portable-persistent-set.test.mjs", "contains": "Eliscript-authored persistent Set preserves algebra and HAMT layouts" },
+        { "kind": "bun-test", "file": "tests/portable-persistent-set.test.mjs", "contains": "Eliscript-authored persistent Set shares the million-member update path" }
+      ]
     }
   ]
 }

@@ -93,6 +93,12 @@ and Node execute equivalent 100,000-key reports; generated value-key histories,
 complete-hash collisions, 32/24 sparse/dense transitions, no-op identity, and a
 million-key update verify model agreement and exact untouched-path sharing.
 
+The portable persistent-set suite compiles both sides of its Map dependency
+with the seed and self-hosted compilers, then executes both output pairs under
+Bun and Node. It covers 20,000 retained value-key operations, collection
+algebra, incompatible policies, complete-hash collisions, inherited 32/24
+transitions, no-op identity, and exact million-member path sharing.
+
 Persistent-vector tests exercise the provisional M8 runtime independently of
 literal compilation. They compare generated operations with a simple mutable
 array model, retain and probe previous versions after each update, cross tail

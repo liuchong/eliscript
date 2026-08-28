@@ -96,6 +96,32 @@ collisions, measured 32/24 node transitions, and a million-key update prove
 correctness and structural sharing. Exact provisional semantics are specified
 in [specs/0055-eliscript-persistent-map.md](../specs/0055-eliscript-persistent-map.md).
 
+## Persistent Set
+
+`persistent-set.eli` is a thin immutable membership and collection-algebra
+layer over `persistent-map.eli`. It imports the Map through a verified portable
+source edge and duplicates no HAMT node or routing algorithm:
+
+```elisp
+(import "../../stdlib/persistent-set.eli"
+        empty-persistent-set persistent-set-conj persistent-set-has?)
+
+(let* ((hash (lambda (value) value))
+       (equal (lambda (left right) (= left right)))
+       (set (persistent-set-conj
+             (empty-persistent-set hash equal)
+             7)))
+  (persistent-set-has? set 7))
+```
+
+The provisional API includes union, intersection, difference, subset,
+superset, disjointness, equality, reduction, and explicit array conversion.
+Two Sets must share the exact hash and key-equality function identities before
+binary algebra is accepted. Dual-compiler/dual-host reports, generated model
+histories, collision and 32/24 transition cases, and a million-member sharing
+test are specified in
+[specs/0056-eliscript-persistent-set.md](../specs/0056-eliscript-persistent-set.md).
+
 ## Sequence
 
 `sequence.eli` is the first standard-library module. It exports fresh-array,

@@ -1,0 +1,214 @@
+(module eliscript.persistent-set
+  (import-portable "./persistent-map.eli"
+                   empty-persistent-map
+                   persistent-map-assoc
+                   persistent-map-count
+                   persistent-map-dissoc
+                   persistent-map-has?
+                   persistent-map-reduce)
+
+  (defconst persistent-set-kind "eliscript/persistent-set")
+  (defconst persistent-set-present t)
+
+  (defportable persistent-set-same-value (_left _right)
+    t)
+
+  (defportable persistent-set-make
+      (map hash-function key-equal-function)
+    (object :kind persistent-set-kind
+            :map map
+            :hash-function hash-function
+            :key-equal-function key-equal-function))
+
+  (defportable empty-persistent-set (hash-function key-equal-function)
+    (persistent-set-make
+     (empty-persistent-map
+      hash-function
+      key-equal-function
+      persistent-set-same-value)
+     hash-function
+     key-equal-function))
+
+  (defportable persistent-set? (value)
+    (and (not (nullish? value))
+         (object-has? value "kind")
+         (= (get value "kind" nil) persistent-set-kind)))
+
+  (defportable persistent-set-compatible? (left right)
+    (and (persistent-set? left)
+         (persistent-set? right)
+         (= (get left "hash-function" nil)
+            (get right "hash-function" nil))
+         (= (get left "key-equal-function" nil)
+            (get right "key-equal-function" nil))))
+
+  (defportable persistent-set-count (set)
+    (persistent-map-count (get set "map" nil)))
+
+  (defportable persistent-set-empty? (set)
+    (= (persistent-set-count set) 0))
+
+  (defportable persistent-set-has? (set value)
+    (persistent-map-has? (get set "map" nil) value))
+
+  (defportable persistent-set-conj (set value)
+    (let* ((map (get set "map" nil))
+           (next-map
+            (persistent-map-assoc map value persistent-set-present)))
+      (if (= map next-map)
+          set
+        (if (nil? next-map)
+            nil
+          (persistent-set-make
+           next-map
+           (get set "hash-function" nil)
+           (get set "key-equal-function" nil))))))
+
+  (defportable persistent-set-disj (set value)
+    (let* ((map (get set "map" nil))
+           (next-map (persistent-map-dissoc map value)))
+      (if (= map next-map)
+          set
+        (persistent-set-make
+         next-map
+         (get set "hash-function" nil)
+         (get set "key-equal-function" nil)))))
+
+  (defportable persistent-set-reduce (function initial set)
+    (persistent-map-reduce
+     (lambda (result key _value) (funcall function result key))
+     initial
+     (get set "map" nil)))
+
+  (defportable persistent-set-array-reverse (values)
+    (let ((result [])
+          (index 0))
+      (while (< index (length values))
+        (setq result (cons (nth index values) result)
+              index (1+ index)))
+      result))
+
+  (defportable persistent-set-to-array (set)
+    (persistent-set-array-reverse
+     (persistent-set-reduce
+      (lambda (result value) (cons value result))
+      []
+      set)))
+
+  (defportable persistent-set-from-array
+      (hash-function key-equal-function values)
+    (let ((result
+           (empty-persistent-set hash-function key-equal-function))
+          (index 0))
+      (while (< index (length values))
+        (setq result (persistent-set-conj result (nth index values))
+              index (1+ index)))
+      result))
+
+  (defportable persistent-set-union (left right)
+    (if (not (persistent-set-compatible? left right))
+        nil
+      (let ((base
+             (if (>= (persistent-set-count left)
+                     (persistent-set-count right))
+                 left
+               right))
+            (additional
+             (if (>= (persistent-set-count left)
+                     (persistent-set-count right))
+                 right
+               left)))
+        (persistent-set-reduce
+         (lambda (result value) (persistent-set-conj result value))
+         base
+         additional))))
+
+  (defportable persistent-set-intersection (left right)
+    (if (not (persistent-set-compatible? left right))
+        nil
+      (let* ((candidates
+              (if (<= (persistent-set-count left)
+                      (persistent-set-count right))
+                  left
+                right))
+             (membership
+              (if (= candidates left) right left))
+             (retained
+              (persistent-set-reduce
+               (lambda (result value)
+                 (if (persistent-set-has? membership value)
+                     (persistent-set-conj result value)
+                   result))
+               (empty-persistent-set
+                (get left "hash-function" nil)
+                (get left "key-equal-function" nil))
+               candidates)))
+        (if (= (persistent-set-count retained)
+               (persistent-set-count left))
+            left
+          retained))))
+
+  (defportable persistent-set-difference (left right)
+    (if (not (persistent-set-compatible? left right))
+        nil
+      (persistent-set-reduce
+       (lambda (result value) (persistent-set-disj result value))
+       left
+       right)))
+
+  (defportable persistent-set-subset? (left right)
+    (if (not (persistent-set-compatible? left right))
+        false
+      (if (> (persistent-set-count left) (persistent-set-count right))
+          false
+        (persistent-set-reduce
+         (lambda (result value)
+           (and result (persistent-set-has? right value)))
+         t
+         left))))
+
+  (defportable persistent-set-superset? (left right)
+    (persistent-set-subset? right left))
+
+  (defportable persistent-set-disjoint? (left right)
+    (if (not (persistent-set-compatible? left right))
+        false
+      (let ((candidates
+             (if (<= (persistent-set-count left)
+                     (persistent-set-count right))
+                 left
+               right))
+            (membership
+             (if (<= (persistent-set-count left)
+                     (persistent-set-count right))
+                 right
+               left)))
+        (persistent-set-reduce
+         (lambda (result value)
+           (and result (not (persistent-set-has? membership value))))
+         t
+         candidates))))
+
+  (defportable persistent-set-equal? (left right)
+    (and (persistent-set-compatible? left right)
+         (= (persistent-set-count left) (persistent-set-count right))
+         (persistent-set-subset? left right)))
+
+  (export empty-persistent-set
+          persistent-set?
+          persistent-set-compatible?
+          persistent-set-count
+          persistent-set-empty?
+          persistent-set-has?
+          persistent-set-conj
+          persistent-set-disj
+          persistent-set-reduce
+          persistent-set-to-array
+          persistent-set-from-array
+          persistent-set-union
+          persistent-set-intersection
+          persistent-set-difference
+          persistent-set-subset?
+          persistent-set-superset?
+          persistent-set-disjoint?
+          persistent-set-equal?))

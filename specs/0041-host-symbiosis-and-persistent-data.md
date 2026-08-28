@@ -647,9 +647,11 @@ generated history plus million-value sharing evidence close P0. The linked
 List and complete HAMT Map then move into portable Eliscript in
 [0054-eliscript-persistent-list.md](0054-eliscript-persistent-list.md) and
 [0055-eliscript-persistent-map.md](0055-eliscript-persistent-map.md), supplying
-three independent collection layouts for P1. Transients, keyword/symbol
-values, protocols, Set migration, and literal migration remain open P1-P4
-work.
+three independent collection layouts for P1. The Map-backed Set follows in
+[0056-eliscript-persistent-set.md](0056-eliscript-persistent-set.md), completing
+the four language-authored collection representations without duplicating the
+HAMT. Transients, keyword/symbol values, protocols, and literal migration
+remain open P1-P4 work.
 
 ### P0: Semantics and Prototype
 
@@ -685,9 +687,11 @@ adds exact suffix sharing and stack-safe million-node traversal beside the
 indexed Vector trie. The portable HAMT Map in
 [0055-eliscript-persistent-map.md](0055-eliscript-persistent-map.md) now adds
 collision-safe associative updates, sparse/dense transitions, explicit
-hash/equality policy, and million-key path sharing. Set migration, common
-equality and hashing, metadata, printing, reading, and cross-family properties
-remain required for this exit.
+hash/equality policy, and million-key path sharing. The Map-backed Set in
+[0056-eliscript-persistent-set.md](0056-eliscript-persistent-set.md) completes
+construction step 1 with algebra, collisions, and million-member sharing.
+Common equality and hashing, metadata, printing, reading, and cross-family
+properties remain required for this exit.
 
 ### P2: Protocols and Algorithms
 

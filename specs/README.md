@@ -87,6 +87,10 @@ The associative core follows in
 moves bitmap, dense, collision, association, and removal algorithms into
 portable Eliscript with explicit hash/equality policy and million-key sharing
 evidence.
+The fourth representation is
+[`0056-eliscript-persistent-set.md`](0056-eliscript-persistent-set.md), which
+reuses the portable Map for membership and collection algebra while proving
+dual-compiler/dual-host behavior and million-member sharing.
 
 ## Adding a Specification
 

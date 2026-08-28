@@ -499,7 +499,12 @@ contrasting capability sets for protocol design. The complete portable HAMT
 Map in [0055-eliscript-persistent-map.md](0055-eliscript-persistent-map.md) now
 adds injected hash/equality policy, bitmap/dense/collision nodes, 32/24
 transitions, retained generated histories, and million-key path sharing. Set
-migration, shared value semantics, metadata, printing, and reading remain open.
+migration follows in
+[0056-eliscript-persistent-set.md](0056-eliscript-persistent-set.md), reusing the
+portable Map for membership and collection algebra with cross-host and
+million-member evidence. All four concrete persistent representations now
+exist in Eliscript; shared value semantics, metadata, printing, and reading
+remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 
