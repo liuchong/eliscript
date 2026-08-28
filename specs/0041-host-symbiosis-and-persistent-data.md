@@ -581,8 +581,11 @@ then land in
 HAMT work then begins with the persistent Map prototype in
 [0049-persistent-hash-map-prototype.md](0049-persistent-hash-map-prototype.md).
 That slice covers bitmap, dense, and full-hash collision nodes through one
-million keys. Set, transients, keyword/symbol values, engine layout
-measurements, and literal migration remain open P0/P1 work.
+million keys. The Map-backed Set follows in
+[0050-persistent-hash-set-prototype.md](0050-persistent-hash-set-prototype.md),
+reusing those nodes for value-semantic membership, collection algebra, exact
+sharing, and million-member bounds. Transients, keyword/symbol values, engine
+layout measurements, and literal migration remain open P0/P1 work.
 
 ### P0: Semantics and Prototype
 

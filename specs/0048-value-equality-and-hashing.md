@@ -95,10 +95,10 @@ All arithmetic is explicitly normalized through JavaScript 32-bit integer
 operations. IEEE-754 words are read with declared little-endian access, so the
 result does not depend on machine byte order.
 
-The exact scalar, vector, and persistent-map results for the current algorithm are frozen in
-`tests/fixtures/value-hashes.json`. Changing one requires an explicit
-provisional compatibility review and fixture update, not an incidental engine
-or refactor change.
+The exact scalar, vector, persistent-map, and persistent-set results for the
+current algorithm are frozen in `tests/fixtures/value-hashes.json`. Changing
+one requires an explicit provisional compatibility review and fixture update,
+not an incidental engine or refactor change.
 
 ## Host Identity Hashes
 
@@ -182,11 +182,11 @@ This fixture prevents an optimization from silently changing the contract to
 
 ## Complexity
 
-| Operation | Portable scalar | Host identity | Persistent vector |
-| --- | --- | --- | --- |
-| equality | O(1), except string content | O(1) | O(n) worst case |
-| first hash | O(value width) | expected O(1) | O(n) |
-| cached hash | not cached | expected O(1) | expected O(1) |
+| Operation | Portable scalar | Host identity | Persistent vector | Persistent Map/Set |
+| --- | --- | --- | --- | --- |
+| equality | O(1), except string content | O(1) | O(n) worst case | expected O(n log32 n) |
+| first hash | O(value width) | expected O(1) | O(n) | O(n) |
+| cached hash | not cached | expected O(1) | expected O(1) | expected O(1) |
 
 String and BigInt work is proportional to their encoded width. Vector equality
 and first hash traverse leaf chunks in order rather than performing one root
@@ -204,6 +204,7 @@ The default suite verifies:
 - independently constructed nested vectors compare by recursive values
 - first and repeat hashes produce the expected cache counters
 - hashing and cached lookup at one million vector values
+- insertion-order-independent Map and Set hashes, including collisions
 - exact frozen hash output under both Bun and Node.js
 
 ## Compatibility and Remaining Work
@@ -214,9 +215,8 @@ and Set but do not complete 0041 value semantics.
 
 Remaining work includes:
 
-- persistent list and set equality/hash implementations
+- persistent list equality/hash implementation
 - keyword and Eliscript symbol runtime values
-- unordered map/set hash mixing independent of insertion order
 - metadata exclusion tests
 - language-form and literal migration
 - public protocol dispatch and extension
@@ -224,6 +224,8 @@ Remaining work includes:
 
 The P0 equality/hash fixture requirement is satisfied for currently
 implemented runtime values. Persistent Map HAMT support is specified by
-[0049-persistent-hash-map-prototype.md](0049-persistent-hash-map-prototype.md).
-The full P0 exit gate still requires Set, integer bit-operation support, and
+[0049-persistent-hash-map-prototype.md](0049-persistent-hash-map-prototype.md),
+and Set support by
+[0050-persistent-hash-set-prototype.md](0050-persistent-hash-set-prototype.md).
+The full P0 exit gate still requires integer bit-operation support and
 cross-engine node-layout measurements.

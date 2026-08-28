@@ -4,6 +4,7 @@ import {
 } from "../../runtime/core/value.mjs";
 import { persistentVector } from "../../runtime/core/vector.mjs";
 import { persistentHashMap } from "../../runtime/core/map.mjs";
+import { persistentHashSet } from "../../runtime/core/set.mjs";
 
 const nestedLeft = persistentVector(
   null,
@@ -35,6 +36,17 @@ const collisionMap = persistentHashMap(
   ["key-50691", "left"],
   ["key-194634", "right"],
 );
+const orderedSet = persistentHashSet(
+  "alpha",
+  persistentVector("key"),
+  "omega",
+);
+const reversedSet = persistentHashSet(
+  "omega",
+  persistentVector("key"),
+  "alpha",
+);
+const collisionSet = persistentHashSet("key-50691", "key-194634");
 
 console.log(JSON.stringify({
   scalars: {
@@ -68,6 +80,13 @@ console.log(JSON.stringify({
     reversed: hashValue(reversedMap),
     collision: hashValue(collisionMap),
   },
+  sets: {
+    empty: hashValue(persistentHashSet()),
+    flat: hashValue(persistentHashSet(1, 2, 3, 4)),
+    ordered: hashValue(orderedSet),
+    reversed: hashValue(reversedSet),
+    collision: hashValue(collisionSet),
+  },
   invariants: {
     nanEqual: equalValues(Number.NaN, Number.NaN),
     zerosEqual: equalValues(0, -0),
@@ -75,5 +94,7 @@ console.log(JSON.stringify({
     nestedHashesEqual: hashValue(nestedLeft) === hashValue(nestedRight),
     mapsEqual: equalValues(orderedMap, reversedMap),
     mapHashesEqual: hashValue(orderedMap) === hashValue(reversedMap),
+    setsEqual: equalValues(orderedSet, reversedSet),
+    setHashesEqual: hashValue(orderedSet) === hashValue(reversedSet),
   },
 }));

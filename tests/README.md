@@ -94,6 +94,13 @@ against a native SameValueZero model. Instrumented 100,000-key updates prove
 exact path sharing, while a one-million-key suite bounds lookup, replacement,
 and deletion under both Bun and Node.
 
+Persistent-set tests reuse the same HAMT observation counters while proving a
+separate Set value category, value-equal members, complete-hash collisions,
+set algebra, unordered hashing, and no-op identity. A generated mutable model
+covers 20,000 updates, a 100,000-member deletion proves exact path sharing, and
+one-million-member membership, insertion, and removal remain depth-bounded
+under Bun and Node.
+
 Project-build tests inspect expanded IR imports, retain non-Eliscript
 specifiers, support cycles, enforce canonical root containment, and verify
 per-module source maps, incremental decisions, and build phase timings. The

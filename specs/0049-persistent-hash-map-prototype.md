@@ -16,8 +16,9 @@ selected trie path.
 
 The implementation is an isolated JavaScript runtime prototype. It does not
 change map literals, native object forms, compiler IR, or standard-library
-object behavior. A future language integration slice must first complete Set,
-explicit host conversion, reader/printer behavior, and compiler support.
+object behavior. A future language integration slice must first complete
+explicit host conversion, reader/printer behavior, and compiler support. The
+Map-backed Set layer is specified separately by 0050.
 
 ## Runtime Surface
 
@@ -249,7 +250,6 @@ The prototype satisfies the core persistent Map correctness, collision,
 sharing, and million-scale structural requirements, but does not complete the
 0041 P0/P1 exits. Remaining work includes:
 
-- persistent Set over the same HAMT key layer
 - transient owner-token variants
 - keyword and Eliscript symbol values
 - metadata and reader/printer round trips
@@ -257,3 +257,6 @@ sharing, and million-scale structural requirements, but does not complete the
 - browser engine layout measurements and threshold benchmarks
 - portable Eliscript implementation after integer bit operations are exposed
 - literal, protocol, compiler, standard-library, and interop migration
+
+The persistent Set over this key layer is implemented and specified by
+[0050-persistent-hash-set-prototype.md](0050-persistent-hash-set-prototype.md).

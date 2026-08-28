@@ -30,6 +30,12 @@ deletion, and complete 32-bit collisions retain distinct keys. Internal node
 shape, transition, allocation, visit, and sharing evidence lives in
 `testing/map.mjs`.
 
+`core/set.mjs` is a thin immutable value-semantic view over that HAMT. Members
+occupy map keys under one private sentinel, so Set membership, algebra,
+collisions, and path sharing cannot drift from Map behavior. Set-specific
+shape and sharing evidence is adapted through `testing/set.mjs` without
+exposing the backing map to applications.
+
 `worker.mjs` is the reference long-lived compute host. It communicates over
 versioned NDJSON, imports local generated modules, correlates concurrent
 requests, and supports progress, cooperative cancellation, timeouts, structured

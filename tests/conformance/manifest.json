@@ -485,6 +485,25 @@
         { "kind": "bun-test", "file": "tests/persistent-map.test.mjs", "contains": "persistent hash map stays within HAMT bounds at one million keys" },
         { "kind": "bun-test", "file": "tests/persistent-map.test.mjs", "contains": "persistent hash map has equivalent behavior under Bun and Node" }
       ]
+    },
+    {
+      "id": "runtime.persistent-hash-set-prototype",
+      "title": "Persistent Map-backed hash set prototype",
+      "status": "accepted",
+      "spec": "0050",
+      "contracts": ["Uses the 0049 HAMT without duplicating its node implementation", "Stores value-equal and host-identity members under the 0048 contract", "Preserves previous versions and returns receiver identity for no-op updates", "Defines value-semantic union, intersection, difference, and relation predicates", "Defines insertion-order-independent equality and Set-domain hashing", "Keeps million-member operations within the declared HAMT bound"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/persistent-set.test.mjs", "contains": "persistent hash set preserves old values and value-equal members" },
+        { "kind": "bun-test", "file": "tests/persistent-set.test.mjs", "contains": "persistent hash set handles complete hash collisions" },
+        { "kind": "bun-test", "file": "tests/persistent-set.test.mjs", "contains": "persistent hash set inherits sparse and dense HAMT transitions" },
+        { "kind": "bun-test", "file": "tests/persistent-set.test.mjs", "contains": "persistent hash set equality and hash ignore insertion order" },
+        { "kind": "bun-test", "file": "tests/persistent-set.test.mjs", "contains": "persistent hash set implements value-semantic set algebra" },
+        { "kind": "bun-test", "file": "tests/persistent-set.test.mjs", "contains": "persistent hash set hashes every member once and caches the result" },
+        { "kind": "bun-test", "file": "tests/persistent-set.test.mjs", "contains": "persistent hash set agrees with a mutable reference model" },
+        { "kind": "bun-test", "file": "tests/persistent-set.test.mjs", "contains": "persistent hash set removal copies only the selected node path" },
+        { "kind": "bun-test", "file": "tests/persistent-set.test.mjs", "contains": "persistent hash set stays within HAMT bounds at one million members" },
+        { "kind": "bun-test", "file": "tests/persistent-set.test.mjs", "contains": "persistent hash set has equivalent behavior under Bun and Node" }
+      ]
     }
   ]
 }

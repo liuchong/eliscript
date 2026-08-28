@@ -472,8 +472,12 @@ recursive equality, collision evidence, and a private immutable-value cache in
 The HAMT Map prototype now adds bitmap, dense, and full-hash collision nodes,
 threshold transitions, structural sharing, and million-key bounds in
 [0049-persistent-hash-map-prototype.md](0049-persistent-hash-map-prototype.md).
-Persistent Set and host/layout measurements remain next, before literal
-migration.
+The Map-backed persistent Set in
+[0050-persistent-hash-set-prototype.md](0050-persistent-hash-set-prototype.md)
+adds a distinct unordered value category, collection algebra, exact path
+sharing, collision coverage, and million-member bounds without duplicating
+HAMT nodes. Browser host/layout measurements remain next, before transient and
+literal migration work.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

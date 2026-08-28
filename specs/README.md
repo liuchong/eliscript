@@ -66,7 +66,9 @@ including frozen Bun/Node hashes and collision evidence.
 The associative runtime continues in
 [`0049-persistent-hash-map-prototype.md`](0049-persistent-hash-map-prototype.md),
 which defines bitmap, dense, and collision HAMT nodes without changing map
-literals.
+literals. The same HAMT key layer backs the value-semantic Set in
+[`0050-persistent-hash-set-prototype.md`](0050-persistent-hash-set-prototype.md),
+including collection algebra, structural sharing, and million-member bounds.
 
 ## Adding a Specification
 
