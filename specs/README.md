@@ -74,7 +74,10 @@ in [`0051-hamt-layout-benchmark.md`](0051-hamt-layout-benchmark.md).
 The portable integer foundation continues in
 [`0052-portable-32-bit-operations.md`](0052-portable-32-bit-operations.md),
 covering seed/self-hosted intrinsics and Eliscript-authored population count
-and rotation algorithms.
+and rotation algorithms. The P0 implementation-language proof is
+[`0053-eliscript-persistent-vector.md`](0053-eliscript-persistent-vector.md):
+the complete vector trie is written in portable Eliscript and verified across
+both compilers, Bun, Node, generated histories, and one million values.
 
 ## Adding a Specification
 

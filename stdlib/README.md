@@ -26,6 +26,29 @@ The module is the reference algorithm layer for future trie and hash sources;
 exact normalization and shift semantics are specified in
 [specs/0052-portable-32-bit-operations.md](../specs/0052-portable-32-bit-operations.md).
 
+## Persistent Vector
+
+`persistent-vector.eli` is the first complete persistent collection algorithm
+written in portable Eliscript. It implements a 32-way trie, a bounded short
+tail, path-copying `conj`, `assoc`, and `pop`, chunked reduction, and explicit
+native-array conversion:
+
+```elisp
+(import "../../stdlib/persistent-vector.eli"
+        empty-persistent-vector persistent-vector-conj persistent-vector-nth)
+
+(persistent-vector-nth
+ (persistent-vector-conj (empty-persistent-vector) "value")
+ 0
+ nil)
+```
+
+The source does not import the JavaScript collection runtime and does not use
+host mutation. It is the readable correctness reference for later collection
+protocol, transient, and literal work. Exact provisional semantics and
+structural evidence are specified in
+[specs/0053-eliscript-persistent-vector.md](../specs/0053-eliscript-persistent-vector.md).
+
 ## Sequence
 
 `sequence.eli` is the first standard-library module. It exports fresh-array,

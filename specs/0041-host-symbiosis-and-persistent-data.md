@@ -590,8 +590,12 @@ real lookup/update paths and selects 32/24 sparse/dense thresholds. Portable
 32-bit intrinsics and Eliscript-authored population count/rotation algorithms
 follow in
 [0052-portable-32-bit-operations.md](0052-portable-32-bit-operations.md).
-An isolated `.eli` collection prototype remains before P0 closes; transients,
-keyword/symbol values, and literal migration remain open P1/P4 work.
+The complete 32-way vector trie then crosses into portable Eliscript in
+[0053-eliscript-persistent-vector.md](0053-eliscript-persistent-vector.md).
+Its two compiler outputs are byte-identical, both run under Bun and Node, and
+generated history plus million-value sharing evidence close P0. Transients,
+keyword/symbol values, protocols, and literal migration remain open P1-P4
+work.
 
 ### P0: Semantics and Prototype
 
@@ -603,6 +607,11 @@ keyword/symbol values, and literal migration remain open P1/P4 work.
 
 **Exit:** semantics are specified and prototypes meet structural sharing and
 complexity counters before any literal behavior changes.
+
+**Status:** Completed on 2026-08-28 by specifications 0047-0053. The exit
+evidence includes cross-runtime equality and hashing, vector and HAMT
+prototypes, measured Bun/Node/Chrome node layouts and thresholds, portable
+32-bit operations, and one complete trie implementation authored in `.eli`.
 
 ### P1: Persistent Collection Core
 

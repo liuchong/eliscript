@@ -45,7 +45,8 @@ Eliscript already has the difficult vertical foundations:
   decisions, and phase timing reports
 - statically validated portable functions and a resilient Emacs-to-JavaScript
   worker protocol
-- initial portable sequence, text, object, and keyed-data modules
+- initial portable bit, sequence, text, object, keyed-data, and persistent
+  vector modules
 - shared seed/self-hosted conformance fixtures and end-to-end execution tests
 
 This proves that the architecture is viable. It does not yet establish a
@@ -482,8 +483,14 @@ initial inherited 16/8 sparse/dense transition with measured 32/24 thresholds.
 The seed and self-hosted compiler paths now expose exact portable 32-bit
 operations, while `stdlib/bit.eli` proves population count and rotations in
 [0052-portable-32-bit-operations.md](0052-portable-32-bit-operations.md).
-P0's remaining implementation-language proof is an isolated `.eli` vector or
-HAMT module; transient and literal migration work follow.
+The complete 32-way trie in `stdlib/persistent-vector.eli` now supplies the
+implementation-language proof in
+[0053-eliscript-persistent-vector.md](0053-eliscript-persistent-vector.md): seed
+and self-hosted artifacts are byte-identical, Bun and Node reports agree, and
+generated history plus million-value structural bounds pass. This closes the
+0041 P0 semantics-and-prototype phase. P1 is next: converge list, vector, map,
+and set into one Eliscript-authored core with shared equality, hashing,
+metadata, printing, reading, and property evidence before literal migration.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

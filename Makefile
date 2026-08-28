@@ -21,6 +21,7 @@ test: check-contracts
 		tests/worker-benchmark.test.mjs tests/stdlib-sequence.test.mjs \
 		tests/stdlib-text.test.mjs tests/stdlib-object.test.mjs \
 		tests/stdlib-bit.test.mjs \
+		tests/portable-persistent-vector.test.mjs \
 		tests/persistent-vector.test.mjs tests/value-semantics.test.mjs \
 		tests/persistent-map.test.mjs tests/persistent-set.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh

@@ -529,6 +529,18 @@
         { "kind": "bun-test", "file": "tests/stdlib-bit.test.mjs", "contains": "portable 32-bit operations and algorithms agree under Bun and Node" },
         { "kind": "fixture", "file": "tests/fixtures/bootstrap-ir.json", "contains": "portable-bit-operations" }
       ]
+    },
+    {
+      "id": "stdlib.persistent-vector-prototype",
+      "title": "Eliscript-authored persistent vector trie",
+      "status": "accepted",
+      "spec": "0053",
+      "contracts": ["Implements the 32-way trie and tail entirely in portable Eliscript", "Keeps seed and self-hosted ESM and Source Maps byte-identical", "Preserves generated histories and exact path sharing at one million values", "Produces equivalent reports under Bun and Node.js"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/portable-persistent-vector.test.mjs", "contains": "Eliscript-authored persistent vector compiles and agrees across hosts" },
+        { "kind": "bun-test", "file": "tests/portable-persistent-vector.test.mjs", "contains": "Eliscript-authored persistent vector preserves generated history" },
+        { "kind": "bun-test", "file": "tests/portable-persistent-vector.test.mjs", "contains": "Eliscript-authored persistent vector keeps million-value trie bounds" }
+      ]
     }
   ]
 }

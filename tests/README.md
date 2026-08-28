@@ -75,6 +75,13 @@ population count, and rotations under Bun and Node. ERT separately proves that
 portable selection includes transitive helpers while excluding unrelated
 operations.
 
+The portable persistent-vector suite compiles the complete trie from `.eli`
+with both seed and self-hosted compilers, compares ESM and Source Maps
+byte-for-byte, then executes both outputs under Bun and Node. Twenty thousand
+generated updates preserve retained versions against an array model, and a
+one-million-value association shares every node except its four-node selected
+path.
+
 Persistent-vector tests exercise the provisional M8 runtime independently of
 literal compilation. They compare generated operations with a simple mutable
 array model, retain and probe previous versions after each update, cross tail
