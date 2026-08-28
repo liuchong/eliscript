@@ -24,6 +24,12 @@ opaque JavaScript objects retain process-local identity semantics. Persistent
 hashes are cached privately. `testing/value.mjs` exposes cache and identity
 counters only for conformance tests.
 
+`core/map.mjs` builds on that key contract with a provisional persistent HAMT.
+Sparse bitmap nodes promote to dense 32-slot nodes, dense nodes compact after
+deletion, and complete 32-bit collisions retain distinct keys. Internal node
+shape, transition, allocation, visit, and sharing evidence lives in
+`testing/map.mjs`.
+
 `worker.mjs` is the reference long-lived compute host. It communicates over
 versioned NDJSON, imports local generated modules, correlates concurrent
 requests, and supports progress, cooperative cancellation, timeouts, structured

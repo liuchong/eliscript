@@ -468,6 +468,23 @@
         { "kind": "bun-test", "file": "tests/value-semantics.test.mjs", "contains": "persistent vector hashing remains linear and cached at one million values" },
         { "kind": "bun-test", "file": "tests/value-semantics.test.mjs", "contains": "value hashes match the frozen Bun and Node fixture" }
       ]
+    },
+    {
+      "id": "runtime.persistent-hash-map-prototype",
+      "title": "Persistent 32-way hash map trie prototype",
+      "status": "accepted",
+      "spec": "0049",
+      "contracts": ["Stores value-equal and host-identity keys under the 0048 contract", "Uses bitmap, dense array, and full-hash collision nodes", "Promotes at 16 occupied branches and demotes at 8", "Copies only changed paths and shares untouched nodes", "Defines insertion-order-independent equality and hashing", "Keeps million-key operations within the declared HAMT bound"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/persistent-map.test.mjs", "contains": "persistent hash map preserves old values and value-equal keys" },
+        { "kind": "bun-test", "file": "tests/persistent-map.test.mjs", "contains": "persistent hash map handles full 32-bit hash collisions" },
+        { "kind": "bun-test", "file": "tests/persistent-map.test.mjs", "contains": "persistent hash map promotes and demotes measured branch thresholds" },
+        { "kind": "bun-test", "file": "tests/persistent-map.test.mjs", "contains": "persistent hash map equality and hash ignore insertion order" },
+        { "kind": "bun-test", "file": "tests/persistent-map.test.mjs", "contains": "persistent hash map hashes each key/value pair once and caches the result" },
+        { "kind": "bun-test", "file": "tests/persistent-map.test.mjs", "contains": "persistent hash map agrees with a mutable reference model" },
+        { "kind": "bun-test", "file": "tests/persistent-map.test.mjs", "contains": "persistent hash map stays within HAMT bounds at one million keys" },
+        { "kind": "bun-test", "file": "tests/persistent-map.test.mjs", "contains": "persistent hash map has equivalent behavior under Bun and Node" }
+      ]
     }
   ]
 }

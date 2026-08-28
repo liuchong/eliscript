@@ -11,8 +11,8 @@
 This specification defines the provisional M8 value comparison and 32-bit hash
 foundation used by persistent collections. It separates portable value
 semantics from JavaScript host identity, gives persistent vectors recursive
-value equality, and freezes deterministic Bun/Node fixtures before HAMT keys
-depend on the result.
+value equality, and freezes deterministic Bun/Node fixtures used by persistent
+HAMT keys.
 
 The implementation lives in `runtime/core/value.mjs`. It exports:
 
@@ -95,7 +95,7 @@ All arithmetic is explicitly normalized through JavaScript 32-bit integer
 operations. IEEE-754 words are read with declared little-endian access, so the
 result does not depend on machine byte order.
 
-The exact scalar and vector results for the current algorithm are frozen in
+The exact scalar, vector, and persistent-map results for the current algorithm are frozen in
 `tests/fixtures/value-hashes.json`. Changing one requires an explicit
 provisional compatibility review and fixture update, not an incidental engine
 or refactor change.
@@ -214,7 +214,7 @@ and Set but do not complete 0041 value semantics.
 
 Remaining work includes:
 
-- persistent list, map, and set equality/hash implementations
+- persistent list and set equality/hash implementations
 - keyword and Eliscript symbol runtime values
 - unordered map/set hash mixing independent of insertion order
 - metadata exclusion tests
@@ -223,6 +223,7 @@ Remaining work includes:
 - hostile-input and decode-boundary security limits
 
 The P0 equality/hash fixture requirement is satisfied for currently
-implemented runtime values. The full P0 exit gate still requires HAMT
-prototypes, integer bit-operation support, and cross-engine node-layout
-measurements.
+implemented runtime values. Persistent Map HAMT support is specified by
+[0049-persistent-hash-map-prototype.md](0049-persistent-hash-map-prototype.md).
+The full P0 exit gate still requires Set, integer bit-operation support, and
+cross-engine node-layout measurements.

@@ -3,6 +3,7 @@ import {
   hashValue,
 } from "../../runtime/core/value.mjs";
 import { persistentVector } from "../../runtime/core/vector.mjs";
+import { persistentHashMap } from "../../runtime/core/map.mjs";
 
 const nestedLeft = persistentVector(
   null,
@@ -19,6 +20,20 @@ const nestedRight = persistentVector(
   42,
   "eliscript",
   persistentVector("nested", Number.NaN, 0),
+);
+const orderedMap = persistentHashMap(
+  ["alpha", 1],
+  [persistentVector("key"), persistentVector(2, 3)],
+  ["omega", Number.NaN],
+);
+const reversedMap = persistentHashMap(
+  ["omega", Number.NaN],
+  [persistentVector("key"), persistentVector(2, 3)],
+  ["alpha", 1],
+);
+const collisionMap = persistentHashMap(
+  ["key-50691", "left"],
+  ["key-194634", "right"],
 );
 
 console.log(JSON.stringify({
@@ -48,10 +63,17 @@ console.log(JSON.stringify({
     flat: hashValue(persistentVector(1, 2, 3, 4)),
     nested: hashValue(nestedLeft),
   },
+  maps: {
+    ordered: hashValue(orderedMap),
+    reversed: hashValue(reversedMap),
+    collision: hashValue(collisionMap),
+  },
   invariants: {
     nanEqual: equalValues(Number.NaN, Number.NaN),
     zerosEqual: equalValues(0, -0),
     nestedEqual: equalValues(nestedLeft, nestedRight),
     nestedHashesEqual: hashValue(nestedLeft) === hashValue(nestedRight),
+    mapsEqual: equalValues(orderedMap, reversedMap),
+    mapHashesEqual: hashValue(orderedMap) === hashValue(reversedMap),
   },
 }));

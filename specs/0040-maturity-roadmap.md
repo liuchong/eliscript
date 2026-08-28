@@ -469,7 +469,11 @@ including generated reference-model checks and one-million-value structural
 bounds. Scalar and vector value semantics now have frozen Bun/Node hashes,
 recursive equality, collision evidence, and a private immutable-value cache in
 [0048-value-equality-and-hashing.md](0048-value-equality-and-hashing.md).
-HAMT Map/Set remains next, before literal migration.
+The HAMT Map prototype now adds bitmap, dense, and full-hash collision nodes,
+threshold transitions, structural sharing, and million-key bounds in
+[0049-persistent-hash-map-prototype.md](0049-persistent-hash-map-prototype.md).
+Persistent Set and host/layout measurements remain next, before literal
+migration.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

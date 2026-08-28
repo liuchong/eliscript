@@ -106,6 +106,29 @@ export function orderedCollectionHash(iterable, hashValue, tag) {
   return finishHash(hash, count);
 }
 
+function rotateLeft(value, distance) {
+  const shift = distance & 31;
+  return ((value << shift) | (value >>> (32 - shift))) >>> 0;
+}
+
+export function unorderedCollectionHash(iterable, hashElement, tag) {
+  let sum = 0;
+  let xor = 0;
+  let product = 1;
+  let count = 0;
+  for (const element of iterable) {
+    const hash = hashElement(element) >>> 0;
+    sum = (sum + hash) >>> 0;
+    xor = (xor ^ rotateLeft(hash, hash & 31)) >>> 0;
+    product = Math.imul(product, hash | 1) >>> 0;
+    count += 1;
+  }
+  return finishHash(
+    mixHash(mixHash(mixHash(tag, sum), xor), product),
+    count,
+  );
+}
+
 export function cachedProtocolHash(value, compute) {
   const cached = protocolHashes.get(value);
   if (cached !== undefined) {

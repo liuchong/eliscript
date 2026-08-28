@@ -63,6 +63,10 @@ and its structural evidence in
 Its scalar and vector key semantics continue in
 [`0048-value-equality-and-hashing.md`](0048-value-equality-and-hashing.md),
 including frozen Bun/Node hashes and collision evidence.
+The associative runtime continues in
+[`0049-persistent-hash-map-prototype.md`](0049-persistent-hash-map-prototype.md),
+which defines bitmap, dense, and collision HAMT nodes without changing map
+literals.
 
 ## Adding a Specification
 

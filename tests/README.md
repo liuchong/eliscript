@@ -87,6 +87,13 @@ invariant, while exact JSON fixtures and a million-value case run under Bun and
 Node. The compiler's existing `equal` form is not migrated by these runtime
 tests.
 
+Persistent-map tests cover bitmap, dense-array, and complete-hash collision
+nodes; exact promotion/demotion thresholds; scalar, vector, and host-identity
+keys; insertion-order-independent hash/equality; and generated operations
+against a native SameValueZero model. Instrumented 100,000-key updates prove
+exact path sharing, while a one-million-key suite bounds lookup, replacement,
+and deletion under both Bun and Node.
+
 Project-build tests inspect expanded IR imports, retain non-Eliscript
 specifiers, support cycles, enforce canonical root containment, and verify
 per-module source maps, incremental decisions, and build phase timings. The

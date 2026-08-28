@@ -578,8 +578,11 @@ evidence without changing language literal behavior. Scalar and vector
 equality, deterministic hashing, collision discipline, and Bun/Node fixtures
 then land in
 [0048-value-equality-and-hashing.md](0048-value-equality-and-hashing.md).
-HAMT, keyword/symbol values, engine layout measurements, and literal migration
-remain open P0/P1 work.
+HAMT work then begins with the persistent Map prototype in
+[0049-persistent-hash-map-prototype.md](0049-persistent-hash-map-prototype.md).
+That slice covers bitmap, dense, and full-hash collision nodes through one
+million keys. Set, transients, keyword/symbol values, engine layout
+measurements, and literal migration remain open P0/P1 work.
 
 ### P0: Semantics and Prototype
 

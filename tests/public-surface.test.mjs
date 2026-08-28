@@ -34,7 +34,7 @@ test("repository public surface matches every tracked implementation", async () 
     commands: { commands: 5, options: 20 },
     schemas: { total: 6 },
     adapters: { adapters: 4, exports: 17 },
-    runtimeModules: { modules: 4, exports: 13, public: 2, internal: 2 },
+    runtimeModules: { modules: 6, exports: 21, public: 3, internal: 3 },
     standardLibrary: { modules: 4, exports: 39 },
     emacs: {
       functions: 91,
@@ -84,10 +84,10 @@ test("public surface checker rejects runtime visibility and export drift", async
   surface.runtimeModules[0].namedExports.shift();
   const errors = await validationErrors(surface);
   expect(errors).toContain(
-    'persistent-vector has invalid visibility "accidental"',
+    'persistent-hash-map has invalid visibility "accidental"',
   );
   expect(errors).toContain(
-    "persistent-vector export inventory is missing current entries: EMPTY_VECTOR",
+    "persistent-hash-map export inventory is missing current entries: EMPTY_MAP",
   );
 });
 
