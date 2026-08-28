@@ -43,14 +43,16 @@ Generate an external Source Map v3 file when debugging generated code:
 
 This writes `dist/basic.mjs.map` and adds its `sourceMappingURL` to the module.
 
-Import portable bit, persistent-list, persistent-vector, sequence, text,
-object, and keyed-data libraries from an Eliscript module handled by Vite or
-the project builder:
+Import portable bit, persistent-list, persistent-map, persistent-vector,
+sequence, text, object, and keyed-data libraries from an Eliscript module
+handled by Vite or the project builder:
 
 ```elisp
 (import "../../stdlib/bit.eli" bit-count rotate-left)
 (import "../../stdlib/persistent-list.eli"
         empty-persistent-list persistent-list-cons persistent-list-first)
+(import "../../stdlib/persistent-map.eli"
+        empty-persistent-map persistent-map-assoc persistent-map-get)
 (import "../../stdlib/persistent-vector.eli"
         empty-persistent-vector persistent-vector-conj persistent-vector-nth)
 (import "../../stdlib/sequence.eli" map filter reduce range)
@@ -514,6 +516,10 @@ Current evidence:
 - `stdlib/persistent-list.eli` implements constant-time front construction and
   exact suffix sharing in portable Eliscript. Generated model histories and a
   million-node stack-safe traversal run through both compilers and hosts.
+- `stdlib/persistent-map.eli` implements the complete bitmap/dense/collision
+  HAMT in portable Eliscript. Injected hash and equality functions make value
+  semantics explicit; dual-compiler and dual-host reports, generated histories,
+  measured 32/24 transitions, and million-key path sharing verify the result.
 - `bin/eliscript-build` walks expanded IR imports, compiles each local `.eli`
   dependency once, preserves its root-relative path as `.mjs`, and emits a
   source map for every module without requiring Vite.
@@ -523,7 +529,7 @@ Current evidence:
 - Ninety-six ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- Eighty-four Bun tests cover the compiler and Org Vite adapters, source-map
+- Eighty-eight Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
   bootstrap behavior, the worker protocol, standard library, and benchmark
   reporting, plus persistent vector correctness, structural bounds, recursive
@@ -614,7 +620,11 @@ P1 has now begun with a second independent representation:
 shares the complete old suffix. The List and Vector reference implementations
 now expose the contrasting stack, indexed, count, and reduction capabilities
 needed to design collection protocols without tying them to one concrete
-layout. Map/Set migration and shared value semantics remain next.
+layout. `stdlib/persistent-map.eli` now adds the complete associative HAMT in
+the language itself: bitmap and dense branches, full-hash collisions,
+path-copying insertion/removal, injected hash/equality policy, 100,000-key
+cross-host reports, and million-key sharing evidence. Set migration and the
+shared value protocol remain next.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -731,7 +741,10 @@ for the portable Eliscript trie implementation, bootstrap parity, generated
 history checks, and million-value structural sharing, and
 [specs/0054-eliscript-persistent-list.md](specs/0054-eliscript-persistent-list.md)
 for the portable linked List, exact suffix identity, generated histories, and
-million-node iterative traversal.
+million-node iterative traversal, and
+[specs/0055-eliscript-persistent-map.md](specs/0055-eliscript-persistent-map.md)
+for the language-authored HAMT Map, injected value semantics, measured node
+transitions, collision handling, and million-key path sharing.
 
 ## License
 

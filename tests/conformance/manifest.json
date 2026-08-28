@@ -553,6 +553,19 @@
         { "kind": "bun-test", "file": "tests/portable-persistent-list.test.mjs", "contains": "Eliscript-authored persistent list preserves generated history" },
         { "kind": "bun-test", "file": "tests/portable-persistent-list.test.mjs", "contains": "Eliscript-authored persistent list shares a million-node suffix" }
       ]
+    },
+    {
+      "id": "stdlib.persistent-map-prototype",
+      "title": "Eliscript-authored persistent HAMT Map",
+      "status": "accepted",
+      "spec": "0055",
+      "contracts": ["Implements bitmap, array, collision, and entry nodes entirely in portable Eliscript", "Keeps seed and self-hosted ESM and Source Maps byte-identical", "Preserves value-key model histories, complete-hash collisions, and measured 32/24 transitions", "Shares every million-key item outside the selected update path"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/portable-persistent-map.test.mjs", "contains": "Eliscript-authored HAMT Map compiles and agrees across hosts" },
+        { "kind": "bun-test", "file": "tests/portable-persistent-map.test.mjs", "contains": "Eliscript-authored HAMT Map preserves generated value-key histories" },
+        { "kind": "bun-test", "file": "tests/portable-persistent-map.test.mjs", "contains": "Eliscript-authored HAMT Map promotes and demotes measured layouts" },
+        { "kind": "bun-test", "file": "tests/portable-persistent-map.test.mjs", "contains": "Eliscript-authored HAMT Map shares the million-key update path" }
+      ]
     }
   ]
 }

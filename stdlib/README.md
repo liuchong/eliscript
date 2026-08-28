@@ -69,6 +69,33 @@ protocol, transient, and literal work. Exact provisional semantics and
 structural evidence are specified in
 [specs/0053-eliscript-persistent-vector.md](../specs/0053-eliscript-persistent-vector.md).
 
+## Persistent Map
+
+`persistent-map.eli` implements the complete associative HAMT in portable
+Eliscript. Sparse bitmap nodes, dense 32-slot nodes, full-hash collision nodes,
+and entries are immutable; association and removal copy only the selected
+path. Hash, key-equality, and value-equality functions are supplied explicitly
+until the common value protocol lands:
+
+```elisp
+(import "../../stdlib/persistent-map.eli"
+        empty-persistent-map persistent-map-assoc persistent-map-get)
+
+(let* ((hash (lambda (key) key))
+       (equal (lambda (left right) (= left right)))
+       (map (persistent-map-assoc
+             (empty-persistent-map hash equal equal)
+             7
+             "value")))
+  (persistent-map-get map 7 nil))
+```
+
+Seed and self-hosted outputs are byte-identical. Bun and Node agree on a
+100,000-key fixture, while generated model histories, complete-hash
+collisions, measured 32/24 node transitions, and a million-key update prove
+correctness and structural sharing. Exact provisional semantics are specified
+in [specs/0055-eliscript-persistent-map.md](../specs/0055-eliscript-persistent-map.md).
+
 ## Sequence
 
 `sequence.eli` is the first standard-library module. It exports fresh-array,

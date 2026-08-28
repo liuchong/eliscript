@@ -87,6 +87,12 @@ dual-host proof to a different data structure. It checks twenty thousand
 retained model versions, exact `rest`/`pop` suffix identity, ordered reversal
 and conversion, and iterative one-million-node lookup and reduction.
 
+The portable persistent-map suite compiles the complete HAMT from `.eli` with
+both compiler generations and compares ESM and Source Maps byte-for-byte. Bun
+and Node execute equivalent 100,000-key reports; generated value-key histories,
+complete-hash collisions, 32/24 sparse/dense transitions, no-op identity, and a
+million-key update verify model agreement and exact untouched-path sharing.
+
 Persistent-vector tests exercise the provisional M8 runtime independently of
 literal compilation. They compare generated operations with a simple mutable
 array model, retain and probe previous versions after each update, cross tail

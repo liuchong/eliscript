@@ -82,6 +82,11 @@ P1 begins with
 [`0054-eliscript-persistent-list.md`](0054-eliscript-persistent-list.md), which
 adds a second language-authored persistent representation with constant-time
 front operations, exact suffix sharing, and stack-safe million-node traversal.
+The associative core follows in
+[`0055-eliscript-persistent-map.md`](0055-eliscript-persistent-map.md), which
+moves bitmap, dense, collision, association, and removal algorithms into
+portable Eliscript with explicit hash/equality policy and million-key sharing
+evidence.
 
 ## Adding a Specification
 

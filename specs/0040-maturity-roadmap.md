@@ -495,8 +495,11 @@ The first P1 slice is the independent linked List in
 [0054-eliscript-persistent-list.md](0054-eliscript-persistent-list.md). It adds
 constant-time front operations, complete suffix identity, generated histories,
 and million-node iterative evidence. List and Vector now provide concrete,
-contrasting capability sets for protocol design; Map/Set migration and shared
-value semantics remain open.
+contrasting capability sets for protocol design. The complete portable HAMT
+Map in [0055-eliscript-persistent-map.md](0055-eliscript-persistent-map.md) now
+adds injected hash/equality policy, bitmap/dense/collision nodes, 32/24
+transitions, retained generated histories, and million-key path sharing. Set
+migration, shared value semantics, metadata, printing, and reading remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

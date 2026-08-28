@@ -128,7 +128,7 @@ The first validated surface contains:
 - 4 JavaScript adapters with 17 exports including defaults
 - 6 JavaScript runtime modules with 21 exports: three provisional public
   modules and three internal test adapters
-- 7 standard-library modules with 68 exports
+- 8 standard-library modules with 78 exports
 - 91 Emacs public functions
 - 22 Emacs records, of which 12 are public and 10 internal
 

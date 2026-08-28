@@ -567,6 +567,56 @@ Thresholds derive from end-to-end measurements and include:
 
 Engine-only speedup is diagnostic information, not the product claim.
 
+### Language-to-Host Feedback Loop
+
+The mature relationship is deliberately bidirectional. Emacs Lisp bootstraps
+the language and owns editor integration; Eliscript contributes a stronger
+functional programming layer; generated JavaScript turns selected algorithms
+into portable high-performance services; measured editor integrations then
+feed missing primitives and library requirements back into the language.
+
+The feedback loop has five layers:
+
+1. **Semantic layer:** persistent values, deterministic equality and hashing,
+   protocols, reducers, transducers, metadata, and explicit state references
+   make large transformations easier to reason about than mutation-heavy
+   tables and lists.
+2. **Algorithm layer:** 32-way tries, collision-safe HAMTs, chunked traversal,
+   transients, and collection-aware algorithms provide bounded copying and
+   predictable asymptotic costs.
+3. **Generated kernel layer:** compiler, indexer, parser, graph, formatter, and
+   transformation kernels are authored in Eliscript and compiled to ordinary
+   ESM, allowing mature JavaScript engines to optimize hot loops and memory
+   access.
+4. **Editor bridge layer:** a warm managed worker, versioned value codec,
+   cancellation, generations, chunking, and buffer-version guards expose those
+   kernels to Emacs Lisp without exposing transport details.
+5. **Adoption layer:** real packages declare paired reference and accelerated
+   implementations, route by measured crossover size, compare results in
+   verification mode, and retain an always-available reference path.
+
+This is not a plan to translate arbitrary Emacs Lisp or replace the editor
+runtime. Dynamic editor objects, buffer mutation, advice, hooks, keymaps,
+markers, overlays, and interactive control stay in Emacs Lisp. The accelerated
+subset is explicit, data-oriented, capability-bounded, and coarse grained.
+
+Each accepted reinvestment must produce six artifacts:
+
+1. one pure or transactionally applied operation contract
+2. one reference Emacs Lisp implementation
+3. one Eliscript implementation using the persistent/protocol library where
+   appropriate
+4. one shared correctness corpus plus generated equivalence tests
+5. one segmented cold/warm benchmark with a declared crossover threshold
+6. one real editor workflow proving cancellation, stale-result rejection, and
+   transactional application
+
+The library is therefore judged twice: first as a coherent language design,
+then by whether its values and algorithms make actual editor work faster and
+safer. Profiled editor workloads may request new primitives, but additions
+enter the core only when they generalize beyond one integration and preserve
+portable seed/self-hosted semantics.
+
 ## Implementation Plan
 
 Implementation began in M8 with the provisional 32-way persistent vector
@@ -593,8 +643,12 @@ follow in
 The complete 32-way vector trie then crosses into portable Eliscript in
 [0053-eliscript-persistent-vector.md](0053-eliscript-persistent-vector.md).
 Its two compiler outputs are byte-identical, both run under Bun and Node, and
-generated history plus million-value sharing evidence close P0. Transients,
-keyword/symbol values, protocols, and literal migration remain open P1-P4
+generated history plus million-value sharing evidence close P0. The linked
+List and complete HAMT Map then move into portable Eliscript in
+[0054-eliscript-persistent-list.md](0054-eliscript-persistent-list.md) and
+[0055-eliscript-persistent-map.md](0055-eliscript-persistent-map.md), supplying
+three independent collection layouts for P1. Transients, keyword/symbol
+values, protocols, Set migration, and literal migration remain open P1-P4
 work.
 
 ### P0: Semantics and Prototype
@@ -628,8 +682,12 @@ complexity suites on all supported JavaScript hosts.
 linked List in
 [0054-eliscript-persistent-list.md](0054-eliscript-persistent-list.md), which
 adds exact suffix sharing and stack-safe million-node traversal beside the
-indexed Vector trie. Map/Set migration, common equality and hashing, metadata,
-printing, reading, and cross-family properties remain required for this exit.
+indexed Vector trie. The portable HAMT Map in
+[0055-eliscript-persistent-map.md](0055-eliscript-persistent-map.md) now adds
+collision-safe associative updates, sparse/dense transitions, explicit
+hash/equality policy, and million-key path sharing. Set migration, common
+equality and hashing, metadata, printing, reading, and cross-family properties
+remain required for this exit.
 
 ### P2: Protocols and Algorithms
 

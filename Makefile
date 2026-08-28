@@ -22,6 +22,7 @@ test: check-contracts
 		tests/stdlib-text.test.mjs tests/stdlib-object.test.mjs \
 		tests/stdlib-bit.test.mjs \
 		tests/portable-persistent-list.test.mjs \
+		tests/portable-persistent-map.test.mjs \
 		tests/portable-persistent-vector.test.mjs \
 		tests/persistent-vector.test.mjs tests/value-semantics.test.mjs \
 		tests/persistent-map.test.mjs tests/persistent-set.test.mjs
