@@ -193,6 +193,16 @@ React interfaces should be able to live in one coherent toolchain.
 - First-class source maps and useful compiler diagnostics.
 - Optional adapters for Vite and Org publishing, kept outside the core.
 
+The long-term target is the Eliscript 1.0 maturity baseline: a stable,
+self-hosted, production-capable hosted Lisp with efficient persistent data,
+first-class Emacs development, standard JavaScript output, and measurable
+performance reinvested into real Emacs workflows. The complete architecture,
+construction sequence, and mandatory acceptance contract are defined in
+[0040: Project Maturity Roadmap](specs/0040-maturity-roadmap.md). The persistent
+vector trie, HAMT, protocols, transients, transducers, host conversion, and
+Emacs acceleration design is defined in
+[0041: Host Symbiosis and Persistent Data](specs/0041-host-symbiosis-and-persistent-data.md).
+
 ## Non-goals
 
 - Full compatibility with Emacs Lisp or its dynamic runtime.

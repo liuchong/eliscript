@@ -30,8 +30,8 @@
       <header class="doc-hero">
         <div class="doc-hero-inner">
           <p class="eyebrow">Roadmap</p>
-          <h1>From a trusted seed to a self-hosted compiler.</h1>
-          <p class="doc-lede">Each phase has one job: establish semantics, grow the language, prove React and publishing, then let Eliscript compile itself.</p>
+          <h1>From self-hosting to a mature hosted Lisp.</h1>
+          <p class="doc-lede">The next horizon stabilizes the language, adds efficient persistent values and first-class Emacs tools, converges the compiler, and proves the result against a mandatory acceptance contract.</p>
         </div>
       </header>
 
@@ -39,8 +39,11 @@
         <nav class="doc-nav" aria-label="On this page">
           <p class="doc-nav-title">On this page</p>
           <a href="#milestones">Milestones</a>
+          <a href="#maturity">Maturity target</a>
+          <a href="#persistent-data">Persistent data</a>
           <a href="#bootstrap">Bootstrap</a>
           <a href="#acceleration">Acceleration</a>
+          <a href="#acceptance">Acceptance</a>
           <a href="#principles">Principles</a>
         </nav>
 
@@ -55,7 +58,27 @@
               <article class="milestone"><span class="milestone-id">M4</span><div><h3>Bootstrap</h3><p>The portable compiler driver, Bun adapter, complete conformance suite, and reproducible compiler fixed point.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M5</span><div><h3>Emacs acceleration</h3><p>Portable functions, the resilient worker, source-mapped diagnostics, immutable module caching, segmented benchmarks, and an asynchronous indexing workload.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M6</span><div><h3>Standard library</h3><p>Portable sequence, text, immutable object, and keyed data-indexing operations, real source imports, and a pure Emacs project builder that emits complete source-mapped ESM trees.</p></div><span class="status status-next">In progress</span></article>
+              <article class="milestone"><span class="milestone-id">M7</span><div><h3>Contract baseline</h3><p>Stable specification ownership, conformance coverage, structured diagnostics, documentation checks, and a supported platform matrix.</p></div><span class="status status-next">Planned</span></article>
+              <article class="milestone"><span class="milestone-id">M8</span><div><h3>Language closure</h3><p>Persistent literals, value equality and hashing, complete ESM interop, loop/recur, macro capture rules, and a frozen core contract.</p></div><span class="status status-next">Planned</span></article>
+              <article class="milestone"><span class="milestone-id">M9</span><div><h3>Compiler convergence</h3><p>A self-hosted project builder, canonical configuration, shared build services, versioned schemas, and Bun plus Node host adapters.</p></div><span class="status status-next">Planned</span></article>
+              <article class="milestone"><span class="milestone-id">M10</span><div><h3>Daily development</h3><p>An idempotent formatter, Emacs major mode, project diagnostics, interactive evaluation, and one watch service.</p></div><span class="status status-next">Planned</span></article>
+              <article class="milestone"><span class="milestone-id">M11</span><div><h3>Data and libraries</h3><p>Persistent vectors, maps and sets, protocols, transients, transducers, stable core libraries, and explicit platform packages.</p></div><span class="status status-next">Planned</span></article>
+              <article class="milestone"><span class="milestone-id">M12</span><div><h3>Reliability</h3><p>Fuzzing, thousand-module builds, capability security, worker soak tests, and measured performance budgets.</p></div><span class="status status-next">Planned</span></article>
+              <article class="milestone"><span class="milestone-id">M13</span><div><h3>Real-world proof</h3><p>Three maintained applications, clean-machine onboarding, compatibility rehearsal, and the final maturity audit.</p></div><span class="status status-next">Planned</span></article>
             </div>
+          </section>
+
+          <section id="maturity">
+            <h2>The 1.0 maturity target</h2>
+            <p>Eliscript aims to be a stable, self-hosted, Emacs-first functional Lisp for standard ECMAScript modules, React interfaces, programmable publishing, and portable high-performance Emacs workloads. Maturity means stable semantics, an authoritative self-hosted compiler, dependable project tools, a first-class Emacs workflow, proven host integration, and engineering evidence that can be reproduced.</p>
+            <p>The detailed 12-to-24-month construction plan is defined in <a href="https://github.com/liuchong/eliscript/blob/master/specs/0040-maturity-roadmap.md">specification 0040</a>. Calendar dates guide sequencing; milestone exit gates decide completion.</p>
+          </section>
+
+          <section id="persistent-data">
+            <h2>A stronger data model</h2>
+            <p>Eliscript will keep JavaScript directly reachable while making immutable persistent collections the default composite values. Vectors use a 32-way bit-partitioned trie with a tail, maps and sets use a HAMT, and transient owner tokens make isolated bulk construction efficient without exposing mutable shared values.</p>
+            <p>Focused protocols define counting, lookup, association, traversal, reduction, equality, hashing, and transient construction. Transducers compose collection transformations without allocating intermediate arrays. Native JavaScript arrays and objects remain explicit interop types with shallow and deep conversion.</p>
+            <div class="callout"><p>The goal is host symbiosis: improve JavaScript's programming model without hiding its libraries or runtime. The complete algorithms, complexity targets, migration steps, and structural acceptance checks are in <a href="https://github.com/liuchong/eliscript/blob/master/specs/0041-host-symbiosis-and-persistent-data.md">specification 0041</a>.</p></div>
           </section>
 
           <section id="bootstrap">
@@ -76,7 +99,15 @@ compiler.js + compiler.eli → next-compiler.js</code></pre>
             <h2>A path back into Emacs</h2>
             <p>Emacs now controls a long-lived Bun worker over versioned NDJSON while retaining editor state and interaction. Requests support progress, cooperative cancellation, timeouts, whole-graph manifests, dependency-aware mapped Eliscript errors, immutable module versions, and automatic worker generations.</p>
             <p><code>defportable</code> rejects mutable module state and host interop, follows immutable helper dependencies transitively, and emits a frozen manifest that the worker resolves by Eliscript source name. Verified project metadata now reuses clean modules while dirty portable graphs repeat closure validation before emission. Versioned build reports expose stable cache decisions and separate non-identity phase timings to editors and CI. A document-search adapter compiles its scoring closure with a source map and dispatches documents concurrently.</p>
+            <p>The mature API adds persistent-value encoding, chunked transfer, dual Emacs Lisp and Eliscript implementations, verification mode, workload thresholds, buffer-version guards, and transactional result application. Editors keep identity-sensitive work in Emacs; parsers, transforms, indexing, graph analysis, and other coarse-grained computations can use a warm JavaScript engine.</p>
             <div class="callout"><p>The reference workload measured a much larger engine-only speedup than end-to-end speedup because transport and client work remain visible. Coarse-grained tasks are the target; small editor operations stay in Emacs.</p></div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Final acceptance is all or nothing</h2>
+            <p>The maturity target is reached only when AC-01 through AC-26 and PD-01 through PD-11 pass in one clean, traceable run. The gate covers stable semantics, seed and self-hosted parity, reproducible bootstrap, deterministic projects, formatter and Emacs mode behavior, source-level debugging, persistent collection correctness and structural bounds, host portability, fuzzing, scale, security, worker soak, documentation, and real applications.</p>
+            <p>Two maintained Emacs workloads must each demonstrate at least a 2x median warm end-to-end speedup over equivalent Emacs Lisp implementations across 30 runs. At least one must use the persistent collection and transducer layer. Engine-only timing does not satisfy the requirement.</p>
+            <div class="callout"><p>A failed mandatory criterion means the final goal has not been reached. Milestone count, feature count, and elapsed time do not replace acceptance evidence.</p></div>
           </section>
 
           <section id="principles">
@@ -85,8 +116,10 @@ compiler.js + compiler.eli → next-compiler.js</code></pre>
               <li>Emacs remains enough to build the seed compiler.</li>
               <li>Generated code stays readable and standards-based.</li>
               <li>JavaScript interop is explicit rather than magical.</li>
+              <li>Persistent immutable values are language defaults; mutable host containers are explicit.</li>
               <li>Compatibility never blocks a clearly better language design.</li>
               <li>Self-hosting is proven by reproducibility and conformance, not branding.</li>
+              <li>Performance claims include the complete Emacs-to-worker round trip.</li>
             </ul>
           </section>
         </article>

@@ -353,6 +353,21 @@ CI, and editor integrations without coupling runtime identity to local
 performance. See [0030-project-graph-manifest.md](0030-project-graph-manifest.md)
 through [0033-build-phase-timings.md](0033-build-phase-timings.md).
 
+### M7-M13: Project Maturity (Planned)
+
+The next horizon turns the working language into a stable and sustainable
+toolchain. It covers the compatibility contract, persistent immutable values,
+protocols and transducers, compiler/build convergence, project configuration,
+formatter and Emacs mode, interactive evaluation, cross-platform reliability,
+real applications, and a formal all-or-nothing acceptance audit.
+
+The complete staged construction plan and AC-01-through-AC-26 final gate are in
+[0040-maturity-roadmap.md](0040-maturity-roadmap.md). The 32-way persistent
+vector trie, HAMT maps and sets, transient builders, collection protocols,
+value codec, and measured reinvestment into Emacs are designed in
+[0041-host-symbiosis-and-persistent-data.md](0041-host-symbiosis-and-persistent-data.md),
+with supplemental PD-01-through-PD-11 acceptance criteria.
+
 ## Non-goals for the Initial Implementation
 
 - Emacs byte-code or native-comp compatibility
