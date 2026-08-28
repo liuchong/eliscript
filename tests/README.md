@@ -139,6 +139,14 @@ variadic `assoc`, exact `contains`, persistent no-op identity, immutable native
 copies, truthful partial Set protocols, bounded infinite-entry rejection, and
 one million generic Vector additions while preserving the old version.
 
+The transducer suite covers completing reducers, declared-order mapping and
+filtering, exact and zero-input taking, reduced termination, reusable state,
+custom transducer completion, and protocol-driven `into` across persistent,
+native, and external collection types. Bun and Node execute one shared report;
+an instrumented million-input scalar pipeline proves one-pass transform counts
+without persistent collection allocation, followed by bounded final-target
+construction.
+
 ## JavaScript Runtime Collections
 
 Persistent-vector tests exercise the provisional M8 runtime independently of

@@ -64,6 +64,17 @@ elements are frozen entries, reduced values provide early termination, and
 construction operations preserve persistent inputs or return immutable native
 copies.
 
+### Transducers
+
+`core/transducer.mjs` composes mapping, filtering, and bounded taking as
+destination-independent reducing-function transformations. `transduce`
+delegates traversal through `IReduce`; `into` obtains an empty target and adds
+logical values through `IConj`. Pipelines preserve reduced-value termination,
+run completion exactly once, reuse transducers with fresh reduction state, and
+allocate no intermediate collection. The current `into` is the immutable
+protocol reference path; transient target builders remain a later
+optimization.
+
 ### Worker Host
 
 `worker.mjs` is the reference long-lived compute host. It communicates over

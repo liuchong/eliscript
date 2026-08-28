@@ -691,7 +691,11 @@ reduced-value early termination. The construction side then continues in
 [0060-collection-construction-protocols.md](0060-collection-construction-protocols.md):
 `IEmptyable`, `IConj`, and `IAssociative` provide canonical empties,
 persistent updates, truthful partial Set membership, and immutable native
-copies. Portable algorithm migration stays open.
+copies. Composable reducing transformations follow in
+[0061-composable-transducers.md](0061-composable-transducers.md): mapping,
+filtering, bounded taking, completion, reduced termination, and
+protocol-driven `into` now execute without intermediate collections. Portable
+algorithm migration and transient target optimization stay open.
 
 ### P0: Semantics and Prototype
 
@@ -761,9 +765,13 @@ replayable sequence views, Map-entry reduction, and explicit early
 termination. The three construction protocols continue in
 [0060-collection-construction-protocols.md](0060-collection-construction-protocols.md),
 including direct persistent updates, native immutable-copy adapters, bounded
-Map entry validation, and million-value generic construction. Transient
-protocols, algorithm migration, and transducers remain required for the P2
-exit.
+Map entry validation, and million-value generic construction. Reusable
+transducers and the persistent reference path for `into` continue in
+[0061-composable-transducers.md](0061-composable-transducers.md), including
+completion, custom composition, exact early termination, protocol-only
+external types, and one-million-input allocation evidence. Transient
+protocols, transient-backed target construction, portable algorithm migration,
+and the complete all-host exit audit remain required for P2.
 
 ### P3: Language Integration and Migration
 

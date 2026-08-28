@@ -28,25 +28,25 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 60 specifications.
+The registry currently contains 61 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 31 |
+| Accepted design | 32 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 57 |
+| Implemented | 58 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-29 as provisional, and 3 as planning. That baseline is derived from registry
+30 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
 implementations, shared value semantics, open protocol dispatch, collection
-capabilities, and immutable collection construction implemented. Transducers,
-transient builders, literal migration, metadata, host conversion, and the
-Emacs value bridge remain ahead.
+capabilities, immutable collection construction, and single-pass transducers
+implemented. Transient builders, portable algorithm migration, literal
+migration, metadata, host conversion, and the Emacs value bridge remain ahead.
 
 ## Reading Paths
 
@@ -86,6 +86,7 @@ number.
 6. [0058: Open Protocol Dispatch](0058-open-protocol-dispatch.md)
 7. [0059: Collection Capabilities](0059-collection-capability-protocols.md)
 8. [0060: Collection Construction](0060-collection-construction-protocols.md)
+9. [0061: Composable Transducers](0061-composable-transducers.md)
 
 ### React and Publishing
 
@@ -212,6 +213,7 @@ The schemas and change workflow are defined by specifications
 | 0058 | [Open Protocol Dispatch Core](0058-open-protocol-dispatch.md) | Accepted | Implemented |
 | 0059 | [Collection Capability Protocols and Reduction Foundation](0059-collection-capability-protocols.md) | Accepted | Implemented |
 | 0060 | [Collection Construction Protocols](0060-collection-construction-protocols.md) | Accepted | Implemented |
+| 0061 | [Composable Transducers and Protocol-driven Into](0061-composable-transducers.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

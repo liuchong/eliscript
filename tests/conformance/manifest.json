@@ -643,6 +643,24 @@
         { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "collection capabilities agree under Bun and Node and reduce at million scale" },
         { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "generic construction reaches one million values without stack growth" }
       ]
+    },
+    {
+      "id": "runtime.collection-transducers",
+      "title": "Composable transducers and protocol-driven into",
+      "status": "accepted",
+      "spec": "0061",
+      "contracts": ["Composes destination-independent mapping, filtering, and bounded taking in one reduction", "Completes reducing functions exactly once and reuses transducers with fresh run state", "Constructs targets through empty, conj, and reduce protocols", "Traverses one million generated values without intermediate persistent collections"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/transducer.test.mjs", "contains": "completing separates reduction steps from one exact completion" },
+        { "kind": "bun-test", "file": "tests/transducer.test.mjs", "contains": "mapping and filtering compose in declared left-to-right order" },
+        { "kind": "bun-test", "file": "tests/transducer.test.mjs", "contains": "taking terminates exactly and allocates fresh state for every run" },
+        { "kind": "bun-test", "file": "tests/transducer.test.mjs", "contains": "transduce preserves reduced termination and completion semantics" },
+        { "kind": "bun-test", "file": "tests/transducer.test.mjs", "contains": "custom transducers can use completing and preserve downstream completion" },
+        { "kind": "bun-test", "file": "tests/transducer.test.mjs", "contains": "into constructs every supported target through collection protocols" },
+        { "kind": "bun-test", "file": "tests/transducer.test.mjs", "contains": "into supports external immutable source and target capabilities" },
+        { "kind": "bun-test", "file": "tests/transducer.test.mjs", "contains": "transducer boundaries reject malformed operations before traversal" },
+        { "kind": "bun-test", "file": "tests/transducer.test.mjs", "contains": "transducers agree under Bun and Node and stay single-pass at scale" }
+      ]
     }
   ]
 }

@@ -522,9 +522,13 @@ views and reduced-value early termination. The target-side continuation
 in [0060-collection-construction-protocols.md](0060-collection-construction-protocols.md)
 adds `IEmptyable`, `IConj`, and `IAssociative`, including direct persistent
 updates, immutable native copies, partial Set membership, bounded entry
-validation, and million-value generic construction. Portable algorithm
-migration, transducers, transient builders, efficient host identity hashing,
-metadata, printing, and reading remain open.
+validation, and million-value generic construction. The single-pass
+transducer continuation in
+[0061-composable-transducers.md](0061-composable-transducers.md) adds reusable
+mapping, filtering, bounded taking, reducing completion, custom composition,
+and protocol-driven `into` with zero-intermediate collection evidence.
+Portable algorithm migration, transient builders, efficient host identity
+hashing, metadata, printing, and reading remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

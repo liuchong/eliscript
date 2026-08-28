@@ -30,11 +30,13 @@ The current M8 work provides:
 - open runtime protocols with direct and externally registered methods
 - generic collection lookup, traversal, reduction, construction, association,
   and key-presence operations
+- reusable mapping, filtering, and bounded-taking transducers with
+  protocol-driven `transduce` and `into`
 - structural-sharing and cross-host evidence through million-value workloads
 
-The next collection boundary is transducer composition and protocol-driven
-`into`, followed by transient builders, literal migration, host conversion,
-and the Emacs value bridge.
+The next collection boundary is owner-token transient builders and their
+transparent use by `into`, followed by portable algorithm migration, literal
+migration, host conversion, and the Emacs value bridge.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in
