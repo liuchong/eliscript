@@ -80,6 +80,7 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
       output: "out.mjs",
       sourceMap: false,
       portableEntries: [],
+      diagnosticFormat: "human",
     });
   expect(parseArguments([
     "--portable",
@@ -92,6 +93,18 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
     output: undefined,
     sourceMap: false,
     portableEntries: ["work", "index"],
+    diagnosticFormat: "human",
+  });
+  expect(parseArguments([
+    "--diagnostic-format",
+    "json",
+    "input.eli",
+  ])).toEqual({
+    input: "input.eli",
+    output: undefined,
+    sourceMap: false,
+    portableEntries: [],
+    diagnosticFormat: "json",
   });
   expect(parseArguments(["--help"])).toEqual({ help: true });
   expect(() => parseArguments(["--source-map", "input.eli"]))
@@ -128,6 +141,35 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
       },
     });
     expect(portableOutput).toBe(seedOutput);
+
+    const diagnosticSource = resolve(directory, "diagnostic.eli");
+    await writeFile(diagnosticSource, "(defun broken ()\n  missing)\n");
+    const diagnosticFailure = await run([
+      portableCliPath,
+      "--diagnostic-format",
+      "json",
+      diagnosticSource,
+    ], {
+      env: {
+        ...process.env,
+        ELISCRIPT_BOOTSTRAP_MODULE_DIR: generationTwo,
+      },
+    });
+    expect(diagnosticFailure.exitCode).toBe(1);
+    expect(diagnosticFailure.stdout).toBe("");
+    expect(JSON.parse(diagnosticFailure.stderr)).toEqual({
+      format: "eliscript-diagnostic",
+      version: 1,
+      code: "ELI-A0001",
+      severity: "error",
+      phase: "analysis",
+      message: "unbound symbol: missing",
+      location: {
+        file: diagnosticSource,
+        start: { offset: 19, line: 2, column: 3 },
+        end: { offset: 26, line: 2, column: 10 },
+      },
+    });
 
     for (const [sourcePath, expectedFunctions] of [
       ["stdlib/sequence.eli", [

@@ -10,8 +10,23 @@ Options:
   -o, --output FILE  Write the generated ECMAScript module to FILE
   --source-map       Write FILE.map and add a sourceMappingURL comment
   --portable NAME    Emit a worker entry and its transitive dependencies
+  --diagnostic-format human|json
+                     Select human-readable or JSON failures
   -h, --help         Show this help
 `;
+
+const diagnosticFormat = "eliscript-diagnostic";
+const diagnosticVersion = 1;
+
+export function requestedDiagnosticFormat(arguments_) {
+  for (let index = 0; index < arguments_.length - 1; index += 1) {
+    if (arguments_[index] === "--diagnostic-format" &&
+        arguments_[index + 1] === "json") {
+      return "json";
+    }
+  }
+  return "human";
+}
 
 export function parseArguments(arguments_) {
   const argumentsList = [...arguments_];
@@ -19,6 +34,7 @@ export function parseArguments(arguments_) {
   let input;
   let output;
   let sourceMap = false;
+  let diagnosticOutput = "human";
   const portableEntries = [];
 
   while (argumentsList.length > 0) {
@@ -38,6 +54,14 @@ export function parseArguments(arguments_) {
         throw new Error(`${argument} requires a function name`);
       }
       portableEntries.push(argumentsList.shift());
+    } else if (argument === "--diagnostic-format") {
+      if (argumentsList.length === 0) {
+        throw new Error(`${argument} requires human or json`);
+      }
+      diagnosticOutput = argumentsList.shift();
+      if (diagnosticOutput !== "human" && diagnosticOutput !== "json") {
+        throw new Error(`unsupported diagnostic format: ${diagnosticOutput}`);
+      }
     } else if (argument.startsWith("-")) {
       throw new Error(`unknown option: ${argument}`);
     } else if (input) {
@@ -51,7 +75,28 @@ export function parseArguments(arguments_) {
   if (sourceMap && !output) {
     throw new Error("--source-map requires --output");
   }
-  return { input, output, sourceMap, portableEntries };
+  return {
+    input,
+    output,
+    sourceMap,
+    portableEntries,
+    diagnosticFormat: diagnosticOutput,
+  };
+}
+
+export function diagnosticFromError(error) {
+  if (error?.eliscriptDiagnostic?.format === diagnosticFormat &&
+      error.eliscriptDiagnostic.version === diagnosticVersion) {
+    return error.eliscriptDiagnostic;
+  }
+  return {
+    format: diagnosticFormat,
+    version: diagnosticVersion,
+    code: "ELI-C0001",
+    severity: "error",
+    phase: "cli",
+    message: error instanceof Error ? error.message : String(error),
+  };
 }
 
 export async function loadCompiler(moduleDirectory) {
@@ -124,8 +169,13 @@ export async function main(arguments_ = process.argv.slice(2)) {
 }
 
 if (import.meta.main) {
+  const outputFormat = requestedDiagnosticFormat(process.argv.slice(2));
   main().catch((error) => {
-    console.error(`eliscript: ${error.message}`);
+    if (outputFormat === "json") {
+      console.error(JSON.stringify(diagnosticFromError(error)));
+    } else {
+      console.error(`eliscript: ${error.message}`);
+    }
     process.exitCode = 1;
   });
 }

@@ -98,11 +98,9 @@
   "Signal a project error at SPAN in FILENAME.
 
 FORMAT-STRING and ARGUMENTS describe the failure."
-  (signal
-   'eliscript-project-error
-   (list
-    (apply #'eliscript-diagnostic-format-at
-           filename span format-string arguments))))
+  (apply #'eliscript-diagnostic-signal
+         'eliscript-project-error "ELI-B0001" "project-build"
+         filename span format-string arguments))
 
 (defun eliscript-project--canonical-directory (directory label)
   "Return canonical DIRECTORY with a trailing slash, or fail using LABEL."

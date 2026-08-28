@@ -8,7 +8,7 @@
     collection-node)
 
   (defconst fail
-    (js* "(message) => { throw new Error(message); }"))
+    (js* "(diagnostic) => { const p = diagnostic.location.start; const error = new Error(`${diagnostic.location.file}:${p.line}:${p.column}: ${diagnostic.message}`); error.eliscriptDiagnostic = diagnostic; throw error; }"))
   (defconst number-pattern
     (js* "/^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$/"))
 
@@ -40,10 +40,26 @@
 
   (defun fail-at (state position message)
     (fail
-      (str (or (get state :filename) "<input>")
-           ":" (get position :line)
-           ":" (get position :column)
-           ": " message)))
+      (object
+        :format "eliscript-diagnostic"
+        :version 1
+        :code "ELI-R0001"
+        :severity "error"
+        :phase "reader"
+        :message message
+        :location
+        (object
+          :file (or (get state :filename) "<input>")
+          :start
+          (object
+            :offset (get position :offset)
+            :line (get position :line)
+            :column (get position :column))
+          :end
+          (object
+            :offset (get position :offset)
+            :line (get position :line)
+            :column (get position :column))))))
 
   (defun peek-code (state)
     (js-call (get state :source) :codePointAt (get state :index)))

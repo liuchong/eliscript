@@ -85,6 +85,41 @@
               "reader.eli:2:1: unexpected end of input")
              (error-message-string error-data)))))
 
+(ert-deftest eliscript-diagnostics-preserve-human-and-structured-contracts ()
+  (let* ((error-data
+          (should-error
+           (eliscript-compile-string
+            "(defun broken ()\n  missing)" "broken.eli")
+           :type 'eliscript-analyze-error))
+         (diagnostic (eliscript-diagnostic-from-condition error-data))
+         (span (eliscript-diagnostic-span diagnostic))
+         (json (eliscript-diagnostic-to-json diagnostic)))
+    (should (eliscript-diagnostic-p diagnostic))
+    (should (equal (cadr error-data)
+                   "broken.eli:2:3: unbound symbol: missing"))
+    (should (equal (error-message-string error-data)
+                   (concat "Eliscript analysis error: "
+                           "\"broken.eli:2:3: unbound symbol: missing\"")))
+    (should (equal (eliscript-diagnostic-code diagnostic) "ELI-A0001"))
+    (should (equal (eliscript-diagnostic-severity diagnostic) "error"))
+    (should (equal (eliscript-diagnostic-phase diagnostic) "analysis"))
+    (should (equal (eliscript-diagnostic-message diagnostic)
+                   "unbound symbol: missing"))
+    (should (= (eliscript-source-span-start span) 19))
+    (should (= (eliscript-source-span-line span) 2))
+    (should (= (eliscript-source-span-column span) 3))
+    (should (= (eliscript-source-span-end span) 26))
+    (should (= (eliscript-source-span-end-line span) 2))
+    (should (= (eliscript-source-span-end-column span) 10))
+    (should (string-match-p
+             (regexp-quote
+              "\"format\":\"eliscript-diagnostic\",\"version\":1")
+             json))
+    (should (string-match-p
+             (regexp-quote
+              "\"start\":{\"offset\":19,\"line\":2,\"column\":3}")
+             json))))
+
 (ert-deftest eliscript-reader-locates-nested-forms ()
   (let* ((forms
           (eliscript-read-located-string

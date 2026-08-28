@@ -13,7 +13,9 @@
 (require 'eliscript-diagnostic)
 (require 'eliscript-form)
 
-(define-error 'eliscript-read-error "Eliscript reader error")
+(define-error 'eliscript-read-error
+  "Eliscript reader error"
+  'eliscript-compile-error)
 
 (cl-defstruct (eliscript-reader--node
                (:constructor eliscript-reader--node-create))
@@ -130,21 +132,15 @@
                   (push (eliscript-reader--locate-value value node) forms)
                   (goto-char (1+ end)))
               (end-of-file
-               (signal
-                'eliscript-read-error
-                (list
-                 (eliscript-diagnostic-format-at
-                  filename
-                  (eliscript-reader--diagnostic-span filename)
-                  "unexpected end of input"))))
+               (eliscript-diagnostic-signal
+                'eliscript-read-error "ELI-R0001" "reader"
+                filename (eliscript-reader--diagnostic-span filename)
+                "unexpected end of input"))
               (invalid-read-syntax
-               (signal
-                'eliscript-read-error
-                (list
-                 (eliscript-diagnostic-format-at
-                  filename
-                  (eliscript-reader--diagnostic-span filename)
-                  "%s" (error-message-string error-data)))))))))
+               (eliscript-diagnostic-signal
+                'eliscript-read-error "ELI-R0001" "reader"
+                filename (eliscript-reader--diagnostic-span filename)
+                "%s" (error-message-string error-data)))))))
       (nreverse forms))))
 
 (defun eliscript-read-string (source &optional filename)

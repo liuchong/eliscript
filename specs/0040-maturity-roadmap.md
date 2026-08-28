@@ -390,6 +390,13 @@ missing evidence, evidence outside the default suite, and uncovered
 implementations. See
 [0042-specification-registry.md](0042-specification-registry.md).
 
+The second slice defines the version 1 diagnostic object, stable category
+codes, public Emacs accessors and serializers, human compatibility rules, and
+`--diagnostic-format json` across the seed compiler, project builder, and
+self-hosted Bun driver. Analyzer failures now agree across both compiler
+generations without changing the reproducible fixed point. See
+[0043-structured-diagnostics.md](0043-structured-diagnostics.md).
+
 ### M8: Language Contract Closure (8-12 weeks)
 
 **Objective:** Finish the small language needed for real applications, then

@@ -26,8 +26,9 @@
 
 (defun eliscript-emitter--fail (format-string &rest arguments)
   "Signal a compiler error using FORMAT-STRING and ARGUMENTS."
-  (signal 'eliscript-compile-error
-          (list (apply #'format format-string arguments))))
+  (apply #'eliscript-diagnostic-signal
+         'eliscript-compile-error "ELI-E0001" "emission"
+         nil nil format-string arguments))
 
 (defun eliscript-emitter--json-string (value)
   "Encode string VALUE as an ECMAScript string literal."

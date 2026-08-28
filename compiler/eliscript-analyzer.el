@@ -40,12 +40,10 @@
 
 (defun eliscript-analyzer--fail (format-string &rest arguments)
   "Signal an analysis error using FORMAT-STRING and ARGUMENTS."
-  (signal 'eliscript-analyze-error
-          (list (apply #'eliscript-diagnostic-format-at
-                       eliscript-analyzer--filename
-                       eliscript-analyzer--current-span
-                       format-string
-                       arguments))))
+  (apply #'eliscript-diagnostic-signal
+         'eliscript-analyze-error "ELI-A0001" "analysis"
+         eliscript-analyzer--filename eliscript-analyzer--current-span
+         format-string arguments))
 
 (defun eliscript-analyzer--make-scope (&optional parent function-context)
   "Create a lexical scope under PARENT with FUNCTION-CONTEXT."
@@ -68,7 +66,8 @@
   (condition-case error-data
       (eliscript-symbol-binding-name name)
     (eliscript-compile-error
-     (eliscript-analyzer--fail "%s" (error-message-string error-data)))))
+     (eliscript-analyzer--fail
+      "%s" (eliscript-diagnostic-condition-message error-data)))))
 
 (defun eliscript-analyzer--declare (scope name kind mutable)
   "Declare NAME with KIND and MUTABLE status in SCOPE."
@@ -413,7 +412,7 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
               (eliscript-symbol-reference-name value)
             (eliscript-compile-error
              (eliscript-analyzer--fail
-              "%s" (error-message-string error-data))))
+              "%s" (eliscript-diagnostic-condition-message error-data))))
         (eliscript-analyzer--require-binding scope value)))
      ((vectorp value)
       (mapc (lambda (item)

@@ -27,8 +27,9 @@
 
 (defun eliscript-symbol--fail (format-string &rest arguments)
   "Signal an identifier error using FORMAT-STRING and ARGUMENTS."
-  (signal 'eliscript-compile-error
-          (list (apply #'format format-string arguments))))
+  (apply #'eliscript-diagnostic-signal
+         'eliscript-compile-error "ELI-S0001" "symbol"
+         nil nil format-string arguments))
 
 (defun eliscript-symbol-munge-segment (name)
   "Convert Lisp identifier segment NAME to an ECMAScript identifier."

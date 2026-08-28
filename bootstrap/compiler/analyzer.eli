@@ -16,18 +16,35 @@
      "jsx" "fragment"])
 
   (defconst fail
-    (js* "(message) => { throw new Error(message); }"))
+    (js* "(diagnostic) => { const p = diagnostic.location.start; const error = new Error(`${diagnostic.location.file}:${p.line}:${p.column}: ${diagnostic.message}`); error.eliscriptDiagnostic = diagnostic; throw error; }"))
   (defconst guard
     (js* "(operation, onError) => { try { return operation(); } catch (error) { return onError(error.message); } }"))
 
   (defun analyzer-fail (context span message)
-    (fail
-      (str (or (get context :filename)
-               (and span (get span :filename))
-               "<input>")
-           ":" (if span (get span :line) 1)
-           ":" (if span (get span :column) 1)
-           ": " message)))
+    (let ((file (or (get context :filename)
+                    (and span (get span :filename))
+                    "<input>")))
+      (fail
+        (object
+          :format "eliscript-diagnostic"
+          :version 1
+          :code "ELI-A0001"
+          :severity "error"
+          :phase "analysis"
+          :message message
+          :location
+          (object
+            :file file
+            :start
+            (object
+              :offset (if span (get span :start) 0)
+              :line (if span (get span :line) 1)
+              :column (if span (get span :column) 1))
+            :end
+            (object
+              :offset (if span (get span :end) 0)
+              :line (if span (get span :endLine) 1)
+              :column (if span (get span :endColumn) 1)))))))
 
   (defun symbol-node-p (node)
     (and node (= (node-kind node) "symbol")))

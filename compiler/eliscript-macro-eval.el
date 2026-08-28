@@ -8,6 +8,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'eliscript-diagnostic)
 
 (define-error 'eliscript-macro-eval-error
 	      "Eliscript macro evaluation error")
@@ -37,8 +38,9 @@
 
 (defun eliscript-macro-eval--fail (format-string &rest arguments)
   "Signal a macro evaluation error using FORMAT-STRING and ARGUMENTS."
-  (signal 'eliscript-macro-eval-error
-          (list (apply #'format format-string arguments))))
+  (apply #'eliscript-diagnostic-signal
+         'eliscript-macro-eval-error "ELI-X0002" "macro-evaluation"
+         nil nil format-string arguments))
 
 (defun eliscript-macro-eval--symbol-p (value)
   "Return non-nil when VALUE is an ordinary Eliscript symbol."

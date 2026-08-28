@@ -87,6 +87,22 @@ if "$PROJECT_DIR/bin/eliscript-build" "$PROJECT_DIR/examples/stdlib-cli/main.eli
 fi
 grep -q 'missing --out-dir' "$TMP_DIR/stderr"
 
+if "$PROJECT_DIR/bin/eliscript-build" --diagnostic-format json \
+    "$PROJECT_DIR/examples/stdlib-cli/main.eli" \
+    >"$TMP_DIR/diagnostic-stdout" 2>"$TMP_DIR/diagnostic-stderr"; then
+  printf '%s\n' 'expected JSON missing --out-dir diagnostic' >&2
+  exit 1
+fi
+DIAGNOSTIC_FILE="$TMP_DIR/diagnostic-stderr" bun -e '
+  const diagnostic = await Bun.file(process.env.DIAGNOSTIC_FILE).json();
+  if (diagnostic.format !== "eliscript-diagnostic" ||
+      diagnostic.version !== 1 || diagnostic.code !== "ELI-C0001" ||
+      diagnostic.phase !== "cli" ||
+      diagnostic.message !== "missing --out-dir") {
+    throw new Error("unexpected project CLI diagnostic");
+  }
+'
+
 PORTABLE_OUTPUT=$(
   cd "$PROJECT_DIR"
   "$PROJECT_DIR/bin/eliscript-build" \

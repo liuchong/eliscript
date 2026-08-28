@@ -77,6 +77,18 @@ integrating the builder with other tools:
 
 Without `--json`, the command continues to print only the generated entry path.
 
+Compiler failures remain human-readable by default. Editors and CI systems can
+request the same versioned structured diagnostic schema from the seed,
+self-hosted, and project CLIs:
+
+```sh
+./bin/eliscript --diagnostic-format json source.eli
+./bin/eliscript-build --diagnostic-format json --out-dir dist source.eli
+```
+
+Diagnostics are written to stderr, so generated output and successful
+`eliscript-build --json` reports remain independent on stdout.
+
 Portable libraries can compose across local source modules with an explicit,
 named-only edge:
 
@@ -371,6 +383,9 @@ Current evidence:
   never appear in generated modules.
 - Located forms preserve source spans through macro expansion and lexical
   analysis; compiler errors report filename, line, and column.
+- Versioned structured diagnostics add stable category codes, phases, messages,
+  and start/end spans without changing human condition text. Seed, project,
+  and self-hosted CLIs select JSON with `--diagnostic-format json`.
 - An explicit IR separates declarations, bindings, control flow, calls, data,
   and JavaScript interop while retaining a span on every node.
 - A dedicated IR backend emits ESM without reconstructing reader forms; a
@@ -461,10 +476,10 @@ Current evidence:
 - Repeated `--portable NAME` options make the same builder verify every local
   `import-portable` target, reject bare or escaping source edges, and emit only
   each module's requested transitive closure.
-- Ninety-two ERT tests cover reading, locations, macro expansion, analysis, IR
+- Ninety-three ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- Eighteen Bun tests cover the compiler and Org Vite adapters, source-map
+- Twenty-three Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
   bootstrap behavior, the worker protocol, standard library, and benchmark
   reporting.
@@ -495,6 +510,12 @@ The same manifest carries separately hashed incremental metadata, allowing
 repeat builds to avoid compiler work without weakening runtime graph identity.
 The versioned build report makes those decisions and phase timings observable
 without writing machine-dependent measurements back into the manifest.
+
+M7 is underway. The specification registry now makes implementation status and
+test ownership machine-checkable, and the first public contract slice adds
+versioned structured diagnostics without changing existing human errors. The
+seed compiler, project builder, and self-hosted compiler share the schema; the
+default test target rejects missing specification evidence.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -576,7 +597,10 @@ for expression-valued try/catch/finally, lexical error bindings, and throw,
 and
 [specs/0039-vector-binding-patterns.md](specs/0039-vector-binding-patterns.md)
 for nested array destructuring across functions, lexical bindings, catches,
-portable code, and both compiler generations.
+portable code, and both compiler generations, and
+[specs/0043-structured-diagnostics.md](specs/0043-structured-diagnostics.md)
+for the versioned diagnostic schema, public APIs, stable code categories, and
+dual-generation CLI behavior.
 
 ## License
 

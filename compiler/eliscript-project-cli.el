@@ -13,12 +13,27 @@
 
 (defconst eliscript-project-cli--usage
   (concat
-   "Usage: eliscript-build [--root DIR] [--portable NAME] [--no-cache] [--json] --out-dir DIR ENTRY\n\n"
+   "Usage: eliscript-build [--root DIR] [--portable NAME] [--no-cache]\n"
+   "                       [--json] [--diagnostic-format human|json]\n"
+   "                       --out-dir DIR ENTRY\n\n"
    "Compile ENTRY and its relative .eli imports into an ESM directory tree.\n"
    "Write eliscript-project.json with deterministic graph content digests.\n"
    "Reuse verified modules by default; --no-cache forces complete compilation.\n"
    "Use --json for a machine-readable build decision report on stdout.\n"
+   "Use JSON diagnostics for failures on stderr.\n"
    "Repeat --portable to emit a verified, dependency-pruned portable graph.\n"))
+
+(defun eliscript-project-cli--requested-diagnostic-format (arguments)
+  "Return a usable diagnostic format requested by raw ARGUMENTS."
+  (let ((remaining arguments)
+        (format-name "human"))
+    (while remaining
+      (when (and (equal (car remaining) "--diagnostic-format")
+                 (cdr remaining)
+                 (equal (cadr remaining) "json"))
+        (setq format-name "json"))
+      (setq remaining (cdr remaining)))
+    format-name))
 
 (defun eliscript-project-cli--parse (arguments)
   "Parse ARGUMENTS into entry, output, root, portable, cache, and JSON fields."
@@ -26,6 +41,7 @@
     (setq arguments (cdr arguments)))
   (let ((use-cache t)
         (json-report nil)
+        (diagnostic-format "human")
         entry out-dir root portable-entries)
     (while arguments
       (let ((argument (pop arguments)))
@@ -49,6 +65,12 @@
           (setq use-cache nil))
          ((equal argument "--json")
           (setq json-report t))
+         ((equal argument "--diagnostic-format")
+          (unless arguments
+            (error "%s requires human or json" argument))
+          (setq diagnostic-format (pop arguments))
+          (unless (member diagnostic-format '("human" "json"))
+            (error "unsupported diagnostic format: %s" diagnostic-format)))
          ((string-prefix-p "-" argument)
           (error "unknown option: %s" argument))
          (entry (error "multiple entry files are not supported"))
@@ -58,30 +80,40 @@
     (unless out-dir
       (error "missing --out-dir"))
     (list entry out-dir root (nreverse portable-entries)
-          use-cache json-report)))
+          use-cache json-report diagnostic-format)))
 
 (defun eliscript-project-cli-main (arguments)
   "Build an Eliscript project according to command-line ARGUMENTS."
-  (condition-case error-data
-      (pcase-let ((`(,entry ,out-dir ,root ,portable-entries
-			    ,use-cache ,json-report)
-                   (eliscript-project-cli--parse arguments)))
-        (let* ((eliscript-project-use-cache use-cache)
-               (result
-                (if portable-entries
-                    (eliscript-project-build-portable
-                     entry portable-entries out-dir root)
-                  (eliscript-project-build entry out-dir root))))
-          (princ
-           (if json-report
-               (json-serialize
-                (eliscript-project-build-report result)
-                :false-object :false)
-             (eliscript-project-build-result-entry-output result)))
-          (princ "\n")))
-    (error
-     (message "eliscript-build: %s" (error-message-string error-data))
-     (kill-emacs 1))))
+  (let ((requested-format
+         (eliscript-project-cli--requested-diagnostic-format arguments)))
+    (condition-case error-data
+        (pcase-let ((`(,entry ,out-dir ,root ,portable-entries
+			        ,use-cache ,json-report ,diagnostic-format)
+                      (eliscript-project-cli--parse arguments)))
+          (setq requested-format diagnostic-format)
+          (let* ((eliscript-project-use-cache use-cache)
+                 (result
+                  (if portable-entries
+                      (eliscript-project-build-portable
+                       entry portable-entries out-dir root)
+                    (eliscript-project-build entry out-dir root))))
+            (princ
+             (if json-report
+                 (json-serialize
+                  (eliscript-project-build-report result)
+                  :false-object :false)
+               (eliscript-project-build-result-entry-output result)))
+            (princ "\n")))
+      (error
+       (if (equal requested-format "json")
+           (message
+            "%s"
+            (eliscript-diagnostic-to-json
+             (eliscript-diagnostic-from-error error-data)))
+         (message
+          "eliscript-build: %s"
+          (eliscript-diagnostic-condition-message error-data)))
+       (kill-emacs 1)))))
 
 (eliscript-project-cli-main command-line-args-left)
 

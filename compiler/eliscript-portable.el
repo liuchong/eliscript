@@ -48,11 +48,10 @@
 
 (defun eliscript-portable--fail (format-string &rest arguments)
   "Signal a portable analysis error using FORMAT-STRING and ARGUMENTS."
-  (signal 'eliscript-analyze-error
-          (list (apply #'eliscript-diagnostic-format-at
-                       eliscript-portable--filename
-                       eliscript-portable--current-span
-                       format-string arguments))))
+  (apply #'eliscript-diagnostic-signal
+         'eliscript-analyze-error "ELI-P0001" "portable-analysis"
+         eliscript-portable--filename eliscript-portable--current-span
+         format-string arguments))
 
 (defun eliscript-portable--value (form)
   "Return the reader value represented by FORM."

@@ -27,12 +27,10 @@
 
 (defun eliscript-expander--fail (format-string &rest arguments)
   "Signal an expansion error using FORMAT-STRING and ARGUMENTS."
-  (signal 'eliscript-expand-error
-          (list (apply #'eliscript-diagnostic-format-at
-                       eliscript-expander--filename
-                       eliscript-expander--current-span
-                       format-string
-                       arguments))))
+  (apply #'eliscript-diagnostic-signal
+         'eliscript-expand-error "ELI-X0001" "expansion"
+         eliscript-expander--filename eliscript-expander--current-span
+         format-string arguments))
 
 (defun eliscript-expander--register (form environment)
   "Validate macro definition FORM and add it to ENVIRONMENT."

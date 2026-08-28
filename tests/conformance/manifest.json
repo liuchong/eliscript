@@ -396,6 +396,18 @@
       "spec": "0042",
       "contracts": ["Indexes every numbered specification with separate design and implementation status", "Requires every implemented specification to own executable conformance evidence"],
       "evidence": [{ "kind": "bun-test", "file": "tests/conformance.test.mjs", "contains": "repository specifications have complete conformance evidence" }]
+    },
+    {
+      "id": "compiler.structured-diagnostics",
+      "title": "Versioned structured compiler diagnostics",
+      "status": "accepted",
+      "spec": "0043",
+      "contracts": ["Preserves existing human condition and terminal messages", "Emits one versioned JSON schema from seed, project, and self-hosted CLIs", "Carries stable codes, phases, messages, and source spans"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-diagnostics-preserve-human-and-structured-contracts" },
+        { "kind": "shell", "file": "tests/cli-test.sh", "contains": "unexpected seed compiler diagnostic" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

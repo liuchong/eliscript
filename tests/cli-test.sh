@@ -49,6 +49,45 @@ if ! grep -F -- '--source-map requires --output' \
   exit 1
 fi
 
+if "$PROJECT_DIR/bin/eliscript" --diagnostic-format json \
+  "$PROJECT_DIR/tests/fixtures/diagnostic-unbound.eli" \
+  > "$TEMP_DIR/diagnostic.out" \
+  2> "$TEMP_DIR/diagnostic.json"; then
+  printf 'expected unbound symbol compilation to fail\n' >&2
+  exit 1
+fi
+
+DIAGNOSTIC_FILE="$TEMP_DIR/diagnostic.json" bun -e '
+  const diagnostic = await Bun.file(process.env.DIAGNOSTIC_FILE).json();
+  if (diagnostic.format !== "eliscript-diagnostic" ||
+      diagnostic.version !== 1 ||
+      diagnostic.code !== "ELI-A0001" ||
+      diagnostic.severity !== "error" ||
+      diagnostic.phase !== "analysis" ||
+      diagnostic.message !== "unbound symbol: missing" ||
+      !diagnostic.location.file.endsWith("tests/fixtures/diagnostic-unbound.eli") ||
+      diagnostic.location.start.offset !== 19 ||
+      diagnostic.location.start.line !== 2 ||
+      diagnostic.location.start.column !== 3) {
+    throw new Error("unexpected seed compiler diagnostic");
+  }
+'
+
+if "$PROJECT_DIR/bin/eliscript" --diagnostic-format json --unknown \
+  > "$TEMP_DIR/option.out" 2> "$TEMP_DIR/option.json"; then
+  printf 'expected unknown option to fail\n' >&2
+  exit 1
+fi
+
+DIAGNOSTIC_FILE="$TEMP_DIR/option.json" bun -e '
+  const diagnostic = await Bun.file(process.env.DIAGNOSTIC_FILE).json();
+  if (diagnostic.code !== "ELI-C0001" || diagnostic.phase !== "cli" ||
+      diagnostic.message !== "unknown option: --unknown" ||
+      Object.hasOwn(diagnostic, "location")) {
+    throw new Error("unexpected CLI fallback diagnostic");
+  }
+'
+
 ACTUAL_OUTPUT=$(bun run "$TEMP_DIR/core.mjs")
 SOURCE_MAPPED_OUTPUT=$(bun run "$TEMP_DIR/core-with-map.mjs")
 EXPECTED_OUTPUT='{"message":"hello from Eliscript","values":[1,2,3],"factorial":120,"class":"positive","sum":15,"doubled":[2,4,6],"consed":[0,1,2],"empty-car":null,"nil-only":[true,false],"undefined-only":[false,true],"nullish":[true,true,false],"legacy-null":[true,true,false],"parameters":[["required",null,[]],["required",null,[]],["required","optional",[3,4]]]}'
