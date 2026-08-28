@@ -26,6 +26,26 @@ The module is the reference algorithm layer for future trie and hash sources;
 exact normalization and shift semantics are specified in
 [specs/0052-portable-32-bit-operations.md](../specs/0052-portable-32-bit-operations.md).
 
+## Persistent List
+
+`persistent-list.eli` implements an immutable singly linked List in portable
+Eliscript. `cons` and `conj` allocate one front node; `first`, `rest`, `peek`,
+and `pop` are constant-time operations, and the new value shares its complete
+old suffix by identity:
+
+```elisp
+(import "../../stdlib/persistent-list.eli"
+        empty-persistent-list persistent-list-cons persistent-list-first)
+
+(persistent-list-first
+ (persistent-list-cons (empty-persistent-list) "value")
+ nil)
+```
+
+Reduction and reversal are iterative and remain stack safe at one million
+nodes. The representation and provisional failure semantics are specified in
+[specs/0054-eliscript-persistent-list.md](../specs/0054-eliscript-persistent-list.md).
+
 ## Persistent Vector
 
 `persistent-vector.eli` is the first complete persistent collection algorithm

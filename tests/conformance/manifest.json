@@ -541,6 +541,18 @@
         { "kind": "bun-test", "file": "tests/portable-persistent-vector.test.mjs", "contains": "Eliscript-authored persistent vector preserves generated history" },
         { "kind": "bun-test", "file": "tests/portable-persistent-vector.test.mjs", "contains": "Eliscript-authored persistent vector keeps million-value trie bounds" }
       ]
+    },
+    {
+      "id": "stdlib.persistent-list-prototype",
+      "title": "Eliscript-authored persistent List",
+      "status": "accepted",
+      "spec": "0054",
+      "contracts": ["Implements immutable List nodes entirely in portable Eliscript", "Keeps seed and self-hosted ESM and Source Maps byte-identical", "Preserves generated histories through exact suffix identity", "Keeps million-node traversal iterative and stack safe under Bun and Node.js"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/portable-persistent-list.test.mjs", "contains": "Eliscript-authored persistent list compiles and agrees across hosts" },
+        { "kind": "bun-test", "file": "tests/portable-persistent-list.test.mjs", "contains": "Eliscript-authored persistent list preserves generated history" },
+        { "kind": "bun-test", "file": "tests/portable-persistent-list.test.mjs", "contains": "Eliscript-authored persistent list shares a million-node suffix" }
+      ]
     }
   ]
 }

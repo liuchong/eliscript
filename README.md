@@ -43,11 +43,14 @@ Generate an external Source Map v3 file when debugging generated code:
 
 This writes `dist/basic.mjs.map` and adds its `sourceMappingURL` to the module.
 
-Import portable bit, persistent-vector, sequence, text, object, and keyed-data
-libraries from an Eliscript module handled by Vite or the project builder:
+Import portable bit, persistent-list, persistent-vector, sequence, text,
+object, and keyed-data libraries from an Eliscript module handled by Vite or
+the project builder:
 
 ```elisp
 (import "../../stdlib/bit.eli" bit-count rotate-left)
+(import "../../stdlib/persistent-list.eli"
+        empty-persistent-list persistent-list-cons persistent-list-first)
 (import "../../stdlib/persistent-vector.eli"
         empty-persistent-vector persistent-vector-conj persistent-vector-nth)
 (import "../../stdlib/sequence.eli" map filter reduce range)
@@ -62,6 +65,9 @@ libraries from an Eliscript module handled by Vite or the project builder:
 (persistent-vector-nth
  (persistent-vector-conj (empty-persistent-vector) "first")
  0
+ nil)
+(persistent-list-first
+ (persistent-list-cons (empty-persistent-list) "first")
  nil)
 ```
 
@@ -505,6 +511,9 @@ Current evidence:
   tail in portable Eliscript. Seed and self-hosted outputs are byte-identical,
   and generated history, Bun/Node parity, and one-million-value path sharing
   are checked without importing the JavaScript collection runtime.
+- `stdlib/persistent-list.eli` implements constant-time front construction and
+  exact suffix sharing in portable Eliscript. Generated model histories and a
+  million-node stack-safe traversal run through both compilers and hosts.
 - `bin/eliscript-build` walks expanded IR imports, compiles each local `.eli`
   dependency once, preserves its root-relative path as `.mjs`, and emits a
   source map for every module without requiring Vite.
@@ -514,7 +523,7 @@ Current evidence:
 - Ninety-six ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- Eighty-one Bun tests cover the compiler and Org Vite adapters, source-map
+- Eighty-four Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
   bootstrap behavior, the worker protocol, standard library, and benchmark
   reporting, plus persistent vector correctness, structural bounds, recursive
@@ -588,6 +597,11 @@ paths over equivalent sparse and dense roots under Bun, Node, and headless
 Chrome. Its source-bound baseline replaces the inherited 16/8 transition with
 measured 32/24 promotion/demotion thresholds; raw timings remain evidence, not
 machine-independent test gates.
+Ten exact-arity 32-bit intrinsics now give ordinary and portable Eliscript the
+signed, unsigned, shift, boolean-word, and low-word multiplication operations
+needed by trie and hash algorithms. `stdlib/bit.eli` implements population
+count and rotations in Eliscript itself, with byte-identical seed/self-hosted
+emission and equivalent Bun/Node execution.
 Portable 32-bit intrinsics now support trie addressing and exact hash work in
 language-authored code. `stdlib/persistent-vector.eli` uses them to implement
 the complete vector trie without a JavaScript helper; both compilers emit the
@@ -595,11 +609,12 @@ same ESM and Source Map, both JavaScript hosts agree, and a million-value update
 copies exactly one four-node path. This closes 0041 P0. P1 now owns the full
 collection core, shared protocols, metadata, reader/printer round trips, and
 the path toward persistent literals.
-Ten exact-arity 32-bit intrinsics now give ordinary and portable Eliscript the
-signed, unsigned, shift, boolean-word, and low-word multiplication operations
-needed by trie and hash algorithms. `stdlib/bit.eli` implements population
-count and rotations in Eliscript itself, with byte-identical seed/self-hosted
-emission and equivalent Bun/Node execution.
+P1 has now begun with a second independent representation:
+`stdlib/persistent-list.eli` allocates exactly one node for front insertion and
+shares the complete old suffix. The List and Vector reference implementations
+now expose the contrasting stack, indexed, count, and reduction capabilities
+needed to design collection protocols without tying them to one concrete
+layout. Map/Set migration and shared value semantics remain next.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -713,7 +728,10 @@ for portable integer normalization, word operations, shifts, multiplication,
 population count, and rotation semantics, and
 [specs/0053-eliscript-persistent-vector.md](specs/0053-eliscript-persistent-vector.md)
 for the portable Eliscript trie implementation, bootstrap parity, generated
-history checks, and million-value structural sharing.
+history checks, and million-value structural sharing, and
+[specs/0054-eliscript-persistent-list.md](specs/0054-eliscript-persistent-list.md)
+for the portable linked List, exact suffix identity, generated histories, and
+million-node iterative traversal.
 
 ## License
 

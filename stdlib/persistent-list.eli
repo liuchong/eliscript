@@ -1,0 +1,127 @@
+(module eliscript.persistent-list
+  (defconst persistent-list-kind "eliscript/persistent-list")
+  (defconst persistent-list-max-count 2147483647)
+
+  (defportable make-empty-persistent-list ()
+    (object :kind persistent-list-kind
+            :count 0
+            :empty t
+            :value nil
+            :rest nil))
+
+  (defportable make-persistent-list-node (value rest)
+    (object :kind persistent-list-kind
+            :count (1+ (get rest "count" 0))
+            :empty false
+            :value value
+            :rest rest))
+
+  (defportable persistent-list? (value)
+    (and (not (nullish? value))
+         (object-has? value "kind")
+         (= (get value "kind" nil) persistent-list-kind)))
+
+  (defportable empty-persistent-list ()
+    (make-empty-persistent-list))
+
+  (defportable persistent-list-empty? (list)
+    (= (get list "count" 0) 0))
+
+  (defportable persistent-list-count (list)
+    (get list "count" 0))
+
+  (defportable persistent-list-cons (list value)
+    (if (>= (persistent-list-count list) persistent-list-max-count)
+        nil
+      (make-persistent-list-node value list)))
+
+  (defportable persistent-list-conj (list value)
+    (persistent-list-cons list value))
+
+  (defportable persistent-list-first (list not-found)
+    (if (persistent-list-empty? list)
+        not-found
+      (get list "value" nil)))
+
+  (defportable persistent-list-rest (list not-found)
+    (if (persistent-list-empty? list)
+        not-found
+      (get list "rest" nil)))
+
+  (defportable persistent-list-peek (list not-found)
+    (persistent-list-first list not-found))
+
+  (defportable persistent-list-pop (list)
+    (if (persistent-list-empty? list)
+        nil
+      (get list "rest" nil)))
+
+  (defportable persistent-list-valid-index? (index count)
+    (and (= index (int32 index))
+         (>= index 0)
+         (< index count)))
+
+  (defportable persistent-list-nth (list index not-found)
+    (if (not (persistent-list-valid-index?
+              index
+              (persistent-list-count list)))
+        not-found
+      (let ((current list)
+            (current-index 0))
+        (while (< current-index index)
+          (setq current (get current "rest" nil)
+                current-index (1+ current-index)))
+        (get current "value" nil))))
+
+  (defportable persistent-list-reduce (function initial list)
+    (let ((result initial)
+          (current list))
+      (while (not (persistent-list-empty? current))
+        (setq result (funcall function result (get current "value" nil))
+              current (get current "rest" nil)))
+      result))
+
+  (defportable persistent-list-reverse (list)
+    (persistent-list-reduce
+     (lambda (result value) (persistent-list-cons result value))
+     (empty-persistent-list)
+     list))
+
+  (defportable persistent-list-array-reverse (values)
+    (let ((result [])
+          (index 0))
+      (while (< index (length values))
+        (setq result (cons (nth index values) result)
+              index (1+ index)))
+      result))
+
+  (defportable persistent-list-to-array (list)
+    (persistent-list-array-reverse
+     (persistent-list-reduce
+      (lambda (result value) (cons value result))
+      []
+      list)))
+
+  (defportable persistent-list-from-array (values)
+    (let ((result (empty-persistent-list))
+          (index (1- (length values))))
+      (while (>= index 0)
+        (setq result (persistent-list-cons result (nth index values))
+              index (1- index)))
+      result))
+
+  (export empty-persistent-list
+          persistent-list?
+          persistent-list-empty?
+          persistent-list-count
+          persistent-list-cons
+          persistent-list-conj
+          persistent-list-first
+          persistent-list-rest
+          persistent-list-peek
+          persistent-list-pop
+          persistent-list-nth
+          persistent-list-reduce
+          persistent-list-reverse
+          persistent-list-to-array
+          persistent-list-from-array))

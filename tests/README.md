@@ -82,6 +82,11 @@ generated updates preserve retained versions against an array model, and a
 one-million-value association shares every node except its four-node selected
 path.
 
+The portable persistent-list suite applies the same dual-compiler and
+dual-host proof to a different data structure. It checks twenty thousand
+retained model versions, exact `rest`/`pop` suffix identity, ordered reversal
+and conversion, and iterative one-million-node lookup and reduction.
+
 Persistent-vector tests exercise the provisional M8 runtime independently of
 literal compilation. They compare generated operations with a simple mutable
 array model, retain and probe previous versions after each update, cross tail

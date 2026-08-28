@@ -78,6 +78,10 @@ and rotation algorithms. The P0 implementation-language proof is
 [`0053-eliscript-persistent-vector.md`](0053-eliscript-persistent-vector.md):
 the complete vector trie is written in portable Eliscript and verified across
 both compilers, Bun, Node, generated histories, and one million values.
+P1 begins with
+[`0054-eliscript-persistent-list.md`](0054-eliscript-persistent-list.md), which
+adds a second language-authored persistent representation with constant-time
+front operations, exact suffix sharing, and stack-safe million-node traversal.
 
 ## Adding a Specification
 

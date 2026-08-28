@@ -491,6 +491,12 @@ generated history plus million-value structural bounds pass. This closes the
 0041 P0 semantics-and-prototype phase. P1 is next: converge list, vector, map,
 and set into one Eliscript-authored core with shared equality, hashing,
 metadata, printing, reading, and property evidence before literal migration.
+The first P1 slice is the independent linked List in
+[0054-eliscript-persistent-list.md](0054-eliscript-persistent-list.md). It adds
+constant-time front operations, complete suffix identity, generated histories,
+and million-node iterative evidence. List and Vector now provide concrete,
+contrasting capability sets for protocol design; Map/Set migration and shared
+value semantics remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

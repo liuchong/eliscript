@@ -624,6 +624,13 @@ prototypes, measured Bun/Node/Chrome node layouts and thresholds, portable
 **Exit:** persistent collections pass correctness, collision, sharing, and
 complexity suites on all supported JavaScript hosts.
 
+**Status:** Underway since 2026-08-28. The first P1 slice is the portable
+linked List in
+[0054-eliscript-persistent-list.md](0054-eliscript-persistent-list.md), which
+adds exact suffix sharing and stack-safe million-node traversal beside the
+indexed Vector trie. Map/Set migration, common equality and hashing, metadata,
+printing, reading, and cross-family properties remain required for this exit.
+
 ### P2: Protocols and Algorithms
 
 1. Implement the initial protocol dispatch path.
