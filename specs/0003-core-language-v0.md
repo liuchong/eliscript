@@ -106,6 +106,12 @@ The compiler implements `if`, `when`, `unless`, `cond`, `progn`, `do`, `while`,
 `and`, and `or`. These forms are expressions and produce values. `while`
 returns `null`; `and` and `or` short-circuit and return operand values.
 
+`try` is also an expression. It accepts an optional lexical `catch` clause and
+an optional `finally` clause, with at least one required. `throw` raises exactly
+one evaluated value. The normal try or catch result is preserved through
+`finally`; abrupt completion in `finally` follows native JavaScript behavior.
+See [0038-exception-control-flow.md](0038-exception-control-flow.md).
+
 ## Operators and Collections
 
 The initial arithmetic and comparison forms are:
@@ -169,6 +175,8 @@ Exports use `(export name ...)` or `(export-default value)`.
 - `(new Constructor arguments...)` constructs a JavaScript object.
 - `(funcall function arguments...)` and `(apply function array)` call values.
 - `defasync`, `async`, and `await` use native JavaScript Promise semantics.
+- `try`, `catch`, `finally`, and `throw` use native JavaScript exception
+  semantics while remaining expression-valued.
 - `(js* "expression")` emits an explicit raw JavaScript escape hatch.
 
 `js*` accepts only a source string literal. It is deliberately visible and

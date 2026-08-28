@@ -28,6 +28,7 @@
     import-named variable-declaration function-declaration export-declaration
     export-default expression-statement parameter-binding reference literal
     array-literal quoted-literal function-expression await-expression
+    throw-expression try-expression catch-clause catch-binding finally-clause
     conditional conditional-sugar
     conditional-chain conditional-clause sequence lexical-bindings
     lexical-binding assignment assignment-pair loop short-circuit intrinsic
@@ -107,7 +108,7 @@
   (unless (eliscript-ir-node-p node)
     (error "Expected an Eliscript IR node: %S" node))
   (pcase (eliscript-ir-node-kind node)
-    ((or 'literal 'reference 'parameter-binding)
+    ((or 'literal 'reference 'parameter-binding 'catch-binding)
      (eliscript-ir-node-value node))
     ('quoted-literal
      (list 'quote (eliscript-ir-node-value node)))
@@ -163,6 +164,31 @@
      (list 'await
            (eliscript-ir-node-to-form
             (car (eliscript-ir-node-children node)))))
+    ('throw-expression
+     (list 'throw
+           (eliscript-ir-node-to-form
+            (car (eliscript-ir-node-children node)))))
+    ('try-expression
+     (let* ((children (eliscript-ir-node-children node))
+            (body-count (eliscript-ir-property node :body-count)))
+       (cons
+        'try
+        (append
+         (mapcar #'eliscript-ir-node-to-form
+                 (cl-subseq children 0 body-count))
+         (mapcar #'eliscript-ir-node-to-form
+                 (nthcdr body-count children))))))
+    ('catch-clause
+     (let ((children (eliscript-ir-node-children node)))
+       (cons
+        'catch
+        (cons
+         (eliscript-ir-node-value (car children))
+         (mapcar #'eliscript-ir-node-to-form (cdr children))))))
+    ('finally-clause
+     (cons 'finally
+           (mapcar #'eliscript-ir-node-to-form
+                   (eliscript-ir-node-children node))))
     ('export-declaration
      (cons 'export
            (mapcar #'eliscript-ir-node-value

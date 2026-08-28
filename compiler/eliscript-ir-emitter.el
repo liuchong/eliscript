@@ -81,6 +81,14 @@
                       ";")))
        "\n"))))
 
+(defun eliscript-ir-emitter--emit-statement-body (nodes)
+  "Emit NODES as statements whose values are discarded."
+  (mapconcat
+   (lambda (node)
+     (concat (eliscript-ir-emitter-emit-expression node) ";"))
+   nodes
+   "\n"))
+
 (defun eliscript-ir-emitter--contains-await-p (value)
   "Return non-nil when VALUE contains `await' in the current function."
   (cond
@@ -172,6 +180,71 @@
                  (eliscript-ir-emitter-emit-expression test)
                  (eliscript-ir-emitter--emit-do body)
                  (eliscript-ir-emitter--emit-cond (cdr clauses))))))))
+
+(defun eliscript-ir-emitter--emit-throw (node)
+  "Emit throw expression NODE."
+  (let ((temporary (eliscript-emitter--fresh-name)))
+    (format "((%s) => { throw %s; })(%s)"
+            temporary temporary
+            (eliscript-ir-emitter-emit-expression
+             (car (eliscript-ir-emitter--children node))))))
+
+(defun eliscript-ir-emitter--emit-catch (node)
+  "Emit catch clause NODE."
+  (let* ((children (eliscript-ir-emitter--children node))
+         (binding (car children))
+         (body (cdr children)))
+    (eliscript-ir-emitter--locate
+     node
+     (concat
+      " catch ("
+      (eliscript-ir-emitter--emit-binding-name binding)
+      ") {\n"
+      (eliscript-emitter--indent
+       (eliscript-ir-emitter--emit-returning-body body))
+      "\n}"))))
+
+(defun eliscript-ir-emitter--emit-finally (node)
+  "Emit finally clause NODE."
+  (eliscript-ir-emitter--locate
+   node
+   (concat
+    " finally {\n"
+    (eliscript-emitter--indent
+     (eliscript-ir-emitter--emit-statement-body
+      (eliscript-ir-emitter--children node)))
+    "\n}")))
+
+(defun eliscript-ir-emitter--emit-try (node)
+  "Emit value-producing try expression NODE."
+  (pcase-let* ((`(,body ,clauses)
+                (eliscript-ir-emitter--split-counted-children
+                 node :body-count))
+               (catch-clause
+                (cl-find-if
+                 (lambda (clause)
+                   (eq (eliscript-ir-node-kind clause) 'catch-clause))
+                 clauses))
+               (finally-clause
+                (cl-find-if
+                 (lambda (clause)
+                   (eq (eliscript-ir-node-kind clause) 'finally-clause))
+                 clauses))
+               (try-block
+                (concat
+                 "try {\n"
+                 (eliscript-emitter--indent
+                  (eliscript-ir-emitter--emit-returning-body body))
+                 "\n}"
+                 (if catch-clause
+                     (eliscript-ir-emitter--emit-catch catch-clause)
+                   "")
+                 (if finally-clause
+                     (eliscript-ir-emitter--emit-finally finally-clause)
+                   ""))))
+    (eliscript-ir-emitter--emit-iife
+     "" (eliscript-emitter--indent try-block) ""
+     (eliscript-ir-emitter--contains-await-p node))))
 
 (defun eliscript-ir-emitter--emit-let (node)
   "Emit lexical binding NODE."
@@ -609,6 +682,8 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
       ('await-expression
        (format "await (%s)"
                (eliscript-ir-emitter-emit-expression (car children))))
+      ('throw-expression (eliscript-ir-emitter--emit-throw node))
+      ('try-expression (eliscript-ir-emitter--emit-try node))
       ('conditional (eliscript-ir-emitter--emit-if children))
       ('conditional-sugar
        (eliscript-ir-emitter--emit-conditional-sugar node))

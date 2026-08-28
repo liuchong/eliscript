@@ -273,6 +273,8 @@
       ('lexical-bindings
        `((sequential . ,(if (eliscript-ir-property node :sequential) t :false))
          (bindingCount . ,(eliscript-ir-property node :binding-count))))
+      ('try-expression
+       `((bodyCount . ,(eliscript-ir-property node :body-count))))
       ('lexical-binding
        `((style . ,(symbol-name (eliscript-ir-property node :style)))))
       ((or 'react-element 'react-fragment)

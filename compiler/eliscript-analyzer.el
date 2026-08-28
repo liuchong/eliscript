@@ -249,6 +249,60 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
       (eliscript-analyzer--analyze-expression (car value) scope)
       (eliscript-analyzer--analyze-sequence (cdr value) scope))))
 
+(defun eliscript-analyzer--clause-operator (form)
+  "Return FORM's clause operator, or nil when it is not a clause."
+  (let ((value (eliscript-form-value form)))
+    (and (proper-list-p value)
+         value
+         (symbolp (eliscript-form-value (car value)))
+         (eliscript-form-value (car value)))))
+
+(defun eliscript-analyzer--analyze-try (arguments scope)
+  "Analyze try ARGUMENTS in lexical SCOPE."
+  (let (clauses-started catch-seen finally-seen)
+    (dolist (argument arguments)
+      (let ((operator (eliscript-analyzer--clause-operator argument)))
+        (cond
+         ((eq operator 'catch)
+          (when catch-seen
+            (eliscript-analyzer--fail "try accepts at most one catch clause"))
+          (when finally-seen
+            (eliscript-analyzer--fail "catch must precede finally"))
+          (setq clauses-started t
+                catch-seen t)
+          (let* ((clause (eliscript-form-value argument))
+                 (binding (cadr clause)))
+            (unless (and binding
+                         (symbolp (eliscript-form-value binding)))
+              (let ((eliscript-analyzer--current-span
+                     (or (eliscript-form-span argument)
+                         eliscript-analyzer--current-span)))
+                (eliscript-analyzer--fail
+                 "catch requires a binding symbol")))
+            (let ((child (eliscript-analyzer--make-scope scope)))
+              (eliscript-analyzer--declare child binding 'catch t)
+              (eliscript-analyzer--analyze-sequence
+               (cddr clause) child))))
+         ((eq operator 'finally)
+          (when finally-seen
+            (eliscript-analyzer--fail
+             "try accepts at most one finally clause"))
+          (setq clauses-started t
+                finally-seen t)
+          (eliscript-analyzer--analyze-sequence
+           (cdr (eliscript-form-value argument)) scope))
+         (clauses-started
+          (let ((eliscript-analyzer--current-span
+                 (or (eliscript-form-span argument)
+                     eliscript-analyzer--current-span)))
+            (eliscript-analyzer--fail
+             "try body forms must precede catch and finally clauses")))
+         (t
+          (eliscript-analyzer--analyze-expression argument scope)))))
+    (unless (or catch-seen finally-seen)
+      (eliscript-analyzer--fail
+       "try requires a catch or finally clause"))))
+
 (defun eliscript-analyzer--analyze-jsx (arguments scope)
   "Analyze React JSX ARGUMENTS in lexical SCOPE."
   (when (< (length arguments) 2)
@@ -283,6 +337,14 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
          (eliscript-analyzer--fail
           "await is only valid inside an async function"))
        (eliscript-analyzer--analyze-expression (car arguments) scope))
+      ('throw
+       (unless (= (length arguments) 1)
+         (eliscript-analyzer--fail "throw expects 1 argument"))
+       (eliscript-analyzer--analyze-expression (car arguments) scope))
+      ('try (eliscript-analyzer--analyze-try arguments scope))
+      ((or 'catch 'finally)
+       (eliscript-analyzer--fail
+        "%s is only valid as a try clause" operator))
       ('let (eliscript-analyzer--analyze-let arguments scope nil))
       ('let* (eliscript-analyzer--analyze-let arguments scope t))
       ('setq (eliscript-analyzer--analyze-assignment arguments scope "setq"))

@@ -1,0 +1,36 @@
+(defvar cleanup-count 0)
+
+(defun mark-cleanup ()
+  (setq cleanup-count (1+ cleanup-count)))
+
+(defun recover (value)
+  (try
+    (if (= value 0)
+        (throw "zero")
+      (/ 12 value))
+    (catch error
+      (str "caught:" error))
+    (finally
+      (mark-cleanup))))
+
+(defun finally-only (value)
+  (try
+    value
+    (finally
+      (mark-cleanup))))
+
+(defasync settle (promise)
+  (try
+    (await promise)
+    (catch error
+      (str "async:" (get error :message "unknown")))
+    (finally
+      (await (js* "Promise.resolve(null)")))))
+
+(defun rethrow ()
+  (try
+    (throw "inner")
+    (catch error
+      (throw (str error ":outer")))))
+
+(export cleanup-count recover finally-only settle rethrow)

@@ -21,6 +21,11 @@
       "source": "(defmacro identity (value) value)\n(defasync load (value) (await (identity value)))\n(defconst loader (async (value) (await (identity value))))"
     },
     {
+      "name": "exception-clause-bodies",
+      "filename": "exceptions.eli",
+      "source": "(defmacro identity (value) value)\n(defun recover (value)\n  (try (identity value)\n    (catch error (identity error))\n    (finally (identity nil))))"
+    },
+    {
       "name": "body-splicing",
       "filename": "body.eli",
       "source": "(defmacro begin (&body forms) `(progn ,@forms))\n(defun two () (begin 1 2))\n(export two)"

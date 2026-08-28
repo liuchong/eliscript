@@ -882,6 +882,34 @@
                   (node-span clause)))))))
       result))
 
+  (defun expand-try-clause (clause environment depth context)
+    (let* ((items (list-items clause))
+           (operator
+            (and (not (eq items undefined))
+                 (> (get items :length) 0)
+                 (symbol-node-p (nth 0 items))
+                 (node-name (nth 0 items)))))
+      (cond
+        ((= operator "catch")
+         (if (> (get items :length) 1)
+             (let ((expanded [(nth 0 items) (nth 1 items)]))
+               (js-call
+                 (expand-sequence
+                   (js-call items :slice 2) environment depth context)
+                 :forEach
+                 (lambda (item) (js-call expanded :push item)))
+               (make-list expanded (node-span clause)))
+           clause))
+        ((= operator "finally")
+         (let ((expanded [(nth 0 items)]))
+           (js-call
+             (expand-sequence
+               (js-call items :slice 1) environment depth context)
+             :forEach
+             (lambda (item) (js-call expanded :push item)))
+           (make-list expanded (node-span clause))))
+        (t (expand-expression clause environment depth context)))))
+
   (defun expand-expression (form environment depth context)
     (cond
       ((= (node-kind form) "vector")
@@ -952,6 +980,12 @@
                  (js-call (expand-cond args environment depth context)
                    :forEach
                    (lambda (item) (js-call expanded :push item))))
+                ((= operator "try")
+                 (js-call args :forEach
+                   (lambda (clause)
+                     (js-call expanded :push
+                       (expand-try-clause
+                         clause environment depth context)))))
                 ((= operator "object")
                  (js-call (expand-alternating
                             args environment depth context t t)

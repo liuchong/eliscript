@@ -90,6 +90,34 @@ if [ "$ASYNC_OUTPUT" != '[21,42,20,2,3,false,"yes",5]' ]; then
   exit 1
 fi
 
+EXCEPTIONS_MODULE="$TEMP_DIR/exceptions.mjs"
+"$PROJECT_DIR/bin/eliscript" \
+  --source-map \
+  --output "$EXCEPTIONS_MODULE" \
+  "$PROJECT_DIR/tests/fixtures/exceptions.eli"
+
+EXCEPTIONS_OUTPUT=$(ELISCRIPT_EXCEPTIONS_MODULE="$EXCEPTIONS_MODULE" bun --eval '
+  const { pathToFileURL } = await import("node:url");
+  const module = await import(pathToFileURL(process.env.ELISCRIPT_EXCEPTIONS_MODULE));
+  let rethrown = null;
+  try { module.rethrow(); } catch (error) { rethrown = error; }
+  console.log(JSON.stringify([
+    module.recover(3),
+    module.recover(0),
+    module.finally_only(9),
+    await module.settle(Promise.resolve(7)),
+    await module.settle(Promise.reject(new Error("bad"))),
+    rethrown,
+    module.cleanup_count,
+  ]));
+')
+
+if [ "$EXCEPTIONS_OUTPUT" != '[4,"caught:zero",9,7,"async:bad","inner:outer",3]' ]; then
+  printf 'expected exception output: [4,"caught:zero",9,7,"async:bad","inner:outer",3]\nactual exception output:   %s\n' \
+    "$EXCEPTIONS_OUTPUT" >&2
+  exit 1
+fi
+
 "$PROJECT_DIR/bin/eliscript" \
   --source-map \
   --output "$TEMP_DIR/react-counter.mjs" \

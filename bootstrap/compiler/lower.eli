@@ -165,6 +165,46 @@
         (setq index (+ index 2)))
       (make-node "object-literal" (node-span form) nil properties nil)))
 
+  (defun clause-operator (form)
+    (let ((items (list-items form)))
+      (and (not (eq items undefined))
+           (> (get items :length) 0)
+           (symbol-node-p (nth 0 items))
+           (node-name (nth 0 items)))))
+
+  (defun lower-try (form args)
+    (let ((body [])
+          (clauses []))
+      (js-call args :forEach
+        (lambda (argument)
+          (let ((items (list-items argument))
+                (operator (clause-operator argument)))
+            (cond
+              ((= operator "catch")
+               (let ((binding (nth 1 items))
+                     (children []))
+                 (js-call children :push
+                   (make-node
+                     "catch-binding" (node-span binding)
+                     (node-name binding) [] nil))
+                 (append-nodes children
+                   (lower-sequence (js-call items :slice 2)))
+                 (js-call clauses :push
+                   (make-node
+                     "catch-clause" (node-span argument) nil children nil))))
+              ((= operator "finally")
+               (js-call clauses :push
+                 (make-node
+                   "finally-clause" (node-span argument) nil
+                   (lower-sequence (js-call items :slice 1)) nil)))
+              (t (js-call body :push (lower-expression argument)))))))
+      (let ((children []))
+        (append-nodes children body)
+        (append-nodes children clauses)
+        (make-node
+          "try-expression" (node-span form) nil children
+          (object :bodyCount (get body :length))))))
+
   (defun lower-cond (form args)
     (let ((clauses []))
       (js-call args :forEach
@@ -237,6 +277,11 @@
             (make-node
               "await-expression" (node-span form) nil
               [(lower-expression (nth 0 args))] nil))
+           ((= operator "throw")
+            (make-node
+              "throw-expression" (node-span form) nil
+              [(lower-expression (nth 0 args))] nil))
+           ((= operator "try") (lower-try form args))
            ((= operator "if")
             (lower-call-node "conditional" form "if" args))
            ((or (= operator "when") (= operator "unless"))

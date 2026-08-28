@@ -165,6 +165,32 @@
          clause)))
    clauses))
 
+(defun eliscript-expander--expand-try-clause (clause environment depth)
+  "Expand one try CLAUSE in ENVIRONMENT at DEPTH."
+  (let* ((value (eliscript-form-value clause))
+         (operator (and (proper-list-p value)
+                        value
+                        (eliscript-form-value (car value))))
+         (arguments (and (proper-list-p value) (cdr value))))
+    (pcase operator
+      ('catch
+       (if arguments
+           (eliscript-form-inherit
+            (cons (car value)
+                  (cons (car arguments)
+                        (eliscript-expander--expand-sequence
+                         (cdr arguments) environment depth)))
+            clause)
+         clause))
+      ('finally
+       (eliscript-form-inherit
+        (cons (car value)
+              (eliscript-expander--expand-sequence
+               arguments environment depth))
+        clause))
+      (_ (eliscript-expander--expand-expression
+          clause environment depth)))))
+
 (defun eliscript-expander--expand-expression (form environment depth)
   "Expand expression FORM in macro ENVIRONMENT at DEPTH."
   (let* ((value (eliscript-form-value form))
@@ -237,6 +263,13 @@
               (cons operator-form
                     (eliscript-expander--expand-cond
                      arguments environment depth)))
+             ('try
+              (cons operator-form
+                    (mapcar
+                     (lambda (clause)
+                       (eliscript-expander--expand-try-clause
+                        clause environment depth))
+                     arguments)))
              ('object
               (cons operator-form
                     (eliscript-expander--expand-object

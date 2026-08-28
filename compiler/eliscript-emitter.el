@@ -87,6 +87,14 @@
                                 ";")))
                  "\n"))))
 
+(defun eliscript-emitter--emit-statement-body (forms)
+  "Emit FORMS as statements whose values are discarded."
+  (mapconcat
+   (lambda (form)
+     (concat (eliscript-emitter-emit-expression form) ";"))
+   forms
+   "\n"))
+
 (defun eliscript-emitter--contains-await-p (form)
   "Return non-nil when FORM contains `await' in the current function."
   (cond
@@ -204,6 +212,79 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
                   (eliscript-emitter-emit-expression test)
                   (eliscript-emitter--emit-do body)
                   (eliscript-emitter--emit-cond (cdr clauses))))))))
+
+(defun eliscript-emitter--try-clause-operator (form)
+  "Return FORM's try clause operator, or nil."
+  (and (proper-list-p form)
+       form
+       (symbolp (car form))
+       (car form)))
+
+(defun eliscript-emitter--emit-throw (arguments)
+  "Emit a throw expression from ARGUMENTS."
+  (eliscript-emitter--require-arity "throw" arguments 1 1)
+  (let ((temporary (eliscript-emitter--fresh-name)))
+    (format "((%s) => { throw %s; })(%s)"
+            temporary temporary
+            (eliscript-emitter-emit-expression (car arguments)))))
+
+(defun eliscript-emitter--emit-try (arguments)
+  "Emit value-producing try ARGUMENTS."
+  (let (body catch-name catch-body finally-body
+             clauses-started catch-seen finally-seen)
+    (dolist (argument arguments)
+      (pcase (eliscript-emitter--try-clause-operator argument)
+        ('catch
+         (when catch-seen
+           (eliscript-emitter--fail
+            "try accepts at most one catch clause"))
+         (when finally-seen
+           (eliscript-emitter--fail "catch must precede finally"))
+         (unless (and (cdr argument) (symbolp (cadr argument)))
+           (eliscript-emitter--fail "catch requires a binding symbol"))
+         (setq clauses-started t
+               catch-seen t
+               catch-name (cadr argument)
+               catch-body (cddr argument)))
+        ('finally
+         (when finally-seen
+           (eliscript-emitter--fail
+            "try accepts at most one finally clause"))
+         (setq clauses-started t
+               finally-seen t
+               finally-body (cdr argument)))
+        (_
+         (if clauses-started
+             (eliscript-emitter--fail
+              "try body forms must precede catch and finally clauses")
+           (setq body (append body (list argument)))))))
+    (unless (or catch-seen finally-seen)
+      (eliscript-emitter--fail "try requires a catch or finally clause"))
+    (let ((try-block
+           (concat
+            "try {\n"
+            (eliscript-emitter--indent
+             (eliscript-emitter--emit-returning-body body))
+            "\n}"
+            (if catch-seen
+                (concat
+                 " catch ("
+                 (eliscript-emitter--binding-name catch-name)
+                 ") {\n"
+                 (eliscript-emitter--indent
+                  (eliscript-emitter--emit-returning-body catch-body))
+                 "\n}")
+              "")
+            (if finally-seen
+                (concat
+                 " finally {\n"
+                 (eliscript-emitter--indent
+                  (eliscript-emitter--emit-statement-body finally-body))
+                 "\n}")
+              ""))))
+      (eliscript-emitter--emit-iife
+       "" (eliscript-emitter--indent try-block) ""
+       (eliscript-emitter--contains-await-p arguments)))))
 
 (defun eliscript-emitter--emit-while (arguments)
   "Emit a value-producing while expression from ARGUMENTS."
@@ -390,6 +471,11 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
        (eliscript-emitter--require-arity "await" arguments 1 1)
        (format "await (%s)"
                (eliscript-emitter-emit-expression (car arguments))))
+      ('throw (eliscript-emitter--emit-throw arguments))
+      ('try (eliscript-emitter--emit-try arguments))
+      ((or 'catch 'finally)
+       (eliscript-emitter--fail
+        "%s is only valid as a try clause" operator))
       ('if (eliscript-emitter--emit-if arguments))
       ('when
        (eliscript-emitter--require-arity "when" arguments 1)

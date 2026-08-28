@@ -272,6 +272,74 @@
               "portable function work cannot use async (asynchronous functions)")
              (error-message-string error-data)))))
 
+(ert-deftest eliscript-supports-exception-control-flow ()
+  (let* ((source
+          "(defun safe-divide (value)
+  (try
+    (if (= value 0) (throw \"zero\") (/ 12 value))
+    (catch error (str \"caught:\" error))
+    (finally (print \"done\"))))
+(defasync settle (promise)
+  (try
+    (await promise)
+    (catch error (get error :message \"unknown\"))
+    (finally (await promise))))")
+         (output (eliscript-compile-string source "exceptions.eli"))
+         (program (eliscript-compile-ir-string source "exceptions.eli"))
+         kinds)
+    (eliscript-ir-walk
+     program
+     (lambda (node) (push (eliscript-ir-node-kind node) kinds)))
+    (should (equal output
+                   (eliscript-tests--legacy-compile-string
+                    source "exceptions.eli")))
+    (should (string-match-p (regexp-quote "try {") output))
+    (should (string-match-p (regexp-quote "catch (error) {") output))
+    (should (string-match-p (regexp-quote "finally {") output))
+    (should (string-match-p (regexp-quote ") => { throw ") output))
+    (should (string-match-p
+             (regexp-quote "(await (async () => {") output))
+    (dolist (kind '(throw-expression try-expression catch-clause
+                    catch-binding finally-clause))
+      (should (memq kind kinds)))
+    (should
+     (equal
+      (eliscript-ir-program-to-forms program)
+      '((defun safe-divide (value)
+          (try
+            (if (= value 0) (throw "zero") (/ 12 value))
+            (catch error (str "caught:" error))
+            (finally (print "done"))))
+        (defasync settle (promise)
+          (try
+            (await promise)
+            (catch error (get error :message "unknown"))
+            (finally (await promise))))))))
+  (dolist (source
+           '("(throw)"
+             "(throw 1 2)"
+             "(try 1)"
+             "(try 1 (catch))"
+             "(try 1 (catch error error) (catch other other))"
+             "(try 1 (finally) (catch error error))"
+             "(try 1 (finally) 2)"
+             "(catch error error)"
+             "(finally 1)"
+             "(progn (try (throw \"x\") (catch error error)) error)"))
+    (should-error (eliscript-compile-string source "exceptions.eli")
+                  :type 'eliscript-analyze-error))
+  (let ((error-data
+         (should-error
+          (eliscript-compile-portable-string
+           "(defportable work () (throw \"stop\"))"
+           '(work)
+           "portable-exceptions.eli")
+          :type 'eliscript-compile-error)))
+    (should (string-match-p
+             (regexp-quote
+              "portable function work cannot use throw (exception control flow)")
+             (error-message-string error-data)))))
+
 (ert-deftest eliscript-preserves-lisp-truthiness ()
   (let ((output (eliscript-compile-string
                  "(print (if 0 \"truthy\" \"falsey\"))")))

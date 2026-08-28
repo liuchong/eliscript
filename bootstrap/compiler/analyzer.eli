@@ -12,7 +12,7 @@
      "object-keys" "object-has?" "object-assoc" "funcall" "apply"])
 
   (defconst portable-forbidden-operators
-    ["js*" "print" "put" "js-call" "new" "async" "await"
+    ["js*" "print" "put" "js-call" "new" "async" "await" "throw" "try"
      "jsx" "fragment"])
 
   (defconst fail
@@ -335,6 +335,58 @@
           (analyze-expression (nth 0 items) scope context)
           (analyze-sequence (js-call items :slice 1) scope context)))))
 
+  (defun clause-operator (form)
+    (let ((items (list-items form)))
+      (and (not (eq items undefined))
+           (> (get items :length) 0)
+           (symbol-node-p (nth 0 items))
+           (node-name (nth 0 items)))))
+
+  (defun analyze-try (args scope context form-span)
+    (let ((clauses-started false)
+          (catch-seen false)
+          (finally-seen false))
+      (js-call args :forEach
+        (lambda (argument)
+          (let ((operator (clause-operator argument)))
+            (cond
+              ((= operator "catch")
+               (when catch-seen
+                 (analyzer-fail
+                   context form-span
+                   "try accepts at most one catch clause"))
+               (when finally-seen
+                 (analyzer-fail context form-span "catch must precede finally"))
+               (setq clauses-started t)
+               (setq catch-seen t)
+               (let* ((items (list-items argument))
+                      (binding (nth 1 items)))
+                 (unless (symbol-node-p binding)
+                   (analyzer-fail
+                     context (node-span argument)
+                     "catch requires a binding symbol"))
+                 (let ((child (make-scope scope)))
+                   (declare-binding child binding "catch" t context)
+                   (analyze-sequence
+                     (js-call items :slice 2) child context))))
+              ((= operator "finally")
+               (when finally-seen
+                 (analyzer-fail
+                   context form-span
+                   "try accepts at most one finally clause"))
+               (setq clauses-started t)
+               (setq finally-seen t)
+               (analyze-sequence
+                 (js-call (list-items argument) :slice 1) scope context))
+              (clauses-started
+               (analyzer-fail
+                 context (node-span argument)
+                 "try body forms must precede catch and finally clauses"))
+              (t (analyze-expression argument scope context))))))
+      (unless (or catch-seen finally-seen)
+        (analyzer-fail
+          context form-span "try requires a catch or finally clause"))))
+
   (defun analyze-jsx (args scope context form-span)
     (when (< (get args :length) 2)
       (analyzer-fail
@@ -374,6 +426,16 @@
              context form-span
              "await is only valid inside an async function"))
          (analyze-expression (nth 0 args) scope context))
+        ((= operator "throw")
+         (unless (= (get args :length) 1)
+           (analyzer-fail context form-span "throw expects 1 argument"))
+         (analyze-expression (nth 0 args) scope context))
+        ((= operator "try")
+         (analyze-try args scope context form-span))
+        ((or (= operator "catch") (= operator "finally"))
+         (analyzer-fail
+           context form-span
+           (str operator " is only valid as a try clause")))
         ((= operator "let")
          (analyze-let args scope false context form-span))
         ((= operator "let*")
@@ -764,6 +826,8 @@
                  ((= operator "new") "host constructors")
                  ((= operator "async") "asynchronous functions")
                  ((= operator "await") "asynchronous suspension")
+                 ((or (= operator "throw") (= operator "try"))
+                  "exception control flow")
                  (t "React runtime access"))
                ")")))
       (cond

@@ -96,6 +96,44 @@
     (eliscript-lower--node
      'object-literal form nil (nreverse properties))))
 
+(defun eliscript-lower--clause-operator (form)
+  "Return the clause operator represented by FORM, or nil."
+  (let ((value (eliscript-form-value form)))
+    (and (proper-list-p value)
+         value
+         (symbolp (eliscript-form-value (car value)))
+         (eliscript-form-value (car value)))))
+
+(defun eliscript-lower--try (form arguments)
+  "Lower try FORM with ARGUMENTS to explicit clause IR."
+  (let (body clauses)
+    (dolist (argument arguments)
+      (let* ((value (eliscript-form-value argument))
+             (operator (eliscript-lower--clause-operator argument)))
+        (pcase operator
+          ('catch
+           (let ((binding (cadr value)))
+             (push
+              (eliscript-lower--node
+               'catch-clause argument nil
+               (cons
+                (eliscript-lower--node
+                 'catch-binding binding (eliscript-form-value binding))
+                (mapcar #'eliscript-lower-expression (cddr value))))
+              clauses)))
+          ('finally
+           (push
+            (eliscript-lower--node
+             'finally-clause argument nil
+             (mapcar #'eliscript-lower-expression (cdr value)))
+            clauses))
+          (_ (push (eliscript-lower-expression argument) body)))))
+    (setq body (nreverse body)
+          clauses (nreverse clauses))
+    (eliscript-lower--node
+     'try-expression form nil (append body clauses)
+     (list :body-count (length body)))))
+
 (defun eliscript-lower-expression (form)
   "Lower analyzed expression FORM to an IR node."
   (let ((value (eliscript-form-value form)))
@@ -130,6 +168,11 @@
            (eliscript-lower--node
             'await-expression form nil
             (list (eliscript-lower-expression (car arguments)))))
+          ('throw
+           (eliscript-lower--node
+            'throw-expression form nil
+            (list (eliscript-lower-expression (car arguments)))))
+          ('try (eliscript-lower--try form arguments))
           ('if (eliscript-lower--call-node
                 'conditional form 'if arguments))
           ((or 'when 'unless)

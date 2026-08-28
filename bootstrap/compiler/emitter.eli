@@ -164,6 +164,13 @@
         (js-call parts :push ";")
         (combine parts))))
 
+  (defun emit-statement-body (nodes)
+    (let ((parts []))
+      (js-call nodes :forEach
+        (lambda (node)
+          (js-call parts :push (combine [(emit-expression node) ";"]))))
+      (join-fragments parts "\n")))
+
   (defun contains-await-p (value)
     (cond
       ((node-p value)
@@ -253,6 +260,51 @@
                " : "
                (emit-cond (js-call clauses :slice 1))
                ")"]))))))
+
+  (defun emit-throw (node)
+    (let ((temporary (fresh-name)))
+      (combine
+        ["((" temporary ") => { throw " temporary "; })("
+         (emit-expression (nth 0 (children node))) ")"])))
+
+  (defun emit-catch (node)
+    (let* ((nodes (children node))
+           (binding (nth 0 nodes))
+           (body (js-call nodes :slice 1)))
+      (locate
+        node
+        (combine
+          [" catch (" (emit-binding-name binding) ") {\n"
+           (indent (emit-returning-body body))
+           "\n}"]))))
+
+  (defun emit-finally (node)
+    (locate
+      node
+      (combine
+        [" finally {\n"
+         (indent (emit-statement-body (children node)))
+         "\n}"])))
+
+  (defun emit-try (node)
+    (let* ((parts (split-counted-children node "bodyCount"))
+           (body (nth 0 parts))
+           (clauses (nth 1 parts))
+           (catch-clause
+            (js-call clauses :find
+              (lambda (clause) (= (ir-kind clause) "catch-clause"))))
+           (finally-clause
+            (js-call clauses :find
+              (lambda (clause) (= (ir-kind clause) "finally-clause"))))
+           (try-block
+            (combine
+              ["try {\n"
+               (indent (emit-returning-body body))
+               "\n}"
+               (if catch-clause (emit-catch catch-clause) "")
+               (if finally-clause (emit-finally finally-clause) "")])))
+      (emit-iife
+        "" (indent try-block) "" (contains-await-p node))))
 
   (defun emit-binding-values (bindings)
     (let ((result []))
@@ -681,6 +733,8 @@
           ((= kind "function-expression") (emit-function node))
           ((= kind "await-expression")
            (combine ["await (" (emit-expression (nth 0 nodes)) ")"]))
+          ((= kind "throw-expression") (emit-throw node))
+          ((= kind "try-expression") (emit-try node))
           ((= kind "conditional") (emit-if nodes))
           ((= kind "conditional-sugar") (emit-conditional-sugar node))
           ((= kind "conditional-chain") (emit-cond nodes))

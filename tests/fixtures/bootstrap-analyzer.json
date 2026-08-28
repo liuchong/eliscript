@@ -41,6 +41,11 @@
       "source": "(defasync resolve-value (value &optional transform)\n  (let ((resolved (await value)))\n    (if transform (await (funcall transform resolved)) resolved)))\n(defconst delayed-double (async (value) (* (await value) 2)))"
     },
     {
+      "name": "exception-control-flow",
+      "filename": "exceptions.eli",
+      "source": "(defun recover (value)\n  (try\n    (if value value (throw \"missing\"))\n    (catch error (str \"caught:\" error))\n    (finally (print \"done\"))))\n(defasync settle (promise)\n  (try (await promise)\n    (catch error error)\n    (finally (await promise))))"
+    },
+    {
       "name": "portable-transitive-closure",
       "filename": "portable.eli",
       "source": "(defconst step 2)\n(defportable helper (value) (* value step))\n(defportable work (value) (helper value))"
@@ -185,6 +190,24 @@
       "filename": "portable-async.eli",
       "source": "(defportable work (value) (async () value))",
       "error": "portable-async.eli:1:27: portable function work cannot use async (asynchronous functions)"
+    },
+    {
+      "name": "try-without-clause",
+      "filename": "exceptions.eli",
+      "source": "(defun broken () (try 1))",
+      "error": "exceptions.eli:1:18: try requires a catch or finally clause"
+    },
+    {
+      "name": "catch-without-binding",
+      "filename": "exceptions.eli",
+      "source": "(defun broken () (try 1 (catch)))",
+      "error": "exceptions.eli:1:25: catch requires a binding symbol"
+    },
+    {
+      "name": "portable-throw",
+      "filename": "portable-exceptions.eli",
+      "source": "(defportable work () (throw \"stop\"))",
+      "error": "portable-exceptions.eli:1:22: portable function work cannot use throw (exception control flow)"
     },
     {
       "name": "output-name-collision",
