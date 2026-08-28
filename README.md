@@ -44,8 +44,9 @@ Generate an external Source Map v3 file when debugging generated code:
 This writes `dist/basic.mjs.map` and adds its `sourceMappingURL` to the module.
 
 Import portable bit, persistent-list, persistent-map, persistent-set,
-persistent-vector, sequence, text, object, and keyed-data libraries from an
-Eliscript module handled by Vite or the project builder:
+persistent-vector, shared value semantics, sequence, text, object, and
+keyed-data libraries from an Eliscript module handled by Vite or the project
+builder:
 
 ```elisp
 (import "../../stdlib/bit.eli" bit-count rotate-left)
@@ -57,6 +58,8 @@ Eliscript module handled by Vite or the project builder:
         empty-persistent-set persistent-set-conj persistent-set-has?)
 (import "../../stdlib/persistent-vector.eli"
         empty-persistent-vector persistent-vector-conj persistent-vector-nth)
+(import "../../stdlib/value.eli"
+        value-equal? value-hash empty-value-map empty-value-set)
 (import "../../stdlib/sequence.eli" map filter reduce range)
 (import "../../stdlib/text.eli" contains? strip-prefix trim)
 (import "../../stdlib/object.eli" assoc pick)
@@ -73,6 +76,9 @@ Eliscript module handled by Vite or the project builder:
 (persistent-list-first
  (persistent-list-cons (empty-persistent-list) "first")
  nil)
+(value-equal?
+ (persistent-vector-conj (empty-persistent-vector) "first")
+ (persistent-vector-conj (empty-persistent-vector) "first"))
 ```
 
 The React examples use these source-module paths in production builds. Build
@@ -299,6 +305,10 @@ Implemented forms include:
 - portable immutable association, merging, value transforms, selection, and
   omission from `stdlib/object.eli`
 - portable keyed lookup, grouping, and counting from `stdlib/data.eli`
+- portable scalar/List/Vector/Map/Set equality and hashing plus ordinary
+  persistent Map/Set constructors from `stdlib/value.eli`
+- exact portable runtime type, UTF-16 code-unit, and float64 word inspection
+  forms used by language-authored value algorithms
 - ESM `module`, `import`, `import-portable`, `export`, and `export-default`
 - compile-time `defmacro` with backquote, `&rest`, and `&body`
 - `get`, `put`, `js-call`, `new`, and explicit `js*` interop
@@ -526,16 +536,22 @@ Current evidence:
   source-module edge. It adds immutable membership and collection algebra,
   preserves no-op identity, and carries collision, transition, model, and
   million-member sharing evidence without duplicating HAMT algorithms.
+- `stdlib/value.eli` supplies the common scalar and persistent collection
+  equality/hash policy in portable Eliscript. Its default Map and Set
+  constructors accept nested persistent values without injected policy. Exact
+  outputs and frozen fixtures agree across both compilers and JavaScript hosts;
+  generated, collision, nullish, and million-value tests extend the default
+  conformance run.
 - `bin/eliscript-build` walks expanded IR imports, compiles each local `.eli`
   dependency once, preserves its root-relative path as `.mjs`, and emits a
   source map for every module without requiring Vite.
 - Repeated `--portable NAME` options make the same builder verify every local
   `import-portable` target, reject bare or escaping source edges, and emit only
   each module's requested transitive closure.
-- Ninety-six ERT tests cover reading, locations, macro expansion, analysis, IR
+- Ninety-eight ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- Ninety-two Bun tests cover the compiler and Org Vite adapters, source-map
+- Ninety-six Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
   bootstrap behavior, the worker protocol, standard library, and benchmark
   reporting, plus persistent vector correctness, structural bounds, recursive
@@ -633,8 +649,12 @@ cross-host reports, and million-key sharing evidence.
 `stdlib/persistent-set.eli` now completes the four concrete collection
 representations by reusing the Map through `import-portable`; Set algebra,
 policy compatibility, collision behavior, and million-member path sharing all
-run through both compiler generations and hosts. The shared value protocol,
-metadata, and reader/printer integration are now the next P1 boundary.
+run through both compiler generations and hosts. `stdlib/value.eli` now
+completes P1 construction step 2: one language-authored policy recursively
+defines scalar, List, Vector, Map, and Set equality and hashing, supplies
+ordinary Map/Set constructors, preserves nested `undefined`, and freezes
+cross-host collision behavior. Open protocol dispatch, efficient host identity
+hashing, metadata, and reader/printer integration are the next P1 boundary.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -757,7 +777,10 @@ for the language-authored HAMT Map, injected value semantics, measured node
 transitions, collision handling, and million-key path sharing, and
 [specs/0056-eliscript-persistent-set.md](specs/0056-eliscript-persistent-set.md)
 for the Map-backed portable Set, collection algebra, explicit policy
-compatibility, and million-member sharing.
+compatibility, and million-member sharing, and
+[specs/0057-portable-value-semantics.md](specs/0057-portable-value-semantics.md)
+for the portable shared value policy, default Map/Set constructors, nullish
+preservation, cross-family invariants, and host-identity limits.
 
 ## License
 

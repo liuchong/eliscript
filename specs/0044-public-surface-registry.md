@@ -121,14 +121,14 @@ bypassed accidentally.
 
 The first validated surface contains:
 
-- 7 language groups with 159 entries
+- 8 language groups with 162 entries
 - 51 IR node kinds
 - 5 commands with 20 long options
 - 6 versioned schemas
 - 4 JavaScript adapters with 17 exports including defaults
-- 6 JavaScript runtime modules with 21 exports: three provisional public
-  modules and three internal test adapters
-- 9 standard-library modules with 96 exports
+- 8 JavaScript runtime modules with 29 exports: four provisional public
+  modules and four internal test adapters
+- 10 standard-library modules with 102 exports
 - 91 Emacs public functions
 - 22 Emacs records, of which 12 are public and 10 internal
 

@@ -15,7 +15,7 @@
     (let ((result [])
           (index 0))
       (while (< index (length values))
-        (setq result (cons (nth index values) result)
+        (setq result (cons (get values index) result)
               index (1+ index)))
       result))
 
@@ -29,7 +29,7 @@
       (while (< index result-length)
         (setq result
               (cons
-               (if (= index wanted-index) value (nth index values))
+               (if (= index wanted-index) value (get values index))
                result)
               index (1+ index)))
       (persistent-map-array-reverse result)))
@@ -40,7 +40,7 @@
       (while (< index (length values))
         (when (= index wanted-index)
           (setq result (cons value result)))
-        (setq result (cons (nth index values) result)
+        (setq result (cons (get values index) result)
               index (1+ index)))
       (when (= wanted-index (length values))
         (setq result (cons value result)))
@@ -51,7 +51,7 @@
           (index 0))
       (while (< index (length values))
         (unless (= index wanted-index)
-          (setq result (cons (nth index values) result)))
+          (setq result (cons (get values index) result)))
         (setq index (1+ index)))
       (persistent-map-array-reverse result)))
 
@@ -126,7 +126,7 @@
   (defportable persistent-map-same-entry?
       (entry hash key key-equal-function)
     (and (= (get entry "hash" 0) hash)
-         (funcall key-equal-function (get entry "key" nil) key)))
+         (funcall key-equal-function (get entry "key") key)))
 
   (defportable persistent-map-merge-entries (shift left right)
     (let ((left-hash (get left "hash" 0))
@@ -220,13 +220,13 @@
       (entry shift hash key value key-equal-function value-equal-function)
     (if (persistent-map-same-entry? entry hash key key-equal-function)
         (if (funcall value-equal-function
-                     (get entry "value" nil)
+                     (get entry "value")
                      value)
             (persistent-map-make-result entry false false)
           (persistent-map-make-result
            (persistent-map-make-entry
             hash
-            (get entry "key" nil)
+            (get entry "key")
             value)
            false
            t))
@@ -346,7 +346,7 @@
                               (< found-index 0))
                     (when (funcall
                            key-equal-function
-                           (get (nth index entries) "key" nil)
+                           (get (nth index entries) "key")
                            key)
                       (setq found-index index))
                     (setq index (1+ index)))
@@ -354,7 +354,7 @@
                       (let ((existing (nth found-index entries)))
                         (if (funcall
                              value-equal-function
-                             (get existing "value" nil)
+                             (get existing "value")
                              value)
                             (persistent-map-make-result item false false)
                           (persistent-map-make-result
@@ -365,7 +365,7 @@
                              found-index
                              (persistent-map-make-entry
                               hash
-                              (get existing "key" nil)
+                              (get existing "key")
                               value)))
                            false
                            t)))
@@ -468,7 +468,7 @@
                             (< found-index 0))
                   (when (funcall
                          key-equal-function
-                         (get (nth index entries) "key" nil)
+                         (get (nth index entries) "key")
                          key)
                     (setq found-index index))
                   (setq index (1+ index)))
@@ -498,7 +498,7 @@
                 (when (persistent-map-same-entry?
                        current hash key key-equal-function)
                   (setq found t
-                        value (get current "value" nil)))
+                        value (get current "value")))
                 (setq finished t))
             (if (= kind persistent-map-bitmap-kind)
                 (let* ((bit
@@ -532,10 +532,10 @@
                         (let ((entry (nth index entries)))
                           (when (funcall
                                  key-equal-function
-                                 (get entry "key" nil)
+                                 (get entry "key")
                                  key)
                             (setq found t
-                                  value (get entry "value" nil))))
+                                  value (get entry "value"))))
                         (setq index (1+ index)))))
                   (setq finished t)))))))
       (object :found found :value value)))
@@ -545,8 +545,8 @@
       (if (= kind persistent-map-entry-kind)
           (funcall function
                    initial
-                   (get item "key" nil)
-                   (get item "value" nil))
+                   (get item "key")
+                   (get item "value"))
         (let ((result initial)
               (index 0)
               (children
@@ -603,7 +603,7 @@
   (defportable persistent-map-get (map key not-found)
     (let ((result (persistent-map-find map key)))
       (if (get result "found" false)
-          (get result "value" nil)
+          (get result "value")
         not-found)))
 
   (defportable persistent-map-assoc (map key value)
@@ -684,12 +684,12 @@
             hash-function key-equal-function value-equal-function))
           (index 0))
       (while (< index (length entries))
-        (let ((entry (nth index entries)))
+        (let ((entry (get entries index)))
           (setq result
                 (persistent-map-assoc
                  result
-                 (nth 0 entry)
-                 (nth 1 entry))))
+                 (get entry 0)
+                 (get entry 1))))
         (setq index (1+ index)))
       result))
 

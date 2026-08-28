@@ -579,6 +579,21 @@
         { "kind": "bun-test", "file": "tests/portable-persistent-set.test.mjs", "contains": "Eliscript-authored persistent Set preserves algebra and HAMT layouts" },
         { "kind": "bun-test", "file": "tests/portable-persistent-set.test.mjs", "contains": "Eliscript-authored persistent Set shares the million-member update path" }
       ]
+    },
+    {
+      "id": "stdlib.value-semantics-core",
+      "title": "Portable shared value semantics",
+      "status": "accepted",
+      "spec": "0057",
+      "contracts": ["Implements scalar and four-family persistent equality and hashing in portable Eliscript", "Keeps seed and self-hosted dependency-graph ESM and Source Maps byte-identical", "Preserves undefined, insertion-order independence, and complete-collision discipline", "Supplies ordinary Map and Set constructors with one shared value policy"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-portable-value-inspection-operations" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-rejects-invalid-value-inspection-arities" },
+        { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics compile and agree across hosts" },
+        { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "portable persistent collections preserve nested undefined values" },
+        { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics preserve generated cross-family invariants" },
+        { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value hashing traverses one million persistent values" }
+      ]
     }
   ]
 }

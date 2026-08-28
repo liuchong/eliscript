@@ -972,6 +972,48 @@
     (should-error (eliscript-compile-string source "bits-invalid.eli")
                   :type 'eliscript-compile-error)))
 
+(ert-deftest eliscript-emits-portable-value-inspection-operations ()
+  (let* ((source
+          "(defun inspect-value (value text index)
+  [(value-type value) (string-code-unit-at text index)
+   (number-float64-words value)])")
+         (filename "value-inspection.eli")
+         (output (eliscript-compile-string source filename))
+         (portable-output
+          (eliscript-compile-portable-string
+           "(defportable inspect-value (value text index)
+  [(value-type value) (string-code-unit-at text index)
+   (number-float64-words value)])"
+           '(inspect-value)
+           filename)))
+    (should
+     (equal output (eliscript-tests--legacy-compile-string source filename)))
+    (dolist (generated (list output portable-output))
+      (should
+       (string-match-p
+        (regexp-quote
+         "__eliscript_value === null ? \"null\" : typeof __eliscript_value")
+        generated))
+      (should
+       (string-match-p
+        (regexp-quote "(text).charCodeAt(index)") generated))
+      (should
+       (string-match-p
+        (regexp-quote
+         "__eliscript_bytes.setFloat64(0, __eliscript_number === 0 ? 0 : __eliscript_number, true)")
+        generated)))))
+
+(ert-deftest eliscript-rejects-invalid-value-inspection-arities ()
+  (dolist (source
+           '("(value-type)"
+             "(value-type 1 2)"
+             "(string-code-unit-at \"a\")"
+             "(string-code-unit-at \"a\" 0 1)"
+             "(number-float64-words)"
+             "(number-float64-words 1 2)"))
+    (should-error (eliscript-compile-string source "value-invalid.eli")
+                  :type 'eliscript-compile-error)))
+
 (ert-deftest eliscript-ir-emitter-does-not-call-form-backend ()
   (let ((program
          (eliscript-compile-ir-string

@@ -503,8 +503,13 @@ migration follows in
 [0056-eliscript-persistent-set.md](0056-eliscript-persistent-set.md), reusing the
 portable Map for membership and collection algebra with cross-host and
 million-member evidence. All four concrete persistent representations now
-exist in Eliscript; shared value semantics, metadata, printing, and reading
-remain open.
+exist in Eliscript. The shared portable value layer in
+[0057-portable-value-semantics.md](0057-portable-value-semantics.md) now adds
+recursive scalar/List/Vector/Map/Set equality and hashing, ordinary Map/Set
+constructors, nested `undefined` preservation, cross-family generated
+invariants, and one-million-value traversal. P1 construction steps 1 and 2 are
+complete; open protocols, efficient host identity hashing, metadata, printing,
+and reading remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

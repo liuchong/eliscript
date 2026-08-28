@@ -65,6 +65,28 @@ This asymmetry is useful. Emacs supplies a durable bootstrap and interactive
 environment, while self-hosting lets the compiler use the performance and
 deployment reach of modern JavaScript engines.
 
+### Improvement Returns to Both Hosts
+
+The relationship is a feedback loop rather than a one-way transpilation step:
+
+1. Emacs Lisp bootstraps the language and exposes real editor workloads.
+2. Eliscript adds immutable values, protocols, reusable algorithms, and
+   explicit state discipline above raw JavaScript facilities.
+3. Generated JavaScript gives those abstractions modern JIT execution,
+   standard modules, browser/server deployment, and the host package
+   ecosystem.
+4. The worker and value bridge return selected high-cost operations to Emacs
+   as versioned, cancellable services.
+5. Profiles from real Emacs use identify the next language, compiler, and
+   library optimizations.
+
+This is the concrete sense in which Eliscript should improve Emacs Lisp.
+Editor-owned identity and interaction stay in Emacs, while persistent indexes,
+graph algorithms, parsing, transformation, and search can run as generated
+JavaScript when their measured crossover justifies the boundary. Stronger
+language-level values make the accelerated path easier to verify and reuse;
+JavaScript speed alone is not sufficient acceptance evidence.
+
 ### Composite Values Default to Immutability
 
 Native JavaScript arrays and objects are useful host containers, but their
@@ -650,8 +672,13 @@ List and complete HAMT Map then move into portable Eliscript in
 three independent collection layouts for P1. The Map-backed Set follows in
 [0056-eliscript-persistent-set.md](0056-eliscript-persistent-set.md), completing
 the four language-authored collection representations without duplicating the
-HAMT. Transients, keyword/symbol values, protocols, and literal migration
-remain open P1-P4 work.
+HAMT. The shared portable policy in
+[0057-portable-value-semantics.md](0057-portable-value-semantics.md) then adds
+recursive equality and hashing for every core collection family, default
+Map/Set constructors, nullish preservation, collision discipline, and
+cross-family generated evidence. Transients, keyword/symbol values, protocols,
+metadata, printer/reader integration, and literal migration remain open P1-P4
+work.
 
 ### P0: Semantics and Prototype
 
@@ -690,8 +717,12 @@ collision-safe associative updates, sparse/dense transitions, explicit
 hash/equality policy, and million-key path sharing. The Map-backed Set in
 [0056-eliscript-persistent-set.md](0056-eliscript-persistent-set.md) completes
 construction step 1 with algebra, collisions, and million-member sharing.
-Common equality and hashing, metadata, printing, reading, and cross-family
-properties remain required for this exit.
+The shared value core in
+[0057-portable-value-semantics.md](0057-portable-value-semantics.md) completes
+construction step 2 with one recursively composed scalar/List/Vector/Map/Set
+policy, default Map/Set constructors, cross-family properties, and explicit
+host-identity limits. Metadata, printing, reading, open protocol dispatch, and
+the complete all-host P1 exit audit remain required.
 
 ### P2: Protocols and Algorithms
 

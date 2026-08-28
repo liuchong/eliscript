@@ -20,9 +20,11 @@ contains no JavaScript import, host API, or mutation form. Seed and self-hosted
 compilers emit byte-identical Set and Map ESM and Source Maps, and both output
 pairs execute equivalently under Bun and Node.js.
 
-Hash and key equality remain explicit constructor parameters until the common
-P1 value protocol lands. All versions preserve the same function identities,
-and binary Set operations reject incompatible policies deterministically.
+Hash and key equality are explicit parameters of this low-level constructor.
+All versions preserve the same function identities, and binary Set operations
+reject incompatible policies deterministically. Ordinary Sets now use the
+shared constructors from
+[0057-portable-value-semantics.md](0057-portable-value-semantics.md).
 
 ## Public Surface
 
@@ -145,10 +147,12 @@ persistent layout:
 - associative HAMT Map
 - Map-backed Set
 
-This completes P1 construction step 1 but not the P1 exit. The next slices
-must replace injected hash/equality functions with common value protocols,
-compose cross-family properties, add metadata, and establish printer/reader
-round trips before persistent literal migration.
+This completes P1 construction step 1 but not the P1 exit. The portable value
+layer in [0057-portable-value-semantics.md](0057-portable-value-semantics.md)
+subsequently completed step 2 with common equality/hashing, ordinary Map/Set
+constructors, and cross-family properties. Open protocols, metadata, and
+printer/reader round trips remain required before persistent literal
+migration.
 
 ## Emacs Reinvestment
 
@@ -190,4 +194,3 @@ compatibility registries make future API changes explicit.
   outside its selected path; removal preserves the source Set.
 - **EPS-08:** Public-surface, conformance, compatibility, build, documentation,
   and default-test registries include the module and all evidence.
-

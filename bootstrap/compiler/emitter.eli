@@ -573,6 +573,21 @@
         ((= name "bit-shift-right") (emit-binary-infix name nodes ">>"))
         ((= name "unsigned-bit-shift-right")
          (emit-binary-infix name nodes ">>>"))
+        ((= name "value-type")
+         (require-node-arity node 1 1)
+         (combine
+           ["((__eliscript_value) => __eliscript_value === null ? \"null\" : typeof __eliscript_value)("
+            (emit-expression (nth 0 nodes)) ")"]))
+        ((= name "string-code-unit-at")
+         (require-node-arity node 2 2)
+         (combine
+           ["(" (emit-expression (nth 0 nodes)) ").charCodeAt("
+            (emit-expression (nth 1 nodes)) ")"]))
+        ((= name "number-float64-words")
+         (require-node-arity node 1 1)
+         (combine
+           ["((__eliscript_number) => { const __eliscript_bytes = new DataView(new ArrayBuffer(8)); __eliscript_bytes.setFloat64(0, __eliscript_number === 0 ? 0 : __eliscript_number, true); return [__eliscript_bytes.getUint32(0, true), __eliscript_bytes.getUint32(4, true)]; })("
+            (emit-expression (nth 0 nodes)) ")"]))
         ((= name "=") (emit-comparison name nodes "==="))
         ((or (= name "/=") (= name "not=")) (emit-distinct name nodes))
         ((= name "<") (emit-comparison name nodes "<"))

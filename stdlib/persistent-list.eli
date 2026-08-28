@@ -41,7 +41,7 @@
   (defportable persistent-list-first (list not-found)
     (if (persistent-list-empty? list)
         not-found
-      (get list "value" nil)))
+      (get list "value")))
 
   (defportable persistent-list-rest (list not-found)
     (if (persistent-list-empty? list)
@@ -71,13 +71,13 @@
         (while (< current-index index)
           (setq current (get current "rest" nil)
                 current-index (1+ current-index)))
-        (get current "value" nil))))
+        (get current "value"))))
 
   (defportable persistent-list-reduce (function initial list)
     (let ((result initial)
           (current list))
       (while (not (persistent-list-empty? current))
-        (setq result (funcall function result (get current "value" nil))
+        (setq result (funcall function result (get current "value"))
               current (get current "rest" nil)))
       result))
 
@@ -91,7 +91,7 @@
     (let ((result [])
           (index 0))
       (while (< index (length values))
-        (setq result (cons (nth index values) result)
+        (setq result (cons (get values index) result)
               index (1+ index)))
       result))
 
@@ -106,7 +106,7 @@
     (let ((result (empty-persistent-list))
           (index (1- (length values))))
       (while (>= index 0)
-        (setq result (persistent-list-cons result (nth index values))
+        (setq result (persistent-list-cons result (get values index))
               index (1- index)))
       result))
 

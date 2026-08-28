@@ -63,8 +63,11 @@ Every Map root stores the three functions supplied at construction:
 
 All descendant versions preserve these exact functions. Operations never fall
 back to JavaScript property coercion or object identity implicitly. Calling
-code therefore chooses scalar, value-key, or host-identity behavior explicitly
-until the common value protocol is installed.
+code can choose scalar, value-key, or host-identity behavior explicitly. The
+ordinary shared policy and default constructors now live above this low-level
+API in
+[0057-portable-value-semantics.md](0057-portable-value-semantics.md); explicit
+injection remains supported for specialized key domains.
 
 Hash equality is only a routing fact. Unequal keys with the same complete hash
 remain separate entries in a collision node. A key lookup succeeds only after
@@ -210,4 +213,3 @@ public-surface registry so every future API change remains reviewable.
   selected path; deletion is depth-bounded and preserves the source Map.
 - **EPM-08:** Public-surface, conformance, compatibility, build, documentation,
   and default-test registries include the module and all evidence.
-

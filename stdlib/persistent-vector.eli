@@ -9,7 +9,7 @@
     (let ((result [])
           (index 0))
       (while (< index (length values))
-        (setq result (cons (nth index values) result)
+        (setq result (cons (get values index) result)
               index (1+ index)))
       result))
 
@@ -25,7 +25,7 @@
               (cons
                (if (= index wanted-index)
                    wanted-value
-                 (nth index values))
+                 (get values index))
                result)
               index (1+ index)))
       (array-reverse result)))
@@ -35,7 +35,7 @@
           (index 0)
           (result-length (1- (length values))))
       (while (< index result-length)
-        (setq result (cons (nth index values) result)
+        (setq result (cons (get values index) result)
               index (1+ index)))
       (array-reverse result)))
 
@@ -166,8 +166,8 @@
   (defportable persistent-vector-nth (vector index not-found)
     (let ((count (persistent-vector-count vector)))
       (if (persistent-vector-valid-index? index count false)
-          (nth (bit-and index persistent-vector-branch-mask)
-               (persistent-vector-array-for vector index))
+          (get (persistent-vector-array-for vector index)
+               (bit-and index persistent-vector-branch-mask))
         not-found)))
 
   (defportable persistent-vector-conj (vector value)
@@ -272,7 +272,7 @@
         (let* ((leaf (persistent-vector-array-for vector index))
                (leaf-index (bit-and index persistent-vector-branch-mask)))
           (while (and (< index count) (< leaf-index (length leaf)))
-            (setq result (funcall function result (nth leaf-index leaf))
+            (setq result (funcall function result (get leaf leaf-index))
                   index (1+ index)
                   leaf-index (1+ leaf-index)))))
       result))
@@ -288,7 +288,7 @@
     (let ((result (empty-persistent-vector))
           (index 0))
       (while (< index (length values))
-        (setq result (persistent-vector-conj result (nth index values))
+        (setq result (persistent-vector-conj result (get values index))
               index (1+ index)))
       result))
 

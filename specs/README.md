@@ -91,6 +91,11 @@ The fourth representation is
 [`0056-eliscript-persistent-set.md`](0056-eliscript-persistent-set.md), which
 reuses the portable Map for membership and collection algebra while proving
 dual-compiler/dual-host behavior and million-member sharing.
+The common policy layer follows in
+[`0057-portable-value-semantics.md`](0057-portable-value-semantics.md), which
+defines recursive scalar/List/Vector/Map/Set equality and hashing in portable
+Eliscript, supplies default Map/Set constructors, preserves nested nullish
+values, and records the remaining host-identity and open-protocol boundary.
 
 ## Adding a Specification
 

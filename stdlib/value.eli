@@ -1,0 +1,286 @@
+(module eliscript.value
+  (import-portable "./bit.eli" rotate-left)
+  (import-portable "./persistent-list.eli"
+                   persistent-list?
+                   persistent-list-empty?
+                   persistent-list-first
+                   persistent-list-rest)
+  (import-portable "./persistent-vector.eli"
+                   persistent-vector?
+                   persistent-vector-count
+                   persistent-vector-nth)
+  (import-portable "./persistent-map.eli"
+                   empty-persistent-map
+                   persistent-map?
+                   persistent-map-count
+                   persistent-map-has?
+                   persistent-map-get
+                   persistent-map-reduce
+                   persistent-map-from-entries)
+  (import-portable "./persistent-set.eli"
+                   empty-persistent-set
+                   persistent-set?
+                   persistent-set-count
+                   persistent-set-has?
+                   persistent-set-reduce
+                   persistent-set-from-array)
+
+  (defconst value-boolean-tag 1260232563)
+  (defconst value-number-tag 374761393)
+  (defconst value-string-tag 1831565813)
+  (defconst value-host-tag 762272397)
+  (defconst value-list-tag 793406745)
+  (defconst value-vector-tag 1327180861)
+  (defconst value-map-tag 1821285621)
+  (defconst value-map-entry-tag 982610667)
+  (defconst value-set-tag 1374139181)
+
+  (defconst value-false-hash 423263297)
+  (defconst value-true-hash 1911856395)
+  (defconst value-null-hash 1108378657)
+  (defconst value-undefined-hash 2135587861)
+  (defconst value-nan-hash 1490037359)
+
+  (defportable value-avalanche-hash (value)
+    (let ((hash (uint32 value)))
+      (setq hash (bit-xor hash (unsigned-bit-shift-right hash 16)))
+      (setq hash (imul32 hash 2246822507))
+      (setq hash (bit-xor hash (unsigned-bit-shift-right hash 13)))
+      (setq hash (imul32 hash 3266489909))
+      (setq hash (bit-xor hash (unsigned-bit-shift-right hash 16)))
+      (uint32 hash)))
+
+  (defportable value-mix-hash (hash value)
+    (let ((mixed (uint32 (bit-xor hash value))))
+      (setq mixed (imul32 mixed 1540483477))
+      (setq mixed
+            (bit-xor mixed (unsigned-bit-shift-right mixed 15)))
+      (uint32 mixed)))
+
+  (defportable value-finish-hash (hash count)
+    (value-avalanche-hash
+     (value-mix-hash hash (uint32 count))))
+
+  (defportable value-hash-string-with-tag (value tag)
+    (let ((hash (value-mix-hash tag (length value)))
+          (index 0))
+      (while (< index (length value))
+        (setq hash
+              (value-mix-hash
+               hash
+               (string-code-unit-at value index))
+              index (1+ index)))
+      (value-finish-hash hash (length value))))
+
+  (defportable value-hash-number (value)
+    (if (not (= value value))
+        value-nan-hash
+      (let ((words (number-float64-words value)))
+        (value-finish-hash
+         (value-mix-hash
+          (value-mix-hash value-number-tag (nth 0 words))
+          (nth 1 words))
+         2))))
+
+  (defportable value-list-equal? (left right)
+    (let ((left-node left)
+          (right-node right)
+          (result t))
+      (while (and result
+                  (not (persistent-list-empty? left-node))
+                  (not (persistent-list-empty? right-node)))
+        (setq result
+              (value-equal?
+               (persistent-list-first left-node nil)
+               (persistent-list-first right-node nil)))
+        (setq left-node (persistent-list-rest left-node nil)
+              right-node (persistent-list-rest right-node nil)))
+      (and result
+           (persistent-list-empty? left-node)
+           (persistent-list-empty? right-node))))
+
+  (defportable value-vector-equal? (left right)
+    (if (not (= (persistent-vector-count left)
+                (persistent-vector-count right)))
+        false
+      (let ((index 0)
+            (result t))
+        (while (and result (< index (persistent-vector-count left)))
+          (setq result
+                (value-equal?
+                 (persistent-vector-nth left index nil)
+                 (persistent-vector-nth right index nil))
+                index (1+ index)))
+        result)))
+
+  (defportable value-map-equal? (left right)
+    (and (= (persistent-map-count left) (persistent-map-count right))
+         (persistent-map-reduce
+          (lambda (result key value)
+            (and result
+                 (persistent-map-has? right key)
+                 (value-equal?
+                  value
+                  (persistent-map-get right key nil))))
+          t
+          left)))
+
+  (defportable value-set-equal? (left right)
+    (and (= (persistent-set-count left) (persistent-set-count right))
+         (persistent-set-reduce
+          (lambda (result value)
+            (and result (persistent-set-has? right value)))
+          t
+          left)))
+
+  (defportable value-equal? (left right)
+    (if (= left right)
+        t
+      (let ((left-type (value-type left))
+            (right-type (value-type right)))
+        (if (not (= left-type right-type))
+            false
+          (cond
+           ((= left-type "number")
+            (and (not (= left left)) (not (= right right))))
+           ((persistent-list? left)
+            (and (persistent-list? right)
+                 (value-list-equal? left right)))
+           ((persistent-vector? left)
+            (and (persistent-vector? right)
+                 (value-vector-equal? left right)))
+           ((persistent-map? left)
+            (and (persistent-map? right)
+                 (value-map-equal? left right)))
+           ((persistent-set? left)
+            (and (persistent-set? right)
+                 (value-set-equal? left right)))
+           (t false))))))
+
+  (defportable value-list-hash (value)
+    (let ((hash value-list-tag)
+          (count 0)
+          (node value))
+      (while (not (persistent-list-empty? node))
+        (setq hash
+              (value-mix-hash
+               hash
+               (value-hash (persistent-list-first node nil)))
+              count (1+ count)
+              node (persistent-list-rest node nil)))
+      (value-finish-hash hash count)))
+
+  (defportable value-vector-hash (value)
+    (let ((hash value-vector-tag)
+          (index 0))
+      (while (< index (persistent-vector-count value))
+        (setq hash
+              (value-mix-hash
+               hash
+               (value-hash (persistent-vector-nth value index nil)))
+              index (1+ index)))
+      (value-finish-hash hash index)))
+
+  (defportable value-map-entry-hash (key value)
+    (value-finish-hash
+     (value-mix-hash
+      (value-mix-hash value-map-entry-tag (value-hash key))
+      (value-hash value))
+     2))
+
+  (defportable value-map-hash (value)
+    (let ((sum 0)
+          (xor 0)
+          (product 1)
+          (count 0))
+      (persistent-map-reduce
+       (lambda (_result key item-value)
+         (let ((hash (value-map-entry-hash key item-value)))
+           (setq sum (uint32 (+ sum hash))
+                 xor
+                 (uint32
+                  (bit-xor xor (rotate-left hash (bit-and hash 31))))
+                 product
+                 (uint32 (imul32 product (bit-or hash 1)))
+                 count (1+ count)))
+         nil)
+       nil
+       value)
+      (value-finish-hash
+       (value-mix-hash
+        (value-mix-hash
+         (value-mix-hash value-map-tag sum)
+         xor)
+        product)
+       count)))
+
+  (defportable value-set-hash (value)
+    (let ((sum 0)
+          (xor 0)
+          (product 1)
+          (count 0))
+      (persistent-set-reduce
+       (lambda (_result item-value)
+         (let ((hash (value-hash item-value)))
+           (setq sum (uint32 (+ sum hash))
+                 xor
+                 (uint32
+                  (bit-xor xor (rotate-left hash (bit-and hash 31))))
+                 product
+                 (uint32 (imul32 product (bit-or hash 1)))
+                 count (1+ count)))
+         nil)
+       nil
+       value)
+      (value-finish-hash
+       (value-mix-hash
+        (value-mix-hash
+         (value-mix-hash value-set-tag sum)
+         xor)
+        product)
+       count)))
+
+  (defportable value-hash-host (type)
+    (value-finish-hash
+     value-host-tag
+     (value-hash-string-with-tag type value-string-tag)))
+
+  (defportable value-hash (value)
+    (let ((type (value-type value)))
+      (cond
+       ((= type "null") value-null-hash)
+       ((= type "undefined") value-undefined-hash)
+       ((= type "boolean")
+        (value-mix-hash
+         value-boolean-tag
+         (if value value-true-hash value-false-hash)))
+       ((= type "number") (value-hash-number value))
+       ((= type "string")
+        (value-hash-string-with-tag value value-string-tag))
+       ((persistent-list? value) (value-list-hash value))
+       ((persistent-vector? value) (value-vector-hash value))
+       ((persistent-map? value) (value-map-hash value))
+       ((persistent-set? value) (value-set-hash value))
+       ((= type "bigint")
+        (value-hash-string-with-tag (str value) value-host-tag))
+       (t (value-hash-host type)))))
+
+  (defportable empty-value-map ()
+    (empty-persistent-map value-hash value-equal? value-equal?))
+
+  (defportable value-map-from-entries (entries)
+    (persistent-map-from-entries
+     value-hash value-equal? value-equal? entries))
+
+  (defportable empty-value-set ()
+    (empty-persistent-set value-hash value-equal?))
+
+  (defportable value-set-from-array (values)
+    (persistent-set-from-array value-hash value-equal? values))
+
+  (export value-equal?
+          value-hash
+          empty-value-map
+          value-map-from-entries
+          empty-value-set
+          value-set-from-array))

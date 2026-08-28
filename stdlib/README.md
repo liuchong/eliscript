@@ -74,8 +74,8 @@ structural evidence are specified in
 `persistent-map.eli` implements the complete associative HAMT in portable
 Eliscript. Sparse bitmap nodes, dense 32-slot nodes, full-hash collision nodes,
 and entries are immutable; association and removal copy only the selected
-path. Hash, key-equality, and value-equality functions are supplied explicitly
-until the common value protocol lands:
+path. Its low-level constructors accept explicit hash, key-equality, and
+value-equality functions for specialized domains:
 
 ```elisp
 (import "../../stdlib/persistent-map.eli"
@@ -121,6 +121,32 @@ binary algebra is accepted. Dual-compiler/dual-host reports, generated model
 histories, collision and 32/24 transition cases, and a million-member sharing
 test are specified in
 [specs/0056-eliscript-persistent-set.md](../specs/0056-eliscript-persistent-set.md).
+
+## Value Semantics
+
+`value.eli` is the ordinary policy layer over all four persistent collection
+modules. It recursively compares and hashes scalars, Lists, Vectors, Maps, and
+Sets, and supplies Map/Set constructors that share the exact same policy
+functions:
+
+```elisp
+(import "../../stdlib/value.eli"
+        value-equal? value-hash
+        empty-value-map value-map-from-entries
+        empty-value-set value-set-from-array)
+
+(value-equal?
+ (value-set-from-array [1 2 3])
+ (value-set-from-array [3 2 1]))
+```
+
+Map and Set equality and hashes are independent of insertion order; List and
+Vector remain distinct ordered value families. Nested `undefined` is preserved
+instead of collapsing to `nil`. Opaque JavaScript objects still use identity
+equality and a collision-heavy portable fallback hash, so identity-keyed hot
+paths should keep using low-level injected constructors. Exact provisional
+semantics and evidence are in
+[specs/0057-portable-value-semantics.md](../specs/0057-portable-value-semantics.md).
 
 ## Sequence
 

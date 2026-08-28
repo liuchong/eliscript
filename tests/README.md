@@ -99,6 +99,14 @@ Bun and Node. It covers 20,000 retained value-key operations, collection
 algebra, incompatible policies, complete-hash collisions, inherited 32/24
 transitions, no-op identity, and exact million-member path sharing.
 
+The portable value-semantics suite compiles `value.eli` and its complete
+five-module collection/bit dependency graph with both compiler generations,
+then executes both outputs under Bun and Node. Frozen scalar and collection
+hashes, default Map/Set policies, insertion-order independence, a real hash
+collision, opaque host identity, and nested `undefined` are checked directly.
+Two thousand generated cross-family cases enforce equality/hash invariants,
+and one-million-value traversals prove iterative bounded-stack behavior.
+
 Persistent-vector tests exercise the provisional M8 runtime independently of
 literal compilation. They compare generated operations with a simple mutable
 array model, retain and probe previous versions after each update, cross tail

@@ -84,7 +84,7 @@
     (let ((result [])
           (index 0))
       (while (< index (length values))
-        (setq result (cons (nth index values) result)
+        (setq result (cons (get values index) result)
               index (1+ index)))
       result))
 
@@ -101,7 +101,7 @@
            (empty-persistent-set hash-function key-equal-function))
           (index 0))
       (while (< index (length values))
-        (setq result (persistent-set-conj result (nth index values))
+        (setq result (persistent-set-conj result (get values index))
               index (1+ index)))
       result))
 

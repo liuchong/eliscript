@@ -45,6 +45,13 @@
         "names": ["bit-and", "bit-not", "bit-or", "bit-shift-left", "bit-shift-right", "bit-xor", "imul32", "int32", "uint32", "unsigned-bit-shift-right"]
       },
       {
+        "id": "portable-value-forms",
+        "spec": "0057",
+        "sources": ["compiler/eliscript-analyzer.el", "compiler/eliscript-ir-emitter.el", "compiler/eliscript-lower.el"],
+        "verifyNames": true,
+        "names": ["number-float64-words", "string-code-unit-at", "value-type"]
+      },
+      {
         "id": "macro-evaluator-forms",
         "spec": "0035",
         "sources": ["bootstrap/compiler/expander.eli", "compiler/eliscript-macro-eval.el"],
@@ -253,7 +260,8 @@
     {"module": "persistent-set", "spec": "0056", "file": "stdlib/persistent-set.eli", "exports": ["empty-persistent-set", "persistent-set-compatible?", "persistent-set-conj", "persistent-set-count", "persistent-set-difference", "persistent-set-disj", "persistent-set-disjoint?", "persistent-set-empty?", "persistent-set-equal?", "persistent-set-from-array", "persistent-set-has?", "persistent-set-intersection", "persistent-set-reduce", "persistent-set-subset?", "persistent-set-superset?", "persistent-set-to-array", "persistent-set-union", "persistent-set?"]},
     {"module": "persistent-vector", "spec": "0053", "file": "stdlib/persistent-vector.eli", "exports": ["empty-persistent-vector", "persistent-vector-assoc", "persistent-vector-conj", "persistent-vector-count", "persistent-vector-from-array", "persistent-vector-nth", "persistent-vector-peek", "persistent-vector-pop", "persistent-vector-reduce", "persistent-vector-to-array", "persistent-vector?"]},
     {"module": "sequence", "spec": "0023", "file": "stdlib/sequence.eli", "exports": ["concat", "drop", "every?", "filter", "find", "map", "range", "range-by", "reduce", "reverse", "some?", "take"]},
-    {"module": "text", "spec": "0025", "file": "stdlib/text.eli", "exports": ["blank?", "contains?", "empty?", "ends-with?", "join", "repeat", "slice", "starts-at?", "starts-with?", "strip-prefix", "strip-suffix", "trim", "whitespace?"]}
+    {"module": "text", "spec": "0025", "file": "stdlib/text.eli", "exports": ["blank?", "contains?", "empty?", "ends-with?", "join", "repeat", "slice", "starts-at?", "starts-with?", "strip-prefix", "strip-suffix", "trim", "whitespace?"]},
+    {"module": "value", "spec": "0057", "file": "stdlib/value.eli", "exports": ["empty-value-map", "empty-value-set", "value-equal?", "value-hash", "value-map-from-entries", "value-set-from-array"]}
   ],
   "emacs": {
     "roots": ["compiler", "tools/org", "tools/worker"],

@@ -519,6 +519,21 @@
        (eliscript-ir-emitter--emit-binary-infix node ">>"))
       ('unsigned-bit-shift-right
        (eliscript-ir-emitter--emit-binary-infix node ">>>"))
+      ('value-type
+       (eliscript-ir-emitter--require-arity node 1 1)
+       (format
+        "((__eliscript_value) => __eliscript_value === null ? \"null\" : typeof __eliscript_value)(%s)"
+        (eliscript-ir-emitter-emit-expression (car nodes))))
+      ('string-code-unit-at
+       (eliscript-ir-emitter--require-arity node 2 2)
+       (format "(%s).charCodeAt(%s)"
+               (eliscript-ir-emitter-emit-expression (nth 0 nodes))
+               (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
+      ('number-float64-words
+       (eliscript-ir-emitter--require-arity node 1 1)
+       (format
+        "((__eliscript_number) => { const __eliscript_bytes = new DataView(new ArrayBuffer(8)); __eliscript_bytes.setFloat64(0, __eliscript_number === 0 ? 0 : __eliscript_number, true); return [__eliscript_bytes.getUint32(0, true), __eliscript_bytes.getUint32(4, true)]; })(%s)"
+        (eliscript-ir-emitter-emit-expression (car nodes))))
       ('= (eliscript-ir-emitter--emit-comparison "=" nodes "==="))
       ((or '/= 'not=)
        (eliscript-ir-emitter--emit-distinct (symbol-name name) nodes))

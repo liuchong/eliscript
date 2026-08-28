@@ -615,6 +615,23 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
       ('unsigned-bit-shift-right
        (eliscript-emitter--emit-binary-infix
         "unsigned-bit-shift-right" arguments ">>>"))
+      ('value-type
+       (eliscript-emitter--require-arity "value-type" arguments 1 1)
+       (format
+        "((__eliscript_value) => __eliscript_value === null ? \"null\" : typeof __eliscript_value)(%s)"
+        (eliscript-emitter-emit-expression (car arguments))))
+      ('string-code-unit-at
+       (eliscript-emitter--require-arity
+        "string-code-unit-at" arguments 2 2)
+       (format "(%s).charCodeAt(%s)"
+               (eliscript-emitter-emit-expression (nth 0 arguments))
+               (eliscript-emitter-emit-expression (nth 1 arguments))))
+      ('number-float64-words
+       (eliscript-emitter--require-arity
+        "number-float64-words" arguments 1 1)
+       (format
+        "((__eliscript_number) => { const __eliscript_bytes = new DataView(new ArrayBuffer(8)); __eliscript_bytes.setFloat64(0, __eliscript_number === 0 ? 0 : __eliscript_number, true); return [__eliscript_bytes.getUint32(0, true), __eliscript_bytes.getUint32(4, true)]; })(%s)"
+        (eliscript-emitter-emit-expression (car arguments))))
       ('= (eliscript-emitter--emit-comparison "=" arguments "==="))
       ((or '/= 'not=)
        (eliscript-emitter--emit-distinct (symbol-name operator) arguments))

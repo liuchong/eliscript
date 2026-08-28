@@ -16,6 +16,7 @@
   '(not + * - / % mod = /= not= < <= > >= 1+ 1-
     int32 uint32 imul32 bit-and bit-or bit-xor bit-not
     bit-shift-left bit-shift-right unsigned-bit-shift-right
+    value-type string-code-unit-at number-float64-words
     eq equal null nil? undefined? nullish?
     list vector array car cdr cons nth aref length
     object-keys object-has? object-assoc)
