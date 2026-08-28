@@ -101,4 +101,6 @@ implemented language surface.
 ## Deferred Work
 
 - optimization and canonicalization passes over IR
-- replacing internal condition messages with structured diagnostics
+
+Structured compiler diagnostics are implemented by
+[0043-structured-diagnostics.md](0043-structured-diagnostics.md).

@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "language": {
+    "groups": [
+      {
+        "id": "reader-values",
+        "spec": "0003",
+        "sources": ["bootstrap/compiler/reader.eli", "compiler/eliscript-reader.el"],
+        "verifyNames": false,
+        "names": ["false", "keyword", "nil", "number", "string", "symbol", "t", "undefined", "vector"]
+      },
+      {
+        "id": "reader-syntax",
+        "spec": "0005",
+        "sources": ["bootstrap/compiler/reader.eli", "compiler/eliscript-reader.el"],
+        "verifyNames": false,
+        "names": ["'", ",", ",@", "`"]
+      },
+      {
+        "id": "binding-markers",
+        "spec": "0036",
+        "sources": ["compiler/eliscript-macro-eval.el", "compiler/eliscript-parameters.el"],
+        "verifyNames": true,
+        "names": ["&body", "&optional", "&rest"]
+      },
+      {
+        "id": "top-level-forms",
+        "spec": "0003",
+        "sources": ["compiler/eliscript-analyzer.el", "compiler/eliscript-expander.el", "compiler/eliscript-lower.el"],
+        "verifyNames": true,
+        "names": ["defasync", "defcomponent", "defconst", "defmacro", "defn", "defportable", "defun", "defvar", "export", "export-default", "import", "import-portable", "module"]
+      },
+      {
+        "id": "runtime-forms",
+        "spec": "0003",
+        "sources": ["compiler/eliscript-analyzer.el", "compiler/eliscript-ir-emitter.el", "compiler/eliscript-lower.el"],
+        "verifyNames": true,
+        "names": ["%", "*", "+", "-", "/", "/=", "1+", "1-", "<", "<=", "=", ">", ">=", "and", "apply", "aref", "array", "async", "await", "car", "catch", "cdr", "cond", "cons", "do", "eq", "equal", "finally", "fn", "fragment", "funcall", "get", "if", "js*", "js-call", "jsx", "lambda", "length", "let", "let*", "list", "mod", "new", "nil?", "not", "not=", "null", "nullish?", "object", "object-assoc", "object-has?", "object-keys", "or", "print", "progn", "put", "quote", "set!", "setq", "str", "throw", "try", "undefined?", "unless", "vector", "when", "while"]
+      },
+      {
+        "id": "macro-evaluator-forms",
+        "spec": "0035",
+        "sources": ["bootstrap/compiler/expander.eli", "compiler/eliscript-macro-eval.el"],
+        "verifyNames": true,
+        "names": ["%", "*", "+", "-", "/", "/=", "1+", "1-", "<", "<=", "=", ">", ">=", "and", "append", "atom", "car", "cdr", "concat", "cond", "cons", "consp", "do", "eq", "equal", "error", "if", "intern", "keywordp", "length", "let", "let*", "list", "listp", "mod", "nil?", "not", "null", "nullish?", "numberp", "or", "progn", "quote", "setq", "str", "stringp", "symbol-name", "symbolp", "undefined?", "unless", "vector", "vectorp", "when"]
+      }
+    ]
+  },
+  "ir": {
+    "source": "compiler/eliscript-ir.el",
+    "nodeKinds": ["apply-call", "array-binding-pattern", "array-literal", "assignment", "assignment-pair", "await-expression", "binding-hole", "binding-name", "call", "catch-binding", "catch-clause", "conditional", "conditional-chain", "conditional-clause", "conditional-sugar", "constructor-call", "export-declaration", "export-default", "expression-statement", "finally-clause", "function-declaration", "function-expression", "import-declaration", "import-default", "import-named", "import-namespace", "intrinsic", "invoke", "lexical-binding", "lexical-bindings", "literal", "loop", "method-call", "module-declaration", "object-literal", "object-property", "parameter-binding", "print", "property-read", "property-write", "quoted-literal", "raw-javascript", "react-element", "react-fragment", "reference", "sequence", "short-circuit", "string-concat", "throw-expression", "try-expression", "variable-declaration"]
+  },
+  "commands": [
+    {
+      "name": "eliscript",
+      "entry": "bin/eliscript",
+      "implementation": "compiler/eliscript-cli.el",
+      "options": ["--diagnostic-format", "--help", "--output", "--portable", "--source-map"]
+    },
+    {
+      "name": "eliscript-bootstrap",
+      "entry": "bin/eliscript-bootstrap",
+      "implementation": "bin/eliscript-bootstrap",
+      "options": []
+    },
+    {
+      "name": "eliscript-build",
+      "entry": "bin/eliscript-build",
+      "implementation": "compiler/eliscript-project-cli.el",
+      "options": ["--diagnostic-format", "--help", "--json", "--no-cache", "--out-dir", "--portable", "--root"]
+    },
+    {
+      "name": "eliscript-org",
+      "entry": "bin/eliscript-org",
+      "implementation": "tools/org/eliscript-org-cli.el",
+      "options": ["--help", "--include-drafts", "--output"]
+    },
+    {
+      "name": "eliscript-portable",
+      "entry": "bin/eliscript-portable",
+      "implementation": "bootstrap/host/bun.mjs",
+      "options": ["--diagnostic-format", "--help", "--output", "--portable", "--source-map"]
+    }
+  ],
+  "schemas": [
+    {
+      "id": "build-report",
+      "spec": "0032",
+      "format": "eliscript-build-report",
+      "version": 1,
+      "evidence": [{"file": "compiler/eliscript-project.el", "contains": ["(format . \"eliscript-build-report\")", "eliscript-project-build-report-version 1"]}]
+    },
+    {
+      "id": "compiler-diagnostic",
+      "spec": "0043",
+      "format": "eliscript-diagnostic",
+      "version": 1,
+      "evidence": [
+        {"file": "compiler/eliscript-diagnostic.el", "contains": ["eliscript-diagnostic-format-name \"eliscript-diagnostic\"", "eliscript-diagnostic-version 1"]},
+        {"file": "bootstrap/host/bun.mjs", "contains": ["diagnosticFormat = \"eliscript-diagnostic\"", "diagnosticVersion = 1"]}
+      ]
+    },
+    {
+      "id": "project-manifest",
+      "spec": "0030",
+      "format": "eliscript-project",
+      "version": 1,
+      "evidence": [
+        {"file": "compiler/eliscript-project.el", "contains": ["(format . \"eliscript-project\")", "(version . 1)"]},
+        {"file": "runtime/worker.mjs", "contains": ["manifest.format !== \"eliscript-project\"", "manifest.version !== 1"]}
+      ]
+    },
+    {
+      "id": "worker-protocol",
+      "spec": "0020",
+      "format": "eliscript-worker-ndjson",
+      "version": 1,
+      "evidence": [
+        {"file": "runtime/worker.mjs", "contains": ["export const protocolVersion = 1"]},
+        {"file": "tools/worker/eliscript-worker.el", "contains": ["eliscript-worker-protocol-version 1"]}
+      ]
+    }
+  ],
+  "adapters": [
+    {
+      "id": "bootstrap-bun-host",
+      "spec": "0019",
+      "file": "bootstrap/host/bun.mjs",
+      "namedExports": ["compileFile", "diagnosticFromError", "loadCompiler", "main", "parseArguments", "requestedDiagnosticFormat"],
+      "defaultExport": false
+    },
+    {
+      "id": "org-vite",
+      "spec": "0012",
+      "file": "tools/org/vite-plugin.mjs",
+      "namedExports": ["compileOrgDirectory", "eliscriptOrg", "orgModuleId"],
+      "defaultExport": true
+    },
+    {
+      "id": "vite",
+      "spec": "0011",
+      "file": "tools/vite/index.mjs",
+      "namedExports": ["compileEliscript", "eliscript"],
+      "defaultExport": true
+    },
+    {
+      "id": "worker-runtime",
+      "spec": "0020",
+      "file": "runtime/worker.mjs",
+      "namedExports": ["capabilities", "loadSourceMap", "protocolVersion", "runWorker"],
+      "defaultExport": false
+    }
+  ],
+  "standardLibrary": [
+    {"module": "data", "spec": "0027", "file": "stdlib/data.eli", "exports": ["count-by", "group-by", "index-by"]},
+    {"module": "object", "spec": "0026", "file": "stdlib/object.eli", "exports": ["assoc", "dissoc", "filter-values", "has?", "key-in?", "keys", "map-values", "merge", "omit", "pick", "update"]},
+    {"module": "sequence", "spec": "0023", "file": "stdlib/sequence.eli", "exports": ["concat", "drop", "every?", "filter", "find", "map", "range", "range-by", "reduce", "reverse", "some?", "take"]},
+    {"module": "text", "spec": "0025", "file": "stdlib/text.eli", "exports": ["blank?", "contains?", "empty?", "ends-with?", "join", "repeat", "slice", "starts-at?", "starts-with?", "strip-prefix", "strip-suffix", "trim", "whitespace?"]}
+  ],
+  "emacs": {
+    "roots": ["compiler", "tools/org", "tools/worker"],
+    "publicFunctions": ["eliscript-analyze-module", "eliscript-binding-names", "eliscript-binding-pattern-p", "eliscript-cli-main", "eliscript-compile-file", "eliscript-compile-file-with-source-map", "eliscript-compile-ir-file", "eliscript-compile-ir-string", "eliscript-compile-portable-file", "eliscript-compile-portable-file-with-source-map", "eliscript-compile-portable-ir-string", "eliscript-compile-portable-string", "eliscript-compile-portable-string-with-source-map", "eliscript-compile-string", "eliscript-compile-string-with-source-map", "eliscript-diagnostic-condition-message", "eliscript-diagnostic-format", "eliscript-diagnostic-format-at", "eliscript-diagnostic-from-condition", "eliscript-diagnostic-from-error", "eliscript-diagnostic-render", "eliscript-diagnostic-signal", "eliscript-diagnostic-to-alist", "eliscript-diagnostic-to-json", "eliscript-emit-ir-module", "eliscript-emit-ir-module-with-source-map", "eliscript-emit-module", "eliscript-emitter-emit-expression", "eliscript-emitter-emit-top-level", "eliscript-expand-module", "eliscript-form-inherit", "eliscript-form-locate-generated", "eliscript-form-span", "eliscript-form-strip", "eliscript-form-value", "eliscript-form-wrap", "eliscript-index-document", "eliscript-index-score-documents", "eliscript-index-score-documents-sync", "eliscript-index-search-sync", "eliscript-index-start", "eliscript-index-stop", "eliscript-index-tokenize", "eliscript-ir-emitter-emit-expression", "eliscript-ir-emitter-emit-top-level", "eliscript-ir-make-node", "eliscript-ir-make-program", "eliscript-ir-node-to-form", "eliscript-ir-program-to-forms", "eliscript-ir-property", "eliscript-ir-walk", "eliscript-lower-expression", "eliscript-lower-module", "eliscript-lower-top-level", "eliscript-macro-eval-parse-parameters", "eliscript-macro-eval-run", "eliscript-macro-eval-symbol-p", "eliscript-org-cli-main", "eliscript-org-emit-module", "eliscript-org-publish-directory", "eliscript-org-read-article", "eliscript-org-read-directory", "eliscript-parameters-parse", "eliscript-portable-select-module", "eliscript-portable-validate-module", "eliscript-project-build", "eliscript-project-build-portable", "eliscript-project-build-report", "eliscript-project-cli-main", "eliscript-read-file", "eliscript-read-located-file", "eliscript-read-located-string", "eliscript-read-string", "eliscript-source-map-create", "eliscript-source-map-mark", "eliscript-symbol-binding-name", "eliscript-symbol-munge-segment", "eliscript-symbol-reference-name", "eliscript-worker-benchmark-run", "eliscript-worker-call", "eliscript-worker-call-portable", "eliscript-worker-call-portable-sync", "eliscript-worker-call-sync", "eliscript-worker-cancel", "eliscript-worker-error-location", "eliscript-worker-format-error", "eliscript-worker-live-p", "eliscript-worker-restart", "eliscript-worker-start", "eliscript-worker-stderr", "eliscript-worker-stop"],
+    "records": {
+      "public": ["eliscript-diagnostic", "eliscript-emission", "eliscript-index-session", "eliscript-ir-node", "eliscript-ir-program", "eliscript-located-form", "eliscript-macro-eval-parameters", "eliscript-parameter", "eliscript-project-build-result", "eliscript-project-module", "eliscript-source-span", "eliscript-worker"],
+      "internal": ["eliscript-analyzer--binding", "eliscript-analyzer--scope", "eliscript-expander--macro", "eliscript-macro-eval--scope", "eliscript-portable--declaration", "eliscript-project-cache", "eliscript-project-cache-decision", "eliscript-project-cache-lookup", "eliscript-reader--node", "eliscript-worker-request"]
+    }
+  },
+  "documentation": [
+    {
+      "file": "README.md",
+      "mustContain": ["contracts/public-surface.json", "0044-public-surface-registry.md"],
+      "mustNotContain": []
+    },
+    {
+      "file": "specs/0003-core-language-v0.md",
+      "mustContain": ["[0043-structured-diagnostics.md](0043-structured-diagnostics.md)"],
+      "mustNotContain": ["structured diagnostic records, Emacs object interop"]
+    },
+    {
+      "file": "specs/0004-lexical-analysis.md",
+      "mustContain": ["[0043-structured-diagnostics.md](0043-structured-diagnostics.md)"],
+      "mustNotContain": ["Structured diagnostic records remain future work", "structured diagnostic records in addition to formatted conditions"]
+    },
+    {
+      "file": "specs/0006-source-locations.md",
+      "mustContain": ["[0043-structured-diagnostics.md](0043-structured-diagnostics.md)"],
+      "mustNotContain": ["structured diagnostic values in addition to formatted condition messages"]
+    },
+    {
+      "file": "specs/0007-intermediate-representation.md",
+      "mustContain": ["[0043-structured-diagnostics.md](0043-structured-diagnostics.md)"],
+      "mustNotContain": ["replacing internal condition messages with structured diagnostics"]
+    }
+  ]
+}

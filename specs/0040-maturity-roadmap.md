@@ -397,6 +397,13 @@ self-hosted Bun driver. Analyzer failures now agree across both compiler
 generations without changing the reproducible fixed point. See
 [0043-structured-diagnostics.md](0043-structured-diagnostics.md).
 
+The third slice inventories language and macro forms, all IR kinds, commands,
+schemas, adapters, standard-library exports, and Emacs interfaces in a
+versioned public-surface registry. Exact implementation comparisons and known
+documentation assertions now fail the default contract target on drift. Both
+contract checkers print generated domain matrices. See
+[0044-public-surface-registry.md](0044-public-surface-registry.md).
+
 ### M8: Language Contract Closure (8-12 weeks)
 
 **Objective:** Finish the small language needed for real applications, then

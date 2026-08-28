@@ -39,6 +39,12 @@ The feature inventory and evidence links live in
 [`0042-specification-registry.md`](0042-specification-registry.md) for the
 schema and change workflow.
 
+The current public and internal boundary lives in
+[`contracts/public-surface.json`](../contracts/public-surface.json). Its checker
+compares language forms, IR kinds, commands, schemas, adapters, libraries, and
+Emacs APIs with their implementations. See
+[`0044-public-surface-registry.md`](0044-public-surface-registry.md).
+
 ## Adding a Specification
 
 1. Choose the next four-digit id and add `NNNN-short-name.md`.

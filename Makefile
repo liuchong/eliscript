@@ -11,7 +11,7 @@ test: check-contracts
 		-l tests/bootstrap-tests.el \
 		-f ert-run-tests-batch-and-exit
 	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
-		tests/conformance.test.mjs \
+		tests/conformance.test.mjs tests/public-surface.test.mjs \
 		tests/bootstrap-symbol.test.mjs tests/bootstrap-reader.test.mjs \
 		tests/bootstrap-expander.test.mjs tests/bootstrap-analyzer.test.mjs \
 		tests/bootstrap-ir.test.mjs tests/bootstrap-emitter.test.mjs \
@@ -23,3 +23,4 @@ test: check-contracts
 
 check-contracts:
 	$(BUN) tools/conformance/check.mjs
+	$(BUN) tools/surface/check.mjs

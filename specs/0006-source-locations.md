@@ -85,5 +85,7 @@ byte-for-byte.
 
 ## Deferred Work
 
-- structured diagnostic values in addition to formatted condition messages
 - expansion stacks with definition and nested call origins
+
+Structured diagnostic values with start and end positions are implemented by
+[0043-structured-diagnostics.md](0043-structured-diagnostics.md).

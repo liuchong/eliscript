@@ -20,11 +20,14 @@ not use Bun-specific language extensions or APIs.
 ## Command Line
 
 ```sh
-bin/eliscript [--output FILE] INPUT
+bin/eliscript [--output FILE] [--source-map] [--portable NAME]
+              [--diagnostic-format human|json] INPUT
 ```
 
 When `--output` is omitted, generated ECMAScript is written to standard output.
-Parent directories for an output file are created automatically.
+Parent directories for an output file are created automatically. Source maps,
+portable closure selection, and diagnostic output are owned by specifications
+0009, 0021, and 0043 respectively.
 
 ## Source and Module Model
 
@@ -209,10 +212,11 @@ in one scope that map to the same output identifier.
 
 Compile-time user macros and recursive source locations are implemented by the
 front end described in specifications 0005 and 0006. Explicit IR lowering is
-specified in 0007. Source maps, structured diagnostic records, Emacs object
-interop, and full diagnostics are not implemented yet. Later Eliscript versions
-may add forms that are more expressive than Emacs Lisp rather than preserving
-compatibility for its own sake.
+specified in 0007. Source maps and structured diagnostics are implemented; see
+0009 and [0043-structured-diagnostics.md](0043-structured-diagnostics.md).
+General Emacs object interop and the complete 1.0 diagnostic corpus remain
+future work. Later Eliscript versions may add forms that are more expressive
+than Emacs Lisp rather than preserving compatibility for its own sake.
 
 ## Acceptance Evidence
 

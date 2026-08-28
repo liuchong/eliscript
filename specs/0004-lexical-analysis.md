@@ -74,8 +74,9 @@ This rule catches accidental undeclared names without hiding host interop.
 
 Analysis failures signal `eliscript-analyze-error`, a subtype of the existing
 public `eliscript-compile-error`. The located-form layer added in specification
-0006 now lets diagnostics include filename, line, and column. Structured
-diagnostic records remain future work.
+0006 lets diagnostics include filename, line, and column. Versioned structured
+records and stable phase codes are implemented by
+[0043-structured-diagnostics.md](0043-structured-diagnostics.md).
 
 ## Acceptance Evidence
 
@@ -87,4 +88,5 @@ diagnostic records remain future work.
 
 ## Deferred Work
 
-- structured diagnostic records in addition to formatted conditions
+- finer-grained analysis codes beyond the current phase category
+- lexical resolution traces for editor integrations

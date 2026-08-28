@@ -119,6 +119,12 @@ Check the specification registry and executable conformance coverage alone:
 bun run check:contracts
 ```
 
+That target also validates the versioned
+[`contracts/public-surface.json`](contracts/public-surface.json) inventory and
+prints generated conformance and interface matrices. The inventory separates
+current public Emacs functions and records from `--`-named implementation
+details and tracks exact IR, CLI, adapter, schema, and standard-library sets.
+
 Compile and render the React counter example:
 
 ```sh
@@ -479,7 +485,7 @@ Current evidence:
 - Ninety-three ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- Twenty-three Bun tests cover the compiler and Org Vite adapters, source-map
+- Thirty Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
   bootstrap behavior, the worker protocol, standard library, and benchmark
   reporting.
@@ -600,7 +606,10 @@ for nested array destructuring across functions, lexical bindings, catches,
 portable code, and both compiler generations, and
 [specs/0043-structured-diagnostics.md](specs/0043-structured-diagnostics.md)
 for the versioned diagnostic schema, public APIs, stable code categories, and
-dual-generation CLI behavior.
+dual-generation CLI behavior, and
+[specs/0044-public-surface-registry.md](specs/0044-public-surface-registry.md)
+for the machine-checked public/internal boundary and generated consistency
+matrices.
 
 ## License
 

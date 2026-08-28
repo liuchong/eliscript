@@ -191,6 +191,7 @@ async function validateManifest(root, manifest, specsById, errors) {
   const featureIds = new Set();
   const coveredSpecs = new Set();
   const sourceCache = new Map();
+  const domains = new Map();
   const testDriver = await readFile(path.join(root, "Makefile"), "utf8");
   let evidenceCount = 0;
   let previousSpec = "";
@@ -201,6 +202,11 @@ async function validateManifest(root, manifest, specsById, errors) {
 
     if (featureIds.has(feature.id)) errors.push(`duplicate feature id ${feature.id}`);
     featureIds.add(feature.id);
+    const domainName = feature.id.split(".")[0];
+    if (!domains.has(domainName)) {
+      domains.set(domainName, { features: 0, evidence: 0 });
+    }
+    domains.get(domainName).features += 1;
     if (feature.spec < previousSpec) {
       errors.push(`features are not sorted by spec at ${feature.id}`);
     }
@@ -224,6 +230,7 @@ async function validateManifest(root, manifest, specsById, errors) {
 
     for (const [evidenceIndex, evidence] of (feature.evidence ?? []).entries()) {
       evidenceCount += 1;
+      domains.get(domainName).evidence += 1;
       const label = `${feature.id} evidence ${evidenceIndex}`;
       if (!isPlainObject(evidence)) {
         errors.push(`${label} must be an object`);
@@ -275,6 +282,7 @@ async function validateManifest(root, manifest, specsById, errors) {
     features: manifest.features.length,
     evidence: evidenceCount,
     coveredSpecs,
+    domains: Object.fromEntries([...domains.entries()].sort()),
   };
 }
 
@@ -316,17 +324,25 @@ export async function checkContracts(options = {}) {
     features: {
       total: manifestReport.features,
       evidence: manifestReport.evidence,
+      domains: manifestReport.domains,
     },
   };
 }
 
 function humanReport(report) {
+  const matrix = Object.entries(report.features.domains).map(
+    ([domain, counts]) =>
+      `  ${domain.padEnd(14)} ${String(counts.features).padStart(2)} features / ` +
+      `${String(counts.evidence).padStart(2)} evidence`,
+  );
   return [
     `Contract index: ${report.specifications.total} specifications`,
     `Implemented coverage: ${report.specifications.coveredImplemented}/` +
       `${report.specifications.implementations.implemented ?? 0}`,
     `Conformance features: ${report.features.total}`,
     `Evidence links: ${report.features.evidence}`,
+    "Conformance matrix:",
+    ...matrix,
   ].join("\n");
 }
 

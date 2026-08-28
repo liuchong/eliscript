@@ -408,6 +408,17 @@
         { "kind": "shell", "file": "tests/cli-test.sh", "contains": "unexpected seed compiler diagnostic" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "quality.public-surface-registry",
+      "title": "Public surface registry and consistency matrix",
+      "status": "accepted",
+      "spec": "0044",
+      "contracts": ["Classifies current public and internal interfaces", "Rejects drift in IR, CLI, adapters, libraries, and Emacs APIs", "Prints generated conformance and public-surface matrices"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "repository public surface matches every tracked implementation" },
+        { "kind": "fixture", "file": "contracts/public-surface.json", "contains": "\"schemaVersion\": 1" }
+      ]
     }
   ]
 }
