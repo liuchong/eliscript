@@ -35,6 +35,9 @@
   (defun keyword-node-p (node)
     (and node (= (node-kind node) "keyword")))
 
+  (defun vector-node-p (node)
+    (and node (= (node-kind node) "vector")))
+
   (defun string-node-p (node)
     (and node
          (= (node-kind node) "literal")
@@ -51,6 +54,63 @@
       ((null-node-p node) [])
       (t undefined)))
 
+  (defun binding-marker-p (name)
+    (js-call ["&optional" "&rest" "&body"] :includes name))
+
+  (defun binding-nodes (pattern context)
+    (cond
+      ((symbol-node-p pattern)
+       (if (binding-marker-p (node-name pattern))
+           (analyzer-fail
+             context (node-span pattern) "invalid binding pattern marker")
+         [pattern]))
+      ((vector-node-p pattern)
+       (let ((result [])
+             (rest-seen false)
+             (rest-done false))
+         (js-call (node-items pattern) :forEach
+           (lambda (element)
+             (let ((name (and (symbol-node-p element) (node-name element))))
+               (cond
+                 ((= name "&rest")
+                  (when (or rest-seen rest-done)
+                    (analyzer-fail
+                      context (node-span element)
+                      "invalid vector binding pattern"))
+                  (setq rest-seen t))
+                 (rest-seen
+                  (unless (and name (not (binding-marker-p name)))
+                    (analyzer-fail
+                      context (node-span element)
+                      "vector &rest binding must be a symbol"))
+                  (js-call result :push element)
+                  (setq rest-seen false)
+                  (setq rest-done t))
+                 (rest-done
+                  (analyzer-fail
+                    context (node-span element)
+                    "vector &rest binding must be final"))
+                 ((null-node-p element) nil)
+                 (t
+                  (js-call (binding-nodes element context) :forEach
+                    (lambda (binding)
+                      (js-call result :push binding))))))))
+         (when rest-seen
+           (analyzer-fail
+             context (node-span pattern)
+             "vector &rest requires a binding"))
+         result))
+      (t
+       (analyzer-fail
+         context (and pattern (node-span pattern))
+         (str "binding pattern must be a symbol or vector: "
+              (node-display pattern))))))
+
+  (defun binding-pattern-p (node)
+    (or (and (symbol-node-p node)
+             (not (binding-marker-p (node-name node))))
+        (vector-node-p node)))
+
   (defun function-parameters (parameters context)
     (let ((items (list-items parameters))
           (parsed [])
@@ -62,11 +122,6 @@
       (while (< index (get items :length))
         (let* ((parameter (nth index items))
                (name (and (symbol-node-p parameter) (node-name parameter))))
-          (unless name
-            (analyzer-fail
-              context (node-span parameter)
-              (str "function arguments must be symbols: "
-                   (node-display parameters))))
           (cond
             ((= name "&optional")
              (unless (= mode "required")
@@ -85,14 +140,28 @@
                context (node-span parameter)
                "invalid function parameter list"))
             ((= mode "rest")
-             (js-call parsed :push (object :kind "rest" :node parameter))
+             (unless (and name (not (binding-marker-p name)))
+               (analyzer-fail
+                 context (node-span parameter)
+                 "function &rest parameter must be a symbol"))
+             (js-call parsed :push
+               (object :kind "rest" :node parameter :bindings [parameter]))
              (setq mode "done"))
             ((= mode "done")
              (analyzer-fail
                context (node-span parameter)
                "invalid function parameter list"))
+            ((binding-pattern-p parameter)
+             (js-call parsed :push
+               (object
+                 :kind mode
+                 :node parameter
+                 :bindings (binding-nodes parameter context))))
             (t
-             (js-call parsed :push (object :kind mode :node parameter)))))
+             (analyzer-fail
+               context (node-span parameter)
+               (str "function arguments must be symbols or vectors: "
+                    (node-display parameters))))))
         (setq index (1+ index)))
       (when (= mode "rest")
         (analyzer-fail
@@ -187,6 +256,11 @@
         (js-call outputs :set output-name binding)
         binding)))
 
+  (defun declare-pattern (scope pattern kind mutable context)
+    (js-call (binding-nodes pattern context) :forEach
+      (lambda (binding)
+        (declare-binding scope binding kind mutable context))))
+
   (defun lookup-binding (scope name)
     (let ((current scope)
           (binding undefined))
@@ -212,14 +286,18 @@
 
   (defun binding-pair (binding context)
     (cond
-      ((symbol-node-p binding) [binding undefined])
+      ((binding-pattern-p binding)
+       (binding-nodes binding context)
+       [binding undefined])
       (t
        (let ((items (list-items binding)))
          (if (and (not (eq items undefined))
                   (>= (get items :length) 1)
                   (<= (get items :length) 2)
-                  (symbol-node-p (nth 0 items)))
-             [(nth 0 items) (nth 1 items)]
+                  (binding-pattern-p (nth 0 items)))
+             (progn
+               (binding-nodes (nth 0 items) context)
+               [(nth 0 items) (nth 1 items)])
            (analyzer-fail
              context (node-span binding)
              (str "invalid let binding: " (node-display binding))))))))
@@ -241,7 +319,7 @@
             (lambda (binding)
               (let ((pair (binding-pair binding context)))
                 (analyze-expression (nth 1 pair) child context)
-                (declare-binding
+                (declare-pattern
                   child (nth 0 pair) "local" t context))))
         (let ((parsed
                (js-call bindings :map
@@ -251,7 +329,7 @@
               (analyze-expression (nth 1 pair) scope context)))
           (js-call parsed :forEach
             (lambda (pair)
-              (declare-binding
+              (declare-pattern
                 child (nth 0 pair) "local" t context)))))
       (analyze-sequence body child context)))
 
@@ -262,8 +340,10 @@
                     scope (if asynchronous "async" "sync"))))
         (js-call parameter-items :forEach
           (lambda (parameter)
-            (declare-binding
-              child (get parameter :node) "parameter" t context)))
+            (js-call (get parameter :bindings) :forEach
+              (lambda (binding)
+                (declare-binding
+                  child binding "parameter" t context)))))
         (analyze-sequence body child context))))
 
   (defun analyze-assignment
@@ -361,12 +441,12 @@
                (setq catch-seen t)
                (let* ((items (list-items argument))
                       (binding (nth 1 items)))
-                 (unless (symbol-node-p binding)
+                 (unless (binding-pattern-p binding)
                    (analyzer-fail
                      context (node-span argument)
-                     "catch requires a binding symbol"))
+                     "catch requires a binding symbol or vector"))
                  (let ((child (make-scope scope)))
-                   (declare-binding child binding "catch" t context)
+                   (declare-pattern child binding "catch" t context)
                    (analyze-sequence
                      (js-call items :slice 2) child context))))
               ((= operator "finally")
@@ -705,11 +785,18 @@
       (when parameters
         (js-call (function-parameters parameters context) :forEach
           (lambda (parameter)
-            (js-call scope :add (node-name (get parameter :node))))))
+            (js-call (get parameter :bindings) :forEach
+              (lambda (binding)
+                (js-call scope :add (node-name binding)))))))
       scope))
 
   (defun copy-portable-scope (scope)
     (new (js* "Set") scope))
+
+  (defun add-portable-pattern (pattern scope context)
+    (js-call (binding-nodes pattern context) :forEach
+      (lambda (binding)
+        (js-call scope :add (node-name binding)))))
 
   (defun portable-reference
       (node scope declarations dependencies entry context)
@@ -743,7 +830,9 @@
     (let ((child (copy-portable-scope scope)))
       (js-call (function-parameters (nth 0 args) context) :forEach
         (lambda (parameter)
-          (js-call child :add (node-name (get parameter :node)))))
+          (js-call (get parameter :bindings) :forEach
+            (lambda (binding)
+              (js-call child :add (node-name binding))))))
       (portable-sequence
         (js-call args :slice 1)
         child declarations dependencies entry context)))
@@ -760,7 +849,7 @@
                      (initializer (and items (nth 1 items))))
                 (portable-expression
                   initializer child declarations dependencies entry context)
-                (js-call child :add (node-name name)))))
+                (add-portable-pattern name child context))))
         (progn
           (js-call bindings :forEach
             (lambda (binding)
@@ -771,8 +860,8 @@
           (js-call bindings :forEach
             (lambda (binding)
               (let ((items (list-items binding)))
-                (js-call child :add
-                  (node-name (if items (nth 0 items) binding))))))))
+                (add-portable-pattern
+                  (if items (nth 0 items) binding) child context))))))
       (portable-sequence
         (js-call args :slice 1)
         child declarations dependencies entry context)))

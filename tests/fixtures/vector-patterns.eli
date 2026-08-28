@@ -1,0 +1,25 @@
+(defun unpack ([first [second nil fourth] &rest tail]
+               &optional [fallback])
+  (let* (([head &rest rest] tail)
+         ([nested] [fallback]))
+    [first second fourth tail fallback head rest nested]))
+
+(defun let-pattern ()
+  (let (([nil value] [1 8]))
+    value))
+
+(defun let-star-pattern ()
+  (let* (([first] [3])
+         ([second] [(+ first 4)]))
+    second))
+
+(defportable pair-sum ([left right])
+  (+ left right))
+
+(defun catch-pair ()
+  (try
+    (throw [7 "caught"])
+    (catch [code message]
+      [code message])))
+
+(export unpack let-pattern let-star-pattern pair-sum catch-pair)

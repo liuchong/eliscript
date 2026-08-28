@@ -118,6 +118,32 @@ if [ "$EXCEPTIONS_OUTPUT" != '[4,"caught:zero",9,7,"async:bad","inner:outer",3]'
   exit 1
 fi
 
+PATTERNS_MODULE="$TEMP_DIR/vector-patterns.mjs"
+"$PROJECT_DIR/bin/eliscript" \
+  --source-map \
+  --output "$PATTERNS_MODULE" \
+  "$PROJECT_DIR/tests/fixtures/vector-patterns.eli"
+
+PATTERNS_OUTPUT=$(ELISCRIPT_PATTERNS_MODULE="$PATTERNS_MODULE" bun --eval '
+  const { pathToFileURL } = await import("node:url");
+  const module = await import(pathToFileURL(process.env.ELISCRIPT_PATTERNS_MODULE));
+  console.log(JSON.stringify([
+    module.unpack([1, [2, 3, 4], 5, 6], [9]),
+    module.unpack([1, [2, 3, 4]]),
+    module.let_pattern(),
+    module.let_star_pattern(),
+    module.pair_sum([20, 22]),
+    module.catch_pair(),
+  ]));
+')
+
+EXPECTED_PATTERNS='[[1,2,4,[5,6],9,5,[6],9],[1,2,4,[],null,null,[],null],8,7,42,[7,"caught"]]'
+if [ "$PATTERNS_OUTPUT" != "$EXPECTED_PATTERNS" ]; then
+  printf 'expected vector pattern output: %s\nactual vector pattern output:   %s\n' \
+    "$EXPECTED_PATTERNS" "$PATTERNS_OUTPUT" >&2
+  exit 1
+fi
+
 "$PROJECT_DIR/bin/eliscript" \
   --source-map \
   --output "$TEMP_DIR/react-counter.mjs" \

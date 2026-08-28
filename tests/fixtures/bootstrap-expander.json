@@ -26,6 +26,11 @@
       "source": "(defmacro identity (value) value)\n(defun recover (value)\n  (try (identity value)\n    (catch error (identity error))\n    (finally (identity nil))))"
     },
     {
+      "name": "vector-binding-patterns",
+      "filename": "patterns.eli",
+      "source": "(defmacro identity (value) value)\n(defun unpack ([first second])\n  (let (([left right] (identity [first second])))\n    [left right]))\n(defun recover ()\n  (try (throw [1 2])\n    (catch [code value] (identity [code value]))))"
+    },
+    {
       "name": "body-splicing",
       "filename": "body.eli",
       "source": "(defmacro begin (&body forms) `(progn ,@forms))\n(defun two () (begin 1 2))\n(export two)"

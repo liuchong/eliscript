@@ -46,6 +46,11 @@
       "source": "(defun recover (value)\n  (try\n    (if value value (throw \"missing\"))\n    (catch error (str \"caught:\" error))\n    (finally (print \"done\"))))\n(defasync settle (promise)\n  (try (await promise)\n    (catch error error)\n    (finally (await promise))))"
     },
     {
+      "name": "vector-binding-patterns",
+      "filename": "patterns.eli",
+      "source": "(defportable pair-sum ([left right]) (+ left right))\n(defun unpack ([first [second nil third] &rest tail] &optional [fallback])\n  (let* (([head &rest rest] tail) ([nested] [fallback]))\n    [first second third tail fallback head rest nested]))\n(defun recover ()\n  (try (throw [7 \"caught\"])\n    (catch [code message] [code message])))"
+    },
+    {
       "name": "portable-transitive-closure",
       "filename": "portable.eli",
       "source": "(defconst step 2)\n(defportable helper (value) (* value step))\n(defportable work (value) (helper value))"
@@ -201,13 +206,37 @@
       "name": "catch-without-binding",
       "filename": "exceptions.eli",
       "source": "(defun broken () (try 1 (catch)))",
-      "error": "exceptions.eli:1:25: catch requires a binding symbol"
+      "error": "exceptions.eli:1:25: catch requires a binding symbol or vector"
     },
     {
       "name": "portable-throw",
       "filename": "portable-exceptions.eli",
       "source": "(defportable work () (throw \"stop\"))",
       "error": "portable-exceptions.eli:1:22: portable function work cannot use throw (exception control flow)"
+    },
+    {
+      "name": "incomplete-vector-rest",
+      "filename": "patterns.eli",
+      "source": "(defun broken ([value &rest]) value)",
+      "error": "patterns.eli:1:16: vector &rest requires a binding"
+    },
+    {
+      "name": "trailing-vector-rest",
+      "filename": "patterns.eli",
+      "source": "(defun broken ([value &rest tail extra]) value)",
+      "error": "patterns.eli:1:34: vector &rest binding must be final"
+    },
+    {
+      "name": "vector-output-name-collision",
+      "filename": "patterns.eli",
+      "source": "(defun broken ([foo-bar foo_bar]) foo-bar)",
+      "error": "patterns.eli:1:25: binding foo_bar emits foo_bar, which collides with foo-bar"
+    },
+    {
+      "name": "pattern-rest-parameter",
+      "filename": "patterns.eli",
+      "source": "(defun broken (&rest [items]) items)",
+      "error": "patterns.eli:1:22: function &rest parameter must be a symbol"
     },
     {
       "name": "output-name-collision",

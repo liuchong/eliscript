@@ -33,8 +33,8 @@ body. Every `eliscript-ir-node` contains:
 The node-kind vocabulary covers the complete implemented language surface:
 
 - modules, imports, variables, functions, exports, and expression statements
-- bindings, references, literals, arrays, quoted values, functions, await, and
-  throw
+- scalar and array-pattern bindings, references, literals, arrays, quoted
+  values, functions, await, and throw
 - conditionals, sequences, lexical bindings, assignments, loops, and
   short-circuit and exception expressions
 - intrinsics, ordinary and computed calls, invocation, and application
@@ -95,7 +95,7 @@ implemented language surface.
 - CLI snapshots remain byte-for-byte stable and Bun executes the emitted ESM.
 - The portable `ir.eli` and `lower.eli` implementations serialize this model
   as ordinary JavaScript objects and arrays. A shared oracle compares complete
-  seed and portable trees for all 48 node kinds and all bootstrap sources.
+  seed and portable trees for all 51 node kinds and all bootstrap sources.
 
 ## Deferred Work
 

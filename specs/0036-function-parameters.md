@@ -27,10 +27,12 @@ The canonical order is:
 (required* [&optional optional*] [&rest rest])
 ```
 
-Every binding must be a symbol. `&optional` may occur at most once and only
-after required parameters. `&rest` may occur at most once, must be followed by
-exactly one symbol, and must end the list. `&body` remains a macro-only alias
-for macro rest parameters and is rejected in runtime function signatures.
+Required and optional bindings may be symbols or vector binding patterns; see
+[0039-vector-binding-patterns.md](0039-vector-binding-patterns.md). `&optional`
+may occur at most once and only after required parameters. Top-level `&rest`
+may occur at most once, must be followed by exactly one symbol, and must end the
+list. `&body` remains a macro-only alias for macro rest parameters and is
+rejected in runtime function signatures.
 
 Markers do not introduce bindings. Duplicate source names and JavaScript output
 identifier collisions are checked across all actual parameters in one lexical
@@ -51,6 +53,11 @@ JavaScript applies a default to an omitted argument and to an argument whose
 value is explicitly `undefined`. Both therefore become Eliscript `nil`. Other
 false values, including `false`, zero, and an empty string, remain unchanged.
 
+An optional vector pattern defaults to an empty array instead. This makes an
+omitted or explicit `undefined` argument safely destructurable; its individual
+names receive JavaScript `undefined`. An explicitly supplied `nil` remains
+`null` and follows native JavaScript's non-iterable error behavior.
+
 The rest parameter is always a newly allocated JavaScript array containing all
 remaining arguments. With no remaining arguments it is an empty array.
 
@@ -59,6 +66,9 @@ remaining arguments. With no remaining arguments it is an empty array.
 Each `parameter-binding` node has a `parameter-kind` property whose value is
 `required`, `optional`, or `rest`. Marker forms are not IR nodes and do not
 contribute to `parameter-count`.
+
+Pattern parameters additionally carry `pattern: true` and own one structural
+`array-binding-pattern` child rather than a scalar value.
 
 Keeping the distinction in IR lets both emitters, source maps, compatibility
 round trips, portable closure validation, and future backends consume one

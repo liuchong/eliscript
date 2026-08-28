@@ -24,28 +24,68 @@
   (eliscript-ir-make-node
    kind (eliscript-form-span form) value children properties))
 
+(defun eliscript-lower--binding-target (pattern)
+  "Lower binding PATTERN to structural IR."
+  (let ((value (eliscript-form-value pattern)))
+    (cond
+     ((symbolp value)
+      (eliscript-lower--node 'binding-name pattern value))
+     ((vectorp value)
+      (let (children rest)
+        (dolist (element (append value nil))
+          (let ((element-value (eliscript-form-value element)))
+            (cond
+             ((eq element-value '&rest) (setq rest t))
+             ((null element-value)
+              (push (eliscript-lower--node 'binding-hole element) children))
+             (t
+              (push (eliscript-lower--binding-target element) children)))))
+        (eliscript-lower--node
+         'array-binding-pattern pattern nil (nreverse children)
+         (and rest (list :rest t)))))
+     (t (error "Cannot lower invalid binding pattern: %S"
+               (eliscript-form-strip pattern))))))
+
 (defun eliscript-lower--binding-node (binding)
   "Lower one lexical BINDING to IR."
   (let ((value (eliscript-form-value binding)))
     (if (symbolp value)
         (eliscript-lower--node
          'lexical-binding binding value nil (list :style 'symbol))
-      (eliscript-lower--node
-       'lexical-binding
-       binding
-       (eliscript-form-value (car value))
-       (and (cdr value)
-            (list (eliscript-lower-expression (cadr value))))
-       (list :style 'list)))))
+      (if (vectorp value)
+          (eliscript-lower--node
+           'lexical-binding binding nil
+           (list (eliscript-lower--binding-target binding))
+           (list :style 'symbol :pattern t))
+        (let ((target (car value)))
+          (if (vectorp (eliscript-form-value target))
+              (eliscript-lower--node
+               'lexical-binding binding nil
+               (cons
+                (eliscript-lower--binding-target target)
+                (and (cdr value)
+                     (list (eliscript-lower-expression (cadr value)))))
+               (list :style 'list :pattern t))
+            (eliscript-lower--node
+             'lexical-binding binding (eliscript-form-value target)
+             (and (cdr value)
+                  (list (eliscript-lower-expression (cadr value))))
+             (list :style 'list))))))))
 
 (defun eliscript-lower--parameter-nodes (parameters)
   "Lower located function PARAMETERS to binding nodes."
   (mapcar
    (lambda (parameter)
      (let ((form (eliscript-parameter-form parameter)))
-       (eliscript-lower--node
-        'parameter-binding form (eliscript-form-value form) nil
-        (list :parameter-kind (eliscript-parameter-kind parameter)))))
+       (if (vectorp (eliscript-form-value form))
+           (eliscript-lower--node
+            'parameter-binding form nil
+            (list (eliscript-lower--binding-target form))
+            (list :parameter-kind (eliscript-parameter-kind parameter)
+                  :pattern t))
+         (eliscript-lower--node
+          'parameter-binding form (eliscript-form-value form) nil
+          (list :parameter-kind (eliscript-parameter-kind parameter))))))
    (eliscript-parameters-parse
     parameters
     (lambda (_form message) (error "%s" message)))))
@@ -117,8 +157,13 @@
               (eliscript-lower--node
                'catch-clause argument nil
                (cons
-                (eliscript-lower--node
-                 'catch-binding binding (eliscript-form-value binding))
+                (if (vectorp (eliscript-form-value binding))
+                    (eliscript-lower--node
+                     'catch-binding binding nil
+                     (list (eliscript-lower--binding-target binding))
+                     (list :pattern t))
+                  (eliscript-lower--node
+                   'catch-binding binding (eliscript-form-value binding)))
                 (mapcar #'eliscript-lower-expression (cddr value))))
               clauses)))
           ('finally

@@ -26,7 +26,8 @@
 (defconst eliscript-ir-node-kinds
   '(module-declaration import-declaration import-default import-namespace
     import-named variable-declaration function-declaration export-declaration
-    export-default expression-statement parameter-binding reference literal
+    export-default expression-statement parameter-binding
+    array-binding-pattern binding-name binding-hole reference literal
     array-literal quoted-literal function-expression await-expression
     throw-expression try-expression catch-clause catch-binding finally-clause
     conditional conditional-sugar
@@ -76,13 +77,23 @@
 
 (defun eliscript-ir--binding-to-form (node)
   "Convert lexical binding NODE to a reader-shaped form."
-  (let ((name (eliscript-ir-node-value node))
-        (children (eliscript-ir-node-children node)))
+  (let* ((pattern (eliscript-ir-property node :pattern))
+         (children (eliscript-ir-node-children node))
+         (name (if pattern
+                   (eliscript-ir-node-to-form (car children))
+                 (eliscript-ir-node-value node)))
+         (values (if pattern (cdr children) children)))
     (pcase (eliscript-ir-property node :style)
       ('symbol name)
-      (_ (if children
-             (list name (eliscript-ir-node-to-form (car children)))
+      (_ (if values
+             (list name (eliscript-ir-node-to-form (car values)))
            (list name))))))
+
+(defun eliscript-ir--binding-target-to-form (node)
+  "Convert binding wrapper NODE to its reader-shaped target."
+  (if (eliscript-ir-property node :pattern)
+      (eliscript-ir-node-to-form (car (eliscript-ir-node-children node)))
+    (eliscript-ir-node-value node)))
 
 (defun eliscript-ir--operator-form (node)
   "Convert operator-style IR NODE to a reader-shaped form."
@@ -100,7 +111,7 @@
            (push '&optional forms)
            (setq optional-marker t)))
         ('rest (push '&rest forms)))
-      (push (eliscript-ir-node-value node) forms))
+      (push (eliscript-ir--binding-target-to-form node) forms))
     (nreverse forms)))
 
 (defun eliscript-ir-node-to-form (node)
@@ -108,8 +119,19 @@
   (unless (eliscript-ir-node-p node)
     (error "Expected an Eliscript IR node: %S" node))
   (pcase (eliscript-ir-node-kind node)
-    ((or 'literal 'reference 'parameter-binding 'catch-binding)
+    ((or 'literal 'reference 'binding-name)
      (eliscript-ir-node-value node))
+    ((or 'parameter-binding 'catch-binding)
+     (eliscript-ir--binding-target-to-form node))
+    ('binding-hole nil)
+    ('array-binding-pattern
+     (let* ((children (eliscript-ir-node-children node))
+            (forms (mapcar #'eliscript-ir-node-to-form children)))
+       (when (eliscript-ir-property node :rest)
+         (setq forms
+               (append (butlast forms)
+                       (list '&rest (car (last forms))))))
+       (apply #'vector forms)))
     ('quoted-literal
      (list 'quote (eliscript-ir-node-value node)))
     ('array-literal
@@ -183,7 +205,7 @@
        (cons
         'catch
         (cons
-         (eliscript-ir-node-value (car children))
+         (eliscript-ir--binding-target-to-form (car children))
          (mapcar #'eliscript-ir-node-to-form (cdr children))))))
     ('finally-clause
      (cons 'finally

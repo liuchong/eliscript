@@ -71,6 +71,39 @@
   (let ((output (eliscript-emitter-emit-expression form)))
     (if (symbolp form) output (format "(%s)" output))))
 
+(defun eliscript-emitter--binding-pattern-p (form)
+  "Return non-nil when FORM is a vector binding pattern."
+  (vectorp (eliscript-form-value form)))
+
+(defun eliscript-emitter--emit-binding-target (form)
+  "Emit symbol or vector binding FORM as JavaScript syntax."
+  (let ((value (eliscript-form-value form)))
+    (cond
+     ((and value (symbolp value))
+      (eliscript-emitter--binding-name value))
+     ((vectorp value)
+      (let (parts rest-next last-hole)
+        (dolist (element (append value nil))
+          (let ((element-value (eliscript-form-value element)))
+            (cond
+             ((eq element-value '&rest) (setq rest-next t))
+             (t
+              (setq last-hole (null element-value))
+              (push
+               (if rest-next
+                   (concat "..."
+                           (eliscript-emitter--emit-binding-target element))
+                 (if last-hole
+                     ""
+                   (eliscript-emitter--emit-binding-target element)))
+               parts)
+              (setq rest-next nil)))))
+        (format "[%s%s]"
+                (string-join (nreverse parts) ", ")
+                (if last-hole "," ""))))
+     (t (eliscript-emitter--fail
+         "invalid binding pattern: %S" (eliscript-form-strip form))))))
+
 (defun eliscript-emitter--emit-returning-body (forms)
   "Emit FORMS as a block body that returns its final value."
   (if (null forms)
@@ -131,9 +164,9 @@
 (defun eliscript-emitter--parse-binding (binding)
   "Return the name and initializer represented by BINDING."
   (cond
-   ((symbolp binding) (list binding nil))
+   ((or (symbolp binding) (vectorp binding)) (list binding nil))
    ((and (listp binding) (<= 1 (length binding)) (<= (length binding) 2)
-         (symbolp (car binding)))
+         (or (symbolp (car binding)) (vectorp (car binding))))
     (list (car binding) (cadr binding)))
    (t (eliscript-emitter--fail "invalid let binding: %S" binding))))
 
@@ -153,10 +186,16 @@
            nil))
       (let* ((parsed (mapcar #'eliscript-emitter--parse-binding bindings))
              (names (mapcar (lambda (item)
-                              (eliscript-emitter--binding-name (car item)))
+                              (eliscript-emitter--emit-binding-target
+                               (car item)))
                             parsed))
              (values (mapcar (lambda (item)
-                               (eliscript-emitter-emit-expression (cadr item)))
+                               (if (and (null (cadr item))
+                                        (eliscript-emitter--binding-pattern-p
+                                         (car item)))
+                                   "[]"
+                                 (eliscript-emitter-emit-expression
+                                  (cadr item))))
                              parsed)))
         (eliscript-emitter--emit-iife
          (string-join names ", ")
@@ -181,11 +220,11 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
 
 (defun eliscript-emitter--emit-parameter (parameter)
   "Emit parsed function PARAMETER."
-  (let ((name
-         (eliscript-emitter--binding-name
-          (eliscript-form-value (eliscript-parameter-form parameter)))))
+  (let* ((form (eliscript-parameter-form parameter))
+         (name (eliscript-emitter--emit-binding-target form))
+         (pattern (eliscript-emitter--binding-pattern-p form)))
     (pcase (eliscript-parameter-kind parameter)
-      ('optional (format "%s = null" name))
+      ('optional (format "%s = %s" name (if pattern "[]" "null")))
       ('rest (format "...%s" name))
       (_ name))))
 
@@ -240,8 +279,12 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
             "try accepts at most one catch clause"))
          (when finally-seen
            (eliscript-emitter--fail "catch must precede finally"))
-         (unless (and (cdr argument) (symbolp (cadr argument)))
-           (eliscript-emitter--fail "catch requires a binding symbol"))
+         (unless (and (cdr argument)
+                      (let ((binding (cadr argument)))
+                        (or (and binding (symbolp binding))
+                            (vectorp binding))))
+           (eliscript-emitter--fail
+            "catch requires a binding symbol or vector"))
          (setq clauses-started t
                catch-seen t
                catch-name (cadr argument)
@@ -269,7 +312,7 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
             (if catch-seen
                 (concat
                  " catch ("
-                 (eliscript-emitter--binding-name catch-name)
+                 (eliscript-emitter--emit-binding-target catch-name)
                  ") {\n"
                  (eliscript-emitter--indent
                   (eliscript-emitter--emit-returning-body catch-body))

@@ -214,6 +214,73 @@
     (should-error (eliscript-compile-string source "parameters.eli")
                   :type 'eliscript-analyze-error)))
 
+(ert-deftest eliscript-supports-vector-binding-patterns ()
+  (let* ((source
+          "(defun unpack ([first [second nil fourth] &rest tail]
+               &optional [fallback])
+  (let* (([head &rest rest] tail)
+         ([nested] [fallback]))
+    [first second fourth tail fallback head rest nested]))
+(defun catch-pair ()
+  (try
+    (throw [7 \"caught\"])
+    (catch [code message] [code message])))")
+         (output (eliscript-compile-string source "patterns.eli"))
+         (program (eliscript-compile-ir-string source "patterns.eli"))
+         kinds
+         rest-pattern)
+    (eliscript-ir-walk
+     program
+     (lambda (node)
+       (push (eliscript-ir-node-kind node) kinds)
+       (when (and (eq (eliscript-ir-node-kind node)
+                      'array-binding-pattern)
+                  (eliscript-ir-property node :rest))
+         (setq rest-pattern node))))
+    (should (equal output
+                   (eliscript-tests--legacy-compile-string
+                    source "patterns.eli")))
+    (should (string-match-p
+             (regexp-quote
+              "function unpack([first, [second, , fourth], ...tail], [fallback] = [])")
+             output))
+    (should (string-match-p
+             (regexp-quote "catch ([code, message])") output))
+    (dolist (kind '(array-binding-pattern binding-name binding-hole))
+      (should (memq kind kinds)))
+    (should rest-pattern)
+    (should
+     (equal
+      (eliscript-ir-program-to-forms program)
+      '((defun unpack
+            ([first [second nil fourth] &rest tail] &optional [fallback])
+          (let* (([head &rest rest] tail)
+                 ([nested] [fallback]))
+            [first second fourth tail fallback head rest nested]))
+        (defun catch-pair nil
+          (try
+            (throw [7 "caught"])
+            (catch [code message] [code message])))))))
+  (should
+   (string-match-p
+    (regexp-quote "function pair_sum([left, right])")
+    (eliscript-compile-portable-string
+     "(defportable pair-sum ([left right]) (+ left right))"
+     '(pair-sum)
+     "portable-patterns.eli")))
+  (dolist (source
+           '("(defun broken ([value value]) value)"
+             "(defun broken ([foo-bar foo_bar]) foo-bar)"
+             "(defun broken ([value &rest]) value)"
+             "(defun broken ([value &rest tail extra]) value)"
+             "(defun broken ([value &rest [tail]]) value)"
+             "(defun broken ([value &optional next]) value)"
+             "(defun broken (&rest [items]) items)"
+             "(let (([left right] [1 2]) ([next] [left])) next)"
+             "(progn (try (throw [1]) (catch [value] value)) value)"))
+    (should-error (eliscript-compile-string source "patterns.eli")
+                  :type 'eliscript-analyze-error)))
+
 (ert-deftest eliscript-supports-async-functions-and-await ()
   (let* ((source
           "(defasync resolve-value (value &optional transform)

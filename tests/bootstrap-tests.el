@@ -261,8 +261,10 @@
        `((parameterCount . ,(eliscript-ir-property node :parameter-count))
          (async . ,(if (eliscript-ir-property node :async) t :false))))
       ('parameter-binding
-       `((parameterKind . ,(symbol-name
-                            (eliscript-ir-property node :parameter-kind)))))
+       (append
+        `((parameterKind . ,(symbol-name
+                             (eliscript-ir-property node :parameter-kind))))
+        (and (eliscript-ir-property node :pattern) '((pattern . t)))))
       ('variable-declaration
        `((sourceOperator . ,(symbol-name
                              (eliscript-ir-property node :source-operator)))
@@ -276,7 +278,13 @@
       ('try-expression
        `((bodyCount . ,(eliscript-ir-property node :body-count))))
       ('lexical-binding
-       `((style . ,(symbol-name (eliscript-ir-property node :style)))))
+       (append
+        `((style . ,(symbol-name (eliscript-ir-property node :style))))
+        (and (eliscript-ir-property node :pattern) '((pattern . t)))))
+      ('catch-binding
+       (and (eliscript-ir-property node :pattern) '((pattern . t))))
+      ('array-binding-pattern
+       (and (eliscript-ir-property node :rest) '((rest . t))))
       ((or 'react-element 'react-fragment)
        `((childCount . ,(eliscript-ir-property node :child-count))))
       ('object-property

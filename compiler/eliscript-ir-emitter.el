@@ -33,11 +33,62 @@
    node
    (eliscript-emitter--binding-name (eliscript-ir-node-value node))))
 
+(defun eliscript-ir-emitter--emit-array-binding-pattern (node)
+  "Emit array binding pattern NODE."
+  (let* ((children (eliscript-ir-emitter--children node))
+         (rest (eliscript-ir-property node :rest))
+         (last-index (1- (length children)))
+         (index 0)
+         parts
+         last-hole)
+    (dolist (child children)
+      (setq last-hole (eq (eliscript-ir-node-kind child) 'binding-hole))
+      (push
+       (cond
+        ((and rest (= index last-index))
+         (concat "..."
+                 (eliscript-ir-emitter--emit-binding-pattern-node child)))
+        (last-hole "")
+        (t (eliscript-ir-emitter--emit-binding-pattern-node child)))
+       parts)
+      (setq index (1+ index)))
+    (eliscript-ir-emitter--locate
+     node
+     (format "[%s%s]"
+             (string-join (nreverse parts) ", ")
+             (if (and last-hole (not rest)) "," "")))))
+
+(defun eliscript-ir-emitter--emit-binding-pattern-node (node)
+  "Emit structural binding pattern NODE."
+  (pcase (eliscript-ir-node-kind node)
+    ('binding-name (eliscript-ir-emitter--emit-binding-name node))
+    ('binding-hole "")
+    ('array-binding-pattern
+     (eliscript-ir-emitter--emit-array-binding-pattern node))
+    (_ (eliscript-emitter--fail
+        "invalid IR binding pattern node: %S"
+        (eliscript-ir-node-kind node)))))
+
+(defun eliscript-ir-emitter--emit-binding-target (node)
+  "Emit scalar or structured binding wrapper NODE."
+  (if (eliscript-ir-property node :pattern)
+      (eliscript-ir-emitter--emit-binding-pattern-node
+       (car (eliscript-ir-emitter--children node)))
+    (eliscript-ir-emitter--emit-binding-name node)))
+
+(defun eliscript-ir-emitter--binding-initializer (node)
+  "Return lexical binding NODE's initializer child, or nil."
+  (let ((children (eliscript-ir-emitter--children node)))
+    (car (if (eliscript-ir-property node :pattern)
+             (cdr children)
+           children))))
+
 (defun eliscript-ir-emitter--emit-parameter (node)
   "Emit function parameter binding NODE."
-  (let ((name (eliscript-ir-emitter--emit-binding-name node)))
+  (let ((name (eliscript-ir-emitter--emit-binding-target node))
+        (pattern (eliscript-ir-property node :pattern)))
     (pcase (eliscript-ir-property node :parameter-kind)
-      ('optional (concat name " = null"))
+      ('optional (concat name " = " (if pattern "[]" "null")))
       ('rest (concat "..." name))
       (_ name))))
 
@@ -198,7 +249,7 @@
      node
      (concat
       " catch ("
-      (eliscript-ir-emitter--emit-binding-name binding)
+      (eliscript-ir-emitter--emit-binding-target binding)
       ") {\n"
       (eliscript-emitter--indent
        (eliscript-ir-emitter--emit-returning-body body))
@@ -266,15 +317,17 @@
   "Emit BINDINGS and BODY, nesting SEQUENTIAL-TAIL when requested."
   (let ((names
          (mapcar (lambda (binding)
-                   (eliscript-ir-emitter--emit-binding-name binding))
+                   (eliscript-ir-emitter--emit-binding-target binding))
                  bindings))
         (values
          (mapcar (lambda (binding)
                    (let ((initializer
-                          (car (eliscript-ir-emitter--children binding))))
+                          (eliscript-ir-emitter--binding-initializer binding)))
                      (if initializer
                          (eliscript-ir-emitter-emit-expression initializer)
-                       "null")))
+                       (if (eliscript-ir-property binding :pattern)
+                           "[]"
+                         "null"))))
                  bindings)))
     (eliscript-ir-emitter--emit-iife
      (string-join names ", ")

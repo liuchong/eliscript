@@ -19,6 +19,9 @@
   (defun keyword-node-p (node)
     (and node (= (node-kind node) "keyword")))
 
+  (defun vector-node-p (node)
+    (and node (= (node-kind node) "vector")))
+
   (defun string-node-p (node)
     (and node
          (= (node-kind node) "literal")
@@ -79,6 +82,32 @@
        (make-node
          "literal" (node-span form) (node-value form) [] nil))))
 
+  (defun lower-binding-target (pattern)
+    (cond
+      ((symbol-node-p pattern)
+       (make-node
+         "binding-name" (node-span pattern) (node-name pattern) [] nil))
+      ((vector-node-p pattern)
+       (let ((children [])
+             (rest false))
+         (js-call (node-items pattern) :forEach
+           (lambda (element)
+             (cond
+               ((and (symbol-node-p element)
+                     (= (node-name element) "&rest"))
+                (setq rest t))
+               ((null-node-p element)
+                (js-call children :push
+                  (make-node
+                    "binding-hole" (node-span element) nil [] nil)))
+               (t
+                (js-call children :push
+                  (lower-binding-target element))))))
+         (make-node
+           "array-binding-pattern" (node-span pattern) nil children
+           (if rest (object :rest t) nil))))
+      (t (fail "cannot lower invalid binding pattern"))))
+
   (defun lower-parameter-nodes (parameters)
     (let ((result [])
           (items (list-items parameters))
@@ -90,12 +119,20 @@
               ((= name "&optional") (setq mode "optional"))
               ((= name "&rest") (setq mode "rest"))
               (t
-               (js-call result :push
-                 (make-node
-                   "parameter-binding"
-                   (node-span parameter)
-                   name
-                   [] (object :parameterKind mode)))
+               (if (vector-node-p parameter)
+                   (js-call result :push
+                     (make-node
+                       "parameter-binding"
+                       (node-span parameter)
+                       nil
+                       [(lower-binding-target parameter)]
+                       (object :parameterKind mode :pattern t)))
+                 (js-call result :push
+                   (make-node
+                     "parameter-binding"
+                     (node-span parameter)
+                     name
+                     [] (object :parameterKind mode))))
                (when (= mode "rest") (setq mode "done")))))))
       result))
 
@@ -104,14 +141,31 @@
         (make-node
           "lexical-binding" (node-span binding) (node-name binding) []
           (object :style "symbol"))
-      (let* ((items (list-items binding))
-             (name (nth 0 items))
-             (children []))
-        (when (> (get items :length) 1)
-          (js-call children :push (lower-expression (nth 1 items))))
-        (make-node
-          "lexical-binding" (node-span binding) (node-name name) children
-          (object :style "list")))))
+      (if (vector-node-p binding)
+          (make-node
+            "lexical-binding" (node-span binding) nil
+            [(lower-binding-target binding)]
+            (object :style "symbol" :pattern t))
+        (let* ((items (list-items binding))
+               (target (nth 0 items))
+               (children []))
+          (if (vector-node-p target)
+              (progn
+                (js-call children :push (lower-binding-target target))
+                (when (> (get items :length) 1)
+                  (js-call children :push
+                    (lower-expression (nth 1 items))))
+                (make-node
+                  "lexical-binding" (node-span binding) nil children
+                  (object :style "list" :pattern t)))
+            (progn
+              (when (> (get items :length) 1)
+                (js-call children :push
+                  (lower-expression (nth 1 items))))
+              (make-node
+                "lexical-binding" (node-span binding)
+                (node-name target) children
+                (object :style "list"))))))))
 
   (defun lower-call-node (kind form operator args)
     (make-node
@@ -183,10 +237,16 @@
               ((= operator "catch")
                (let ((binding (nth 1 items))
                      (children []))
-                 (js-call children :push
-                   (make-node
-                     "catch-binding" (node-span binding)
-                     (node-name binding) [] nil))
+                 (if (vector-node-p binding)
+                     (js-call children :push
+                       (make-node
+                         "catch-binding" (node-span binding) nil
+                         [(lower-binding-target binding)]
+                         (object :pattern t)))
+                   (js-call children :push
+                     (make-node
+                       "catch-binding" (node-span binding)
+                       (node-name binding) [] nil)))
                  (append-nodes children
                    (lower-sequence (js-call items :slice 2)))
                  (js-call clauses :push

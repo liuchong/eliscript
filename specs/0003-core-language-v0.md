@@ -93,6 +93,11 @@ All local bindings are lexical. Function signatures may contain an
 [0036-function-parameters.md](0036-function-parameters.md). Dynamic scope,
 special variables, and declarations are not implemented.
 
+Required and optional function parameters, `let` and `let*` targets, and catch
+bindings may use nested vector patterns. Nil entries consume values without
+binding, and one final `&rest` captures the remaining array. See
+[0039-vector-binding-patterns.md](0039-vector-binding-patterns.md).
+
 A function returns the value of its final body form. An empty function body
 returns `null`.
 

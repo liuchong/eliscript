@@ -144,16 +144,30 @@
 
 (defun eliscript-portable--parameter-forms (parameters)
   "Return binding forms from function PARAMETERS."
-  (mapcar
-   #'eliscript-parameter-form
-   (eliscript-parameters-parse
-    parameters
-    (lambda (_form message) (eliscript-portable--fail "%s" message)))))
+  (apply
+   #'append
+   (mapcar
+    (lambda (parameter)
+      (eliscript-binding-names
+       (eliscript-parameter-form parameter)
+       (lambda (_form message) (eliscript-portable--fail "%s" message))))
+    (eliscript-parameters-parse
+     parameters
+     (lambda (_form message) (eliscript-portable--fail "%s" message))))))
 
 (defun eliscript-portable--binding-name (binding)
-  "Return the name form from lexical BINDING."
+  "Return the target form from lexical BINDING."
   (let ((value (eliscript-portable--value binding)))
-    (if (symbolp value) binding (car value))))
+    (if (or (symbolp value) (vectorp value)) binding (car value))))
+
+(defun eliscript-portable--add-pattern (pattern scope)
+  "Add every name in binding PATTERN to portable SCOPE."
+  (dolist
+      (name
+       (eliscript-binding-names
+        pattern
+        (lambda (_form message) (eliscript-portable--fail "%s" message))))
+    (puthash (eliscript-portable--value name) t scope)))
 
 (defun eliscript-portable--binding-value (binding)
   "Return the initializer from lexical BINDING, or nil."
@@ -225,20 +239,16 @@
           (eliscript-portable--expression
            (eliscript-portable--binding-value binding)
            child declarations dependencies)
-          (puthash
-           (eliscript-portable--value
-            (eliscript-portable--binding-name binding))
-           t child))
+          (eliscript-portable--add-pattern
+           (eliscript-portable--binding-name binding) child))
       (progn
         (dolist (binding bindings)
           (eliscript-portable--expression
            (eliscript-portable--binding-value binding)
            scope declarations dependencies))
         (dolist (binding bindings)
-          (puthash
-           (eliscript-portable--value
-            (eliscript-portable--binding-name binding))
-           t child))))
+          (eliscript-portable--add-pattern
+           (eliscript-portable--binding-name binding) child))))
     (eliscript-portable--sequence
      (cdr arguments) child declarations dependencies)))
 

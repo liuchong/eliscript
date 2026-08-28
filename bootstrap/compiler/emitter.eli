@@ -130,11 +130,57 @@
   (defun emit-binding-name (node)
     (locate node (binding-name (ir-value node))))
 
-  (defun emit-parameter (node)
-    (let ((name (emit-binding-name node))
-          (kind (ir-property node "parameterKind")))
+  (defun emit-array-binding-pattern (node)
+    (let* ((nodes (children node))
+           (rest (ir-property node "rest"))
+           (last-index (1- (get nodes :length)))
+           (parts [])
+           (index 0)
+           (last-hole false))
+      (js-call nodes :forEach
+        (lambda (child)
+          (setq last-hole (= (ir-kind child) "binding-hole"))
+          (js-call parts :push
+            (cond
+              ((and rest (= index last-index))
+               (combine ["..." (emit-binding-pattern-node child)]))
+              (last-hole "")
+              (t (emit-binding-pattern-node child))))
+          (setq index (1+ index))))
+      (locate
+        node
+        (combine
+          ["[" (join-fragments parts ", ")
+           (if (and last-hole (not rest)) "," "") "]"]))))
+
+  (defun emit-binding-pattern-node (node)
+    (let ((kind (ir-kind node)))
       (cond
-        ((= kind "optional") (combine [name " = null"]))
+        ((= kind "binding-name") (emit-binding-name node))
+        ((= kind "binding-hole") "")
+        ((= kind "array-binding-pattern")
+         (emit-array-binding-pattern node))
+        (t (fail (str "invalid IR binding pattern node: " kind))))))
+
+  (defun emit-binding-target (node)
+    (if (ir-property node "pattern")
+        (emit-binding-pattern-node (nth 0 (children node)))
+      (emit-binding-name node)))
+
+  (defun binding-initializer (node)
+    (let ((nodes (children node)))
+      (nth 0
+        (if (ir-property node "pattern")
+            (js-call nodes :slice 1)
+          nodes))))
+
+  (defun emit-parameter (node)
+    (let ((name (emit-binding-target node))
+          (kind (ir-property node "parameterKind"))
+          (pattern (ir-property node "pattern")))
+      (cond
+        ((= kind "optional")
+         (combine [name " = " (if pattern "[]" "null")]))
         ((= kind "rest") (combine ["..." name]))
         (t name))))
 
@@ -274,7 +320,7 @@
       (locate
         node
         (combine
-          [" catch (" (emit-binding-name binding) ") {\n"
+          [" catch (" (emit-binding-target binding) ") {\n"
            (indent (emit-returning-body body))
            "\n}"]))))
 
@@ -310,16 +356,18 @@
     (let ((result []))
       (js-call bindings :forEach
         (lambda (binding)
-          (let ((initializer (nth 0 (children binding))))
+          (let ((initializer (binding-initializer binding)))
             (js-call result :push
-              (if initializer (emit-expression initializer) "null")))))
+              (if initializer
+                  (emit-expression initializer)
+                (if (ir-property binding "pattern") "[]" "null"))))))
       result))
 
   (defun emit-parallel-let (bindings body)
     (let* ((names
             (join-fragments
               (js-call bindings :map
-                (lambda (binding) (emit-binding-name binding)))
+                (lambda (binding) (emit-binding-target binding)))
               ", "))
            (values (join-fragments (emit-binding-values bindings) ", "))
            (body-output (indent (emit-returning-body body))))
@@ -329,7 +377,7 @@
     (if (= (get bindings :length) 0)
         (emit-do body)
       (let ((binding (nth 0 bindings)))
-        (let* ((name (emit-binding-name binding))
+        (let* ((name (emit-binding-target binding))
                (initializer (nth 0 (emit-binding-values [binding])))
                (tail (emit-sequential-let (js-call bindings :slice 1) body)))
           (emit-iife

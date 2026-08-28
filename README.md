@@ -219,6 +219,8 @@ Implemented forms include:
 
 - literals, symbols, keywords, vectors, quoted lists, and object literals
 - `defvar`, `defconst`, `defun`, `defportable`, `lambda`, `let`, and `let*`
+- nested vector binding patterns in function parameters, lexical bindings, and
+  catch clauses, including nil holes and final `&rest`
 - `if`, `when`, `unless`, `cond`, `progn`, `while`, `and`, and `or`
 - expression-valued `try`, lexical `catch`, `finally`, and `throw`
 - `setq`, arithmetic, comparisons, explicit nullish predicates, and basic
@@ -339,6 +341,9 @@ Current evidence:
 - Named, anonymous, component, and portable functions share required,
   `&optional`, and trailing `&rest` parameters; explicit IR kinds keep both
   compiler generations and compatibility round trips aligned.
+- Function parameters, `let`/`let*`, and catch clauses accept nested vector
+  binding patterns with consuming nil holes and one final rest binding. Every
+  bound name retains independent lexical validation and source mapping.
 - Named `defasync`, anonymous `async`, and lexically checked `await` forms emit
   native Promise code. Generated expression IIFEs become async only when they
   contain suspension in the current function boundary.
@@ -385,7 +390,7 @@ Current evidence:
   portable analyzer directly.
 - Portable IR and lowering modules written in Eliscript convert analyzed
   syntax into JSON-safe programs. Complete trees, properties, quoted data, and
-  source spans match the seed across every one of the 48 IR node kinds.
+  source spans match the seed across every one of the 51 IR node kinds.
 - Portable ESM and Source Map emitters consume that IR without Emacs text
   properties. Their output is byte-identical to the seed across examples and
   all ten bootstrap modules, including Unicode mapping columns.
@@ -440,7 +445,7 @@ Current evidence:
 - Repeated `--portable NAME` options make the same builder verify every local
   `import-portable` target, reject bare or escaping source edges, and emit only
   each module's requested transitive closure.
-- Ninety-one ERT tests cover reading, locations, macro expansion, analysis, IR
+- Ninety-two ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
 - Eighteen Bun tests cover the compiler and Org Vite adapters, source-map
@@ -551,7 +556,11 @@ parameter kinds, and
 for native Promise functions, lexical await validation, and async generated
 expression wrappers, and
 [specs/0038-exception-control-flow.md](specs/0038-exception-control-flow.md)
-for expression-valued try/catch/finally, lexical error bindings, and throw.
+for expression-valued try/catch/finally, lexical error bindings, and throw,
+and
+[specs/0039-vector-binding-patterns.md](specs/0039-vector-binding-patterns.md)
+for nested array destructuring across functions, lexical bindings, catches,
+portable code, and both compiler generations.
 
 ## License
 

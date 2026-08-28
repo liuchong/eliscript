@@ -40,10 +40,11 @@ the clauses. An empty try, catch, or finally body is valid and has a normal
 value of `nil` where that value is observed. `catch` and `finally` are reserved
 clauses and are rejected as standalone expressions.
 
-The catch binding must be a symbol. It is a mutable lexical binding visible
-only in the catch body, may shadow an outer name, and participates in normal
-output-name collision validation. The finally body uses the surrounding scope;
-the catch binding is not visible there.
+The catch binding may be a symbol or vector binding pattern. It is mutable,
+visible only in the catch body, may shadow outer names, and participates in
+normal duplicate and output-name collision validation. The finally body uses
+the surrounding scope; catch bindings are not visible there. Vector behavior
+is defined by [0039-vector-binding-patterns.md](0039-vector-binding-patterns.md).
 
 ## Value and Completion Semantics
 
@@ -77,7 +78,8 @@ Five public IR kinds represent the feature:
 - `try-expression` stores direct body children followed by clauses and records
   `bodyCount`.
 - `catch-clause` owns one `catch-binding` child followed by body expressions.
-- `catch-binding` retains the narrow source span of the binding symbol.
+- `catch-binding` retains the narrow source span of its symbol or pattern and
+  owns structural pattern IR when needed.
 - `finally-clause` owns its body expressions.
 
 The compatibility round trip reconstructs canonical `try`, `catch`, `finally`,

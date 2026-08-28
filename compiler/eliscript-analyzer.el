@@ -95,6 +95,19 @@
       (puthash output-name binding outputs)
       binding)))
 
+(defun eliscript-analyzer--declare-pattern (scope pattern kind mutable)
+  "Declare every name in binding PATTERN in SCOPE."
+  (dolist
+      (name
+       (eliscript-binding-names
+        pattern
+        (lambda (form message)
+          (let ((eliscript-analyzer--current-span
+                 (or (eliscript-form-span form)
+                     eliscript-analyzer--current-span)))
+            (eliscript-analyzer--fail "%s" message)))))
+    (eliscript-analyzer--declare scope name kind mutable)))
+
 (defun eliscript-analyzer--lookup (scope name)
   "Resolve NAME from SCOPE or its parents."
   (let (binding)
@@ -123,11 +136,26 @@
           (or (eliscript-form-span binding) eliscript-analyzer--current-span))
          (value (eliscript-form-value binding)))
     (cond
-     ((symbolp value) (list binding nil))
+     ((eliscript-binding-pattern-p binding)
+      (eliscript-binding-names
+       binding
+       (lambda (form message)
+         (let ((eliscript-analyzer--current-span
+                (or (eliscript-form-span form)
+                    eliscript-analyzer--current-span)))
+           (eliscript-analyzer--fail "%s" message))))
+      (list binding nil))
      ((and (proper-list-p value)
            (<= 1 (length value))
            (<= (length value) 2)
-           (symbolp (eliscript-form-value (car value))))
+           (eliscript-binding-pattern-p (car value)))
+      (eliscript-binding-names
+       (car value)
+       (lambda (form message)
+         (let ((eliscript-analyzer--current-span
+                (or (eliscript-form-span form)
+                    eliscript-analyzer--current-span)))
+           (eliscript-analyzer--fail "%s" message))))
       (list (car value) (cadr value)))
      (t (eliscript-analyzer--fail
          "invalid let binding: %S" (eliscript-form-strip binding))))))
@@ -151,12 +179,13 @@
           (pcase-let ((`(,name ,value)
                        (eliscript-analyzer--binding-pair binding)))
             (eliscript-analyzer--analyze-expression value child)
-            (eliscript-analyzer--declare child name 'local t)))
+            (eliscript-analyzer--declare-pattern child name 'local t)))
       (let ((parsed (mapcar #'eliscript-analyzer--binding-pair bindings)))
         (dolist (binding parsed)
           (eliscript-analyzer--analyze-expression (cadr binding) scope))
         (dolist (binding parsed)
-          (eliscript-analyzer--declare child (car binding) 'local t))))
+          (eliscript-analyzer--declare-pattern
+           child (car binding) 'local t))))
     (eliscript-analyzer--analyze-sequence body child)))
 
 (defun eliscript-analyzer--analyze-function
@@ -175,7 +204,7 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
     (let ((child (eliscript-analyzer--make-scope
                   scope (if asynchronous 'async 'sync))))
       (dolist (parameter parsed)
-        (eliscript-analyzer--declare
+        (eliscript-analyzer--declare-pattern
          child (eliscript-parameter-form parameter) 'parameter t))
       (eliscript-analyzer--analyze-sequence body child))))
 
@@ -273,14 +302,14 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
           (let* ((clause (eliscript-form-value argument))
                  (binding (cadr clause)))
             (unless (and binding
-                         (symbolp (eliscript-form-value binding)))
+                         (eliscript-binding-pattern-p binding))
               (let ((eliscript-analyzer--current-span
                      (or (eliscript-form-span argument)
                          eliscript-analyzer--current-span)))
                 (eliscript-analyzer--fail
-                 "catch requires a binding symbol")))
+                 "catch requires a binding symbol or vector")))
             (let ((child (eliscript-analyzer--make-scope scope)))
-              (eliscript-analyzer--declare child binding 'catch t)
+              (eliscript-analyzer--declare-pattern child binding 'catch t)
               (eliscript-analyzer--analyze-sequence
                (cddr clause) child))))
          ((eq operator 'finally)

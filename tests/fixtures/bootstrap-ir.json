@@ -26,6 +26,11 @@
       "source": "(defun recover (value)\n  (try\n    (if value value (throw \"missing\"))\n    (catch error (str \"caught:\" error))\n    (finally (print \"done\"))))\n(defasync settle (promise)\n  (try (await promise)\n    (catch error error)\n    (finally (await promise))))\n(export recover settle)"
     },
     {
+      "name": "vector-binding-patterns",
+      "filename": "patterns.eli",
+      "source": "(defportable pair-sum ([left right]) (+ left right))\n(defun unpack ([first [second nil third] &rest tail] &optional [fallback])\n  (let* (([head &rest rest] tail) ([nested] [fallback]))\n    [first second third tail fallback head rest nested]))\n(defun recover ()\n  (try (throw [7 \"caught\"])\n    (catch [code message] [code message])))\n(export pair-sum unpack recover)"
+    },
+    {
       "name": "object-primitives",
       "filename": "objects.eli",
       "source": "(defun objects (value key)\n  [(object-keys value)\n   (object-has? value key)\n   (object-assoc value key 1)])\n(export objects)"
