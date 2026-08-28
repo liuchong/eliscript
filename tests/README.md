@@ -3,6 +3,15 @@
 Compiler behavior is tested from Emacs in batch mode. Source fixtures belong in
 `fixtures/`; stable JavaScript output belongs in `snapshots/`.
 
+Before compiler tests run, the contract checker validates all numbered
+specification metadata and requires every implemented specification to own a
+conformance feature with evidence locators that still exist. Its own Bun tests
+cover the passing repository plus metadata drift, missing evidence, and
+uncovered implementation failures. The registry is `specs/index.json`; the
+feature inventory is `conformance/manifest.json`.
+Non-fixture evidence must also appear in the default `make test` driver, so a
+test file cannot silently stop running while remaining present in the tree.
+
 `make test` runs the ERT suite, invokes the public CLI, compares the generated
 ESM with its snapshot, validates and decodes Source Map v3 output, and executes
 ordinary, source-mapped, and React server-rendered modules with Bun. It also

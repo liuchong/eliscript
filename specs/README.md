@@ -1,0 +1,51 @@
+# Specifications
+
+Numbered specifications define Eliscript language, compiler, toolchain, and
+integration contracts. Their machine-readable registry is
+[`index.json`](index.json).
+
+Each specification has two independent metadata fields:
+
+- `Status` records design maturity: `Draft`, `Accepted`, `Stable`, or
+  `Superseded`.
+- `Implementation` records delivery: `Pending`, `In progress`, `Implemented`,
+  or `Superseded`.
+
+`Accepted` does not mean compatibility-frozen. A public behavior enters the
+1.0 compatibility contract only after its specification is marked `Stable` and
+its conformance feature is also stable.
+
+## Contract Check
+
+Run:
+
+```sh
+bun run check:contracts
+```
+
+The checker verifies that:
+
+- every numbered Markdown specification appears exactly once in the registry
+- id, title, design status, and implementation status match the source file
+- every implemented specification owns at least one conformance feature
+- every feature has observable contract statements and executable evidence
+- every evidence locator still exists in its declared test or fixture
+
+Use `bun tools/conformance/check.mjs --json` for the versioned summary consumed
+by automation.
+
+The feature inventory and evidence links live in
+[`tests/conformance/manifest.json`](../tests/conformance/manifest.json). See
+[`0042-specification-registry.md`](0042-specification-registry.md) for the
+schema and change workflow.
+
+## Adding a Specification
+
+1. Choose the next four-digit id and add `NNNN-short-name.md`.
+2. Add exact metadata to `index.json`.
+3. When implementation exists, add its feature and evidence to the conformance
+   manifest.
+4. Run the focused contract tests and then the complete suite.
+
+Do not mark a specification implemented without executable evidence. Do not
+mark a feature stable while its specification remains draft or accepted.

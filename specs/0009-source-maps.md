@@ -1,6 +1,7 @@
 # 0009: Source Map v3 Emission
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0006 Located Forms, 0007 Explicit Compiler IR, 0008 Direct IR Emission
 

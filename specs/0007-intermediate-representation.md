@@ -1,6 +1,7 @@
 # 0007: Explicit Compiler Intermediate Representation
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0004 Lexical Analysis, 0006 Located Forms
 

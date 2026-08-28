@@ -1,6 +1,7 @@
 # 0011: Vite Adapter
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 
 ## Summary

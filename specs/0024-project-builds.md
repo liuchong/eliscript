@@ -1,6 +1,7 @@
 # 0024: Multi-file Project Builds
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0007 Intermediate Representation, 0009 Source Maps,
   0023 Portable Sequence Standard Library

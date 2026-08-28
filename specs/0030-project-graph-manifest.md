@@ -1,6 +1,7 @@
 # 0030: Project Graph Manifest
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0024 Project Builds,
   0029 Portable Indexing Composition

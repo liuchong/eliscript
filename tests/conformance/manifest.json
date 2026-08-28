@@ -1,0 +1,401 @@
+{
+  "schemaVersion": 1,
+  "features": [
+    {
+      "id": "acceleration.measurement-probe",
+      "title": "Segmented Emacs acceleration measurement",
+      "status": "accepted",
+      "spec": "0002",
+      "contracts": ["Reports cold and warm end-to-end measurements", "Compares equivalent Emacs Lisp and generated JavaScript results"],
+      "evidence": [{ "kind": "bun-test", "file": "tests/worker-benchmark.test.mjs", "contains": "worker benchmark reports equivalent cold and warm measurements" }]
+    },
+    {
+      "id": "language.core",
+      "title": "Implemented core language",
+      "status": "accepted",
+      "spec": "0003",
+      "contracts": ["Compiles core literals and data forms", "Executes the representative core program as ESM"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-literals-and-data" },
+        { "kind": "shell", "file": "tests/cli-test.sh", "contains": "tests/fixtures/core.eli" }
+      ]
+    },
+    {
+      "id": "compiler.lexical-analysis",
+      "title": "Lexical analysis and binding diagnostics",
+      "status": "accepted",
+      "spec": "0004",
+      "contracts": ["Resolves module and lexical bindings", "Rejects unbound and duplicate bindings"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-analyzer-resolves-module-and-lexical-bindings" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-analyzer-rejects-duplicate-bindings" }
+      ]
+    },
+    {
+      "id": "compiler.compile-time-macros",
+      "title": "Deterministic compile-time macros",
+      "status": "accepted",
+      "spec": "0005",
+      "contracts": ["Expands user macros before analysis", "Preserves quoted data and isolates compilations"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-expander-expands-user-macros" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-expander-isolates-compilations" }
+      ]
+    },
+    {
+      "id": "compiler.source-locations",
+      "title": "Located forms and diagnostics",
+      "status": "accepted",
+      "spec": "0006",
+      "contracts": ["Retains recursive source locations", "Reports filename, line, and column for failures"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-reader-locates-nested-forms" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-expander-reports-macro-failures-with-filename" }
+      ]
+    },
+    {
+      "id": "compiler.explicit-ir",
+      "title": "Explicit intermediate representation",
+      "status": "accepted",
+      "spec": "0007",
+      "contracts": ["Lowers analyzed forms into explicit IR", "Preserves origin spans through lowering"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-lowerer-builds-explicit-ir" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-lowerer-preserves-macro-call-origin" }
+      ]
+    },
+    {
+      "id": "compiler.direct-ir-emission",
+      "title": "Direct ESM emission from IR",
+      "status": "accepted",
+      "spec": "0008",
+      "contracts": ["Emits directly from IR", "Matches the compatibility backend"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-ir-emitter-matches-compatibility-backend" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-ir-emitter-does-not-call-form-backend" }
+      ]
+    },
+    {
+      "id": "compiler.source-maps",
+      "title": "Source Map v3 emission",
+      "status": "accepted",
+      "spec": "0009",
+      "contracts": ["Emits valid signed VLQ mappings", "Maps UTF-16 generated columns and macro origins"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-source-map-records-ir-spans-and-utf16-columns" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-source-map-points-expanded-code-to-macro-call" }
+      ]
+    },
+    {
+      "id": "react.element-compilation",
+      "title": "React element compilation",
+      "status": "accepted",
+      "spec": "0010",
+      "contracts": ["Lowers components and elements to dedicated IR", "Uses the automatic JSX runtime"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-react-lowers-components-and-elements-to-ir" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-react-emits-the-automatic-jsx-runtime" }
+      ]
+    },
+    {
+      "id": "tooling.vite-adapter",
+      "title": "Vite transform adapter",
+      "status": "accepted",
+      "spec": "0011",
+      "contracts": ["Compiles .eli modules with source maps", "Provides a React Refresh boundary in development"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/vite-plugin.test.mjs", "contains": "Vite adapter compiles .eli modules with source maps" },
+        { "kind": "bun-test", "file": "tests/vite-plugin.test.mjs", "contains": "Vite development transform adds a React Refresh boundary" }
+      ]
+    },
+    {
+      "id": "publishing.org-adapter",
+      "title": "Deterministic Org publishing",
+      "status": "accepted",
+      "spec": "0012",
+      "contracts": ["Exports deterministic article modules", "Validates metadata, drafts, slugs, and heading identifiers"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-org-tests.el", "contains": "eliscript-org-exports-deterministic-articles" },
+        { "kind": "bun-test", "file": "tests/org-vite-plugin.test.mjs", "contains": "Org Vite adapter emits deterministic published content" }
+      ]
+    },
+    {
+      "id": "bootstrap.symbol-foundation",
+      "title": "Bootstrap symbol foundation",
+      "status": "accepted",
+      "spec": "0013",
+      "contracts": ["Maps symbols identically in seed and generated compilers", "Shares one conformance fixture"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/bootstrap-tests.el", "contains": "eliscript-seed-symbol-module-matches-bootstrap-contract" },
+        { "kind": "bun-test", "file": "tests/bootstrap-symbol.test.mjs", "contains": "bootstrapped symbol mapping matches the seed conformance fixture" }
+      ]
+    },
+    {
+      "id": "bootstrap.portable-reader",
+      "title": "Portable syntax and reader",
+      "status": "accepted",
+      "spec": "0014",
+      "contracts": ["Reads normalized located syntax", "Matches seed diagnostics and reads compiler sources"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/bootstrap-tests.el", "contains": "eliscript-seed-reader-satisfies-bootstrap-cases" },
+        { "kind": "bun-test", "file": "tests/bootstrap-reader.test.mjs", "contains": "bootstrapped reader matches normalized seed syntax and diagnostics" }
+      ]
+    },
+    {
+      "id": "bootstrap.portable-analyzer",
+      "title": "Portable lexical analyzer",
+      "status": "accepted",
+      "spec": "0015",
+      "contracts": ["Matches seed acceptance and diagnostics", "Analyzes all bootstrap compiler sources"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/bootstrap-tests.el", "contains": "eliscript-seed-analyzer-satisfies-bootstrap-cases" },
+        { "kind": "bun-test", "file": "tests/bootstrap-analyzer.test.mjs", "contains": "bootstrapped analyzer matches seed acceptance and diagnostics" }
+      ]
+    },
+    {
+      "id": "bootstrap.portable-expander",
+      "title": "Portable macro expander",
+      "status": "accepted",
+      "spec": "0016",
+      "contracts": ["Matches expanded syntax and call-site spans", "Rejects unavailable host evaluation"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/bootstrap-tests.el", "contains": "eliscript-seed-expander-satisfies-bootstrap-cases" },
+        { "kind": "bun-test", "file": "tests/bootstrap-expander.test.mjs", "contains": "bootstrapped expander matches seed syntax, spans, and diagnostics" }
+      ]
+    },
+    {
+      "id": "bootstrap.portable-ir",
+      "title": "Portable IR lowering",
+      "status": "accepted",
+      "spec": "0017",
+      "contracts": ["Matches complete normalized IR trees", "Preserves JSON-safe values and source spans"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/bootstrap-tests.el", "contains": "eliscript-seed-ir-lowering-satisfies-bootstrap-cases" },
+        { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" }
+      ]
+    },
+    {
+      "id": "bootstrap.portable-emitter",
+      "title": "Portable ESM and source-map emission",
+      "status": "accepted",
+      "spec": "0018",
+      "contracts": ["Matches complete seed ESM", "Matches parsed Source Map documents"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/bootstrap-tests.el", "contains": "eliscript-seed-emitter-satisfies-bootstrap-cases" },
+        { "kind": "bun-test", "file": "tests/bootstrap-emitter.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" }
+      ]
+    },
+    {
+      "id": "bootstrap.self-hosted-driver",
+      "title": "Self-hosted compiler fixed point",
+      "status": "accepted",
+      "spec": "0019",
+      "contracts": ["Builds Generation 1 through Generation 3", "Produces byte-identical compiler modules and maps"],
+      "evidence": [{ "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }]
+    },
+    {
+      "id": "worker.protocol-v1",
+      "title": "Versioned worker protocol",
+      "status": "accepted",
+      "spec": "0020",
+      "contracts": ["Correlates requests and responses over NDJSON", "Supports progress, cancellation, timeout, errors, and shutdown"],
+      "evidence": [{ "kind": "bun-test", "file": "tests/worker-runtime.test.mjs", "contains": "long-lived worker implements the versioned NDJSON protocol" }]
+    },
+    {
+      "id": "portable.function-closure",
+      "title": "Portable functions and dependency closure",
+      "status": "accepted",
+      "spec": "0021",
+      "contracts": ["Validates transitive portable dependencies", "Emits selected closures and source-name manifests"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-portable-selection-emits-transitive-closure-only" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-portable-functions-reject-non-portable-dependencies" }
+      ]
+    },
+    {
+      "id": "worker.emacs-integration",
+      "title": "Resilient Emacs worker integration",
+      "status": "accepted",
+      "spec": "0022",
+      "contracts": ["Restarts after module changes and failures", "Tracks project graphs and mapped diagnostics"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-worker-tests.el", "contains": "eliscript-emacs-client-restarts-after-module-change" },
+        { "kind": "ert", "file": "tests/eliscript-worker-tests.el", "contains": "eliscript-emacs-client-tracks-project-graph-and-dependency-maps" }
+      ]
+    },
+    {
+      "id": "stdlib.sequence",
+      "title": "Portable sequence standard library",
+      "status": "accepted",
+      "spec": "0023",
+      "contracts": ["Compiles and executes portable sequence operations", "Supports closure-only selection"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/stdlib-sequence.test.mjs", "contains": "portable sequence library compiles and executes as an ESM module" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-standard-library-sequence-closure-is-portable" }
+      ]
+    },
+    {
+      "id": "project.multi-file-build",
+      "title": "Multi-file project builds",
+      "status": "accepted",
+      "spec": "0024",
+      "contracts": ["Discovers expanded local imports", "Builds a runnable source-mapped ESM tree"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-builds-expanded-import-graph" },
+        { "kind": "shell", "file": "tests/project-cli-test.sh", "contains": "eliscript-build-report" }
+      ]
+    },
+    {
+      "id": "stdlib.text",
+      "title": "Portable text standard library",
+      "status": "accepted",
+      "spec": "0025",
+      "contracts": ["Executes documented UTF-16 text operations", "Supports portable closure selection"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/stdlib-text.test.mjs", "contains": "portable text library compiles and executes as an ESM module" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-standard-library-text-closure-is-portable" }
+      ]
+    },
+    {
+      "id": "stdlib.object",
+      "title": "Portable immutable object library",
+      "status": "accepted",
+      "spec": "0026",
+      "contracts": ["Preserves immutable own-property semantics", "Supports dependency-pruned portable builds"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/stdlib-object.test.mjs", "contains": "portable object and data libraries preserve immutable own-property semantics" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-standard-library-object-closure-is-portable" }
+      ]
+    },
+    {
+      "id": "stdlib.data-indexing",
+      "title": "Portable keyed data indexing",
+      "status": "accepted",
+      "spec": "0027",
+      "contracts": ["Provides indexing, grouping, and counting", "Compiles portable imports into named ESM imports"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-standard-library-data-compiles-portable-imports" },
+        { "kind": "bun-test", "file": "tests/stdlib-object.test.mjs", "contains": "portable object and data libraries preserve immutable own-property semantics" }
+      ]
+    },
+    {
+      "id": "portable.module-composition",
+      "title": "Portable module composition",
+      "status": "accepted",
+      "spec": "0028",
+      "contracts": ["Follows local portable imports", "Emits only the verified transitive closure"],
+      "evidence": [{ "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-builds-pruned-portable-module-graph" }]
+    },
+    {
+      "id": "portable.indexing-composition",
+      "title": "Portable indexing application composition",
+      "status": "accepted",
+      "spec": "0029",
+      "contracts": ["Builds the index-to-data-to-object graph", "Executes the composed graph through the worker adapter"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-builds-portable-indexing-application-graph" },
+        { "kind": "ert", "file": "tests/eliscript-worker-tests.el", "contains": "eliscript-index-scores-texts-asynchronously" }
+      ]
+    },
+    {
+      "id": "project.graph-manifest",
+      "title": "Deterministic project graph manifest",
+      "status": "accepted",
+      "spec": "0030",
+      "contracts": ["Records sorted project module identities", "Produces a stable graph digest"],
+      "evidence": [{ "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-emits-deterministic-graph-manifest" }]
+    },
+    {
+      "id": "project.incremental-builds",
+      "title": "Verified incremental project builds",
+      "status": "accepted",
+      "spec": "0031",
+      "contracts": ["Reuses clean modules", "Rebuilds dirty modules and validates portable closures"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-reuses-clean-modules-and-rebuilds-dirty-ones" },
+        { "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-portable-cache-preserves-closure-validation" }
+      ]
+    },
+    {
+      "id": "project.decision-reports",
+      "title": "Machine-readable build decision reports",
+      "status": "accepted",
+      "spec": "0032",
+      "contracts": ["Reports compiled and reused modules", "Uses a stable versioned JSON-compatible schema"],
+      "evidence": [{ "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-reports-incremental-decisions" }]
+    },
+    {
+      "id": "project.phase-timings",
+      "title": "Non-identity build phase timings",
+      "status": "accepted",
+      "spec": "0033",
+      "contracts": ["Reports per-module phase timings", "Excludes machine-local timings from artifact identity"],
+      "evidence": [{ "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-reports-incremental-decisions" }]
+    },
+    {
+      "id": "language.nullish-values",
+      "title": "Explicit nullish values",
+      "status": "accepted",
+      "spec": "0034",
+      "contracts": ["Distinguishes null and undefined at interop boundaries", "Preserves Lisp truthiness"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-distinguishes-nullish-values" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-preserves-lisp-truthiness" }
+      ]
+    },
+    {
+      "id": "macro.deterministic-seed",
+      "title": "Host-independent seed macro evaluation",
+      "status": "accepted",
+      "spec": "0035",
+      "contracts": ["Rejects undeclared host functions", "Matches the portable macro evaluator"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-expander-rejects-host-functions" },
+        { "kind": "bun-test", "file": "tests/bootstrap-expander.test.mjs", "contains": "bootstrapped expander matches seed syntax, spans, and diagnostics" }
+      ]
+    },
+    {
+      "id": "language.function-parameters",
+      "title": "Optional and rest function parameters",
+      "status": "accepted",
+      "spec": "0036",
+      "contracts": ["Supports optional defaults", "Supports one final rest parameter with validation"],
+      "evidence": [{ "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-supports-optional-and-rest-parameters" }]
+    },
+    {
+      "id": "language.async-await",
+      "title": "Async functions and await",
+      "status": "accepted",
+      "spec": "0037",
+      "contracts": ["Emits async functions and await expressions", "Rejects await outside an async context"],
+      "evidence": [{ "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-supports-async-functions-and-await" }]
+    },
+    {
+      "id": "language.exception-control-flow",
+      "title": "Exception control flow",
+      "status": "accepted",
+      "spec": "0038",
+      "contracts": ["Supports expression-valued try, catch, finally, and throw", "Preserves lexical catch scope"],
+      "evidence": [{ "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-supports-exception-control-flow" }]
+    },
+    {
+      "id": "language.vector-binding-patterns",
+      "title": "Nested vector binding patterns",
+      "status": "accepted",
+      "spec": "0039",
+      "contracts": ["Supports nested patterns, nil holes, and final rest bindings", "Works in parameters, lexical bindings, catch, and portable functions"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-supports-vector-binding-patterns" },
+        { "kind": "shell", "file": "tests/cli-test.sh", "contains": "tests/fixtures/vector-patterns.eli" }
+      ]
+    },
+    {
+      "id": "quality.specification-registry",
+      "title": "Specification registry and conformance evidence",
+      "status": "accepted",
+      "spec": "0042",
+      "contracts": ["Indexes every numbered specification with separate design and implementation status", "Requires every implemented specification to own executable conformance evidence"],
+      "evidence": [{ "kind": "bun-test", "file": "tests/conformance.test.mjs", "contains": "repository specifications have complete conformance evidence" }]
+    }
+  ]
+}

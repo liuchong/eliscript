@@ -101,6 +101,12 @@ bun install --frozen-lockfile
 bun run test
 ```
 
+Check the specification registry and executable conformance coverage alone:
+
+```sh
+bun run check:contracts
+```
+
 Compile and render the React counter example:
 
 ```sh
@@ -266,7 +272,7 @@ examples/                End-to-end example applications
   stdlib-cli/            Multi-file standard-library build
   react-counter/         First React compilation target
   org-site/              Org-powered custom React publishing site
-specs/                   Numbered language and toolchain decisions
+specs/                   Numbered decisions and machine-readable contract index
 tests/                   Compiler fixtures and output snapshots
 tools/                   Optional integrations and developer utilities
   org/                   Pure Emacs Org exporter and Vite adapter

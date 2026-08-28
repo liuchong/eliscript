@@ -1,8 +1,8 @@
 EMACS ?= emacs
 BUN ?= bun
 
-.PHONY: test
-test:
+.PHONY: test check-contracts
+test: check-contracts
 	$(EMACS) --batch -Q -L compiler -L tools/org -L tools/worker -L tests \
 		-l tests/eliscript-tests.el \
 		-l tests/eliscript-project-tests.el \
@@ -11,6 +11,7 @@ test:
 		-l tests/bootstrap-tests.el \
 		-f ert-run-tests-batch-and-exit
 	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
+		tests/conformance.test.mjs \
 		tests/bootstrap-symbol.test.mjs tests/bootstrap-reader.test.mjs \
 		tests/bootstrap-expander.test.mjs tests/bootstrap-analyzer.test.mjs \
 		tests/bootstrap-ir.test.mjs tests/bootstrap-emitter.test.mjs \
@@ -19,3 +20,6 @@ test:
 		tests/stdlib-text.test.mjs tests/stdlib-object.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/project-cli-test.sh
+
+check-contracts:
+	$(BUN) tools/conformance/check.mjs

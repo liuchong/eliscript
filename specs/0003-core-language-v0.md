@@ -1,6 +1,7 @@
 # 0003: Implemented Core Language
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-27
 - Depends on: 0001 Language and Toolchain Boundary
 - ECMAScript target: [ECMA-262](https://ecma-international.org/publications-and-standards/standards/ecma-262/)

@@ -1,6 +1,7 @@
 # 0018: Portable ESM and Source Map Emission
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0008 Direct ECMAScript Emission from IR,
   0009 Source Map v3 Emission, 0017 Portable IR Lowering

@@ -1,6 +1,7 @@
 # 0028: Portable Module Composition
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0021 Portable Functions, 0024 Project Builds
 

@@ -1,6 +1,7 @@
 # 0039: Vector Binding Patterns
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0001 Language and Toolchain Boundary, 0004 Lexical Analysis,
   0007 Intermediate Representation, 0036 Function Parameters,

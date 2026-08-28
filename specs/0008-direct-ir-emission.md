@@ -1,6 +1,7 @@
 # 0008: Direct ECMAScript Emission from IR
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0003 Core Language v0, 0007 Explicit Compiler IR
 

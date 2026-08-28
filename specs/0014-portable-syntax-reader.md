@@ -1,6 +1,7 @@
 # 0014: Portable Syntax and Reader
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 
 ## Summary

@@ -1,6 +1,7 @@
 # 0021: Portable Functions and Dependency Closure
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0002 Emacs Acceleration Through JavaScript,
   0020 Emacs Worker Protocol and Measurement Probe

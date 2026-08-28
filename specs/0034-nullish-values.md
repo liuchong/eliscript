@@ -1,6 +1,7 @@
 # 0034: Nullish Values
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0003 Core Language v0
 

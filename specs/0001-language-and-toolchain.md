@@ -1,6 +1,7 @@
 # 0001: Language and Toolchain Boundary
 
 - Status: Draft
+- Implementation: In progress
 - Date: 2026-08-27
 
 ## Summary

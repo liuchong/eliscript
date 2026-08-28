@@ -15,3 +15,7 @@ adapter. Org remains the content source; generated modules are build artifacts.
 compute worker, an end-to-end benchmark, and a representative document indexing
 adapter. It keeps editor state in Emacs while moving explicit JSON-compatible
 computations across a measured process boundary.
+
+`conformance/` contains the dependency-free specification and evidence checker.
+It verifies `specs/index.json`, the numbered specification headers, and
+`tests/conformance/manifest.json` before the default test suite runs.

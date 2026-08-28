@@ -1,6 +1,7 @@
 # 0040: Project Maturity Roadmap and 1.0 Acceptance Contract
 
-- Status: Accepted roadmap; implementation in progress
+- Status: Accepted
+- Implementation: In progress
 - Date: 2026-08-28
 - Depends on: 0001 Language and Toolchain Boundary,
   0019 Self-Hosted Compiler Driver, 0022 Emacs Worker Integration,
@@ -379,6 +380,15 @@ testable compatibility baseline.
 **Exit gate:** Every currently supported public behavior has a specification
 owner and executable evidence; the complete existing suite passes on macOS and
 Linux without undocumented setup.
+
+Started on 2026-08-28. The first slice separates design and implementation
+status across every numbered specification, indexes all specifications in a
+versioned registry, maps every implemented specification to named contract
+statements and executable evidence, and runs a dependency-free checker before
+the default test suite. The checker also has negative tests for metadata drift,
+missing evidence, evidence outside the default suite, and uncovered
+implementations. See
+[0042-specification-registry.md](0042-specification-registry.md).
 
 ### M8: Language Contract Closure (8-12 weeks)
 

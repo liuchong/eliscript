@@ -1,6 +1,7 @@
 # 0020: Emacs Worker Protocol and Measurement Probe
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0002 Emacs Acceleration Through JavaScript,
   0019 Self-Hosted Compiler Driver

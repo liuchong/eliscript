@@ -1,6 +1,7 @@
 # 0016: Portable Macro Expander
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 
 ## Summary

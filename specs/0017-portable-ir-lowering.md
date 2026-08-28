@@ -1,6 +1,7 @@
 # 0017: Portable IR Lowering
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0007 Explicit IR, 0015 Portable Lexical Analyzer,
   0016 Portable Macro Expander

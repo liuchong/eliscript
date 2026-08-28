@@ -1,6 +1,7 @@
 # 0031: Incremental Project Builds
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0024 Project Builds,
   0030 Project Graph Manifest

@@ -1,6 +1,7 @@
 # 0025: Portable Text Standard Library
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0003 Implemented Core Language,
   0021 Portable Functions and Dependency Closure,

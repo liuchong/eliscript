@@ -1,6 +1,7 @@
 # 0029: Portable Indexing Composition
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0022 Emacs Worker Integration,
   0027 Portable Data Indexing,

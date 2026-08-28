@@ -1,6 +1,7 @@
 # 0027: Portable Data Indexing
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0026 Portable Immutable Object Library
 

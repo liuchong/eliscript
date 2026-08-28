@@ -1,6 +1,7 @@
 # 0041: Host Symbiosis, Persistent Data, and Emacs Acceleration
 
-- Status: Accepted design; implementation pending
+- Status: Accepted
+- Implementation: Pending
 - Date: 2026-08-28
 - Depends on: 0002 Emacs Acceleration Through JavaScript,
   0034 Nullish Values, 0040 Project Maturity Roadmap

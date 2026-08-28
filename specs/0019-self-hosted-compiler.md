@@ -1,6 +1,7 @@
 # 0019: Self-Hosted Compiler Driver
 
-- Status: Implemented
+- Status: Accepted
+- Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0014 Portable Syntax and Reader,
   0015 Portable Lexical Analyzer, 0016 Portable Macro Expander,
