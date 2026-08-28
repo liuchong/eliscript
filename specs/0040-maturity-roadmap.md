@@ -476,8 +476,11 @@ The Map-backed persistent Set in
 [0050-persistent-hash-set-prototype.md](0050-persistent-hash-set-prototype.md)
 adds a distinct unordered value category, collection algebra, exact path
 sharing, collision coverage, and million-member bounds without duplicating
-HAMT nodes. Browser host/layout measurements remain next, before transient and
-literal migration work.
+HAMT nodes. The source-bound Bun/Node/Chrome benchmark in
+[0051-hamt-layout-benchmark.md](0051-hamt-layout-benchmark.md) replaces the
+initial inherited 16/8 sparse/dense transition with measured 32/24 thresholds.
+Portable bit operations remain before P0 closes; transient and literal
+migration work follow.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

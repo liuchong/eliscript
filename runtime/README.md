@@ -28,7 +28,9 @@ counters only for conformance tests.
 Sparse bitmap nodes promote to dense 32-slot nodes, dense nodes compact after
 deletion, and complete 32-bit collisions retain distinct keys. Internal node
 shape, transition, allocation, visit, and sharing evidence lives in
-`testing/map.mjs`.
+`testing/map.mjs`. Cross-engine measurements select promotion at 32 occupied
+branches and demotion at 24; the versioned methodology and baseline live under
+`tools/collections` and `benchmarks`.
 
 `core/set.mjs` is a thin immutable value-semantic view over that HAMT. Members
 occupy map keys under one private sentinel, so Set membership, algebra,

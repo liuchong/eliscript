@@ -88,7 +88,7 @@ hash bits select a logical branch. Population count over all lower bitmap bits
 maps that branch to the compact array index.
 
 Items are either entries or deeper nodes. Missing branches consume no array
-slot. Inserting the sixteenth occupied branch promotes the node to an
+slot. Inserting the thirty-second occupied branch promotes the node to an
 `ArrayNode`.
 
 ### Array Node
@@ -96,7 +96,7 @@ slot. Inserting the sixteenth occupied branch promotes the node to an
 A dense node stores an exact occupied-branch count and one frozen 32-slot
 array. A selected slot contains an entry, a deeper node, or `undefined`.
 
-After deletion reduces occupancy to eight branches, the node demotes to a
+After deletion reduces occupancy to 24 branches, the node demotes to a
 compact bitmap node. The separate promotion and demotion thresholds prevent
 representation thrashing around one occupancy boundary.
 
@@ -228,7 +228,7 @@ The default suite verifies:
 - null, undefined, NaN, signed zero, vector, and host-identity keys
 - a real complete-hash collision through lookup, replacement, and deletion
 - collision-node rebranching with a different complete hash
-- exact promotion at 16 root branches and demotion at 8
+- exact promotion at 32 root branches and demotion at 24
 - insertion-order-independent equality and frozen hashes
 - one key hash and one value hash per entry on first hash, then one cached call
 - 20,000 generated updates against a native SameValueZero reference model
@@ -254,9 +254,11 @@ sharing, and million-scale structural requirements, but does not complete the
 - keyword and Eliscript symbol values
 - metadata and reader/printer round trips
 - property-generated operation sequences at the final PD-01 volume
-- browser engine layout measurements and threshold benchmarks
 - portable Eliscript implementation after integer bit operations are exposed
 - literal, protocol, compiler, standard-library, and interop migration
 
 The persistent Set over this key layer is implemented and specified by
 [0050-persistent-hash-set-prototype.md](0050-persistent-hash-set-prototype.md).
+The cross-engine layout benchmark and measured 32/24 threshold decision are
+specified by
+[0051-hamt-layout-benchmark.md](0051-hamt-layout-benchmark.md).

@@ -101,6 +101,12 @@ covers 20,000 updates, a 100,000-member deletion proves exact path sharing, and
 one-million-member membership, insertion, and removal remain depth-bounded
 under Bun and Node.
 
+Collection-layout benchmark tests execute equivalent real HAMT node operations,
+smoke-test the Bun and Node host adapters, and validate the committed
+Bun/Node/Chrome baseline. They recompute its source digest and 32/24 threshold
+decision from raw samples without treating host timing values as regression
+gates.
+
 Project-build tests inspect expanded IR imports, retain non-Eliscript
 specifiers, support cycles, enforce canonical root containment, and verify
 per-module source maps, incremental decisions, and build phase timings. The

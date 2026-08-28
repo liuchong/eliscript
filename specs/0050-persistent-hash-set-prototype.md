@@ -64,7 +64,7 @@ hashing.
 This representation has three consequences:
 
 1. no second hash trie implementation can drift from Map collision behavior
-2. Map promotion at 16 branches and demotion at 8 apply unchanged
+2. measured Map promotion at 32 branches and demotion at 24 apply unchanged
 3. future transient Set can share the transient HAMT owner-token machinery
    rather than inventing a Set-specific node family
 
@@ -217,7 +217,6 @@ Existing syntax and native JavaScript Set behavior are unchanged.
 The prototype completes the Map-backed Set component of the initial HAMT
 runtime, but it does not complete the 0041 P0/P1 exits. Remaining work includes:
 
-- browser-engine node-layout and occupancy-threshold measurements
 - transient owner-token vector, map, and set builders
 - persistent list, keyword, and Eliscript symbol values
 - metadata and reader/printer round trips

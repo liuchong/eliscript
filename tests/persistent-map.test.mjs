@@ -146,27 +146,27 @@ test("persistent hash map handles full 32-bit hash collisions", () => {
 });
 
 test("persistent hash map promotes and demotes measured branch thresholds", () => {
-  const keys = distinctRootKeys(16);
+  const keys = distinctRootKeys(32);
   let map = EMPTY_MAP;
-  for (const key of keys.slice(0, 15)) {
+  for (const key of keys.slice(0, 31)) {
     map = map.assoc(key, key);
   }
   expect(inspectPersistentMap(map).arrayNodes).toBe(0);
 
   resetPersistentMapMetrics();
-  map = map.assoc(keys[15], keys[15]);
+  map = map.assoc(keys[31], keys[31]);
   expect(persistentMapMetrics().promotions).toBe(1);
   expect(inspectPersistentMap(map).arrayNodes).toBe(1);
 
   for (const key of keys.slice(0, 7)) {
     map = map.dissoc(key);
   }
-  expect(map.count).toBe(9);
+  expect(map.count).toBe(25);
   expect(inspectPersistentMap(map).arrayNodes).toBe(1);
 
   resetPersistentMapMetrics();
   map = map.dissoc(keys[7]);
-  expect(map.count).toBe(8);
+  expect(map.count).toBe(24);
   expect(persistentMapMetrics().demotions).toBe(1);
   expect(inspectPersistentMap(map).arrayNodes).toBe(0);
   for (const key of keys.slice(8)) {

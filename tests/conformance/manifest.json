@@ -474,7 +474,7 @@
       "title": "Persistent 32-way hash map trie prototype",
       "status": "accepted",
       "spec": "0049",
-      "contracts": ["Stores value-equal and host-identity keys under the 0048 contract", "Uses bitmap, dense array, and full-hash collision nodes", "Promotes at 16 occupied branches and demotes at 8", "Copies only changed paths and shares untouched nodes", "Defines insertion-order-independent equality and hashing", "Keeps million-key operations within the declared HAMT bound"],
+      "contracts": ["Stores value-equal and host-identity keys under the 0048 contract", "Uses bitmap, dense array, and full-hash collision nodes", "Promotes at measured occupancy 32 and demotes at measured occupancy 24", "Copies only changed paths and shares untouched nodes", "Defines insertion-order-independent equality and hashing", "Keeps million-key operations within the declared HAMT bound"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/persistent-map.test.mjs", "contains": "persistent hash map preserves old values and value-equal keys" },
         { "kind": "bun-test", "file": "tests/persistent-map.test.mjs", "contains": "persistent hash map handles full 32-bit hash collisions" },
@@ -503,6 +503,18 @@
         { "kind": "bun-test", "file": "tests/persistent-set.test.mjs", "contains": "persistent hash set removal copies only the selected node path" },
         { "kind": "bun-test", "file": "tests/persistent-set.test.mjs", "contains": "persistent hash set stays within HAMT bounds at one million members" },
         { "kind": "bun-test", "file": "tests/persistent-set.test.mjs", "contains": "persistent hash set has equivalent behavior under Bun and Node" }
+      ]
+    },
+    {
+      "id": "runtime.hamt-layout-benchmark",
+      "title": "Cross-host HAMT layout benchmark and measured thresholds",
+      "status": "accepted",
+      "spec": "0051",
+      "contracts": ["Measures equivalent Bitmap and Array nodes through real lookup and persistent update paths", "Preserves raw samples, correctness checksums, host fingerprints, parameters, and a source digest", "Runs under Bun, Node, and headless Chrome with bounded process and listener cleanup", "Marks unsupported Bun retained-heap measurements absent instead of substituting RSS", "Recomputes promotion and demotion candidates from a declared workload and memory policy", "Selects 32-branch promotion and 24-branch demotion from the committed baseline"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/collection-layout-benchmark.test.mjs", "contains": "HAMT layout core validates equivalent real node operations" },
+        { "kind": "bun-test", "file": "tests/collection-layout-benchmark.test.mjs", "contains": "HAMT layout host adapters agree under Bun and Node" },
+        { "kind": "bun-test", "file": "tests/collection-layout-benchmark.test.mjs", "contains": "committed HAMT layout baseline proves the 32/24 threshold decision" }
       ]
     }
   ]

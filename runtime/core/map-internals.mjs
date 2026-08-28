@@ -4,8 +4,8 @@ export const MAP_STATE = Symbol("eliscript.map.state");
 export const MAP_CONSTRUCTOR_TOKEN = Symbol("eliscript.map.constructor");
 export const MAP_NOT_FOUND = Symbol("eliscript.map.not-found");
 
-export const ARRAY_NODE_THRESHOLD = 16;
-export const BITMAP_NODE_THRESHOLD = 8;
+export const ARRAY_NODE_THRESHOLD = 32;
+export const BITMAP_NODE_THRESHOLD = 24;
 
 const BRANCH_MASK = 31;
 

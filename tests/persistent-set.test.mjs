@@ -123,15 +123,15 @@ test("persistent hash set handles complete hash collisions", () => {
 });
 
 test("persistent hash set inherits sparse and dense HAMT transitions", () => {
-  const values = distinctRootValues(16);
+  const values = distinctRootValues(32);
   let set = EMPTY_SET;
-  for (const value of values.slice(0, 15)) {
+  for (const value of values.slice(0, 31)) {
     set = set.conj(value);
   }
   expect(inspectPersistentSet(set).arrayNodes).toBe(0);
 
   resetPersistentSetMetrics();
-  set = set.conj(values[15]);
+  set = set.conj(values[31]);
   expect(persistentSetMetrics().promotions).toBe(1);
   expect(inspectPersistentSet(set).arrayNodes).toBe(1);
 

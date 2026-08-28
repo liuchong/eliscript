@@ -584,8 +584,11 @@ That slice covers bitmap, dense, and full-hash collision nodes through one
 million keys. The Map-backed Set follows in
 [0050-persistent-hash-set-prototype.md](0050-persistent-hash-set-prototype.md),
 reusing those nodes for value-semantic membership, collection algebra, exact
-sharing, and million-member bounds. Transients, keyword/symbol values, engine
-layout measurements, and literal migration remain open P0/P1 work.
+sharing, and million-member bounds. The cross-engine benchmark in
+[0051-hamt-layout-benchmark.md](0051-hamt-layout-benchmark.md) then measures the
+real lookup/update paths and selects 32/24 sparse/dense thresholds. Transients,
+keyword/symbol values, portable bit operations, and literal migration remain
+open P0/P1 work.
 
 ### P0: Semantics and Prototype
 

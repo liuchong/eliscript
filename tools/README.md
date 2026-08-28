@@ -16,6 +16,11 @@ compute worker, an end-to-end benchmark, and a representative document indexing
 adapter. It keeps editor state in Emacs while moving explicit JSON-compatible
 computations across a measured process boundary.
 
+`collections/` contains the versioned HAMT node-layout benchmark. It executes
+equivalent bitmap-indexed and dense roots through the real runtime paths under
+Bun, Node, and headless Chrome, owns bounded browser/server cleanup, and emits
+source-digested reports used to review internal representation thresholds.
+
 `conformance/` contains the dependency-free specification and evidence checker.
 It verifies `specs/index.json`, the numbered specification headers, and
 `tests/conformance/manifest.json` before the default test suite runs.

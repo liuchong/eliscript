@@ -139,7 +139,7 @@ make byte-compile
 ```
 
 [`contracts/compatibility-baseline.json`](contracts/compatibility-baseline.json)
-freezes 28 specifications and conformance features while retaining 19
+freezes 28 specifications and conformance features while retaining 20
 implemented collection, IR, bootstrap-phase, and standard-library surfaces as
 provisional. The contract checker rejects incomplete or partial promotions.
 
@@ -503,7 +503,7 @@ Current evidence:
 - Ninety-four ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- Seventy-four Bun tests cover the compiler and Org Vite adapters, source-map
+- Seventy-seven Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
   bootstrap behavior, the worker protocol, standard library, and benchmark
   reporting, plus persistent vector correctness, structural bounds, recursive
@@ -572,6 +572,11 @@ that same HAMT. It adds value-semantic membership and set algebra, preserves
 no-op identity, freezes exact Bun/Node hashes, and proves exact path sharing
 and bounded operations through one million members without duplicating node
 logic.
+The HAMT layout benchmark executes the actual lookup and persistent-update
+paths over equivalent sparse and dense roots under Bun, Node, and headless
+Chrome. Its source-bound baseline replaces the inherited 16/8 transition with
+measured 32/24 promotion/demotion thresholds; raw timings remain evidence, not
+machine-independent test gates.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -676,7 +681,10 @@ for bitmap/dense/collision HAMT nodes, persistent associative updates, and
 million-key structural bounds, and
 [specs/0050-persistent-hash-set-prototype.md](specs/0050-persistent-hash-set-prototype.md)
 for the Map-backed Set value category, collection algebra, frozen hashes, and
-million-member structural bounds.
+million-member structural bounds, and
+[specs/0051-hamt-layout-benchmark.md](specs/0051-hamt-layout-benchmark.md)
+for the Bun/Node/Chrome layout methodology, source-bound baseline, and measured
+32/24 HAMT thresholds.
 
 ## License
 

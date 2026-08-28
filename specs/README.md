@@ -69,6 +69,8 @@ which defines bitmap, dense, and collision HAMT nodes without changing map
 literals. The same HAMT key layer backs the value-semantic Set in
 [`0050-persistent-hash-set-prototype.md`](0050-persistent-hash-set-prototype.md),
 including collection algebra, structural sharing, and million-member bounds.
+The cross-engine layout evidence and measured 32/24 transition decision live
+in [`0051-hamt-layout-benchmark.md`](0051-hamt-layout-benchmark.md).
 
 ## Adding a Specification
 
