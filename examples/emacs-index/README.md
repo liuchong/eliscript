@@ -1,5 +1,8 @@
 # Emacs Index Workload
 
+[Examples](../README.md) | [Project README](../../README.md) |
+[Specification 0022](../../specs/0022-emacs-worker-integration.md)
+
 This example is a representative Emacs acceleration workload. Emacs extracts
 plain text from buffers or publishing sources, tokenizes it, and sends explicit
 document data to a long-lived JavaScript worker. The portable Eliscript kernel

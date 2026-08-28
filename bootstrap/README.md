@@ -1,8 +1,13 @@
 # Bootstrap Compiler
 
+[Project README](../README.md) | [Seed compiler](../compiler/README.md) |
+[Specifications](../specs/README.md)
+
 This directory contains compiler modules written in Eliscript. The Emacs Lisp
 seed compiler builds them into ESM until the portable implementation can
 compile itself.
+
+## Dependency Order
 
 The bootstrap grows along this dependency order:
 
@@ -19,6 +24,8 @@ symbol semantics (implemented)
   -> reproducible self-compilation (implemented)
 ```
 
+## Modules
+
 `compiler/symbol.eli` owns deterministic mapping from Lisp-style names to
 ECMAScript identifiers. `compiler/syntax.eli` defines serializable syntax nodes
 and source spans. `compiler/reader.eli` parses the portable source grammar into
@@ -32,6 +39,8 @@ Source Map v3. The generated pipeline can process and emit every current
 bootstrap module, including its own sources. `compiler/compiler.eli` composes
 the complete in-memory pipeline without filesystem dependencies.
 
+## Build
+
 Build the current bootstrap modules with the seed compiler:
 
 ```sh
@@ -44,6 +53,8 @@ adapter:
 ```sh
 ./bin/eliscript-portable --output dist/program.mjs source/program.eli
 ```
+
+## Fixed-point Evidence
 
 Generated files are written below `dist/bootstrap/` and are not source
 artifacts. Shared fixtures cover symbol behavior, reader syntax, macro

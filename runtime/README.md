@@ -1,5 +1,10 @@
 # Runtime
 
+[Project README](../README.md) | [Standard library](../stdlib/README.md) |
+[Specifications](../specs/README.md)
+
+## Boundary
+
 This directory contains the minimal JavaScript runtime semantics that cannot be
 represented by ordinary host values alone. Ordinary JavaScript values and APIs
 should still be emitted directly; helpers need a concrete semantic reason to
@@ -12,17 +17,25 @@ helper justifies a module dependency.
 React modules import `react/jsx-runtime` directly. There is no Eliscript wrapper
 runtime for element construction.
 
+## Modules
+
+### Persistent Vector
+
 `core/vector.mjs` is the first provisional M8 persistent-value module. It
 implements an immutable 32-way bit-partitioned vector trie with a short tail.
 It is tested independently before vector literal behavior changes. Internal
 node shape, allocation, visit, and sharing observations are isolated in
 `testing/vector.mjs`; applications must not depend on those test adapters.
 
+### Value Semantics
+
 `core/value.mjs` defines provisional coercion-free value equality and unsigned
 32-bit hashing. Portable scalar and persistent-vector hashes are deterministic;
 opaque JavaScript objects retain process-local identity semantics. Persistent
 hashes are cached privately. `testing/value.mjs` exposes cache and identity
 counters only for conformance tests.
+
+### Persistent Map
 
 `core/map.mjs` builds on that key contract with a provisional persistent HAMT.
 Sparse bitmap nodes promote to dense 32-slot nodes, dense nodes compact after
@@ -32,11 +45,15 @@ shape, transition, allocation, visit, and sharing evidence lives in
 branches and demotion at 24; the versioned methodology and baseline live under
 `tools/collections` and `benchmarks`.
 
+### Persistent Set
+
 `core/set.mjs` is a thin immutable value-semantic view over that HAMT. Members
 occupy map keys under one private sentinel, so Set membership, algebra,
 collisions, and path sharing cannot drift from Map behavior. Set-specific
 shape and sharing evidence is adapted through `testing/set.mjs` without
 exposing the backing map to applications.
+
+### Protocols and Collections
 
 `core/collection.mjs` defines the generic collection capability layer:
 `ICounted`, `IEmptyable`, `IConj`, `ILookup`, `IAssociative`, `IIndexed`,
@@ -46,6 +63,8 @@ without prototype changes. Sequence views are frozen and replayable, Map
 elements are frozen entries, reduced values provide early termination, and
 construction operations preserve persistent inputs or return immutable native
 copies.
+
+### Worker Host
 
 `worker.mjs` is the reference long-lived compute host. It communicates over
 versioned NDJSON, imports local generated modules, correlates concurrent

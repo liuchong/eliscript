@@ -1,4 +1,7 @@
-# Standard library CLI project
+# Standard Library CLI Project
+
+[Examples](../README.md) | [Project README](../../README.md) |
+[Specification 0024](../../specs/0024-project-builds.md)
 
 This example imports sequence, text, and object modules directly from `stdlib/`.
 The project builder discovers all three dependencies after macro expansion,

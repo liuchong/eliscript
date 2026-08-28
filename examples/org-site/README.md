@@ -1,5 +1,8 @@
 # Org Site
 
+[Examples](../README.md) | [Project README](../../README.md) |
+[Specification 0012](../../specs/0012-org-publishing.md)
+
 This example is the M3 publishing vertical slice: authored Org files are
 exported by pure Emacs, exposed as a Vite virtual ESM module, and rendered by a
 React application written in Eliscript.

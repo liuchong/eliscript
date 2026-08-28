@@ -1,23 +1,101 @@
 # Specifications
 
-Numbered specifications define Eliscript language, compiler, toolchain, and
-integration contracts. Their machine-readable registry is
-[`index.json`](index.json).
+Numbered specifications are the normative design record for the Eliscript
+language, compiler, runtime, toolchain, and integrations. This page is the
+human-readable catalog; [`index.json`](index.json) is the machine-readable
+registry.
 
-Each specification has two independent metadata fields:
+[Project README](../README.md) | [1.0 roadmap](0040-maturity-roadmap.md) |
+[Persistent data and Emacs design](0041-host-symbiosis-and-persistent-data.md)
 
-- `Status` records design maturity: `Draft`, `Accepted`, `Stable`, or
-  `Superseded`.
-- `Implementation` records delivery: `Pending`, `In progress`, `Implemented`,
-  or `Superseded`.
+## How to Read a Specification
 
-`Accepted` does not mean compatibility-frozen. A public behavior enters the
-1.0 compatibility contract only after its specification is marked `Stable` and
-its conformance feature is also stable.
+Every specification has two independent metadata fields.
 
-## Contract Check
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `Status` | `Draft`, `Accepted`, `Stable`, `Superseded` | Maturity of the design contract |
+| `Implementation` | `Pending`, `In progress`, `Implemented`, `Superseded` | Delivery state of the behavior |
 
-Run:
+`Accepted` means the design is approved for implementation. It does not make
+the behavior compatibility-frozen. A public behavior enters the 1.0 contract
+only when its specification and conformance feature are both stable.
+
+The specification body defines behavior and acceptance evidence. Directory
+READMEs are usage guides; source code and tests are implementations. When these
+sources disagree, the registry and contract checker make the mismatch visible
+rather than silently choosing one.
+
+## Current Snapshot
+
+The registry currently contains 60 specifications.
+
+| Classification | Count |
+| --- | ---: |
+| Draft design | 1 |
+| Accepted design | 31 |
+| Stable design | 28 |
+| Implementation in progress | 3 |
+| Implemented | 57 |
+
+Compatibility Baseline 1 separately classifies 28 specifications as stable,
+29 as provisional, and 3 as planning. That baseline is derived from registry
+and feature statuses, so it cannot drift independently.
+
+M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
+implementations, shared value semantics, open protocol dispatch, collection
+capabilities, and immutable collection construction implemented. Transducers,
+transient builders, literal migration, metadata, host conversion, and the
+Emacs value bridge remain ahead.
+
+## Reading Paths
+
+For the shortest route through the design, read by intent rather than by file
+number.
+
+### Project Direction
+
+1. [0040: Project Maturity Roadmap](0040-maturity-roadmap.md)
+2. [0041: Host Symbiosis, Persistent Data, and Emacs Acceleration](0041-host-symbiosis-and-persistent-data.md)
+3. [0046: M7 Compatibility Baseline 1](0046-m7-compatibility-baseline.md)
+
+### Language and Compiler
+
+1. [0001: Language and Toolchain Boundary](0001-language-and-toolchain.md)
+2. [0003: Implemented Core Language](0003-core-language-v0.md)
+3. [0004: Lexical Analysis](0004-lexical-analysis.md)
+4. [0007: Compiler IR](0007-intermediate-representation.md)
+5. [0008: Direct ESM Emission](0008-direct-ir-emission.md)
+6. [0009: Source Maps](0009-source-maps.md)
+
+### Self-hosting and Emacs
+
+1. [0013: Bootstrap Foundation](0013-bootstrap-foundation.md)
+2. [0014: Portable Syntax and Reader](0014-portable-syntax-reader.md)
+3. [0019: Self-Hosted Compiler Driver](0019-self-hosted-compiler.md)
+4. [0020: Worker Protocol](0020-worker-protocol.md)
+5. [0022: Emacs Worker Integration](0022-emacs-worker-integration.md)
+
+### Persistent Data and Protocols
+
+1. [0053: Eliscript Persistent Vector](0053-eliscript-persistent-vector.md)
+2. [0054: Eliscript Persistent List](0054-eliscript-persistent-list.md)
+3. [0055: Eliscript Persistent Map](0055-eliscript-persistent-map.md)
+4. [0056: Eliscript Persistent Set](0056-eliscript-persistent-set.md)
+5. [0057: Portable Value Semantics](0057-portable-value-semantics.md)
+6. [0058: Open Protocol Dispatch](0058-open-protocol-dispatch.md)
+7. [0059: Collection Capabilities](0059-collection-capability-protocols.md)
+8. [0060: Collection Construction](0060-collection-construction-protocols.md)
+
+### React and Publishing
+
+1. [0010: React Element Compilation](0010-react-elements.md)
+2. [0011: Vite Adapter](0011-vite-adapter.md)
+3. [0012: Org Publishing](0012-org-publishing.md)
+
+## Contract System
+
+Run the complete contract check with:
 
 ```sh
 bun run check:contracts
@@ -25,98 +103,124 @@ bun run check:contracts
 
 The checker verifies that:
 
-- every numbered Markdown specification appears exactly once in the registry
-- id, title, design status, and implementation status match the source file
+- every numbered Markdown specification appears exactly once in `index.json`
+- IDs, titles, design statuses, and implementation statuses match the source
 - every implemented specification owns at least one conformance feature
-- every feature has observable contract statements and executable evidence
-- every evidence locator still exists in its declared test or fixture
+- every feature has observable statements and executable evidence
+- every evidence locator exists and participates in the default test target
+- stable, provisional, and planning classifications agree across contracts
 
-Use `bun tools/conformance/check.mjs --json` for the versioned summary consumed
-by automation.
+The contract data is split by responsibility:
 
-The feature inventory and evidence links live in
-[`tests/conformance/manifest.json`](../tests/conformance/manifest.json). See
-[`0042-specification-registry.md`](0042-specification-registry.md) for the
-schema and change workflow.
+| Registry | Responsibility |
+| --- | --- |
+| [`specs/index.json`](index.json) | Specification identity and lifecycle |
+| [`tests/conformance/manifest.json`](../tests/conformance/manifest.json) | Observable features and executable evidence |
+| [`contracts/public-surface.json`](../contracts/public-surface.json) | Public and internal interface inventory |
+| [`contracts/compatibility-matrix.json`](../contracts/compatibility-matrix.json) | Supported Emacs, OS, architecture, and Bun combinations |
+| [`contracts/compatibility-baseline.json`](../contracts/compatibility-baseline.json) | Stable, provisional, and planning boundary |
 
-The current public and internal boundary lives in
-[`contracts/public-surface.json`](../contracts/public-surface.json). Its checker
-compares language forms, IR kinds, commands, schemas, adapters, libraries, and
-Emacs APIs with their implementations. See
-[`0044-public-surface-registry.md`](0044-public-surface-registry.md).
+The schemas and change workflow are defined by specifications
+[0042](0042-specification-registry.md),
+[0044](0044-public-surface-registry.md),
+[0045](0045-continuous-compatibility-matrix.md), and
+[0046](0046-m7-compatibility-baseline.md).
 
-The supported continuous-test dimensions live in
-[`contracts/compatibility-matrix.json`](../contracts/compatibility-matrix.json).
-The contract deterministically renders the pinned GitHub Actions workflow and
-is checked before local tests. See
-[`0045-continuous-compatibility-matrix.md`](0045-continuous-compatibility-matrix.md).
+## Specification Catalog
 
-The frozen and provisional boundary lives in
-[`contracts/compatibility-baseline.json`](../contracts/compatibility-baseline.json).
-Its checker derives every expected classification from specification and
-feature statuses, so partial promotions and missing entries fail. See
-[`0046-m7-compatibility-baseline.md`](0046-m7-compatibility-baseline.md).
+### Language, Compiler, and Integrations
 
-M8 persistent collection work begins with the provisional 32-way vector trie
-and its structural evidence in
-[`0047-persistent-vector-prototype.md`](0047-persistent-vector-prototype.md).
-Its scalar and vector key semantics continue in
-[`0048-value-equality-and-hashing.md`](0048-value-equality-and-hashing.md),
-including frozen Bun/Node hashes and collision evidence.
-The associative runtime continues in
-[`0049-persistent-hash-map-prototype.md`](0049-persistent-hash-map-prototype.md),
-which defines bitmap, dense, and collision HAMT nodes without changing map
-literals. The same HAMT key layer backs the value-semantic Set in
-[`0050-persistent-hash-set-prototype.md`](0050-persistent-hash-set-prototype.md),
-including collection algebra, structural sharing, and million-member bounds.
-The cross-engine layout evidence and measured 32/24 transition decision live
-in [`0051-hamt-layout-benchmark.md`](0051-hamt-layout-benchmark.md).
-The portable integer foundation continues in
-[`0052-portable-32-bit-operations.md`](0052-portable-32-bit-operations.md),
-covering seed/self-hosted intrinsics and Eliscript-authored population count
-and rotation algorithms. The P0 implementation-language proof is
-[`0053-eliscript-persistent-vector.md`](0053-eliscript-persistent-vector.md):
-the complete vector trie is written in portable Eliscript and verified across
-both compilers, Bun, Node, generated histories, and one million values.
-P1 begins with
-[`0054-eliscript-persistent-list.md`](0054-eliscript-persistent-list.md), which
-adds a second language-authored persistent representation with constant-time
-front operations, exact suffix sharing, and stack-safe million-node traversal.
-The associative core follows in
-[`0055-eliscript-persistent-map.md`](0055-eliscript-persistent-map.md), which
-moves bitmap, dense, collision, association, and removal algorithms into
-portable Eliscript with explicit hash/equality policy and million-key sharing
-evidence.
-The fourth representation is
-[`0056-eliscript-persistent-set.md`](0056-eliscript-persistent-set.md), which
-reuses the portable Map for membership and collection algebra while proving
-dual-compiler/dual-host behavior and million-member sharing.
-The common policy layer follows in
-[`0057-portable-value-semantics.md`](0057-portable-value-semantics.md), which
-defines recursive scalar/List/Vector/Map/Set equality and hashing in portable
-Eliscript, supplies default Map/Set constructors, preserves nested nullish
-values, and records the remaining host-identity and open-protocol boundary.
-The P2 dispatch foundation begins in
-[`0058-open-protocol-dispatch.md`](0058-open-protocol-dispatch.md), which adds
-immutable protocol definitions, direct and external dispatch, structured
-missing diagnostics, and the first production `IEquiv`/`IHash` migration.
-The first generic collection capabilities continue in
-[`0059-collection-capability-protocols.md`](0059-collection-capability-protocols.md),
-which adds count, lookup, indexed access, replayable sequence views,
-collection-native reduction, and reduced-value early termination over
-persistent and selected native collections.
-The matching target-side capabilities continue in
-[`0060-collection-construction-protocols.md`](0060-collection-construction-protocols.md),
-which adds canonical empties, persistent conj/assoc updates, key-presence
-checks, native immutable copies, and bounded Map entry validation.
+| ID | Specification | Status | Implementation |
+| --- | --- | --- | --- |
+| 0001 | [Language and Toolchain Boundary](0001-language-and-toolchain.md) | Draft | In progress |
+| 0002 | [Emacs Acceleration Through JavaScript](0002-emacs-acceleration.md) | Accepted | Implemented |
+| 0003 | [Implemented Core Language](0003-core-language-v0.md) | Accepted | Implemented |
+| 0004 | [Lexical Analysis and Binding Diagnostics](0004-lexical-analysis.md) | Stable | Implemented |
+| 0005 | [Compile-time Macros](0005-compile-time-macros.md) | Stable | Implemented |
+| 0006 | [Located Forms and Diagnostic Positions](0006-source-locations.md) | Stable | Implemented |
+| 0007 | [Explicit Compiler Intermediate Representation](0007-intermediate-representation.md) | Accepted | Implemented |
+| 0008 | [Direct ECMAScript Emission from IR](0008-direct-ir-emission.md) | Accepted | Implemented |
+| 0009 | [Source Map v3 Emission](0009-source-maps.md) | Stable | Implemented |
+| 0010 | [React Element Compilation](0010-react-elements.md) | Stable | Implemented |
+| 0011 | [Vite Adapter](0011-vite-adapter.md) | Stable | Implemented |
+| 0012 | [Org Publishing](0012-org-publishing.md) | Stable | Implemented |
+
+### Self-hosting and Emacs Acceleration
+
+| ID | Specification | Status | Implementation |
+| --- | --- | --- | --- |
+| 0013 | [Bootstrap Foundation](0013-bootstrap-foundation.md) | Accepted | Implemented |
+| 0014 | [Portable Syntax and Reader](0014-portable-syntax-reader.md) | Accepted | Implemented |
+| 0015 | [Portable Lexical Analyzer](0015-portable-lexical-analyzer.md) | Accepted | Implemented |
+| 0016 | [Portable Macro Expander](0016-portable-macro-expander.md) | Accepted | Implemented |
+| 0017 | [Portable IR Lowering](0017-portable-ir-lowering.md) | Accepted | Implemented |
+| 0018 | [Portable ESM and Source Map Emission](0018-portable-emission.md) | Accepted | Implemented |
+| 0019 | [Self-Hosted Compiler Driver](0019-self-hosted-compiler.md) | Stable | Implemented |
+| 0020 | [Emacs Worker Protocol and Measurement Probe](0020-worker-protocol.md) | Stable | Implemented |
+| 0021 | [Portable Functions and Dependency Closure](0021-portable-functions.md) | Stable | Implemented |
+| 0022 | [Emacs Worker Integration](0022-emacs-worker-integration.md) | Stable | Implemented |
+
+### Libraries, Builds, and Language Closure
+
+| ID | Specification | Status | Implementation |
+| --- | --- | --- | --- |
+| 0023 | [Portable Sequence Standard Library](0023-portable-sequence-library.md) | Accepted | Implemented |
+| 0024 | [Multi-file Project Builds](0024-project-builds.md) | Stable | Implemented |
+| 0025 | [Portable Text Standard Library](0025-portable-text-library.md) | Accepted | Implemented |
+| 0026 | [Portable Immutable Object Library](0026-portable-object-library.md) | Accepted | Implemented |
+| 0027 | [Portable Data Indexing](0027-portable-data-indexing.md) | Accepted | Implemented |
+| 0028 | [Portable Module Composition](0028-portable-module-composition.md) | Stable | Implemented |
+| 0029 | [Portable Indexing Composition](0029-portable-indexing-composition.md) | Accepted | Implemented |
+| 0030 | [Project Graph Manifest](0030-project-graph-manifest.md) | Stable | Implemented |
+| 0031 | [Incremental Project Builds](0031-incremental-project-builds.md) | Stable | Implemented |
+| 0032 | [Build Decision Reports](0032-build-decision-reports.md) | Stable | Implemented |
+| 0033 | [Build Phase Timings](0033-build-phase-timings.md) | Stable | Implemented |
+| 0034 | [Nullish Values](0034-nullish-values.md) | Stable | Implemented |
+| 0035 | [Deterministic Seed Macros](0035-deterministic-seed-macros.md) | Stable | Implemented |
+| 0036 | [Optional and Rest Function Parameters](0036-function-parameters.md) | Stable | Implemented |
+| 0037 | [Async Functions and Await](0037-async-functions.md) | Stable | Implemented |
+| 0038 | [Exception Control Flow](0038-exception-control-flow.md) | Stable | Implemented |
+| 0039 | [Vector Binding Patterns](0039-vector-binding-patterns.md) | Stable | Implemented |
+
+### Project Governance and Compatibility
+
+| ID | Specification | Status | Implementation |
+| --- | --- | --- | --- |
+| 0040 | [Project Maturity Roadmap and 1.0 Acceptance Contract](0040-maturity-roadmap.md) | Accepted | In progress |
+| 0041 | [Host Symbiosis, Persistent Data, and Emacs Acceleration](0041-host-symbiosis-and-persistent-data.md) | Accepted | In progress |
+| 0042 | [Specification Registry and Conformance Evidence](0042-specification-registry.md) | Stable | Implemented |
+| 0043 | [Structured Compiler Diagnostics](0043-structured-diagnostics.md) | Stable | Implemented |
+| 0044 | [Public Surface Registry and Consistency Matrix](0044-public-surface-registry.md) | Stable | Implemented |
+| 0045 | [Continuous Compatibility Matrix](0045-continuous-compatibility-matrix.md) | Stable | Implemented |
+| 0046 | [M7 Compatibility Baseline 1](0046-m7-compatibility-baseline.md) | Stable | Implemented |
+
+### Persistent Data and Protocols
+
+| ID | Specification | Status | Implementation |
+| --- | --- | --- | --- |
+| 0047 | [Persistent Vector Trie Prototype](0047-persistent-vector-prototype.md) | Accepted | Implemented |
+| 0048 | [Value Equality and Deterministic Hashing](0048-value-equality-and-hashing.md) | Accepted | Implemented |
+| 0049 | [Persistent Hash Map Trie Prototype](0049-persistent-hash-map-prototype.md) | Accepted | Implemented |
+| 0050 | [Persistent Hash Set Prototype](0050-persistent-hash-set-prototype.md) | Accepted | Implemented |
+| 0051 | [HAMT Layout Benchmark and Threshold Selection](0051-hamt-layout-benchmark.md) | Accepted | Implemented |
+| 0052 | [Portable 32-bit Integer Operations](0052-portable-32-bit-operations.md) | Accepted | Implemented |
+| 0053 | [Eliscript-authored Persistent Vector Trie](0053-eliscript-persistent-vector.md) | Accepted | Implemented |
+| 0054 | [Eliscript-authored Persistent List](0054-eliscript-persistent-list.md) | Accepted | Implemented |
+| 0055 | [Eliscript-authored Persistent HAMT Map](0055-eliscript-persistent-map.md) | Accepted | Implemented |
+| 0056 | [Eliscript-authored Persistent Map-backed Set](0056-eliscript-persistent-set.md) | Accepted | Implemented |
+| 0057 | [Portable Value Semantics Core](0057-portable-value-semantics.md) | Accepted | Implemented |
+| 0058 | [Open Protocol Dispatch Core](0058-open-protocol-dispatch.md) | Accepted | Implemented |
+| 0059 | [Collection Capability Protocols and Reduction Foundation](0059-collection-capability-protocols.md) | Accepted | Implemented |
+| 0060 | [Collection Construction Protocols](0060-collection-construction-protocols.md) | Accepted | Implemented |
 
 ## Adding a Specification
 
-1. Choose the next four-digit id and add `NNNN-short-name.md`.
-2. Add exact metadata to `index.json`.
+1. Choose the next four-digit ID and add `NNNN-short-name.md`.
+2. Add matching metadata to `index.json`.
 3. When implementation exists, add its feature and evidence to the conformance
    manifest.
-4. Run the focused contract tests and then the complete suite.
+4. Update this catalog in the same change.
+5. Run `bun run check:contracts`, then run the complete test suite.
 
 Do not mark a specification implemented without executable evidence. Do not
 mark a feature stable while its specification remains draft or accepted.

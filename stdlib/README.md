@@ -1,5 +1,8 @@
 # Standard Library
 
+[Project README](../README.md) | [Runtime](../runtime/README.md) |
+[Specifications](../specs/README.md)
+
 This directory contains portable Eliscript functions and macros. React and
 publishing support should be libraries here or in focused packages, not special
 cases embedded throughout the compiler.

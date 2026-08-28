@@ -1,5 +1,8 @@
 # Vite Adapter
 
+[Project README](../../README.md) | [Tools](../README.md) |
+[Specification 0011](../../specs/0011-vite-adapter.md)
+
 The adapter compiles `.eli` modules through the public Emacs-hosted compiler
 before Vite performs import analysis and bundling. It returns generated
 JavaScript and Source Map v3 data directly to Vite and leaves the compiler core

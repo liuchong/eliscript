@@ -1,22 +1,17 @@
 # Examples
 
+[Project README](../README.md) | [Specifications](../specs/README.md)
+
 Examples are executable design probes. Each example should include source,
 expected generated JavaScript, and the smallest environment needed to run it.
 
-`basic/main.eli` exercises the M1 language core. `react-counter/main.eli`
-exercises components, hooks, props, children, events, fragments, conditional
-children, automatic JSX runtime emission, server rendering, browser mounting,
-Vite production builds, React Fast Refresh, and a direct source import from the
-portable sequence standard library.
+| Example | What it proves | Entry command |
+| --- | --- | --- |
+| [`basic/`](basic/) | Core language forms and direct ESM execution | `bun run compile:example` |
+| [`stdlib-cli/`](stdlib-cli/README.md) | Recursive multi-file project builds | `bun run build:stdlib-cli` |
+| [`react-counter/`](react-counter/README.md) | React, hooks, browser mounting, Vite, and Fast Refresh | `bun run dev:react-counter` |
+| [`org-site/`](org-site/README.md) | Org export, watched content, and a custom React site | `bun run dev:org-site` |
+| [`emacs-index/`](emacs-index/README.md) | Portable computation called from a long-lived Emacs worker | `bun run benchmark:worker` |
 
-`org-site/` adds the publishing vertical slice: Org metadata and body export,
-draft filtering, a watched ESM content module, and a fully custom React reading
-interface written in Eliscript.
-
-`emacs-index/` adds the Emacs acceleration vertical slice: a statically checked
-portable scoring kernel compiled with a source map and driven concurrently by a
-high-level Emacs adapter.
-
-`stdlib-cli/` exercises ordinary multi-file project builds by importing the
-portable sequence, text, and object libraries as Eliscript source, then running
-the four-module ESM tree directly with Bun.
+Examples are maintained as end-to-end evidence. Generated files belong below
+`dist/` and are never hand-edited source.

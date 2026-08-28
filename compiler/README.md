@@ -1,5 +1,10 @@
 # Compiler
 
+[Project README](../README.md) | [Bootstrap compiler](../bootstrap/README.md) |
+[Specifications](../specs/README.md)
+
+## Modules
+
 This directory contains the first Emacs Lisp seed compiler:
 
 - `eliscript-reader.el` reads one or more `.eli` forms.
@@ -22,6 +27,8 @@ This directory contains the first Emacs Lisp seed compiler:
 - `eliscript-project-cli.el` implements the batch command used by
   `bin/eliscript-build`.
 
+## Pipeline
+
 The current pipeline expands user macros before passing forms through lexical
 analysis and JavaScript emission. Macro environments are isolated per
 compilation, and expanded forms are validated for resolution, mutability,
@@ -31,10 +38,14 @@ emission, and optional Source Map v3 output. The public compiler never
 reconstructs reader-shaped forms after lowering. Public entry points support
 both interactive Emacs use and clean batch builds.
 
+## React Lowering
+
 React `jsx` and `fragment` forms lower to dedicated IR nodes. Modules that use
 those nodes receive one automatic `react/jsx-runtime` namespace import and emit
 `jsx`, `jsxs`, and `Fragment` calls directly; ordinary modules remain free of
 React imports.
+
+## Source Discipline
 
 The Emacs Lisp and self-hosted implementations must share a conformance suite.
 Generated JavaScript is a build artifact and must never become the hand-edited

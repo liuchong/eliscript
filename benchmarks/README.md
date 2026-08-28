@@ -1,8 +1,13 @@
 # Benchmarks
 
+[Project README](../README.md) | [Tests](../tests/README.md) |
+[Specifications](../specs/README.md)
+
 Benchmark reports are evidence, not universal performance promises. Every
 committed report records raw samples, host fingerprints, correctness checks,
 parameters, and a digest of the source files that determine the measurement.
+
+## HAMT Layout
 
 Run the HAMT layout benchmark with:
 

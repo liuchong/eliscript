@@ -1,7 +1,14 @@
 # Tests
 
+[Project README](../README.md) | [Specifications](../specs/README.md) |
+[Benchmarks](../benchmarks/README.md)
+
+## Layout
+
 Compiler behavior is tested from Emacs in batch mode. Source fixtures belong in
 `fixtures/`; stable JavaScript output belongs in `snapshots/`.
+
+## Contract Gates
 
 Before compiler tests run, the contract checker validates all numbered
 specification metadata and requires every implemented specification to own a
@@ -22,6 +29,8 @@ Compatibility Baseline 1 then requires every specification and feature to be
 classified as stable, provisional, or planning, with stable ownership and
 feature status agreeing in both directions.
 
+## Default Suite
+
 `make test` runs the ERT suite, invokes the public CLI, compares the generated
 ESM with its snapshot, validates and decodes Source Map v3 output, and executes
 ordinary, source-mapped, and React server-rendered modules with Bun. It also
@@ -29,6 +38,8 @@ tests the Vite transform adapter and builds the browser counter with bundled
 Eliscript source maps. Org publishing tests cover metadata, deterministic HTML,
 draft and duplicate handling, the watched Vite content module, direct ESM
 execution, and the production Org site bundle.
+
+## Bootstrap and Compiler
 
 Bootstrap tests use shared JSON conformance fixtures. ERT runs the Emacs Lisp
 seed implementation, while Bun compiles the corresponding `.eli` module,
@@ -65,6 +76,8 @@ Generation 2 with Generation 1, and Generation 3 with Generation 2. It compares
 all ten ESM and Source Map artifacts byte-for-byte, checks the portable CLI
 against seed output, and verifies mapped file output and located diagnostics.
 It also compares seed and self-hosted `defportable` closure builds.
+
+## Standard Library and Portable Collections
 
 Standard-library tests compile bit, sequence, text, object, and data modules
 with the seed and self-hosted compiler, compare complete JavaScript output,
@@ -126,6 +139,8 @@ variadic `assoc`, exact `contains`, persistent no-op identity, immutable native
 copies, truthful partial Set protocols, bounded infinite-entry rejection, and
 one million generic Vector additions while preserving the old version.
 
+## JavaScript Runtime Collections
+
 Persistent-vector tests exercise the provisional M8 runtime independently of
 literal compilation. They compare generated operations with a simple mutable
 array model, retain and probe previous versions after each update, cross tail
@@ -154,6 +169,8 @@ set algebra, unordered hashing, and no-op identity. A generated mutable model
 covers 20,000 updates, a 100,000-member deletion proves exact path sharing, and
 one-million-member membership, insertion, and removal remain depth-bounded
 under Bun and Node.
+
+## Benchmarks, Projects, and Worker
 
 Collection-layout benchmark tests execute equivalent real HAMT node operations,
 smoke-test the Bun and Node host adapters, and validate the committed

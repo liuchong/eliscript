@@ -1,5 +1,8 @@
 # Org Publishing Adapter
 
+[Project README](../../README.md) | [Tools](../README.md) |
+[Specification 0012](../../specs/0012-org-publishing.md)
+
 The adapter uses the Org library bundled with Emacs to turn trusted `.org`
 articles into a deterministic ESM data module. It extracts metadata, exports the
 body to HTML, assigns stable heading ids, filters drafts, validates duplicate

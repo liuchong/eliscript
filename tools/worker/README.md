@@ -1,5 +1,8 @@
 # Emacs Worker Adapter
 
+[Project README](../../README.md) | [Tools](../README.md) |
+[Specification 0022](../../specs/0022-emacs-worker-integration.md)
+
 `eliscript-worker.el` keeps one Bun process alive and exchanges protocol v1
 NDJSON messages with `runtime/worker.mjs`. Load it from Emacs with the compiler
 and worker directories on `load-path`:
