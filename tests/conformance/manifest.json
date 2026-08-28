@@ -610,6 +610,22 @@
         { "kind": "bun-test", "file": "tests/protocol.test.mjs", "contains": "open IEquiv and IHash extensions preserve persistent key semantics" },
         { "kind": "bun-test", "file": "tests/protocol.test.mjs", "contains": "protocol dispatch agrees under Bun and Node and remains stable at scale" }
       ]
+    },
+    {
+      "id": "runtime.collection-capability-protocols",
+      "title": "Collection capability protocols and reduction foundation",
+      "status": "accepted",
+      "spec": "0059",
+      "contracts": ["Dispatches count, lookup, indexed access, sequence views, and reduction through open protocols", "Installs direct persistent collection capabilities and prototype-preserving native adapters", "Represents traversal as replayable immutable sequence views with frozen Map entries", "Supports explicit reduced values for exact early termination"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "collection protocols are frozen capabilities with direct persistent methods" },
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "generic count, lookup, and indexed access cover persistent and native values" },
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "seq returns replayable immutable logical views and immutable map entries" },
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "reduce follows logical sequence elements and supports explicit early termination" },
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "external immutable collections can implement the complete capability set" },
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "native adapters are exact, realm-explicit, and prototype preserving" },
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "collection capabilities agree under Bun and Node and reduce at million scale" }
+      ]
     }
   ]
 }

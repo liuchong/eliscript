@@ -162,7 +162,7 @@ make byte-compile
 ```
 
 [`contracts/compatibility-baseline.json`](contracts/compatibility-baseline.json)
-freezes 28 specifications and conformance features while retaining 20
+freezes 28 specifications and conformance features while retaining 28
 implemented collection, IR, bootstrap-phase, and standard-library surfaces as
 provisional. The contract checker rejects incomplete or partial promotions.
 
@@ -309,6 +309,9 @@ Implemented forms include:
   persistent Map/Set constructors from `stdlib/value.eli`
 - open runtime protocols with direct Symbol slots, exact-type and host-category
   extensions, explicit defaults, and structured missing-method diagnostics
+- generic collection count, lookup, indexed access, replayable sequence views,
+  collection-native reduction, and explicit early termination over persistent
+  and selected native values
 - exact portable runtime type, UTF-16 code-unit, and float64 word inspection
   forms used by language-authored value algorithms
 - ESM `module`, `import`, `import-portable`, `export`, and `export-default`
@@ -549,6 +552,11 @@ Current evidence:
   persistent value equality and hashing now use its `IEquiv` and `IHash`
   direct slots, while external immutable value types can register matching
   equality and hash implementations.
+- `runtime/core/collection.mjs` builds `ICounted`, `ILookup`, `IIndexed`,
+  `ISeqable`, and `IReduce` on that dispatch core. Persistent collections use
+  direct slots, native Array/Map/Set values use prototype-preserving adapters,
+  and replayable sequence views plus reduced values establish the future
+  transducer boundary.
 - `bin/eliscript-build` walks expanded IR imports, compiles each local `.eli`
   dependency once, preserves its root-relative path as `.mjs`, and emits a
   source map for every module without requiring Vite.
@@ -558,7 +566,7 @@ Current evidence:
 - Ninety-eight ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- One hundred three Bun tests cover the compiler and Org Vite adapters, source-map
+- One hundred ten Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
   bootstrap behavior, the worker protocol, standard library, and benchmark
   reporting, plus persistent vector correctness, structural bounds, recursive
@@ -663,9 +671,12 @@ ordinary Map/Set constructors, preserves nested `undefined`, and freezes
 cross-host collision behavior. The generic runtime protocol core now supplies
 direct Symbol dispatch, exact-type and host-category extensions, explicit
 defaults, and structured missing diagnostics; `IEquiv`/`IHash` are its first
-production protocols. The remaining collection protocols, efficient host
-identity hashing, metadata, and reader/printer integration are the next
-boundary.
+production protocols. The collection continuation now adds `ICounted`,
+`ILookup`, `IIndexed`, `ISeqable`, and `IReduce`, with direct persistent
+methods, selected native adapters, immutable replayable traversal views,
+Map-entry reduction, and explicit early termination. Construction protocols,
+portable algorithm migration, transducers, efficient host identity hashing,
+metadata, and reader/printer integration remain open.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -794,7 +805,10 @@ for the portable shared value policy, default Map/Set constructors, nullish
 preservation, cross-family invariants, and host-identity limits, and
 [specs/0058-open-protocol-dispatch.md](specs/0058-open-protocol-dispatch.md)
 for immutable protocol definitions, open dispatch precedence, external value
-types, diagnostics, and cross-runtime evidence.
+types, diagnostics, and cross-runtime evidence, and
+[specs/0059-collection-capability-protocols.md](specs/0059-collection-capability-protocols.md)
+for generic collection capabilities, replayable sequence views, native
+adapters, reduction semantics, and early termination.
 
 ## License
 

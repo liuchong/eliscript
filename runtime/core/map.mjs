@@ -16,6 +16,14 @@ import {
   mixHash,
   unorderedCollectionHash,
 } from "./value-internals.mjs";
+import {
+  COLLECTION_COUNT,
+  COLLECTION_GET,
+  COLLECTION_REDUCE,
+  COLLECTION_SEQ,
+  reduceIterable,
+  sequenceView,
+} from "./collection-internals.mjs";
 
 const MAP_HASH_TAG = 0x6c8e_9cf5;
 const MAP_ENTRY_HASH_TAG = 0x3a91_72eb;
@@ -142,6 +150,24 @@ export class PersistentHashMap {
       result = reducer(result, entry.value, entry.key, this);
     }
     return result;
+  }
+
+  [COLLECTION_COUNT]() {
+    return this.count;
+  }
+
+  [COLLECTION_GET](key, notFound = null) {
+    return this.get(key, notFound);
+  }
+
+  [COLLECTION_SEQ]() {
+    return this.count === 0
+      ? null
+      : sequenceView(() => this.entries(), this.count);
+  }
+
+  [COLLECTION_REDUCE](reducer, ...initial) {
+    return reduceIterable(this, reducer, ...initial);
   }
 
   toMap() {

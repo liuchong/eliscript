@@ -116,6 +116,12 @@ semantics through `IEquiv`, `IHash`, and persistent Map. Bun and Node execute
 the same dispatch report, followed by one million direct calls in the default
 test host.
 
+The collection-protocol suite applies that dispatch core to `ICounted`,
+`ILookup`, `IIndexed`, `ISeqable`, and `IReduce`. It covers direct persistent
+implementations, prototype-preserving native adapters, replayable sequence
+views, frozen Map entries, explicit reduced-value termination, external types,
+realm-explicit extension, Bun/Node parity, and one million reduction steps.
+
 Persistent-vector tests exercise the provisional M8 runtime independently of
 literal compilation. They compare generated operations with a simple mutable
 array model, retain and probe previous versions after each update, cross tail

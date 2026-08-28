@@ -100,6 +100,11 @@ The P2 dispatch foundation begins in
 [`0058-open-protocol-dispatch.md`](0058-open-protocol-dispatch.md), which adds
 immutable protocol definitions, direct and external dispatch, structured
 missing diagnostics, and the first production `IEquiv`/`IHash` migration.
+The first generic collection capabilities continue in
+[`0059-collection-capability-protocols.md`](0059-collection-capability-protocols.md),
+which adds count, lookup, indexed access, replayable sequence views,
+collection-native reduction, and reduced-value early termination over
+persistent and selected native collections.
 
 ## Adding a Specification
 

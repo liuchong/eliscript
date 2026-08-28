@@ -683,7 +683,11 @@ The reusable dispatch mechanism now begins in
 [0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md): frozen
 protocol objects own direct Symbol slots and private exact-type/category/default
 tables, and the JavaScript value runtime migrates `IEquiv` and `IHash` onto
-that path. The remaining collection protocol set and portable algorithm
+that path. The first collection capability layer follows in
+[0059-collection-capability-protocols.md](0059-collection-capability-protocols.md):
+`ICounted`, `ILookup`, `IIndexed`, `ISeqable`, and `IReduce` now dispatch over
+persistent and selected native collections, with immutable sequence views and
+reduced-value early termination. Construction protocols and portable algorithm
 migration stay open.
 
 ### P0: Semantics and Prototype
@@ -746,9 +750,13 @@ implemented in
 [0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md), including
 direct, exact-type, host-category, default, and missing paths; atomic external
 registration; cross-realm adaptation; and `IEquiv`/`IHash` production use.
-`ICounted`, `IEmptyable`, `IConj`, `ILookup`, `IAssociative`, `IIndexed`,
-`ISeqable`, `IReduce`, transient protocols, algorithm migration, and
-transducers remain required for the P2 exit.
+The consumption capabilities `ICounted`, `ILookup`, `IIndexed`, `ISeqable`,
+and `IReduce` now continue in
+[0059-collection-capability-protocols.md](0059-collection-capability-protocols.md),
+including direct persistent implementations, native Array/Map/Set adapters,
+replayable sequence views, Map-entry reduction, and explicit early
+termination. `IEmptyable`, `IConj`, `IAssociative`, transient protocols,
+algorithm migration, and transducers remain required for the P2 exit.
 
 ### P3: Language Integration and Migration
 

@@ -12,6 +12,14 @@ import {
   VALUE_HASH,
   unorderedCollectionHash,
 } from "./value-internals.mjs";
+import {
+  COLLECTION_COUNT,
+  COLLECTION_GET,
+  COLLECTION_REDUCE,
+  COLLECTION_SEQ,
+  reduceIterable,
+  sequenceView,
+} from "./collection-internals.mjs";
 
 const SET_HASH_TAG = 0x51e7_b32d;
 
@@ -176,6 +184,24 @@ export class PersistentHashSet {
       result = reducer(result, value, this);
     }
     return result;
+  }
+
+  [COLLECTION_COUNT]() {
+    return this.count;
+  }
+
+  [COLLECTION_GET](value, notFound = null) {
+    return this.has(value) ? value : notFound;
+  }
+
+  [COLLECTION_SEQ]() {
+    return this.count === 0
+      ? null
+      : sequenceView(() => this.values(), this.count);
+  }
+
+  [COLLECTION_REDUCE](reducer, ...initial) {
+    return reduceIterable(this, reducer, ...initial);
   }
 
   toSet() {

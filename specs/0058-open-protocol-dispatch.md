@@ -202,11 +202,13 @@ equality and hash outputs do not change.
 
 Open items include:
 
-- `ICounted`, `IEmptyable`, `IConj`, `ILookup`, `IAssociative`, `IIndexed`,
-  `ISeqable`, `IReduce`, and transient protocols
+- `IEmptyable`, `IConj`, `IAssociative`, and transient protocols; the first
+  collection capability set continues in
+  [0059-collection-capability-protocols.md](0059-collection-capability-protocols.md)
 - Eliscript declaration syntax and compile-time protocol checking
 - direct-call specialization from proven receiver types
-- immutable sequence views and host adapters
+- additional sequence views and named host adapters beyond the Array, Map,
+  and Set support in 0059
 - metadata and user-defined record ergonomics
 - lifecycle policy for long-lived plugin extension and hot reload
 

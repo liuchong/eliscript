@@ -1,0 +1,207 @@
+# 0059: Collection Capability Protocols and Reduction Foundation
+
+- Status: Accepted
+- Implementation: Implemented
+- Date: 2026-08-28
+- Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
+  0047 Persistent Vector Trie Prototype,
+  0049 Persistent Hash Map Trie Prototype,
+  0050 Persistent Hash Set Prototype,
+  0058 Open Protocol Dispatch Core
+
+## Summary
+
+This specification turns the generic protocol mechanism into the first shared
+collection capability layer. It defines `ICounted`, `ILookup`, `IIndexed`,
+`ISeqable`, and `IReduce`; installs direct Symbol methods on persistent Vector,
+Map, and Set values; and supplies external adapters for native JavaScript
+Array, Map, and Set values without modifying their prototypes.
+
+`seq` introduces an immutable, replayable logical traversal view. Generic
+`reduce` dispatches to collection-native traversal, treats Map entries as
+logical elements, and recognizes an explicit reduced wrapper for early
+termination. These contracts are the substrate for later generic algorithms
+and transducers. This slice does not yet implement transducers, transient
+builders, persistent collection literals, or the remaining mutation-shaped
+collection capabilities.
+
+## Public Runtime Surface
+
+`runtime/core/collection.mjs` exports:
+
+- protocols: `ICounted`, `ILookup`, `IIndexed`, `ISeqable`, `IReduce`
+- generic operations: `count`, `get`, `nth`, `seq`, `reduce`
+- sequence values: `SequenceView`, `sequenceView`, `isSequenceView`
+- early termination: `reduced`, `isReduced`, `unreduced`
+
+The implementation identities and direct slots remain internal to
+`runtime/core/collection-internals.mjs`. Applications extend a capability by
+passing the public protocol object to the extension functions from
+`runtime/core/protocol.mjs`.
+
+## Capability Contracts
+
+### ICounted
+
+`count(collection)` returns a non-negative safe integer. A protocol
+implementation returning a negative, fractional, infinite, or unsafe value is
+invalid and fails at the generic boundary.
+
+Persistent Vector, Map, and Set values answer in O(1). Native Array, Map, and
+Set values read their current `length` or `size`. `null` has count zero;
+`undefined` remains distinct and has no implicit collection behavior.
+
+### ILookup
+
+`get(collection, key, notFound = null)` never uses the result value itself to
+decide whether a key is present. Stored `undefined` is therefore distinct from
+absence.
+
+- Vector and Array accept in-range non-negative integer indexes.
+- Map returns the value associated with an equal key under that Map's own key
+  semantics.
+- Set returns the queried member when present.
+- an absent or unsupported key returns `notFound`.
+
+### IIndexed
+
+`nth(collection, index)` provides indexed access and throws `RangeError` for a
+missing or invalid index. `nth(collection, index, notFound)` returns the
+provided fallback instead. Vector and native Array implement this capability;
+Map and Set deliberately do not.
+
+### ISeqable
+
+`seq(collection)` returns `null` for an empty logical collection. Otherwise it
+returns an iterable logical traversal value. A persistent collection never
+returns itself merely because it is iterable.
+
+`SequenceView` is frozen and replayable: requesting an iterator twice starts
+two independent traversals. It is not a mutable iterator cursor. Persistent
+views close over immutable roots. Native container views deliberately observe
+later host mutation; callers use a persistent conversion when they require a
+snapshot.
+
+Vector yields values in index order. Map yields frozen two-element
+`[key, value]` entries. Set yields members. `null` yields no sequence.
+
+### IReduce
+
+`reduce(collection, reducer)` uses the first logical element as the initial
+accumulator and fails on an empty collection. The three-argument form
+`reduce(collection, reducer, initial)` returns `initial` unchanged for an
+empty collection.
+
+The reducer receives exactly the accumulator and one logical sequence element.
+Vector and Set elements are values; Map elements are the same frozen entries
+produced by `seq`. Representation-specific JavaScript-style `.reduce` methods
+remain compatible but do not define protocol semantics.
+
+Every core implementation traverses its native iterator or leaf path directly;
+generic reduction does not repeatedly call `seq`, `count`, or `nth`.
+
+## Reduced Values
+
+`reduced(value)` wraps a completed accumulator. Returning that wrapper from a
+reducer stops traversal immediately, closes a closable iterator through normal
+ECMAScript iteration semantics, and makes generic `reduce` return the unwrapped
+value. Wrapping an already reduced value is idempotent.
+
+`isReduced(value)` recognizes the wrapper and `unreduced(value)` removes one
+wrapper if present. The wrapper is frozen and its private marker is not part of
+the public value representation.
+
+This early-termination contract is intentionally established before
+transducers. A later transducer implementation must compose with it rather than
+inventing a second termination channel.
+
+## Direct Persistent Implementations
+
+Persistent types install direct Symbol-keyed protocol methods:
+
+- Vector: all five capabilities
+- Map: `ICounted`, `ILookup`, `ISeqable`, `IReduce`
+- Set: `ICounted`, `ILookup`, `ISeqable`, `IReduce`
+
+Direct methods delegate traversal to existing representation-native iterators.
+No protocol operation inspects private node shapes from outside the owning
+collection module.
+
+Direct dispatch remains one Symbol lookup and one call. Vector lookup is
+O(log32 n), Map and Set lookup have expected O(log32 n) trie depth, counting is
+O(1), and reduction is O(n) with O(1) reducer state apart from user results.
+
+## Native Host Adapters
+
+Importing `runtime/core/collection.mjs` registers exact-type adapters for the
+current realm's Array, Map, and Set constructors. Registration writes only to
+protocol-owned tables. It does not add Symbols or string properties to any
+built-in prototype.
+
+Exact registration is intentionally realm-specific. A value from another
+realm does not accidentally inherit a local adapter. A host integration may
+explicitly register that realm's constructor through `extendProtocolType`.
+Named cross-realm adapters for broader host families remain future work.
+
+Strings, typed arrays, DOM collections, async iterables, and arbitrary
+iterables are not guessed into this contract. Their element and mutation
+semantics require explicit follow-up decisions.
+
+## External Collection Types
+
+An immutable external type can implement any subset of the capabilities by
+registering each protocol separately. A complete sequence-oriented type should
+normally provide `ICounted`, `ISeqable`, and `IReduce`; indexed and keyed
+capabilities remain representation-dependent.
+
+`sequenceView(factory, count)` is the standard helper for an external
+`ISeqable` implementation. The factory must return a fresh iterator. `count`
+may be a non-negative safe integer, a resolver for host-backed views, or
+omitted when counting by traversal is acceptable.
+
+## Compatibility and Limits
+
+This collection runtime surface is provisional during M8. It does not change
+current Eliscript literal emission or the older array-backed
+`stdlib/sequence.eli` contract. Migrating that library requires protocol-call
+support in portable Eliscript and dual-compiler evidence, so it remains a
+separate P2 construction step.
+
+Open P2 capabilities are:
+
+- `IEmptyable`, `IConj`, `IAssociative`, and transient protocols
+- generic map/filter/take/drop algorithms over `IReduce`
+- transducers, `transduce`, and transient-backed `into`
+- portable Eliscript protocol declarations and direct-call specialization
+- named host adapters and persistent host conversion
+
+## Acceptance Criteria
+
+- **CCP-01:** All five protocol objects and operation functions are immutable
+  and use the 0058 dispatch contract.
+- **CCP-02:** Persistent Vector implements all five direct capabilities; Map
+  and Set implement every applicable direct capability without exposing node
+  internals.
+- **CCP-03:** Count, lookup, and indexed operations preserve stored
+  `undefined`, explicit fallbacks, null emptiness, and deterministic errors.
+- **CCP-04:** Non-empty `seq` results are frozen, replayable logical views;
+  empty persistent and native collections plus `null` return `null`.
+- **CCP-05:** Persistent and native Map sequence/reduction elements are frozen
+  key/value entries rather than value-only callbacks.
+- **CCP-06:** Reduction supports explicit and implicit initial values and stops
+  at the exact reducer call returning `reduced`.
+- **CCP-07:** Native adapters leave Array, Map, and Set prototypes byte-for-byte
+  unchanged and do not match foreign realms accidentally.
+- **CCP-08:** One external immutable type implements the complete capability
+  set through extension tables and a standard sequence view.
+- **CCP-09:** Bun and Node.js produce identical capability reports, and an
+  exact one-million-element reduction completes without stack growth.
+- **CCP-10:** Existing persistent collection, protocol, public-surface,
+  conformance, compatibility, and full regression suites remain green.
+
+## Next Slice
+
+The next protocol slice should add `IEmptyable`, `IConj`, and `IAssociative`,
+then express generic collection construction over those capabilities. With
+both consumption and construction protocols present, transducers and `into`
+can land without binding algorithms to Vector, Map, Set, or native containers.

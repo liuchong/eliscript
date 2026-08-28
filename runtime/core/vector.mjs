@@ -16,6 +16,15 @@ import {
   VALUE_HASH,
   orderedCollectionHash,
 } from "./value-internals.mjs";
+import {
+  COLLECTION_COUNT,
+  COLLECTION_GET,
+  COLLECTION_NTH,
+  COLLECTION_REDUCE,
+  COLLECTION_SEQ,
+  reduceIterable,
+  sequenceView,
+} from "./collection-internals.mjs";
 
 const MAX_COUNT = 0x7fffffff;
 const MISSING = Symbol("eliscript.vector.missing");
@@ -287,6 +296,30 @@ export class PersistentVector {
       }
     }
     return accumulator;
+  }
+
+  [COLLECTION_COUNT]() {
+    return this.count;
+  }
+
+  [COLLECTION_GET](index, notFound = null) {
+    return this.nth(index, notFound);
+  }
+
+  [COLLECTION_NTH](index, ...notFound) {
+    return notFound.length === 0
+      ? this.nth(index)
+      : this.nth(index, notFound[0]);
+  }
+
+  [COLLECTION_SEQ]() {
+    return this.count === 0
+      ? null
+      : sequenceView(() => this[Symbol.iterator](), this.count);
+  }
+
+  [COLLECTION_REDUCE](reducer, ...initial) {
+    return reduceIterable(this, reducer, ...initial);
   }
 
   toArray() {

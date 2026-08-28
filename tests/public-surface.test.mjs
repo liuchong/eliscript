@@ -34,7 +34,7 @@ test("repository public surface matches every tracked implementation", async () 
     commands: { commands: 5, options: 20 },
     schemas: { total: 6 },
     adapters: { adapters: 4, exports: 17 },
-    runtimeModules: { modules: 9, exports: 42, public: 5, internal: 4 },
+    runtimeModules: { modules: 10, exports: 58, public: 6, internal: 4 },
     standardLibrary: { modules: 10, exports: 102 },
     emacs: {
       functions: 91,
@@ -81,8 +81,11 @@ test("public surface checker rejects adapter export drift", async () => {
 
 test("public surface checker rejects runtime visibility and export drift", async () => {
   const surface = await surfaceDocument();
-  surface.runtimeModules[0].visibility = "accidental";
-  surface.runtimeModules[0].namedExports.shift();
+  const module = surface.runtimeModules.find(
+    ({ id }) => id === "persistent-hash-map",
+  );
+  module.visibility = "accidental";
+  module.namedExports.shift();
   const errors = await validationErrors(surface);
   expect(errors).toContain(
     'persistent-hash-map has invalid visibility "accidental"',

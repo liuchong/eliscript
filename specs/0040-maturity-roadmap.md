@@ -514,7 +514,12 @@ with immutable protocol definitions, direct Symbol slots, exact-type and
 host-category extension tables, explicit defaults, structured diagnostics,
 and production `IEquiv`/`IHash` integration. The remaining collection
 protocols, efficient host identity hashing, metadata, printing, and reading
-remain open.
+remain open. The first collection-capability continuation in
+[0059-collection-capability-protocols.md](0059-collection-capability-protocols.md)
+adds `ICounted`, `ILookup`, `IIndexed`, `ISeqable`, and `IReduce` across
+persistent and selected native collections, plus immutable replayable sequence
+views and reduced-value early termination. Construction protocols, portable
+algorithm migration, and transducers remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 
