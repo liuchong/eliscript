@@ -1,6 +1,6 @@
 # 0005: Compile-time Macros
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-27
 - Depends on: 0001 Language and Toolchain Boundary, 0004 Lexical Analysis

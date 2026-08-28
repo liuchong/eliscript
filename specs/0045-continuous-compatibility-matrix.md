@@ -1,6 +1,6 @@
 # 0045: Continuous Compatibility Matrix
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0040 Project Maturity Roadmap and 1.0 Acceptance Contract,
@@ -15,10 +15,10 @@ contract is the source of truth for the matrix. The checked-in GitHub Actions
 workflow is generated deterministically from that contract and fails the
 default contract check if it is edited independently.
 
-This establishes the first executable platform baseline required by M7. It
-does not declare M7 complete by itself: the generated jobs must run
-successfully on the remote runners, and the accepted language contracts must
-still be reviewed before promotion to `Stable`.
+This establishes the executable platform baseline required by M7. The four
+generated jobs now pass on their remote runners, and Compatibility Baseline 1
+records the reviewed stable and provisional language contracts. Together they
+satisfy the M7 platform and compatibility exit requirements.
 
 ## Compatibility Contract
 

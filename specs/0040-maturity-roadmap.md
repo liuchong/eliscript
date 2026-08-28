@@ -51,7 +51,7 @@ Eliscript already has the difficult vertical foundations:
 This proves that the architecture is viable. It does not yet establish a
 mature user contract. The main remaining gaps are:
 
-- no frozen language compatibility baseline
+- core collection literal and value semantics remain provisional until M8
 - provisional mutable JavaScript arrays and objects still stand in for
   language-level vector and map values
 - incomplete module interop and core data semantics
@@ -60,7 +60,6 @@ mature user contract. The main remaining gaps are:
 - no formatter, interactive REPL, or complete Emacs editing mode
 - an intentionally small standard library without a documented stability
   classification
-- no continuous cross-platform compatibility matrix
 - insufficient malformed-input, fuzz, scale, soak, and security evidence
 - no multi-project proving period or formal final acceptance report
 
@@ -412,6 +411,19 @@ Local contract tests reject missing matrix cells, mutable Action revisions,
 weakened commands, and workflow drift. Remote matrix results remain required
 before the M7 platform exit gate is satisfied. See
 [0045-continuous-compatibility-matrix.md](0045-continuous-compatibility-matrix.md).
+
+The fifth slice freezes Compatibility Baseline 1 without freezing the current
+mutable collection representation. Twenty-eight specifications and features
+whose semantics survive the planned M8 migration are stable; fifteen
+implemented compiler, collection, and standard-library surfaces remain
+explicitly provisional; three roadmap specifications remain planning work.
+The default checker derives and compares every classification in both
+directions. The complete suite and strict byte compilation pass on all four
+declared remote matrix cells. These results satisfy the M7 exit gate. See
+[0046-m7-compatibility-baseline.md](0046-m7-compatibility-baseline.md).
+
+**M7 status:** Completed on 2026-08-28. M8 work may now change only provisional
+surfaces unless it follows the stable compatibility-change process.
 
 ### M8: Language Contract Closure (8-12 weeks)
 

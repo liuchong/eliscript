@@ -23,7 +23,7 @@
     {
       "id": "compiler.lexical-analysis",
       "title": "Lexical analysis and binding diagnostics",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0004",
       "contracts": ["Resolves module and lexical bindings", "Rejects unbound and duplicate bindings"],
       "evidence": [
@@ -34,7 +34,7 @@
     {
       "id": "compiler.compile-time-macros",
       "title": "Deterministic compile-time macros",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0005",
       "contracts": ["Expands user macros before analysis", "Preserves quoted data and isolates compilations"],
       "evidence": [
@@ -45,7 +45,7 @@
     {
       "id": "compiler.source-locations",
       "title": "Located forms and diagnostics",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0006",
       "contracts": ["Retains recursive source locations", "Reports filename, line, and column for failures"],
       "evidence": [
@@ -78,7 +78,7 @@
     {
       "id": "compiler.source-maps",
       "title": "Source Map v3 emission",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0009",
       "contracts": ["Emits valid signed VLQ mappings", "Maps UTF-16 generated columns and macro origins"],
       "evidence": [
@@ -89,7 +89,7 @@
     {
       "id": "react.element-compilation",
       "title": "React element compilation",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0010",
       "contracts": ["Lowers components and elements to dedicated IR", "Uses the automatic JSX runtime"],
       "evidence": [
@@ -100,7 +100,7 @@
     {
       "id": "tooling.vite-adapter",
       "title": "Vite transform adapter",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0011",
       "contracts": ["Compiles .eli modules with source maps", "Provides a React Refresh boundary in development"],
       "evidence": [
@@ -111,7 +111,7 @@
     {
       "id": "publishing.org-adapter",
       "title": "Deterministic Org publishing",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0012",
       "contracts": ["Exports deterministic article modules", "Validates metadata, drafts, slugs, and heading identifiers"],
       "evidence": [
@@ -188,7 +188,7 @@
     {
       "id": "bootstrap.self-hosted-driver",
       "title": "Self-hosted compiler fixed point",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0019",
       "contracts": ["Builds Generation 1 through Generation 3", "Produces byte-identical compiler modules and maps"],
       "evidence": [{ "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }]
@@ -196,7 +196,7 @@
     {
       "id": "worker.protocol-v1",
       "title": "Versioned worker protocol",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0020",
       "contracts": ["Correlates requests and responses over NDJSON", "Supports progress, cancellation, timeout, errors, and shutdown"],
       "evidence": [{ "kind": "bun-test", "file": "tests/worker-runtime.test.mjs", "contains": "long-lived worker implements the versioned NDJSON protocol" }]
@@ -204,7 +204,7 @@
     {
       "id": "portable.function-closure",
       "title": "Portable functions and dependency closure",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0021",
       "contracts": ["Validates transitive portable dependencies", "Emits selected closures and source-name manifests"],
       "evidence": [
@@ -215,7 +215,7 @@
     {
       "id": "worker.emacs-integration",
       "title": "Resilient Emacs worker integration",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0022",
       "contracts": ["Restarts after module changes and failures", "Tracks project graphs and mapped diagnostics"],
       "evidence": [
@@ -237,7 +237,7 @@
     {
       "id": "project.multi-file-build",
       "title": "Multi-file project builds",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0024",
       "contracts": ["Discovers expanded local imports", "Builds a runnable source-mapped ESM tree"],
       "evidence": [
@@ -281,7 +281,7 @@
     {
       "id": "portable.module-composition",
       "title": "Portable module composition",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0028",
       "contracts": ["Follows local portable imports", "Emits only the verified transitive closure"],
       "evidence": [{ "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-builds-pruned-portable-module-graph" }]
@@ -300,7 +300,7 @@
     {
       "id": "project.graph-manifest",
       "title": "Deterministic project graph manifest",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0030",
       "contracts": ["Records sorted project module identities", "Produces a stable graph digest"],
       "evidence": [{ "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-emits-deterministic-graph-manifest" }]
@@ -308,7 +308,7 @@
     {
       "id": "project.incremental-builds",
       "title": "Verified incremental project builds",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0031",
       "contracts": ["Reuses clean modules", "Rebuilds dirty modules and validates portable closures"],
       "evidence": [
@@ -319,7 +319,7 @@
     {
       "id": "project.decision-reports",
       "title": "Machine-readable build decision reports",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0032",
       "contracts": ["Reports compiled and reused modules", "Uses a stable versioned JSON-compatible schema"],
       "evidence": [{ "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-reports-incremental-decisions" }]
@@ -327,7 +327,7 @@
     {
       "id": "project.phase-timings",
       "title": "Non-identity build phase timings",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0033",
       "contracts": ["Reports per-module phase timings", "Excludes machine-local timings from artifact identity"],
       "evidence": [{ "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-reports-incremental-decisions" }]
@@ -335,7 +335,7 @@
     {
       "id": "language.nullish-values",
       "title": "Explicit nullish values",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0034",
       "contracts": ["Distinguishes null and undefined at interop boundaries", "Preserves Lisp truthiness"],
       "evidence": [
@@ -346,7 +346,7 @@
     {
       "id": "macro.deterministic-seed",
       "title": "Host-independent seed macro evaluation",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0035",
       "contracts": ["Rejects undeclared host functions", "Matches the portable macro evaluator"],
       "evidence": [
@@ -357,7 +357,7 @@
     {
       "id": "language.function-parameters",
       "title": "Optional and rest function parameters",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0036",
       "contracts": ["Supports optional defaults", "Supports one final rest parameter with validation"],
       "evidence": [{ "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-supports-optional-and-rest-parameters" }]
@@ -365,7 +365,7 @@
     {
       "id": "language.async-await",
       "title": "Async functions and await",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0037",
       "contracts": ["Emits async functions and await expressions", "Rejects await outside an async context"],
       "evidence": [{ "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-supports-async-functions-and-await" }]
@@ -373,7 +373,7 @@
     {
       "id": "language.exception-control-flow",
       "title": "Exception control flow",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0038",
       "contracts": ["Supports expression-valued try, catch, finally, and throw", "Preserves lexical catch scope"],
       "evidence": [{ "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-supports-exception-control-flow" }]
@@ -381,7 +381,7 @@
     {
       "id": "language.vector-binding-patterns",
       "title": "Nested vector binding patterns",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0039",
       "contracts": ["Supports nested patterns, nil holes, and final rest bindings", "Works in parameters, lexical bindings, catch, and portable functions"],
       "evidence": [
@@ -392,7 +392,7 @@
     {
       "id": "quality.specification-registry",
       "title": "Specification registry and conformance evidence",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0042",
       "contracts": ["Indexes every numbered specification with separate design and implementation status", "Requires every implemented specification to own executable conformance evidence"],
       "evidence": [{ "kind": "bun-test", "file": "tests/conformance.test.mjs", "contains": "repository specifications have complete conformance evidence" }]
@@ -400,7 +400,7 @@
     {
       "id": "compiler.structured-diagnostics",
       "title": "Versioned structured compiler diagnostics",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0043",
       "contracts": ["Preserves existing human condition and terminal messages", "Emits one versioned JSON schema from seed, project, and self-hosted CLIs", "Carries stable codes, phases, messages, and source spans"],
       "evidence": [
@@ -412,7 +412,7 @@
     {
       "id": "quality.public-surface-registry",
       "title": "Public surface registry and consistency matrix",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0044",
       "contracts": ["Classifies current public and internal interfaces", "Rejects drift in IR, CLI, adapters, libraries, and Emacs APIs", "Prints generated conformance and public-surface matrices"],
       "evidence": [
@@ -423,12 +423,23 @@
     {
       "id": "quality.continuous-compatibility-matrix",
       "title": "Continuous operating-system and Emacs compatibility matrix",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0045",
       "contracts": ["Defines the complete Linux/macOS and Emacs 29/30 matrix as versioned data", "Renders one immutable pinned workflow and rejects contract drift", "Runs the complete suite and strict byte compilation in every matrix cell"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/ci-contract.test.mjs", "contains": "repository compatibility matrix renders the committed CI workflow" },
         { "kind": "fixture", "file": "contracts/compatibility-matrix.json", "contains": "\"format\": \"eliscript-compatibility-matrix\"" }
+      ]
+    },
+    {
+      "id": "quality.compatibility-baseline",
+      "title": "Stable and provisional compatibility baseline",
+      "status": "stable",
+      "spec": "0046",
+      "contracts": ["Classifies every specification and conformance feature exactly once", "Requires stable specification and feature statuses to agree", "Keeps persistent literal and pre-protocol library behavior explicitly provisional"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/conformance.test.mjs", "contains": "repository specifications have complete conformance evidence" },
+        { "kind": "fixture", "file": "contracts/compatibility-baseline.json", "contains": "\"format\": \"eliscript-compatibility-baseline\"" }
       ]
     }
   ]

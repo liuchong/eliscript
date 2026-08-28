@@ -1,6 +1,6 @@
 # 0031: Incremental Project Builds
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0024 Project Builds,

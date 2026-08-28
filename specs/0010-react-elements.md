@@ -1,6 +1,6 @@
 # 0010: React Element Compilation
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 

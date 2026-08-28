@@ -1,6 +1,6 @@
 # 0043: Structured Compiler Diagnostics
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0006 Located Forms and Diagnostic Positions, 0019 Self-hosted Compiler Driver, 0040 Project Maturity Roadmap and 1.0 Acceptance Contract

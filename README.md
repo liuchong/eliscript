@@ -138,6 +138,11 @@ warning-as-error Emacs byte compilation locally with:
 make byte-compile
 ```
 
+[`contracts/compatibility-baseline.json`](contracts/compatibility-baseline.json)
+freezes 28 specifications and conformance features while retaining 15
+implemented collection, IR, bootstrap-phase, and standard-library surfaces as
+provisional. The contract checker rejects incomplete or partial promotions.
+
 Compile and render the React counter example:
 
 ```sh
@@ -498,7 +503,7 @@ Current evidence:
 - Ninety-four ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- Thirty-six Bun tests cover the compiler and Org Vite adapters, source-map
+- Thirty-eight Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
   bootstrap behavior, the worker protocol, standard library, and benchmark
   reporting.
@@ -530,7 +535,7 @@ repeat builds to avoid compiler work without weakening runtime graph identity.
 The versioned build report makes those decisions and phase timings observable
 without writing machine-dependent measurements back into the manifest.
 
-M7 is underway. The specification registry now makes implementation status and
+M7 is complete. The specification registry now makes implementation status and
 test ownership machine-checkable, and the first public contract slice adds
 versioned structured diagnostics without changing existing human errors. The
 seed compiler, project builder, and self-hosted compiler share the schema; the
@@ -538,7 +543,9 @@ default test target rejects missing specification evidence. The public-surface
 registry classifies language, IR, CLI, schema, adapter, library, and Emacs
 interfaces. A generated compatibility workflow now covers Emacs 29.4 and 30.2
 on Linux and macOS with a pinned Bun minimum version and strict byte
-compilation in every matrix cell.
+compilation in every matrix cell. Compatibility Baseline 1 freezes 28
+specifications and features while preserving an explicit provisional boundary
+for the collection and compiler work that begins in M8.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -629,7 +636,9 @@ for the machine-checked public/internal boundary and generated consistency
 matrices, and
 [specs/0045-continuous-compatibility-matrix.md](specs/0045-continuous-compatibility-matrix.md)
 for the versioned platform matrix, deterministic workflow generation, and
-strict CI gates.
+strict CI gates, and
+[specs/0046-m7-compatibility-baseline.md](specs/0046-m7-compatibility-baseline.md)
+for the stable/provisional boundary and M7 exit audit.
 
 ## License
 

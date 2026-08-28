@@ -1,6 +1,6 @@
 # 0030: Project Graph Manifest
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0024 Project Builds,

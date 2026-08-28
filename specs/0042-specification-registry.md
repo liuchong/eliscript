@@ -1,6 +1,6 @@
 # 0042: Specification Registry and Conformance Evidence
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0040 Project Maturity Roadmap and 1.0 Acceptance Contract
@@ -105,9 +105,11 @@ specifications own 39 conformance features with 67 evidence links. The roadmap
 and persistent-data design remain accepted work with independent implementation
 states rather than being misreported as completed features.
 
-This first manifest establishes specification-level coverage. Later M7 slices
-may divide broad features into finer stable feature identifiers before any
-surface is promoted from `accepted` to `stable`.
+This first manifest established specification-level coverage. Compatibility
+Baseline 1 now promotes the M7 contracts that can remain stable through later
+language work while retaining collection, IR, bootstrap-phase, and
+standard-library surfaces as provisional. See
+[0046-m7-compatibility-baseline.md](0046-m7-compatibility-baseline.md).
 
 ## Change Workflow
 

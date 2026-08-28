@@ -1,6 +1,6 @@
 # 0044: Public Surface Registry and Consistency Matrix
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0040 Project Maturity Roadmap and 1.0 Acceptance Contract, 0042 Specification Registry and Conformance Evidence, 0043 Structured Compiler Diagnostics

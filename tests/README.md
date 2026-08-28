@@ -18,6 +18,9 @@ exports, and Emacs APIs. It also validates the Linux/macOS and Emacs 29/30
 compatibility contract and requires the committed GitHub Actions workflow to
 match its deterministic render. Negative Bun tests cover missing matrix cells,
 mutable Action revisions, weakened CI commands, and manual workflow drift.
+Compatibility Baseline 1 then requires every specification and feature to be
+classified as stable, provisional, or planning, with stable ownership and
+feature status agreeing in both directions.
 
 `make test` runs the ERT suite, invokes the public CLI, compares the generated
 ESM with its snapshot, validates and decodes Source Map v3 output, and executes

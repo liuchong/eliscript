@@ -1,6 +1,6 @@
 # 0036: Optional and Rest Function Parameters
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0003 Implemented Core Language, 0004 Lexical Analysis,

@@ -29,18 +29,18 @@ test("repository specifications have complete conformance evidence", async () =>
   expect(report).toEqual({
     schemaVersion: 1,
     specifications: {
-      total: 45,
-      statuses: { draft: 1, accepted: 44 },
+      total: 46,
+      statuses: { draft: 1, accepted: 17, stable: 28 },
       implementations: {
         "in-progress": 2,
-        implemented: 42,
+        implemented: 43,
         pending: 1,
       },
-      coveredImplemented: 42,
+      coveredImplemented: 43,
     },
     features: {
-      total: 42,
-      evidence: 74,
+      total: 43,
+      evidence: 76,
       domains: {
         acceleration: { features: 1, evidence: 1 },
         bootstrap: { features: 7, evidence: 13 },
@@ -50,12 +50,19 @@ test("repository specifications have complete conformance evidence", async () =>
         portable: { features: 3, evidence: 5 },
         project: { features: 5, evidence: 7 },
         publishing: { features: 1, evidence: 2 },
-        quality: { features: 3, evidence: 5 },
+        quality: { features: 4, evidence: 7 },
         react: { features: 1, evidence: 2 },
         stdlib: { features: 4, evidence: 8 },
         tooling: { features: 1, evidence: 2 },
         worker: { features: 2, evidence: 3 },
       },
+    },
+    baseline: {
+      stableSpecifications: 28,
+      provisionalSpecifications: 15,
+      planningSpecifications: 3,
+      stableFeatures: 28,
+      provisionalFeatures: 15,
     },
   });
 });
@@ -100,4 +107,22 @@ test("contract checker rejects uncovered implemented specifications", async () =
 
   const errors = await validationErrors({ manifest });
   expect(errors).toContain("implemented spec 0039 has no conformance feature");
+});
+
+test("contract checker rejects incomplete stable baselines", async () => {
+  const baseline = await readJson("contracts/compatibility-baseline.json");
+  baseline.specifications.stable.shift();
+
+  const errors = await validationErrors({ baseline });
+  expect(errors).toContain("stable specification baseline is missing: 0004");
+});
+
+test("contract checker rejects partially promoted stable contracts", async () => {
+  const manifest = await readJson("tests/conformance/manifest.json");
+  manifest.features.find((feature) => feature.spec === "0004").status = "accepted";
+
+  const errors = await validationErrors({ manifest });
+  expect(errors).toContain(
+    "compiler.lexical-analysis must be stable because spec 0004 is stable",
+  );
 });

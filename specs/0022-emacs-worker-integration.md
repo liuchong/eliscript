@@ -1,6 +1,6 @@
 # 0022: Emacs Worker Integration
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0002 Emacs Acceleration Through JavaScript,

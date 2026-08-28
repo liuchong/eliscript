@@ -1,6 +1,6 @@
 # 0037: Async Functions and Await
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0001 Language and Toolchain Boundary, 0004 Lexical Analysis,

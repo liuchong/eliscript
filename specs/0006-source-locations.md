@@ -1,6 +1,6 @@
 # 0006: Located Forms and Diagnostic Positions
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0004 Lexical Analysis, 0005 Compile-time Macros

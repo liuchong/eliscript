@@ -1,6 +1,6 @@
 # 0019: Self-Hosted Compiler Driver
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0014 Portable Syntax and Reader,

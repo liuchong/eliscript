@@ -31,6 +31,32 @@ function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function validateSortedStrings(values, label, errors) {
+  if (!Array.isArray(values) ||
+      values.some((value) => typeof value !== "string" || value.length === 0)) {
+    errors.push(`${label} must be an array of non-empty strings`);
+    return [];
+  }
+  const expected = [...new Set(values)].sort();
+  if (JSON.stringify(values) !== JSON.stringify(expected)) {
+    errors.push(`${label} must be unique and lexicographically sorted`);
+  }
+  return values;
+}
+
+function compareClassification(actual, expected, label, errors) {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    const missing = expected.filter((value) => !actual.includes(value));
+    const extra = actual.filter((value) => !expected.includes(value));
+    if (missing.length > 0) {
+      errors.push(`${label} is missing: ${missing.join(", ")}`);
+    }
+    if (extra.length > 0) {
+      errors.push(`${label} has unexpected entries: ${extra.join(", ")}`);
+    }
+  }
+}
+
 function isSafeRelativePath(relativePath) {
   return (
     typeof relativePath === "string" &&
@@ -226,6 +252,9 @@ async function validateManifest(root, manifest, specsById, errors) {
       if (feature.status === "stable" && spec.status !== "stable") {
         errors.push(`${feature.id} cannot be stable while spec ${spec.id} is not stable`);
       }
+      if (spec.status === "stable" && feature.status !== "stable") {
+        errors.push(`${feature.id} must be stable because spec ${spec.id} is stable`);
+      }
     }
 
     for (const [evidenceIndex, evidence] of (feature.evidence ?? []).entries()) {
@@ -286,6 +315,132 @@ async function validateManifest(root, manifest, specsById, errors) {
   };
 }
 
+function validateCompatibilityBaseline(baseline, specsById, manifest, errors) {
+  if (!isPlainObject(baseline) || baseline.schemaVersion !== 1 ||
+      baseline.format !== "eliscript-compatibility-baseline" ||
+      baseline.version !== 1) {
+    errors.push("compatibility baseline must use eliscript-compatibility-baseline version 1");
+    return {
+      stableSpecifications: 0,
+      provisionalSpecifications: 0,
+      planningSpecifications: 0,
+      stableFeatures: 0,
+      provisionalFeatures: 0,
+    };
+  }
+  if (!isPlainObject(baseline.specifications) || !isPlainObject(baseline.features)) {
+    errors.push("compatibility baseline must classify specifications and features");
+    return {
+      stableSpecifications: 0,
+      provisionalSpecifications: 0,
+      planningSpecifications: 0,
+      stableFeatures: 0,
+      provisionalFeatures: 0,
+    };
+  }
+
+  const stableSpecifications = validateSortedStrings(
+    baseline.specifications.stable,
+    "stable specification baseline",
+    errors,
+  );
+  const provisionalSpecifications = validateSortedStrings(
+    baseline.specifications.provisional,
+    "provisional specification baseline",
+    errors,
+  );
+  const planningSpecifications = validateSortedStrings(
+    baseline.specifications.planning,
+    "planning specification baseline",
+    errors,
+  );
+  const stableFeatures = validateSortedStrings(
+    baseline.features.stable,
+    "stable feature baseline",
+    errors,
+  );
+  const provisionalFeatures = validateSortedStrings(
+    baseline.features.provisional,
+    "provisional feature baseline",
+    errors,
+  );
+
+  const specs = [...specsById.values()];
+  const expectedStableSpecifications = specs
+    .filter((spec) => spec.status === "stable")
+    .map((spec) => spec.id)
+    .sort();
+  const expectedProvisionalSpecifications = specs
+    .filter((spec) => spec.status === "accepted" && spec.implementation === "implemented")
+    .map((spec) => spec.id)
+    .sort();
+  const expectedPlanningSpecifications = specs
+    .filter((spec) => spec.implementation !== "implemented")
+    .map((spec) => spec.id)
+    .sort();
+  const features = Array.isArray(manifest.features) ? manifest.features : [];
+  const expectedStableFeatures = features
+    .filter((feature) => feature.status === "stable")
+    .map((feature) => feature.id)
+    .sort();
+  const expectedProvisionalFeatures = features
+    .filter((feature) => feature.status === "accepted")
+    .map((feature) => feature.id)
+    .sort();
+
+  compareClassification(
+    stableSpecifications,
+    expectedStableSpecifications,
+    "stable specification baseline",
+    errors,
+  );
+  compareClassification(
+    provisionalSpecifications,
+    expectedProvisionalSpecifications,
+    "provisional specification baseline",
+    errors,
+  );
+  compareClassification(
+    planningSpecifications,
+    expectedPlanningSpecifications,
+    "planning specification baseline",
+    errors,
+  );
+  compareClassification(
+    stableFeatures,
+    expectedStableFeatures,
+    "stable feature baseline",
+    errors,
+  );
+  compareClassification(
+    provisionalFeatures,
+    expectedProvisionalFeatures,
+    "provisional feature baseline",
+    errors,
+  );
+
+  const allSpecifications = [
+    ...stableSpecifications,
+    ...provisionalSpecifications,
+    ...planningSpecifications,
+  ];
+  if (new Set(allSpecifications).size !== allSpecifications.length) {
+    errors.push("compatibility baseline classifies a specification more than once");
+  }
+  const allFeatures = [...stableFeatures, ...provisionalFeatures];
+  if (new Set(allFeatures).size !== allFeatures.length) {
+    errors.push("compatibility baseline classifies a feature more than once");
+  }
+
+  return {
+    stableSpecifications: stableSpecifications.length,
+    provisionalSpecifications: provisionalSpecifications.length,
+    planningSpecifications: planningSpecifications.length,
+    stableFeatures: stableFeatures.length,
+    provisionalFeatures: provisionalFeatures.length,
+  };
+}
+
 export async function checkContracts(options = {}) {
   const root = path.resolve(options.root ?? DEFAULT_ROOT);
   const errors = [];
@@ -294,9 +449,18 @@ export async function checkContracts(options = {}) {
   const manifest =
     options.manifest ??
     (await readJson(path.join(root, "tests/conformance/manifest.json")));
+  const baseline =
+    options.baseline ??
+    (await readJson(path.join(root, "contracts/compatibility-baseline.json")));
 
   const specsById = await validateSpecIndex(root, specIndex, errors);
   const manifestReport = await validateManifest(root, manifest, specsById, errors);
+  const baselineReport = validateCompatibilityBaseline(
+    baseline,
+    specsById,
+    manifest,
+    errors,
+  );
 
   if (errors.length > 0) throw new ContractValidationError(errors);
 
@@ -326,6 +490,7 @@ export async function checkContracts(options = {}) {
       evidence: manifestReport.evidence,
       domains: manifestReport.domains,
     },
+    baseline: baselineReport,
   };
 }
 
@@ -341,6 +506,10 @@ function humanReport(report) {
       `${report.specifications.implementations.implemented ?? 0}`,
     `Conformance features: ${report.features.total}`,
     `Evidence links: ${report.features.evidence}`,
+    `Stable baseline: ${report.baseline.stableSpecifications} specs / ` +
+      `${report.baseline.stableFeatures} features`,
+    `Provisional: ${report.baseline.provisionalSpecifications} specs / ` +
+      `${report.baseline.provisionalFeatures} features`,
     "Conformance matrix:",
     ...matrix,
   ].join("\n");

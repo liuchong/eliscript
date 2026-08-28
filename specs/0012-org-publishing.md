@@ -1,6 +1,6 @@
 # 0012: Org Publishing
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 

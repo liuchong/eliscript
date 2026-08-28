@@ -51,6 +51,12 @@ The contract deterministically renders the pinned GitHub Actions workflow and
 is checked before local tests. See
 [`0045-continuous-compatibility-matrix.md`](0045-continuous-compatibility-matrix.md).
 
+The frozen and provisional boundary lives in
+[`contracts/compatibility-baseline.json`](../contracts/compatibility-baseline.json).
+Its checker derives every expected classification from specification and
+feature statuses, so partial promotions and missing entries fail. See
+[`0046-m7-compatibility-baseline.md`](0046-m7-compatibility-baseline.md).
+
 ## Adding a Specification
 
 1. Choose the next four-digit id and add `NNNN-short-name.md`.

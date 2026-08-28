@@ -1,6 +1,6 @@
 # 0035: Deterministic Seed Macros
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0005 Compile-time Macros, 0016 Portable Macro Expander,
