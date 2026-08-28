@@ -5,19 +5,36 @@ import {
 } from "./protocol.mjs";
 
 export const I_COUNTED = defineProtocol("ICounted", ["count"]);
+export const I_EMPTYABLE = defineProtocol("IEmptyable", ["empty"]);
+export const I_CONJ = defineProtocol("IConj", ["conj"]);
 export const I_LOOKUP = defineProtocol("ILookup", ["get"]);
+export const I_ASSOCIATIVE = defineProtocol("IAssociative", [
+  "assoc",
+  "contains",
+]);
 export const I_INDEXED = defineProtocol("IIndexed", ["nth"]);
 export const I_SEQABLE = defineProtocol("ISeqable", ["seq"]);
 export const I_REDUCE = defineProtocol("IReduce", ["reduce"]);
 
 export const COLLECTION_COUNT = protocolSlot(I_COUNTED, "count");
+export const COLLECTION_EMPTY = protocolSlot(I_EMPTYABLE, "empty");
+export const COLLECTION_CONJ = protocolSlot(I_CONJ, "conj");
 export const COLLECTION_GET = protocolSlot(I_LOOKUP, "get");
+export const COLLECTION_ASSOC = protocolSlot(I_ASSOCIATIVE, "assoc");
+export const COLLECTION_CONTAINS = protocolSlot(I_ASSOCIATIVE, "contains");
 export const COLLECTION_NTH = protocolSlot(I_INDEXED, "nth");
 export const COLLECTION_SEQ = protocolSlot(I_SEQABLE, "seq");
 export const COLLECTION_REDUCE = protocolSlot(I_REDUCE, "reduce");
 
 export const dispatchCollectionCount = protocolMethod(I_COUNTED, "count");
+export const dispatchCollectionEmpty = protocolMethod(I_EMPTYABLE, "empty");
+export const dispatchCollectionConj = protocolMethod(I_CONJ, "conj");
 export const dispatchCollectionGet = protocolMethod(I_LOOKUP, "get");
+export const dispatchCollectionAssoc = protocolMethod(I_ASSOCIATIVE, "assoc");
+export const dispatchCollectionContains = protocolMethod(
+  I_ASSOCIATIVE,
+  "contains",
+);
 export const dispatchCollectionNth = protocolMethod(I_INDEXED, "nth");
 export const dispatchCollectionSeq = protocolMethod(I_SEQABLE, "seq");
 export const dispatchCollectionReduce = protocolMethod(I_REDUCE, "reduce");
@@ -41,6 +58,43 @@ function iteratorFromFactory(factory) {
     throw new TypeError("sequence view factory must return an iterator");
   }
   return iterator;
+}
+
+export function readCollectionEntry(entry) {
+  if (entry === null || entry === undefined ||
+      typeof entry[Symbol.iterator] !== "function") {
+    throw new TypeError(
+      "persistent hash map entries must be iterable key/value pairs",
+    );
+  }
+  const iterator = iteratorFromFactory(() => entry[Symbol.iterator]());
+  let complete = false;
+  try {
+    const first = iterator.next();
+    if (first.done) {
+      throw new TypeError(
+        "persistent hash map entries must contain exactly two values",
+      );
+    }
+    const second = iterator.next();
+    if (second.done) {
+      throw new TypeError(
+        "persistent hash map entries must contain exactly two values",
+      );
+    }
+    const third = iterator.next();
+    if (!third.done) {
+      throw new TypeError(
+        "persistent hash map entries must contain exactly two values",
+      );
+    }
+    complete = true;
+    return [first.value, second.value];
+  } finally {
+    if (!complete && typeof iterator.return === "function") {
+      iterator.return();
+    }
+  }
 }
 
 function sequenceCount(state) {

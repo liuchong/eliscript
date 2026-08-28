@@ -626,6 +626,23 @@
         { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "native adapters are exact, realm-explicit, and prototype preserving" },
         { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "collection capabilities agree under Bun and Node and reduce at million scale" }
       ]
+    },
+    {
+      "id": "runtime.collection-construction-protocols",
+      "title": "Collection construction protocols",
+      "status": "accepted",
+      "spec": "0060",
+      "contracts": ["Constructs persistent and native collection values through empty and conj protocols", "Updates associative keys and tests key presence without representation checks", "Supports truthful operation-level partial protocols for Set membership", "Bounds Map entry validation and preserves every source collection"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "construction protocols are frozen capabilities with direct persistent methods" },
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "empty preserves logical collection categories and canonical persistent values" },
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "conj builds persistent and native collections without mutating inputs" },
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "assoc and contains preserve key semantics and validate complete updates" },
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "external immutable collections can implement the complete capability set" },
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "native adapters are exact, realm-explicit, and prototype preserving" },
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "collection capabilities agree under Bun and Node and reduce at million scale" },
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "generic construction reaches one million values without stack growth" }
+      ]
     }
   ]
 }

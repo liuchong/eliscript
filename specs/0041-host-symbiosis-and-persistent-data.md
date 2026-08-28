@@ -687,8 +687,11 @@ that path. The first collection capability layer follows in
 [0059-collection-capability-protocols.md](0059-collection-capability-protocols.md):
 `ICounted`, `ILookup`, `IIndexed`, `ISeqable`, and `IReduce` now dispatch over
 persistent and selected native collections, with immutable sequence views and
-reduced-value early termination. Construction protocols and portable algorithm
-migration stay open.
+reduced-value early termination. The construction side then continues in
+[0060-collection-construction-protocols.md](0060-collection-construction-protocols.md):
+`IEmptyable`, `IConj`, and `IAssociative` provide canonical empties,
+persistent updates, truthful partial Set membership, and immutable native
+copies. Portable algorithm migration stays open.
 
 ### P0: Semantics and Prototype
 
@@ -755,8 +758,12 @@ and `IReduce` now continue in
 [0059-collection-capability-protocols.md](0059-collection-capability-protocols.md),
 including direct persistent implementations, native Array/Map/Set adapters,
 replayable sequence views, Map-entry reduction, and explicit early
-termination. `IEmptyable`, `IConj`, `IAssociative`, transient protocols,
-algorithm migration, and transducers remain required for the P2 exit.
+termination. The three construction protocols continue in
+[0060-collection-construction-protocols.md](0060-collection-construction-protocols.md),
+including direct persistent updates, native immutable-copy adapters, bounded
+Map entry validation, and million-value generic construction. Transient
+protocols, algorithm migration, and transducers remain required for the P2
+exit.
 
 ### P3: Language Integration and Migration
 

@@ -121,6 +121,10 @@ The collection-protocol suite applies that dispatch core to `ICounted`,
 implementations, prototype-preserving native adapters, replayable sequence
 views, frozen Map entries, explicit reduced-value termination, external types,
 realm-explicit extension, Bun/Node parity, and one million reduction steps.
+The construction continuation covers canonical `empty`, variadic `conj`,
+variadic `assoc`, exact `contains`, persistent no-op identity, immutable native
+copies, truthful partial Set protocols, bounded infinite-entry rejection, and
+one million generic Vector additions while preserving the old version.
 
 Persistent-vector tests exercise the provisional M8 runtime independently of
 literal compilation. They compare generated operations with a simple mutable

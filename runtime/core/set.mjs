@@ -14,7 +14,10 @@ import {
 } from "./value-internals.mjs";
 import {
   COLLECTION_COUNT,
+  COLLECTION_EMPTY,
+  COLLECTION_CONJ,
   COLLECTION_GET,
+  COLLECTION_CONTAINS,
   COLLECTION_REDUCE,
   COLLECTION_SEQ,
   reduceIterable,
@@ -190,8 +193,20 @@ export class PersistentHashSet {
     return this.count;
   }
 
+  [COLLECTION_EMPTY]() {
+    return EMPTY_SET;
+  }
+
+  [COLLECTION_CONJ](value) {
+    return this.conj(value);
+  }
+
   [COLLECTION_GET](value, notFound = null) {
     return this.has(value) ? value : notFound;
+  }
+
+  [COLLECTION_CONTAINS](value) {
+    return this.has(value);
   }
 
   [COLLECTION_SEQ]() {

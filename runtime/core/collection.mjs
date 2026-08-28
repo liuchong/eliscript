@@ -4,17 +4,25 @@ import {
 } from "./protocol.mjs";
 import {
   I_COUNTED,
+  I_EMPTYABLE,
+  I_CONJ,
   I_INDEXED,
   I_LOOKUP,
+  I_ASSOCIATIVE,
   I_REDUCE,
   I_SEQABLE,
   SequenceView as InternalSequenceView,
   dispatchCollectionCount,
+  dispatchCollectionEmpty,
+  dispatchCollectionConj,
   dispatchCollectionGet,
+  dispatchCollectionAssoc,
+  dispatchCollectionContains,
   dispatchCollectionNth,
   dispatchCollectionReduce,
   dispatchCollectionSeq,
   isReducedValue,
+  readCollectionEntry,
   reduceIterable,
   reducedValue,
   sequenceView as createSequenceView,
@@ -32,6 +40,40 @@ function indexedValue(values, index, notFound = MISSING) {
     return notFound;
   }
   throw new RangeError(`nth index ${String(index)} is outside collection bounds`);
+}
+
+function indexedAssoc(values, index, value) {
+  if (!Number.isInteger(index) || index < 0 || index > values.length) {
+    throw new RangeError(
+      `assoc index ${String(index)} is outside collection bounds`,
+    );
+  }
+  const result = values.slice();
+  result[index] = value;
+  return result;
+}
+
+function indexedContains(values, index) {
+  return Number.isInteger(index) && index >= 0 && index < values.length;
+}
+
+function mapConj(values, entry) {
+  const [key, value] = readCollectionEntry(entry);
+  const result = new Map(values);
+  result.set(key, value);
+  return result;
+}
+
+function mapAssoc(values, key, value) {
+  const result = new Map(values);
+  result.set(key, value);
+  return result;
+}
+
+function setConj(values, value) {
+  const result = new Set(values);
+  result.add(value);
+  return result;
 }
 
 function arraySequence(values) {
@@ -61,17 +103,31 @@ function setSequence(values) {
 }
 
 extendProtocolType(I_COUNTED, Array, { count: (values) => values.length });
+extendProtocolType(I_EMPTYABLE, Array, { empty: () => [] });
+extendProtocolType(I_CONJ, Array, {
+  conj: (values, value) => [...values, value],
+});
 extendProtocolType(I_LOOKUP, Array, {
   get: (values, index, notFound = null) => indexedValue(values, index, notFound),
+});
+extendProtocolType(I_ASSOCIATIVE, Array, {
+  assoc: indexedAssoc,
+  contains: indexedContains,
 });
 extendProtocolType(I_INDEXED, Array, { nth: indexedValue });
 extendProtocolType(I_SEQABLE, Array, { seq: arraySequence });
 extendProtocolType(I_REDUCE, Array, { reduce: reduceIterable });
 
 extendProtocolType(I_COUNTED, Map, { count: (values) => values.size });
+extendProtocolType(I_EMPTYABLE, Map, { empty: () => new Map() });
+extendProtocolType(I_CONJ, Map, { conj: mapConj });
 extendProtocolType(I_LOOKUP, Map, {
   get: (values, key, notFound = null) =>
     values.has(key) ? values.get(key) : notFound,
+});
+extendProtocolType(I_ASSOCIATIVE, Map, {
+  assoc: mapAssoc,
+  contains: (values, key) => values.has(key),
 });
 extendProtocolType(I_SEQABLE, Map, { seq: mapSequence });
 extendProtocolType(I_REDUCE, Map, {
@@ -80,20 +136,29 @@ extendProtocolType(I_REDUCE, Map, {
 });
 
 extendProtocolType(I_COUNTED, Set, { count: (values) => values.size });
+extendProtocolType(I_EMPTYABLE, Set, { empty: () => new Set() });
+extendProtocolType(I_CONJ, Set, { conj: setConj });
 extendProtocolType(I_LOOKUP, Set, {
   get: (values, key, notFound = null) => values.has(key) ? key : notFound,
+});
+extendProtocolType(I_ASSOCIATIVE, Set, {
+  contains: (values, key) => values.has(key),
 });
 extendProtocolType(I_SEQABLE, Set, { seq: setSequence });
 extendProtocolType(I_REDUCE, Set, { reduce: reduceIterable });
 
 extendProtocolCategory(I_COUNTED, "null", { count: () => 0 });
+extendProtocolCategory(I_EMPTYABLE, "null", { empty: () => null });
 extendProtocolCategory(I_SEQABLE, "null", { seq: () => null });
 extendProtocolCategory(I_REDUCE, "null", {
   reduce: (_value, reducer, ...initial) => reduceIterable([], reducer, ...initial),
 });
 
 export const ICounted = I_COUNTED;
+export const IEmptyable = I_EMPTYABLE;
+export const IConj = I_CONJ;
 export const ILookup = I_LOOKUP;
+export const IAssociative = I_ASSOCIATIVE;
 export const IIndexed = I_INDEXED;
 export const ISeqable = I_SEQABLE;
 export const IReduce = I_REDUCE;
@@ -108,8 +173,45 @@ export function count(collection) {
   return validateCollectionCount(dispatchCollectionCount(collection));
 }
 
+export function empty(collection) {
+  return dispatchCollectionEmpty(collection);
+}
+
+export function conj(collection, ...values) {
+  let result = collection;
+  for (const value of values) {
+    result = dispatchCollectionConj(result, value);
+  }
+  return result;
+}
+
 export function get(collection, key, notFound = null) {
   return dispatchCollectionGet(collection, key, notFound);
+}
+
+export function assoc(collection, key, value, ...keyValues) {
+  if (arguments.length < 3 || keyValues.length % 2 !== 0) {
+    throw new TypeError(
+      "assoc requires a collection followed by one or more key/value pairs",
+    );
+  }
+  let result = dispatchCollectionAssoc(collection, key, value);
+  for (let index = 0; index < keyValues.length; index += 2) {
+    result = dispatchCollectionAssoc(
+      result,
+      keyValues[index],
+      keyValues[index + 1],
+    );
+  }
+  return result;
+}
+
+export function contains(collection, key) {
+  const result = dispatchCollectionContains(collection, key);
+  if (typeof result !== "boolean") {
+    throw new TypeError("IAssociative/contains must return a boolean");
+  }
+  return result;
 }
 
 export function nth(collection, index, ...notFound) {

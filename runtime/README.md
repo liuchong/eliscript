@@ -38,13 +38,14 @@ collisions, and path sharing cannot drift from Map behavior. Set-specific
 shape and sharing evidence is adapted through `testing/set.mjs` without
 exposing the backing map to applications.
 
-`core/collection.mjs` defines the first generic collection capability layer:
-`ICounted`, `ILookup`, `IIndexed`, `ISeqable`, and `IReduce`. Persistent
-Vector, Map, and Set values use direct Symbol slots; native Array, Map, and Set
-values use exact-type extension tables without prototype changes. Sequence
-views are frozen and replayable, Map elements are frozen entries, and explicit
-reduced values provide the early-termination contract needed by future
-transducers.
+`core/collection.mjs` defines the generic collection capability layer:
+`ICounted`, `IEmptyable`, `IConj`, `ILookup`, `IAssociative`, `IIndexed`,
+`ISeqable`, and `IReduce`. Persistent Vector, Map, and Set values use direct
+Symbol slots; native Array, Map, and Set values use exact-type extension tables
+without prototype changes. Sequence views are frozen and replayable, Map
+elements are frozen entries, reduced values provide early termination, and
+construction operations preserve persistent inputs or return immutable native
+copies.
 
 `worker.mjs` is the reference long-lived compute host. It communicates over
 versioned NDJSON, imports local generated modules, correlates concurrent

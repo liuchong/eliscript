@@ -18,10 +18,15 @@ import {
 } from "./value-internals.mjs";
 import {
   COLLECTION_COUNT,
+  COLLECTION_EMPTY,
+  COLLECTION_CONJ,
   COLLECTION_GET,
+  COLLECTION_ASSOC,
+  COLLECTION_CONTAINS,
   COLLECTION_REDUCE,
   COLLECTION_SEQ,
   reduceIterable,
+  readCollectionEntry,
   sequenceView,
 } from "./collection-internals.mjs";
 
@@ -37,18 +42,6 @@ function pairHash(entry, hash) {
     mixHash(mixHash(MAP_ENTRY_HASH_TAG, hash(entry.key)), hash(entry.value)),
     2,
   );
-}
-
-function readEntryPair(entry) {
-  if (entry === null || entry === undefined ||
-      typeof entry[Symbol.iterator] !== "function") {
-    throw new TypeError("persistent hash map entries must be iterable key/value pairs");
-  }
-  const values = [...entry];
-  if (values.length !== 2) {
-    throw new TypeError("persistent hash map entries must contain exactly two values");
-  }
-  return values;
 }
 
 export class PersistentHashMap {
@@ -72,7 +65,7 @@ export class PersistentHashMap {
     }
     let result = EMPTY_MAP;
     for (const entry of entries) {
-      const [key, value] = readEntryPair(entry);
+      const [key, value] = readCollectionEntry(entry);
       result = result.assoc(key, value);
     }
     return result;
@@ -156,8 +149,25 @@ export class PersistentHashMap {
     return this.count;
   }
 
+  [COLLECTION_EMPTY]() {
+    return EMPTY_MAP;
+  }
+
+  [COLLECTION_CONJ](entry) {
+    const [key, value] = readCollectionEntry(entry);
+    return this.assoc(key, value);
+  }
+
   [COLLECTION_GET](key, notFound = null) {
     return this.get(key, notFound);
+  }
+
+  [COLLECTION_ASSOC](key, value) {
+    return this.assoc(key, value);
+  }
+
+  [COLLECTION_CONTAINS](key) {
+    return this.has(key);
   }
 
   [COLLECTION_SEQ]() {

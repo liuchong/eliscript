@@ -18,7 +18,11 @@ import {
 } from "./value-internals.mjs";
 import {
   COLLECTION_COUNT,
+  COLLECTION_EMPTY,
+  COLLECTION_CONJ,
   COLLECTION_GET,
+  COLLECTION_ASSOC,
+  COLLECTION_CONTAINS,
   COLLECTION_NTH,
   COLLECTION_REDUCE,
   COLLECTION_SEQ,
@@ -302,8 +306,24 @@ export class PersistentVector {
     return this.count;
   }
 
+  [COLLECTION_EMPTY]() {
+    return EMPTY_VECTOR;
+  }
+
+  [COLLECTION_CONJ](value) {
+    return this.conj(value);
+  }
+
   [COLLECTION_GET](index, notFound = null) {
     return this.nth(index, notFound);
+  }
+
+  [COLLECTION_ASSOC](index, value) {
+    return this.assoc(index, value);
+  }
+
+  [COLLECTION_CONTAINS](index) {
+    return Number.isInteger(index) && index >= 0 && index < this.count;
   }
 
   [COLLECTION_NTH](index, ...notFound) {

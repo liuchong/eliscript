@@ -513,13 +513,18 @@ complete. The generic runtime dispatch core in
 with immutable protocol definitions, direct Symbol slots, exact-type and
 host-category extension tables, explicit defaults, structured diagnostics,
 and production `IEquiv`/`IHash` integration. The remaining collection
-protocols, efficient host identity hashing, metadata, printing, and reading
-remain open. The first collection-capability continuation in
+protocols were still open at that point. The first collection-capability
+continuation in
 [0059-collection-capability-protocols.md](0059-collection-capability-protocols.md)
 adds `ICounted`, `ILookup`, `IIndexed`, `ISeqable`, and `IReduce` across
 persistent and selected native collections, plus immutable replayable sequence
-views and reduced-value early termination. Construction protocols, portable
-algorithm migration, and transducers remain open.
+views and reduced-value early termination. The target-side continuation
+in [0060-collection-construction-protocols.md](0060-collection-construction-protocols.md)
+adds `IEmptyable`, `IConj`, and `IAssociative`, including direct persistent
+updates, immutable native copies, partial Set membership, bounded entry
+validation, and million-value generic construction. Portable algorithm
+migration, transducers, transient builders, efficient host identity hashing,
+metadata, printing, and reading remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

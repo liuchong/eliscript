@@ -169,7 +169,8 @@ separate P2 construction step.
 
 Open P2 capabilities are:
 
-- `IEmptyable`, `IConj`, `IAssociative`, and transient protocols
+- transient protocols; `IEmptyable`, `IConj`, and `IAssociative` continue in
+  [0060-collection-construction-protocols.md](0060-collection-construction-protocols.md)
 - generic map/filter/take/drop algorithms over `IReduce`
 - transducers, `transduce`, and transient-backed `into`
 - portable Eliscript protocol declarations and direct-call specialization
@@ -201,7 +202,8 @@ Open P2 capabilities are:
 
 ## Next Slice
 
-The next protocol slice should add `IEmptyable`, `IConj`, and `IAssociative`,
-then express generic collection construction over those capabilities. With
-both consumption and construction protocols present, transducers and `into`
-can land without binding algorithms to Vector, Map, Set, or native containers.
+The construction protocol slice is implemented in
+[0060-collection-construction-protocols.md](0060-collection-construction-protocols.md).
+With both consumption and construction protocols present, the next slice can
+implement transducers and `into` without binding algorithms to Vector, Map,
+Set, or native containers.

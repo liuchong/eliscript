@@ -105,6 +105,10 @@ The first generic collection capabilities continue in
 which adds count, lookup, indexed access, replayable sequence views,
 collection-native reduction, and reduced-value early termination over
 persistent and selected native collections.
+The matching target-side capabilities continue in
+[`0060-collection-construction-protocols.md`](0060-collection-construction-protocols.md),
+which adds canonical empties, persistent conj/assoc updates, key-presence
+checks, native immutable copies, and bounded Map entry validation.
 
 ## Adding a Specification
 

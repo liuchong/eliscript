@@ -202,9 +202,9 @@ equality and hash outputs do not change.
 
 Open items include:
 
-- `IEmptyable`, `IConj`, `IAssociative`, and transient protocols; the first
-  collection capability set continues in
-  [0059-collection-capability-protocols.md](0059-collection-capability-protocols.md)
+- transient protocols; the collection capability and construction sets are
+  specified by [0059-collection-capability-protocols.md](0059-collection-capability-protocols.md)
+  and [0060-collection-construction-protocols.md](0060-collection-construction-protocols.md)
 - Eliscript declaration syntax and compile-time protocol checking
 - direct-call specialization from proven receiver types
 - additional sequence views and named host adapters beyond the Array, Map,
