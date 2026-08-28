@@ -462,6 +462,13 @@ freeze the core surface against accidental changes.
 question required by the maintained applications, and seed/self-hosted results
 match across the complete stable corpus.
 
+**M8 status:** Underway since 2026-08-28. The first provisional slice is the
+32-way persistent vector trie in
+[0047-persistent-vector-prototype.md](0047-persistent-vector-prototype.md),
+including generated reference-model checks and one-million-value structural
+bounds. Persistent equality/hash semantics and HAMT work remain next, before
+literal migration.
+
 ### M9: Compiler and Build Convergence (8-12 weeks)
 
 **Objective:** Make the self-hosted compiler the normal complete toolchain

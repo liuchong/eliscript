@@ -34,6 +34,7 @@ test("repository public surface matches every tracked implementation", async () 
     commands: { commands: 5, options: 20 },
     schemas: { total: 6 },
     adapters: { adapters: 4, exports: 17 },
+    runtimeModules: { modules: 2, exports: 8, public: 1, internal: 1 },
     standardLibrary: { modules: 4, exports: 39 },
     emacs: {
       functions: 91,
@@ -74,6 +75,19 @@ test("public surface checker rejects adapter export drift", async () => {
   surface.adapters[2].namedExports.shift();
   expect(await validationErrors(surface)).toContain(
     "vite export inventory is missing current entries: compileEliscript",
+  );
+});
+
+test("public surface checker rejects runtime visibility and export drift", async () => {
+  const surface = await surfaceDocument();
+  surface.runtimeModules[0].visibility = "accidental";
+  surface.runtimeModules[0].namedExports.shift();
+  const errors = await validationErrors(surface);
+  expect(errors).toContain(
+    'persistent-vector has invalid visibility "accidental"',
+  );
+  expect(errors).toContain(
+    "persistent-vector export inventory is missing current entries: EMPTY_VECTOR",
   );
 });
 

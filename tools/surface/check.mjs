@@ -207,6 +207,50 @@ async function validateAdapters(root, adapters, specs, cache, errors) {
   return { adapters: adapters.length, exports: exportCount };
 }
 
+async function validateRuntimeModules(root, modules, specs, cache, errors) {
+  if (!Array.isArray(modules)) {
+    errors.push("runtimeModules must be an array");
+    return { modules: 0, exports: 0, public: 0, internal: 0 };
+  }
+  const ids = [];
+  let exportCount = 0;
+  let publicCount = 0;
+  let internalCount = 0;
+  for (const [index, module] of modules.entries()) {
+    const label = `runtime module ${index}`;
+    if (!isPlainObject(module)) {
+      errors.push(`${label} must be an object`);
+      continue;
+    }
+    ids.push(module.id);
+    validateSpec(specs, module.spec, module.id, errors);
+    if (module.visibility === "public") {
+      publicCount += 1;
+    } else if (module.visibility === "internal") {
+      internalCount += 1;
+    } else {
+      errors.push(`${module.id} has invalid visibility ${JSON.stringify(module.visibility)}`);
+    }
+    const expected = sortedUniqueStrings(
+      module.namedExports, `${module.id} named exports`, errors,
+    );
+    const source = await readSurfaceFile(root, module.file, cache, errors);
+    const actual = extractJsExports(source);
+    compareInventory(`${module.id} export inventory`, expected, actual.named, errors);
+    if (module.defaultExport !== actual.defaultExport) {
+      errors.push(`${module.id} default export does not match its implementation`);
+    }
+    exportCount += expected.length + (module.defaultExport ? 1 : 0);
+  }
+  sortedUniqueStrings(ids, "runtime module ids", errors);
+  return {
+    modules: modules.length,
+    exports: exportCount,
+    public: publicCount,
+    internal: internalCount,
+  };
+}
+
 function extractLibraryExports(source) {
   const start = source.lastIndexOf("(export ");
   const end = source.indexOf("))", start);
@@ -391,6 +435,9 @@ export async function checkPublicSurface(options = {}) {
   const adapters = await validateAdapters(
     root, surface.adapters, specs, cache, errors,
   );
+  const runtimeModules = await validateRuntimeModules(
+    root, surface.runtimeModules, specs, cache, errors,
+  );
   const standardLibrary = await validateStandardLibrary(
     root, surface.standardLibrary, specs, cache, errors,
   );
@@ -406,6 +453,7 @@ export async function checkPublicSurface(options = {}) {
     commands,
     schemas: { total: schemas },
     adapters,
+    runtimeModules,
     standardLibrary,
     emacs,
   };
@@ -419,6 +467,7 @@ export function humanSurfaceReport(report) {
     `  Commands       ${report.commands.commands} commands / ${report.commands.options} options`,
     `  Schemas        ${report.schemas.total} versioned schemas`,
     `  Adapters       ${report.adapters.adapters} adapters / ${report.adapters.exports} exports`,
+    `  Runtime        ${report.runtimeModules.modules} modules / ${report.runtimeModules.exports} exports`,
     `  Standard lib   ${report.standardLibrary.modules} modules / ${report.standardLibrary.exports} exports`,
     `  Emacs API      ${report.emacs.functions} functions / ${report.emacs.records} records`,
   ].join("\n");

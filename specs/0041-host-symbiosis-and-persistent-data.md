@@ -1,7 +1,7 @@
 # 0041: Host Symbiosis, Persistent Data, and Emacs Acceleration
 
 - Status: Accepted
-- Implementation: Pending
+- Implementation: In Progress
 - Date: 2026-08-28
 - Depends on: 0002 Emacs Acceleration Through JavaScript,
   0034 Nullish Values, 0040 Project Maturity Roadmap
@@ -568,6 +568,14 @@ Thresholds derive from end-to-end measurements and include:
 Engine-only speedup is diagnostic information, not the product claim.
 
 ## Implementation Plan
+
+Implementation began in M8 with the provisional 32-way persistent vector
+prototype specified by
+[0047-persistent-vector-prototype.md](0047-persistent-vector-prototype.md).
+That slice establishes indexed semantics, old-version preservation, structural
+sharing counters, root growth/collapse coverage, and one-million-value depth
+evidence without changing language literal behavior. Equality, hashing, HAMT,
+engine layout measurements, and literal migration remain open P0/P1 work.
 
 ### P0: Semantics and Prototype
 

@@ -57,6 +57,10 @@ Its checker derives every expected classification from specification and
 feature statuses, so partial promotions and missing entries fail. See
 [`0046-m7-compatibility-baseline.md`](0046-m7-compatibility-baseline.md).
 
+M8 persistent collection work begins with the provisional 32-way vector trie
+and its structural evidence in
+[`0047-persistent-vector-prototype.md`](0047-persistent-vector-prototype.md).
+
 ## Adding a Specification
 
 1. Choose the next four-digit id and add `NNNN-short-name.md`.

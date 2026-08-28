@@ -10,8 +10,8 @@
 Eliscript now keeps a versioned, machine-readable inventory of its current
 public surface in `contracts/public-surface.json`. A dependency-free checker
 compares the inventory with compiler constants, source declarations, CLI
-parsers, adapter exports, standard-library modules, Emacs APIs, and selected
-documentation assertions.
+parsers, adapter exports, public and internal runtime modules,
+standard-library modules, Emacs APIs, and selected documentation assertions.
 
 The registry records what exists today at `Accepted` maturity. It does not make
 every entry a permanent compatibility promise. Promotion to `Stable` still
@@ -27,6 +27,8 @@ Version 1 inventories these domains:
 - every shipped command and long option
 - every versioned project, diagnostic, build-report, and worker schema
 - named and default JavaScript adapter exports
+- named and default JavaScript runtime-module exports, with public or internal
+  visibility
 - every exported portable standard-library binding
 - every explicitly named Emacs function that does not use the internal `--`
   convention
@@ -63,7 +65,7 @@ has an authoritative enumerable source:
 
 - `eliscript-ir-node-kinds` for IR
 - quoted long options in each CLI parser
-- JavaScript `export` declarations for adapters
+- JavaScript `export` declarations for adapters and runtime modules
 - the terminal `export` form in each standard-library module
 - non-private `defun` and `cl-defun` declarations under compiler and tool roots
 - every `cl-defstruct` declaration under those roots
@@ -83,7 +85,7 @@ The default contract target prints two generated matrices:
 
 1. conformance features and evidence counts grouped by feature domain
 2. public-surface counts grouped by language, IR, command, schema, adapter,
-   standard-library, and Emacs API domain
+   runtime-module, standard-library, and Emacs API domain
 
 The matrices are generated from validated data; they are not checked-in output.
 `--json` on either checker returns the same counts for automation.
@@ -122,8 +124,10 @@ The first validated surface contains:
 - 6 language groups with 149 entries
 - 51 IR node kinds
 - 5 commands with 20 long options
-- 4 versioned schemas
+- 6 versioned schemas
 - 4 JavaScript adapters with 17 exports including defaults
+- 2 JavaScript runtime modules with 8 exports: one provisional public module
+  and one internal test adapter
 - 4 standard-library modules with 39 exports
 - 91 Emacs public functions
 - 22 Emacs records, of which 12 are public and 10 internal
@@ -135,8 +139,9 @@ as persistent collections land; those changes must remain visible here.
 ## Acceptance Evidence
 
 - The checker validates the complete current repository inventory.
-- Negative tests remove IR, standard-library, adapter, and Emacs API entries
-  and add an undeclared CLI option; every drift produces a targeted failure.
+- Negative tests remove IR, standard-library, adapter, runtime, and Emacs API
+  entries and add an undeclared CLI option; every drift produces a targeted
+  failure.
 - A documentation negative test proves known contradictions fail the check.
 - The default contract target runs the checker before ERT, Bun, bootstrap, and
   CLI integration suites.

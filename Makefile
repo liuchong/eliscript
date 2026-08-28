@@ -18,7 +18,8 @@ test: check-contracts
 		tests/bootstrap-ir.test.mjs tests/bootstrap-emitter.test.mjs \
 		tests/bootstrap-compiler.test.mjs tests/worker-runtime.test.mjs \
 		tests/worker-benchmark.test.mjs tests/stdlib-sequence.test.mjs \
-		tests/stdlib-text.test.mjs tests/stdlib-object.test.mjs
+		tests/stdlib-text.test.mjs tests/stdlib-object.test.mjs \
+		tests/persistent-vector.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/project-cli-test.sh
 

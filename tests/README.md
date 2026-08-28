@@ -72,6 +72,14 @@ importing ESM fixtures, inspect their source maps, and retain library sources in
 production bundle maps. ERT separately proves that portable selection includes
 transitive helpers while excluding unrelated operations.
 
+Persistent-vector tests exercise the provisional M8 runtime independently of
+literal compilation. They compare generated operations with a simple mutable
+array model, retain and probe previous versions after each update, cross tail
+and root-depth boundaries, inspect exact node allocation and sharing counts,
+and verify bounded lookup and update work at one million values. Test-only
+shape and counter adapters live under `runtime/testing` and are not application
+APIs.
+
 Project-build tests inspect expanded IR imports, retain non-Eliscript
 specifiers, support cycles, enforce canonical root containment, and verify
 per-module source maps, incremental decisions, and build phase timings. The

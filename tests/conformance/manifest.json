@@ -441,6 +441,19 @@
         { "kind": "bun-test", "file": "tests/conformance.test.mjs", "contains": "repository specifications have complete conformance evidence" },
         { "kind": "fixture", "file": "contracts/compatibility-baseline.json", "contains": "\"format\": \"eliscript-compatibility-baseline\"" }
       ]
+    },
+    {
+      "id": "runtime.persistent-vector-prototype",
+      "title": "Persistent 32-way vector trie prototype",
+      "status": "accepted",
+      "spec": "0047",
+      "contracts": ["Preserves previous versions through indexed updates and stack operations", "Copies only selected trie paths and shares every untouched node", "Keeps lookup and update work within measured trie-depth bounds at one million values", "Produces equivalent observable results under Bun and Node.js"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/persistent-vector.test.mjs", "contains": "persistent vector construction and indexed operations preserve old values" },
+        { "kind": "bun-test", "file": "tests/persistent-vector.test.mjs", "contains": "persistent vector updates copy only the selected trie path" },
+        { "kind": "bun-test", "file": "tests/persistent-vector.test.mjs", "contains": "persistent vector keeps trie work bounded at one million values" },
+        { "kind": "bun-test", "file": "tests/persistent-vector.test.mjs", "contains": "persistent vector has equivalent behavior under Bun and Node" }
+      ]
     }
   ]
 }

@@ -1,8 +1,9 @@
 # Runtime
 
-This directory is reserved for the minimal JavaScript helpers referenced by
-generated modules. Ordinary JavaScript values and APIs should be emitted
-directly; helpers need a concrete semantic reason to exist.
+This directory contains the minimal JavaScript runtime semantics that cannot be
+represented by ordinary host values alone. Ordinary JavaScript values and APIs
+should still be emitted directly; helpers need a concrete semantic reason to
+exist.
 
 The first compiler emits its small Lisp-truthiness helper directly into each
 module. Shared runtime extraction is deferred until more than one semantic
@@ -10,6 +11,12 @@ helper justifies a module dependency.
 
 React modules import `react/jsx-runtime` directly. There is no Eliscript wrapper
 runtime for element construction.
+
+`core/vector.mjs` is the first provisional M8 persistent-value module. It
+implements an immutable 32-way bit-partitioned vector trie with a short tail.
+It is tested independently before vector literal behavior changes. Internal
+node shape, allocation, visit, and sharing observations are isolated in
+`testing/vector.mjs`; applications must not depend on those test adapters.
 
 `worker.mjs` is the reference long-lived compute host. It communicates over
 versioned NDJSON, imports local generated modules, correlates concurrent

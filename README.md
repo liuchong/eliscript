@@ -503,10 +503,11 @@ Current evidence:
 - Ninety-four ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- Thirty-eight Bun tests cover the compiler and Org Vite adapters, source-map
+- Forty-seven Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
   bootstrap behavior, the worker protocol, standard library, and benchmark
-  reporting.
+  reporting, plus persistent vector correctness and structural bounds through
+  one million values.
 - CLI integration tests compare generated output with a checked-in snapshot
   and execute a recursively built standard-library project.
 - Bun 1.4 executes generated modules and verifies recursion, mutation, loops,
@@ -540,12 +541,21 @@ test ownership machine-checkable, and the first public contract slice adds
 versioned structured diagnostics without changing existing human errors. The
 seed compiler, project builder, and self-hosted compiler share the schema; the
 default test target rejects missing specification evidence. The public-surface
-registry classifies language, IR, CLI, schema, adapter, library, and Emacs
-interfaces. A generated compatibility workflow now covers Emacs 29.4 and 30.2
+registry classifies language, IR, CLI, schema, adapter, runtime, library, and
+Emacs interfaces. A generated compatibility workflow now covers Emacs 29.4
+and 30.2
 on Linux and macOS with a pinned Bun minimum version and strict byte
 compilation in every matrix cell. Compatibility Baseline 1 freezes 28
 specifications and features while preserving an explicit provisional boundary
 for the collection and compiler work that begins in M8.
+
+M8 is underway. Its first provisional runtime slice implements an immutable
+32-way bit-partitioned vector trie with a short tail, indexed update, append,
+pop, chunked traversal, and explicit native-array conversion. Generated model
+tests preserve every prior version, while internal structural counters prove
+path-copy bounds and untouched-node sharing through one million values. Vector
+literals intentionally remain native JavaScript arrays until equality,
+hashing, HAMT, protocol, and interop migration semantics are complete.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -638,7 +648,10 @@ matrices, and
 for the versioned platform matrix, deterministic workflow generation, and
 strict CI gates, and
 [specs/0046-m7-compatibility-baseline.md](specs/0046-m7-compatibility-baseline.md)
-for the stable/provisional boundary and M7 exit audit.
+for the stable/provisional boundary and M7 exit audit, and
+[specs/0047-persistent-vector-prototype.md](specs/0047-persistent-vector-prototype.md)
+for the provisional 32-way vector trie, structural sharing evidence, and
+million-value depth bounds.
 
 ## License
 
