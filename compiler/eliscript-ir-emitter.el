@@ -417,6 +417,15 @@
           (mapconcat #'eliscript-ir-emitter-emit-expression
                      nodes (format " %s " operator))))
 
+(defun eliscript-ir-emitter--emit-binary-infix (node operator)
+  "Emit exact binary intrinsic NODE using JavaScript OPERATOR."
+  (eliscript-ir-emitter--require-arity node 2 2)
+  (let ((nodes (eliscript-ir-emitter--children node)))
+    (format "(%s %s %s)"
+            (eliscript-ir-emitter-emit-expression (nth 0 nodes))
+            operator
+            (eliscript-ir-emitter-emit-expression (nth 1 nodes)))))
+
 (defun eliscript-ir-emitter--emit-comparison (name nodes operator)
   "Emit one-evaluation n-ary comparison NAME over NODES using OPERATOR."
   (eliscript-emitter--require-arity name nodes 2)
@@ -484,6 +493,32 @@
          (eliscript-ir-emitter--emit-infix "/" nodes "/")))
       ((or '% 'mod)
        (eliscript-ir-emitter--emit-infix (symbol-name name) nodes "%"))
+      ('int32
+       (eliscript-ir-emitter--require-arity node 1 1)
+       (format "(%s | 0)"
+               (eliscript-ir-emitter-emit-expression (car nodes))))
+      ('uint32
+       (eliscript-ir-emitter--require-arity node 1 1)
+       (format "(%s >>> 0)"
+               (eliscript-ir-emitter-emit-expression (car nodes))))
+      ('imul32
+       (eliscript-ir-emitter--require-arity node 2 2)
+       (format "Math.imul(%s, %s)"
+               (eliscript-ir-emitter-emit-expression (nth 0 nodes))
+               (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
+      ('bit-and (eliscript-ir-emitter--emit-binary-infix node "&"))
+      ('bit-or (eliscript-ir-emitter--emit-binary-infix node "|"))
+      ('bit-xor (eliscript-ir-emitter--emit-binary-infix node "^"))
+      ('bit-not
+       (eliscript-ir-emitter--require-arity node 1 1)
+       (format "(~%s)"
+               (eliscript-ir-emitter-emit-expression (car nodes))))
+      ('bit-shift-left
+       (eliscript-ir-emitter--emit-binary-infix node "<<"))
+      ('bit-shift-right
+       (eliscript-ir-emitter--emit-binary-infix node ">>"))
+      ('unsigned-bit-shift-right
+       (eliscript-ir-emitter--emit-binary-infix node ">>>"))
       ('= (eliscript-ir-emitter--emit-comparison "=" nodes "==="))
       ((or '/= 'not=)
        (eliscript-ir-emitter--emit-distinct (symbol-name name) nodes))

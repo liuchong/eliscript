@@ -927,6 +927,51 @@
      (equal (eliscript-compile-string source filename)
             (eliscript-tests--legacy-compile-string source filename)))))
 
+(ert-deftest eliscript-emits-portable-32-bit-operations ()
+  (let* ((source
+          "(defun bits (value distance)
+  [(int32 value)
+   (uint32 value)
+   (imul32 value 31)
+   (bit-and value 255)
+   (bit-or value 256)
+   (bit-xor value 85)
+   (bit-not value)
+   (bit-shift-left value distance)
+   (bit-shift-right value distance)
+   (unsigned-bit-shift-right value distance)])")
+         (filename "bits.eli")
+         (output (eliscript-compile-string source filename)))
+    (should
+     (equal output (eliscript-tests--legacy-compile-string source filename)))
+    (dolist (fragment
+             '("(value | 0)"
+               "(value >>> 0)"
+               "Math.imul(value, 31)"
+               "(value & 255)"
+               "(value | 256)"
+               "(value ^ 85)"
+               "(~value)"
+               "(value << distance)"
+               "(value >> distance)"
+               "(value >>> distance)"))
+      (should (string-match-p (regexp-quote fragment) output)))))
+
+(ert-deftest eliscript-rejects-invalid-32-bit-operation-arities ()
+  (dolist (source
+           '("(int32)"
+             "(uint32 1 2)"
+             "(imul32 1)"
+             "(bit-and 1)"
+             "(bit-or 1 2 3)"
+             "(bit-xor)"
+             "(bit-not 1 2)"
+             "(bit-shift-left 1)"
+             "(bit-shift-right 1 2 3)"
+             "(unsigned-bit-shift-right 1)"))
+    (should-error (eliscript-compile-string source "bits-invalid.eli")
+                  :type 'eliscript-compile-error)))
+
 (ert-deftest eliscript-ir-emitter-does-not-call-form-backend ()
   (let ((program
          (eliscript-compile-ir-string

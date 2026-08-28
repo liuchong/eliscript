@@ -29,13 +29,13 @@ async function validationErrors(surface) {
 test("repository public surface matches every tracked implementation", async () => {
   expect(await checkPublicSurface({ root: ROOT })).toEqual({
     schemaVersion: 1,
-    language: { groups: 6, entries: 149 },
+    language: { groups: 7, entries: 159 },
     ir: { nodeKinds: 51 },
     commands: { commands: 5, options: 20 },
     schemas: { total: 6 },
     adapters: { adapters: 4, exports: 17 },
     runtimeModules: { modules: 8, exports: 29, public: 4, internal: 4 },
-    standardLibrary: { modules: 4, exports: 39 },
+    standardLibrary: { modules: 5, exports: 42 },
     emacs: {
       functions: 91,
       records: 22,
@@ -55,7 +55,8 @@ test("public surface checker rejects IR node drift", async () => {
 
 test("public surface checker rejects standard library export drift", async () => {
   const surface = await surfaceDocument();
-  surface.standardLibrary[1].exports.shift();
+  surface.standardLibrary.find(({ module }) => module === "object")
+    .exports.shift();
   expect(await validationErrors(surface)).toContain(
     "object export inventory is missing current entries: assoc",
   );

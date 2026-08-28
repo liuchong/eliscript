@@ -586,9 +586,12 @@ million keys. The Map-backed Set follows in
 reusing those nodes for value-semantic membership, collection algebra, exact
 sharing, and million-member bounds. The cross-engine benchmark in
 [0051-hamt-layout-benchmark.md](0051-hamt-layout-benchmark.md) then measures the
-real lookup/update paths and selects 32/24 sparse/dense thresholds. Transients,
-keyword/symbol values, portable bit operations, and literal migration remain
-open P0/P1 work.
+real lookup/update paths and selects 32/24 sparse/dense thresholds. Portable
+32-bit intrinsics and Eliscript-authored population count/rotation algorithms
+follow in
+[0052-portable-32-bit-operations.md](0052-portable-32-bit-operations.md).
+An isolated `.eli` collection prototype remains before P0 closes; transients,
+keyword/symbol values, and literal migration remain open P1/P4 work.
 
 ### P0: Semantics and Prototype
 

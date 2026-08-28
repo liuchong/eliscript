@@ -8,6 +8,24 @@ The compiler owns only React element construction and the automatic JSX
 runtime contract. Higher-level component helpers belong here so React remains
 a library target instead of a second component framework.
 
+## Bit
+
+`bit.eli` builds population count and 32-bit rotations entirely from portable
+Eliscript intrinsics:
+
+```elisp
+(import "../../stdlib/bit.eli" bit-count rotate-left rotate-right)
+
+(bit-count -1)
+(rotate-left 305419896 8)
+```
+
+`bit-count` uses parallel masked reduction rather than a per-bit loop.
+Rotations normalize their distance to five bits and return unsigned words.
+The module is the reference algorithm layer for future trie and hash sources;
+exact normalization and shift semantics are specified in
+[specs/0052-portable-32-bit-operations.md](../specs/0052-portable-32-bit-operations.md).
+
 ## Sequence
 
 `sequence.eli` is the first standard-library module. It exports fresh-array,

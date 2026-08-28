@@ -400,6 +400,14 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
                      arguments
                      (format " %s " operator))))
 
+(defun eliscript-emitter--emit-binary-infix (name arguments operator)
+  "Emit exact binary NAME over ARGUMENTS using JavaScript OPERATOR."
+  (eliscript-emitter--require-arity name arguments 2 2)
+  (format "(%s %s %s)"
+          (eliscript-emitter-emit-expression (nth 0 arguments))
+          operator
+          (eliscript-emitter-emit-expression (nth 1 arguments))))
+
 (defun eliscript-emitter--emit-comparison (name arguments operator)
   "Emit one-evaluation n-ary comparison NAME using OPERATOR."
   (eliscript-emitter--require-arity name arguments 2)
@@ -575,6 +583,38 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
          (eliscript-emitter--emit-infix "/" arguments "/")))
       ((or '% 'mod) (eliscript-emitter--emit-infix (symbol-name operator)
                                                     arguments "%"))
+      ('int32
+       (eliscript-emitter--require-arity "int32" arguments 1 1)
+       (format "(%s | 0)"
+               (eliscript-emitter-emit-expression (car arguments))))
+      ('uint32
+       (eliscript-emitter--require-arity "uint32" arguments 1 1)
+       (format "(%s >>> 0)"
+               (eliscript-emitter-emit-expression (car arguments))))
+      ('imul32
+       (eliscript-emitter--require-arity "imul32" arguments 2 2)
+       (format "Math.imul(%s, %s)"
+               (eliscript-emitter-emit-expression (nth 0 arguments))
+               (eliscript-emitter-emit-expression (nth 1 arguments))))
+      ('bit-and
+       (eliscript-emitter--emit-binary-infix "bit-and" arguments "&"))
+      ('bit-or
+       (eliscript-emitter--emit-binary-infix "bit-or" arguments "|"))
+      ('bit-xor
+       (eliscript-emitter--emit-binary-infix "bit-xor" arguments "^"))
+      ('bit-not
+       (eliscript-emitter--require-arity "bit-not" arguments 1 1)
+       (format "(~%s)"
+               (eliscript-emitter-emit-expression (car arguments))))
+      ('bit-shift-left
+       (eliscript-emitter--emit-binary-infix
+        "bit-shift-left" arguments "<<"))
+      ('bit-shift-right
+       (eliscript-emitter--emit-binary-infix
+        "bit-shift-right" arguments ">>"))
+      ('unsigned-bit-shift-right
+       (eliscript-emitter--emit-binary-infix
+        "unsigned-bit-shift-right" arguments ">>>"))
       ('= (eliscript-emitter--emit-comparison "=" arguments "==="))
       ((or '/= 'not=)
        (eliscript-emitter--emit-distinct (symbol-name operator) arguments))

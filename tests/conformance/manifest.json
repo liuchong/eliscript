@@ -516,6 +516,19 @@
         { "kind": "bun-test", "file": "tests/collection-layout-benchmark.test.mjs", "contains": "HAMT layout host adapters agree under Bun and Node" },
         { "kind": "bun-test", "file": "tests/collection-layout-benchmark.test.mjs", "contains": "committed HAMT layout baseline proves the 32/24 threshold decision" }
       ]
+    },
+    {
+      "id": "language.portable-32-bit-operations",
+      "title": "Portable exact 32-bit integer operations",
+      "status": "accepted",
+      "spec": "0052",
+      "contracts": ["Defines ten exact-arity 32-bit Number intrinsics", "Preserves signed, unsigned, multiplication, and shift semantics under Bun and Node", "Keeps seed and self-hosted IR and emission equivalent", "Implements population count and rotations in portable Eliscript"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-portable-32-bit-operations" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-rejects-invalid-32-bit-operation-arities" },
+        { "kind": "bun-test", "file": "tests/stdlib-bit.test.mjs", "contains": "portable 32-bit operations and algorithms agree under Bun and Node" },
+        { "kind": "fixture", "file": "tests/fixtures/bootstrap-ir.json", "contains": "portable-bit-operations" }
+      ]
     }
   ]
 }

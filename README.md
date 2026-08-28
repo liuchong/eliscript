@@ -43,10 +43,11 @@ Generate an external Source Map v3 file when debugging generated code:
 
 This writes `dist/basic.mjs.map` and adds its `sourceMappingURL` to the module.
 
-Import portable sequence, text, object, and keyed-data libraries from an
+Import portable bit, sequence, text, object, and keyed-data libraries from an
 Eliscript module handled by Vite or the project builder:
 
 ```elisp
+(import "../../stdlib/bit.eli" bit-count rotate-left)
 (import "../../stdlib/sequence.eli" map filter reduce range)
 (import "../../stdlib/text.eli" contains? strip-prefix trim)
 (import "../../stdlib/object.eli" assoc pick)
@@ -500,10 +501,10 @@ Current evidence:
 - Repeated `--portable NAME` options make the same builder verify every local
   `import-portable` target, reject bare or escaping source edges, and emit only
   each module's requested transitive closure.
-- Ninety-four ERT tests cover reading, locations, macro expansion, analysis, IR
+- Ninety-six ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- Seventy-seven Bun tests cover the compiler and Org Vite adapters, source-map
+- Seventy-eight Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
   bootstrap behavior, the worker protocol, standard library, and benchmark
   reporting, plus persistent vector correctness, structural bounds, recursive
@@ -577,6 +578,11 @@ paths over equivalent sparse and dense roots under Bun, Node, and headless
 Chrome. Its source-bound baseline replaces the inherited 16/8 transition with
 measured 32/24 promotion/demotion thresholds; raw timings remain evidence, not
 machine-independent test gates.
+Ten exact-arity 32-bit intrinsics now give ordinary and portable Eliscript the
+signed, unsigned, shift, boolean-word, and low-word multiplication operations
+needed by trie and hash algorithms. `stdlib/bit.eli` implements population
+count and rotations in Eliscript itself, with byte-identical seed/self-hosted
+emission and equivalent Bun/Node execution.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -684,7 +690,10 @@ for the Map-backed Set value category, collection algebra, frozen hashes, and
 million-member structural bounds, and
 [specs/0051-hamt-layout-benchmark.md](specs/0051-hamt-layout-benchmark.md)
 for the Bun/Node/Chrome layout methodology, source-bound baseline, and measured
-32/24 HAMT thresholds.
+32/24 HAMT thresholds, and
+[specs/0052-portable-32-bit-operations.md](specs/0052-portable-32-bit-operations.md)
+for portable integer normalization, word operations, shifts, multiplication,
+population count, and rotation semantics.
 
 ## License
 

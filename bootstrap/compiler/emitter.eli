@@ -464,6 +464,12 @@
          (str " " operator " "))
        ")"]))
 
+  (defun emit-binary-infix (name nodes operator)
+    (require-arity name nodes 2 2)
+    (combine
+      ["(" (emit-expression (nth 0 nodes)) " " operator " "
+       (emit-expression (nth 1 nodes)) ")"]))
+
   (defun temporary-names (nodes)
     (let ((result []))
       (js-call nodes :forEach
@@ -546,6 +552,27 @@
              (combine ["(1 / " (emit-expression (nth 0 nodes)) ")"])
            (emit-infix "/" nodes "/" 2)))
         ((or (= name "%") (= name "mod")) (emit-infix name nodes "%" 2))
+        ((= name "int32")
+         (require-node-arity node 1 1)
+         (combine ["(" (emit-expression (nth 0 nodes)) " | 0)"]))
+        ((= name "uint32")
+         (require-node-arity node 1 1)
+         (combine ["(" (emit-expression (nth 0 nodes)) " >>> 0)"]))
+        ((= name "imul32")
+         (require-node-arity node 2 2)
+         (combine
+           ["Math.imul(" (emit-expression (nth 0 nodes)) ", "
+            (emit-expression (nth 1 nodes)) ")"]))
+        ((= name "bit-and") (emit-binary-infix name nodes "&"))
+        ((= name "bit-or") (emit-binary-infix name nodes "|"))
+        ((= name "bit-xor") (emit-binary-infix name nodes "^"))
+        ((= name "bit-not")
+         (require-node-arity node 1 1)
+         (combine ["(~" (emit-expression (nth 0 nodes)) ")"]))
+        ((= name "bit-shift-left") (emit-binary-infix name nodes "<<"))
+        ((= name "bit-shift-right") (emit-binary-infix name nodes ">>"))
+        ((= name "unsigned-bit-shift-right")
+         (emit-binary-infix name nodes ">>>"))
         ((= name "=") (emit-comparison name nodes "==="))
         ((or (= name "/=") (= name "not=")) (emit-distinct name nodes))
         ((= name "<") (emit-comparison name nodes "<"))

@@ -1,0 +1,36 @@
+(module eliscript.bit
+  (defportable bit-count (value)
+    (let* ((bits (uint32 value))
+           (pairs
+            (- bits
+               (bit-and
+                (unsigned-bit-shift-right bits 1)
+                1431655765)))
+           (quads
+            (+ (bit-and pairs 858993459)
+               (bit-and
+                (unsigned-bit-shift-right pairs 2)
+                858993459)))
+           (octets
+            (bit-and
+             (+ quads (unsigned-bit-shift-right quads 4))
+             252645135)))
+      (unsigned-bit-shift-right
+       (imul32 octets 16843009)
+       24)))
+
+  (defportable rotate-left (value distance)
+    (let ((amount (bit-and distance 31)))
+      (uint32
+       (bit-or
+        (bit-shift-left value amount)
+        (unsigned-bit-shift-right value (- 32 amount))))))
+
+  (defportable rotate-right (value distance)
+    (let ((amount (bit-and distance 31)))
+      (uint32
+       (bit-or
+        (unsigned-bit-shift-right value amount)
+        (bit-shift-left value (- 32 amount))))))
+
+  (export bit-count rotate-left rotate-right))

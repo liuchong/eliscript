@@ -1,0 +1,25 @@
+(module tests.bit-usage
+  (defportable intrinsic-results ()
+    (object
+      :int32 (int32 4294967295)
+      :int32-fraction (int32 3.75)
+      :int32-negative-fraction (int32 -3.75)
+      :int32-nan (int32 (/ 0 0))
+      :uint32 (uint32 -1)
+      :uint32-infinity (uint32 (/ 1 0))
+      :uint32-wrap (uint32 4294967297)
+      :imul32 (imul32 4294967295 5)
+      :bit-and (bit-and 3855 255)
+      :bit-or (bit-or 3840 15)
+      :bit-xor (bit-xor 255 170)
+      :bit-not (bit-not 0)
+      :shift-left (bit-shift-left 1 31)
+      :shift-mask (bit-shift-left 3 32)
+      :shift-right (bit-shift-right -2147483648 31)
+      :unsigned-shift-right
+      (unsigned-bit-shift-right -2147483648 31)))
+
+  (defportable bit-evaluation (left right)
+    (bit-or (funcall left) (funcall right)))
+
+  (export intrinsic-results bit-evaluation))

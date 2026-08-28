@@ -479,8 +479,11 @@ sharing, collision coverage, and million-member bounds without duplicating
 HAMT nodes. The source-bound Bun/Node/Chrome benchmark in
 [0051-hamt-layout-benchmark.md](0051-hamt-layout-benchmark.md) replaces the
 initial inherited 16/8 sparse/dense transition with measured 32/24 thresholds.
-Portable bit operations remain before P0 closes; transient and literal
-migration work follow.
+The seed and self-hosted compiler paths now expose exact portable 32-bit
+operations, while `stdlib/bit.eli` proves population count and rotations in
+[0052-portable-32-bit-operations.md](0052-portable-32-bit-operations.md).
+P0's remaining implementation-language proof is an isolated `.eli` vector or
+HAMT module; transient and literal migration work follow.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

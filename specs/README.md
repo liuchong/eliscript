@@ -71,6 +71,10 @@ literals. The same HAMT key layer backs the value-semantic Set in
 including collection algebra, structural sharing, and million-member bounds.
 The cross-engine layout evidence and measured 32/24 transition decision live
 in [`0051-hamt-layout-benchmark.md`](0051-hamt-layout-benchmark.md).
+The portable integer foundation continues in
+[`0052-portable-32-bit-operations.md`](0052-portable-32-bit-operations.md),
+covering seed/self-hosted intrinsics and Eliscript-authored population count
+and rotation algorithms.
 
 ## Adding a Specification
 
