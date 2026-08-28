@@ -661,6 +661,24 @@
         { "kind": "bun-test", "file": "tests/transducer.test.mjs", "contains": "transducer boundaries reject malformed operations before traversal" },
         { "kind": "bun-test", "file": "tests/transducer.test.mjs", "contains": "transducers agree under Bun and Node and stay single-pass at scale" }
       ]
+    },
+    {
+      "id": "runtime.owner-token-transient-collections",
+      "title": "Owner-token transient collections",
+      "status": "accepted",
+      "spec": "0062",
+      "contracts": ["Shares persistent roots until an owner-selected path is updated", "Implements truthful transient Vector, Map, and Set capabilities with deterministic invalidation", "Preserves HAMT collisions, layout transitions, and every committed owner generation", "Uses transient builders in into with bounded million-value allocation"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/transient.test.mjs", "contains": "transient protocols expose only each collection's editable capabilities" },
+        { "kind": "bun-test", "file": "tests/transient.test.mjs", "contains": "transient vectors convert in O(1), own touched paths, and invalidate exactly" },
+        { "kind": "bun-test", "file": "tests/transient.test.mjs", "contains": "transient maps preserve HAMT collisions and dense/sparse transitions" },
+        { "kind": "bun-test", "file": "tests/transient.test.mjs", "contains": "transient sets reuse the map owner path and retain source values" },
+        { "kind": "bun-test", "file": "tests/transient.test.mjs", "contains": "successive transient owners preserve every committed generation" },
+        { "kind": "bun-test", "file": "tests/transient.test.mjs", "contains": "transients reject persistent APIs, serialization, and use after completion" },
+        { "kind": "bun-test", "file": "tests/transient.test.mjs", "contains": "into selects transient builders and reduces persistent allocation volume" },
+        { "kind": "bun-test", "file": "tests/transient.test.mjs", "contains": "transient vector construction remains bounded at one million values" },
+        { "kind": "bun-test", "file": "tests/transient.test.mjs", "contains": "transient behavior agrees under Bun and Node" }
+      ]
     }
   ]
 }

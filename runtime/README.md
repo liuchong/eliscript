@@ -69,11 +69,22 @@ copies.
 `core/transducer.mjs` composes mapping, filtering, and bounded taking as
 destination-independent reducing-function transformations. `transduce`
 delegates traversal through `IReduce`; `into` obtains an empty target and adds
-logical values through `IConj`. Pipelines preserve reduced-value termination,
-run completion exactly once, reuse transducers with fresh reduction state, and
-allocate no intermediate collection. The current `into` is the immutable
-protocol reference path; transient target builders remain a later
-optimization.
+logical values through `IConj` or an editable transient builder. Pipelines
+preserve reduced-value termination, run completion exactly once, reuse
+transducers with fresh reduction state, and allocate no intermediate
+collection.
+
+### Transient Collections
+
+`core/transient.mjs` defines provisional `IEditable` and
+`ITransientCollection` protocols plus conversion and update operations.
+Persistent Vector, Map, and Set values create owner-token builders that share
+their source representation until the first selected-path update. Completion
+returns a persistent value and permanently invalidates the builder. Transients
+reject persistent collection operations and serialization; async and module
+escape checks remain compiler work. Internal ownership and allocation evidence
+is exposed only through `testing/vector.mjs`, `testing/map.mjs`, and
+`testing/set.mjs`.
 
 ### Worker Host
 

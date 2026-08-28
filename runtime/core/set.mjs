@@ -6,6 +6,10 @@ import {
   SET_CONSTRUCTOR_TOKEN,
   SET_PRESENT,
   SET_STATE,
+  TRANSIENT_SET_CONSTRUCTOR_TOKEN,
+  TRANSIENT_SET_STATE,
+  recordInvalidTransientSetCall,
+  recordTransientSetPersistent,
 } from "./set-internals.mjs";
 import {
   VALUE_EQUAL,
@@ -23,6 +27,13 @@ import {
   reduceIterable,
   sequenceView,
 } from "./collection-internals.mjs";
+import {
+  EDITABLE_TRANSIENT,
+  TRANSIENT_ASSOC,
+  TRANSIENT_CONJ,
+  TRANSIENT_DISSOC,
+  TRANSIENT_PERSISTENT,
+} from "./transient-internals.mjs";
 
 const SET_HASH_TAG = 0x51e7_b32d;
 
@@ -30,10 +41,79 @@ function makeSet(map) {
   return new PersistentHashSet(SET_CONSTRUCTOR_TOKEN, map);
 }
 
+function makeTransientSet(set) {
+  return new TransientHashSet(TRANSIENT_SET_CONSTRUCTOR_TOKEN, set);
+}
+
+function activeTransientSetState(set) {
+  const state = set[TRANSIENT_SET_STATE];
+  if (!state.active) {
+    recordInvalidTransientSetCall();
+    throw new TypeError("transient hash set is no longer editable");
+  }
+  return state;
+}
+
 function asPersistentSet(values) {
   return values instanceof PersistentHashSet
     ? values
     : PersistentHashSet.from(values);
+}
+
+class TransientHashSet {
+  constructor(token, set) {
+    if (token !== TRANSIENT_SET_CONSTRUCTOR_TOKEN ||
+        !(set instanceof PersistentHashSet)) {
+      throw new TypeError(
+        "transient hash sets must be created from a persistent hash set",
+      );
+    }
+    const sourceMap = set[SET_STATE].map;
+    this[TRANSIENT_SET_STATE] = {
+      active: true,
+      source: set,
+      sourceMap,
+      map: sourceMap[EDITABLE_TRANSIENT](),
+    };
+    Object.defineProperty(this, "__eliscript_transient__", {
+      enumerable: true,
+      get() {
+        throw new TypeError("transient hash sets cannot be serialized");
+      },
+    });
+    Object.freeze(this);
+  }
+
+  [TRANSIENT_CONJ](value) {
+    const state = activeTransientSetState(this);
+    state.map[TRANSIENT_ASSOC](value, SET_PRESENT);
+    return this;
+  }
+
+  [TRANSIENT_DISSOC](value) {
+    const state = activeTransientSetState(this);
+    state.map[TRANSIENT_DISSOC](value);
+    return this;
+  }
+
+  [TRANSIENT_PERSISTENT]() {
+    const state = activeTransientSetState(this);
+    const map = state.map[TRANSIENT_PERSISTENT]();
+    const result = map === state.sourceMap
+      ? state.source
+      : (map === EMPTY_MAP ? EMPTY_SET : makeSet(map));
+    state.active = false;
+    recordTransientSetPersistent();
+    return result;
+  }
+
+  toJSON() {
+    throw new TypeError("transient hash sets cannot be serialized");
+  }
+
+  get [Symbol.toStringTag]() {
+    return "EliscriptTransientHashSet";
+  }
 }
 
 export class PersistentHashSet {
@@ -217,6 +297,10 @@ export class PersistentHashSet {
 
   [COLLECTION_REDUCE](reducer, ...initial) {
     return reduceIterable(this, reducer, ...initial);
+  }
+
+  [EDITABLE_TRANSIENT]() {
+    return makeTransientSet(this);
   }
 
   toSet() {

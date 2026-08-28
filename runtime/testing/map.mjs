@@ -1,17 +1,28 @@
 import {
   MAP_STATE,
+  TRANSIENT_MAP_STATE,
   ArrayNode,
   BitmapIndexedNode,
   HashCollisionNode,
   MapEntry,
   readMapMetrics,
+  readTransientMapMetrics,
   resetMapMetrics,
+  resetTransientMapMetrics as resetTransientMapMetricsInternal,
 } from "../core/map-internals.mjs";
 
 function stateOf(map) {
   const state = map?.[MAP_STATE];
   if (state === undefined) {
     throw new TypeError("expected an Eliscript persistent hash map");
+  }
+  return state;
+}
+
+function transientStateOf(map) {
+  const state = map?.[TRANSIENT_MAP_STATE];
+  if (state === undefined) {
+    throw new TypeError("expected an Eliscript transient hash map");
   }
   return state;
 }
@@ -74,6 +85,33 @@ export function resetPersistentMapMetrics() {
 
 export function persistentMapMetrics() {
   return readMapMetrics();
+}
+
+export function resetTransientMapMetrics() {
+  resetTransientMapMetricsInternal();
+}
+
+export function transientMapMetrics() {
+  return readTransientMapMetrics();
+}
+
+export function inspectTransientMap(map) {
+  const state = transientStateOf(map);
+  const nodes = new Set();
+  collectNodes(state.root, nodes);
+  let ownedNodeCount = 0;
+  for (const node of nodes) {
+    if (node.owner === state.owner) {
+      ownedNodeCount += 1;
+    }
+  }
+  return Object.freeze({
+    active: state.active,
+    count: state.count,
+    nodeCount: nodes.size,
+    ownedNodeCount,
+    sharesSourceRoot: state.root === state.source?.[MAP_STATE].root,
+  });
 }
 
 export function inspectPersistentMap(map) {

@@ -147,6 +147,13 @@ an instrumented million-input scalar pipeline proves one-pass transform counts
 without persistent collection allocation, followed by bounded final-target
 construction.
 
+The transient suite verifies truthful editable capabilities, O(1) conversion,
+owner-matched Vector and HAMT path reuse, collision and 32/24 layout behavior,
+Set delegation, retained generations, deterministic invalidation, and
+serialization rejection. Instrumented persistent/transient construction gates
+Vector, Map, and Set node-allocation reductions; a one-million-value Vector
+build and Bun/Node fixture close the scale and host-equivalence boundary.
+
 ## JavaScript Runtime Collections
 
 Persistent-vector tests exercise the provisional M8 runtime independently of

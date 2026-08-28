@@ -4,11 +4,19 @@ import {
   BRANCH_WIDTH,
   EMPTY_ROOT,
   EMPTY_TAIL,
+  TRANSIENT_VECTOR_CONSTRUCTOR_TOKEN,
+  TRANSIENT_VECTOR_STATE,
   VECTOR_CONSTRUCTOR_TOKEN,
   VECTOR_STATE,
   VectorNode,
   allocateTail,
+  editableVectorNode,
+  recordInvalidTransientVectorCall,
   recordRootGrowth,
+  recordTransientVectorNodeMutation,
+  recordTransientVectorPersistent,
+  recordTransientVectorTailCopy,
+  recordTransientVectorTailMutation,
   visitNode,
 } from "./vector-internals.mjs";
 import {
@@ -29,6 +37,12 @@ import {
   reduceIterable,
   sequenceView,
 } from "./collection-internals.mjs";
+import {
+  EDITABLE_TRANSIENT,
+  TRANSIENT_ASSOC,
+  TRANSIENT_CONJ,
+  TRANSIENT_PERSISTENT,
+} from "./transient-internals.mjs";
 
 const MAX_COUNT = 0x7fffffff;
 const MISSING = Symbol("eliscript.vector.missing");
@@ -88,6 +102,51 @@ function assocNode(level, node, index, value) {
   return new VectorNode(slots);
 }
 
+function transientNewPath(level, node, owner) {
+  if (level === 0) {
+    return node;
+  }
+  return new VectorNode(
+    [transientNewPath(level - BRANCH_BITS, node, owner)],
+    owner,
+  );
+}
+
+function transientPushTail(level, parent, tailNode, count, owner) {
+  visitNode(parent);
+  const editable = editableVectorNode(parent, owner);
+  const subindex = ((count - 1) >>> level) & BRANCH_MASK;
+  if (level === BRANCH_BITS) {
+    editable.slots[subindex] = tailNode;
+  } else {
+    const child = editable.slots[subindex];
+    editable.slots[subindex] = child === undefined
+      ? transientNewPath(level - BRANCH_BITS, tailNode, owner)
+      : transientPushTail(level - BRANCH_BITS, child, tailNode, count, owner);
+  }
+  recordTransientVectorNodeMutation();
+  return editable;
+}
+
+function transientAssocNode(level, node, index, value, owner) {
+  visitNode(node);
+  const editable = editableVectorNode(node, owner);
+  if (level === 0) {
+    editable.slots[index & BRANCH_MASK] = value;
+  } else {
+    const subindex = (index >>> level) & BRANCH_MASK;
+    editable.slots[subindex] = transientAssocNode(
+      level - BRANCH_BITS,
+      editable.slots[subindex],
+      index,
+      value,
+      owner,
+    );
+  }
+  recordTransientVectorNodeMutation();
+  return editable;
+}
+
 function popTail(level, node, count) {
   visitNode(node);
   const subindex = ((count - 2) >>> level) & BRANCH_MASK;
@@ -134,6 +193,136 @@ function makeVector(count, shift, root, tail) {
     root,
     tail,
   );
+}
+
+function makeTransientVector(vector) {
+  return new TransientVector(TRANSIENT_VECTOR_CONSTRUCTOR_TOKEN, vector);
+}
+
+function activeTransientVectorState(vector) {
+  const state = vector[TRANSIENT_VECTOR_STATE];
+  if (!state.active) {
+    recordInvalidTransientVectorCall();
+    throw new TypeError("transient vector is no longer editable");
+  }
+  return state;
+}
+
+function editableTransientTail(state) {
+  if (!state.tailOwned) {
+    state.tail = state.tail.slice();
+    state.tailOwned = true;
+    recordTransientVectorTailCopy();
+  }
+  return state.tail;
+}
+
+class TransientVector {
+  constructor(token, vector) {
+    if (token !== TRANSIENT_VECTOR_CONSTRUCTOR_TOKEN ||
+        !(vector instanceof PersistentVector)) {
+      throw new TypeError("transient vectors must be created from a persistent vector");
+    }
+    const source = vector[VECTOR_STATE];
+    this[TRANSIENT_VECTOR_STATE] = {
+      active: true,
+      changed: false,
+      owner: Object.freeze({}),
+      source: vector,
+      count: source.count,
+      shift: source.shift,
+      root: source.root,
+      tail: source.tail,
+      tailOwned: false,
+    };
+    Object.defineProperty(this, "__eliscript_transient__", {
+      enumerable: true,
+      get() {
+        throw new TypeError("transient vectors cannot be serialized");
+      },
+    });
+    Object.freeze(this);
+  }
+
+  [TRANSIENT_CONJ](value) {
+    const state = activeTransientVectorState(this);
+    if (state.count === MAX_COUNT) {
+      throw new RangeError(`persistent vector cannot exceed ${MAX_COUNT} values`);
+    }
+    if (state.tail.length < BRANCH_WIDTH) {
+      editableTransientTail(state).push(value);
+      recordTransientVectorTailMutation();
+    } else {
+      if (!state.tailOwned) {
+        state.tail = state.tail.slice();
+        recordTransientVectorTailCopy();
+      }
+      const tailNode = new VectorNode(state.tail, state.owner);
+      if ((state.count >>> BRANCH_BITS) > (1 << state.shift)) {
+        state.root = new VectorNode([
+          state.root,
+          transientNewPath(state.shift, tailNode, state.owner),
+        ], state.owner);
+        state.shift += BRANCH_BITS;
+        recordRootGrowth();
+      } else {
+        state.root = transientPushTail(
+          state.shift,
+          state.root,
+          tailNode,
+          state.count,
+          state.owner,
+        );
+      }
+      state.tail = [value];
+      state.tailOwned = true;
+      recordTransientVectorTailMutation();
+    }
+    state.count += 1;
+    state.changed = true;
+    return this;
+  }
+
+  [TRANSIENT_ASSOC](index, value) {
+    const state = activeTransientVectorState(this);
+    if (index === state.count) {
+      return this[TRANSIENT_CONJ](value);
+    }
+    assertIndex(index, state.count, "assocBang");
+    if (index >= tailOffset(state.count)) {
+      editableTransientTail(state)[index & BRANCH_MASK] = value;
+      recordTransientVectorTailMutation();
+    } else {
+      state.root = transientAssocNode(
+        state.shift,
+        state.root,
+        index,
+        value,
+        state.owner,
+      );
+    }
+    state.changed = true;
+    return this;
+  }
+
+  [TRANSIENT_PERSISTENT]() {
+    const state = activeTransientVectorState(this);
+    const result = state.changed
+      ? makeVector(state.count, state.shift, state.root, state.tail)
+      : state.source;
+    state.active = false;
+    state.owner = null;
+    recordTransientVectorPersistent();
+    return result;
+  }
+
+  toJSON() {
+    throw new TypeError("transient vectors cannot be serialized");
+  }
+
+  get [Symbol.toStringTag]() {
+    return "EliscriptTransientVector";
+  }
 }
 
 export class PersistentVector {
@@ -340,6 +529,10 @@ export class PersistentVector {
 
   [COLLECTION_REDUCE](reducer, ...initial) {
     return reduceIterable(this, reducer, ...initial);
+  }
+
+  [EDITABLE_TRANSIENT]() {
+    return makeTransientVector(this);
   }
 
   toArray() {

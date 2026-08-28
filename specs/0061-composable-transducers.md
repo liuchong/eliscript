@@ -20,9 +20,10 @@ transducer knows neither the input representation nor the destination. It is a
 pure function from one reducing function to another, while state required by a
 specific reduction is allocated only when that transducer is applied.
 
-This slice deliberately implements the persistent protocol reference path for
-`into`. Owner-token transient builders will optimize bulk target construction
-without changing the observable API or results defined here.
+The original slice implemented the persistent protocol reference path for
+`into`. [0062-owner-token-transient-collections.md](0062-owner-token-transient-collections.md)
+now selects owner-token builders for editable persistent targets without
+changing the observable API or results defined here.
 
 ## Public Runtime Surface
 
@@ -129,9 +130,10 @@ into(target, source)
 into(target, transducer, source)
 ```
 
-It obtains the result seed with `empty(target)`, reduces source values through
-`conj`, and returns the completed result. The original target and source remain
-unchanged under the immutable protocol contracts.
+It obtains the result seed with `empty(target)`. Editable persistent seeds
+reduce through `conjBang` and complete through `persistentBang`; native and
+external seeds reduce through `conj`. The original target and source remain
+unchanged under either protocol contract.
 
 The logical target category controls element semantics:
 
@@ -153,17 +155,16 @@ stages. `mapping` and `filtering` have no per-run counter; `taking` uses one
 integer. Composition depth is fixed before traversal and does not grow the
 JavaScript call stack per input.
 
-`into` inherits target `conj` cost. Persistent Vector append is amortized
-O(log32 n), while persistent Map and Set insertion have expected O(log32 n)
-path cost. Current native immutable-copy adapters copy their target on each
-addition, so large native Array, Map, or Set targets may require O(n^2) copied
-elements. This cost is explicit and temporary; it is not hidden behind a
-mutable target alias.
+`into` inherits the logical target update cost. Owner-token persistent Vector,
+Map, and Set builders copy each selected path once per owner and then reuse it.
+Native immutable-copy adapters still copy their target on each addition, so
+large native Array, Map, or Set targets may require O(n^2) copied elements.
+This cost is explicit and is not hidden behind a mutable target alias.
 
 The million-input scalar fixture counts source pulls, mapping calls, and
 predicate calls and observes no persistent collection allocation. The bounded
-`into` fixture constructs only its final persistent Vector. Transient builders
-will reduce final-target path allocation in a later specification.
+`into` fixture constructs only its final persistent Vector. Specification 0062
+adds structural allocation gates for transient-backed target construction.
 
 ## Failure and Extension Boundaries
 
@@ -186,9 +187,9 @@ Portable Eliscript protocol calls and language-authored transducer definitions
 remain later P2 work.
 
 This slice does not yet provide `removing`, `dropping`, `mapcat`, partitioning,
-transient builders, async transducers, parallel fold, or implicit completion
-initializers. These operations require concrete maintained use cases and their
-own completion or resource contracts before joining the public surface.
+async transducers, parallel fold, or implicit completion initializers. These
+operations require concrete maintained use cases and their own completion or
+resource contracts before joining the public surface.
 
 ## Acceptance Criteria
 
@@ -220,8 +221,10 @@ own completion or resource contracts before joining the public surface.
 - **TRD-12:** Existing collection, protocol, persistent-value, public-surface,
   conformance, compatibility, and complete repository suites remain green.
 
-## Next Slice
+## Continuation
 
-Implement owner-token transient Vector, Map, and Set builders with deterministic
-post-`persistent` invalidation. Then select those builders inside `into` while
-preserving every result and failure contract in this specification.
+Owner-token Vector, Map, and Set builders, deterministic invalidation, and
+transient-backed `into` are specified and evidenced in
+[0062-owner-token-transient-collections.md](0062-owner-token-transient-collections.md).
+The next collection work migrates maintained standard-library algorithms onto
+the protocol and transient surface.

@@ -527,8 +527,12 @@ transducer continuation in
 [0061-composable-transducers.md](0061-composable-transducers.md) adds reusable
 mapping, filtering, bounded taking, reducing completion, custom composition,
 and protocol-driven `into` with zero-intermediate collection evidence.
-Portable algorithm migration, transient builders, efficient host identity
-hashing, metadata, printing, and reading remain open.
+Owner-token runtime builders in
+[0062-owner-token-transient-collections.md](0062-owner-token-transient-collections.md)
+then add Vector/Map/Set path ownership, deterministic invalidation,
+transient-backed `into`, retained-generation safety, and structural allocation
+gates. Portable algorithm migration, static escape analysis, efficient host
+identity hashing, metadata, printing, and reading remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

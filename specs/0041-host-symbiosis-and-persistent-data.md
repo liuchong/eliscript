@@ -676,9 +676,9 @@ HAMT. The shared portable policy in
 [0057-portable-value-semantics.md](0057-portable-value-semantics.md) then adds
 recursive equality and hashing for every core collection family, default
 Map/Set constructors, nullish preservation, collision discipline, and
-cross-family generated evidence. Transients, keyword/symbol values, protocols,
-metadata, printer/reader integration, and literal migration remain open P1-P4
-work.
+cross-family generated evidence. Keyword/symbol values, metadata,
+printer/reader integration, literal migration, and portable transient
+implementation remain open P1-P4 work.
 The reusable dispatch mechanism now begins in
 [0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md): frozen
 protocol objects own direct Symbol slots and private exact-type/category/default
@@ -695,7 +695,9 @@ copies. Composable reducing transformations follow in
 [0061-composable-transducers.md](0061-composable-transducers.md): mapping,
 filtering, bounded taking, completion, reduced termination, and
 protocol-driven `into` now execute without intermediate collections. Portable
-algorithm migration and transient target optimization stay open.
+Owner-token runtime builders and transient-backed `into` follow in
+[0062-owner-token-transient-collections.md](0062-owner-token-transient-collections.md).
+Portable algorithm migration and static transient escape analysis stay open.
 
 ### P0: Semantics and Prototype
 
@@ -769,9 +771,12 @@ Map entry validation, and million-value generic construction. Reusable
 transducers and the persistent reference path for `into` continue in
 [0061-composable-transducers.md](0061-composable-transducers.md), including
 completion, custom composition, exact early termination, protocol-only
-external types, and one-million-input allocation evidence. Transient
-protocols, transient-backed target construction, portable algorithm migration,
-and the complete all-host exit audit remain required for P2.
+external types, and one-million-input allocation evidence. Owner-token
+transient protocols and transient-backed target construction now continue in
+[0062-owner-token-transient-collections.md](0062-owner-token-transient-collections.md),
+including retained generations, deterministic invalidation, HAMT transitions,
+allocation gates, and Bun/Node equivalence. Portable algorithm migration and
+the complete all-host exit audit remain required for P2.
 
 ### P3: Language Integration and Migration
 
@@ -795,6 +800,14 @@ literals, and JavaScript interop remains explicit and ergonomic.
 
 **Exit:** bulk builders improve measured runtime without changing persistent
 semantics or observable application output.
+
+**Status:** Underway since 2026-08-29. Specification
+[0062-owner-token-transient-collections.md](0062-owner-token-transient-collections.md)
+implements owner-token Vector, Map, and Set runtime nodes, completion
+invalidation, message/serialization rejection, transient-backed `into`,
+retained-generation tests, and structural allocation gates. Static async and
+module-export escape analysis, grouping/indexing migration, compiler hot-path
+profiles, and portable reference implementations remain required.
 
 ### P5: Emacs Value Bridge
 

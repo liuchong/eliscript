@@ -6,6 +6,13 @@ import {
   reduced,
   unreduced,
 } from "./collection.mjs";
+import { implementsProtocolOperation } from "./protocol.mjs";
+import {
+  IEditable,
+  conjBang,
+  persistentBang,
+  transient,
+} from "./transient.mjs";
 
 const REDUCING_FUNCTION = Symbol("eliscript.transducer.reducing-function");
 const ZERO_INPUT = Symbol("eliscript.transducer.zero-input");
@@ -155,10 +162,22 @@ export function into(target, ...arguments_) {
     ? IDENTITY_TRANSDUCER
     : arguments_[0];
   const source = arguments_.length === 1 ? arguments_[0] : arguments_[1];
+  const seed = empty(target);
+  if (implementsProtocolOperation(IEditable, "transient", seed)) {
+    return transduce(
+      transducer,
+      completing(
+        (result, value) => conjBang(result, value),
+        (result) => persistentBang(result),
+      ),
+      transient(seed),
+      source,
+    );
+  }
   return transduce(
     transducer,
     (result, value) => conj(result, value),
-    empty(target),
+    seed,
     source,
   );
 }

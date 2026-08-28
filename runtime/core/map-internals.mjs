@@ -3,6 +3,10 @@ import { equalValues, hashValue } from "./value.mjs";
 export const MAP_STATE = Symbol("eliscript.map.state");
 export const MAP_CONSTRUCTOR_TOKEN = Symbol("eliscript.map.constructor");
 export const MAP_NOT_FOUND = Symbol("eliscript.map.not-found");
+export const TRANSIENT_MAP_STATE = Symbol("eliscript.map.transient-state");
+export const TRANSIENT_MAP_CONSTRUCTOR_TOKEN = Symbol(
+  "eliscript.map.transient-constructor",
+);
 
 export const ARRAY_NODE_THRESHOLD = 32;
 export const BITMAP_NODE_THRESHOLD = 24;
@@ -18,6 +22,13 @@ const metrics = {
   demotions: 0,
 };
 
+const transientMetrics = {
+  nodeClones: 0,
+  nodeMutations: 0,
+  persistentCalls: 0,
+  invalidCalls: 0,
+};
+
 export class MapEntry {
   constructor(key, value, hash) {
     metrics.entryAllocations += 1;
@@ -29,30 +40,57 @@ export class MapEntry {
 }
 
 export class BitmapIndexedNode {
-  constructor(bitmap = 0, items = []) {
+  constructor(bitmap = 0, items = [], owner = null) {
     metrics.nodeAllocations += 1;
     this.bitmap = bitmap >>> 0;
-    this.items = Object.freeze(items);
-    Object.freeze(this);
+    this.owner = owner;
+    this.items = owner === null ? Object.freeze(items) : items;
+    if (owner === null) {
+      Object.freeze(this);
+    }
   }
 }
 
 export class ArrayNode {
-  constructor(count, children) {
+  constructor(count, children, owner = null) {
     metrics.nodeAllocations += 1;
     this.count = count;
-    this.children = Object.freeze(children);
-    Object.freeze(this);
+    this.owner = owner;
+    this.children = owner === null ? Object.freeze(children) : children;
+    if (owner === null) {
+      Object.freeze(this);
+    }
   }
 }
 
 export class HashCollisionNode {
-  constructor(hash, entries) {
+  constructor(hash, entries, owner = null) {
     metrics.nodeAllocations += 1;
     this.hash = hash >>> 0;
-    this.entries = Object.freeze(entries);
-    Object.freeze(this);
+    this.owner = owner;
+    this.entries = owner === null ? Object.freeze(entries) : entries;
+    if (owner === null) {
+      Object.freeze(this);
+    }
   }
+}
+
+function editableMapNode(node, owner) {
+  if (node.owner === owner) {
+    return node;
+  }
+  transientMetrics.nodeClones += 1;
+  if (node instanceof BitmapIndexedNode) {
+    return new BitmapIndexedNode(node.bitmap, node.items.slice(), owner);
+  }
+  if (node instanceof ArrayNode) {
+    return new ArrayNode(node.count, node.children.slice(), owner);
+  }
+  return new HashCollisionNode(node.hash, node.entries.slice(), owner);
+}
+
+function recordTransientNodeMutation() {
+  transientMetrics.nodeMutations += 1;
 }
 
 function visitNode(node) {
@@ -396,6 +434,286 @@ function dissocNode(node, shift, hash, key) {
   };
 }
 
+function transientMergeEntries(shift, left, right, owner) {
+  if (left.hash === right.hash) {
+    return new HashCollisionNode(left.hash, [left, right], owner);
+  }
+  const leftIndex = branchIndex(left.hash, shift);
+  const rightIndex = branchIndex(right.hash, shift);
+  if (leftIndex === rightIndex) {
+    return new BitmapIndexedNode(
+      (1 << leftIndex) >>> 0,
+      [transientMergeEntries(shift + 5, left, right, owner)],
+      owner,
+    );
+  }
+  const bitmap = ((1 << leftIndex) | (1 << rightIndex)) >>> 0;
+  return new BitmapIndexedNode(
+    bitmap,
+    leftIndex < rightIndex ? [left, right] : [right, left],
+    owner,
+  );
+}
+
+function transientMergeCollisionAndEntry(shift, node, entry, owner) {
+  const nodeIndex = branchIndex(node.hash, shift);
+  const entryIndex = branchIndex(entry.hash, shift);
+  if (nodeIndex === entryIndex) {
+    return new BitmapIndexedNode(
+      (1 << nodeIndex) >>> 0,
+      [transientMergeCollisionAndEntry(shift + 5, node, entry, owner)],
+      owner,
+    );
+  }
+  const bitmap = ((1 << nodeIndex) | (1 << entryIndex)) >>> 0;
+  return new BitmapIndexedNode(
+    bitmap,
+    nodeIndex < entryIndex ? [node, entry] : [entry, node],
+    owner,
+  );
+}
+
+function transientAssocEntry(entry, shift, hash, key, value, owner) {
+  if (sameEntry(entry, hash, key)) {
+    if (equalValues(entry.value, value)) {
+      return { item: entry, added: false, changed: false };
+    }
+    return {
+      item: new MapEntry(entry.key, value, entry.hash),
+      added: false,
+      changed: true,
+    };
+  }
+  return {
+    item: transientMergeEntries(
+      shift,
+      entry,
+      new MapEntry(key, value, hash),
+      owner,
+    ),
+    added: true,
+    changed: true,
+  };
+}
+
+function transientPromoteBitmapNode(node, shift, hash, key, value, owner) {
+  const children = Array(32).fill(undefined);
+  let packed = 0;
+  for (let index = 0; index < 32; index += 1) {
+    const bit = (1 << index) >>> 0;
+    if ((node.bitmap & bit) !== 0) {
+      children[index] = node.items[packed];
+      packed += 1;
+    }
+  }
+  children[branchIndex(hash, shift)] = new MapEntry(key, value, hash);
+  metrics.promotions += 1;
+  return new ArrayNode(node.items.length + 1, children, owner);
+}
+
+function transientPackArrayNode(node, removedIndex, owner) {
+  let bitmap = 0;
+  const items = [];
+  for (let index = 0; index < 32; index += 1) {
+    if (index === removedIndex) {
+      continue;
+    }
+    const child = node.children[index];
+    if (child !== undefined) {
+      bitmap = (bitmap | (1 << index)) >>> 0;
+      items.push(child);
+    }
+  }
+  metrics.demotions += 1;
+  return new BitmapIndexedNode(bitmap, items, owner);
+}
+
+function transientAssocNode(node, shift, hash, key, value, owner) {
+  visitNode(node);
+  if (node instanceof BitmapIndexedNode) {
+    const bit = bitPosition(hash, shift);
+    const index = packedIndex(node.bitmap, bit);
+    if ((node.bitmap & bit) === 0) {
+      if (node.items.length + 1 >= ARRAY_NODE_THRESHOLD) {
+        return {
+          item: transientPromoteBitmapNode(
+            node,
+            shift,
+            hash,
+            key,
+            value,
+            owner,
+          ),
+          added: true,
+          changed: true,
+        };
+      }
+      const editable = editableMapNode(node, owner);
+      editable.bitmap = (editable.bitmap | bit) >>> 0;
+      editable.items.splice(index, 0, new MapEntry(key, value, hash));
+      recordTransientNodeMutation();
+      return { item: editable, added: true, changed: true };
+    }
+
+    const existing = node.items[index];
+    const result = existing instanceof MapEntry
+      ? transientAssocEntry(existing, shift + 5, hash, key, value, owner)
+      : transientAssocNode(existing, shift + 5, hash, key, value, owner);
+    if (!result.changed) {
+      return { item: node, added: false, changed: false };
+    }
+    const editable = editableMapNode(node, owner);
+    editable.items[index] = result.item;
+    recordTransientNodeMutation();
+    return { item: editable, added: result.added, changed: true };
+  }
+
+  if (node instanceof ArrayNode) {
+    const index = branchIndex(hash, shift);
+    const existing = node.children[index];
+    if (existing === undefined) {
+      const editable = editableMapNode(node, owner);
+      editable.children[index] = new MapEntry(key, value, hash);
+      editable.count += 1;
+      recordTransientNodeMutation();
+      return { item: editable, added: true, changed: true };
+    }
+    const result = existing instanceof MapEntry
+      ? transientAssocEntry(existing, shift + 5, hash, key, value, owner)
+      : transientAssocNode(existing, shift + 5, hash, key, value, owner);
+    if (!result.changed) {
+      return { item: node, added: false, changed: false };
+    }
+    const editable = editableMapNode(node, owner);
+    editable.children[index] = result.item;
+    recordTransientNodeMutation();
+    return { item: editable, added: result.added, changed: true };
+  }
+
+  if (node.hash !== hash) {
+    return {
+      item: transientMergeCollisionAndEntry(
+        shift,
+        node,
+        new MapEntry(key, value, hash),
+        owner,
+      ),
+      added: true,
+      changed: true,
+    };
+  }
+  const index = node.entries.findIndex((entry) => keysEqual(entry.key, key));
+  if (index >= 0) {
+    const existing = node.entries[index];
+    if (equalValues(existing.value, value)) {
+      return { item: node, added: false, changed: false };
+    }
+    const editable = editableMapNode(node, owner);
+    editable.entries[index] = new MapEntry(existing.key, value, hash);
+    recordTransientNodeMutation();
+    return { item: editable, added: false, changed: true };
+  }
+  const editable = editableMapNode(node, owner);
+  editable.entries.push(new MapEntry(key, value, hash));
+  recordTransientNodeMutation();
+  return { item: editable, added: true, changed: true };
+}
+
+function transientRemovePackedItem(node, bit, index, owner) {
+  if (node.items.length === 1) {
+    return undefined;
+  }
+  const editable = editableMapNode(node, owner);
+  editable.bitmap = (editable.bitmap ^ bit) >>> 0;
+  editable.items.splice(index, 1);
+  recordTransientNodeMutation();
+  return editable;
+}
+
+function transientDissocNode(node, shift, hash, key, owner) {
+  visitNode(node);
+  if (node instanceof BitmapIndexedNode) {
+    const bit = bitPosition(hash, shift);
+    if ((node.bitmap & bit) === 0) {
+      return { item: node, removed: false };
+    }
+    const index = packedIndex(node.bitmap, bit);
+    const existing = node.items[index];
+    if (existing instanceof MapEntry) {
+      if (!sameEntry(existing, hash, key)) {
+        return { item: node, removed: false };
+      }
+      return {
+        item: transientRemovePackedItem(node, bit, index, owner),
+        removed: true,
+      };
+    }
+    const result = transientDissocNode(
+      existing,
+      shift + 5,
+      hash,
+      key,
+      owner,
+    );
+    if (!result.removed) {
+      return { item: node, removed: false };
+    }
+    if (result.item === undefined) {
+      return {
+        item: transientRemovePackedItem(node, bit, index, owner),
+        removed: true,
+      };
+    }
+    const editable = editableMapNode(node, owner);
+    editable.items[index] = result.item;
+    recordTransientNodeMutation();
+    return { item: editable, removed: true };
+  }
+
+  if (node instanceof ArrayNode) {
+    const index = branchIndex(hash, shift);
+    const existing = node.children[index];
+    if (existing === undefined) {
+      return { item: node, removed: false };
+    }
+    const result = existing instanceof MapEntry
+      ? (sameEntry(existing, hash, key)
+          ? { item: undefined, removed: true }
+          : { item: existing, removed: false })
+      : transientDissocNode(existing, shift + 5, hash, key, owner);
+    if (!result.removed) {
+      return { item: node, removed: false };
+    }
+    const count = result.item === undefined ? node.count - 1 : node.count;
+    if (result.item === undefined && count <= BITMAP_NODE_THRESHOLD) {
+      return {
+        item: transientPackArrayNode(node, index, owner),
+        removed: true,
+      };
+    }
+    const editable = editableMapNode(node, owner);
+    editable.children[index] = result.item;
+    editable.count = count;
+    recordTransientNodeMutation();
+    return { item: editable, removed: true };
+  }
+
+  if (node.hash !== hash) {
+    return { item: node, removed: false };
+  }
+  const index = node.entries.findIndex((entry) => keysEqual(entry.key, key));
+  if (index < 0) {
+    return { item: node, removed: false };
+  }
+  if (node.entries.length === 2) {
+    return { item: node.entries[index === 0 ? 1 : 0], removed: true };
+  }
+  const editable = editableMapNode(node, owner);
+  editable.entries.splice(index, 1);
+  recordTransientNodeMutation();
+  return { item: editable, removed: true };
+}
+
 export function mapFind(root, hash, key, notFound) {
   return findInNode(root, 0, hash >>> 0, key, notFound);
 }
@@ -406,6 +724,14 @@ export function mapAssoc(root, hash, key, value) {
 
 export function mapDissoc(root, hash, key) {
   return dissocNode(root, 0, hash >>> 0, key);
+}
+
+export function mapAssocTransient(root, owner, hash, key, value) {
+  return transientAssocNode(root, 0, hash >>> 0, key, value, owner);
+}
+
+export function mapDissocTransient(root, owner, hash, key) {
+  return transientDissocNode(root, 0, hash >>> 0, key, owner);
 }
 
 export function* mapEntries(item) {
@@ -444,6 +770,24 @@ export function resetMapMetrics() {
 
 export function readMapMetrics() {
   return Object.freeze({ ...metrics });
+}
+
+export function resetTransientMapMetrics() {
+  for (const key of Object.keys(transientMetrics)) {
+    transientMetrics[key] = 0;
+  }
+}
+
+export function readTransientMapMetrics() {
+  return Object.freeze({ ...transientMetrics });
+}
+
+export function recordTransientMapPersistent() {
+  transientMetrics.persistentCalls += 1;
+}
+
+export function recordInvalidTransientMapCall() {
+  transientMetrics.invalidCalls += 1;
 }
 
 export const EMPTY_BITMAP_NODE = new BitmapIndexedNode();
