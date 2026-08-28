@@ -454,6 +454,20 @@
         { "kind": "bun-test", "file": "tests/persistent-vector.test.mjs", "contains": "persistent vector keeps trie work bounded at one million values" },
         { "kind": "bun-test", "file": "tests/persistent-vector.test.mjs", "contains": "persistent vector has equivalent behavior under Bun and Node" }
       ]
+    },
+    {
+      "id": "runtime.value-equality-hashing",
+      "title": "Value equality and deterministic 32-bit hashing",
+      "status": "accepted",
+      "spec": "0048",
+      "contracts": ["Defines coercion-free SameValueZero scalar semantics", "Compares and hashes persistent vectors recursively by ordered values", "Uses process-local identity semantics for opaque host values", "Caches immutable persistent hashes privately", "Resolves matching hashes with value equality"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/value-semantics.test.mjs", "contains": "value equality and hashing freeze scalar edge semantics" },
+        { "kind": "bun-test", "file": "tests/value-semantics.test.mjs", "contains": "hash collisions never imply value equality" },
+        { "kind": "bun-test", "file": "tests/value-semantics.test.mjs", "contains": "persistent vectors use recursive value equality and ordered hashes" },
+        { "kind": "bun-test", "file": "tests/value-semantics.test.mjs", "contains": "persistent vector hashing remains linear and cached at one million values" },
+        { "kind": "bun-test", "file": "tests/value-semantics.test.mjs", "contains": "value hashes match the frozen Bun and Node fixture" }
+      ]
     }
   ]
 }

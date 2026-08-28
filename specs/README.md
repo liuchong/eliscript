@@ -60,6 +60,9 @@ feature statuses, so partial promotions and missing entries fail. See
 M8 persistent collection work begins with the provisional 32-way vector trie
 and its structural evidence in
 [`0047-persistent-vector-prototype.md`](0047-persistent-vector-prototype.md).
+Its scalar and vector key semantics continue in
+[`0048-value-equality-and-hashing.md`](0048-value-equality-and-hashing.md),
+including frozen Bun/Node hashes and collision evidence.
 
 ## Adding a Specification
 

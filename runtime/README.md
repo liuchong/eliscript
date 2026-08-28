@@ -18,6 +18,12 @@ It is tested independently before vector literal behavior changes. Internal
 node shape, allocation, visit, and sharing observations are isolated in
 `testing/vector.mjs`; applications must not depend on those test adapters.
 
+`core/value.mjs` defines provisional coercion-free value equality and unsigned
+32-bit hashing. Portable scalar and persistent-vector hashes are deterministic;
+opaque JavaScript objects retain process-local identity semantics. Persistent
+hashes are cached privately. `testing/value.mjs` exposes cache and identity
+counters only for conformance tests.
+
 `worker.mjs` is the reference long-lived compute host. It communicates over
 versioned NDJSON, imports local generated modules, correlates concurrent
 requests, and supports progress, cooperative cancellation, timeouts, structured

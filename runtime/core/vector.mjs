@@ -11,9 +11,15 @@ import {
   recordRootGrowth,
   visitNode,
 } from "./vector-internals.mjs";
+import {
+  VALUE_EQUAL,
+  VALUE_HASH,
+  orderedCollectionHash,
+} from "./value-internals.mjs";
 
 const MAX_COUNT = 0x7fffffff;
 const MISSING = Symbol("eliscript.vector.missing");
+const VECTOR_HASH_TAG = 0x4f1b_2c3d;
 
 function assertIndex(index, upperBound, operation) {
   if (!Number.isInteger(index) || index < 0 || index >= upperBound) {
@@ -288,6 +294,23 @@ export class PersistentVector {
       values.push(value);
       return values;
     }, []);
+  }
+
+  [VALUE_EQUAL](other, equal) {
+    if (!(other instanceof PersistentVector) || other.count !== this.count) {
+      return false;
+    }
+    const right = other[Symbol.iterator]();
+    for (const value of this) {
+      if (!equal(value, right.next().value)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  [VALUE_HASH](hash) {
+    return orderedCollectionHash(this, hash, VECTOR_HASH_TAG);
   }
 
   *[Symbol.iterator]() {

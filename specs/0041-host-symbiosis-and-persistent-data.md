@@ -574,8 +574,12 @@ prototype specified by
 [0047-persistent-vector-prototype.md](0047-persistent-vector-prototype.md).
 That slice establishes indexed semantics, old-version preservation, structural
 sharing counters, root growth/collapse coverage, and one-million-value depth
-evidence without changing language literal behavior. Equality, hashing, HAMT,
-engine layout measurements, and literal migration remain open P0/P1 work.
+evidence without changing language literal behavior. Scalar and vector
+equality, deterministic hashing, collision discipline, and Bun/Node fixtures
+then land in
+[0048-value-equality-and-hashing.md](0048-value-equality-and-hashing.md).
+HAMT, keyword/symbol values, engine layout measurements, and literal migration
+remain open P0/P1 work.
 
 ### P0: Semantics and Prototype
 

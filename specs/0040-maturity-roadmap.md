@@ -466,8 +466,10 @@ match across the complete stable corpus.
 32-way persistent vector trie in
 [0047-persistent-vector-prototype.md](0047-persistent-vector-prototype.md),
 including generated reference-model checks and one-million-value structural
-bounds. Persistent equality/hash semantics and HAMT work remain next, before
-literal migration.
+bounds. Scalar and vector value semantics now have frozen Bun/Node hashes,
+recursive equality, collision evidence, and a private immutable-value cache in
+[0048-value-equality-and-hashing.md](0048-value-equality-and-hashing.md).
+HAMT Map/Set remains next, before literal migration.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

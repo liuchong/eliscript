@@ -43,10 +43,12 @@ The initial operation surface is:
 - `reduce(reducer[, initial])`
 - `toArray()` and synchronous JavaScript iteration
 
-Protocol functions, language-level equality, hashing, metadata, transient
-builders, printing, and reader round trips remain later M8 slices. Method
-names in this provisional module do not yet constitute the stable protocol
-surface.
+Protocol functions, metadata, transient builders, printing, and reader round
+trips remain later M8 slices. Recursive equality and deterministic hashing are
+implemented by
+[0048-value-equality-and-hashing.md](0048-value-equality-and-hashing.md), but
+method names in this provisional module do not yet constitute the stable
+collection protocol surface.
 
 ## Representation
 
@@ -161,7 +163,8 @@ layout benchmarks and transient owner tokens remain separate work.
 
 This specification and its conformance feature are provisional in
 Compatibility Baseline 1. The implementation may evolve while M8 completes
-equality, hashing, protocols, transients, literals, and host conversion.
+the remaining value families, protocols, transients, literals, and host
+conversion.
 
 Stable M7 behavior is unaffected: existing vector literals continue to emit
 native JavaScript arrays, and existing destructuring and interop fixtures keep

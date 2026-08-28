@@ -503,11 +503,11 @@ Current evidence:
 - Ninety-four ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- Forty-seven Bun tests cover the compiler and Org Vite adapters, source-map
+- Fifty-five Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
   bootstrap behavior, the worker protocol, standard library, and benchmark
-  reporting, plus persistent vector correctness and structural bounds through
-  one million values.
+  reporting, plus persistent vector correctness, structural bounds, recursive
+  equality, deterministic hashing, and caching through one million values.
 - CLI integration tests compare generated output with a checked-in snapshot
   and execute a recursively built standard-library project.
 - Bun 1.4 executes generated modules and verifies recursion, mutation, loops,
@@ -556,6 +556,11 @@ tests preserve every prior version, while internal structural counters prove
 path-copy bounds and untouched-node sharing through one million values. Vector
 literals intentionally remain native JavaScript arrays until equality,
 hashing, HAMT, protocol, and interop migration semantics are complete.
+The value layer now defines coercion-free scalar equality, recursive vector
+equality, unsigned deterministic hashes, private immutable-value caching, and
+explicit process-local identity for opaque JavaScript objects. Exact scalar
+and vector hashes are frozen across Bun and Node, including a real collision
+fixture that remains unequal.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -651,7 +656,10 @@ strict CI gates, and
 for the stable/provisional boundary and M7 exit audit, and
 [specs/0047-persistent-vector-prototype.md](specs/0047-persistent-vector-prototype.md)
 for the provisional 32-way vector trie, structural sharing evidence, and
-million-value depth bounds.
+million-value depth bounds, and
+[specs/0048-value-equality-and-hashing.md](specs/0048-value-equality-and-hashing.md)
+for scalar and persistent-vector equality, frozen hashes, host identity, and
+collision discipline.
 
 ## License
 

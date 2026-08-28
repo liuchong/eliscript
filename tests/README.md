@@ -80,6 +80,13 @@ and verify bounded lookup and update work at one million values. Test-only
 shape and counter adapters live under `runtime/testing` and are not application
 APIs.
 
+Value-semantics tests freeze scalar edge behavior, recursive vector equality,
+ordered hashes, host identity, immutable hash caching, and an actual collision
+pair. Generated nested vectors establish the equal-implies-equal-hash
+invariant, while exact JSON fixtures and a million-value case run under Bun and
+Node. The compiler's existing `equal` form is not migrated by these runtime
+tests.
+
 Project-build tests inspect expanded IR imports, retain non-Eliscript
 specifiers, support cycles, enforce canonical root containment, and verify
 per-module source maps, incremental decisions, and build phase timings. The
