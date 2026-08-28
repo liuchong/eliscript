@@ -12,6 +12,13 @@ feature inventory is `conformance/manifest.json`.
 Non-fixture evidence must also appear in the default `make test` driver, so a
 test file cannot silently stop running while remaining present in the tree.
 
+The same pre-test gate compares the versioned public-surface registry with
+language forms, IR kinds, commands, schemas, adapters, standard-library
+exports, and Emacs APIs. It also validates the Linux/macOS and Emacs 29/30
+compatibility contract and requires the committed GitHub Actions workflow to
+match its deterministic render. Negative Bun tests cover missing matrix cells,
+mutable Action revisions, weakened CI commands, and manual workflow drift.
+
 `make test` runs the ERT suite, invokes the public CLI, compares the generated
 ESM with its snapshot, validates and decodes Source Map v3 output, and executes
 ordinary, source-mapped, and React server-rendered modules with Bun. It also

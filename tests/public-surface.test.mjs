@@ -32,7 +32,7 @@ test("repository public surface matches every tracked implementation", async () 
     language: { groups: 6, entries: 149 },
     ir: { nodeKinds: 51 },
     commands: { commands: 5, options: 20 },
-    schemas: { total: 4 },
+    schemas: { total: 5 },
     adapters: { adapters: 4, exports: 17 },
     standardLibrary: { modules: 4, exports: 39 },
     emacs: {

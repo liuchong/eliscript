@@ -24,6 +24,10 @@ Requirements:
 - Emacs 29 or newer for compilation
 - Bun 1.4 or newer for executing generated modules and running all tests
 
+Continuous verification covers Emacs 29.4 and 30.2 on Ubuntu 24.04 x64 and
+macOS 15 arm64. Bun 1.4.0 is the pinned minimum-version host in every matrix
+cell.
+
 Compile and run the basic example:
 
 ```sh
@@ -124,6 +128,15 @@ That target also validates the versioned
 prints generated conformance and interface matrices. The inventory separates
 current public Emacs functions and records from `--`-named implementation
 details and tracks exact IR, CLI, adapter, schema, and standard-library sets.
+
+It also checks
+[`contracts/compatibility-matrix.json`](contracts/compatibility-matrix.json)
+against the generated, commit-pinned GitHub Actions workflow. Run strict
+warning-as-error Emacs byte compilation locally with:
+
+```sh
+make byte-compile
+```
 
 Compile and render the React counter example:
 
@@ -485,7 +498,7 @@ Current evidence:
 - Ninety-three ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
-- Thirty Bun tests cover the compiler and Org Vite adapters, source-map
+- Thirty-six Bun tests cover the compiler and Org Vite adapters, source-map
   handoff, file filtering, React Refresh, Org module invalidation, generated
   bootstrap behavior, the worker protocol, standard library, and benchmark
   reporting.
@@ -521,7 +534,11 @@ M7 is underway. The specification registry now makes implementation status and
 test ownership machine-checkable, and the first public contract slice adds
 versioned structured diagnostics without changing existing human errors. The
 seed compiler, project builder, and self-hosted compiler share the schema; the
-default test target rejects missing specification evidence.
+default test target rejects missing specification evidence. The public-surface
+registry classifies language, IR, CLI, schema, adapter, library, and Emacs
+interfaces. A generated compatibility workflow now covers Emacs 29.4 and 30.2
+on Linux and macOS with a pinned Bun minimum version and strict byte
+compilation in every matrix cell.
 
 See [specs/0004-lexical-analysis.md](specs/0004-lexical-analysis.md) for the
 implemented analyzer contract and
@@ -609,7 +626,10 @@ for the versioned diagnostic schema, public APIs, stable code categories, and
 dual-generation CLI behavior, and
 [specs/0044-public-surface-registry.md](specs/0044-public-surface-registry.md)
 for the machine-checked public/internal boundary and generated consistency
-matrices.
+matrices, and
+[specs/0045-continuous-compatibility-matrix.md](specs/0045-continuous-compatibility-matrix.md)
+for the versioned platform matrix, deterministic workflow generation, and
+strict CI gates.
 
 ## License
 

@@ -419,6 +419,17 @@
         { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "repository public surface matches every tracked implementation" },
         { "kind": "fixture", "file": "contracts/public-surface.json", "contains": "\"schemaVersion\": 1" }
       ]
+    },
+    {
+      "id": "quality.continuous-compatibility-matrix",
+      "title": "Continuous operating-system and Emacs compatibility matrix",
+      "status": "accepted",
+      "spec": "0045",
+      "contracts": ["Defines the complete Linux/macOS and Emacs 29/30 matrix as versioned data", "Renders one immutable pinned workflow and rejects contract drift", "Runs the complete suite and strict byte compilation in every matrix cell"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/ci-contract.test.mjs", "contains": "repository compatibility matrix renders the committed CI workflow" },
+        { "kind": "fixture", "file": "contracts/compatibility-matrix.json", "contains": "\"format\": \"eliscript-compatibility-matrix\"" }
+      ]
     }
   ]
 }

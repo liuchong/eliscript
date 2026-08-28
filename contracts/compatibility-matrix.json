@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "format": "eliscript-compatibility-matrix",
+  "version": 1,
+  "workflow": ".github/workflows/compatibility.yml",
+  "operatingSystems": [
+    {
+      "id": "linux",
+      "runner": "ubuntu-24.04",
+      "architecture": "x64"
+    },
+    {
+      "id": "macos",
+      "runner": "macos-15",
+      "architecture": "arm64"
+    }
+  ],
+  "emacsVersions": ["29.4", "30.2"],
+  "javascriptHost": {
+    "name": "bun",
+    "version": "1.4.0"
+  },
+  "actions": [
+    {
+      "id": "checkout",
+      "repository": "actions/checkout",
+      "revision": "de0fac2e4500dabe0009e67214ff5f5447ce83dd",
+      "label": "v6.0.2"
+    },
+    {
+      "id": "setup-bun",
+      "repository": "oven-sh/setup-bun",
+      "revision": "0c5077e51419868618aeaa5fe8019c62421857d6",
+      "label": "v2"
+    },
+    {
+      "id": "setup-emacs",
+      "repository": "purcell/setup-emacs",
+      "revision": "34c6ded44899fd1bf74d2889558befd1750e61a7",
+      "label": "master@2026-08-28"
+    }
+  ],
+  "commands": [
+    "bun install --frozen-lockfile",
+    "bun run test",
+    "make byte-compile"
+  ]
+}

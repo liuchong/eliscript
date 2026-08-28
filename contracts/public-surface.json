@@ -91,6 +91,16 @@
       "evidence": [{"file": "compiler/eliscript-project.el", "contains": ["(format . \"eliscript-build-report\")", "eliscript-project-build-report-version 1"]}]
     },
     {
+      "id": "compatibility-matrix",
+      "spec": "0045",
+      "format": "eliscript-compatibility-matrix",
+      "version": 1,
+      "evidence": [
+        {"file": "contracts/compatibility-matrix.json", "contains": ["\"format\": \"eliscript-compatibility-matrix\"", "\"version\": 1"]},
+        {"file": "tools/ci/render-workflow.mjs", "contains": ["matrix.format !== \"eliscript-compatibility-matrix\"", "matrix.version !== 1"]}
+      ]
+    },
+    {
       "id": "compiler-diagnostic",
       "spec": "0043",
       "format": "eliscript-diagnostic",
@@ -168,7 +178,7 @@
   "documentation": [
     {
       "file": "README.md",
-      "mustContain": ["contracts/public-surface.json", "0044-public-surface-registry.md"],
+      "mustContain": ["contracts/public-surface.json", "0044-public-surface-registry.md", "contracts/compatibility-matrix.json", "0045-continuous-compatibility-matrix.md"],
       "mustNotContain": []
     },
     {

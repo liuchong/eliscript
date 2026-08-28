@@ -45,6 +45,12 @@ compares language forms, IR kinds, commands, schemas, adapters, libraries, and
 Emacs APIs with their implementations. See
 [`0044-public-surface-registry.md`](0044-public-surface-registry.md).
 
+The supported continuous-test dimensions live in
+[`contracts/compatibility-matrix.json`](../contracts/compatibility-matrix.json).
+The contract deterministically renders the pinned GitHub Actions workflow and
+is checked before local tests. See
+[`0045-continuous-compatibility-matrix.md`](0045-continuous-compatibility-matrix.md).
+
 ## Adding a Specification
 
 1. Choose the next four-digit id and add `NNNN-short-name.md`.
