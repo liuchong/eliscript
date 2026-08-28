@@ -32,7 +32,13 @@
 
 (defun eliscript-emitter--json-string (value)
   "Encode string VALUE as an ECMAScript string literal."
-  (json-serialize value))
+  (let ((encoded (json-serialize value)))
+    ;; Emacs 30 returns UTF-8 JSON strings as unibyte data.  Decode before
+    ;; composing them with multibyte emitter fragments so non-ASCII values do
+    ;; not turn into one replacement character per encoded byte.
+    (if (multibyte-string-p encoded)
+        encoded
+      (decode-coding-string encoded 'utf-8-unix))))
 
 (defun eliscript-emitter--fresh-name ()
   "Return a fresh internal ECMAScript identifier."

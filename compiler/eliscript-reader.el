@@ -112,6 +112,17 @@
     (eliscript-reader--span
      start (min (point-max) (1+ start)) filename)))
 
+(defun eliscript-reader--invalid-syntax-message (source start error-data)
+  "Return a stable invalid-reader message for SOURCE at START.
+
+Emacs releases disagree on whether an unknown dispatch reports `#' or its
+two-character dispatch prefix.  Eliscript owns that diagnostic contract."
+  (if (and (< start (length source))
+           (= (aref source start) ?#))
+      (format "Invalid read syntax: %S"
+              (substring source start (min (length source) (+ start 2))))
+    (error-message-string error-data)))
+
 (defun eliscript-read-located-string (source &optional filename)
   "Read every Eliscript form from SOURCE with recursive source locations."
   (with-temp-buffer
@@ -140,7 +151,8 @@
                (eliscript-diagnostic-signal
                 'eliscript-read-error "ELI-R0001" "reader"
                 filename (eliscript-reader--diagnostic-span filename)
-                "%s" (error-message-string error-data)))))))
+                "%s" (eliscript-reader--invalid-syntax-message
+                       source (1- start) error-data)))))))
       (nreverse forms))))
 
 (defun eliscript-read-string (source &optional filename)

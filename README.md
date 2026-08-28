@@ -495,7 +495,7 @@ Current evidence:
 - Repeated `--portable NAME` options make the same builder verify every local
   `import-portable` target, reject bare or escaping source edges, and emit only
   each module's requested transitive closure.
-- Ninety-three ERT tests cover reading, locations, macro expansion, analysis, IR
+- Ninety-four ERT tests cover reading, locations, macro expansion, analysis, IR
   lowering, direct emission, source maps, React, Org publishing, modules,
   bootstrap conformance, worker integration, errors, and interop.
 - Thirty-six Bun tests cover the compiler and Org Vite adapters, source-map

@@ -959,6 +959,11 @@
   (should (equal (eliscript-source-map--encode-vlq 16) "gB"))
   (should (equal (eliscript-source-map--encode-vlq -16) "hB")))
 
+(ert-deftest eliscript-emitter-preserves-non-bmp-string-literals ()
+  (let ((encoded (eliscript-emitter--json-string "😀")))
+    (should (multibyte-string-p encoded))
+    (should (equal encoded "\"😀\""))))
+
 (ert-deftest eliscript-source-map-records-ir-spans-and-utf16-columns ()
   (let* ((source "(defun choose (value)\n\t(if value value nil))\n(print \"😀\" \"after\")")
          (emission
@@ -980,6 +985,9 @@
              (eliscript-emission-javascript emission)
              (substring-no-properties
               (eliscript-emission-javascript emission))))
+    (should (string-match-p
+             (regexp-quote "console.log(\"😀\", \"after\");")
+             (eliscript-emission-javascript emission)))
     (should (member '(3 0 0 0 0) segments))
     (should (cl-find-if
              (lambda (segment)
@@ -988,7 +996,7 @@
              segments))
     (should (cl-find-if
              (lambda (segment)
-               (and (= (nth 1 segment) 20)
+               (and (= (nth 1 segment) 18)
                     (= (nth 3 segment) 2)
                     (= (nth 4 segment) 12)))
              segments))))
