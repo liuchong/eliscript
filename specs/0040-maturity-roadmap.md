@@ -39,7 +39,9 @@ Eliscript already has the difficult vertical foundations:
 - a compiler written in Eliscript that reaches a byte-identical bootstrap
   fixed point
 - direct JavaScript interop, asynchronous functions, exceptions, vector
-  binding patterns, React element lowering, and Vite integration
+  binding patterns, and React element lowering
+- optional application-level bundler integration that consumes public
+  compiler output without entering the language core
 - deterministic Org publishing into a custom React application
 - multi-file project builds, project graph manifests, incremental cache
   decisions, and phase timing reports
@@ -141,6 +143,9 @@ The following boundaries remain fixed through the maturity roadmap:
 - Dynamic scope and arbitrary Emacs object compatibility are not goals.
 - The compiler emits standard ESM and does not invent a proprietary runtime
   module system.
+- The compiler, runtime, and standard library do not depend on Vite or any
+  bundler-specific API. Application adapters may consume only public ESM, CLI,
+  or host-neutral compiler boundaries.
 - React remains a library target; Eliscript does not own a reconciler or a web
   application framework.
 - Org publishing remains an adapter over the compiler, not a mandatory part of
@@ -242,8 +247,9 @@ own:
 
 Bun remains the reference JavaScript development host. A Node.js LTS adapter
 is added to prove that generated ESM and the self-hosted compiler do not depend
-on Bun-only language behavior. Browser execution is verified through Vite and
-standards-based ESM output.
+on Bun-only language behavior. Browser execution is verified from
+standards-based ESM. A replaceable application toolchain may bundle reference
+applications, but it is not part of the compiler or language contract.
 
 ### Project and Build Layer
 
@@ -305,7 +311,8 @@ The mature toolchain contains:
   integration, and interactive commands
 - a long-lived REPL/evaluation session with source-mapped errors
 - stable JSON diagnostics for editor and CI integrations
-- a documented Vite adapter and public transform contract
+- maintained application adapters that consume public compiler boundaries and
+  introduce no core dependency
 
 An LSP server is optional for 1.0. The diagnostic and project APIs must avoid
 blocking one later, but Emacs integration is the required first-class editor
@@ -320,7 +327,8 @@ Tests are organized by the claim they prove:
 - golden tests for diagnostics, IR schemas, ESM, and source maps
 - runtime tests against supported JavaScript hosts
 - project tests for graph, cache, path, and configuration behavior
-- integration tests for Emacs, Vite, React, Org, and worker workflows
+- integration tests for Emacs and worker workflows, plus application-level
+  React, Org, and optional bundler proofs
 - property and fuzz tests for readers, expanders, analyzers, and configuration
 - scale, performance, and soak suites outside the fast development loop
 
@@ -556,9 +564,11 @@ and Map/Set key behavior. Immutable metadata now lands in
 [0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md),
 including root-only wrappers, persistent/transient propagation, portable and
 runtime APIs, equality/hash exclusion, and seed/self-hosted Bun/Node evidence.
-P1 construction steps 1-5 now have implementation evidence. Declared macro
-dependencies, object/text migration, portable dispatch policy, and static
-escape analysis remain open. Canonical printing/reading for
+P1 construction steps 1-5 and their all-host exit gate now have complete
+implementation evidence through
+[0078-persistent-collection-core-exit-audit.md](0078-persistent-collection-core-exit-audit.md).
+Declared macro dependencies, object/text migration, portable dispatch policy,
+and static escape analysis remain open. Canonical printing/reading for
 the optimized runtime family now lands in
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md);
 portable Keyword/Symbol values and List/collection data text now land in
@@ -574,8 +584,7 @@ with shallow-by-default conversion, bounded deep graph traversal, sharing and
 cycle semantics, and React props evidence. Efficient portable opaque-object,
 function, and native-Symbol identity hashing now lands in
 [0074-process-local-host-identity-hashing.md](0074-process-local-host-identity-hashing.md),
-removing the previous type-wide HAMT collision group. The complete P1 all-host
-exit audit remains open before literal migration. The first explicit M11
+removing the previous type-wide HAMT collision group. The first explicit M11
 library value now lands early in
 [0075-portable-result-values.md](0075-portable-result-values.md): inspectable
 Ok/Err persistent records, exact branch combinators, dependency-pruned portable
@@ -631,7 +640,8 @@ especially inside Emacs.
 - Emacs major mode
 - project-aware check command with stable JSON diagnostics
 - source-mapped interactive evaluation and REPL session
-- watch API consumed by the Vite adapter and Emacs mode
+- host-neutral watch API consumed by the Emacs mode and optional application
+  adapters
 - installation and troubleshooting documentation
 
 **Construction steps:**
@@ -645,8 +655,8 @@ especially inside Emacs.
 5. Add compile buffer/file/project and jump-to-source commands.
 6. Add a persistent evaluation session with explicit namespace and reload
    behavior.
-7. Unify file watching so Vite, Emacs, and command-line watch mode consume the
-   same invalidation events.
+7. Unify file watching so Emacs, command-line watch mode, and replaceable
+   application adapters consume the same host-neutral invalidation events.
 8. Test unsaved-buffer compilation through virtual source input without making
    it an undeclared filesystem dependency.
 
@@ -936,8 +946,10 @@ equivalent to a clean rebuild.
 **AC-10 MUST - Host portability**
 
 The stable conformance corpus and command-line reference application execute on
-the supported Bun version and Node.js LTS. The browser applications build and
-run through the supported Vite version without Bun-specific emitted syntax.
+the supported Bun version and Node.js LTS. Browser reference applications run
+from standards-based ESM through a pinned but replaceable application
+toolchain, without tool-specific emitted syntax or a compiler dependency on
+that toolchain.
 
 ### D. Developer Experience
 

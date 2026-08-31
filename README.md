@@ -18,8 +18,9 @@ ECMAScript modules, and bootstraps a compiler written in Eliscript itself.
 ## Project Status
 
 Eliscript has a working Emacs Lisp seed compiler, a reproducible self-hosted
-compiler, multi-file builds, React and Vite integration, Org publishing, and a
-long-lived Emacs-to-JavaScript worker. The project is now in **M8: Language
+compiler, multi-file builds, persistent values, protocols, and a long-lived
+Emacs-to-JavaScript worker. The repository also carries React, Org, and
+optional bundler application probes. The project is now in **M8: Language
 Contract Closure**.
 
 The current M8 work provides:
@@ -72,9 +73,10 @@ host class or identity boundary. Portable JSON now parses strict text directly
 into persistent values and emits deterministic string-key order with Result
 errors, cycle detection, and resource bounds. Portable numeric functions now
 make Number, NaN, infinity, safe-integer, signed division, and checked-overflow
-semantics explicit without host Math calls. The next language boundary is the
-complete P1 exit audit, followed by portable protocol dispatch policy,
-measured object/text migration, literal migration, and the Emacs value bridge.
+semantics explicit without host Math calls. The persistent collection core now
+passes its complete cross-host million-value exit audit. The next language
+boundary is portable protocol dispatch policy, followed by measured
+object/text migration, literal migration, and the Emacs value bridge.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in
@@ -382,7 +384,13 @@ arm64 with the pinned minimum Bun version in every matrix cell.
 - Persistent immutable values and protocol-oriented collection algorithms.
 - Direct JavaScript, browser, React, and package ecosystem interoperation.
 - First-class Emacs editing and measurable JavaScript acceleration.
-- Optional Vite and Org adapters outside the language core.
+
+### Application Evidence
+
+React, Org publishing, and optional bundler adapters are maintained as
+application-level proving grounds. They consume public compiler and ESM
+boundaries; they do not define language semantics, compiler architecture,
+runtime behavior, or standard-library dependencies.
 
 ### Non-goals
 

@@ -27,6 +27,7 @@ test: check-contracts
 		tests/portable-persistent-map.test.mjs \
 		tests/portable-persistent-set.test.mjs \
 		tests/portable-persistent-vector.test.mjs \
+		tests/persistent-core-exit.test.mjs \
 		tests/portable-value-semantics.test.mjs tests/portable-metadata.test.mjs \
 		tests/portable-data-text.test.mjs tests/portable-result.test.mjs \
 		tests/portable-json.test.mjs tests/portable-numeric.test.mjs \

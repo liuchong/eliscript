@@ -13,6 +13,9 @@ development, React Fast Refresh, asset loading, and production bundling.
 
 Vite and Node.js remain outside the compiler core. Emacs is still the compiler
 host, while Vite is an optional consumer of the public command-line interface.
+The compiler, runtime, and standard library must not import Vite or its plugin
+APIs, and Vite packages remain development-only dependencies. The application
+adapter test enforces this boundary over every core source file.
 
 ## Plugin Contract
 

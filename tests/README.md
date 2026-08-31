@@ -122,6 +122,14 @@ Bun and Node. It covers 20,000 retained value-key operations, collection
 algebra, incompatible policies, complete-hash collisions, inherited 32/24
 transitions, no-op identity, and exact million-member path sharing.
 
+The persistent-core exit suite builds the complete portable value graph once,
+then runs million-value Vector, Map, and Set audits in isolated Bun and Node
+processes. Deterministic reports prove exact probes, retained original roots,
+collision behavior, bounded changed paths, and identity sharing for every
+unchanged trie or HAMT item. Together with the List dual-host million-node
+fixture, this closes the P1 all-host correctness, collision, sharing, and
+complexity gate.
+
 The portable value-semantics suite compiles `value.eli` and its complete
 five-module collection/bit dependency graph with both compiler generations,
 then executes both outputs under Bun and Node. Frozen scalar and collection

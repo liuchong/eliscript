@@ -171,7 +171,7 @@ Return a JSON-ready alist with metadata and exported HTML."
   (let ((seen (make-hash-table :test #'equal)))
     (dolist (article articles)
       (let ((slug (alist-get 'slug article)))
-        (when-let ((previous (gethash slug seen)))
+        (when-let* ((previous (gethash slug seen)))
           (eliscript-org--fail
            directory
            "duplicate slug %S in %s and %s"

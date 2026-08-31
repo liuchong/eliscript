@@ -711,10 +711,10 @@ HAMT. The shared portable policy in
 [0057-portable-value-semantics.md](0057-portable-value-semantics.md) then adds
 recursive equality and hashing for every core collection family, default
 Map/Set constructors, nullish preservation, collision discipline, and
-cross-family generated evidence. Keyword/Symbol values now land in
-[0067-first-class-keyword-symbol-values.md](0067-first-class-keyword-symbol-values.md);
-metadata, printer/reader integration, literal migration, and portable transient
-implementation remain open P1-P4 work.
+cross-family generated evidence. Keyword/Symbol values, metadata, and portable
+printer/reader integration now complete the remaining P1 construction steps,
+and [0078-persistent-collection-core-exit-audit.md](0078-persistent-collection-core-exit-audit.md)
+closes the complete cross-host gate. Literal migration remains P3 work.
 The reusable dispatch mechanism now begins in
 [0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md): frozen
 protocol objects own direct Symbol slots and private exact-type/category/default
@@ -771,8 +771,8 @@ prototypes, measured Bun/Node/Chrome node layouts and thresholds, portable
 **Exit:** persistent collections pass correctness, collision, sharing, and
 complexity suites on all supported JavaScript hosts.
 
-**Status:** Underway since 2026-08-28. The first P1 slice is the portable
-linked List in
+**Status:** Completed on 2026-08-31 by specifications 0054-0057, 0068,
+0070-0071, 0074, and 0078. The portable linked List in
 [0054-eliscript-persistent-list.md](0054-eliscript-persistent-list.md), which
 adds exact suffix sharing and stack-safe million-node traversal beside the
 indexed Vector trie. The portable HAMT Map in
@@ -801,8 +801,12 @@ complete construction step 4 with common-subset byte parity. Existing
 reference-model and million-scale suites cover construction step 5.
 Process-local opaque host identity hashing in
 [0074-process-local-host-identity-hashing.md](0074-process-local-host-identity-hashing.md)
-removes the portable core's type-wide Map/Set collision fallback. The complete
-all-host P1 exit audit remains required.
+removes the portable core's type-wide Map/Set collision fallback. The final
+audit in
+[0078-persistent-collection-core-exit-audit.md](0078-persistent-collection-core-exit-audit.md)
+adds symmetric million-value Bun/Node structural reports for Vector, Map, and
+Set beside the existing List report, closing correctness, collision, sharing,
+and bounded-path complexity requirements without timing thresholds.
 
 ### P2: Protocols and Algorithms
 
@@ -844,8 +848,7 @@ search termination and transient-backed indexing. The next source-level slice
 in [0066-eliscript-authored-core-protocol-algorithms.md](0066-eliscript-authored-core-protocol-algorithms.md)
 adds Lisp-named protocol, collection, transducer, and transient modules and
 moves the maintained sequence/data algorithm bodies into `.eli`.
-Text/object migration, portable dispatch internals, and the complete all-host
-exit audit remain open.
+Text/object migration and portable dispatch internals remain open.
 
 ### P3: Language Integration and Migration
 

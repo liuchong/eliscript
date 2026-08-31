@@ -865,6 +865,20 @@
         { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "repository public surface matches every tracked implementation" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "runtime.persistent-collection-core-exit",
+      "title": "Persistent collection core all-host exit audit",
+      "status": "accepted",
+      "spec": "0078",
+      "contracts": ["Retains immutable List, Vector, Map, and Set histories against reference models", "Resolves collisions by equality while preserving deterministic value semantics and metadata exclusion", "Shares every unchanged branch with bounded List, vector-trie, and HAMT paths at one million values", "Produces identical million-value structural reports under Bun and Node"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/persistent-core-exit.test.mjs", "contains": "persistent collection core closes its all-host million-value exit gate" },
+        { "kind": "bun-test", "file": "tests/portable-persistent-list.test.mjs", "contains": "Eliscript-authored persistent list compiles and agrees across hosts" },
+        { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics preserve generated cross-family invariants" },
+        { "kind": "bun-test", "file": "tests/portable-metadata.test.mjs", "contains": "Eliscript-authored metadata is byte-identical and portable" },
+        { "kind": "bun-test", "file": "tests/portable-data-text.test.mjs", "contains": "portable canonical data text is byte-identical and host-independent" }
+      ]
     }
   ]
 }

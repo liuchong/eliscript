@@ -29,17 +29,17 @@ test("repository specifications have complete conformance evidence", async () =>
   expect(report).toEqual({
     schemaVersion: 1,
     specifications: {
-      total: 77,
-      statuses: { draft: 1, accepted: 48, stable: 28 },
+      total: 78,
+      statuses: { draft: 1, accepted: 49, stable: 28 },
       implementations: {
         "in-progress": 3,
-        implemented: 74,
+        implemented: 75,
       },
-      coveredImplemented: 74,
+      coveredImplemented: 75,
     },
     features: {
-      total: 74,
-      evidence: 221,
+      total: 75,
+      evidence: 226,
       domains: {
         acceleration: { features: 1, evidence: 1 },
         bootstrap: { features: 7, evidence: 13 },
@@ -51,7 +51,7 @@ test("repository specifications have complete conformance evidence", async () =>
         publishing: { features: 1, evidence: 2 },
         quality: { features: 4, evidence: 7 },
         react: { features: 1, evidence: 2 },
-        runtime: { features: 10, evidence: 70 },
+        runtime: { features: 11, evidence: 75 },
         stdlib: { features: 18, evidence: 57 },
         tooling: { features: 1, evidence: 2 },
         worker: { features: 2, evidence: 3 },
@@ -59,10 +59,10 @@ test("repository specifications have complete conformance evidence", async () =>
     },
     baseline: {
       stableSpecifications: 28,
-      provisionalSpecifications: 46,
+      provisionalSpecifications: 47,
       planningSpecifications: 3,
       stableFeatures: 28,
-      provisionalFeatures: 46,
+      provisionalFeatures: 47,
     },
   });
 });
