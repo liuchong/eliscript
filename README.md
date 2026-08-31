@@ -30,15 +30,17 @@ The current M8 work provides:
 - open runtime protocols with direct and externally registered methods
 - generic collection lookup, traversal, reduction, construction, association,
   and key-presence operations
-- reusable mapping, filtering, and bounded-taking transducers with
+- reusable mapping, filtering, removing, taking, and dropping transducers with
   protocol-driven `transduce` and `into`
 - owner-token transient Vector, Map, and Set builders with deterministic
   completion invalidation and transient-backed persistent `into`
+- protocol-driven sequence and keyed-data algorithms returning persistent
+  values, with Lisp-named Eliscript modules under `stdlib/core/`
 - structural-sharing and cross-host evidence through million-value workloads
 
-The next collection boundary is portable sequence, object, grouping, and
-indexing algorithms built over these protocols and builders, followed by
-literal migration, host conversion, and the Emacs value bridge.
+The next language boundary is portable protocol and core-algorithm definitions,
+followed by measured object/text migration, literal migration, host conversion,
+and the Emacs value bridge.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in

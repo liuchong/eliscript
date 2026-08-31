@@ -77,3 +77,11 @@ the generated UI are otherwise unchanged.
 The structural follow-up is implemented: these operations now live in
 `data.eli` and depend on `assoc` and `has?` from `object.eli` without copying
 them. Project-level portable builds prove and prune that local source graph.
+
+## Runtime Continuation
+
+This Object-backed portable API remains supported for compiler and historical
+application use. Value-semantic persistent Map results, persistent Vector
+groups, frequencies, external protocol sources, and transient-backed
+construction are specified in
+[0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md).

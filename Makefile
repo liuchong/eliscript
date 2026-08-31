@@ -28,6 +28,7 @@ test: check-contracts
 		tests/portable-value-semantics.test.mjs \
 		tests/protocol.test.mjs tests/collection-protocol.test.mjs \
 		tests/transducer.test.mjs tests/transient.test.mjs \
+		tests/core-stdlib.test.mjs \
 		tests/persistent-vector.test.mjs tests/value-semantics.test.mjs \
 		tests/persistent-map.test.mjs tests/persistent-set.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh

@@ -1,0 +1,25 @@
+(module test.core-stdlib-usage
+  (import "./stdlib/core/seq.mjs"
+          concat drop every? filter find map remove reverse some take)
+  (import "./stdlib/core/data.mjs"
+          count-by frequencies group-by index-by)
+
+  (defconst values [0 1 2 3 4])
+  (defconst mapped (map (lambda (value) (* value 2)) values))
+  (defconst filtered (filter (lambda (value) (= (% value 2) 0)) values))
+  (defconst removed (remove (lambda (value) (= value 2)) values))
+  (defconst taken (take 3 values))
+  (defconst dropped (drop 2 values))
+  (defconst reversed (reverse values))
+  (defconst concatenated (concat [0 1] [2] nil [3 4]))
+  (defconst first-even (find (lambda (value) (= (% value 2) 0)) [1 3 4 6]))
+  (defconst zero-truth (some (lambda (value) (if (= value 2) 0 nil)) values))
+  (defconst all-truth (every? (lambda (value) (if (= value 3) "" 0)) values))
+  (defconst indexed (index-by (lambda (value) (% value 3)) values))
+  (defconst grouped (group-by (lambda (value) (% value 2)) values))
+  (defconst counted (count-by (lambda (value) (% value 2)) values))
+  (defconst frequencies-result (frequencies [1 2 1 3 2 1]))
+
+  (export mapped filtered removed taken dropped reversed concatenated
+          first-even zero-truth all-truth indexed grouped counted
+          frequencies-result))

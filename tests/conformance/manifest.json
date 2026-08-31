@@ -679,6 +679,21 @@
         { "kind": "bun-test", "file": "tests/transient.test.mjs", "contains": "transient vector construction remains bounded at one million values" },
         { "kind": "bun-test", "file": "tests/transient.test.mjs", "contains": "transient behavior agrees under Bun and Node" }
       ]
+    },
+    {
+      "id": "stdlib.protocol-driven-core-algorithms",
+      "title": "Protocol-driven core sequence and data algorithms",
+      "status": "accepted",
+      "spec": "0063",
+      "contracts": ["Uses Eliscript truth semantics over arbitrary IReduce sources", "Returns value-semantic persistent Vector and Map results", "Terminates searches and bounded transforms through reduced values", "Uses transient builders for indexed and grouped data construction"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "sequence algorithms use protocols and Eliscript truthiness" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "removing and dropping compose with fresh reduction state" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "data algorithms return persistent value-semantic maps and vectors" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "indexBy uses a transient HAMT builder at scale" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core facades compile and execute against runtime protocols" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "protocol standard-library algorithms agree under Bun and Node" }
+      ]
     }
   ]
 }

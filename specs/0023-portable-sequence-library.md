@@ -83,8 +83,11 @@ Emacs editor state.
 - The project CLI discovers the same source import, emits both modules and
   their maps, rewrites the relative specifier, and runs the entry with Bun.
 
-## Next Slice
+## Runtime Continuation
 
 The project build command is implemented in
-[0024-project-builds.md](0024-project-builds.md). M6 can continue with object
-and text helpers exercised through both browser and ordinary ESM builds.
+[0024-project-builds.md](0024-project-builds.md). The Array-backed portable API
+remains supported for compiler closure and compatibility use. The maintained
+protocol-driven sequence surface, persistent Vector results, and exact reduced
+termination are specified separately in
+[0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md).

@@ -155,8 +155,9 @@ implementation can match.
 
 This slice does not add transient List, pop, metadata, async-safe ownership,
 module-export analysis, host conversion, or transient extension tables for
-external types. Grouping, indexing, and compiler algorithms have not yet been
-migrated to the new builders.
+external types. Grouping and indexing adopt these builders in
+[0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md);
+compiler algorithms have not yet been migrated.
 
 ## Acceptance Criteria
 
@@ -187,9 +188,10 @@ migrated to the new builders.
   conformance, public-surface, compatibility, and complete repository suites
   remain green.
 
-## Next Slice
+## Continuation
 
-Rebuild maintained sequence, object, and data algorithms over the protocol
-surface, using transient builders for grouping and indexing where allocation
-evidence justifies them. Expose the resulting operations to portable Eliscript
-without adding representation checks to user-facing standard-library code.
+Maintained sequence and keyed-data algorithms, transient-backed indexing, and
+Eliscript source facades continue in
+[0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md).
+Portable protocol definitions, object/text migration, compiler hot paths, and
+static transient escape analysis remain open.

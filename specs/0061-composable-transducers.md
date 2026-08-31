@@ -30,7 +30,8 @@ changing the observable API or results defined here.
 `runtime/core/transducer.mjs` exports:
 
 - reducing-function construction: `completing`
-- transducer constructors: `mapping`, `filtering`, `taking`
+- transducer constructors: `mapping`, `filtering`, `removing`, `taking`,
+  `dropping`
 - composition: `composeTransducers`
 - execution: `transduce`, `into`
 
@@ -71,8 +72,15 @@ once for every source element that reaches this stage.
 ### Filtering
 
 `filtering(predicate)` passes the original input downstream only when the
-predicate returns a truthy JavaScript value. Rejected values leave the current
-accumulator unchanged.
+predicate returns an Eliscript-truthy value. Only `false`, `null`, and
+`undefined` are false; `0` and the empty string are true. Rejected values leave
+the current accumulator unchanged.
+
+### Removing
+
+`removing(predicate)` is the complement of filtering under the same Eliscript
+truth contract. It rejects an input when the predicate result is truthy and
+otherwise passes the original input downstream.
 
 ### Taking
 
@@ -88,6 +96,13 @@ limit.
 `taking(0)` is a zero-input pipeline. `transduce` completes the initial result
 without dispatching source reduction or acquiring an iterator. Composition
 retains this property when any built-in stage admits no input.
+
+### Dropping
+
+`dropping(limit)` accepts a non-negative safe integer and rejects the first
+`limit` source values reaching that stage. Its remaining count belongs to one
+applied reducing function, so reusing the transducer starts each reduction
+with fresh state.
 
 ## Composition
 
@@ -186,10 +201,12 @@ Eliscript literal emission or the array-backed `stdlib/sequence.eli` API.
 Portable Eliscript protocol calls and language-authored transducer definitions
 remain later P2 work.
 
-This slice does not yet provide `removing`, `dropping`, `mapcat`, partitioning,
-async transducers, parallel fold, or implicit completion initializers. These
-operations require concrete maintained use cases and their own completion or
-resource contracts before joining the public surface.
+`removing` and `dropping` were added with the maintained sequence algorithms in
+[0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md).
+This surface does not yet provide `mapcat`, partitioning, async transducers,
+parallel fold, or implicit completion initializers. These operations require
+concrete maintained use cases and their own completion or resource contracts
+before joining the public surface.
 
 ## Acceptance Criteria
 
@@ -226,5 +243,6 @@ resource contracts before joining the public surface.
 Owner-token Vector, Map, and Set builders, deterministic invalidation, and
 transient-backed `into` are specified and evidenced in
 [0062-owner-token-transient-collections.md](0062-owner-token-transient-collections.md).
-The next collection work migrates maintained standard-library algorithms onto
-the protocol and transient surface.
+Maintained sequence and keyed-data algorithms now use the protocol and
+transient surface in
+[0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md).

@@ -28,26 +28,27 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 62 specifications.
+The registry currently contains 63 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 33 |
+| Accepted design | 34 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 59 |
+| Implemented | 60 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-31 as provisional, and 3 as planning. That baseline is derived from registry
+32 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
 implementations, shared value semantics, open protocol dispatch, collection
-capabilities, immutable collection construction, single-pass transducers, and
-owner-token transient Vector, Map, and Set builders implemented. Portable
-algorithm migration, literal migration, metadata, host conversion, static
-transient escape analysis, and the Emacs value bridge remain ahead.
+capabilities, immutable collection construction, single-pass transducers,
+owner-token transient Vector, Map, and Set builders, and protocol-driven core
+sequence/data algorithms implemented. Portable protocol and algorithm
+definitions, literal migration, metadata, host conversion, static transient
+escape analysis, and the Emacs value bridge remain ahead.
 
 ## Reading Paths
 
@@ -89,6 +90,7 @@ number.
 8. [0060: Collection Construction](0060-collection-construction-protocols.md)
 9. [0061: Composable Transducers](0061-composable-transducers.md)
 10. [0062: Owner-token Transient Collections](0062-owner-token-transient-collections.md)
+11. [0063: Protocol-driven Core Algorithms](0063-protocol-driven-core-algorithms.md)
 
 ### React and Publishing
 
@@ -217,6 +219,7 @@ The schemas and change workflow are defined by specifications
 | 0060 | [Collection Construction Protocols](0060-collection-construction-protocols.md) | Accepted | Implemented |
 | 0061 | [Composable Transducers and Protocol-driven Into](0061-composable-transducers.md) | Accepted | Implemented |
 | 0062 | [Owner-token Transient Collections](0062-owner-token-transient-collections.md) | Accepted | Implemented |
+| 0063 | [Protocol-driven Core Sequence and Data Algorithms](0063-protocol-driven-core-algorithms.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

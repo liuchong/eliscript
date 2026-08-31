@@ -1,0 +1,14 @@
+(module eliscript.core.data
+  (import "../../runtime/core/data.mjs"
+          countBy frequencies groupBy indexBy)
+
+  (defun index-by (key-function values)
+    (indexBy key-function values))
+
+  (defun group-by (key-function values)
+    (groupBy key-function values))
+
+  (defun count-by (key-function values)
+    (countBy key-function values))
+
+  (export count-by frequencies group-by index-by))

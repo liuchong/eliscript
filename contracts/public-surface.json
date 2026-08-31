@@ -199,7 +199,7 @@
       "spec": "0061",
       "visibility": "public",
       "file": "runtime/core/transducer.mjs",
-      "namedExports": ["completing", "composeTransducers", "filtering", "into", "mapping", "taking", "transduce"],
+      "namedExports": ["completing", "composeTransducers", "dropping", "filtering", "into", "mapping", "removing", "taking", "transduce"],
       "defaultExport": false
     },
     {
@@ -208,6 +208,30 @@
       "visibility": "public",
       "file": "runtime/core/transient.mjs",
       "namedExports": ["IEditable", "ITransientCollection", "assocBang", "conjBang", "dissocBang", "persistentBang", "transient"],
+      "defaultExport": false
+    },
+    {
+      "id": "core-data-algorithms",
+      "spec": "0063",
+      "visibility": "public",
+      "file": "runtime/core/data.mjs",
+      "namedExports": ["countBy", "frequencies", "groupBy", "indexBy"],
+      "defaultExport": false
+    },
+    {
+      "id": "core-sequence-algorithms",
+      "spec": "0063",
+      "visibility": "public",
+      "file": "runtime/core/sequence.mjs",
+      "namedExports": ["concat", "drop", "every", "filter", "find", "map", "remove", "reverse", "some", "take"],
+      "defaultExport": false
+    },
+    {
+      "id": "core-truth",
+      "spec": "0063",
+      "visibility": "public",
+      "file": "runtime/core/truth.mjs",
+      "namedExports": ["isTruthy"],
       "defaultExport": false
     },
     {
@@ -285,6 +309,8 @@
   ],
   "standardLibrary": [
     {"module": "bit", "spec": "0052", "file": "stdlib/bit.eli", "exports": ["bit-count", "rotate-left", "rotate-right"]},
+    {"module": "core-data", "spec": "0063", "file": "stdlib/core/data.eli", "exports": ["count-by", "frequencies", "group-by", "index-by"]},
+    {"module": "core-sequence", "spec": "0063", "file": "stdlib/core/seq.eli", "exports": ["concat", "drop", "every?", "filter", "find", "map", "remove", "reverse", "some", "take"]},
     {"module": "data", "spec": "0027", "file": "stdlib/data.eli", "exports": ["count-by", "group-by", "index-by"]},
     {"module": "object", "spec": "0026", "file": "stdlib/object.eli", "exports": ["assoc", "dissoc", "filter-values", "has?", "key-in?", "keys", "map-values", "merge", "omit", "pick", "update"]},
     {"module": "persistent-list", "spec": "0054", "file": "stdlib/persistent-list.eli", "exports": ["empty-persistent-list", "persistent-list-conj", "persistent-list-cons", "persistent-list-count", "persistent-list-empty?", "persistent-list-first", "persistent-list-from-array", "persistent-list-nth", "persistent-list-peek", "persistent-list-pop", "persistent-list-reduce", "persistent-list-rest", "persistent-list-reverse", "persistent-list-to-array", "persistent-list?"]},

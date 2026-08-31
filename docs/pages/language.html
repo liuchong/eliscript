@@ -143,6 +143,7 @@
 
 (map (lambda (value) (* value 2)) (range 1 5))</code></pre>
             <p>The first standard-library module is written entirely in Eliscript. It provides <code>reverse</code>, <code>map</code>, <code>filter</code>, <code>reduce</code>, <code>concat</code>, ranges, slicing, predicate checks, and search without adding compiler intrinsics or mutating input arrays.</p>
+            <p>The current <code>stdlib/core/seq.eli</code> surface also accepts persistent, native, and externally extended reducible values through collection protocols. It returns persistent Vectors, adds <code>remove</code>, and uses exact early termination for bounded transforms and searches.</p>
           </section>
 
           <section id="text">
@@ -161,6 +162,7 @@
 (pick (assoc (object :name "Eliscript") :runtime "JavaScript")
       [:name :runtime])</code></pre>
             <p>Eleven object functions enumerate own keys, test own properties, associate without mutation, remove and merge keys, transform values, and select fields. The data module adds keyed lookup, grouping, and counting by importing object primitives through explicit <code>import-portable</code> edges. Graph-aware portable builds verify those targets and prune every generated module.</p>
+            <p>The runtime-backed <code>stdlib/core/data.eli</code> surface returns value-semantic persistent Maps and persistent Vector groups, adds frequencies, and uses transient builders for efficient final construction.</p>
           </section>
 
           <section id="react">

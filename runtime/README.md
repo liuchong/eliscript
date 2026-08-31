@@ -10,9 +10,9 @@ represented by ordinary host values alone. Ordinary JavaScript values and APIs
 should still be emitted directly; helpers need a concrete semantic reason to
 exist.
 
-The first compiler emits its small Lisp-truthiness helper directly into each
-module. Shared runtime extraction is deferred until more than one semantic
-helper justifies a module dependency.
+The compiler still emits a local Lisp-truthiness helper for standalone
+generated forms. `core/truth.mjs` exposes the same semantics to shared runtime
+algorithms: only `false`, `null`, and `undefined` are false.
 
 React modules import `react/jsx-runtime` directly. There is no Eliscript wrapper
 runtime for element construction.
@@ -66,13 +66,13 @@ copies.
 
 ### Transducers
 
-`core/transducer.mjs` composes mapping, filtering, and bounded taking as
-destination-independent reducing-function transformations. `transduce`
-delegates traversal through `IReduce`; `into` obtains an empty target and adds
-logical values through `IConj` or an editable transient builder. Pipelines
-preserve reduced-value termination, run completion exactly once, reuse
-transducers with fresh reduction state, and allocate no intermediate
-collection.
+`core/transducer.mjs` composes mapping, filtering, removing, bounded taking,
+and dropping as destination-independent reducing-function transformations.
+`transduce` delegates traversal through `IReduce`; `into` obtains an empty
+target and adds logical values through `IConj` or an editable transient
+builder. Pipelines preserve reduced-value termination, run completion exactly
+once, reuse transducers with fresh reduction state, and allocate no
+intermediate collection.
 
 ### Transient Collections
 
@@ -85,6 +85,19 @@ reject persistent collection operations and serialization; async and module
 escape checks remain compiler work. Internal ownership and allocation evidence
 is exposed only through `testing/vector.mjs`, `testing/map.mjs`, and
 `testing/set.mjs`.
+
+### Core Algorithms
+
+`core/sequence.mjs` implements eager sequence transformations and searches
+against `IReduce`, returning persistent Vectors and using reduced values for
+exact bounded traversal. `core/data.mjs` implements value-semantic indexing,
+grouping, counting, and frequencies with persistent Map results and transient
+final construction. Native and persistent collections, null, and external
+protocol extensions all use the same algorithm path.
+
+`stdlib/core/seq.eli` and `stdlib/core/data.eli` provide the corresponding
+Lisp-named Eliscript imports. They are runtime-backed source facades; portable
+protocol definitions and language-authored implementations remain later work.
 
 ### Worker Host
 

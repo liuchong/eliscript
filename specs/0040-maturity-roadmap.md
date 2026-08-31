@@ -531,8 +531,12 @@ Owner-token runtime builders in
 [0062-owner-token-transient-collections.md](0062-owner-token-transient-collections.md)
 then add Vector/Map/Set path ownership, deterministic invalidation,
 transient-backed `into`, retained-generation safety, and structural allocation
-gates. Portable algorithm migration, static escape analysis, efficient host
-identity hashing, metadata, printing, and reading remain open.
+gates. Protocol-driven sequence and keyed-data algorithms then land in
+[0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md),
+with persistent results, Eliscript truth semantics, exact early termination,
+runtime-backed source facades, and transient indexing evidence. Portable
+protocol/algorithm definitions, object/text migration, static escape analysis,
+efficient host identity hashing, metadata, printing, and reading remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

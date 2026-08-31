@@ -694,10 +694,13 @@ persistent updates, truthful partial Set membership, and immutable native
 copies. Composable reducing transformations follow in
 [0061-composable-transducers.md](0061-composable-transducers.md): mapping,
 filtering, bounded taking, completion, reduced termination, and
-protocol-driven `into` now execute without intermediate collections. Portable
+protocol-driven `into` now execute without intermediate collections.
 Owner-token runtime builders and transient-backed `into` follow in
 [0062-owner-token-transient-collections.md](0062-owner-token-transient-collections.md).
-Portable algorithm migration and static transient escape analysis stay open.
+Protocol-driven sequence and keyed-data algorithms continue in
+[0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md).
+Portable protocol/algorithm definitions and static transient escape analysis
+stay open.
 
 ### P0: Semantics and Prototype
 
@@ -775,8 +778,13 @@ external types, and one-million-input allocation evidence. Owner-token
 transient protocols and transient-backed target construction now continue in
 [0062-owner-token-transient-collections.md](0062-owner-token-transient-collections.md),
 including retained generations, deterministic invalidation, HAMT transitions,
-allocation gates, and Bun/Node equivalence. Portable algorithm migration and
-the complete all-host exit audit remain required for P2.
+allocation gates, and Bun/Node equivalence. The maintained
+sequence and keyed-data subset now continues in
+[0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md),
+including external `IReduce` sources, persistent Vector/Map results, exact
+search termination, Lisp-named source facades, and transient-backed indexing.
+Text/object migration, portable protocol and algorithm implementations, and
+the complete all-host exit audit remain open.
 
 ### P3: Language Integration and Migration
 
@@ -805,9 +813,11 @@ semantics or observable application output.
 [0062-owner-token-transient-collections.md](0062-owner-token-transient-collections.md)
 implements owner-token Vector, Map, and Set runtime nodes, completion
 invalidation, message/serialization rejection, transient-backed `into`,
-retained-generation tests, and structural allocation gates. Static async and
-module-export escape analysis, grouping/indexing migration, compiler hot-path
-profiles, and portable reference implementations remain required.
+retained-generation tests, and structural allocation gates. Specification
+[0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md)
+now applies transients to indexing and final grouped/count Map construction.
+Static async and module-export escape analysis, compiler hot-path profiles,
+and portable reference implementations remain required.
 
 ### P5: Emacs Value Bridge
 

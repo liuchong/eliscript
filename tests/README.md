@@ -154,6 +154,14 @@ serialization rejection. Instrumented persistent/transient construction gates
 Vector, Map, and Set node-allocation reductions; a one-million-value Vector
 build and Bun/Node fixture close the scale and host-equivalence boundary.
 
+The protocol core-library suite extends an external `IReduce` source and runs
+sequence transforms, searches, grouping, indexing, counting, and frequencies
+without concrete source checks. It freezes Eliscript truth behavior, exact
+reduced-value termination, persistent result families, equal persistent keys,
+fresh transducer state, and a transient HAMT allocation ratio. It then compiles
+and executes the Lisp-named `stdlib/core/` facades with source maps and compares
+one shared report under Bun and Node.
+
 ## JavaScript Runtime Collections
 
 Persistent-vector tests exercise the provisional M8 runtime independently of

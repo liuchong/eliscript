@@ -151,7 +151,29 @@ paths should keep using low-level injected constructors. Exact provisional
 semantics and evidence are in
 [specs/0057-portable-value-semantics.md](../specs/0057-portable-value-semantics.md).
 
-## Sequence
+## Protocol-driven Core
+
+`core/seq.eli` and `core/data.eli` expose the current protocol-driven runtime
+algorithms through Lisp-named Eliscript modules:
+
+```elisp
+(import "../../stdlib/core/seq.eli" map filter take every?)
+(import "../../stdlib/core/data.eli" group-by frequencies)
+```
+
+Sequence transforms accept any `IReduce` source and return persistent Vectors.
+Keyed-data transforms return value-semantic persistent Maps, with persistent
+Vector group values. Searches and bounded transforms use reduced values for
+early termination, while grouping and indexing use owner-token builders for
+final construction.
+
+These modules intentionally import `runtime/core/*.mjs` and are not yet
+eligible for portable closure extraction. They are the language-level entry
+points for the current protocol core. Exact semantics and allocation evidence
+are specified in
+[specs/0063-protocol-driven-core-algorithms.md](../specs/0063-protocol-driven-core-algorithms.md).
+
+## Portable Sequence Compatibility Module
 
 `sequence.eli` is the first standard-library module. It exports fresh-array,
 non-mutating sequence operations:
@@ -228,7 +250,7 @@ module is portable and dependency-prunable; selecting `omit` includes only its
 [specs/0026-portable-object-library.md](../specs/0026-portable-object-library.md)
 for primitive semantics.
 
-## Data
+## Portable Data Compatibility Module
 
 `data.eli` exports `index-by`, `group-by`, and `count-by`. It is the first
 standard module composed from another portable source module:

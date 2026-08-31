@@ -13,6 +13,7 @@ import {
   persistentBang,
   transient,
 } from "./transient.mjs";
+import { isTruthy } from "./truth.mjs";
 
 const REDUCING_FUNCTION = Symbol("eliscript.transducer.reducing-function");
 const ZERO_INPUT = Symbol("eliscript.transducer.zero-input");
@@ -90,7 +91,25 @@ export function filtering(predicate) {
       "filtering reducing function",
     );
     return completing(
-      (result, input) => predicate(input) ? downstream(result, input) : result,
+      (result, input) => isTruthy(predicate(input))
+        ? downstream(result, input)
+        : result,
+      (result) => downstream(result),
+    );
+  });
+}
+
+export function removing(predicate) {
+  requireFunction(predicate, "removing predicate");
+  return makeTransducer((reducingFunction) => {
+    const downstream = asReducingFunction(
+      reducingFunction,
+      "removing reducing function",
+    );
+    return completing(
+      (result, input) => isTruthy(predicate(input))
+        ? result
+        : downstream(result, input),
       (result) => downstream(result),
     );
   });
@@ -120,6 +139,29 @@ export function taking(limit) {
       (result) => downstream(result),
     );
   }, limit === 0);
+}
+
+export function dropping(limit) {
+  if (!Number.isSafeInteger(limit) || limit < 0) {
+    throw new TypeError("dropping limit must be a non-negative safe integer");
+  }
+  return makeTransducer((reducingFunction) => {
+    const downstream = asReducingFunction(
+      reducingFunction,
+      "dropping reducing function",
+    );
+    let remaining = limit;
+    return completing(
+      (result, input) => {
+        if (remaining > 0) {
+          remaining -= 1;
+          return result;
+        }
+        return downstream(result, input);
+      },
+      (result) => downstream(result),
+    );
+  });
 }
 
 export function composeTransducers(...transducers) {
