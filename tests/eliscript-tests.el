@@ -180,6 +180,38 @@
            (nth 0 persistent) (length persistent)
            (nth 0 host) (length host))))))))
 
+(ert-deftest eliscript-lowers-map-syntax-to-persistent-map-literals ()
+  (let* ((source
+          "(defconst data
+  {:name \"Eliscript\" [1 2] {:nested [3]}})")
+         (located (eliscript-read-located-string source "maps.eli"))
+         (program (eliscript-compile-ir-string source "maps.eli"))
+         (output (eliscript-compile-string source "maps.eli"))
+         kinds)
+    (eliscript-ir-walk
+     program
+     (lambda (node) (push (eliscript-ir-node-kind node) kinds)))
+    (should
+     (equal (mapcar #'eliscript-form-strip located)
+            '((defconst data
+                (hash-map :name "Eliscript"
+                          [1 2]
+                          (hash-map :nested [3]))))))
+    (should (= (cl-count 'persistent-map-literal kinds) 2))
+    (should (= (cl-count 'persistent-vector-literal kinds) 2))
+    (should (= (length (split-string output "eliscript/runtime/literals" t))
+               2))
+    (should (equal output
+                   (eliscript-tests--legacy-compile-string
+                    source "maps.eli")))
+    (should
+     (equal
+      (eliscript-ir-program-to-forms program)
+      '((defconst data
+          (hash-map :name "Eliscript"
+                    (vector 1 2)
+                    (hash-map :nested (vector 3)))))))))
+
 (ert-deftest eliscript-distinguishes-nullish-values ()
   (let* ((source
           "(defun classify (value)

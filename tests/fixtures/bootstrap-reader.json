@@ -11,6 +11,16 @@
       "source": "(module demo [one 2 :three]\n  (print \"ok\"))"
     },
     {
+      "name": "map-literals",
+      "filename": "maps.eli",
+      "source": "{:name \"Ada\" :nested {:ready t} [1 2] \"vector-key\"} {}"
+    },
+    {
+      "name": "map-braces-in-text",
+      "filename": "map-text.eli",
+      "source": "\"{not a map}\" ; {ignored}\n{:ok t}"
+    },
+    {
       "name": "reader-prefixes",
       "filename": "prefixes.eli",
       "source": "'name `(a ,b ,@items) #'handler"
@@ -90,6 +100,18 @@
       "error": "unclosed-vector.eli:1:1: unexpected end of input"
     },
     {
+      "name": "unclosed-map",
+      "filename": "unclosed-map.eli",
+      "source": "{:a 1",
+      "error": "unclosed-map.eli:1:1: unexpected end of input"
+    },
+    {
+      "name": "odd-map",
+      "filename": "odd-map.eli",
+      "source": "{:a 1 :b}",
+      "error": "odd-map.eli:1:1: map literal must contain an even number of forms"
+    },
+    {
       "name": "unterminated-string",
       "filename": "string.eli",
       "source": "\"unfinished",
@@ -102,10 +124,28 @@
       "error": "close.eli:1:1: Invalid read syntax: \")\""
     },
     {
+      "name": "unexpected-map-close",
+      "filename": "map-close.eli",
+      "source": "}",
+      "error": "map-close.eli:1:1: Invalid read syntax: \"}\""
+    },
+    {
       "name": "mismatched-close",
       "filename": "mismatch.eli",
       "source": "(a]",
       "error": "mismatch.eli:1:1: Invalid read syntax: \"]\""
+    },
+    {
+      "name": "map-mismatched-close",
+      "filename": "map-mismatch.eli",
+      "source": "{:a 1)",
+      "error": "map-mismatch.eli:1:1: Invalid read syntax: \")\""
+    },
+    {
+      "name": "list-mismatched-map-close",
+      "filename": "list-map-mismatch.eli",
+      "source": "(a}",
+      "error": "list-map-mismatch.eli:1:1: Invalid read syntax: \"}\""
     },
     {
       "name": "missing-quoted-value",

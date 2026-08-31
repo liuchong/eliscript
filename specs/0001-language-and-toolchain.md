@@ -52,7 +52,7 @@ The reader should support these forms in the first language slice:
 - `nil`, booleans, numbers, strings, symbols, and keywords
 - lists for calls and special forms
 - vectors for ordered data and destructuring
-- maps for JavaScript object-shaped data
+- brace Maps for immutable associative data, with explicit host objects
 - quote and syntax-quote sufficient for macros
 - comments and source locations on every parsed form
 
@@ -390,10 +390,14 @@ The distinction between `nil`, JavaScript `null`, and `undefined` is resolved:
 predicates expose the boundary explicitly. See
 [0034-nullish-values.md](0034-nullish-values.md).
 
-1. Should maps read as `{...}` or use a Lisp-native constructor form?
-2. How should Lisp kebab-case symbols map to JavaScript identifiers and object
+Map source syntax is resolved: `{key value ...}` is the canonical persistent
+Map expression and `(hash-map ...)` is its canonical reader/lowering form.
+Native JavaScript objects remain explicit through `js-object`. See
+[0084-persistent-map-source-syntax.md](0084-persistent-map-source-syntax.md).
+
+1. How should Lisp kebab-case symbols map to JavaScript identifiers and object
    keys?
-3. What explicit compiler context should declare file dependencies if macros
+2. What explicit compiler context should declare file dependencies if macros
    eventually gain file access?
 
 These questions should be resolved by small executable examples and follow-up

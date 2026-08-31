@@ -939,7 +939,22 @@
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-separates-persistent-vectors-from-host-arrays" },
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "square literals, persistent constructors, and host containers are distinct" },
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "explicit host-only modules do not link the persistent runtime" },
-        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "portable closures reject persistent constructors and square literals" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "portable closures reject persistent constructors and collection literals" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
+    },
+    {
+      "id": "language.persistent-map-source-syntax",
+      "title": "Persistent Map source syntax",
+      "status": "accepted",
+      "spec": "0084",
+      "contracts": ["Reads brace expressions as canonical persistent Map constructors", "Preserves nested value semantics, duplicate-key behavior, and explicit host objects", "Matches seed/self-hosted readers, macro expansion, diagnostics, IR, ESM, and Source Maps", "Keeps frameworks and bundlers outside the core language contract"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-lowers-map-syntax-to-persistent-map-literals" },
+        { "kind": "bun-test", "file": "tests/bootstrap-reader.test.mjs", "contains": "bootstrapped reader matches normalized seed syntax and diagnostics" },
+        { "kind": "bun-test", "file": "tests/bootstrap-expander.test.mjs", "contains": "bootstrapped expander matches seed syntax, spans, and diagnostics" },
+        { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "square literals, persistent constructors, and host containers are distinct" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
     }

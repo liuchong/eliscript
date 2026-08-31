@@ -565,7 +565,10 @@ native container forms. Specification
 [0083-default-persistent-vector-literals.md](0083-default-persistent-vector-literals.md)
 then makes square-bracket values persistent Vectors, routes `nth` and `length`
 through collection protocols, adds explicit host access, and annotates all
-maintained compiler and standard-library host arrays. Stack-safe function and
+maintained compiler and standard-library host arrays. Specification
+[0084-persistent-map-source-syntax.md](0084-persistent-map-source-syntax.md)
+adds canonical brace Map expressions with matching seed/self-hosted reader,
+macro, IR, diagnostic, and cross-host runtime evidence. Stack-safe function and
 binding iteration now lands in
 [0064-stack-safe-loop-recur.md](0064-stack-safe-loop-recur.md), with exact tail
 positions, nearest-target analysis, simultaneous pattern rebinding,
@@ -594,8 +597,10 @@ The literal ABI and explicit host constructors begin P3 in
 [0082-persistent-literal-runtime-abi.md](0082-persistent-literal-runtime-abi.md),
 and default persistent Vector literals plus explicit host access continue it in
 [0083-default-persistent-vector-literals.md](0083-default-persistent-vector-literals.md).
-Persistent Map source syntax, compiler specialization, transport-safe protocol
-representation, and static escape analysis remain open. Canonical
+Canonical brace Map expressions continue it in
+[0084-persistent-map-source-syntax.md](0084-persistent-map-source-syntax.md).
+First-class source Keyword emission, quoted persistent data, transport-safe
+protocol representation, and static escape analysis remain open. Canonical
 printing/reading for the optimized runtime family now lands in
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md);
 portable Keyword/Symbol values and List/collection data text now land in

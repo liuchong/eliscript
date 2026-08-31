@@ -48,8 +48,8 @@ runtime import by itself.
 Quoted vectors remain syntax data in this slice. Their existing JSON-safe
 representation is retained for deterministic macro expansion, diagnostics,
 and bootstrap transport. First-class quoted persistent data is part of the
-later reader/data-literal integration together with Map syntax and Keyword
-emission.
+later reader/data-literal integration together with Keyword emission. Map
+expression syntax is specified separately by 0084.
 
 ## Explicit Host Containers
 
@@ -122,7 +122,7 @@ distinction before the persistent literal family is promoted to stable.
 
 The following integration work remains after this slice:
 
-1. define final persistent Map source syntax and first-class Keyword emission
+1. emit source keywords as first-class runtime Keyword values
 2. integrate quoted collection values with the canonical data reader
 3. implement transport-safe persistent values in the Emacs worker codec
 4. audit legacy `car`, `cdr`, `cons`, `list`, and `array` compatibility forms

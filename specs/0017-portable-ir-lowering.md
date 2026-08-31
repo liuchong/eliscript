@@ -42,6 +42,8 @@ Quoted compound data is recursively encoded with tagged `symbol`, `keyword`,
 `undefined`, `list`, and `vector` objects. Literal object keys are normalized
 to strings; computed keys remain child expressions. This representation can be
 serialized, compared, cached, or passed to a future host-neutral driver.
+Quoted brace syntax therefore remains a tagged `list` beginning with
+`hash-map`; unquoted brace syntax lowers to `persistent-map-literal`.
 
 ## Lowering Surface
 

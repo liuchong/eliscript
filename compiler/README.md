@@ -49,10 +49,12 @@ rebinding.
 `persistent-vector-literal` and `persistent-map-literal` IR nodes emit calls
 through the package-owned `eliscript/runtime/literals` ESM ABI. The import is
 inserted once and only when those nodes occur. Square-bracket expressions,
-`(vector ...)`, and `(hash-map ...)` use that path; `js-array` and `js-object`
-remain direct native container forms. Language-level `nth` and `length` link
-the collection protocol runtime, while `js-nth` and `js-length` retain direct
-host access without that dependency.
+brace Map expressions, `(vector ...)`, and `(hash-map ...)` use that path;
+`js-array` and `js-object` remain direct native container forms. The reader
+desugars `{key value ...}` into located `hash-map` syntax and rejects odd or
+mismatched forms before analysis. Language-level `nth` and `length` link the
+collection protocol runtime, while `js-nth` and `js-length` retain direct host
+access without that dependency.
 
 ## Application Lowering
 

@@ -86,11 +86,11 @@ but cannot alter literal semantics or runtime resolution.
 ## Remaining P3 Migration
 
 This specification completes P3 construction prerequisites, not the P3 exit.
-Specification 0083 completes the default Vector, maintained-source annotation,
-protocol collection access, and compatibility-recording items. The following
-work remains explicit:
+Specifications 0083 and 0084 complete default Vector and Map expression
+syntax, maintained-source annotation, protocol collection access, and
+compatibility recording. The following work remains explicit:
 
-1. add final persistent Map source syntax and first-class Keyword emission
+1. add first-class source Keyword emission
 2. integrate quoted collection values with the canonical data reader
 3. integrate persistent values with the Emacs transport codec
 4. audit legacy list and native-container compatibility forms

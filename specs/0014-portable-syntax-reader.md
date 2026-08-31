@@ -30,6 +30,9 @@ Every parsed value is an object with a `kind` and `span`:
 
 An empty list has the same value semantics as `nil` and is represented as a
 null literal, matching the seed compiler. An empty vector remains a vector.
+Brace Map expressions are normalized during reading to a `list` node whose
+synthetic first item is the symbol `hash-map`; this preserves one canonical
+constructor-shaped syntax tree across both compilers.
 
 `bootstrap/compiler/syntax.eli` owns constructors and accessors for these
 objects. The representation is JSON-compatible except for the explicit
@@ -59,7 +62,7 @@ the UTF-16 columns required by Source Map v3.
 Eliscript and its bootstrap compiler sources:
 
 - whitespace and semicolon line comments
-- lists and vectors
+- lists, vectors, and even-paired brace Maps
 - null, true, false, and undefined literals
 - decimal integers and floats, including exponent notation
 - JSON-compatible quoted strings
@@ -69,9 +72,9 @@ Eliscript and its bootstrap compiler sources:
 Reader prefixes become explicit list nodes. The synthetic prefix symbol owns
 the prefix span, while the list owns the complete prefix-plus-value span.
 
-The reader rejects unexpected or mismatched closing delimiters, unknown `#`
-dispatch syntax, missing prefixed values, and unterminated collections or
-strings with filename, line, and column diagnostics.
+The reader rejects odd Map forms, unexpected or mismatched closing delimiters,
+unknown `#` dispatch syntax, missing prefixed values, and unterminated
+collections or strings with filename, line, and column diagnostics.
 
 The seed's underlying Emacs reader accepts additional host syntax. That extra
 surface is not automatically part of the portable language contract. Any

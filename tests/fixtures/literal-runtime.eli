@@ -4,6 +4,12 @@
     (hash-map
       "name" "Eliscript"
       ["value-key"] [5 6]))
+  (defconst map-literal
+    {"name" "source"
+     ["value-key"] [7 8]
+     "nested" {:ready t}
+     "duplicate" 1
+     "duplicate" 2})
   (defconst array-value (js-array 1 2 3))
   (defconst object-value
     (js-object :name "host" :count 2))
@@ -13,5 +19,5 @@
   (defconst array-count (length array-value))
 
   (export
-    vector-value map-value array-value object-value
+    vector-value map-value map-literal array-value object-value
     vector-first vector-count array-second array-count))

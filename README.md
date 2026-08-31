@@ -80,12 +80,12 @@ semantics explicit without host Math calls. The persistent collection core now
 passes its complete cross-host million-value exit audit. Protocol dispatch and
 text/object algorithms are now maintained in Eliscript and checked against
 generated production artifacts. Persistent `(vector ...)`, square-bracket
-Vector literals, and `(hash-map ...)` construction now link through a standard
-ESM literal ABI. `js-array`, `js-object`, `js-nth`, and `js-length` make
-host-container construction and access explicit, while language-level `nth`
-and `length` use collection protocols. Final Map source syntax and the Emacs
-value bridge remain open; transport-safe protocol representation is not yet
-implemented.
+Vector literals, `(hash-map ...)`, and brace Map literals now link through a
+standard ESM literal ABI. `js-array`, `js-object`, `js-nth`, and `js-length`
+make host-container construction and access explicit, while language-level
+`nth` and `length` use collection protocols. First-class source Keyword
+emission, quoted persistent data, and the Emacs value bridge remain open;
+transport-safe protocol representation is not yet implemented.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in
@@ -226,7 +226,7 @@ The implemented language includes:
 - ESM modules, JavaScript interop, and application-level element syntax
 - statically checked portable functions and dependency-pruned builds
 - persistent collections, value semantics, and open collection protocols
-- persistent Vector/Map constructors with explicit native container forms
+- persistent Vector and Map literals with explicit native container forms
 - first-class immutable Keyword and Symbol values with qualified names
 - immutable metadata on Symbols and persistent collections
 - canonical readable text for optimized and portable persistent values

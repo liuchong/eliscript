@@ -17,6 +17,8 @@ const generated = await import(pathToFileURL(modulePath).href);
 const nested = generated.vector_value.nth(2);
 const mapKey = persistentVector("value-key");
 const mapResult = generated.map_value.get(mapKey);
+const literalMapResult = generated.map_literal.get(mapKey);
+const nestedMap = generated.map_literal.get("nested");
 
 console.log(JSON.stringify({
   vector: {
@@ -32,6 +34,17 @@ console.log(JSON.stringify({
     count: generated.map_value.count,
     name: generated.map_value.get("name"),
     valueKey: isPersistentVector(mapResult) ? [...mapResult] : null,
+  },
+  mapLiteral: {
+    persistent: isPersistentHashMap(generated.map_literal),
+    count: generated.map_literal.count,
+    name: generated.map_literal.get("name"),
+    valueKey: isPersistentVector(literalMapResult)
+      ? [...literalMapResult]
+      : null,
+    nestedPersistent: isPersistentHashMap(nestedMap),
+    nestedReady: nestedMap.get("ready"),
+    duplicate: generated.map_literal.get("duplicate"),
   },
   host: {
     array: Array.isArray(generated.array_value),

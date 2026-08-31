@@ -36,6 +36,11 @@
       "source": "(defmacro begin (&body forms) `(progn ,@forms))\n(defun two () (begin 1 2))\n(export two)"
     },
     {
+      "name": "map-literal-macro-boundaries",
+      "filename": "map-macro.eli",
+      "source": "(defmacro entry (key value) `{,key ,value})\n(defconst generated (entry :answer 42))\n(defconst direct {:nested (entry :ready t)})\n(export generated direct)"
+    },
+    {
       "name": "generated-top-level-declaration",
       "filename": "declaration.eli",
       "source": "(defmacro define-answer () '(defconst answer 42))\n(define-answer)\n(export answer)"

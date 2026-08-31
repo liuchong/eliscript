@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 78 specifications.
+The registry currently contains 84 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 54 |
+| Accepted design | 55 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 80 |
+| Implemented | 81 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-52 as provisional, and 3 as planning. That baseline is derived from registry
+53 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -56,7 +56,8 @@ process-local host identity hashing for efficient opaque Map/Set keys, and
 portable value-semantic Result records and combinators, plus a strict portable
 persistent JSON codec and a portable Number/safe-integer foundation
 implemented. The P1 persistent collection core now passes its complete
-Bun/Node million-value exit audit.
+Bun/Node million-value exit audit, and P3 now has canonical persistent Vector
+and Map expression syntax with explicit native host containers.
 Portable dispatch internals, literal migration, static transient
 escape analysis, and the Emacs value bridge remain ahead.
 
@@ -117,6 +118,9 @@ number.
 25. [0079: Eliscript-authored Protocol Dispatch Policy](0079-eliscript-protocol-dispatch-policy.md)
 26. [0080: Canonical Generated Protocol Runtime](0080-canonical-generated-protocol-runtime.md)
 27. [0081: Protocol-driven Text and Keyed Object Algorithms](0081-protocol-driven-text-object.md)
+28. [0082: Persistent Literal Runtime ABI and Explicit Host Containers](0082-persistent-literal-runtime-abi.md)
+29. [0083: Default Persistent Vector Literals and Explicit Host Access](0083-default-persistent-vector-literals.md)
+30. [0084: Persistent Map Source Syntax](0084-persistent-map-source-syntax.md)
 
 ### React and Publishing
 
@@ -266,6 +270,7 @@ The schemas and change workflow are defined by specifications
 | 0081 | [Protocol-driven Text and Keyed Object Algorithms](0081-protocol-driven-text-object.md) | Accepted | Implemented |
 | 0082 | [Persistent Literal Runtime ABI and Explicit Host Containers](0082-persistent-literal-runtime-abi.md) | Accepted | Implemented |
 | 0083 | [Default Persistent Vector Literals and Explicit Host Access](0083-default-persistent-vector-literals.md) | Accepted | Implemented |
+| 0084 | [Persistent Map Source Syntax](0084-persistent-map-source-syntax.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

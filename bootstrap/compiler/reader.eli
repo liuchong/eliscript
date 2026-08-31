@@ -97,6 +97,8 @@
         (= code 41)
         (= code 91)
         (= code 93)
+        (= code 123)
+        (= code 125)
         (= code 34)
         (= code 39)
         (= code 44)
@@ -104,7 +106,7 @@
         (= code 96)))
 
   (defun closing-code-p (code)
-    (or (= code 41) (= code 93)))
+    (or (= code 41) (= code 93) (= code 125)))
 
   (defun code-character (code)
     (js-call (js* "String") :fromCodePoint code))
@@ -198,7 +200,8 @@
 
   (defun read-collection (state start closing kind)
     (advance state)
-    (let ((items (js-array))
+    (let ((opening-span (span-from state start))
+          (items (js-array))
           (done false))
       (while (not done)
         (skip-space-and-comments state)
@@ -213,9 +216,20 @@
              (invalid-closing state start code))
             (t (js-call items :push (read-node state))))))
       (let ((span (span-from state start)))
-        (if (and (= kind "list") (= (get items :length) 0))
-            (literal-node nil span)
-          (collection-node kind items span)))))
+        (cond
+          ((= kind "map")
+           (when (= (% (get items :length) 2) 1)
+             (fail-at
+               state start
+               "map literal must contain an even number of forms"))
+           (let ((form-items
+                  (js-array (symbol-node "hash-map" opening-span))))
+             (js-call items :forEach
+               (lambda (item) (js-call form-items :push item)))
+             (collection-node "list" form-items span)))
+          ((and (= kind "list") (= (get items :length) 0))
+           (literal-node nil span))
+          (t (collection-node kind items span))))))
 
   (defun read-dispatch (state start)
     (if (= (peek-code-ahead state 1) 39)
@@ -236,6 +250,7 @@
          (fail-at state start "unexpected end of input"))
         ((= code 40) (read-collection state start 41 "list"))
         ((= code 91) (read-collection state start 93 "vector"))
+        ((= code 123) (read-collection state start 125 "map"))
         ((closing-code-p code) (invalid-closing state start code))
         ((= code 34) (read-string-literal state start))
         ((= code 39) (read-prefix state start "quote" 1))

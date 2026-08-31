@@ -104,6 +104,15 @@ test("square literals, persistent constructors, and host containers are distinct
         name: "Eliscript",
         valueKey: [5, 6],
       },
+      mapLiteral: {
+        persistent: true,
+        count: 4,
+        name: "source",
+        valueKey: [7, 8],
+        nestedPersistent: true,
+        nestedReady: true,
+        duplicate: 2,
+      },
       host: {
         array: true,
         languageCount: 3,
@@ -179,7 +188,7 @@ test("explicit host-only modules do not link the persistent runtime", async () =
   }
 }, 60_000);
 
-test("portable closures reject persistent constructors and square literals", async () => {
+test("portable closures reject persistent constructors and collection literals", async () => {
   const directory = await mkdtemp(resolve(ROOT, ".eliscript-portable-values-"));
   const bootstrap = resolve(directory, "bootstrap");
   const source = resolve(directory, "portable.eli");
@@ -187,7 +196,12 @@ test("portable closures reject persistent constructors and square literals", asy
     await run([BUILD_BOOTSTRAP], {
       ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrap,
     });
-    for (const expression of ["(vector 1 2)", "[1 2]"]) {
+    for (const expression of [
+      "(vector 1 2)",
+      "[1 2]",
+      "(hash-map :ready t)",
+      "{:ready t}",
+    ]) {
       await Bun.write(
         source,
         `(defportable build () ${expression})\n(export build)\n`,

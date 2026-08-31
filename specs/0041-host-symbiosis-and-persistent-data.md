@@ -716,8 +716,9 @@ Map/Set constructors, nullish preservation, collision discipline, and
 cross-family generated evidence. Keyword/Symbol values, metadata, and portable
 printer/reader integration now complete the remaining P1 construction steps,
 and [0078-persistent-collection-core-exit-audit.md](0078-persistent-collection-core-exit-audit.md)
-closes the complete cross-host gate. Default Vector literal migration is
-implemented by 0083; Map syntax and transport integration remain P3 work.
+closes the complete cross-host gate. Default Vector and Map expression syntax
+is implemented by 0083 and 0084; quoted-data and transport integration remain
+P3 work.
 The reusable dispatch mechanism now begins in
 [0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md): frozen
 protocol objects own direct Symbol slots and private exact-type/category/default
@@ -884,9 +885,12 @@ ABI, and explicit `js-array`/`js-object` forms. Specification
 makes square-bracket values persistent Vectors, adds explicit `js-nth` and
 `js-length`, dispatches language collection access through protocols, and
 converts maintained compiler and standard-library host buffers. Native
-conversion was already implemented by 0073. Final Map syntax, first-class
-source Keyword emission, quoted persistent data, the worker codec, and the
-complete compatibility freeze remain open; the P3 exit is not yet satisfied.
+conversion was already implemented by 0073. Specification
+[0084-persistent-map-source-syntax.md](0084-persistent-map-source-syntax.md)
+adds canonical brace Map expressions and seed/self-hosted reader, macro, IR,
+diagnostic, and cross-host evidence. First-class source Keyword emission,
+quoted persistent data, the worker codec, and the complete compatibility
+freeze remain open; the P3 exit is not yet satisfied.
 
 ### P4: Transients and Hot-Path Optimization
 

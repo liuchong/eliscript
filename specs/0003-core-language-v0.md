@@ -56,8 +56,9 @@ the output path yet.
 | strings | ECMAScript strings |
 | keywords | strings without the leading colon |
 | vector expressions | persistent Vectors |
+| brace Map expressions | persistent Maps |
 | quoted proper lists | arrays |
-| `(object key value ...)` | plain object literals |
+| `(js-object key value ...)` | plain object literals |
 
 Quoted symbols currently become strings. Dotted lists are rejected.
 
@@ -138,13 +139,14 @@ The initial arithmetic and comparison forms are:
 
 The initial collection forms are:
 
-- `list`, persistent `vector`, and native `array`/`js-array`
+- `list`, persistent `vector`/`hash-map`, and native `array`/`js-array`
 - `car`, `cdr`, `cons`, protocol-driven `nth`/`length`, and host `aref`/`js-nth`/`js-length`
 - `object`, `get`, and `put`
 - `object-keys`, `object-has?`, and `object-assoc`
 
 Square-bracket expressions and `(vector ...)` construct canonical persistent
-Vectors. `list`, `array`, and `js-array` retain the provisional ECMAScript Array
+Vectors. Brace expressions and `(hash-map ...)` construct canonical persistent
+Maps. `list`, `array`, and `js-array` retain the provisional ECMAScript Array
 representation. `nth` and `length` dispatch through collection protocols;
 `js-nth` and `js-length` are explicit native access. `equal` currently uses
 strict identity equality in the language intrinsic; structural equality is

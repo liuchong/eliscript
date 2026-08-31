@@ -20,7 +20,36 @@
 (cl-defstruct (eliscript-reader--node
                (:constructor eliscript-reader--node-create))
   span
-  children)
+  children
+  kind)
+
+(defun eliscript-reader--emacs-source (source)
+  "Return a length-preserving Emacs-readable copy of SOURCE.
+
+Map braces outside strings and comments become parentheses.  Eliscript owns
+their persistent Map semantics after the host reader has produced a list."
+  (let ((result (copy-sequence source))
+        (index 0)
+        (in-string nil)
+        (escaped nil)
+        (in-comment nil))
+    (while (< index (length result))
+      (let ((character (aref result index)))
+        (cond
+         (in-comment
+          (when (= character ?\n)
+            (setq in-comment nil)))
+         (in-string
+          (cond
+           (escaped (setq escaped nil))
+           ((= character ?\\) (setq escaped t))
+           ((= character ?\") (setq in-string nil))))
+         ((= character ?\;) (setq in-comment t))
+         ((= character ?\") (setq in-string t))
+         ((= character ?\{) (aset result index ?\())
+         ((= character ?\}) (aset result index ?\)))))
+      (setq index (1+ index)))
+    result))
 
 (defun eliscript-reader--span (start end filename)
   "Return a source span from buffer positions START to END in FILENAME."
@@ -64,36 +93,77 @@
         (setq children
               (list
                (eliscript-reader--node-create
-                :span (eliscript-reader--span start prefix-end filename))
+                :span (eliscript-reader--span start prefix-end filename)
+                :kind 'prefix-token)
                child))
         (eliscript-reader--node-create
          :span (eliscript-reader--span start end filename)
-         :children children)))
-     ((memq (char-after) '(?\( ?\[))
-      (let ((closing (if (eq (char-after) ?\() ?\) ?\])))
+         :children children
+         :kind 'prefix)))
+     ((memq (char-after) '(?\( ?\[ ?\{))
+      (let* ((opening (char-after))
+             (closing (pcase opening
+                        (?\( ?\))
+                        (?\[ ?\])
+                        (?\{ ?\})))
+             (kind (pcase opening
+                     (?\( 'list)
+                     (?\[ 'vector)
+                     (?\{ 'map))))
         (forward-char 1)
         (forward-comment (point-max))
         (while (and (char-after) (not (eq (char-after) closing)))
+          (when (memq (char-after) '(?\) ?\] ?\}))
+            (eliscript-diagnostic-signal
+             'eliscript-read-error "ELI-R0001" "reader"
+             filename (eliscript-reader--span start (1+ start) filename)
+             "Invalid read syntax: %S" (char-to-string (char-after))))
           (push (eliscript-reader--scan-node filename) children)
           (forward-comment (point-max)))
         (when (eq (char-after) closing)
           (forward-char 1))
         (eliscript-reader--node-create
          :span (eliscript-reader--span start (point) filename)
-         :children (nreverse children))))
+         :children (nreverse children)
+         :kind kind)))
      (t
       (let ((end (scan-sexps start 1)))
         (unless end
           (setq end (point-max)))
         (goto-char end)
         (eliscript-reader--node-create
-         :span (eliscript-reader--span start end filename)))))))
+         :span (eliscript-reader--span start end filename)
+         :kind 'atom))))))
+
+(defun eliscript-reader--map-operator-span (span)
+  "Return the opening-brace operator span within map SPAN."
+  (eliscript-source-span-create
+   :filename (eliscript-source-span-filename span)
+   :start (eliscript-source-span-start span)
+   :end (1+ (eliscript-source-span-start span))
+   :line (eliscript-source-span-line span)
+   :column (eliscript-source-span-column span)
+   :end-line (eliscript-source-span-line span)
+   :end-column (1+ (eliscript-source-span-column span))))
 
 (defun eliscript-reader--locate-value (value node)
   "Attach locations from NODE to recursively read VALUE."
   (let ((span (eliscript-reader--node-span node))
-        (children (eliscript-reader--node-children node)))
+        (children (eliscript-reader--node-children node))
+        (kind (eliscript-reader--node-kind node)))
     (cond
+     ((eq kind 'map)
+      (when (= (% (length children) 2) 1)
+        (eliscript-diagnostic-signal
+         'eliscript-read-error "ELI-R0001" "reader"
+         (eliscript-source-span-filename span) span
+         "map literal must contain an even number of forms"))
+      (eliscript-form-wrap
+       (cons
+        (eliscript-form-wrap
+         'hash-map (eliscript-reader--map-operator-span span))
+        (cl-mapcar #'eliscript-reader--locate-value value children))
+       span))
      ((and (vectorp value) (= (length value) (length children)))
       (eliscript-form-wrap
        (apply #'vector
@@ -121,22 +191,28 @@ two-character dispatch prefix.  Eliscript owns that diagnostic contract."
            (= (aref source start) ?#))
       (format "Invalid read syntax: %S"
               (substring source start (min (length source) (+ start 2))))
-    (error-message-string error-data)))
+    (if (and (< start (length source))
+             (= (aref source start) ?\}))
+        "Invalid read syntax: \"}\""
+      (error-message-string error-data))))
 
 (defun eliscript-read-located-string (source &optional filename)
   "Read every Eliscript form from SOURCE with recursive source locations."
   (with-temp-buffer
     (insert source)
-    (set-syntax-table emacs-lisp-mode-syntax-table)
+    (set-syntax-table (copy-syntax-table emacs-lisp-mode-syntax-table))
+    (modify-syntax-entry ?\{ "(}" (syntax-table))
+    (modify-syntax-entry ?\} "){" (syntax-table))
     (goto-char (point-min))
-    (let (forms done)
+    (let ((emacs-source (eliscript-reader--emacs-source source))
+          forms done)
       (while (not done)
         (forward-comment (point-max))
         (if (eobp)
             (setq done t)
           (let ((start (point)))
             (condition-case error-data
-                (let* ((result (read-from-string source (1- start)))
+                (let* ((result (read-from-string emacs-source (1- start)))
                        (value (car result))
                        (end (cdr result))
                        (node (eliscript-reader--scan-node filename)))
