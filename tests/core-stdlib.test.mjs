@@ -59,6 +59,10 @@ const EMACS = process.env.EMACS ??
   "/opt/homebrew/Cellar/emacs-plus@30/30.2/bin/emacs";
 const COMPILER = resolve(ROOT, "bin/eliscript");
 const USAGE_SOURCE = resolve(ROOT, "tests/fixtures/core-stdlib-usage.eli");
+const API_USAGE_SOURCE = resolve(
+  ROOT,
+  "tests/fixtures/core-language-api-usage.eli",
+);
 const HOST_FIXTURE = resolve(ROOT, "tests/fixtures/core-stdlib-host.mjs");
 
 async function runSuccessful(command) {
@@ -216,17 +220,27 @@ test("indexBy uses a transient HAMT builder at scale", () => {
   });
 });
 
-test("Eliscript core facades compile and execute against runtime protocols", async () => {
+test("Eliscript core modules compile and execute against runtime protocols", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "eliscript-core-stdlib-"));
   const runtimeLink = resolve(directory, "runtime");
+  const protocolModule = resolve(directory, "stdlib/core/protocol.mjs");
+  const collectionModule = resolve(directory, "stdlib/core/collection.mjs");
+  const transientModule = resolve(directory, "stdlib/core/transient.mjs");
+  const transducerModule = resolve(directory, "stdlib/core/transducer.mjs");
   const seqModule = resolve(directory, "stdlib/core/seq.mjs");
   const dataModule = resolve(directory, "stdlib/core/data.mjs");
   const usageModule = resolve(directory, "core-stdlib-usage.mjs");
+  const apiUsageModule = resolve(directory, "core-language-api-usage.mjs");
   try {
     await symlink(resolve(ROOT, "runtime"), runtimeLink, "dir");
+    await compile(resolve(ROOT, "stdlib/core/protocol.eli"), protocolModule);
+    await compile(resolve(ROOT, "stdlib/core/collection.eli"), collectionModule);
+    await compile(resolve(ROOT, "stdlib/core/transient.eli"), transientModule);
+    await compile(resolve(ROOT, "stdlib/core/transducer.eli"), transducerModule);
     await compile(resolve(ROOT, "stdlib/core/seq.eli"), seqModule);
     await compile(resolve(ROOT, "stdlib/core/data.eli"), dataModule);
     await compile(USAGE_SOURCE, usageModule);
+    await compile(API_USAGE_SOURCE, apiUsageModule);
 
     const usage = await import(pathToFileURL(usageModule).href);
     expect([...usage.mapped]).toEqual([0, 2, 4, 6, 8]);
@@ -248,9 +262,106 @@ test("Eliscript core facades compile and execute against runtime protocols", asy
     expect(generatedUsage).toContain("first_even");
 
     const seqMap = await Bun.file(`${seqModule}.map`).json();
-    expect(seqMap.sourcesContent[0]).toContain("runtime/core/sequence.mjs");
+    expect(seqMap.sourcesContent[0]).toContain("(defun reverse (collection)");
+    expect(seqMap.sourcesContent[0]).toContain("(defun some");
+    expect(seqMap.sourcesContent[0]).not.toContain("runtime/core/sequence.mjs");
     const dataMap = await Bun.file(`${dataModule}.map`).json();
-    expect(dataMap.sourcesContent[0]).toContain("runtime/core/data.mjs");
+    expect(dataMap.sourcesContent[0]).toContain("(defun collect-buckets");
+    expect(dataMap.sourcesContent[0]).toContain("(defun index-by");
+    expect(dataMap.sourcesContent[0]).not.toContain("runtime/core/data.mjs");
+
+    const api = await import(pathToFileURL(apiUsageModule).href);
+    expect(api.report).toMatchObject({
+      "number-description": "number:7",
+      "default-description": "default",
+      "number-category": "number",
+      "method-slot-type": "symbol",
+      "implements-number": true,
+      "implements-operation": true,
+      "vector-count": 3,
+      "vector-second": 2,
+      "vector-has-two": true,
+      "vector-seq-count": 3,
+      "map-left": 10,
+      "map-missing": "fallback",
+      "map-has-right": true,
+      "bounded-sum": 6,
+      "observed": [1, 2, 3],
+      "reduced-state": true,
+      "unreduced-value": 9,
+    });
+    expect([...api.report["vector-appended"]]).toEqual([1, 2, 3, 4]);
+    expect([...api.report["vector-empty"]]).toEqual([]);
+    expect([...api.report.transformed]).toEqual([6, 8]);
+
+    const transientApi = await import(pathToFileURL(transientModule).href);
+    expect(() => transientApi.conj_BANG_(api.vector_builder, 5))
+      .toThrow("transient vector is no longer editable");
+    expect(() => transientApi.assoc_BANG_(api.map_builder, "late", 30))
+      .toThrow("transient hash map is no longer editable");
+
+    class SourceRange {
+      constructor(end, observe) {
+        this.end = end;
+        this.observe = observe;
+        Object.freeze(this);
+      }
+    }
+    extendProtocolType(IReduce, SourceRange, {
+      reduce: (range, reducer, initial) => {
+        let result = initial;
+        for (let value = 0; value < range.end; value += 1) {
+          range.observe(value);
+          result = reducer(result, value);
+          if (isReduced(result)) {
+            return unreduced(result);
+          }
+        }
+        return result;
+      },
+    });
+    const generatedSeq = await import(pathToFileURL(seqModule).href);
+    const observed = [];
+    expect(generatedSeq.find(
+      (value) => value === 4,
+      new SourceRange(100, (value) => observed.push(value)),
+      "missing",
+    )).toBe(4);
+    expect(observed).toEqual([0, 1, 2, 3, 4]);
+    expect(() => generatedSeq.some(null, [], "missing"))
+      .toThrow("some predicate must be a function");
+
+    const generatedData = await import(pathToFileURL(dataModule).href);
+    resetPersistentMapMetrics();
+    resetTransientMapMetrics();
+    const indexed = generatedData.index_by(
+      (value) => value,
+      Array.from({ length: 50_000 }, (_, value) => value),
+    );
+    expect(indexed.count).toBe(50_000);
+    expect(transientMapMetrics()).toMatchObject({
+      persistentCalls: 1,
+      invalidCalls: 0,
+    });
+
+    const nodeCheck = [
+      `const api = await import(${JSON.stringify(pathToFileURL(apiUsageModule).href)});`,
+      `const seq = await import(${JSON.stringify(pathToFileURL(seqModule).href)});`,
+      "if (api.report['number-description'] !== 'number:7') process.exit(1);",
+      "if (JSON.stringify([...api.report['vector-appended']]) !== '[1,2,3,4]') process.exit(1);",
+      "if (JSON.stringify([...seq.map((value) => value * 3, [1,2,3])]) !== '[3,6,9]') process.exit(1);",
+    ].join("");
+    await runSuccessful(["node", "--input-type=module", "--eval", nodeCheck]);
+
+    const protocolMap = await Bun.file(`${protocolModule}.map`).json();
+    expect(protocolMap.sourcesContent[0]).toContain("(defun define-protocol");
+    const collectionMap = await Bun.file(`${collectionModule}.map`).json();
+    expect(collectionMap.sourcesContent[0]).toContain("(defun reduce");
+    const transientMap = await Bun.file(`${transientModule}.map`).json();
+    expect(transientMap.sourcesContent[0]).toContain("(defun persistent!");
+    const transducerMap = await Bun.file(`${transducerModule}.map`).json();
+    expect(transducerMap.sourcesContent[0])
+      .toContain("(defun compose-transducers");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -169,8 +169,11 @@ sequence transforms, searches, grouping, indexing, counting, and frequencies
 without concrete source checks. It freezes Eliscript truth behavior, exact
 reduced-value termination, persistent result families, equal persistent keys,
 fresh transducer state, and a transient HAMT allocation ratio. It then compiles
-and executes the Lisp-named `stdlib/core/` facades with source maps and compares
-one shared report under Bun and Node.
+and executes the Lisp-named protocol, collection, transducer, transient,
+sequence, and data modules with source maps. The sequence/data maps contain the
+maintained Eliscript algorithm bodies, seed and self-hosted compiler artifacts
+match, strict binding references agree with declarations, and Bun/Node execute
+the same generated API report.
 
 ## JavaScript Runtime Collections
 

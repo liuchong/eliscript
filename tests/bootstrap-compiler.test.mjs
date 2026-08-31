@@ -189,6 +189,31 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "import {has_QMARK_} from \"./object.eli\";",
         "function group_by(key_function, values)",
       ]],
+      ["stdlib/core/protocol.eli", [
+        "function define_protocol(name, operations)",
+        "function extend_protocol_type(protocol, constructor, implementations)",
+      ]],
+      ["stdlib/core/collection.eli", [
+        "function collection_count(collection)",
+        "function reduce(collection, reducer, ...initial)",
+      ]],
+      ["stdlib/core/transient.eli", [
+        "function assoc_BANG_(collection, key, value, ...key_values)",
+        "function persistent_BANG_(collection)",
+      ]],
+      ["stdlib/core/transducer.eli", [
+        "function compose_transducers(...transducers)",
+        "function transduce(transducer, reducer, initial, collection)",
+      ]],
+      ["stdlib/core/seq.eli", [
+        "function reverse(collection)",
+        "function map(transform, collection)",
+        "function concat(...collections)",
+      ]],
+      ["stdlib/core/data.eli", [
+        "function collect_buckets(key_function, collection, create_bucket, update_bucket)",
+        "function index_by(key_function, collection)",
+      ]],
       ["examples/emacs-index/index.eli", [
         "import {count_by} from \"../../stdlib/data.eli\";",
         "function score_document(id, terms, query_terms)",

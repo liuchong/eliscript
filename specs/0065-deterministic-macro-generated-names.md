@@ -192,4 +192,4 @@ every binding introduced by a macro.
 Use generated names in portable standard-library macros that introduce local
 bindings. Remaining language-closure work includes persistent literal
 integration, explicit host conversion, metadata and printing, portable
-protocol definitions, and declared macro dependency capabilities.
+protocol dispatch internals, and declared macro dependency capabilities.

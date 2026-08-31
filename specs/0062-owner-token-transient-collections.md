@@ -190,8 +190,11 @@ compiler algorithms have not yet been migrated.
 
 ## Continuation
 
-Maintained sequence and keyed-data algorithms, transient-backed indexing, and
-Eliscript source facades continue in
+Maintained sequence and keyed-data algorithms plus transient-backed indexing
+continue in
 [0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md).
-Portable protocol definitions, object/text migration, compiler hot paths, and
+Their Eliscript-authored modules and the language-level protocol, collection,
+transducer, and transient surface continue in
+[0066-eliscript-authored-core-protocol-algorithms.md](0066-eliscript-authored-core-protocol-algorithms.md).
+Portable dispatch internals, object/text migration, compiler hot paths, and
 static transient escape analysis remain open.

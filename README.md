@@ -34,17 +34,19 @@ The current M8 work provides:
   protocol-driven `transduce` and `into`
 - owner-token transient Vector, Map, and Set builders with deterministic
   completion invalidation and transient-backed persistent `into`
-- protocol-driven sequence and keyed-data algorithms returning persistent
-  values, with Lisp-named Eliscript modules under `stdlib/core/`
+- protocol, collection, transducer, and transient APIs exposed through
+  Lisp-named Eliscript modules, with sequence and keyed-data algorithm bodies
+  maintained in `stdlib/core/`
 - stack-safe `loop`/`recur` for functions and lexical binding loops, including
   tail-position diagnostics, simultaneous pattern rebinding, and async support
 - deterministic macro-generated symbols through `gensym` and trailing `$`
   template names, with explicit caller-capture and quote boundaries
 - structural-sharing and cross-host evidence through million-value workloads
 
-The next language boundary is portable protocol/core-algorithm definitions,
-followed by measured object/text migration, literal migration, host conversion,
-metadata, and the Emacs value bridge.
+The next language boundary is portable protocol dispatch policy without losing
+the optimized direct-slot runtime, followed by keyword/symbol values, metadata,
+printing and reading, measured object/text migration, literal migration, host
+conversion, and the Emacs value bridge.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in

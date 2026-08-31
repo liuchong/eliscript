@@ -1,0 +1,35 @@
+(module eliscript.core.protocol
+  (import "../../runtime/core/protocol.mjs" :as Runtime)
+
+  (defun protocol-host-category (value)
+    (Runtime/protocolHostCategory value))
+
+  (defun define-protocol (name operations)
+    (Runtime/defineProtocol name operations))
+
+  (defun protocol-method (protocol operation)
+    (Runtime/protocolMethod protocol operation))
+
+  (defun protocol-slot (protocol operation)
+    (Runtime/protocolSlot protocol operation))
+
+  (defun extend-protocol-type (protocol constructor implementations)
+    (Runtime/extendProtocolType protocol constructor implementations))
+
+  (defun extend-protocol-category (protocol category implementations)
+    (Runtime/extendProtocolCategory protocol category implementations))
+
+  (defun extend-protocol-default (protocol implementations)
+    (Runtime/extendProtocolDefault protocol implementations))
+
+  (defun implements-protocol-operation?
+      (protocol operation value)
+    (Runtime/implementsProtocolOperation protocol operation value))
+
+  (defun implements-protocol? (protocol value)
+    (Runtime/implementsProtocol protocol value))
+
+  (export define-protocol extend-protocol-category extend-protocol-default
+          extend-protocol-type implements-protocol-operation?
+          implements-protocol? protocol-host-category protocol-method
+          protocol-slot))

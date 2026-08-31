@@ -1,0 +1,32 @@
+(module eliscript.core.transducer
+  (import "../../runtime/core/transducer.mjs" :as Runtime)
+
+  (defun completing (step &rest completion)
+    (apply Runtime/completing (cons step completion)))
+
+  (defun compose-transducers (&rest transducers)
+    (apply Runtime/composeTransducers transducers))
+
+  (defun mapping (transform)
+    (Runtime/mapping transform))
+
+  (defun filtering (predicate)
+    (Runtime/filtering predicate))
+
+  (defun removing (predicate)
+    (Runtime/removing predicate))
+
+  (defun taking (limit)
+    (Runtime/taking limit))
+
+  (defun dropping (limit)
+    (Runtime/dropping limit))
+
+  (defun transduce (transducer reducer initial collection)
+    (Runtime/transduce transducer reducer initial collection))
+
+  (defun into (target &rest arguments)
+    (apply Runtime/into (cons target arguments)))
+
+  (export completing compose-transducers dropping filtering into mapping
+          removing taking transduce))

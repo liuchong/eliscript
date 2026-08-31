@@ -28,28 +28,29 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 65 specifications.
+The registry currently contains 66 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 36 |
+| Accepted design | 37 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 62 |
+| Implemented | 63 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-34 as provisional, and 3 as planning. That baseline is derived from registry
+35 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
 implementations, shared value semantics, open protocol dispatch, collection
 capabilities, immutable collection construction, single-pass transducers,
 owner-token transient Vector, Map, and Set builders, and protocol-driven core
-sequence/data algorithms, stack-safe recurrence, and deterministic
-macro-generated names implemented. Portable protocol and algorithm definitions,
-literal migration, metadata, host conversion, static transient escape analysis,
-and the Emacs value bridge remain ahead.
+sequence/data algorithms, stack-safe recurrence, deterministic macro-generated
+names, Lisp-named protocol/collection/transducer/transient modules, and
+Eliscript-maintained core algorithm bodies implemented. Portable dispatch
+internals, literal migration, metadata, host conversion, static transient
+escape analysis, and the Emacs value bridge remain ahead.
 
 ## Reading Paths
 
@@ -92,6 +93,7 @@ number.
 9. [0061: Composable Transducers](0061-composable-transducers.md)
 10. [0062: Owner-token Transient Collections](0062-owner-token-transient-collections.md)
 11. [0063: Protocol-driven Core Algorithms](0063-protocol-driven-core-algorithms.md)
+12. [0066: Eliscript-authored Core Protocol and Algorithms](0066-eliscript-authored-core-protocol-algorithms.md)
 
 ### React and Publishing
 
@@ -223,6 +225,7 @@ The schemas and change workflow are defined by specifications
 | 0063 | [Protocol-driven Core Sequence and Data Algorithms](0063-protocol-driven-core-algorithms.md) | Accepted | Implemented |
 | 0064 | [Stack-safe Loop and Recur](0064-stack-safe-loop-recur.md) | Accepted | Implemented |
 | 0065 | [Deterministic Macro-generated Names and Capture Rules](0065-deterministic-macro-generated-names.md) | Accepted | Implemented |
+| 0066 | [Eliscript-authored Core Protocol Surface and Algorithms](0066-eliscript-authored-core-protocol-algorithms.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

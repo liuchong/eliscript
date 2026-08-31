@@ -74,12 +74,17 @@
 
   (defun reference-name (name)
     (let* ((normalized (js-call name :replaceAll "/" "."))
+           (qualified (or (js-call name :includes "/")
+                          (js-call name :includes ".")))
            (segments (js-call normalized :split "."))
            (present
             (js-call segments :filter
               (lambda (segment) (> (get segment :length) 0))))
            (munged (js-call present :map munge-segment))
            (reference (js-call munged :join ".")))
+      (when (and (not qualified)
+                 (js-call strict-binding-names :includes reference))
+        (setq reference (str reference "$")))
       (when (js-call reference :startsWith internal-prefix)
         (fail (str "reference uses reserved compiler prefix: " name)))
       reference))

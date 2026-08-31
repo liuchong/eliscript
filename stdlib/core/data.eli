@@ -1,14 +1,88 @@
 (module eliscript.core.data
-  (import "../../runtime/core/data.mjs"
-          countBy frequencies groupBy indexBy)
+  (import "../../runtime/core/collection.mjs" reduce)
+  (import "../../runtime/core/map.mjs" EMPTY_MAP)
+  (import "../../runtime/core/transducer.mjs" into)
+  (import "../../runtime/core/transient.mjs"
+          assocBang persistentBang transient)
+  (import "../../runtime/core/vector.mjs" EMPTY_VECTOR)
 
-  (defun index-by (key-function values)
-    (indexBy key-function values))
+  (defconst missing-value (object))
 
-  (defun group-by (key-function values)
-    (groupBy key-function values))
+  (defun require-function (value label)
+    (if (= (value-type value) "function")
+        value
+      (throw (new globalThis/TypeError (str label " must be a function")))))
 
-  (defun count-by (key-function values)
-    (countBy key-function values))
+  (defun collect-buckets
+      (key-function collection create-bucket update-bucket)
+    (require-function key-function "data key function")
+    (let ((bucket-index EMPTY_MAP)
+          (keys (array))
+          (buckets (array)))
+      (reduce
+        collection
+        (lambda (result value)
+          (let* ((key (funcall key-function value))
+                 (index (js-call bucket-index :get key missing-value)))
+            (if (eq index missing-value)
+                (progn
+                  (setq index (length keys)
+                        bucket-index (js-call bucket-index :assoc key index))
+                  (js-call keys :push key)
+                  (js-call buckets :push (funcall create-bucket value)))
+              (funcall update-bucket buckets index value))
+            result))
+        nil)
+      (object :keys keys :buckets buckets)))
+
+  (defun persistent-map-from-buckets (keys buckets finish-bucket)
+    (let ((result (transient EMPTY_MAP))
+          (index 0))
+      (while (< index (length keys))
+        (assocBang
+          result
+          (nth index keys)
+          (funcall finish-bucket (nth index buckets)))
+        (setq index (1+ index)))
+      (persistentBang result)))
+
+  (defun index-by (key-function collection)
+    (require-function key-function "indexBy key function")
+    (let ((result (transient EMPTY_MAP)))
+      (reduce
+        collection
+        (lambda (builder value)
+          (assocBang builder (funcall key-function value) value)
+          builder)
+        result)
+      (persistentBang result)))
+
+  (defun group-by (key-function collection)
+    (let* ((grouped
+            (collect-buckets
+              key-function
+              collection
+              (lambda (value) (array value))
+              (lambda (buckets index value)
+                (js-call (nth index buckets) :push value))))
+           (keys (get grouped :keys))
+           (buckets (get grouped :buckets)))
+      (persistent-map-from-buckets
+        keys buckets (lambda (values) (into EMPTY_VECTOR values)))))
+
+  (defun count-by (key-function collection)
+    (let* ((counted
+            (collect-buckets
+              key-function
+              collection
+              (lambda (_value) 1)
+              (lambda (counts index _value)
+                (put counts index (1+ (nth index counts))))))
+           (keys (get counted :keys))
+           (buckets (get counted :buckets)))
+      (persistent-map-from-buckets keys buckets (lambda (count) count))))
+
+  (defun frequencies (collection)
+    (count-by (lambda (value) value) collection))
 
   (export count-by frequencies group-by index-by))

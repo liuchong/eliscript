@@ -82,10 +82,15 @@
 
 (defun eliscript-symbol-reference-name (symbol)
   "Return an ECMAScript reference for SYMBOL."
-  (let ((reference
-         (mapconcat #'eliscript-symbol-munge-segment
-                    (split-string (symbol-name symbol) "[./]" t)
-                    ".")))
+  (let* ((name (symbol-name symbol))
+         (qualified (string-match-p "[./]" name))
+         (reference
+          (mapconcat #'eliscript-symbol-munge-segment
+                     (split-string name "[./]" t)
+                     ".")))
+    (when (and (not qualified)
+               (member reference eliscript-symbol-strict-binding-names))
+      (setq reference (concat reference "$")))
     (when (string-prefix-p eliscript-symbol-internal-prefix reference)
       (eliscript-symbol--fail
        "reference uses reserved compiler prefix: %s" symbol))

@@ -700,11 +700,13 @@ Owner-token runtime builders and transient-backed `into` follow in
 Protocol-driven sequence and keyed-data algorithms continue in
 [0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md).
 Stack-safe portable iteration is now available through
-[0064-stack-safe-loop-recur.md](0064-stack-safe-loop-recur.md), so future
-portable protocol and algorithm definitions no longer need JavaScript stack
-recursion for iterative control.
-Portable protocol/algorithm definitions and static transient escape analysis
-stay open.
+[0064-stack-safe-loop-recur.md](0064-stack-safe-loop-recur.md), so portable
+dispatch and future core algorithms no longer need JavaScript stack recursion
+for iterative control.
+The public protocol/collection/transducer/transient surface and maintained
+sequence/data algorithm bodies now move into Eliscript in
+[0066-eliscript-authored-core-protocol-algorithms.md](0066-eliscript-authored-core-protocol-algorithms.md).
+Portable dispatch internals and static transient escape analysis stay open.
 
 ### P0: Semantics and Prototype
 
@@ -786,9 +788,12 @@ allocation gates, and Bun/Node equivalence. The maintained
 sequence and keyed-data subset now continues in
 [0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md),
 including external `IReduce` sources, persistent Vector/Map results, exact
-search termination, Lisp-named source facades, and transient-backed indexing.
-Text/object migration, portable protocol and algorithm implementations, and
-the complete all-host exit audit remain open.
+search termination and transient-backed indexing. The next source-level slice
+in [0066-eliscript-authored-core-protocol-algorithms.md](0066-eliscript-authored-core-protocol-algorithms.md)
+adds Lisp-named protocol, collection, transducer, and transient modules and
+moves the maintained sequence/data algorithm bodies into `.eli`.
+Text/object migration, portable dispatch internals, and the complete all-host
+exit audit remain open.
 
 ### P3: Language Integration and Migration
 

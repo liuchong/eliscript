@@ -534,8 +534,12 @@ transient-backed `into`, retained-generation safety, and structural allocation
 gates. Protocol-driven sequence and keyed-data algorithms then land in
 [0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md),
 with persistent results, Eliscript truth semantics, exact early termination,
-runtime-backed source facades, and transient indexing evidence. Portable
-protocol/algorithm definitions remain open. Stack-safe function and binding
+and transient indexing evidence. The source-level protocol, collection,
+transducer, and transient APIs plus maintained sequence/data algorithm bodies
+now land in
+[0066-eliscript-authored-core-protocol-algorithms.md](0066-eliscript-authored-core-protocol-algorithms.md).
+The optimized protocol dispatch substrate remains JavaScript. Stack-safe
+function and binding
 iteration now lands in
 [0064-stack-safe-loop-recur.md](0064-stack-safe-loop-recur.md), with exact tail
 positions, nearest-target analysis, simultaneous pattern rebinding,
@@ -543,8 +547,9 @@ seed/self-hosted fixed-point evidence, and million-step Bun/Node execution.
 Deterministic generated symbols and explicit capture rules now land in
 [0065-deterministic-macro-generated-names.md](0065-deterministic-macro-generated-names.md),
 including module-wide collision avoidance and Bun/Node execution evidence.
-Declared macro dependencies, object/text migration, static escape analysis,
-efficient host identity hashing, metadata, printing, and reading remain open.
+Declared macro dependencies, object/text migration, portable dispatch policy,
+static escape analysis, efficient host identity hashing, keyword/symbol values,
+metadata, printing, and reading remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

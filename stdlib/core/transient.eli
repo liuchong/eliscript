@@ -1,0 +1,24 @@
+(module eliscript.core.transient
+  (import "../../runtime/core/transient.mjs" :as Runtime)
+
+  (defconst IEditable Runtime/IEditable)
+  (defconst ITransientCollection Runtime/ITransientCollection)
+
+  (defun transient (collection)
+    (Runtime/transient collection))
+
+  (defun conj! (collection &rest values)
+    (apply Runtime/conjBang (cons collection values)))
+
+  (defun assoc! (collection key value &rest key-values)
+    (apply Runtime/assocBang
+           (cons collection (cons key (cons value key-values)))))
+
+  (defun dissoc! (collection &rest keys)
+    (apply Runtime/dissocBang (cons collection keys)))
+
+  (defun persistent! (collection)
+    (Runtime/persistentBang collection))
+
+  (export IEditable ITransientCollection assoc! conj! dissoc! persistent!
+          transient))

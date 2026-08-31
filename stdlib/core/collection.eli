@@ -1,0 +1,53 @@
+(module eliscript.core.collection
+  (import "../../runtime/core/collection.mjs" :as Runtime)
+
+  (defconst ICounted Runtime/ICounted)
+  (defconst IEmptyable Runtime/IEmptyable)
+  (defconst IConj Runtime/IConj)
+  (defconst ILookup Runtime/ILookup)
+  (defconst IAssociative Runtime/IAssociative)
+  (defconst IIndexed Runtime/IIndexed)
+  (defconst ISeqable Runtime/ISeqable)
+  (defconst IReduce Runtime/IReduce)
+  (defconst SequenceView Runtime/SequenceView)
+
+  (defun collection-count (collection)
+    (Runtime/count collection))
+
+  (defun empty (collection)
+    (Runtime/empty collection))
+
+  (defun conj (collection &rest values)
+    (apply Runtime/conj (cons collection values)))
+
+  (defun lookup (collection key &rest not-found)
+    (apply Runtime/get (cons collection (cons key not-found))))
+
+  (defun contains? (collection key)
+    (Runtime/contains collection key))
+
+  (defun collection-nth (collection index &rest not-found)
+    (apply Runtime/nth (cons collection (cons index not-found))))
+
+  (defun reduce (collection reducer &rest initial)
+    (apply Runtime/reduce (cons collection (cons reducer initial))))
+
+  (defun collection-seq (collection)
+    (Runtime/seq collection))
+
+  (defun reduced (value)
+    (Runtime/reduced value))
+
+  (defun reduced? (value)
+    (Runtime/isReduced value))
+
+  (defun unreduced (value)
+    (Runtime/unreduced value))
+
+  (defun sequence-view (factory &rest count)
+    (apply Runtime/sequenceView (cons factory count)))
+
+  (export IAssociative IConj ICounted IEmptyable IIndexed ILookup IReduce
+          ISeqable SequenceView collection-count collection-nth collection-seq
+          conj contains? empty lookup reduce reduced reduced? sequence-view
+          unreduced))

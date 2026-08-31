@@ -573,7 +573,13 @@
           "(defun add (arguments eval) (+ arguments eval))")))
     (should (string-match-p
              (regexp-quote "function add(arguments$, eval$)")
-             output))))
+             output))
+    (should (string-match-p
+             (regexp-quote "return (arguments$ + eval$);")
+             output)))
+  (should (equal (eliscript-symbol-reference-name 'arguments) "arguments$"))
+  (should (equal (eliscript-symbol-reference-name 'globalThis/arguments)
+                 "globalThis.arguments")))
 
 (ert-deftest eliscript-analyzer-validates-assignment-mutability ()
   (should-error

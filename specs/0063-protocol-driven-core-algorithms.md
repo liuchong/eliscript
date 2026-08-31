@@ -15,12 +15,10 @@ runtime. The algorithms accept any `IReduce` source, construct persistent
 Vector and Map results, use Eliscript truth semantics, and stop traversal
 through the shared reduced-value contract.
 
-Two Eliscript modules under `stdlib/core/` provide Lisp-named source imports
-for these runtime operations. They are ordinary `.eli` modules compiled by the
-seed and self-hosted-compatible module pipeline, while their implementation
-imports the JavaScript protocol runtime. They establish the intended language
-surface without claiming that protocol dispatch itself has already been
-rewritten in portable Eliscript.
+The initial implementation supplied equivalent JavaScript algorithms plus
+Lisp-named source modules. Specification 0066 moves the maintained sequence
+and keyed-data algorithm bodies into those `.eli` modules while retaining the
+lower-level JavaScript protocol and persistent-data substrate.
 
 The earlier portable `stdlib/sequence.eli` and `stdlib/data.eli` modules remain
 supported compatibility modules. They preserve their Array/Object semantics
@@ -91,10 +89,13 @@ concat drop every? filter find map remove reverse some take
 count-by frequencies group-by index-by
 ```
 
-The modules preserve Lisp spelling at source boundaries and import only the
-corresponding public runtime modules. Generated ESM uses the compiler's normal
-identifier mapping and source-map path retention. These modules are currently
-runtime-backed and are not eligible for `--portable` closure extraction.
+The modules preserve Lisp spelling at source boundaries. As completed by
+specification 0066, they import lower-level collection, transducer, transient,
+truth, Map, and Vector capabilities and contain their maintained algorithm
+bodies directly. They do not import `runtime/core/sequence.mjs` or
+`runtime/core/data.mjs`. Generated ESM uses the compiler's normal identifier
+mapping and source-map path retention. Runtime imports still make these modules
+ineligible for `--portable` closure extraction.
 
 ## Complexity and Allocation
 
@@ -122,9 +123,9 @@ Array, Map, Set, null, persistent collections, and externally extended
 
 This slice does not add lazy sequences, `mapcat`, partitioning, sorting,
 comparison, text/object protocol migration, async reduction, metadata, or
-compiler-generated direct protocol calls. Portable Eliscript definitions of
-the runtime protocols and algorithms remain later work; the runtime-backed
-facades make that remaining boundary explicit.
+compiler-generated direct protocol calls. Specification 0066 moves the public
+protocol access surface and maintained algorithms into Eliscript; portable
+dispatch internals remain later work.
 
 ## Acceptance Criteria
 
@@ -144,7 +145,7 @@ facades make that remaining boundary explicit.
   function is invoked exactly once per source value.
 - **PCA-08:** A 50,000-key `indexBy` build performs one transient completion and
   stays below one third of equivalent persistent HAMT node allocation.
-- **PCA-09:** Both `stdlib/core/` facades compile with source maps and execute
+- **PCA-09:** Both `stdlib/core/` modules compile with source maps and execute
   the complete source-level API from Eliscript.
 - **PCA-10:** Bun and Node.js produce identical sequence and keyed-data reports.
 - **PCA-11:** Existing protocol, transducer, transient, persistent collection,
@@ -154,6 +155,6 @@ facades make that remaining boundary explicit.
 ## Next Slice
 
 Complete the maintained core collection vocabulary where real workloads need
-it, then expose protocol operations and these algorithms as portable
-Eliscript-authored definitions. Object/text migration and compiler hot-path
+it, then make protocol dispatch policy portable without regressing direct-slot
+or open-extension behavior. Object/text migration and compiler hot-path
 adoption should follow measured use rather than expanding the API by analogy.

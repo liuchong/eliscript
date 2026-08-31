@@ -1,8 +1,86 @@
 (module eliscript.core.seq
-  (import "../../runtime/core/sequence.mjs"
-          concat drop every filter find map remove reverse some take)
+  (import "../../runtime/core/collection.mjs" reduce reduced)
+  (import "../../runtime/core/transducer.mjs"
+          dropping filtering into mapping removing taking)
+  (import "../../runtime/core/transient.mjs"
+          conjBang persistentBang transient)
+  (import "../../runtime/core/truth.mjs" isTruthy)
+  (import "../../runtime/core/vector.mjs" EMPTY_VECTOR)
 
-  (defun every? (predicate values)
-    (every predicate values))
+  (defconst not-found (object))
+
+  (defun require-function (value label)
+    (if (= (value-type value) "function")
+        value
+      (throw (new globalThis/TypeError (str label " must be a function")))))
+
+  (defun reverse (collection)
+    (let ((values
+           (reduce
+             collection
+             (lambda (result value)
+               (js-call result :push value)
+               result)
+             (array))))
+      (js-call values :reverse)
+      (into EMPTY_VECTOR values)))
+
+  (defun map (transform collection)
+    (into EMPTY_VECTOR (mapping transform) collection))
+
+  (defun filter (predicate collection)
+    (into EMPTY_VECTOR (filtering predicate) collection))
+
+  (defun remove (predicate collection)
+    (into EMPTY_VECTOR (removing predicate) collection))
+
+  (defun take (limit collection)
+    (into EMPTY_VECTOR (taking limit) collection))
+
+  (defun drop (limit collection)
+    (into EMPTY_VECTOR (dropping limit) collection))
+
+  (defun concat (&rest collections)
+    (let ((result (transient EMPTY_VECTOR))
+          (index 0))
+      (while (< index (length collections))
+        (reduce
+          (nth index collections)
+          (lambda (builder value)
+            (conjBang builder value))
+          result)
+        (setq index (1+ index)))
+      (persistentBang result)))
+
+  (defun some (predicate collection &optional not-found-value)
+    (require-function predicate "some predicate")
+    (let ((result
+           (reduce
+             collection
+             (lambda (missing value)
+               (let ((matched (funcall predicate value)))
+                 (if (isTruthy matched) (reduced matched) missing)))
+             not-found)))
+      (if (eq result not-found) not-found-value result)))
+
+  (defun every? (predicate collection)
+    (require-function predicate "every predicate")
+    (reduce
+      collection
+      (lambda (result value)
+        (if (isTruthy (funcall predicate value)) result (reduced false)))
+      t))
+
+  (defun find (predicate collection &optional not-found-value)
+    (require-function predicate "find predicate")
+    (let ((result
+           (reduce
+             collection
+             (lambda (missing value)
+               (if (isTruthy (funcall predicate value))
+                   (reduced (object :value value))
+                 missing))
+             not-found)))
+      (if (eq result not-found) not-found-value (get result :value))))
 
   (export concat drop every? filter find map remove reverse some take))
