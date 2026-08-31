@@ -620,7 +620,11 @@ progress and results, and upload-stage cancellation. Specification
 [0090-large-worker-value-memory-probe.md](0090-large-worker-value-memory-probe.md)
 closes PD-08 with a source-bound 256 MiB real-process report and explicit
 Emacs, Bun, and combined RSS budgets. Transport of protocol definitions and
-static escape analysis remain open. Canonical
+static escape analysis were the remaining adjacent items. Specification
+[0091-transport-safe-protocol-definitions.md](0091-transport-safe-protocol-definitions.md)
+now closes protocol-definition transport with a versioned data-only descriptor,
+fresh local runtime identity, and strict non-executable validation. Static
+transient escape analysis remains open. Canonical
 printing/reading for the optimized runtime family now lands in
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md);
 portable Keyword/Symbol values and List/collection data text now land in

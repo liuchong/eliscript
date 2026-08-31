@@ -5,11 +5,13 @@ import { pathToFileURL } from "node:url";
 const modulePath = resolve(process.argv[2]);
 const {
   define_protocol: defineProtocol,
+  define_protocol_from_definition: defineProtocolFromDefinition,
   extend_protocol_category: extendProtocolCategory,
   extend_protocol_default: extendProtocolDefault,
   extend_protocol_type: extendProtocolType,
   implements_protocol_operation_QMARK_: implementsProtocolOperation,
   implements_protocol_QMARK_: implementsProtocol,
+  protocol_definition: protocolDefinition,
   protocol_host_category: protocolHostCategory,
   protocol_method: protocolMethod,
   protocol_slot: protocolSlot,
@@ -53,6 +55,18 @@ extendProtocolType(protocol, Exact, {
 const remoteObject = runInNewContext("({ value: 'remote' })");
 const direct = new Direct("alpha");
 const exact = new Exact("beta");
+
+const definition = protocolDefinition(protocol);
+const restored = defineProtocolFromDefinition(
+  JSON.parse(JSON.stringify(definition)),
+);
+const restoredRead = protocolMethod(restored, "read");
+let restoredReason;
+try {
+  restoredRead("unextended");
+} catch (error) {
+  restoredReason = error.reason;
+}
 
 const invalid = new Exact("invalid");
 Object.defineProperty(invalid, readSlot, { value: 42 });
@@ -137,6 +151,16 @@ console.log(JSON.stringify({
     read.operation,
     read.slot === readSlot,
   ],
+  definition: {
+    value: definition,
+    frozen: [
+      Object.isFrozen(definition),
+      Object.isFrozen(definition.operations),
+    ],
+    restored: protocolDefinition(restored),
+    isolated: protocolSlot(restored, "read") !== readSlot,
+    missingReason: restoredReason,
+  },
   dispatch: {
     direct: [read(direct), size(direct), implementsProtocol(protocol, direct)],
     exact: [read(exact), size(exact), implementsProtocol(protocol, exact)],

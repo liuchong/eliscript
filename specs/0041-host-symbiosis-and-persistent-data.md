@@ -721,7 +721,9 @@ is implemented by 0083 and 0084, and first-class quoted persistent data is
 implemented by 0087. The first transport integration slice now lands in 0088:
 an opt-in versioned worker codec carries persistent values and metadata through
 explicit Emacs records while legacy JSON mode remains unchanged. Streaming,
-chunking, and protocol-definition transport remain later bridge work.
+chunking, and bounded large-value evidence now land through 0089-0090.
+Transport-safe protocol definitions land in 0091 as declarative data with
+fresh local runtime identities.
 The reusable dispatch mechanism now begins in
 [0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md): frozen
 protocol objects own direct Symbol slots and private exact-type/category/default
@@ -749,7 +751,9 @@ for iterative control.
 The public protocol/collection/transducer/transient surface and maintained
 sequence/data algorithm bodies now move into Eliscript in
 [0066-eliscript-authored-core-protocol-algorithms.md](0066-eliscript-authored-core-protocol-algorithms.md).
-Portable dispatch internals and static transient escape analysis stay open.
+Protocol dispatch policy and its generated runtime now live in Eliscript, and
+0091 completes the data-only definition transport boundary. Static transient
+escape analysis stays open.
 
 ### P0: Semantics and Prototype
 
@@ -826,7 +830,7 @@ and bounded-path complexity requirements without timing thresholds.
 **Exit:** generic algorithms operate on all core collections and native
 adapters without concrete representation checks in user-facing functions.
 
-**Status:** Underway since 2026-08-28. The dispatch-mechanism step is
+**Status:** Completed on 2026-09-01. The dispatch-mechanism step is
 implemented in
 [0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md), including
 direct, exact-type, host-category, default, and missing paths; atomic external
@@ -865,8 +869,12 @@ error type. Protocol-driven String/Object adapters and generated text/keyed
 algorithms now land in
 [0081-protocol-driven-text-object.md](0081-protocol-driven-text-object.md),
 closing the remaining P2 algorithm migration with external-capability and
-transient-construction evidence. A transport-safe protocol representation
-remains open.
+transient-construction evidence. Specification
+[0091-transport-safe-protocol-definitions.md](0091-transport-safe-protocol-definitions.md)
+closes the final definition-transport item: versioned plain data crosses JSON
+and worker codecs, while every import creates new local methods, Symbol slots,
+and empty extension tables. The P2 exit is therefore satisfied without making
+runtime implementations serializable.
 
 ### P3: Language Integration and Migration
 

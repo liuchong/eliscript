@@ -45,6 +45,8 @@ The current M8 work provides:
 - explicit shallow and deep conversion between persistent values and native
   JavaScript Array, plain object, Map, and Set containers
 - open runtime protocols with direct and externally registered methods
+- versioned transport-safe protocol definitions that rebuild fresh local
+  dispatch identities without transferring functions or extension state
 - generic collection lookup, traversal, reduction, construction, association,
   and key-presence operations
 - reusable mapping, filtering, removing, taking, and dropping transducers with
@@ -104,7 +106,9 @@ incremental progress and result streams, and cancellation during upload and
 codec traversal. A source-bound 256 MiB real-process round trip now verifies
 1,058 chunks in each direction within explicit Emacs, Bun, and combined RSS
 budgets, completing the P5 value-bridge gate. Protocol-definition transport
-and static transient escape analysis remain open.
+now uses a strict versioned data descriptor with fresh local identities,
+completing P2. Static transient escape analysis and the P3 compatibility freeze
+remain open.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in

@@ -6,6 +6,12 @@ import {
 import { persistentList } from "../runtime/core/list.mjs";
 import { persistentHashMap } from "../runtime/core/map.mjs";
 import { meta, withMeta } from "../runtime/core/metadata.mjs";
+import {
+  defineProtocol,
+  defineProtocolFromDefinition,
+  protocolDefinition,
+  protocolSlot,
+} from "../runtime/core/protocol.mjs";
 import { persistentHashSet } from "../runtime/core/set.mjs";
 import { transient } from "../runtime/core/transient.mjs";
 import { equalValues } from "../runtime/core/value.mjs";
@@ -72,6 +78,21 @@ test("worker value codec emits deterministic Map, Set, and object order", () => 
   );
   expect(encodeWorkerValue(persistentHashSet("😀", "\uE000"))).toEqual(
     ["set", ["\uE000", "😀"], null],
+  );
+});
+
+test("worker value codec transports protocol definitions without runtime identity", () => {
+  const original = defineProtocol("WorkerReadable", ["read", "close"]);
+  const originalDefinition = protocolDefinition(original);
+  const transported = decodeWorkerValue(encodeWorkerValue(originalDefinition));
+  const restored = defineProtocolFromDefinition(transported);
+
+  expect(transported).toEqual(originalDefinition);
+  expect(protocolDefinition(restored)).toEqual(originalDefinition);
+  expect(protocolSlot(restored, "read"))
+    .not.toBe(protocolSlot(original, "read"));
+  expect(() => encodeWorkerValue(original)).toThrow(
+    /unsupported function value/,
   );
 });
 

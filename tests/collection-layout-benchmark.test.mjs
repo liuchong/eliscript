@@ -111,6 +111,11 @@ test("committed HAMT layout baseline proves the 32/24 threshold decision", async
     promotionCandidate: 32,
     demotionCandidate: 24,
   });
+  const mismatched = structuredClone(baseline);
+  mismatched.runtimeThresholds = { promotion: 28, demotion: 20 };
+  expect(() => validateLayoutSuiteReport(mismatched)).toThrow(
+    "HAMT runtime thresholds 28/20 do not match measured candidates 32/24",
+  );
   expect(baseline.hosts.map((host) => host.host.id)).toEqual([
     "bun",
     "node",

@@ -509,7 +509,15 @@ export function validateLayoutSuiteReport(report) {
   }
   if (report.runtimeThresholds?.promotion !== analysis.promotionCandidate ||
       report.runtimeThresholds?.demotion !== analysis.demotionCandidate) {
-    throw new TypeError("HAMT runtime thresholds do not match measured candidates");
+    const declared =
+      `${report.runtimeThresholds?.promotion ?? "none"}/` +
+      `${report.runtimeThresholds?.demotion ?? "none"}`;
+    const measured =
+      `${analysis.promotionCandidate ?? "none"}/` +
+      `${analysis.demotionCandidate ?? "none"}`;
+    throw new TypeError(
+      `HAMT runtime thresholds ${declared} do not match measured candidates ${measured}`,
+    );
   }
   return report;
 }

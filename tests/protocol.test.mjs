@@ -5,11 +5,13 @@ import { fileURLToPath } from "node:url";
 import {
   ProtocolDispatchError,
   defineProtocol,
+  defineProtocolFromDefinition,
   extendProtocolCategory,
   extendProtocolDefault,
   extendProtocolType,
   implementsProtocol,
   implementsProtocolOperation,
+  protocolDefinition,
   protocolHostCategory,
   protocolMethod,
   protocolSlot,
@@ -60,6 +62,121 @@ test("protocol definitions expose frozen operation identities", () => {
   expect(() => count()).toThrow(
     "protocol Measured/count requires a dispatch value",
   );
+});
+
+test("protocol definitions round trip as isolated declarative data", () => {
+  const original = defineProtocol("Transported", ["read", "size"]);
+  const originalRead = protocolMethod(original, "read");
+  const originalSlot = protocolSlot(original, "read");
+  extendProtocolCategory(original, "string", {
+    read: (value) => `original:${value}`,
+  });
+
+  const definition = protocolDefinition(original);
+  expect(definition).toEqual({
+    format: "eliscript-protocol-definition",
+    version: 1,
+    name: "Transported",
+    operations: ["read", "size"],
+  });
+  expect(Object.isFrozen(definition)).toBe(true);
+  expect(Object.isFrozen(definition.operations)).toBe(true);
+
+  const restored = defineProtocolFromDefinition(
+    JSON.parse(JSON.stringify(definition)),
+  );
+  const restoredRead = protocolMethod(restored, "read");
+  expect(protocolDefinition(restored)).toEqual(definition);
+  expect(restored).not.toBe(original);
+  expect(restoredRead).not.toBe(originalRead);
+  expect(protocolSlot(restored, "read")).not.toBe(originalSlot);
+  expect(() => restoredRead("value")).toThrow(ProtocolDispatchError);
+  expect(originalRead("value")).toBe("original:value");
+
+  extendProtocolCategory(restored, "string", {
+    read: (value) => `restored:${value}`,
+  });
+  expect(restoredRead("value")).toBe("restored:value");
+  expect(originalRead("value")).toBe("original:value");
+});
+
+test("protocol definition validation rejects executable and ambiguous input", () => {
+  let reads = 0;
+  const accessorOperations = [];
+  Object.defineProperty(accessorOperations, "0", {
+    enumerable: true,
+    get() {
+      reads += 1;
+      return "read";
+    },
+  });
+  accessorOperations.length = 1;
+  expect(() => defineProtocol("Accessor", accessorOperations)).toThrow(
+    "protocol operations must contain enumerable data values",
+  );
+  expect(reads).toBe(0);
+
+  const sparse = new Array(2);
+  sparse[1] = "read";
+  expect(() => defineProtocol("Sparse", sparse)).toThrow(
+    "protocol operations must be a dense array with no extra properties",
+  );
+  const extended = ["read"];
+  extended.extra = "side-channel";
+  expect(() => defineProtocol("Extended", extended)).toThrow(
+    "protocol operations must be a dense array with no extra properties",
+  );
+  expect(() => defineProtocol(
+    "Oversized",
+    Array.from({ length: 1025 }, (_, index) => `operation-${index}`),
+  )).toThrow("protocol operations exceed 1024");
+
+  const base = {
+    format: "eliscript-protocol-definition",
+    version: 1,
+    name: "Imported",
+    operations: ["read"],
+  };
+  const nullPrototype = Object.assign(Object.create(null), base);
+  expect(protocolDefinition(defineProtocolFromDefinition(nullPrototype)))
+    .toEqual(base);
+  expect(() => defineProtocolFromDefinition({ ...base, extra: true })).toThrow(
+    "protocol definition must contain exactly format, version, name, and operations",
+  );
+  expect(() => defineProtocolFromDefinition({ ...base, version: 2 })).toThrow(
+    "unsupported protocol definition version 2",
+  );
+  expect(() => defineProtocolFromDefinition({
+    ...base,
+    format: "other",
+  })).toThrow("unsupported protocol definition format other");
+  expect(() => defineProtocolFromDefinition(Object.assign(
+    Object.create({ inherited: true }),
+    base,
+  ))).toThrow("protocol definition must be a plain object");
+
+  const symbolExtended = { ...base };
+  symbolExtended[Symbol("hidden")] = true;
+  expect(() => defineProtocolFromDefinition(symbolExtended)).toThrow(
+    "protocol definition must contain exactly format, version, name, and operations",
+  );
+
+  const accessorDefinition = {
+    version: 1,
+    name: "Accessor",
+    operations: ["read"],
+  };
+  Object.defineProperty(accessorDefinition, "format", {
+    enumerable: true,
+    get() {
+      reads += 1;
+      return "eliscript-protocol-definition";
+    },
+  });
+  expect(() => defineProtocolFromDefinition(accessorDefinition)).toThrow(
+    "protocol definition field format must be an enumerable data property",
+  );
+  expect(reads).toBe(0);
 });
 
 test("protocol dispatch follows direct, exact, category, and default priority", () => {

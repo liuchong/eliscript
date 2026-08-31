@@ -243,8 +243,13 @@ atomic validation, and structured missing diagnostics. It proves that
 extensions do not modify built-in prototypes, that categories adapt values
 across JavaScript realms, and that external immutable types retain value-key
 semantics through `IEquiv`, `IHash`, and persistent Map. Bun and Node execute
-the same dispatch report, followed by one million direct calls in the default
-test host.
+the same dispatch report, including a versioned definition round trip with
+fresh slots and empty extension state, followed by one million direct calls in
+the default test host. Strict definition tests reject accessors without
+invoking them, sparse or extended Arrays, non-plain Objects, unknown versions,
+and more than 1,024 operations. The worker codec separately proves that the
+definition data crosses the value boundary while the executable protocol does
+not.
 
 The collection-protocol suite applies that dispatch core to `ICounted`,
 `ILookup`, `IIndexed`, `ISeqable`, and `IReduce`. It covers direct persistent

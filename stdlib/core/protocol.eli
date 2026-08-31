@@ -6,6 +6,9 @@
   (defconst protocol-host-categories
     (js-array "null" "undefined" "boolean" "number" "bigint" "string"
      "symbol" "function" "object"))
+  (defconst protocol-definition-format "eliscript-protocol-definition")
+  (defconst protocol-definition-version 1)
+  (defconst protocol-max-operations 1024)
 
   ;; These capabilities isolate host reflection from dispatch policy. They are
   ;; deliberately private and contain no protocol-specific decisions.
@@ -25,6 +28,8 @@
   (defconst protocol-host-type (js* "(value) => typeof value"))
   (defconst protocol-exact-prototype
     (js* "(value, missing) => ((typeof value === \"object\" && value !== null) || typeof value === \"function\") ? Object.getPrototypeOf(value) : missing"))
+  (defconst protocol-object-prototype (js* "Object.prototype"))
+  (defconst protocol-get-prototype (js* "Object.getPrototypeOf"))
   (defconst protocol-freeze (js* "Object.freeze"))
   (defconst protocol-define-enumerable
     (js* "(target, key, value) => { Object.defineProperty(target, key, { value, enumerable: true }); return target; }"))
@@ -45,6 +50,72 @@
             (= (js-length value) 0))
         (protocol-fail (str label " must be a non-empty string"))
       value))
+
+  (defun normalize-protocol-operations (operations)
+    (when (not (funcall protocol-array? operations))
+      (protocol-fail "protocol operations must be a non-empty dense array"))
+    (let ((length (js-length operations)))
+      (when (= length 0)
+        (protocol-fail "protocol operations must be a non-empty dense array"))
+      (when (> length protocol-max-operations)
+        (protocol-fail
+         (str "protocol operations exceed " protocol-max-operations)))
+      (let* ((descriptors (funcall protocol-own-descriptors operations))
+             (keys (funcall protocol-own-keys descriptors))
+             (normalized (js-array))
+             (index 0))
+        ;; A dense Array has one own descriptor per item plus "length". This
+        ;; also rejects Symbol keys and named side-channel properties.
+        (when (/= (js-length keys) (1+ length))
+          (protocol-fail
+           "protocol operations must be a dense array with no extra properties"))
+        (while (< index length)
+          (let ((descriptor (get descriptors (str index) undefined)))
+            (when (or (undefined? descriptor)
+                      (not (funcall protocol-has-own descriptor "value"))
+                      (not (get descriptor :enumerable false)))
+              (protocol-fail
+               "protocol operations must contain enumerable data values"))
+            (js-call normalized :push
+                     (normalize-name (get descriptor :value)
+                                     "protocol operation")))
+          (setq index (1+ index)))
+        normalized)))
+
+  (defun protocol-definition-field (descriptors name)
+    (let ((descriptor (get descriptors name undefined)))
+      (when (or (undefined? descriptor)
+                (not (funcall protocol-has-own descriptor "value"))
+                (not (get descriptor :enumerable false)))
+        (protocol-fail
+         (str "protocol definition field " name
+              " must be an enumerable data property")))
+      (get descriptor :value)))
+
+  (defun normalize-protocol-definition (definition)
+    (when (or (nil? definition)
+              (not (= (value-type definition) "object"))
+              (funcall protocol-array? definition))
+      (protocol-fail "protocol definition must be a plain object"))
+    (let ((prototype (funcall protocol-get-prototype definition)))
+      (when (and (/= prototype protocol-object-prototype)
+                 (not (nil? prototype)))
+        (protocol-fail "protocol definition must be a plain object")))
+    (let* ((descriptors (funcall protocol-own-descriptors definition))
+           (keys (funcall protocol-own-keys descriptors)))
+      (when (/= (js-length keys) 4)
+        (protocol-fail
+         "protocol definition must contain exactly format, version, name, and operations"))
+      (let ((format (protocol-definition-field descriptors "format"))
+            (version (protocol-definition-field descriptors "version"))
+            (name (protocol-definition-field descriptors "name"))
+            (operations (protocol-definition-field descriptors "operations")))
+        (when (/= format protocol-definition-format)
+          (protocol-fail (str "unsupported protocol definition format " format)))
+        (when (/= version protocol-definition-version)
+          (protocol-fail (str "unsupported protocol definition version " version)))
+        (object :name (normalize-name name "protocol name")
+                :operations (normalize-protocol-operations operations)))))
 
   (defun operation-record (protocol operation)
     (let* ((state (protocol-state protocol))
@@ -166,17 +237,15 @@
             (apply external (cons receiver arguments)))))))
 
   (defun define-protocol (name operations)
-    (let ((protocol-name (normalize-name name "protocol name")))
-      (when (or (not (funcall protocol-array? operations))
-                (= (js-length operations) 0))
-        (protocol-fail "protocol operations must be a non-empty array"))
+    (let ((protocol-name (normalize-name name "protocol name"))
+          (protocol-operations (normalize-protocol-operations operations)))
       (let ((records (funcall protocol-map))
             (operation-table (funcall protocol-null-object))
             (protocol nil)
             (index 0))
-        (while (< index (js-length operations))
+        (while (< index (js-length protocol-operations))
           (let ((operation
-                 (normalize-name (js-nth index operations) "protocol operation")))
+                 (js-nth index protocol-operations)))
             (when (js-call records :has operation)
               (protocol-fail
                (str "protocol " protocol-name
@@ -208,8 +277,8 @@
                                :operations
                                (funcall protocol-freeze operation-table))))
         (setq index 0)
-        (while (< index (js-length operations))
-          (let* ((operation (js-nth index operations))
+        (while (< index (js-length protocol-operations))
+          (let* ((operation (js-nth index protocol-operations))
                  (record (js-call records :get operation))
                  (method (get record :method)))
             (funcall protocol-define-metadata
@@ -226,6 +295,22 @@
                          (funcall protocol-freeze
                                   (funcall protocol-null-object))))
         protocol)))
+
+  (defun protocol-definition (protocol)
+    (protocol-state protocol)
+    (let ((operations
+           (js-call (object-keys (get protocol :operations)) :slice)))
+      (funcall protocol-freeze operations)
+      (funcall protocol-freeze
+               (object :format protocol-definition-format
+                       :version protocol-definition-version
+                       :name (get protocol :name)
+                       :operations operations))))
+
+  (defun define-protocol-from-definition (definition)
+    (let ((normalized (normalize-protocol-definition definition)))
+      (define-protocol (get normalized :name)
+                       (get normalized :operations))))
 
   (defun protocol-method (protocol operation)
     (get (operation-record protocol operation) :method))
@@ -295,7 +380,8 @@
         (setq index (1+ index)))
       implemented))
 
-  (export define-protocol extend-protocol-category extend-protocol-default
+  (export define-protocol define-protocol-from-definition
+          extend-protocol-category extend-protocol-default
           extend-protocol-type implements-protocol-operation?
-          implements-protocol? protocol-host-category protocol-method
-          protocol-slot))
+          implements-protocol? protocol-definition protocol-host-category
+          protocol-method protocol-slot))

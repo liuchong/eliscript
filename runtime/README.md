@@ -125,6 +125,13 @@ exposing the backing map to applications.
 dispatch policy of its own; `core/protocol-error.mjs` contains only the host
 error type that cannot be expressed as an ordinary portable value.
 
+`protocolDefinition` extracts a frozen
+`eliscript-protocol-definition` v1 Object containing only a name and ordered
+operation names. `defineProtocolFromDefinition` validates that data and creates
+fresh local dispatch functions, Symbol slots, and empty extension state. The
+definition can cross JSON and worker value boundaries; the executable protocol
+object and its implementations cannot.
+
 `core/collection.mjs` defines the generic collection capability layer:
 `ICounted`, `IEmptyable`, `IConj`, `ILookup`, `IAssociative`, `IIndexed`,
 `ISeqable`, and `IReduce`. Persistent List, Vector, Map, and Set values use direct

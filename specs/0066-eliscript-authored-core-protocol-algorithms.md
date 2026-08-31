@@ -104,9 +104,10 @@ reflection. Specification 0079 completes protocol dispatch policy without
 misclassifying Symbol slots, constructors, WeakMap state, or exceptions as
 JSON-portable values. Specification 0081 completes the protocol-driven
 text/object algorithm migration. Persistent collection literals and the first
-worker value codec now land through 0088. Compiler direct-call specialization,
-transport of protocol definitions, and static transient escape analysis remain
-later work.
+worker value codec now land through 0088. Compiler direct-call specialization
+and static transient escape analysis remain later work. Specification 0091
+adds the versioned data-only protocol definition and isolated local import
+path; executable protocol state remains deliberately non-transportable.
 
 ## Acceptance Criteria
 
@@ -144,3 +145,7 @@ preserving direct slots, open external extension, exact host categories, and
 measured dispatch work. It deliberately remains outside `defportable` closure
 selection because Symbol slots, constructors, WeakMap registries, and host
 exceptions do not cross the JSON-compatible worker boundary.
+Specification
+[0091-transport-safe-protocol-definitions.md](0091-transport-safe-protocol-definitions.md)
+later adds a strict data-only definition format without changing that runtime
+identity boundary.

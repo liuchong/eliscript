@@ -173,6 +173,16 @@
       ]
     },
     {
+      "id": "protocol-definition",
+      "spec": "0091",
+      "format": "eliscript-protocol-definition",
+      "version": 1,
+      "evidence": [
+        {"file": "stdlib/core/protocol.eli", "contains": ["protocol-definition-format \"eliscript-protocol-definition\"", "protocol-definition-version 1"]},
+        {"file": "runtime/core/protocol.mjs", "contains": ["define_protocol_from_definition as defineProtocolFromDefinition", "protocol_definition as protocolDefinition"]}
+      ]
+    },
+    {
       "id": "worker-protocol",
       "spec": "0020",
       "format": "eliscript-worker-ndjson",
@@ -409,7 +419,7 @@
       "spec": "0058",
       "visibility": "public",
       "file": "runtime/core/protocol.mjs",
-      "namedExports": ["ProtocolDispatchError", "defineProtocol", "extendProtocolCategory", "extendProtocolDefault", "extendProtocolType", "implementsProtocol", "implementsProtocolOperation", "protocolHostCategory", "protocolMethod", "protocolSlot"],
+      "namedExports": ["ProtocolDispatchError", "defineProtocol", "defineProtocolFromDefinition", "extendProtocolCategory", "extendProtocolDefault", "extendProtocolType", "implementsProtocol", "implementsProtocolOperation", "protocolDefinition", "protocolHostCategory", "protocolMethod", "protocolSlot"],
       "defaultExport": false
     },
     {
@@ -417,7 +427,7 @@
       "spec": "0080",
       "visibility": "internal",
       "file": "runtime/core/protocol-impl.mjs",
-      "namedExports": ["define_protocol", "extend_protocol_category", "extend_protocol_default", "extend_protocol_type", "implements_protocol_QMARK_", "implements_protocol_operation_QMARK_", "protocol_host_category", "protocol_method", "protocol_slot"],
+      "namedExports": ["define_protocol", "define_protocol_from_definition", "extend_protocol_category", "extend_protocol_default", "extend_protocol_type", "implements_protocol_QMARK_", "implements_protocol_operation_QMARK_", "protocol_definition", "protocol_host_category", "protocol_method", "protocol_slot"],
       "defaultExport": false
     },
     {
@@ -485,7 +495,7 @@
     {"module": "core-identifier", "spec": "0067", "file": "stdlib/core/identifier.eli", "exports": ["EliscriptSymbol", "Keyword", "identifier-name", "identifier-namespace", "identifier?", "keyword", "keyword?", "qualified-name", "symbol", "symbol?"]},
     {"module": "core-metadata", "spec": "0068", "file": "stdlib/core/metadata.eli", "exports": ["IMeta", "IWithMeta", "meta", "supports-metadata?", "vary-meta", "with-meta"]},
     {"module": "core-object", "spec": "0081", "file": "stdlib/core/object.eli", "exports": ["assoc", "dissoc", "filter-values", "has?", "key-in?", "keys", "map-values", "merge", "omit", "pick", "update"]},
-    {"module": "core-protocol", "spec": "0066", "file": "stdlib/core/protocol.eli", "exports": ["define-protocol", "extend-protocol-category", "extend-protocol-default", "extend-protocol-type", "implements-protocol-operation?", "implements-protocol?", "protocol-host-category", "protocol-method", "protocol-slot"]},
+    {"module": "core-protocol", "spec": "0066", "file": "stdlib/core/protocol.eli", "exports": ["define-protocol", "define-protocol-from-definition", "extend-protocol-category", "extend-protocol-default", "extend-protocol-type", "implements-protocol-operation?", "implements-protocol?", "protocol-definition", "protocol-host-category", "protocol-method", "protocol-slot"]},
     {"module": "core-sequence", "spec": "0066", "file": "stdlib/core/seq.eli", "exports": ["concat", "drop", "every?", "filter", "find", "map", "remove", "reverse", "some", "take"]},
     {"module": "core-text", "spec": "0081", "file": "stdlib/core/text.eli", "exports": ["blank?", "contains?", "empty?", "ends-with?", "join", "repeat", "slice", "starts-at?", "starts-with?", "strip-prefix", "strip-suffix", "trim", "whitespace?"]},
     {"module": "core-transducer", "spec": "0066", "file": "stdlib/core/transducer.eli", "exports": ["completing", "compose-transducers", "dropping", "filtering", "into", "mapping", "removing", "taking", "transduce"]},

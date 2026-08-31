@@ -1050,6 +1050,19 @@
         { "kind": "bun-test", "file": "tests/worker-value-stream-probe.test.mjs", "contains": "value-stream probe cancels and fails when a memory budget is exceeded" },
         { "kind": "bun-test", "file": "tests/worker-value-stream-probe.test.mjs", "contains": "committed 256 MiB value-stream report matches its measured sources" }
       ]
+    },
+    {
+      "id": "runtime.transport-safe-protocol-definitions",
+      "title": "Transport-safe protocol definitions",
+      "status": "accepted",
+      "spec": "0091",
+      "contracts": ["Extracts frozen versioned protocol definitions containing no executable identity", "Rebuilds fresh local methods, Symbol slots, and empty extension registries", "Round trips definitions through JSON and the worker value codec while raw protocols remain rejected", "Rejects accessors, sparse or extended arrays, non-plain objects, unknown versions, duplicate names, and excessive operation counts", "Matches seed and self-hosted artifacts under Bun and Node without application framework dependencies"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/protocol.test.mjs", "contains": "protocol definitions round trip as isolated declarative data" },
+        { "kind": "bun-test", "file": "tests/protocol.test.mjs", "contains": "protocol definition validation rejects executable and ambiguous input" },
+        { "kind": "bun-test", "file": "tests/worker-value-codec.test.mjs", "contains": "worker value codec transports protocol definitions without runtime identity" },
+        { "kind": "bun-test", "file": "tests/eliscript-protocol.test.mjs", "contains": "Eliscript-authored protocol policy preserves open dispatch semantics" }
+      ]
     }
   ]
 }

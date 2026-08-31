@@ -108,6 +108,10 @@ test("Eliscript-authored protocol policy preserves open dispatch semantics", asy
         await readFile(`${committedImplementation}.map`, "utf8"),
       ));
     expect(generated).toContain("function define_protocol(name, operations)");
+    expect(generated).toContain(
+      "function define_protocol_from_definition(definition)",
+    );
+    expect(generated).toContain("function protocol_definition(protocol)");
     expect(generated).toContain("const protocol_states = new WeakMap()");
     expect(generated).not.toContain("Runtime.defineProtocol");
     expect(generated).not.toContain("Runtime.extendProtocol");
@@ -132,6 +136,23 @@ test("Eliscript-authored protocol policy preserves open dispatch semantics", asy
     expect(reports[0]).toEqual({
       frozen: [true, true, true],
       metadata: [true, "read", true],
+      definition: {
+        value: {
+          format: "eliscript-protocol-definition",
+          version: 1,
+          name: "Measured",
+          operations: ["read", "size"],
+        },
+        frozen: [true, true],
+        restored: {
+          format: "eliscript-protocol-definition",
+          version: 1,
+          name: "Measured",
+          operations: ["read", "size"],
+        },
+        isolated: true,
+        missingReason: "missing",
+      },
       dispatch: {
         direct: ["direct:alpha", 5, true],
         exact: ["exact:beta", 4, true],

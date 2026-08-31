@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 90 specifications.
+The registry currently contains 91 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 61 |
+| Accepted design | 62 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 87 |
+| Implemented | 88 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-59 as provisional, and 3 as planning. That baseline is derived from registry
+60 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -61,8 +61,11 @@ implemented. The P1 persistent collection core now passes its complete
 Bun/Node million-value exit audit, and P3 now has canonical persistent Vector
 and Map expression syntax plus first-class source Keyword values with explicit
 native host-property boundaries, and quote now preserves persistent List/
-Vector and first-class identifier categories. Transport-safe values, static
-transient escape analysis, and the Emacs value bridge remain ahead.
+Vector and first-class identifier categories. The Emacs value bridge now has a
+bounded 256 MiB real-process gate, and protocol definitions now cross that
+value boundary as strict versioned data while retaining fresh local execution
+identity. Static transient escape analysis and the P3 compatibility freeze
+remain ahead.
 
 ## Reading Paths
 
@@ -127,6 +130,7 @@ number.
 31. [0085: First-class Source Keyword Values](0085-first-class-source-keywords.md)
 32. [0086: Optimized Runtime Persistent List and Canonical Data Text](0086-optimized-runtime-persistent-list.md)
 33. [0087: First-class Quoted Persistent Data](0087-first-class-quoted-persistent-data.md)
+34. [0091: Transport-safe Protocol Definitions](0091-transport-safe-protocol-definitions.md)
 
 ### React and Publishing
 
