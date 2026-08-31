@@ -171,9 +171,16 @@ async function validateCommands(root, commands, cache, errors) {
 }
 
 function extractJsExports(source) {
-  const named = [...source.matchAll(
+  const declarations = [...source.matchAll(
     /^export\s+(?:async\s+)?(?:function|const|class)\s+([A-Za-z_$][\w$]*)/gmu,
-  )].map((match) => match[1]).sort();
+  )].map((match) => match[1]);
+  const lists = [...source.matchAll(
+    /^export\s*\{([^}]*)\}\s*(?:from\s*["'][^"']+["'])?\s*;?/gmu,
+  )].flatMap((match) => match[1].split(",").map((entry) => {
+    const parts = entry.trim().split(/\s+as\s+/u);
+    return parts.at(-1)?.trim();
+  }).filter(Boolean));
+  const named = [...new Set([...declarations, ...lists])].sort();
   return { named, defaultExport: /^export\s+default\s+/mu.test(source) };
 }
 

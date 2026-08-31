@@ -142,6 +142,7 @@ console.log(JSON.stringify({
     exact: [read(exact), size(exact), implementsProtocol(protocol, exact)],
     category: [read(remoteObject), size(remoteObject)],
     fallback: [read(7), size(7)],
+    undefined: [read(undefined), size(undefined)],
   },
   categories: [
     protocolHostCategory(null),

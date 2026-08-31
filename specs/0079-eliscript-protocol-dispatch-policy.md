@@ -14,11 +14,12 @@ module `stdlib/core/protocol.eli` now owns operation validation, unique method
 slots, private extension registries, direct and external lookup order, atomic
 registration, implementation queries, and immutable protocol metadata.
 
-The JavaScript runtime remains a compatibility surface for existing consumers
-and supplies the existing `ProtocolDispatchError` host type. It no longer owns
-the implementation reached through the Eliscript standard-library API. That
-API does not forward `define-protocol`, extension, or dispatch operations to
-camel-cased runtime functions.
+The JavaScript runtime compatibility surface for existing consumers now
+re-exports the generated implementation specified by
+[0080](0080-canonical-generated-protocol-runtime.md). The only maintained
+hand-written host behavior is the `ProtocolDispatchError` type. The standard
+library does not forward `define-protocol`, extension, or dispatch operations
+to a second camel-cased runtime implementation.
 
 ## Architecture Boundary
 

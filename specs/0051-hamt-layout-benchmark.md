@@ -147,6 +147,8 @@ Every suite report contains a SHA-256 digest over the exact files that define
 keys, hashing, node behavior, orchestration, and measurement:
 
 - `runtime/core/map-internals.mjs`
+- `runtime/core/protocol-error.mjs`
+- `runtime/core/protocol-impl.mjs`
 - `runtime/core/protocol.mjs`
 - `runtime/core/value.mjs`
 - `runtime/core/value-internals.mjs`

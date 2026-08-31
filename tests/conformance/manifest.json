@@ -890,6 +890,18 @@
         { "kind": "bun-test", "file": "tests/eliscript-protocol.test.mjs", "contains": "Eliscript-authored protocol policy preserves open dispatch semantics" },
         { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" }
       ]
+    },
+    {
+      "id": "runtime.protocol-generated-production",
+      "title": "Canonical generated protocol production runtime",
+      "status": "accepted",
+      "spec": "0080",
+      "contracts": ["Treats stdlib/core/protocol.eli as the only maintained protocol policy source", "Commits seed-generated ESM and Source Map artifacts with byte-for-byte drift checks", "Keeps runtime/core/protocol.mjs as a policy-free camel-case compatibility facade", "Preserves exact undefined dispatch semantics across generated Bun and Node execution"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/eliscript-protocol.test.mjs", "contains": "Eliscript-authored protocol policy preserves open dispatch semantics" },
+        { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "public surface checker follows aliased runtime re-exports" },
+        { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "canonical data text prints scalar and identifier values" }
+      ]
     }
   ]
 }

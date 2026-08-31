@@ -29,6 +29,8 @@ const hostRunner = path.join(directory, "layout-host.mjs");
 const browserDirectory = path.join(directory, "browser");
 const digestFiles = Object.freeze([
   "runtime/core/map-internals.mjs",
+  "runtime/core/protocol-error.mjs",
+  "runtime/core/protocol-impl.mjs",
   "runtime/core/protocol.mjs",
   "runtime/core/value.mjs",
   "runtime/core/value-internals.mjs",

@@ -95,6 +95,12 @@ exposing the backing map to applications.
 
 ### Protocols and Collections
 
+`core/protocol-impl.mjs` and its Source Map are generated from the canonical
+`stdlib/core/protocol.eli` source by `bun run generate:runtime-protocol`.
+`core/protocol.mjs` is a stable camel-case compatibility facade with no
+dispatch policy of its own; `core/protocol-error.mjs` contains only the host
+error type that cannot be expressed as an ordinary portable value.
+
 `core/collection.mjs` defines the generic collection capability layer:
 `ICounted`, `IEmptyable`, `IConj`, `ILookup`, `IAssociative`, `IIndexed`,
 `ISeqable`, and `IReduce`. Persistent Vector, Map, and Set values use direct
@@ -135,9 +141,10 @@ grouping, counting, and frequencies with persistent Map results and transient
 final construction. Native and persistent collections, null, and external
 protocol extensions all use the same algorithm path.
 
-`stdlib/core/seq.eli` and `stdlib/core/data.eli` provide the maintained
-Lisp-named Eliscript implementations. Portable protocol dispatch internals
-remain later work.
+`stdlib/core/protocol.eli`, `stdlib/core/seq.eli`, and
+`stdlib/core/data.eli` provide the maintained Lisp-named Eliscript
+implementations. A transport-safe protocol representation for portable worker
+values remains later work.
 
 ### Worker Host
 

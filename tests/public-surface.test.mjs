@@ -34,7 +34,7 @@ test("repository public surface matches every tracked implementation", async () 
     commands: { commands: 5, options: 20 },
     schemas: { total: 6 },
     adapters: { adapters: 4, exports: 17 },
-    runtimeModules: { modules: 18, exports: 126, public: 14, internal: 4 },
+    runtimeModules: { modules: 20, exports: 136, public: 14, internal: 6 },
     standardLibrary: { modules: 27, exports: 278 },
     emacs: {
       functions: 91,
@@ -92,6 +92,19 @@ test("public surface checker rejects runtime visibility and export drift", async
   );
   expect(errors).toContain(
     "persistent-hash-map export inventory is missing current entries: EMPTY_MAP",
+  );
+});
+
+test("public surface checker follows aliased runtime re-exports", async () => {
+  const surface = await surfaceDocument();
+  const module = surface.runtimeModules.find(
+    ({ id }) => id === "protocol-dispatch",
+  );
+  module.namedExports = module.namedExports.filter(
+    (name) => name !== "defineProtocol",
+  );
+  expect(await validationErrors(surface)).toContain(
+    "protocol-dispatch export inventory is missing current entries: defineProtocol",
   );
 });
 

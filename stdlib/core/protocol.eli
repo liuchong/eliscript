@@ -1,5 +1,5 @@
 (module eliscript.core.protocol
-  (import "../../runtime/core/protocol.mjs" ProtocolDispatchError)
+  (import "../../runtime/core/protocol-error.mjs" ProtocolDispatchError)
 
   (defconst protocol-states (js* "new WeakMap()"))
   (defconst protocol-missing (js* "Symbol(\"eliscript.protocol.missing\")"))
@@ -193,7 +193,7 @@
                               " requires a dispatch value")))
                       (dispatch protocol
                                 (js-call records :get operation)
-                                (nth 0 invocation)
+                                (aref invocation 0)
                                 (js-call invocation :slice 1))))
                    (record
                     (object :name operation :slot slot :method method)))

@@ -851,7 +851,10 @@ moves the maintained sequence/data algorithm bodies into `.eli`.
 Protocol definition, extension, and dispatch policy now continue in
 [0079-eliscript-protocol-dispatch-policy.md](0079-eliscript-protocol-dispatch-policy.md),
 with private host-reflection capabilities and byte-identical seed/self-hosted
-output. Text/object migration and a transport-safe protocol representation
+output. Its generated artifact becomes the canonical production runtime in
+[0080-canonical-generated-protocol-runtime.md](0080-canonical-generated-protocol-runtime.md),
+while the JavaScript facade retains only compatibility names and the host
+error type. Text/object migration and a transport-safe protocol representation
 remain open.
 
 ### P3: Language Integration and Migration

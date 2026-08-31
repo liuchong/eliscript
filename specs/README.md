@@ -114,6 +114,8 @@ number.
 22. [0076: Portable JSON Values](0076-portable-json-values.md)
 23. [0077: Portable Numeric Foundation](0077-portable-numeric-foundation.md)
 24. [0078: Persistent Collection Core Exit Audit](0078-persistent-collection-core-exit-audit.md)
+25. [0079: Eliscript-authored Protocol Dispatch Policy](0079-eliscript-protocol-dispatch-policy.md)
+26. [0080: Canonical Generated Protocol Runtime](0080-canonical-generated-protocol-runtime.md)
 
 ### React and Publishing
 
@@ -259,6 +261,7 @@ The schemas and change workflow are defined by specifications
 | 0077 | [Portable Numeric Foundation](0077-portable-numeric-foundation.md) | Accepted | Implemented |
 | 0078 | [Persistent Collection Core Exit Audit](0078-persistent-collection-core-exit-audit.md) | Accepted | Implemented |
 | 0079 | [Eliscript-authored Protocol Dispatch Policy](0079-eliscript-protocol-dispatch-policy.md) | Accepted | Implemented |
+| 0080 | [Canonical Generated Protocol Runtime](0080-canonical-generated-protocol-runtime.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

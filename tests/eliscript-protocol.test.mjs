@@ -12,6 +12,11 @@ const hostFixture = resolve(
   root,
   "tests/fixtures/eliscript-protocol-host.mjs",
 );
+const committedImplementation = resolve(
+  root,
+  "runtime/core/protocol-impl.mjs",
+);
+const committedFacade = resolve(root, "runtime/core/protocol.mjs");
 const bun = process.execPath;
 const node = process.env.NODE_BINARY ?? "node";
 
@@ -54,15 +59,19 @@ async function execute(host, modulePath) {
   return JSON.parse(await run([host, hostFixture, modulePath]));
 }
 
+function canonicalSourceMap(sourceMap) {
+  return { ...JSON.parse(sourceMap), sources: ["<protocol-source>"] };
+}
+
 test("Eliscript-authored protocol policy preserves open dispatch semantics", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "eliscript-protocol-"));
   const bootstrapDirectory = resolve(directory, "bootstrap");
   const seedRoot = resolve(directory, "seed");
   const selfHostedRoot = resolve(directory, "self-hosted");
-  const seed = resolve(seedRoot, "stdlib/core/protocol.mjs");
+  const seed = resolve(seedRoot, "stdlib/core/protocol-impl.mjs");
   const selfHosted = resolve(
     selfHostedRoot,
-    "stdlib/core/protocol.mjs",
+    "stdlib/core/protocol-impl.mjs",
   );
 
   try {
@@ -92,6 +101,12 @@ test("Eliscript-authored protocol policy preserves open dispatch semantics", asy
       .toBe(await readFile(`${seed}.map`, "utf8"));
 
     const generated = await readFile(seed, "utf8");
+    const committed = await readFile(committedImplementation, "utf8");
+    expect(generated).toBe(committed);
+    expect(canonicalSourceMap(await readFile(`${seed}.map`, "utf8")))
+      .toEqual(canonicalSourceMap(
+        await readFile(`${committedImplementation}.map`, "utf8"),
+      ));
     expect(generated).toContain("function define_protocol(name, operations)");
     expect(generated).toContain("const protocol_states = new WeakMap()");
     expect(generated).not.toContain("Runtime.defineProtocol");
@@ -99,11 +114,19 @@ test("Eliscript-authored protocol policy preserves open dispatch semantics", asy
     expect(generated).not.toContain("vite");
     expect(generated).not.toContain("react");
 
+    const facade = await readFile(committedFacade, "utf8");
+    expect(facade).toContain('from "./protocol-impl.mjs"');
+    expect(facade).toContain('from "./protocol-error.mjs"');
+    expect(facade).not.toContain("new WeakMap");
+    expect(facade).not.toContain("function dispatch");
+
     const reports = await Promise.all([
       execute(bun, seed),
       execute(node, seed),
       execute(bun, selfHosted),
       execute(node, selfHosted),
+      execute(bun, committedImplementation),
+      execute(node, committedImplementation),
     ]);
     for (const report of reports) expect(report).toEqual(reports[0]);
     expect(reports[0]).toEqual({
@@ -114,6 +137,7 @@ test("Eliscript-authored protocol policy preserves open dispatch semantics", asy
         exact: ["exact:beta", 4, true],
         category: ["category:remote", 0],
         fallback: ["default:7", -1],
+        undefined: ["default:undefined", -1],
       },
       categories: [
         "null",

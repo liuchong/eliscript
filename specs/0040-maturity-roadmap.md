@@ -548,8 +548,11 @@ and transient indexing evidence. The source-level protocol, collection,
 transducer, and transient APIs plus maintained sequence/data algorithm bodies
 now land in
 [0066-eliscript-authored-core-protocol-algorithms.md](0066-eliscript-authored-core-protocol-algorithms.md).
-The optimized protocol dispatch substrate remains JavaScript. Stack-safe
-function and binding
+Protocol policy then moves into maintained Eliscript in
+[0079-eliscript-protocol-dispatch-policy.md](0079-eliscript-protocol-dispatch-policy.md),
+and [0080-canonical-generated-protocol-runtime.md](0080-canonical-generated-protocol-runtime.md)
+makes that compiled output the canonical production runtime behind a
+policy-free JavaScript compatibility facade. Stack-safe function and binding
 iteration now lands in
 [0064-stack-safe-loop-recur.md](0064-stack-safe-loop-recur.md), with exact tail
 positions, nearest-target analysis, simultaneous pattern rebinding,

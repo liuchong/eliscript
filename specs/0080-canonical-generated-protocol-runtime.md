@@ -1,0 +1,78 @@
+# 0080: Canonical Generated Protocol Runtime
+
+- Status: Accepted
+- Implementation: Implemented
+- Date: 2026-08-31
+- Depends on: 0018 Portable ESM and Source Map Emission,
+  0019 Self-hosted Compiler Driver,
+  0079 Eliscript-authored Protocol Dispatch Policy
+
+## Summary
+
+The maintained protocol production implementation is
+`stdlib/core/protocol.eli`. Its checked-in ESM and Source Map artifacts are
+`runtime/core/protocol-impl.mjs` and
+`runtime/core/protocol-impl.mjs.map`. The seed compiler generates these
+artifacts, and the self-hosted compiler must reach the same bytes.
+
+`runtime/core/protocol.mjs` remains the stable public JavaScript entry point.
+It translates only export names from Lisp-style generated identifiers to the
+existing camel-case API. It owns no protocol state, registration rules,
+dispatch priority, or implementation queries. `runtime/core/protocol-error.mjs`
+contains the host exception type used at the JavaScript boundary and no
+protocol policy.
+
+## Source and Artifact Contract
+
+The package command `generate:runtime-protocol` regenerates the committed ESM
+and Source Map from the canonical `.eli` source. Tests compile the source with
+both seed and self-hosted compilers, compare those outputs byte for byte, and
+compare the seed output with the committed production artifact. Source Map
+comparison normalizes only the source path introduced by the temporary test
+directory; mappings and embedded source remain exact.
+
+Generated protocol code may use explicit private host-reflection capabilities
+such as `WeakMap`, `Map`, `Symbol`, property descriptors, and prototype
+identity. Those capabilities support the policy authored in Eliscript; they do
+not create a second policy source.
+
+## Semantic Preservation
+
+Production, seed, and self-hosted artifacts execute the same protocol fixture
+under Bun and Node. The fixture covers direct, exact-type, category, default,
+missing, invalid-slot, atomic-registration, subclass, prototype-preservation,
+and million-dispatch behavior.
+
+Dispatch must preserve the receiver exactly. In particular, JavaScript
+`undefined` is not normalized to `null` while extracting the first invocation
+argument. The canonical implementation therefore uses exact array access for
+the receiver rather than nullish collection lookup.
+
+## Architecture Boundary
+
+This contract belongs to the language runtime and standard library. It has no
+dependency on UI frameworks, application bundlers, development servers, or
+publishing systems. Such tools may consume the public ESM entry point in
+application-level validation, but they cannot define core goals, protocol
+semantics, generation, or acceptance.
+
+## Acceptance Criteria
+
+- **GPR-01:** `stdlib/core/protocol.eli` is the only maintained source of
+  protocol definition, registration, dispatch, and implementation-query policy.
+- **GPR-02:** The package exposes one deterministic command that regenerates
+  the committed protocol ESM and Source Map.
+- **GPR-03:** Seed-generated ESM is byte-identical to the committed production
+  implementation.
+- **GPR-04:** Seed-generated and self-hosted ESM are byte-identical.
+- **GPR-05:** Seed-generated and self-hosted Source Maps are byte-identical.
+- **GPR-06:** The committed Source Map preserves exact mappings and embedded
+  canonical Eliscript source after source-path normalization.
+- **GPR-07:** The public JavaScript module is a compatibility-only re-export
+  facade and contains no dispatch registry or policy.
+- **GPR-08:** The host error module contains only boundary diagnostics and is
+  independently inventoried as internal runtime surface.
+- **GPR-09:** Production, seed, and self-hosted implementations agree under Bun
+  and Node, including exact `undefined` receiver dispatch.
+- **GPR-10:** Framework and bundler integrations remain optional application
+  evidence and are absent from core dependencies and acceptance conditions.
