@@ -770,6 +770,31 @@
         { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "generated nested values retain equality and canonical text" },
         { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" }
       ]
+    },
+    {
+      "id": "language.portable-identifier-values",
+      "title": "Portable Keyword and Symbol values",
+      "status": "accepted",
+      "spec": "0070",
+      "contracts": ["Constructs validated identifiers entirely from portable Eliscript", "Shares logical Keyword and Symbol categories with optimized runtime values", "Preserves cross-representation equality, hashing, Map lookup, and Set membership", "Matches self-hosted artifacts and Bun/Node execution"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-portable-value-inspection-operations" },
+        { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics compile and agree across hosts" },
+        { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics preserve generated cross-family invariants" }
+      ]
+    },
+    {
+      "id": "stdlib.canonical-portable-data-text",
+      "title": "Canonical portable data text",
+      "status": "accepted",
+      "spec": "0071",
+      "contracts": ["Prints and reads scalar, identifier, List, Vector, Map, Set, and metadata values in portable Eliscript", "Returns explicit transportable success and located failure values", "Sorts Map and Set text independently of insertion and trie order", "Matches runtime common-subset bytes and self-hosted Bun/Node execution"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-portable-value-inspection-operations" },
+        { "kind": "bun-test", "file": "tests/portable-data-text.test.mjs", "contains": "portable canonical data text is byte-identical and host-independent" },
+        { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "generated nested values retain equality and canonical text" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

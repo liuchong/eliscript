@@ -1024,14 +1024,16 @@
   (let* ((source
           "(defun inspect-value (value text index)
   [(value-type value) (string-code-unit-at text index)
-   (number-float64-words value)])")
+   (string-from-code-unit 65) (string-to-number \"1.5\")
+   (string-to-bigint \"42\") (number-float64-words value)])")
          (filename "value-inspection.eli")
          (output (eliscript-compile-string source filename))
          (portable-output
           (eliscript-compile-portable-string
            "(defportable inspect-value (value text index)
   [(value-type value) (string-code-unit-at text index)
-   (number-float64-words value)])"
+   (string-from-code-unit 65) (string-to-number \"1.5\")
+   (string-to-bigint \"42\") (number-float64-words value)])"
            '(inspect-value)
            filename)))
     (should
@@ -1049,7 +1051,24 @@
         generated))
       (should
        (string-match-p
+        (regexp-quote
+         "__eliscript_kind.value === \"eliscript/keyword\"")
+        generated))
+      (should
+       (string-match-p
+        (regexp-quote
+         "__eliscript_kind.value === \"eliscript/symbol\"")
+        generated))
+      (should
+       (string-match-p
         (regexp-quote "(text).charCodeAt(index)") generated))
+      (should
+       (string-match-p (regexp-quote "String.fromCharCode(65)") generated))
+      (should
+       (string-match-p (regexp-quote "Number(\"1.5\")") generated))
+      (should
+       (string-match-p
+        (regexp-quote "return BigInt(__eliscript_text)") generated))
       (should
        (string-match-p
         (regexp-quote
@@ -1062,6 +1081,12 @@
              "(value-type 1 2)"
              "(string-code-unit-at \"a\")"
              "(string-code-unit-at \"a\" 0 1)"
+             "(string-from-code-unit)"
+             "(string-from-code-unit 65 66)"
+             "(string-to-number)"
+             "(string-to-number \"1\" \"2\")"
+             "(string-to-bigint)"
+             "(string-to-bigint \"1\" \"2\")"
              "(number-float64-words)"
              "(number-float64-words 1 2)"))
     (should-error (eliscript-compile-string source "value-invalid.eli")

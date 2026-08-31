@@ -29,8 +29,9 @@ The current M8 work provides:
 - deterministic value equality and hashing across persistent collections
 - immutable persistent-Map metadata with root-only structural sharing,
   propagation through persistent/transient updates, and equality/hash exclusion
-- canonical readable runtime data text with deterministic Map/Set ordering,
-  metadata prefixes, explicit limits, and Bun/Node round trips
+- canonical readable data text for both optimized runtime values and portable
+  List/Vector/Map/Set values, with deterministic order, metadata, limits, and
+  Bun/Node round trips
 - open runtime protocols with direct and externally registered methods
 - generic collection lookup, traversal, reduction, construction, association,
   and key-presence operations
@@ -47,15 +48,16 @@ The current M8 work provides:
   template names, with explicit caller-capture and quote boundaries
 - structural-sharing and cross-host evidence through million-value workloads
 
-First-class immutable Keyword and Symbol values now participate in runtime and
-portable equality, hashing, Map keys, and Set membership. Symbols and
-persistent collections can carry immutable persistent-Map metadata without
-changing their value identity or copying collection internals. Optimized
-runtime values now also have canonical readable `print-value`/`read-value`
-round trips. The next language boundary is the matching portable List and
-collection data-text implementation, followed by portable protocol dispatch
-policy, measured object/text migration, literal migration, host conversion,
-and the Emacs value bridge.
+First-class immutable Keyword and Symbol values now have optimized and
+portable representations that share equality, hashing, Map keys, and Set
+membership. Symbols and persistent collections can carry immutable
+persistent-Map metadata without changing their value identity or copying
+collection internals. Optimized runtime values and portable List/Vector/Map/Set
+values now have matching canonical data-text implementations, including
+cross-family byte parity over their common subset. The next language boundary
+is the complete P1 exit audit, followed by portable protocol dispatch policy,
+measured object/text migration, literal migration, host conversion, and the
+Emacs value bridge.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in
@@ -131,6 +133,18 @@ Portable source modules can be imported directly:
  nil)
 ```
 
+Portable identifiers and data text stay inside the same selected closure:
+
+```elisp
+(import "../../stdlib/identifier.eli" keyword)
+(import "../../stdlib/data-text.eli" data-text-result-value print-value)
+(import "../../stdlib/persistent-list.eli" persistent-list-from-array)
+
+(data-text-result-value
+ (print-value
+  (persistent-list-from-array [(keyword "article/title") 1 2])))
+```
+
 Runtime-backed core values use the same Lisp-facing module style:
 
 ```elisp
@@ -164,7 +178,7 @@ The implemented language includes:
 - persistent collections, value semantics, and open collection protocols
 - first-class immutable Keyword and Symbol values with qualified names
 - immutable metadata on Symbols and persistent collections
-- canonical readable text for optimized runtime values
+- canonical readable text for optimized and portable persistent values
 
 Eliscript deliberately differs from Emacs Lisp. It uses ECMAScript numbers,
 distinguishes `false` from `nil`, has lexical scope, and does not attempt to run

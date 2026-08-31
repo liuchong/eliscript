@@ -758,9 +758,13 @@ transient round trips, and equality/hash exclusion. Canonical text for the
 optimized runtime family now begins step 4 in
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md),
 including deterministic Map/Set order, metadata, located malformed-input
-errors, resource limits, generated round trips, and Bun/Node evidence. Portable
-List/collection data text and the complete all-host P1 exit audit remain
-required.
+errors, resource limits, generated round trips, and Bun/Node evidence.
+Portable identifiers and the matching List/Vector/Map/Set implementation in
+[0070-portable-identifier-values.md](0070-portable-identifier-values.md) and
+[0071-canonical-portable-data-text.md](0071-canonical-portable-data-text.md)
+complete construction step 4 with common-subset byte parity. Existing
+reference-model and million-scale suites cover construction step 5. The
+complete all-host P1 exit audit remains required.
 
 ### P2: Protocols and Algorithms
 

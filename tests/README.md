@@ -157,6 +157,14 @@ must satisfy value equality and byte-identical reprinting; one shared fixture
 then proves Bun/Node equivalence. The core-library fixture compiles and executes
 the Lisp-named printer/reader module through both compiler generations.
 
+The portable data-text suite compiles portable identifiers, all four
+persistent collections, value semantics, metadata, and the printer/reader with
+both compiler generations. It compares all nine JavaScript and Source Map
+artifacts, runs Bun and Node reports, preserves List category and nested
+`undefined`, checks located failures and limits, verifies 2,000 generated
+round trips, and compares runtime/portable bytes over their common value
+subset.
+
 The protocol suite exercises immutable protocol definitions, direct Symbol
 slots, exact prototype extensions, stable host categories, explicit defaults,
 atomic validation, and structured missing diagnostics. It proves that

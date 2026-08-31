@@ -179,10 +179,11 @@ semantics in both implementations.
   fixtures; public-surface, compatibility, conformance, CLI, Vite, full test,
   and strict byte-compilation checks remain green.
 
-## Next Slice
+## Next Boundary
 
 Canonical runtime printer/reader round trips are now defined by
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md).
-Implement the matching portable List/collection model next. Only after that
-cross-family syntax contract is executable should source literals migrate from
-native JavaScript containers to persistent Eliscript values.
+The matching portable List/collection model and cross-family byte contract are
+implemented by [0071-canonical-portable-data-text.md](0071-canonical-portable-data-text.md).
+Complete the P1 exit audit before source literals migrate from native
+JavaScript containers to persistent Eliscript values.

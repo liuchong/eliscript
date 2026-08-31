@@ -154,7 +154,9 @@ semantics and evidence are in
 
 ## Identifier Values
 
-`core/identifier.eli` exposes immutable, qualified Keyword and Symbol values:
+`core/identifier.eli` exposes optimized immutable, qualified Keyword and
+Symbol values. `identifier.eli` provides matching constructors implemented
+entirely with `defportable`:
 
 ```elisp
 (import "../../stdlib/core/identifier.eli"
@@ -172,8 +174,10 @@ Keywords are interned; Symbols are non-interned values with namespace/name
 equality. Both use deterministic hashes and work as runtime and portable value
 Map keys or Set members. JSON serialization is deliberately rejected until a
 versioned value codec exists. Source literals remain unchanged in this slice.
-Exact semantics are specified in
-[specs/0067-first-class-keyword-symbol-values.md](../specs/0067-first-class-keyword-symbol-values.md).
+Portable Keywords are not interned, but equal portable/runtime identifiers
+share hashes and cross-representation Map/Set behavior. Exact semantics are
+specified in [0067](../specs/0067-first-class-keyword-symbol-values.md) and
+[0070](../specs/0070-portable-identifier-values.md).
 
 ## Metadata
 
@@ -221,9 +225,33 @@ The format covers scalar edges, Keyword/Symbol values, persistent Vector, Map,
 Set, and metadata values. Map and Set output is deterministic, malformed and
 duplicate data is rejected with source positions, and explicit limits bound
 depth, text length, and value count. Portable List and portable collection
-representations are intentionally not claimed by this module; their matching
-implementation is the next standard-library slice. See
+representations remain outside this optimized module and are implemented
+separately in `data-text.eli`. See
 [specs/0069-canonical-runtime-data-text.md](../specs/0069-canonical-runtime-data-text.md).
+
+## Canonical Portable Data Text
+
+`data-text.eli` prints and reads scalar, identifier, persistent List, Vector,
+Map, Set, and metadata values without importing the JavaScript collection
+runtime:
+
+```elisp
+(import "../../stdlib/data-text.eli"
+        data-text-result-value print-value read-value)
+
+(data-text-result-value
+ (read-value
+  (data-text-result-value
+   (print-value value))))
+```
+
+Portable operations return explicit success/failure objects because portable
+closures do not use exception control flow. Successful values live in a
+one-element payload so `undefined` remains distinguishable from failure.
+Lists use `(...)`; Map and Set output uses a stable Eliscript-authored merge
+sort. Located errors and default depth, length, and value-count limits match
+the runtime format. See
+[specs/0071-canonical-portable-data-text.md](../specs/0071-canonical-portable-data-text.md).
 
 ## Protocol-driven Core
 

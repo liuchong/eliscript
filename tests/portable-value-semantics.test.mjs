@@ -12,6 +12,7 @@ const bootstrapBuilder = resolve(projectDirectory, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(projectDirectory, "bin/eliscript-portable");
 const sources = [
   "bit",
+  "identifier",
   "persistent-list",
   "persistent-vector",
   "persistent-map",
@@ -57,7 +58,7 @@ async function generatedModules(label) {
   await generatedModuleBuild;
   const suffix = `?${label}=${Date.now()}`;
   const modules = {};
-  for (const name of sources) {
+  for (const name of sources.filter((source) => source !== "identifier")) {
     const output = resolve(projectDirectory, `dist/stdlib/${name}.mjs`);
     modules[name] = await import(`${pathToFileURL(output).href}${suffix}`);
   }
@@ -180,6 +181,8 @@ test("Eliscript-authored value semantics compile and agree across hosts", async 
         unqualifiedKeyword: 1_981_314_640,
         symbol: 1_771_029_623,
         unqualifiedSymbol: 3_731_567_423,
+        portableKeyword: 889_022_832,
+        portableSymbol: 1_771_029_623,
       },
       invariants: {
         nanEqual: true,
@@ -197,6 +200,12 @@ test("Eliscript-authored value semantics compile and agree across hosts", async 
         hostFallbackHash: true,
         symbolsEqual: true,
         identifierCategoriesDistinct: true,
+        portableKeywordEqual: true,
+        portableSymbolEqual: true,
+        portableKeywordValid: true,
+        portableSymbolValid: true,
+        concretePortableOnly: true,
+        invalidPortableIdentifier: true,
       },
       collision: {
         leftHash: 2_357_254_775,
@@ -215,6 +224,9 @@ test("Eliscript-authored value semantics compile and agree across hosts", async 
         symbolValue: "symbol",
         identifierSetCount: 2,
         equalSymbolMember: true,
+        portableKeywordValue: "keyword",
+        portableSymbolValue: "symbol",
+        portableIdentifierSetCount: 2,
       },
     });
 

@@ -152,7 +152,8 @@ by 0048.
 
 Immutable metadata is implemented by
 [0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).
-The optimized-runtime printer/reader round trip now exists in 0069. Complete
-the portable collection/List side before changing literal emission. Literal
+The optimized-runtime printer/reader round trip exists in 0069. Portable
+Keyword/Symbol values and collection/List data text are implemented by 0070
+and 0071. Complete the P1 exit audit before changing literal emission. Literal
 migration must preserve explicit native JavaScript property keys and JSX tag
 semantics rather than treating every current keyword-shaped token alike.

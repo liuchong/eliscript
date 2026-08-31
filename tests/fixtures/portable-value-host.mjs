@@ -7,6 +7,7 @@ import {
 const [modulePath] = process.argv.slice(2);
 const moduleUrl = pathToFileURL(modulePath);
 const valueModule = await import(moduleUrl.href);
+const identifierModule = await import(new URL("./identifier.eli", moduleUrl).href);
 const listModule = await import(new URL("./persistent-list.eli", moduleUrl).href);
 const vectorModule = await import(new URL("./persistent-vector.eli", moduleUrl).href);
 const mapModule = await import(new URL("./persistent-map.eli", moduleUrl).href);
@@ -18,6 +19,15 @@ const {
   value_map_from_entries: valueMapFromEntries,
   value_set_from_array: valueSetFromArray,
 } = valueModule;
+const {
+  keyword: portableKeyword,
+  keyword_QMARK_: portableKeywordPredicate,
+  portable_keyword_QMARK_: concretePortableKeywordPredicate,
+  portable_symbol_QMARK_: concretePortableSymbolPredicate,
+  qualified_name: portableQualifiedName,
+  symbol: portableSymbol,
+  symbol_QMARK_: portableSymbolPredicate,
+} = identifierModule;
 const { persistent_list_from_array: persistentListFromArray } = listModule;
 const { persistent_vector_from_array: persistentVectorFromArray } = vectorModule;
 const {
@@ -80,6 +90,8 @@ const vectorLookup = persistentMapGet(
 );
 const keywordTitle = keyword("article/title");
 const symbolTitle = eliscriptSymbol("article/title");
+const portableKeywordTitle = portableKeyword("article/title");
+const portableSymbolTitle = portableSymbol("article", "title");
 const identifierMap = valueMapFromEntries([
   [keywordTitle, "keyword"],
   [symbolTitle, "symbol"],
@@ -88,6 +100,12 @@ const identifierSet = valueSetFromArray([
   symbolTitle,
   eliscriptSymbol("article", "title"),
   keywordTitle,
+]);
+const portableIdentifierSet = valueSetFromArray([
+  keywordTitle,
+  portableKeywordTitle,
+  symbolTitle,
+  portableSymbolTitle,
 ]);
 
 console.log(JSON.stringify({
@@ -120,6 +138,8 @@ console.log(JSON.stringify({
     unqualifiedKeyword: valueHash(keyword("title")),
     symbol: valueHash(symbolTitle),
     unqualifiedSymbol: valueHash(eliscriptSymbol("title")),
+    portableKeyword: valueHash(portableKeywordTitle),
+    portableSymbol: valueHash(portableSymbolTitle),
   },
   invariants: {
     nanEqual: valueEqual(Number.NaN, Number.NaN),
@@ -140,6 +160,27 @@ console.log(JSON.stringify({
       eliscriptSymbol("article", "title"),
     ),
     identifierCategoriesDistinct: !valueEqual(keywordTitle, symbolTitle),
+    portableKeywordEqual: valueEqual(keywordTitle, portableKeywordTitle),
+    portableSymbolEqual: valueEqual(symbolTitle, portableSymbolTitle),
+    portableKeywordValid:
+      portableKeywordPredicate(portableKeywordTitle) &&
+      concretePortableKeywordPredicate(portableKeywordTitle) &&
+      portableQualifiedName(portableKeywordTitle) === "article/title",
+    portableSymbolValid:
+      portableSymbolPredicate(portableSymbolTitle) &&
+      concretePortableSymbolPredicate(portableSymbolTitle) &&
+      portableQualifiedName(portableSymbolTitle) === "article/title",
+    concretePortableOnly:
+      !concretePortableKeywordPredicate(keywordTitle) &&
+      !concretePortableSymbolPredicate(symbolTitle),
+    invalidPortableIdentifier:
+      portableKeyword("bad/name/again") === null &&
+      portableSymbol("", "name") === null &&
+      !concretePortableKeywordPredicate({
+        kind: "eliscript/keyword",
+        namespace: "bad/namespace",
+        name: "title",
+      }),
   },
   collision: {
     leftHash: valueHash("key-50691"),
@@ -172,5 +213,16 @@ console.log(JSON.stringify({
       identifierSet,
       eliscriptSymbol("article", "title"),
     ),
+    portableKeywordValue: persistentMapGet(
+      identifierMap,
+      portableKeywordTitle,
+      "missing",
+    ),
+    portableSymbolValue: persistentMapGet(
+      identifierMap,
+      portableSymbolTitle,
+      "missing",
+    ),
+    portableIdentifierSetCount: persistentSetCount(portableIdentifierSet),
   },
 }));

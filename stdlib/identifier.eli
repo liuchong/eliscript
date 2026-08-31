@@ -1,0 +1,147 @@
+(module eliscript.identifier
+  (defconst portable-keyword-kind "eliscript/keyword")
+  (defconst portable-symbol-kind "eliscript/symbol")
+
+  (defportable identifier-valid-part? (value)
+    (if (or (not (= (value-type value) "string"))
+            (= (length value) 0))
+        false
+      (let ((valid t)
+            (index 0))
+        (while (and valid (< index (length value)))
+          (when (= (nth index value) "/")
+            (setq valid false))
+          (setq index (1+ index)))
+        valid)))
+
+  (defportable identifier-split-qualified (value)
+    (if (or (not (= (value-type value) "string"))
+            (= (length value) 0))
+        nil
+      (let ((separator -1)
+            (valid t)
+            (index 0))
+        (while (and valid (< index (length value)))
+          (when (= (nth index value) "/")
+            (if (= separator -1)
+                (setq separator index)
+              (setq valid false)))
+          (setq index (1+ index)))
+        (cond
+         ((not valid) nil)
+         ((= separator -1) [nil value])
+         ((or (= separator 0) (= separator (1- (length value)))) nil)
+         (t
+          [(text-slice 0 separator value)
+           (text-slice (1+ separator) (length value) value)])))))
+
+  (defportable text-slice (start end text)
+    (let ((result "")
+          (index start))
+      (while (< index end)
+        (setq result (str result (nth index text))
+              index (1+ index)))
+      result))
+
+  (defportable portable-keyword? (value)
+    (and (not (nullish? value))
+         (object-has? value "kind")
+         (= (get value "kind" nil) portable-keyword-kind)
+         (object-has? value "namespace")
+         (object-has? value "name")
+         (or (nil? (get value "namespace" nil))
+             (identifier-valid-part? (get value "namespace" nil)))
+         (identifier-valid-part? (get value "name" nil))))
+
+  (defportable portable-symbol? (value)
+    (and (not (nullish? value))
+         (object-has? value "kind")
+         (= (get value "kind" nil) portable-symbol-kind)
+         (object-has? value "namespace")
+         (object-has? value "name")
+         (or (nil? (get value "namespace" nil))
+             (identifier-valid-part? (get value "namespace" nil)))
+         (identifier-valid-part? (get value "name" nil))))
+
+  (defportable keyword? (value)
+    (= (value-type value) "keyword"))
+
+  (defportable symbol? (value)
+    (= (value-type value) "symbol"))
+
+  (defportable identifier? (value)
+    (or (keyword? value) (symbol? value)))
+
+  (defportable identifier-name (value)
+    (if (identifier? value) (get value "name" nil) nil))
+
+  (defportable identifier-namespace (value)
+    (if (identifier? value) (get value "namespace" nil) nil))
+
+  (defportable qualified-name (value)
+    (if (not (identifier? value))
+        nil
+      (let ((namespace (identifier-namespace value))
+            (name (identifier-name value)))
+        (if (nil? namespace) name (str namespace "/" name)))))
+
+  (defportable normalize-identifier-arguments (arguments type)
+    (cond
+     ((= (length arguments) 1)
+      (let ((value (nth 0 arguments)))
+        (if (= (value-type value) type)
+            (let ((namespace (get value "namespace" nil))
+                  (name (get value "name" nil)))
+              (if (and (or (nil? namespace)
+                           (identifier-valid-part? namespace))
+                       (identifier-valid-part? name))
+                  (object :existing value
+                          :namespace namespace
+                          :name name)
+                nil))
+          (let ((parts (identifier-split-qualified value)))
+            (if (nil? parts)
+                nil
+              (object :existing nil
+                      :namespace (nth 0 parts)
+                      :name (nth 1 parts)))))))
+     ((= (length arguments) 2)
+      (let ((namespace (nth 0 arguments))
+            (name (nth 1 arguments)))
+        (if (and (or (nil? namespace)
+                     (identifier-valid-part? namespace))
+                 (identifier-valid-part? name))
+            (object :existing nil :namespace namespace :name name)
+          nil)))
+     (t nil)))
+
+  (defportable make-portable-identifier (kind normalized)
+    (if (nil? normalized)
+        nil
+      (let ((existing (get normalized "existing" nil)))
+        (if (not (nil? existing))
+            existing
+          (object :kind kind
+                  :namespace (get normalized "namespace" nil)
+                  :name (get normalized "name" nil))))))
+
+  (defportable keyword (&rest arguments)
+    (make-portable-identifier
+     portable-keyword-kind
+     (normalize-identifier-arguments arguments "keyword")))
+
+  (defportable symbol (&rest arguments)
+    (make-portable-identifier
+     portable-symbol-kind
+     (normalize-identifier-arguments arguments "symbol")))
+
+  (export identifier-name
+          identifier-namespace
+          identifier?
+          keyword
+          keyword?
+          portable-keyword?
+          portable-symbol?
+          qualified-name
+          symbol
+          symbol?))

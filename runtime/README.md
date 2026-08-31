@@ -69,10 +69,11 @@ unsafe identifiers use explicit tags, and duplicate or malformed input fails
 with a located `DataTextError`. Depth, UTF-16 length, and value-count limits
 bound both directions.
 
-This is deliberately separate from executable source reading and the future
-versioned Emacs transport codec. Portable List/collection data text remains the
-next P1 slice. Exact semantics are specified in
-[specs/0069-canonical-runtime-data-text.md](../specs/0069-canonical-runtime-data-text.md).
+This is deliberately separate from executable source reading, the portable
+List/collection implementation, and the future versioned Emacs transport
+codec. Portable data text is now implemented in `stdlib/data-text.eli`. Exact
+semantics are specified in [0069](../specs/0069-canonical-runtime-data-text.md)
+and [0071](../specs/0071-canonical-portable-data-text.md).
 
 ### Persistent Map
 

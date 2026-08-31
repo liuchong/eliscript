@@ -19,7 +19,7 @@ The format covers nullish and numeric scalar edges, strings, Keyword and Symbol
 values, persistent Vector/Map/Set values, and immutable metadata. It is
 separate from the compiler source reader, generated JavaScript serialization,
 the future versioned Emacs value codec, and the portable List/collection text
-implementation.
+implementation defined by 0071.
 
 ## Public Surface
 
@@ -144,10 +144,12 @@ throws `RangeError`.
 
 ## Scope and Compatibility
 
-This provisional M8 format covers the optimized runtime family only. It does
-not yet read List syntax, portable Eliscript collection representations,
+This provisional M8 module covers the optimized runtime family only. It does
+not read List syntax or portable Eliscript collection representations,
 native JavaScript Array/Object/Map/Set values, local JavaScript Symbols, cyclic
 host objects, executable forms, reader macros, or arbitrary tagged literals.
+The matching portable grammar, including Lists, is implemented separately by
+0071.
 
 The compiler source reader remains responsible for `.eli` programs and located
 syntax. The future Emacs value codec must add explicit framing, versioning,
@@ -181,9 +183,9 @@ format as an unframed wire protocol.
 - **CDT-13:** Public-surface, compatibility, conformance, full test, CLI, Vite,
   and strict byte-compilation checks remain green.
 
-## Next Slice
+## Next Boundary
 
-Implement the same canonical model for portable Eliscript List, Vector, Map,
-and Set representations, including `(...)` List syntax. Then run cross-family
-printer/reader properties before declaring 0041 P1 construction step 4
-complete or changing source literal emission.
+0070 and 0071 complete the portable identifier and List/collection side plus
+common-subset byte parity. Run the complete 0041 P1 exit audit before changing
+source literal emission; the compiler reader remains independent until that
+migration has its own compatibility and application evidence.

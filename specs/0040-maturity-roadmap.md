@@ -554,13 +554,15 @@ and Map/Set key behavior. Immutable metadata now lands in
 [0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md),
 including root-only wrappers, persistent/transient propagation, portable and
 runtime APIs, equality/hash exclusion, and seed/self-hosted Bun/Node evidence.
-P1 construction steps 1-3 are complete. Declared macro dependencies,
+P1 construction steps 1-5 now have implementation evidence. Declared macro dependencies,
 object/text migration, portable dispatch policy, static escape analysis,
 efficient host identity hashing remain open. Canonical printing/reading for
 the optimized runtime family now lands in
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md);
-portable List/collection data text and the complete P1 cross-family audit
-remain open.
+portable Keyword/Symbol values and List/collection data text now land in
+[0070-portable-identifier-values.md](0070-portable-identifier-values.md) and
+[0071-canonical-portable-data-text.md](0071-canonical-portable-data-text.md).
+The complete P1 all-host exit audit remains open before literal migration.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

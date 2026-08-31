@@ -797,13 +797,25 @@
         ((= name "value-type")
          (require-node-arity node 1 1)
          (combine
-           ["((__eliscript_value) => { if (__eliscript_value === null) return \"null\"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== \"object\" && __eliscript_host_type !== \"function\") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for(\"eliscript.value.type\")); return __eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, \"value\") && (__eliscript_type.value === \"keyword\" || __eliscript_type.value === \"symbol\") ? __eliscript_type.value : __eliscript_host_type; } catch { return __eliscript_host_type; } })("
+           ["((__eliscript_value) => { if (__eliscript_value === null) return \"null\"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== \"object\" && __eliscript_host_type !== \"function\") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for(\"eliscript.value.type\")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, \"value\") && (__eliscript_type.value === \"keyword\" || __eliscript_type.value === \"symbol\")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, \"kind\"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, \"value\")) { if (__eliscript_kind.value === \"eliscript/keyword\") return \"keyword\"; if (__eliscript_kind.value === \"eliscript/symbol\") return \"symbol\"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })("
             (emit-expression (nth 0 nodes)) ")"]))
         ((= name "string-code-unit-at")
          (require-node-arity node 2 2)
          (combine
            ["(" (emit-expression (nth 0 nodes)) ").charCodeAt("
             (emit-expression (nth 1 nodes)) ")"]))
+        ((= name "string-from-code-unit")
+         (require-node-arity node 1 1)
+         (combine
+           ["String.fromCharCode(" (emit-expression (nth 0 nodes)) ")"]))
+        ((= name "string-to-number")
+         (require-node-arity node 1 1)
+         (combine ["Number(" (emit-expression (nth 0 nodes)) ")"]))
+        ((= name "string-to-bigint")
+         (require-node-arity node 1 1)
+         (combine
+           ["((__eliscript_text) => { try { return BigInt(__eliscript_text); } catch { return null; } })("
+            (emit-expression (nth 0 nodes)) ")"]))
         ((= name "number-float64-words")
          (require-node-arity node 1 1)
          (combine

@@ -28,6 +28,7 @@ test: check-contracts
 		tests/portable-persistent-set.test.mjs \
 		tests/portable-persistent-vector.test.mjs \
 		tests/portable-value-semantics.test.mjs tests/portable-metadata.test.mjs \
+		tests/portable-data-text.test.mjs \
 		tests/identifier.test.mjs tests/metadata.test.mjs \
 		tests/data-text.test.mjs \
 		tests/protocol.test.mjs tests/collection-protocol.test.mjs \

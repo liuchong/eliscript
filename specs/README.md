@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 69 specifications.
+The registry currently contains 71 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 40 |
+| Accepted design | 42 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 66 |
+| Implemented | 68 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-38 as provisional, and 3 as planning. That baseline is derived from registry
+40 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -49,9 +49,9 @@ owner-token transient Vector, Map, and Set builders, and protocol-driven core
 sequence/data algorithms, stack-safe recurrence, deterministic macro-generated
 names, Lisp-named protocol/collection/transducer/transient modules, and
 Eliscript-maintained core algorithm bodies, first-class immutable Keyword and
-Symbol values, root-shared immutable metadata, and canonical runtime data text
-implemented. Portable collection/List data text, portable dispatch internals,
-literal migration, host conversion, static transient
+Symbol values, root-shared immutable metadata, portable identifier values, and
+canonical runtime plus portable List/collection data text implemented.
+Portable dispatch internals, literal migration, host conversion, static transient
 escape analysis, and the Emacs value bridge remain ahead.
 
 ## Reading Paths
@@ -99,6 +99,8 @@ number.
 13. [0067: First-class Keyword and Symbol Values](0067-first-class-keyword-symbol-values.md)
 14. [0068: Immutable Metadata Semantics](0068-immutable-metadata-semantics.md)
 15. [0069: Canonical Runtime Data Text](0069-canonical-runtime-data-text.md)
+16. [0070: Portable Keyword and Symbol Values](0070-portable-identifier-values.md)
+17. [0071: Canonical Portable Data Text](0071-canonical-portable-data-text.md)
 
 ### React and Publishing
 
@@ -234,6 +236,8 @@ The schemas and change workflow are defined by specifications
 | 0067 | [First-class Keyword and Symbol Values](0067-first-class-keyword-symbol-values.md) | Accepted | Implemented |
 | 0068 | [Immutable Metadata Semantics](0068-immutable-metadata-semantics.md) | Accepted | Implemented |
 | 0069 | [Canonical Runtime Data Text](0069-canonical-runtime-data-text.md) | Accepted | Implemented |
+| 0070 | [Portable Keyword and Symbol Values](0070-portable-identifier-values.md) | Accepted | Implemented |
+| 0071 | [Canonical Portable Data Text](0071-canonical-portable-data-text.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

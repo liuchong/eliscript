@@ -859,7 +859,7 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
       ('value-type
        (eliscript-emitter--require-arity "value-type" arguments 1 1)
        (format
-        "((__eliscript_value) => { if (__eliscript_value === null) return \"null\"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== \"object\" && __eliscript_host_type !== \"function\") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for(\"eliscript.value.type\")); return __eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, \"value\") && (__eliscript_type.value === \"keyword\" || __eliscript_type.value === \"symbol\") ? __eliscript_type.value : __eliscript_host_type; } catch { return __eliscript_host_type; } })(%s)"
+        "((__eliscript_value) => { if (__eliscript_value === null) return \"null\"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== \"object\" && __eliscript_host_type !== \"function\") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for(\"eliscript.value.type\")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, \"value\") && (__eliscript_type.value === \"keyword\" || __eliscript_type.value === \"symbol\")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, \"kind\"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, \"value\")) { if (__eliscript_kind.value === \"eliscript/keyword\") return \"keyword\"; if (__eliscript_kind.value === \"eliscript/symbol\") return \"symbol\"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(%s)"
         (eliscript-emitter-emit-expression (car arguments))))
       ('string-code-unit-at
        (eliscript-emitter--require-arity
@@ -867,6 +867,20 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
        (format "(%s).charCodeAt(%s)"
                (eliscript-emitter-emit-expression (nth 0 arguments))
                (eliscript-emitter-emit-expression (nth 1 arguments))))
+      ('string-from-code-unit
+       (eliscript-emitter--require-arity
+        "string-from-code-unit" arguments 1 1)
+       (format "String.fromCharCode(%s)"
+               (eliscript-emitter-emit-expression (car arguments))))
+      ('string-to-number
+       (eliscript-emitter--require-arity "string-to-number" arguments 1 1)
+       (format "Number(%s)"
+               (eliscript-emitter-emit-expression (car arguments))))
+      ('string-to-bigint
+       (eliscript-emitter--require-arity "string-to-bigint" arguments 1 1)
+       (format
+        "((__eliscript_text) => { try { return BigInt(__eliscript_text); } catch { return null; } })(%s)"
+        (eliscript-emitter-emit-expression (car arguments))))
       ('number-float64-words
        (eliscript-emitter--require-arity
         "number-float64-words" arguments 1 1)

@@ -765,13 +765,26 @@
       ('value-type
        (eliscript-ir-emitter--require-arity node 1 1)
        (format
-        "((__eliscript_value) => { if (__eliscript_value === null) return \"null\"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== \"object\" && __eliscript_host_type !== \"function\") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for(\"eliscript.value.type\")); return __eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, \"value\") && (__eliscript_type.value === \"keyword\" || __eliscript_type.value === \"symbol\") ? __eliscript_type.value : __eliscript_host_type; } catch { return __eliscript_host_type; } })(%s)"
+        "((__eliscript_value) => { if (__eliscript_value === null) return \"null\"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== \"object\" && __eliscript_host_type !== \"function\") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for(\"eliscript.value.type\")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, \"value\") && (__eliscript_type.value === \"keyword\" || __eliscript_type.value === \"symbol\")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, \"kind\"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, \"value\")) { if (__eliscript_kind.value === \"eliscript/keyword\") return \"keyword\"; if (__eliscript_kind.value === \"eliscript/symbol\") return \"symbol\"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(%s)"
         (eliscript-ir-emitter-emit-expression (car nodes))))
       ('string-code-unit-at
        (eliscript-ir-emitter--require-arity node 2 2)
        (format "(%s).charCodeAt(%s)"
                (eliscript-ir-emitter-emit-expression (nth 0 nodes))
                (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
+      ('string-from-code-unit
+       (eliscript-ir-emitter--require-arity node 1 1)
+       (format "String.fromCharCode(%s)"
+               (eliscript-ir-emitter-emit-expression (car nodes))))
+      ('string-to-number
+       (eliscript-ir-emitter--require-arity node 1 1)
+       (format "Number(%s)"
+               (eliscript-ir-emitter-emit-expression (car nodes))))
+      ('string-to-bigint
+       (eliscript-ir-emitter--require-arity node 1 1)
+       (format
+        "((__eliscript_text) => { try { return BigInt(__eliscript_text); } catch { return null; } })(%s)"
+        (eliscript-ir-emitter-emit-expression (car nodes))))
       ('number-float64-words
        (eliscript-ir-emitter--require-arity node 1 1)
        (format

@@ -59,6 +59,13 @@
         "names": ["number-float64-words", "string-code-unit-at", "value-type"]
       },
       {
+        "id": "portable-data-text-forms",
+        "spec": "0071",
+        "sources": ["compiler/eliscript-analyzer.el", "compiler/eliscript-ir-emitter.el", "compiler/eliscript-lower.el"],
+        "verifyNames": true,
+        "names": ["string-from-code-unit", "string-to-bigint", "string-to-number"]
+      },
+      {
         "id": "macro-evaluator-forms",
         "spec": "0035",
         "sources": ["bootstrap/compiler/expander.eli", "compiler/eliscript-macro-eval.el"],
@@ -357,6 +364,8 @@
     {"module": "core-transducer", "spec": "0066", "file": "stdlib/core/transducer.eli", "exports": ["completing", "compose-transducers", "dropping", "filtering", "into", "mapping", "removing", "taking", "transduce"]},
     {"module": "core-transient", "spec": "0066", "file": "stdlib/core/transient.eli", "exports": ["IEditable", "ITransientCollection", "assoc!", "conj!", "dissoc!", "persistent!", "transient"]},
     {"module": "data", "spec": "0027", "file": "stdlib/data.eli", "exports": ["count-by", "group-by", "index-by"]},
+    {"module": "data-text", "spec": "0071", "file": "stdlib/data-text.eli", "exports": ["data-text-result-value", "print-value", "read-value", "read-values"]},
+    {"module": "identifier", "spec": "0070", "file": "stdlib/identifier.eli", "exports": ["identifier-name", "identifier-namespace", "identifier?", "keyword", "keyword?", "portable-keyword?", "portable-symbol?", "qualified-name", "symbol", "symbol?"]},
     {"module": "metadata", "spec": "0068", "file": "stdlib/metadata.eli", "exports": ["meta", "metadata-valid?", "supports-metadata?", "vary-meta", "with-meta"]},
     {"module": "object", "spec": "0026", "file": "stdlib/object.eli", "exports": ["assoc", "dissoc", "filter-values", "has?", "key-in?", "keys", "map-values", "merge", "omit", "pick", "update"]},
     {"module": "persistent-list", "spec": "0054", "file": "stdlib/persistent-list.eli", "exports": ["empty-persistent-list", "persistent-list-conj", "persistent-list-cons", "persistent-list-count", "persistent-list-empty?", "persistent-list-first", "persistent-list-from-array", "persistent-list-meta", "persistent-list-nth", "persistent-list-peek", "persistent-list-pop", "persistent-list-reduce", "persistent-list-rest", "persistent-list-reverse", "persistent-list-to-array", "persistent-list-with-meta", "persistent-list?"]},
