@@ -117,9 +117,11 @@ This M8 surface is provisional. It adds explicit values and extends
 reader syntax, keyword property keys, JSX tag handling, quoted forms, or
 compiler binding Symbols.
 
-Metadata, canonical printing/reading, serialization codecs, automatic literal
-emission, namespace aliases, and Emacs boundary conversion remain separate
-work. Native JavaScript `Symbol` values retain the behavior defined by 0048.
+Immutable Symbol metadata is now specified by 0068; Keywords remain
+unannotated because they are interned. Canonical printing/reading,
+serialization codecs, automatic literal emission, namespace aliases, and
+Emacs boundary conversion remain separate work. Native JavaScript `Symbol`
+values retain the behavior defined by 0048.
 
 ## Acceptance Criteria
 
@@ -146,7 +148,9 @@ work. Native JavaScript `Symbol` values retain the behavior defined by 0048.
 
 ## Next Slice
 
-Build immutable metadata on this identifier foundation, then define one
-canonical printer/reader round trip before changing literal emission. Literal
-migration must preserve explicit native JavaScript property keys and JSX tag
-semantics rather than treating every current keyword-shaped token alike.
+Immutable metadata is implemented by
+[0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).
+Define one canonical printer/reader round trip next, before changing literal
+emission. Literal migration must preserve explicit native JavaScript property
+keys and JSX tag semantics rather than treating every current keyword-shaped
+token alike.

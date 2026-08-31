@@ -550,9 +550,13 @@ including module-wide collision avoidance and Bun/Node execution evidence.
 First-class Keyword and Symbol values now land in
 [0067-first-class-keyword-symbol-values.md](0067-first-class-keyword-symbol-values.md),
 including immutable qualified values, deterministic runtime/portable hashes,
-and Map/Set key behavior. Declared macro dependencies, object/text migration,
-portable dispatch policy, static escape analysis, efficient host identity
-hashing, metadata, printing, and reading remain open.
+and Map/Set key behavior. Immutable metadata now lands in
+[0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md),
+including root-only wrappers, persistent/transient propagation, portable and
+runtime APIs, equality/hash exclusion, and seed/self-hosted Bun/Node evidence.
+P1 construction steps 1-3 are complete. Declared macro dependencies,
+object/text migration, portable dispatch policy, static escape analysis,
+efficient host identity hashing, printing, and reading remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

@@ -1,0 +1,20 @@
+(module eliscript.core.metadata
+  (import "../../runtime/core/metadata.mjs" :as Runtime)
+
+  (defconst IMeta Runtime/IMeta)
+  (defconst IWithMeta Runtime/IWithMeta)
+
+  (defun supports-metadata? (value)
+    (Runtime/supportsMetadata value))
+
+  (defun meta (value)
+    (Runtime/meta value))
+
+  (defun with-meta (value metadata)
+    (Runtime/withMeta value metadata))
+
+  (defun vary-meta (value transform &rest arguments)
+    (apply Runtime/varyMeta
+           (cons value (cons transform arguments))))
+
+  (export IMeta IWithMeta meta supports-metadata? vary-meta with-meta))

@@ -20,6 +20,10 @@
   (defun conj (collection &rest values)
     (apply Runtime/conj (cons collection values)))
 
+  (defun assoc (collection key value &rest key-values)
+    (apply Runtime/assoc
+           (cons collection (cons key (cons value key-values)))))
+
   (defun lookup (collection key &rest not-found)
     (apply Runtime/get (cons collection (cons key not-found))))
 
@@ -48,6 +52,7 @@
     (apply Runtime/sequenceView (cons factory count)))
 
   (export IAssociative IConj ICounted IEmptyable IIndexed ILookup IReduce
-          ISeqable SequenceView collection-count collection-nth collection-seq
-          conj contains? empty lookup reduce reduced reduced? sequence-view
+          ISeqable SequenceView assoc collection-count collection-nth
+          collection-seq conj contains? empty lookup reduce reduced reduced?
+          sequence-view
           unreduced))

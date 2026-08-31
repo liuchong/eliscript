@@ -219,10 +219,10 @@ This specification and its conformance feature are provisional in
 Compatibility Baseline 1. They establish the key contract needed by HAMT Map
 and Set but do not complete 0041 value semantics.
 
+Metadata exclusion is now implemented and evidenced by
+[0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).
 Remaining work includes:
 
-- metadata-aware equality/hash policy
-- metadata exclusion tests
 - language-form and literal migration
 - portable protocol dispatch policy
 - hostile-input and decode-boundary security limits
@@ -235,3 +235,5 @@ and Set support by
 Portable collection semantics and first-class identifiers are now specified
 by [0057-portable-value-semantics.md](0057-portable-value-semantics.md) and
 [0067-first-class-keyword-symbol-values.md](0067-first-class-keyword-symbol-values.md).
+Immutable metadata exclusion and propagation are specified by
+[0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).

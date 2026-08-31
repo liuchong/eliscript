@@ -42,12 +42,22 @@ import {
   TRANSIENT_DISSOC,
   TRANSIENT_PERSISTENT,
 } from "./transient-internals.mjs";
+import {
+  METADATA_READ,
+  METADATA_WITH,
+} from "./metadata-internals.mjs";
 
 const MAP_HASH_TAG = 0x6c8e_9cf5;
 const MAP_ENTRY_HASH_TAG = 0x3a91_72eb;
 
-function makeMap(count, root) {
-  return new PersistentHashMap(MAP_CONSTRUCTOR_TOKEN, count, root);
+function makeMap(count, root, metadata = null) {
+  return new PersistentHashMap(MAP_CONSTRUCTOR_TOKEN, count, root, metadata);
+}
+
+function emptyMapWithMetadata(metadata) {
+  return metadata === null
+    ? EMPTY_MAP
+    : makeMap(0, EMPTY_BITMAP_NODE, metadata);
 }
 
 function makeTransientMap(map) {
@@ -86,6 +96,7 @@ class TransientHashMap {
       source: map,
       count: source.count,
       root: source.root,
+      metadata: source.metadata,
     };
     Object.defineProperty(this, "__eliscript_transient__", {
       enumerable: true,
@@ -141,8 +152,8 @@ class TransientHashMap {
     const result = !state.changed
       ? state.source
       : state.count === 0
-        ? EMPTY_MAP
-        : makeMap(state.count, state.root);
+        ? emptyMapWithMetadata(state.metadata)
+        : makeMap(state.count, state.root, state.metadata);
     state.active = false;
     state.owner = null;
     recordTransientMapPersistent();
@@ -159,13 +170,13 @@ class TransientHashMap {
 }
 
 export class PersistentHashMap {
-  constructor(token, count, root) {
+  constructor(token, count, root, metadata = null) {
     if (token !== MAP_CONSTRUCTOR_TOKEN) {
       throw new TypeError(
         "PersistentHashMap values must be created with persistentHashMap or PersistentHashMap.from",
       );
     }
-    this[MAP_STATE] = Object.freeze({ count, root });
+    this[MAP_STATE] = Object.freeze({ count, root, metadata });
     Object.freeze(this);
   }
 
@@ -212,7 +223,11 @@ export class PersistentHashMap {
     if (!result.changed) {
       return this;
     }
-    return makeMap(state.count + (result.added ? 1 : 0), result.item);
+    return makeMap(
+      state.count + (result.added ? 1 : 0),
+      result.item,
+      state.metadata,
+    );
   }
 
   dissoc(key) {
@@ -222,9 +237,13 @@ export class PersistentHashMap {
       return this;
     }
     if (state.count === 1) {
-      return EMPTY_MAP;
+      return emptyMapWithMetadata(state.metadata);
     }
-    return makeMap(state.count - 1, result.item ?? EMPTY_BITMAP_NODE);
+    return makeMap(
+      state.count - 1,
+      result.item ?? EMPTY_BITMAP_NODE,
+      state.metadata,
+    );
   }
 
   *entries() {
@@ -264,7 +283,7 @@ export class PersistentHashMap {
   }
 
   [COLLECTION_EMPTY]() {
-    return EMPTY_MAP;
+    return emptyMapWithMetadata(this[MAP_STATE].metadata);
   }
 
   [COLLECTION_CONJ](entry) {
@@ -321,6 +340,17 @@ export class PersistentHashMap {
       (entry) => pairHash(entry, hash),
       MAP_HASH_TAG,
     );
+  }
+
+  [METADATA_READ]() {
+    return this[MAP_STATE].metadata;
+  }
+
+  [METADATA_WITH](metadata) {
+    const state = this[MAP_STATE];
+    return metadata === state.metadata
+      ? this
+      : makeMap(state.count, state.root, metadata);
   }
 
   [Symbol.iterator]() {

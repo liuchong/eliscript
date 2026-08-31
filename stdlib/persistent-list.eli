@@ -2,19 +2,21 @@
   (defconst persistent-list-kind "eliscript/persistent-list")
   (defconst persistent-list-max-count 2147483647)
 
-  (defportable make-empty-persistent-list ()
+  (defportable make-empty-persistent-list (metadata)
     (object :kind persistent-list-kind
             :count 0
             :empty t
             :value nil
-            :rest nil))
+            :rest nil
+            :metadata metadata))
 
-  (defportable make-persistent-list-node (value rest)
+  (defportable make-persistent-list-node (value rest metadata)
     (object :kind persistent-list-kind
             :count (1+ (get rest "count" 0))
             :empty false
             :value value
-            :rest rest))
+            :rest rest
+            :metadata metadata))
 
   (defportable persistent-list? (value)
     (and (not (nullish? value))
@@ -22,7 +24,7 @@
          (= (get value "kind" nil) persistent-list-kind)))
 
   (defportable empty-persistent-list ()
-    (make-empty-persistent-list))
+    (make-empty-persistent-list nil))
 
   (defportable persistent-list-empty? (list)
     (= (get list "count" 0) 0))
@@ -33,7 +35,8 @@
   (defportable persistent-list-cons (list value)
     (if (>= (persistent-list-count list) persistent-list-max-count)
         nil
-      (make-persistent-list-node value list)))
+      (make-persistent-list-node
+       value list (get list "metadata" nil))))
 
   (defportable persistent-list-conj (list value)
     (persistent-list-cons list value))
@@ -55,6 +58,19 @@
     (if (persistent-list-empty? list)
         nil
       (get list "rest" nil)))
+
+  (defportable persistent-list-meta (list)
+    (get list "metadata" nil))
+
+  (defportable persistent-list-with-meta (list metadata)
+    (if (= metadata (persistent-list-meta list))
+        list
+      (if (persistent-list-empty? list)
+          (make-empty-persistent-list metadata)
+        (make-persistent-list-node
+         (get list "value")
+         (get list "rest" nil)
+         metadata))))
 
   (defportable persistent-list-valid-index? (index count)
     (and (= index (int32 index))
@@ -84,7 +100,7 @@
   (defportable persistent-list-reverse (list)
     (persistent-list-reduce
      (lambda (result value) (persistent-list-cons result value))
-     (empty-persistent-list)
+     (make-empty-persistent-list (persistent-list-meta list))
      list))
 
   (defportable persistent-list-array-reverse (values)
@@ -120,6 +136,8 @@
           persistent-list-rest
           persistent-list-peek
           persistent-list-pop
+          persistent-list-meta
+          persistent-list-with-meta
           persistent-list-nth
           persistent-list-reduce
           persistent-list-reverse

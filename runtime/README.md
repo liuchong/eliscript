@@ -46,6 +46,19 @@ Eliscript value algorithms recognize the same categories without depending on
 the runtime classes. Serialization fails explicitly until the value codec is
 specified.
 
+### Metadata
+
+`core/metadata.mjs` defines open `IMeta` and `IWithMeta` protocols plus
+`meta`, `withMeta`, `varyMeta`, and capability inspection. Eliscript Symbols
+and persistent Vector, Map, and Set values attach either `null` or a persistent
+Map by replacing only their frozen root wrapper. Equality and hashing ignore
+metadata; collection updates, `empty`, and transient round trips preserve it;
+logical host conversions emit only collection contents. Keywords remain
+unannotated because their global interning cannot carry per-use state.
+
+Exact semantics and evidence are specified in
+[specs/0068-immutable-metadata-semantics.md](../specs/0068-immutable-metadata-semantics.md).
+
 ### Persistent Map
 
 `core/map.mjs` builds on that key contract with a provisional persistent HAMT.

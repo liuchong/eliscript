@@ -225,6 +225,7 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
   const runtimeLink = resolve(directory, "runtime");
   const protocolModule = resolve(directory, "stdlib/core/protocol.mjs");
   const identifierModule = resolve(directory, "stdlib/core/identifier.mjs");
+  const metadataModule = resolve(directory, "stdlib/core/metadata.mjs");
   const collectionModule = resolve(directory, "stdlib/core/collection.mjs");
   const transientModule = resolve(directory, "stdlib/core/transient.mjs");
   const transducerModule = resolve(directory, "stdlib/core/transducer.mjs");
@@ -236,6 +237,7 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     await symlink(resolve(ROOT, "runtime"), runtimeLink, "dir");
     await compile(resolve(ROOT, "stdlib/core/protocol.eli"), protocolModule);
     await compile(resolve(ROOT, "stdlib/core/identifier.eli"), identifierModule);
+    await compile(resolve(ROOT, "stdlib/core/metadata.eli"), metadataModule);
     await compile(resolve(ROOT, "stdlib/core/collection.eli"), collectionModule);
     await compile(resolve(ROOT, "stdlib/core/transient.eli"), transientModule);
     await compile(resolve(ROOT, "stdlib/core/transducer.eli"), transducerModule);
@@ -287,6 +289,11 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
       "map-left": 10,
       "map-missing": "fallback",
       "map-has-right": true,
+      "metadata-support": true,
+      "keyword-metadata-support": false,
+      "metadata-left": 10,
+      "metadata-varied-left": 30,
+      "metadata-preserved": true,
       "bounded-sum": 6,
       "observed": [1, 2, 3],
       "reduced-state": true,
@@ -357,10 +364,12 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
       `const api = await import(${JSON.stringify(pathToFileURL(apiUsageModule).href)});`,
       `const seq = await import(${JSON.stringify(pathToFileURL(seqModule).href)});`,
       `const identifier = await import(${JSON.stringify(pathToFileURL(identifierModule).href)});`,
+      `const metadata = await import(${JSON.stringify(pathToFileURL(metadataModule).href)});`,
       "if (api.report['number-description'] !== 'number:7') process.exit(1);",
       "if (JSON.stringify([...api.report['vector-appended']]) !== '[1,2,3,4]') process.exit(1);",
       "if (JSON.stringify([...seq.map((value) => value * 3, [1,2,3])]) !== '[3,6,9]') process.exit(1);",
       "if (String(identifier.keyword('article/title')) !== ':article/title') process.exit(1);",
+      "if (metadata.meta(api.report['vector-appended']) !== null) process.exit(1);",
     ].join("");
     await runSuccessful(["node", "--input-type=module", "--eval", nodeCheck]);
 
@@ -368,6 +377,8 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect(protocolMap.sourcesContent[0]).toContain("(defun define-protocol");
     const identifierMap = await Bun.file(`${identifierModule}.map`).json();
     expect(identifierMap.sourcesContent[0]).toContain("(defun keyword");
+    const metadataMap = await Bun.file(`${metadataModule}.map`).json();
+    expect(metadataMap.sourcesContent[0]).toContain("(defun with-meta");
     const collectionMap = await Bun.file(`${collectionModule}.map`).json();
     expect(collectionMap.sourcesContent[0]).toContain("(defun reduce");
     const transientMap = await Bun.file(`${transientModule}.map`).json();

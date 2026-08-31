@@ -38,6 +38,8 @@ The provisional module exports:
 - `persistent-list-rest(list, not-found)`
 - `persistent-list-peek(list, not-found)`
 - `persistent-list-pop(list)`
+- `persistent-list-meta(list)`
+- `persistent-list-with-meta(list, metadata)`
 - `persistent-list-nth(list, index, not-found)`
 - `persistent-list-reduce(function, initial, list)`
 - `persistent-list-reverse(list)`
@@ -62,13 +64,13 @@ Count is capped at 2,147,483,647. Prepending at the cap returns `nil`.
 An empty List is an object containing:
 
 ```text
-kind, count = 0, empty = true, value = nil, rest = nil
+kind, count = 0, empty = true, value = nil, rest = nil, metadata
 ```
 
 A non-empty node contains:
 
 ```text
-kind, count, empty = false, value, rest
+kind, count, empty = false, value, rest, metadata
 ```
 
 `rest` points to a valid List with count one smaller. Persistent operations do
@@ -127,10 +129,11 @@ P1 now has two independent Eliscript-authored persistent structures:
 - Vector proves bounded tail copying and logarithmic indexed path sharing.
 
 Their contrasting capabilities provide the concrete receivers needed to
-design focused count, lookup, stack, and reduction protocols. The remaining
-P1 work is to move Map and Set algorithms into the Eliscript core, unify value
-equality and hashing, add metadata and printer/reader round trips, and run
-cross-family property suites before persistent literal migration.
+design focused count, lookup, stack, and reduction protocols. Map, Set, shared
+value semantics, protocols, and metadata now exist; printer/reader round trips
+and the complete cross-family P1 audit remain before persistent literal
+migration. Root metadata and its navigation rules are defined by
+[0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).
 
 ## Compatibility
 

@@ -48,12 +48,13 @@
   (defportable vector-node-slots (node)
     (get node "slots" []))
 
-  (defportable make-persistent-vector (count shift root tail)
+  (defportable make-persistent-vector (count shift root tail metadata)
     (object :kind persistent-vector-kind
             :count count
             :shift shift
             :root root
-            :tail tail))
+            :tail tail
+            :metadata metadata))
 
   (defportable persistent-vector? (value)
     (and (not (nullish? value))
@@ -64,10 +65,24 @@
     (make-persistent-vector 0
                             persistent-vector-branch-bits
                             (empty-vector-node)
-                            []))
+                            []
+                            nil))
 
   (defportable persistent-vector-count (vector)
     (get vector "count" 0))
+
+  (defportable persistent-vector-meta (vector)
+    (get vector "metadata" nil))
+
+  (defportable persistent-vector-with-meta (vector metadata)
+    (if (= metadata (persistent-vector-meta vector))
+        vector
+      (make-persistent-vector
+       (persistent-vector-count vector)
+       (get vector "shift" persistent-vector-branch-bits)
+       (get vector "root" nil)
+       (get vector "tail" [])
+       metadata)))
 
   (defportable persistent-vector-tail-offset (vector)
     (let ((count (persistent-vector-count vector)))
@@ -182,7 +197,8 @@
              (1+ count)
              shift
              root
-             (array-copy-assoc tail (length tail) value))
+             (array-copy-assoc tail (length tail) value)
+             (persistent-vector-meta vector))
           (let* ((tail-node (make-vector-node tail))
                  (root-overflow
                   (> (unsigned-bit-shift-right
@@ -199,7 +215,11 @@
                        [root (vector-new-path shift tail-node)])
                     (vector-push-tail shift root tail-node count))))
             (make-persistent-vector
-             (1+ count) next-shift next-root [value]))))))
+             (1+ count)
+             next-shift
+             next-root
+             [value]
+             (persistent-vector-meta vector)))))))
 
   (defportable persistent-vector-assoc (vector index value)
     (let* ((count (persistent-vector-count vector))
@@ -218,12 +238,14 @@
                (array-copy-assoc
                 tail
                 (bit-and index persistent-vector-branch-mask)
-                value))
+                value)
+               (persistent-vector-meta vector))
             (make-persistent-vector
              count
              shift
              (vector-assoc-node shift root index value)
-             tail))))))
+             tail
+             (persistent-vector-meta vector)))))))
 
   (defportable persistent-vector-pop (vector)
     (let* ((count (persistent-vector-count vector))
@@ -233,10 +255,19 @@
       (if (= count 0)
           nil
         (if (= count 1)
-            (empty-persistent-vector)
+            (make-persistent-vector
+             0
+             persistent-vector-branch-bits
+             (empty-vector-node)
+             []
+             (persistent-vector-meta vector))
           (if (> (length tail) 1)
               (make-persistent-vector
-               (1- count) shift root (array-drop-last tail))
+               (1- count)
+               shift
+               root
+               (array-drop-last tail)
+               (persistent-vector-meta vector))
             (let* ((next-tail
                     (persistent-vector-array-for vector (- count 2)))
                    (popped-root (vector-pop-tail shift root count))
@@ -256,7 +287,11 @@
                         (- shift persistent-vector-branch-bits)
                       shift)))
               (make-persistent-vector
-               (1- count) next-shift collapsed-root next-tail)))))))
+               (1- count)
+               next-shift
+               collapsed-root
+               next-tail
+               (persistent-vector-meta vector))))))))
 
   (defportable persistent-vector-peek (vector not-found)
     (let ((count (persistent-vector-count vector)))
@@ -295,6 +330,8 @@
   (export empty-persistent-vector
           persistent-vector?
           persistent-vector-count
+          persistent-vector-meta
+          persistent-vector-with-meta
           persistent-vector-nth
           persistent-vector-conj
           persistent-vector-assoc

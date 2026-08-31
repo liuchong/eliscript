@@ -14,11 +14,12 @@
     t)
 
   (defportable persistent-set-make
-      (map hash-function key-equal-function)
+      (map hash-function key-equal-function metadata)
     (object :kind persistent-set-kind
             :map map
             :hash-function hash-function
-            :key-equal-function key-equal-function))
+            :key-equal-function key-equal-function
+            :metadata metadata))
 
   (defportable empty-persistent-set (hash-function key-equal-function)
     (persistent-set-make
@@ -27,7 +28,8 @@
       key-equal-function
       persistent-set-same-value)
      hash-function
-     key-equal-function))
+     key-equal-function
+     nil))
 
   (defportable persistent-set? (value)
     (and (not (nullish? value))
@@ -44,6 +46,18 @@
 
   (defportable persistent-set-count (set)
     (persistent-map-count (get set "map" nil)))
+
+  (defportable persistent-set-meta (set)
+    (get set "metadata" nil))
+
+  (defportable persistent-set-with-meta (set metadata)
+    (if (= metadata (persistent-set-meta set))
+        set
+      (persistent-set-make
+       (get set "map" nil)
+       (get set "hash-function" nil)
+       (get set "key-equal-function" nil)
+       metadata)))
 
   (defportable persistent-set-empty? (set)
     (= (persistent-set-count set) 0))
@@ -62,7 +76,8 @@
           (persistent-set-make
            next-map
            (get set "hash-function" nil)
-           (get set "key-equal-function" nil))))))
+           (get set "key-equal-function" nil)
+           (persistent-set-meta set))))))
 
   (defportable persistent-set-disj (set value)
     (let* ((map (get set "map" nil))
@@ -72,7 +87,8 @@
         (persistent-set-make
          next-map
          (get set "hash-function" nil)
-         (get set "key-equal-function" nil)))))
+         (get set "key-equal-function" nil)
+         (persistent-set-meta set)))))
 
   (defportable persistent-set-reduce (function initial set)
     (persistent-map-reduce
@@ -118,10 +134,12 @@
                      (persistent-set-count right))
                  right
                left)))
-        (persistent-set-reduce
-         (lambda (result value) (persistent-set-conj result value))
-         base
-         additional))))
+        (persistent-set-with-meta
+         (persistent-set-reduce
+          (lambda (result value) (persistent-set-conj result value))
+          base
+          additional)
+         (persistent-set-meta left)))))
 
   (defportable persistent-set-intersection (left right)
     (if (not (persistent-set-compatible? left right))
@@ -146,7 +164,9 @@
         (if (= (persistent-set-count retained)
                (persistent-set-count left))
             left
-          retained))))
+          (persistent-set-with-meta
+           retained
+           (persistent-set-meta left))))))
 
   (defportable persistent-set-difference (left right)
     (if (not (persistent-set-compatible? left right))
@@ -198,6 +218,8 @@
           persistent-set?
           persistent-set-compatible?
           persistent-set-count
+          persistent-set-meta
+          persistent-set-with-meta
           persistent-set-empty?
           persistent-set-has?
           persistent-set-conj

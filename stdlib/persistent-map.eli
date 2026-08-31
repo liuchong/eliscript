@@ -565,18 +565,19 @@
           result))))
 
   (defportable persistent-map-make
-      (count root hash-function key-equal-function value-equal-function)
+      (count root hash-function key-equal-function value-equal-function metadata)
     (object :kind persistent-map-kind
             :count count
             :root root
             :hash-function hash-function
             :key-equal-function key-equal-function
-            :value-equal-function value-equal-function))
+            :value-equal-function value-equal-function
+            :metadata metadata))
 
   (defportable empty-persistent-map
       (hash-function key-equal-function value-equal-function)
     (persistent-map-make
-     0 nil hash-function key-equal-function value-equal-function))
+     0 nil hash-function key-equal-function value-equal-function nil))
 
   (defportable persistent-map? (value)
     (and (not (nullish? value))
@@ -585,6 +586,20 @@
 
   (defportable persistent-map-count (map)
     (get map "count" 0))
+
+  (defportable persistent-map-meta (map)
+    (get map "metadata" nil))
+
+  (defportable persistent-map-with-meta (map metadata)
+    (if (= metadata (persistent-map-meta map))
+        map
+      (persistent-map-make
+       (persistent-map-count map)
+       (get map "root" nil)
+       (get map "hash-function" nil)
+       (get map "key-equal-function" nil)
+       (get map "value-equal-function" nil)
+       metadata)))
 
   (defportable persistent-map-find (map key)
     (let ((root (get map "root" nil)))
@@ -639,7 +654,8 @@
            (get result "item" nil)
            hash-function
            key-equal-function
-           value-equal-function)))))
+           value-equal-function
+           (persistent-map-meta map))))))
 
   (defportable persistent-map-dissoc (map key)
     (let ((root (get map "root" nil)))
@@ -662,7 +678,8 @@
              (get result "item" nil)
              hash-function
              key-equal-function
-             (get map "value-equal-function" nil)))))))
+             (get map "value-equal-function" nil)
+             (persistent-map-meta map)))))))
 
   (defportable persistent-map-reduce (function initial map)
     (let ((root (get map "root" nil)))
@@ -696,6 +713,8 @@
   (export empty-persistent-map
           persistent-map?
           persistent-map-count
+          persistent-map-meta
+          persistent-map-with-meta
           persistent-map-has?
           persistent-map-get
           persistent-map-assoc

@@ -750,8 +750,12 @@ The shared value core in
 [0057-portable-value-semantics.md](0057-portable-value-semantics.md) completes
 construction step 2 with one recursively composed scalar/List/Vector/Map/Set
 policy, default Map/Set constructors, cross-family properties, and explicit
-host-identity limits. Metadata, printing, reading, open protocol dispatch, and
-the complete all-host P1 exit audit remain required.
+host-identity limits. Immutable root metadata in
+[0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md)
+completes construction step 3 across optimized Symbols/collections and all
+four portable collection families, including structural sharing, propagation,
+transient round trips, and equality/hash exclusion. Printing, reading, and the
+complete all-host P1 exit audit remain required.
 
 ### P2: Protocols and Algorithms
 

@@ -27,6 +27,8 @@ The current M8 work provides:
 - immutable persistent List, Vector, Map, and Set implementations written in
   portable Eliscript
 - deterministic value equality and hashing across persistent collections
+- immutable persistent-Map metadata with root-only structural sharing,
+  propagation through persistent/transient updates, and equality/hash exclusion
 - open runtime protocols with direct and externally registered methods
 - generic collection lookup, traversal, reduction, construction, association,
   and key-presence operations
@@ -44,8 +46,10 @@ The current M8 work provides:
 - structural-sharing and cross-host evidence through million-value workloads
 
 First-class immutable Keyword and Symbol values now participate in runtime and
-portable equality, hashing, Map keys, and Set membership. The next language
-boundary is metadata plus deterministic printing/reading, followed by portable
+portable equality, hashing, Map keys, and Set membership. Symbols and
+persistent collections can carry immutable persistent-Map metadata without
+changing their value identity or copying collection internals. The next
+language boundary is deterministic printing/reading, followed by portable
 protocol dispatch policy, measured object/text migration, literal migration,
 host conversion, and the Emacs value bridge.
 
@@ -128,9 +132,15 @@ Runtime-backed core values use the same Lisp-facing module style:
 ```elisp
 (import "../../stdlib/core/identifier.eli"
         keyword symbol qualified-name)
+(import "../../stdlib/core/metadata.eli"
+        meta with-meta)
+(import "../../runtime/core/map.mjs" persistentHashMap)
 
-[(keyword "article/title")
- (qualified-name (symbol "article" "title"))]
+(let* ((name (symbol "article" "title"))
+       (annotated (with-meta name (persistentHashMap ["source" "tour"]))))
+  [(keyword "article/title")
+   (qualified-name name)
+   (meta annotated)])
 ```
 
 The implemented language includes:
@@ -146,6 +156,7 @@ The implemented language includes:
 - statically checked portable functions and dependency-pruned builds
 - persistent collections, value semantics, and open collection protocols
 - first-class immutable Keyword and Symbol values with qualified names
+- immutable metadata on Symbols and persistent collections
 
 Eliscript deliberately differs from Emacs Lisp. It uses ECMAScript numbers,
 distinguishes `false` from `nil`, has lexical scope, and does not attempt to run

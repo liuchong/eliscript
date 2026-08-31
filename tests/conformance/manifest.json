@@ -744,6 +744,19 @@
         { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "language.immutable-metadata",
+      "title": "Immutable metadata semantics",
+      "status": "accepted",
+      "spec": "0068",
+      "contracts": ["Attaches nil or persistent Map metadata through open protocols", "Replaces only value roots while preserving collection internals and update propagation", "Excludes metadata from equality, hashing, navigation, and logical host conversion", "Matches seed and self-hosted artifacts under Bun and Node"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/metadata.test.mjs", "contains": "metadata protocols cover symbols and persistent runtime collections" },
+        { "kind": "bun-test", "file": "tests/metadata.test.mjs", "contains": "persistent updates, empty values, and transients preserve root metadata" },
+        { "kind": "bun-test", "file": "tests/portable-metadata.test.mjs", "contains": "Eliscript-authored metadata is byte-identical and portable" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" }
+      ]
     }
   ]
 }

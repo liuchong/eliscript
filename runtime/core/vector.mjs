@@ -43,6 +43,10 @@ import {
   TRANSIENT_CONJ,
   TRANSIENT_PERSISTENT,
 } from "./transient-internals.mjs";
+import {
+  METADATA_READ,
+  METADATA_WITH,
+} from "./metadata-internals.mjs";
 
 const MAX_COUNT = 0x7fffffff;
 const MISSING = Symbol("eliscript.vector.missing");
@@ -185,14 +189,21 @@ function arrayFor(state, index) {
   return node.slots;
 }
 
-function makeVector(count, shift, root, tail) {
+function makeVector(count, shift, root, tail, metadata = null) {
   return new PersistentVector(
     VECTOR_CONSTRUCTOR_TOKEN,
     count,
     shift,
     root,
     tail,
+    metadata,
   );
+}
+
+function emptyVectorWithMetadata(metadata) {
+  return metadata === null
+    ? EMPTY_VECTOR
+    : makeVector(0, BRANCH_BITS, EMPTY_ROOT, EMPTY_TAIL, metadata);
 }
 
 function makeTransientVector(vector) {
@@ -234,6 +245,7 @@ class TransientVector {
       root: source.root,
       tail: source.tail,
       tailOwned: false,
+      metadata: source.metadata,
     };
     Object.defineProperty(this, "__eliscript_transient__", {
       enumerable: true,
@@ -308,7 +320,13 @@ class TransientVector {
   [TRANSIENT_PERSISTENT]() {
     const state = activeTransientVectorState(this);
     const result = state.changed
-      ? makeVector(state.count, state.shift, state.root, state.tail)
+      ? makeVector(
+        state.count,
+        state.shift,
+        state.root,
+        state.tail,
+        state.metadata,
+      )
       : state.source;
     state.active = false;
     state.owner = null;
@@ -326,13 +344,19 @@ class TransientVector {
 }
 
 export class PersistentVector {
-  constructor(token, count, shift, root, tail) {
+  constructor(token, count, shift, root, tail, metadata = null) {
     if (token !== VECTOR_CONSTRUCTOR_TOKEN) {
       throw new TypeError(
         "PersistentVector values must be created with persistentVector or PersistentVector.from",
       );
     }
-    this[VECTOR_STATE] = Object.freeze({ count, shift, root, tail });
+    this[VECTOR_STATE] = Object.freeze({
+      count,
+      shift,
+      root,
+      tail,
+      metadata,
+    });
     Object.freeze(this);
   }
 
@@ -385,6 +409,7 @@ export class PersistentVector {
         state.shift,
         state.root,
         allocateTail(tail),
+        state.metadata,
       );
     }
     return makeVector(
@@ -392,6 +417,7 @@ export class PersistentVector {
       state.shift,
       assocNode(state.shift, state.root, index, value),
       state.tail,
+      state.metadata,
     );
   }
 
@@ -406,6 +432,7 @@ export class PersistentVector {
         state.shift,
         state.root,
         allocateTail([...state.tail, value]),
+        state.metadata,
       );
     }
 
@@ -427,6 +454,7 @@ export class PersistentVector {
       shift,
       root,
       allocateTail([value]),
+      state.metadata,
     );
   }
 
@@ -441,7 +469,7 @@ export class PersistentVector {
       throw new RangeError("cannot pop an empty persistent vector");
     }
     if (state.count === 1) {
-      return EMPTY_VECTOR;
+      return emptyVectorWithMetadata(state.metadata);
     }
     if (state.tail.length > 1) {
       return makeVector(
@@ -449,6 +477,7 @@ export class PersistentVector {
         state.shift,
         state.root,
         allocateTail(state.tail.slice(0, -1)),
+        state.metadata,
       );
     }
 
@@ -459,7 +488,13 @@ export class PersistentVector {
       root = root.slots[0];
       shift -= BRANCH_BITS;
     }
-    return makeVector(state.count - 1, shift, root, tail);
+    return makeVector(
+      state.count - 1,
+      shift,
+      root,
+      tail,
+      state.metadata,
+    );
   }
 
   reduce(reducer, ...initial) {
@@ -496,7 +531,7 @@ export class PersistentVector {
   }
 
   [COLLECTION_EMPTY]() {
-    return EMPTY_VECTOR;
+    return emptyVectorWithMetadata(this[VECTOR_STATE].metadata);
   }
 
   [COLLECTION_CONJ](value) {
@@ -557,6 +592,23 @@ export class PersistentVector {
 
   [VALUE_HASH](hash) {
     return orderedCollectionHash(this, hash, VECTOR_HASH_TAG);
+  }
+
+  [METADATA_READ]() {
+    return this[VECTOR_STATE].metadata;
+  }
+
+  [METADATA_WITH](metadata) {
+    const state = this[VECTOR_STATE];
+    return metadata === state.metadata
+      ? this
+      : makeVector(
+        state.count,
+        state.shift,
+        state.root,
+        state.tail,
+        metadata,
+      );
   }
 
   *[Symbol.iterator]() {

@@ -33,6 +33,8 @@ The provisional module exports:
 - `empty-persistent-vector()`
 - `persistent-vector?(value)`
 - `persistent-vector-count(vector)`
+- `persistent-vector-meta(vector)`
+- `persistent-vector-with-meta(vector, metadata)`
 - `persistent-vector-nth(vector, index, not-found)`
 - `persistent-vector-conj(vector, value)`
 - `persistent-vector-assoc(vector, index, value)`
@@ -56,7 +58,7 @@ at 2,147,483,647. Appending at the cap returns `nil`.
 Each vector is an ordinary generated object with:
 
 ```text
-kind, count, shift, root, tail
+kind, count, shift, root, tail, metadata
 ```
 
 Each internal node is an object containing a `slots` array. Five index bits
@@ -132,9 +134,10 @@ continues to own the richer provisional JavaScript-facing API from 0047.
 
 P0 in 0041 is complete after this slice: equality and hashing are frozen,
 vector and HAMT layouts are implemented and measured, portable bit operations
-exist, and a real trie is authored in Eliscript. P1 remains open for the full
-list/vector/map/set core, metadata, printing and reading, shared protocols,
-and property evidence across all collection families.
+exist, and a real trie is authored in Eliscript. P1 remains open for printing,
+reading, and complete property evidence across all collection families. Root
+metadata and its equality/hash exclusion are now defined by
+[0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).
 
 ## Acceptance Criteria
 

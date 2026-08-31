@@ -34,6 +34,8 @@ The provisional module exports:
 - `persistent-set?(value)`
 - `persistent-set-compatible?(left, right)`
 - `persistent-set-count(set)`
+- `persistent-set-meta(set)`
+- `persistent-set-with-meta(set, metadata)`
 - `persistent-set-empty?(set)`
 - `persistent-set-has?(set, value)`
 - `persistent-set-conj(set, value)`
@@ -59,7 +61,7 @@ insertion order nor sorted order is promised.
 A Set value contains:
 
 ```text
-kind, map, hash-function, key-equal-function
+kind, map, hash-function, key-equal-function, metadata
 ```
 
 Every member is a key in `map`; all values use one private presence sentinel.
@@ -150,9 +152,11 @@ persistent layout:
 This completes P1 construction step 1 but not the P1 exit. The portable value
 layer in [0057-portable-value-semantics.md](0057-portable-value-semantics.md)
 subsequently completed step 2 with common equality/hashing, ordinary Map/Set
-constructors, and cross-family properties. Open protocols, metadata, and
-printer/reader round trips remain required before persistent literal
-migration.
+constructors, and cross-family properties. Open protocols and immutable
+metadata are now implemented; printer/reader round trips remain required
+before persistent literal migration. Metadata propagation through Set algebra
+is defined by
+[0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).
 
 ## Emacs Reinvestment
 

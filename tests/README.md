@@ -139,6 +139,16 @@ The core-library execution fixture compiles the Lisp-named identifier module
 and executes its public constructors, predicates, and accessors under Bun and
 Node.
 
+The metadata runtime suite verifies `IMeta`/`IWithMeta` dispatch, Symbol and
+persistent collection support, deterministic validation, complete trie/HAMT
+sharing on root replacement, equality/hash exclusion, logical host conversion,
+persistent update propagation, generic empty values, transient round trips,
+and Bun/Node agreement. The portable metadata suite compiles its seven-module
+dependency graph with seed and self-hosted compilers, compares every ESM and
+Source Map artifact byte-for-byte, and executes both generations under Bun and
+Node. The core-library fixture also compiles and calls the Lisp-named runtime
+metadata surface.
+
 The protocol suite exercises immutable protocol definitions, direct Symbol
 slots, exact prototype extensions, stable host categories, explicit defaults,
 atomic validation, and structured missing diagnostics. It proves that

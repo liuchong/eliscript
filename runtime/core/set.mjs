@@ -34,11 +34,19 @@ import {
   TRANSIENT_DISSOC,
   TRANSIENT_PERSISTENT,
 } from "./transient-internals.mjs";
+import {
+  METADATA_READ,
+  METADATA_WITH,
+} from "./metadata-internals.mjs";
 
 const SET_HASH_TAG = 0x51e7_b32d;
 
-function makeSet(map) {
-  return new PersistentHashSet(SET_CONSTRUCTOR_TOKEN, map);
+function makeSet(map, metadata = null) {
+  return new PersistentHashSet(SET_CONSTRUCTOR_TOKEN, map, metadata);
+}
+
+function emptySetWithMetadata(metadata) {
+  return metadata === null ? EMPTY_SET : makeSet(EMPTY_MAP, metadata);
 }
 
 function makeTransientSet(set) {
@@ -69,11 +77,13 @@ class TransientHashSet {
       );
     }
     const sourceMap = set[SET_STATE].map;
+    const metadata = set[SET_STATE].metadata;
     this[TRANSIENT_SET_STATE] = {
       active: true,
       source: set,
       sourceMap,
       map: sourceMap[EDITABLE_TRANSIENT](),
+      metadata,
     };
     Object.defineProperty(this, "__eliscript_transient__", {
       enumerable: true,
@@ -101,7 +111,9 @@ class TransientHashSet {
     const map = state.map[TRANSIENT_PERSISTENT]();
     const result = map === state.sourceMap
       ? state.source
-      : (map === EMPTY_MAP ? EMPTY_SET : makeSet(map));
+      : (map === EMPTY_MAP
+        ? emptySetWithMetadata(state.metadata)
+        : makeSet(map, state.metadata));
     state.active = false;
     recordTransientSetPersistent();
     return result;
@@ -117,13 +129,13 @@ class TransientHashSet {
 }
 
 export class PersistentHashSet {
-  constructor(token, map) {
+  constructor(token, map, metadata = null) {
     if (token !== SET_CONSTRUCTOR_TOKEN || !(map instanceof PersistentHashMap)) {
       throw new TypeError(
         "PersistentHashSet values must be created with persistentHashSet or PersistentHashSet.from",
       );
     }
-    this[SET_STATE] = Object.freeze({ map });
+    this[SET_STATE] = Object.freeze({ map, metadata });
     Object.freeze(this);
   }
 
@@ -157,7 +169,7 @@ export class PersistentHashSet {
   conj(value) {
     const state = this[SET_STATE];
     const map = state.map.assoc(value, SET_PRESENT);
-    return map === state.map ? this : makeSet(map);
+    return map === state.map ? this : makeSet(map, state.metadata);
   }
 
   disj(value) {
@@ -166,7 +178,9 @@ export class PersistentHashSet {
     if (map === state.map) {
       return this;
     }
-    return map === EMPTY_MAP ? EMPTY_SET : makeSet(map);
+    return map === EMPTY_MAP
+      ? emptySetWithMetadata(state.metadata)
+      : makeSet(map, state.metadata);
   }
 
   union(...collections) {
@@ -188,7 +202,7 @@ export class PersistentHashSet {
       }
       const candidates = result.count <= other.count ? result : other;
       const membership = candidates === result ? other : result;
-      let retained = EMPTY_SET;
+      let retained = emptySetWithMetadata(this[SET_STATE].metadata);
       for (const value of candidates) {
         if (membership.has(value)) {
           retained = retained.conj(value);
@@ -274,7 +288,7 @@ export class PersistentHashSet {
   }
 
   [COLLECTION_EMPTY]() {
-    return EMPTY_SET;
+    return emptySetWithMetadata(this[SET_STATE].metadata);
   }
 
   [COLLECTION_CONJ](value) {
@@ -321,6 +335,17 @@ export class PersistentHashSet {
 
   [VALUE_HASH](hash) {
     return unorderedCollectionHash(this, hash, SET_HASH_TAG);
+  }
+
+  [METADATA_READ]() {
+    return this[SET_STATE].metadata;
+  }
+
+  [METADATA_WITH](metadata) {
+    const state = this[SET_STATE];
+    return metadata === state.metadata
+      ? this
+      : makeSet(state.map, metadata);
   }
 
   [Symbol.iterator]() {

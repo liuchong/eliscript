@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 67 specifications.
+The registry currently contains 68 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 38 |
+| Accepted design | 39 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 64 |
+| Implemented | 65 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-36 as provisional, and 3 as planning. That baseline is derived from registry
+37 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -48,9 +48,10 @@ capabilities, immutable collection construction, single-pass transducers,
 owner-token transient Vector, Map, and Set builders, and protocol-driven core
 sequence/data algorithms, stack-safe recurrence, deterministic macro-generated
 names, Lisp-named protocol/collection/transducer/transient modules, and
-Eliscript-maintained core algorithm bodies, plus first-class immutable Keyword
-and Symbol values implemented. Portable dispatch internals, literal migration,
-metadata, host conversion, static transient
+Eliscript-maintained core algorithm bodies, first-class immutable Keyword and
+Symbol values, and root-shared immutable metadata implemented. Portable
+dispatch internals, deterministic printing/reading, literal migration, host
+conversion, static transient
 escape analysis, and the Emacs value bridge remain ahead.
 
 ## Reading Paths
@@ -96,6 +97,7 @@ number.
 11. [0063: Protocol-driven Core Algorithms](0063-protocol-driven-core-algorithms.md)
 12. [0066: Eliscript-authored Core Protocol and Algorithms](0066-eliscript-authored-core-protocol-algorithms.md)
 13. [0067: First-class Keyword and Symbol Values](0067-first-class-keyword-symbol-values.md)
+14. [0068: Immutable Metadata Semantics](0068-immutable-metadata-semantics.md)
 
 ### React and Publishing
 
@@ -229,6 +231,7 @@ The schemas and change workflow are defined by specifications
 | 0065 | [Deterministic Macro-generated Names and Capture Rules](0065-deterministic-macro-generated-names.md) | Accepted | Implemented |
 | 0066 | [Eliscript-authored Core Protocol Surface and Algorithms](0066-eliscript-authored-core-protocol-algorithms.md) | Accepted | Implemented |
 | 0067 | [First-class Keyword and Symbol Values](0067-first-class-keyword-symbol-values.md) | Accepted | Implemented |
+| 0068 | [Immutable Metadata Semantics](0068-immutable-metadata-semantics.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

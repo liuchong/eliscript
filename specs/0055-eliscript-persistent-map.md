@@ -35,6 +35,8 @@ The provisional module exports:
 - `empty-persistent-map(hash-function, key-equal-function, value-equal-function)`
 - `persistent-map?(value)`
 - `persistent-map-count(map)`
+- `persistent-map-meta(map)`
+- `persistent-map-with-meta(map, metadata)`
 - `persistent-map-has?(map, key)`
 - `persistent-map-get(map, key, not-found)`
 - `persistent-map-assoc(map, key, value)`
@@ -60,6 +62,9 @@ Every Map root stores the three functions supplied at construction:
 - `hash-function(key)` returns a value normalized to an unsigned 32-bit word.
 - `key-equal-function(left, right)` resolves keys that share a full hash.
 - `value-equal-function(left, right)` identifies a no-op replacement.
+
+Each root also stores immutable metadata under the separate 0068 contract;
+metadata never participates in key or value semantics.
 
 All descendant versions preserve these exact functions. Operations never fall
 back to JavaScript property coercion or object identity implicitly. Calling

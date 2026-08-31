@@ -210,6 +210,12 @@ No literal changes in this slice. Native JavaScript arrays, objects, Maps, and
 Sets retain their current behavior. Persistent literal migration remains P3
 work and requires its own compatibility decision.
 
+Portable persistent metadata now layers on these values through
+[0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).
+`value-equal?` and `value-hash` intentionally continue to inspect logical
+collection contents only, so annotated and unannotated roots remain equal and
+hash-identical.
+
 ## Acceptance Criteria
 
 - **EVP-01:** Seed and self-hosted compilers emit byte-identical ESM and Source

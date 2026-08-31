@@ -4,11 +4,13 @@
           implements-protocol-operation? implements-protocol?
           protocol-host-category protocol-method protocol-slot)
   (import "./stdlib/core/collection.mjs"
-          collection-count collection-nth collection-seq conj contains? empty
+          assoc collection-count collection-nth collection-seq conj contains? empty
           lookup reduce reduced reduced? unreduced)
   (import "./stdlib/core/identifier.mjs"
           identifier-name identifier-namespace identifier? keyword keyword?
           qualified-name symbol symbol?)
+  (import "./stdlib/core/metadata.mjs"
+          meta supports-metadata? vary-meta with-meta)
   (import "./stdlib/core/transient.mjs"
           assoc! conj! persistent! transient)
   (import "./stdlib/core/transducer.mjs"
@@ -34,6 +36,14 @@
   (defconst map-builder (transient EMPTY_MAP))
   (assoc! map-builder "left" 10 "right" 20)
   (defconst map-value (persistent! map-builder))
+
+  (defconst annotated-vector (with-meta vector-value map-value))
+  (defconst varied-vector
+    (vary-meta
+      annotated-vector
+      (lambda (current key value) (assoc current key value))
+      "left"
+      30))
 
   (defconst title-keyword (keyword "article/title"))
   (defconst title-symbol (symbol "article" "title"))
@@ -75,6 +85,11 @@
       :map-left (lookup map-value "left")
       :map-missing (lookup map-value "missing" "fallback")
       :map-has-right (contains? map-value "right")
+      :metadata-support (supports-metadata? annotated-vector)
+      :keyword-metadata-support (supports-metadata? title-keyword)
+      :metadata-left (lookup (meta annotated-vector) "left")
+      :metadata-varied-left (lookup (meta varied-vector) "left")
+      :metadata-preserved (= (meta (conj annotated-vector 4)) map-value)
       :bounded-sum bounded-sum
       :observed observed
       :transformed transformed

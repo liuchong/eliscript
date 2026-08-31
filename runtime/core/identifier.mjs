@@ -5,6 +5,10 @@ import {
   hashString,
   mixHash,
 } from "./value-internals.mjs";
+import {
+  METADATA_READ,
+  METADATA_WITH,
+} from "./metadata-internals.mjs";
 
 const VALUE_TYPE = Symbol.for("eliscript.value.type");
 const KEYWORD_TYPE = "keyword";
@@ -168,13 +172,18 @@ export class Keyword {
 }
 
 export class EliscriptSymbol {
-  constructor(token, namespace, name) {
+  constructor(token, namespace, name, metadata = null) {
     if (token !== SYMBOL_TOKEN) {
       throw new TypeError(
         "EliscriptSymbol values must be created with eliscriptSymbol()",
       );
     }
-    defineIdentifier(this, SYMBOL_TYPE, { namespace, name }, symbolState);
+    defineIdentifier(
+      this,
+      SYMBOL_TYPE,
+      { namespace, name, metadata },
+      symbolState,
+    );
   }
 
   get name() {
@@ -205,6 +214,22 @@ export class EliscriptSymbol {
 
   [VALUE_HASH]() {
     return identifierHash(SYMBOL_HASH_TAG, symbolState.get(this));
+  }
+
+  [METADATA_READ]() {
+    return symbolState.get(this).metadata;
+  }
+
+  [METADATA_WITH](metadata) {
+    const state = symbolState.get(this);
+    return metadata === state.metadata
+      ? this
+      : new EliscriptSymbol(
+        SYMBOL_TOKEN,
+        state.namespace,
+        state.name,
+        metadata,
+      );
   }
 
   get [Symbol.toStringTag]() {

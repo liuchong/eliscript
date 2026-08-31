@@ -175,6 +175,34 @@ versioned value codec exists. Source literals remain unchanged in this slice.
 Exact semantics are specified in
 [specs/0067-first-class-keyword-symbol-values.md](../specs/0067-first-class-keyword-symbol-values.md).
 
+## Metadata
+
+`metadata.eli` implements portable metadata dispatch for persistent Lists,
+Vectors, Maps, and Sets. `core/metadata.eli` exposes the optimized runtime
+protocols to ordinary Eliscript source:
+
+```elisp
+(import "../../stdlib/core/metadata.eli"
+        meta supports-metadata? vary-meta with-meta)
+(import "../../runtime/core/map.mjs" persistentHashMap)
+(import "../../runtime/core/vector.mjs" persistentVector)
+
+(let ((value (with-meta
+              (persistentVector 1 2 3)
+              (persistentHashMap ["source" "example"]))))
+  [(supports-metadata? value)
+   (meta value)
+   (vary-meta value
+              (lambda (current) current))])
+```
+
+Metadata is `nil` or a persistent Map. It changes only the root wrapper,
+survives persistent and transient updates, and does not affect equality or
+hashing. The portable collection modules also export representation-level
+`*-meta` and `*-with-meta` functions for portable dispatch. Exact semantics
+are specified in
+[specs/0068-immutable-metadata-semantics.md](../specs/0068-immutable-metadata-semantics.md).
+
 ## Protocol-driven Core
 
 `core/seq.eli` and `core/data.eli` expose the current protocol-driven runtime

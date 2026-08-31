@@ -198,7 +198,13 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "function symbol(...arguments$)",
         "function qualified_name(value)",
       ]],
+      ["stdlib/core/metadata.eli", [
+        "function meta(value)",
+        "function with_meta(value, metadata)",
+        "function vary_meta(value, transform, ...arguments$)",
+      ]],
       ["stdlib/core/collection.eli", [
+        "function assoc(collection, key, value, ...key_values)",
         "function collection_count(collection)",
         "function reduce(collection, reducer, ...initial)",
       ]],

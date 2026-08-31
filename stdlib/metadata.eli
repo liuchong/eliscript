@@ -1,0 +1,56 @@
+(module eliscript.metadata
+  (import-portable "./persistent-list.eli"
+                   persistent-list?
+                   persistent-list-meta
+                   persistent-list-with-meta)
+  (import-portable "./persistent-vector.eli"
+                   persistent-vector?
+                   persistent-vector-meta
+                   persistent-vector-with-meta)
+  (import-portable "./persistent-map.eli"
+                   persistent-map?
+                   persistent-map-meta
+                   persistent-map-with-meta)
+  (import-portable "./persistent-set.eli"
+                   persistent-set?
+                   persistent-set-meta
+                   persistent-set-with-meta)
+
+  (defportable supports-metadata? (value)
+    (or (persistent-list? value)
+        (persistent-vector? value)
+        (persistent-map? value)
+        (persistent-set? value)))
+
+  (defportable metadata-valid? (metadata)
+    (or (nil? metadata) (persistent-map? metadata)))
+
+  (defportable meta (value)
+    (cond
+     ((persistent-list? value) (persistent-list-meta value))
+     ((persistent-vector? value) (persistent-vector-meta value))
+     ((persistent-map? value) (persistent-map-meta value))
+     ((persistent-set? value) (persistent-set-meta value))
+     (t nil)))
+
+  (defportable with-meta (value metadata)
+    (if (not (and (supports-metadata? value)
+                  (metadata-valid? metadata)))
+        nil
+      (cond
+       ((persistent-list? value)
+        (persistent-list-with-meta value metadata))
+       ((persistent-vector? value)
+        (persistent-vector-with-meta value metadata))
+       ((persistent-map? value)
+        (persistent-map-with-meta value metadata))
+       (t (persistent-set-with-meta value metadata)))))
+
+  (defportable vary-meta (value transform &rest arguments)
+    (if (not (= (value-type transform) "function"))
+        nil
+      (with-meta
+       value
+       (apply transform (cons (meta value) arguments)))))
+
+  (export meta metadata-valid? supports-metadata? vary-meta with-meta))
