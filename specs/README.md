@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 89 specifications.
+The registry currently contains 90 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 60 |
+| Accepted design | 61 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 86 |
+| Implemented | 87 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-58 as provisional, and 3 as planning. That baseline is derived from registry
+59 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -282,6 +282,7 @@ The schemas and change workflow are defined by specifications
 | 0087 | [First-class Quoted Persistent Data](0087-first-class-quoted-persistent-data.md) | Accepted | Implemented |
 | 0088 | [Versioned Emacs Worker Persistent Value Codec](0088-emacs-worker-value-codec.md) | Accepted | Implemented |
 | 0089 | [Chunked Emacs Worker Value Streams](0089-chunked-emacs-worker-values.md) | Accepted | Implemented |
+| 0090 | [Large Emacs Worker Value Stream Memory Probe](0090-large-worker-value-memory-probe.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

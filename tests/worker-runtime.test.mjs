@@ -280,7 +280,21 @@ test("worker negotiates the persistent value codec without changing JSON mode", 
       executionMs: expect.any(Number),
       serializationMs: expect.any(Number),
       workerMs: expect.any(Number),
+      valueStream: {
+        framing: workerValueFraming,
+        maxChunkBytes: 256 * 1024,
+        maxEventsPerChunk: 512,
+        maxTextPartUnits: 8192,
+      },
     });
+    expect(typeof chunkedResponse.message.timing.valueStream.argumentChunks)
+      .toBe("number");
+    expect(typeof chunkedResponse.message.timing.valueStream.responseChunks)
+      .toBe("number");
+    expect(chunkedResponse.message.timing.valueStream.argumentChunks > 0)
+      .toBe(true);
+    expect(chunkedResponse.message.timing.valueStream.responseChunks > 0)
+      .toBe(true);
 
     client.send({
       version: 1,

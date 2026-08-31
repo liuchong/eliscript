@@ -101,9 +101,10 @@ and numeric categories, deterministic native containers, and portable
 closures generated outside the package tree. The worker bridge now also
 supports bounded value-event chunks, one-chunk request backpressure,
 incremental progress and result streams, and cancellation during upload and
-codec traversal. The maintained 256 MiB memory-budget probe,
-protocol-definition transport, and static transient escape analysis remain
-open.
+codec traversal. A source-bound 256 MiB real-process round trip now verifies
+1,058 chunks in each direction within explicit Emacs, Bun, and combined RSS
+budgets, completing the P5 value-bridge gate. Protocol-definition transport
+and static transient escape analysis remain open.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in

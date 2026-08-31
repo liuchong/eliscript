@@ -176,10 +176,10 @@ decoded partial values from reaching application callbacks.
 - **WVS-16:** Core implementation and acceptance evidence have no dependency
   on an application framework, UI library, bundler, or publishing adapter.
 
-## Remaining P5 Gate
+## Large-value Evidence
 
-This specification implements the incremental protocol and bounded framing,
-but it does not by itself close PD-08. P5 still requires a maintained 256 MiB
-logical-dataset process probe with measured per-process peak memory and an
-approved memory budget. That evidence must exercise the real Emacs/Bun
-boundary and remain separate from application demonstrations.
+This specification implements the incremental protocol and bounded framing;
+it does not by itself close PD-08. Specification
+[0090-large-worker-value-memory-probe.md](0090-large-worker-value-memory-probe.md)
+adds the maintained 256 MiB real-process probe, source-bound report, measured
+per-process peaks, and approved memory budgets that complete that gate.

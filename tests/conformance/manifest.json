@@ -1038,6 +1038,18 @@
         { "kind": "ert", "file": "tests/eliscript-worker-tests.el", "contains": "eliscript-emacs-value-stream-is-incremental-and-bounded" },
         { "kind": "ert", "file": "tests/eliscript-worker-tests.el", "contains": "eliscript-emacs-client-negotiates-persistent-value-codec" }
       ]
+    },
+    {
+      "id": "worker.large-value-memory-probe",
+      "title": "Large Emacs worker value-stream memory probe",
+      "status": "accepted",
+      "spec": "0090",
+      "contracts": ["Round trips one complete 256 MiB logical dataset through real Emacs and Bun processes", "Verifies source and result SHA-256 plus actual request and response chunk counts", "Samples Emacs, Bun, and simultaneous combined RSS against explicit budgets", "Invalidates the committed report when any measurement-defining source changes", "Keeps application frameworks and bundlers outside implementation and evidence"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/worker-value-stream-probe.test.mjs", "contains": "real Emacs and Bun processes report bounded chunked value memory" },
+        { "kind": "bun-test", "file": "tests/worker-value-stream-probe.test.mjs", "contains": "value-stream probe cancels and fails when a memory budget is exceeded" },
+        { "kind": "bun-test", "file": "tests/worker-value-stream-probe.test.mjs", "contains": "committed 256 MiB value-stream report matches its measured sources" }
+      ]
     }
   ]
 }

@@ -626,7 +626,12 @@ async function writeValueStream({
       events: current.value,
     };
     if (stream !== undefined) message.stream = stream;
-    if (final && finalFields) Object.assign(message, finalFields());
+    if (final && finalFields) {
+      Object.assign(message, finalFields({
+        sequence,
+        chunkCount: sequence + 1,
+      }));
+    }
     await writeMessageAsync(message);
     current = next;
     sequence += 1;
@@ -728,7 +733,7 @@ async function executeRequest(message, entry, streamedArguments = undefined) {
         channel: "response",
         value,
         signal: entry.controller.signal,
-        finalFields() {
+        finalFields({ chunkCount }) {
           serializationMs = performance.now() - serializationStartedAt;
           return {
             timing: {
@@ -740,6 +745,14 @@ async function executeRequest(message, entry, streamedArguments = undefined) {
               executionMs,
               serializationMs,
               workerMs: performance.now() - startedAt,
+              valueStream: {
+                framing: workerValueFraming,
+                argumentChunks: entry.sequence,
+                responseChunks: chunkCount,
+                maxChunkBytes: workerValueStreamLimits.maxChunkBytes,
+                maxEventsPerChunk: workerValueStreamLimits.maxEventsPerChunk,
+                maxTextPartUnits: workerValueStreamLimits.maxTextPartUnits,
+              },
             },
           };
         },

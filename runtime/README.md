@@ -192,6 +192,9 @@ special numeric/nullish values, and explicit native containers.
 event grammar with bounded batches, persistent transient builders, traversal
 limits, UTF-16-safe text parts, and cancellation checks. The worker applies
 one-chunk acknowledgements to request input and stdout drain backpressure to
-progress and response output. It also confines generated
+progress and response output. Chunked success timing reports actual argument
+and response chunk counts plus the active framing bounds. The maintained
+real-process probe binds its 256 MiB memory report to these runtime sources.
+The worker also confines generated
 `eliscript/runtime/` imports to this package runtime, so temporary portable
 builds do not depend on their output directory for runtime resolution.

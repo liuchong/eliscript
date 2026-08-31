@@ -54,6 +54,13 @@ The value bridge is language and Emacs integration infrastructure. It does not
 depend on a UI library, application framework, bundler, development server, or
 publishing adapter.
 
+`value-stream-probe.el` runs a complete chunked string round trip while
+sampling Emacs and Bun RSS. `bun run probe:worker-values` uses a small default
+dataset; specification 0090 provides the intentional 256 MiB acceptance
+command and budgets. The JSON report includes exact request/response chunk
+counts, SHA-256 correctness, timing, memory peaks, host versions, and measured
+source digests.
+
 `eliscript-index.el` is the representative high-level integration. It compiles
 the portable kernel in `examples/emacs-index/`, owns its temporary module and
 worker, and scores tokenized documents concurrently:

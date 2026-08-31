@@ -939,14 +939,18 @@ and portable reference implementations remain required.
 **Exit:** all persistent values cross the worker boundary predictably, and
 large inputs remain bounded in memory.
 
-**Status:** Underway since 2026-09-01. Specification 0088 implements the
+**Status:** Complete on 2026-09-01. Specification 0088 implements the
 versioned non-streaming codec, deterministic validation, Emacs records, exact
 scalar categories, and temporary-module runtime resolution. Specification
 [0089-chunked-emacs-worker-values.md](0089-chunked-emacs-worker-values.md)
 implements incremental Emacs and JavaScript codecs, bounded chunks, explicit
 input and output backpressure, progress and result streams, and cancellation
-during upload and traversal. The maintained 256 MiB process probe and measured
-memory budget required by PD-08 remain open before the P5 exit.
+during upload and traversal. Specification
+[0090-large-worker-value-memory-probe.md](0090-large-worker-value-memory-probe.md)
+adds the source-bound 256 MiB round-trip report: 1,058 chunks in each
+direction, 1,215.078125 MiB Emacs peak RSS, 680.046875 MiB Bun peak RSS, and
+1,895.125 MiB simultaneous combined peak. All remain within the documented
+2,048/1,024/2,560 MiB budgets, completing PD-08 and the P5 exit.
 
 ### P6: Accelerated Emacs API
 
@@ -1031,6 +1035,11 @@ compatibility matrix also pass.
 Every supported persistent and nullish value round-trips between Emacs and the
 worker. A 256 MiB logical dataset is processed through bounded chunks while
 neither side exceeds the documented memory budget.
+
+**Status:** Complete on 2026-09-01 through specifications 0088-0090. The
+source-bound reference report records exact SHA-256 equality, 1,058 chunks in
+each direction, per-process peaks, and the simultaneous combined peak below
+all three budgets.
 
 ### PD-09: Accelerated Operation Correctness
 

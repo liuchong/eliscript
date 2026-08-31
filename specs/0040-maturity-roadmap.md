@@ -616,9 +616,11 @@ preserves all persistent categories, metadata, exact special scalars, and
 explicit native containers across temporary generated modules. Specification
 [0089-chunked-emacs-worker-values.md](0089-chunked-emacs-worker-values.md)
 adds incremental codec traversal, bounded framing, backpressure, streamed
-progress and results, and upload-stage cancellation. The PD-08 256 MiB
-memory-budget probe, transport of protocol definitions, and static escape
-analysis remain open. Canonical
+progress and results, and upload-stage cancellation. Specification
+[0090-large-worker-value-memory-probe.md](0090-large-worker-value-memory-probe.md)
+closes PD-08 with a source-bound 256 MiB real-process report and explicit
+Emacs, Bun, and combined RSS budgets. Transport of protocol definitions and
+static escape analysis remain open. Canonical
 printing/reading for the optimized runtime family now lands in
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md);
 portable Keyword/Symbol values and List/collection data text now land in

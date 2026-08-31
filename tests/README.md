@@ -47,6 +47,11 @@ real Bun worker and verifies incremental Emacs encoding and decoding. These
 tests are core integration evidence and do not use application frameworks or
 bundlers.
 
+`worker-value-stream-probe.test.mjs` starts an independent Emacs/Bun pair for
+a small memory-probe smoke run. It also validates the committed 256 MiB report,
+all three RSS budgets, exact bidirectional chunking, and every source digest.
+The large workload is not repeated by the default suite.
+
 ## Bootstrap and Compiler
 
 Bootstrap tests use shared JSON conformance fixtures. ERT runs the Emacs Lisp
