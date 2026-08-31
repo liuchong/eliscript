@@ -264,6 +264,7 @@ The schemas and change workflow are defined by specifications
 | 0079 | [Eliscript-authored Protocol Dispatch Policy](0079-eliscript-protocol-dispatch-policy.md) | Accepted | Implemented |
 | 0080 | [Canonical Generated Protocol Runtime](0080-canonical-generated-protocol-runtime.md) | Accepted | Implemented |
 | 0081 | [Protocol-driven Text and Keyed Object Algorithms](0081-protocol-driven-text-object.md) | Accepted | Implemented |
+| 0082 | [Persistent Literal Runtime ABI and Explicit Host Containers](0082-persistent-literal-runtime-abi.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

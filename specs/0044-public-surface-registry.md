@@ -117,9 +117,9 @@ An inventory change alone does not justify a public behavior change. It makes
 the change visible so specification and compatibility review cannot be
 bypassed accidentally.
 
-## Initial Baseline
+## Initial Baseline Snapshot
 
-The first validated surface contains:
+The first validated surface recorded when this specification landed contained:
 
 - 8 language groups with 162 entries
 - 51 IR node kinds
@@ -132,9 +132,11 @@ The first validated surface contains:
 - 91 Emacs public functions
 - 22 Emacs records, of which 12 are public and 10 internal
 
-These counts describe the current accepted implementation, not the eventual
-1.0 surface. M8 may deliberately supersede array-backed collection semantics
-as persistent collections land; those changes must remain visible here.
+These counts are historical evidence for the first registry, not current
+totals or the eventual 1.0 surface. The machine-readable registry and its
+executable report are authoritative for current counts. M8 may deliberately
+supersede array-backed collection semantics as persistent collections land;
+those changes must remain visible there.
 
 ## Acceptance Evidence
 

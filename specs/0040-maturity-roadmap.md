@@ -558,7 +558,11 @@ policy-free JavaScript compatibility facade. Protocol-driven text and keyed
 object algorithms then close the remaining P2 migration in
 [0081-protocol-driven-text-object.md](0081-protocol-driven-text-object.md),
 including generated production artifacts and transient persistent-Map
-construction. Stack-safe function and binding
+construction. The first P3 language-integration layer now lands in
+[0082-persistent-literal-runtime-abi.md](0082-persistent-literal-runtime-abi.md):
+dedicated persistent Vector/Map IR, one standard ESM runtime ABI, and explicit
+native container forms. Square-bracket default migration and maintained-source
+conversion remain open. Stack-safe function and binding
 iteration now lands in
 [0064-stack-safe-loop-recur.md](0064-stack-safe-loop-recur.md), with exact tail
 positions, nearest-target analysis, simultaneous pattern rebinding,
@@ -576,14 +580,16 @@ runtime APIs, equality/hash exclusion, and seed/self-hosted Bun/Node evidence.
 P1 construction steps 1-5 and their all-host exit gate now have complete
 implementation evidence through
 [0078-persistent-collection-core-exit-audit.md](0078-persistent-collection-core-exit-audit.md).
-Declared macro dependencies, portable dispatch policy, generated protocol
+Deterministic macro generation, portable dispatch policy, generated protocol
 runtime, and protocol-driven object/text algorithms now land in
-[0055-declared-macro-dependencies.md](0055-declared-macro-dependencies.md),
-[0079-portable-protocol-declarations.md](0079-portable-protocol-declarations.md),
-[0080-eliscript-authored-protocol-runtime.md](0080-eliscript-authored-protocol-runtime.md),
+[0065-deterministic-macro-generated-names.md](0065-deterministic-macro-generated-names.md),
+[0079-eliscript-protocol-dispatch-policy.md](0079-eliscript-protocol-dispatch-policy.md),
+[0080-canonical-generated-protocol-runtime.md](0080-canonical-generated-protocol-runtime.md),
 and
 [0081-protocol-driven-text-object.md](0081-protocol-driven-text-object.md).
-Persistent collection literal migration, compiler specialization,
+The literal ABI and explicit host constructors begin P3 in
+[0082-persistent-literal-runtime-abi.md](0082-persistent-literal-runtime-abi.md).
+Default persistent collection literal migration, compiler specialization,
 transport-safe protocol representation, and static escape analysis remain
 open. Canonical printing/reading for
 the optimized runtime family now lands in

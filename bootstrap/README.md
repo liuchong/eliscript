@@ -58,7 +58,7 @@ adapter:
 
 Generated files are written below `dist/bootstrap/` and are not source
 artifacts. Shared fixtures cover symbol behavior, reader syntax, macro
-expansion, lexical analysis, all 51 IR node kinds, direct ESM emission, and
+expansion, lexical analysis, all 55 IR node kinds, direct ESM emission, and
 Source Map v3. Oracles compare complete syntax and IR trees, spans, properties,
 acceptance, exact diagnostics, JavaScript bytes, and parsed source maps between
 the seed and generated implementations. Repeated builds must be byte-identical.

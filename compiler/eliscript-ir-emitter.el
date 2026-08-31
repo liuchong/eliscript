@@ -21,6 +21,10 @@
   "__eliscript_react_jsx_runtime"
   "Internal namespace binding for the automatic React JSX runtime.")
 
+(defconst eliscript-ir-emitter--literal-runtime-import
+  "import { hashMap as __eliscript_hash_map, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n"
+  "Generated import for persistent literal construction.")
+
 (defun eliscript-ir-emitter--locate (node output)
   "Mark OUTPUT with NODE's source span when source-map recording is active."
   (if eliscript-ir-emitter--record-source-spans
@@ -826,7 +830,7 @@
        (eliscript-ir-emitter--require-arity node 1 1)
        (format "(%s == null)"
                (eliscript-ir-emitter-emit-expression (car nodes))))
-      ((or 'list 'vector 'array)
+      ((or 'list 'array 'js-array)
        (format "[%s]" (eliscript-ir-emitter--emit-arguments nodes)))
       ('car
        (eliscript-ir-emitter--require-arity node 1 1)
@@ -1039,6 +1043,12 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
        (eliscript-emitter--reference-name (eliscript-ir-node-value node)))
       ('array-literal
        (format "[%s]" (eliscript-ir-emitter--emit-arguments children)))
+      ('persistent-vector-literal
+       (format "__eliscript_vector(%s)"
+               (eliscript-ir-emitter--emit-arguments children)))
+      ('persistent-map-literal
+       (format "__eliscript_hash_map(%s)"
+               (eliscript-ir-emitter--emit-arguments children)))
       ('quoted-literal
        (eliscript-emitter--emit-quoted (eliscript-ir-node-value node)))
       ('function-expression (eliscript-ir-emitter--emit-function node))
@@ -1204,6 +1214,7 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
     (eliscript-emitter--fail "expected an IR program: %S" program))
   (let ((eliscript-emitter--temporary-counter 0)
         uses-react-runtime
+        uses-literal-runtime
         uses-host-identity-token
         portable-functions
         exported-bindings)
@@ -1213,6 +1224,9 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
        (when (memq (eliscript-ir-node-kind node)
                    '(react-element react-fragment))
          (setq uses-react-runtime t))
+       (when (memq (eliscript-ir-node-kind node)
+                   '(persistent-vector-literal persistent-map-literal))
+         (setq uses-literal-runtime t))
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (eq (eliscript-ir-node-value node) 'host-identity-token))
          (setq uses-host-identity-token t))
@@ -1228,6 +1242,9 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
      (if uses-react-runtime
          (format "import * as %s from \"react/jsx-runtime\";\n"
                  eliscript-ir-emitter--react-runtime-binding)
+       "")
+     (if uses-literal-runtime
+         eliscript-ir-emitter--literal-runtime-import
        "")
      "const __eliscript_truthy = (value) => value !== false && value != null;\n"
      (if uses-host-identity-token

@@ -12,13 +12,13 @@
      "bit-shift-left" "bit-shift-right" "unsigned-bit-shift-right"
      "value-type" "host-identity-token" "string-code-unit-at" "string-from-code-unit"
      "string-to-number" "string-to-bigint" "number-float64-words"
-     "list" "vector" "array" "car"
+     "list" "vector" "hash-map" "array" "js-array" "car"
      "cdr" "cons" "nth" "aref" "length" "new" "print" "str"
      "object-keys" "object-has?" "object-assoc" "funcall" "apply"])
 
   (defconst portable-forbidden-operators
     ["js*" "print" "put" "js-call" "new" "async" "await" "throw" "try"
-     "jsx" "fragment"])
+     "vector" "hash-map" "jsx" "fragment"])
 
   (defconst fail
     (js* "(diagnostic) => { const p = diagnostic.location.start; const error = new Error(`${diagnostic.location.file}:${p.line}:${p.column}: ${diagnostic.message}`); error.eliscriptDiagnostic = diagnostic; throw error; }"))
@@ -486,9 +486,10 @@
           (analyze-non-tail value scope context))
         (setq index (+ index 2)))))
 
-  (defun analyze-object (args scope context form-span)
+  (defun analyze-object (args scope context form-span form-name)
     (when (= (% (get args :length) 2) 1)
-      (analyzer-fail context form-span "object expects key/value pairs"))
+      (analyzer-fail
+        context form-span (str form-name " expects key/value pairs")))
     (let ((index 0))
       (while (< index (get args :length))
         (let ((key (nth index args))
@@ -673,8 +674,14 @@
         ((= operator "fragment")
          (analyze-non-tail-sequence args scope context))
         ((= operator "quote") nil)
-        ((= operator "object")
-         (analyze-object args scope context form-span))
+        ((or (= operator "object") (= operator "js-object"))
+         (analyze-object args scope context form-span operator))
+        ((= operator "hash-map")
+         (when (= (% (get args :length) 2) 1)
+           (analyzer-fail
+             context form-span
+             "hash-map expects complete key/value pairs"))
+         (analyze-non-tail-sequence args scope context))
         ((or (= operator "get") (= operator "put") (= operator "js-call"))
          (analyze-property-call
            operator args scope context form-span))
@@ -1075,6 +1082,8 @@
                  ((= operator "await") "asynchronous suspension")
                  ((or (= operator "throw") (= operator "try"))
                   "exception control flow")
+                 ((or (= operator "vector") (= operator "hash-map"))
+                  "persistent runtime values")
                  (t "React runtime access"))
                ")")))
       (cond
@@ -1094,7 +1103,7 @@
         ((or (= operator "setq") (= operator "set!"))
          (portable-assignment
            args scope declarations dependencies entry context))
-        ((= operator "object")
+        ((or (= operator "object") (= operator "js-object"))
          (portable-object
            args scope declarations dependencies entry context))
         (t

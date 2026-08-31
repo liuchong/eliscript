@@ -40,7 +40,7 @@
     value-type host-identity-token string-code-unit-at string-from-code-unit
     string-to-number string-to-bigint number-float64-words
     eq equal null nil? undefined? nullish?
-    list vector array car cdr cons nth aref length
+    list vector hash-map array js-array car cdr cons nth aref length
     object-keys object-has? object-assoc
     new print str funcall apply))
 
@@ -321,10 +321,10 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
            "cannot assign to immutable binding: %s" name-value)))
       (eliscript-analyzer--analyze-non-tail value scope))))
 
-(defun eliscript-analyzer--analyze-object (arguments scope)
-  "Analyze object literal ARGUMENTS in SCOPE."
+(defun eliscript-analyzer--analyze-object (arguments scope form-name)
+  "Analyze host object ARGUMENTS in SCOPE for FORM-NAME."
   (when (= (% (length arguments) 2) 1)
-    (eliscript-analyzer--fail "object expects key/value pairs"))
+    (eliscript-analyzer--fail "%s expects key/value pairs" form-name))
   (while arguments
     (let ((key (pop arguments))
           (value (pop arguments)))
@@ -496,7 +496,14 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
       ('fragment
        (eliscript-analyzer--analyze-non-tail-sequence arguments scope))
       ('quote nil)
-      ('object (eliscript-analyzer--analyze-object arguments scope))
+      ((or 'object 'js-object)
+       (eliscript-analyzer--analyze-object
+        arguments scope (symbol-name operator)))
+      ('hash-map
+       (when (= (% (length arguments) 2) 1)
+         (eliscript-analyzer--fail
+          "hash-map expects complete key/value pairs"))
+       (eliscript-analyzer--analyze-non-tail-sequence arguments scope))
       ((or 'get 'put 'js-call)
        (eliscript-analyzer--analyze-property-call operator arguments scope))
       ('js* nil)

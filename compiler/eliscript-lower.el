@@ -19,7 +19,7 @@
     value-type host-identity-token string-code-unit-at string-from-code-unit
     string-to-number string-to-bigint number-float64-words
     eq equal null nil? undefined? nullish?
-    list vector array car cdr cons nth aref length
+    list array js-array car cdr cons nth aref length
     object-keys object-has? object-assoc)
   "Operators represented by the generic intrinsic IR node.")
 
@@ -276,6 +276,14 @@
           ((or 'and 'or)
            (eliscript-lower--call-node
             'short-circuit form operator arguments))
+          ('vector
+           (eliscript-lower--node
+            'persistent-vector-literal form nil
+            (mapcar #'eliscript-lower-expression arguments)))
+          ('hash-map
+           (eliscript-lower--node
+            'persistent-map-literal form nil
+            (mapcar #'eliscript-lower-expression arguments)))
           ('jsx
            (eliscript-lower--node
             'react-element form nil
@@ -288,7 +296,8 @@
             (list :child-count (length arguments))))
           ((pred (lambda (name) (memq name eliscript-lower--intrinsics)))
            (eliscript-lower--call-node 'intrinsic form operator arguments))
-          ('object (eliscript-lower--object form arguments))
+          ((or 'object 'js-object)
+           (eliscript-lower--object form arguments))
           ('get
            (eliscript-lower--call-node 'property-read form 'get arguments))
           ('put

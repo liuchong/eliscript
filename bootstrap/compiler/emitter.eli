@@ -12,6 +12,8 @@
   (import "./source-map.mjs" create-source-map)
 
   (defconst react-runtime-binding "__eliscript_react_jsx_runtime")
+  (defconst literal-runtime-import
+    "import { hashMap as __eliscript_hash_map, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n")
   (defconst host-identity-token-helper
     "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n")
   (defconst fail
@@ -854,7 +856,7 @@
         ((or (= name "null") (= name "nullish?"))
          (require-node-arity node 1 1)
          (combine ["(" (emit-expression (nth 0 nodes)) " == null)"]))
-        ((or (= name "list") (= name "vector") (= name "array"))
+        ((or (= name "list") (= name "array") (= name "js-array"))
          (combine ["[" (emit-arguments nodes) "]"]))
         ((= name "car")
          (require-node-arity node 1 1)
@@ -1059,6 +1061,10 @@
           ((= kind "literal") (emit-literal node))
           ((= kind "reference") (text-fragment (reference-name (ir-value node))))
           ((= kind "array-literal") (combine ["[" (emit-arguments nodes) "]"]))
+          ((= kind "persistent-vector-literal")
+           (combine ["__eliscript_vector(" (emit-arguments nodes) ")"]))
+          ((= kind "persistent-map-literal")
+           (combine ["__eliscript_hash_map(" (emit-arguments nodes) ")"]))
           ((= kind "quoted-literal") (emit-quoted (ir-value node)))
           ((= kind "function-expression") (emit-function node))
           ((= kind "await-expression")
@@ -1226,6 +1232,17 @@
               (setq found t))))
         found)))
 
+  (defun node-uses-literal-runtime-p (node)
+    (if (or (= (ir-kind node) "persistent-vector-literal")
+            (= (ir-kind node) "persistent-map-literal"))
+        t
+      (let ((found false))
+        (js-call (children node) :forEach
+          (lambda (child)
+            (when (node-uses-literal-runtime-p child)
+              (setq found t))))
+        found)))
+
   (defun program-uses-react-p (program)
     (let ((found false))
       (js-call (program-body program) :forEach
@@ -1239,6 +1256,14 @@
       (js-call (program-body program) :forEach
         (lambda (node)
           (when (node-uses-host-identity-token-p node)
+            (setq found t))))
+      found))
+
+  (defun program-uses-literal-runtime-p (program)
+    (let ((found false))
+      (js-call (program-body program) :forEach
+        (lambda (node)
+          (when (node-uses-literal-runtime-p node)
             (setq found t))))
       found))
 
@@ -1298,6 +1323,9 @@
          (if (program-uses-react-p program)
              (str "import * as " react-runtime-binding
                   " from \"react/jsx-runtime\";\n")
+           "")
+         (if (program-uses-literal-runtime-p program)
+             literal-runtime-import
            "")
          "const __eliscript_truthy = (value) => value !== false && value != null;\n"
          (if (program-uses-host-identity-token-p program)

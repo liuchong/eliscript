@@ -924,6 +924,7 @@
 (import \"react-dom\" :as ReactDOM)
 (import-portable \"./helper.eli\" helper)
 (defvar state 0)
+(defconst quoted-constructor '(vector 1))
 (defun optional-branch (value) (let* () (if value value)))
 (defun exercise (value values)
   (let* ((next (1+ value))

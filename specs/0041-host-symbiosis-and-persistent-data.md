@@ -875,6 +875,14 @@ remains open.
 **Exit:** no maintained project depends accidentally on mutable vector or map
 literals, and JavaScript interop remains explicit and ergonomic.
 
+**P3 status:** Specification
+[0082-persistent-literal-runtime-abi.md](0082-persistent-literal-runtime-abi.md)
+implements dedicated persistent Vector/Map IR, the standard ESM constructor
+ABI, and explicit `js-array`/`js-object` forms. Native conversion was already
+implemented by 0073. Square-bracket default migration, final Map syntax,
+first-class source Keyword emission, maintained-source conversion, and the
+compatibility freeze remain open; the P3 exit is not yet satisfied.
+
 ### P4: Transients and Hot-Path Optimization
 
 1. Implement owner-token transient vector, map, and set nodes.

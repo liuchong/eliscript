@@ -44,12 +44,24 @@ and recurrence as distinct IR nodes; the emitter turns valid targets into
 deterministic labeled JavaScript loops with simultaneous temporary-backed
 rebinding.
 
-## React Lowering
+## Persistent Literal Linking
+
+`persistent-vector-literal` and `persistent-map-literal` IR nodes emit calls
+through the package-owned `eliscript/runtime/literals` ESM ABI. The import is
+inserted once and only when those nodes occur. `(vector ...)` and
+`(hash-map ...)` use that path; `js-array` and `js-object` remain direct native
+container forms. Square-bracket expressions still use the provisional
+`array-literal` node until the next P3 migration slice.
+
+## Application Lowering
 
 React `jsx` and `fragment` forms lower to dedicated IR nodes. Modules that use
 those nodes receive one automatic `react/jsx-runtime` namespace import and emit
 `jsx`, `jsxs`, and `Fragment` calls directly; ordinary modules remain free of
 React imports.
+
+This application compatibility surface is independent of persistent literal
+semantics and is not a dependency of the compiler or runtime ABI.
 
 ## Source Discipline
 

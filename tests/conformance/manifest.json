@@ -915,6 +915,19 @@
         { "kind": "bun-test", "file": "tests/core-text-object.test.mjs", "contains": "core text/object production artifacts are fixed-point and cross-host" },
         { "kind": "bun-test", "file": "tests/core-text-object.test.mjs", "contains": "core object transforms use transient persistent-map construction" }
       ]
+    },
+    {
+      "id": "runtime.persistent-literal-abi",
+      "title": "Persistent literal runtime ABI and explicit host containers",
+      "status": "accepted",
+      "spec": "0082",
+      "contracts": ["Links persistent Vector and Map constructors through one standard ESM runtime ABI", "Separates persistent constructor IR from provisional array and host object IR", "Provides explicit js-array and js-object forms without framework or bundler dependencies", "Matches seed/self-hosted ESM and Source Maps plus Bun and Node value reports"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "persistent constructors and explicit host containers are distinct" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "hash-map rejects incomplete pairs in both compilers" },
+        { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

@@ -180,8 +180,8 @@ adapters through specifications
 [0063](0063-protocol-driven-core-algorithms.md),
 [0066](0066-eliscript-authored-core-protocol-algorithms.md),
 [0073](0073-native-javascript-container-interop.md),
-[0079](0079-portable-protocol-declarations.md),
-[0080](0080-eliscript-authored-protocol-runtime.md), and
+[0079](0079-eliscript-protocol-dispatch-policy.md),
+[0080](0080-canonical-generated-protocol-runtime.md), and
 [0081](0081-protocol-driven-text-object.md). Persistent collection literal
 migration, compiler specialization, and a transport-safe protocol
 representation remain later compiler work.

@@ -79,9 +79,11 @@ make Number, NaN, infinity, safe-integer, signed division, and checked-overflow
 semantics explicit without host Math calls. The persistent collection core now
 passes its complete cross-host million-value exit audit. Protocol dispatch and
 text/object algorithms are now maintained in Eliscript and checked against
-generated production artifacts. The next language boundary is persistent
-literal migration and the Emacs value bridge, while transport-safe protocol
-representation remains open.
+generated production artifacts. Persistent `(vector ...)` and `(hash-map ...)`
+construction now links through a standard ESM literal ABI, while `js-array`
+and `js-object` make host containers explicit. The next language boundary is
+changing square-bracket defaults and migrating maintained sources, followed by
+the Emacs value bridge; transport-safe protocol representation remains open.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in
@@ -222,6 +224,7 @@ The implemented language includes:
 - ESM modules, JavaScript interop, and application-level element syntax
 - statically checked portable functions and dependency-pruned builds
 - persistent collections, value semantics, and open collection protocols
+- persistent Vector/Map constructors with explicit native container forms
 - first-class immutable Keyword and Symbol values with qualified names
 - immutable metadata on Symbols and persistent collections
 - canonical readable text for optimized and portable persistent values

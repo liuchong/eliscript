@@ -10,8 +10,8 @@
      "bit-shift-left" "bit-shift-right" "unsigned-bit-shift-right"
      "value-type" "host-identity-token" "string-code-unit-at" "string-from-code-unit"
      "string-to-number" "string-to-bigint" "number-float64-words"
-     "nullish?" "list" "vector"
-     "array" "car" "cdr" "cons" "nth" "aref" "length"
+     "nullish?" "list" "array" "js-array" "car" "cdr" "cons" "nth"
+     "aref" "length"
      "object-keys" "object-has?" "object-assoc"])
 
   (defconst fail
@@ -387,6 +387,14 @@
             (lower-call-node "loop" form "while" args))
            ((or (= operator "and") (= operator "or"))
             (lower-call-node "short-circuit" form operator args))
+           ((= operator "vector")
+            (make-node
+              "persistent-vector-literal" (node-span form) nil
+              (lower-sequence args) nil))
+           ((= operator "hash-map")
+            (make-node
+              "persistent-map-literal" (node-span form) nil
+              (lower-sequence args) nil))
            ((= operator "jsx")
             (make-node
               "react-element" (node-span form) nil (lower-sequence args)
@@ -397,7 +405,8 @@
               (object :childCount (get args :length))))
            ((js-call intrinsics :includes operator)
             (lower-call-node "intrinsic" form operator args))
-           ((= operator "object") (lower-object form args))
+           ((or (= operator "object") (= operator "js-object"))
+            (lower-object form args))
            ((= operator "get")
             (lower-call-node "property-read" form "get" args))
            ((= operator "put")

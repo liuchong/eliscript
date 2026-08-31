@@ -19,6 +19,15 @@ runtime for element construction.
 
 ## Modules
 
+### Literal Runtime ABI
+
+`literals.mjs` is the package-owned standard ESM link for generated persistent
+constructors. It exports `vector` and `hashMap`, delegating directly to the
+canonical persistent Vector and HAMT Map implementations. The compiler imports
+it only for dedicated persistent literal IR nodes. It has no application
+framework, bundler, server, or publishing dependency. Explicit `js-array` and
+`js-object` forms bypass this ABI and emit native containers directly.
+
 ### Persistent Vector
 
 `core/vector.mjs` is the first provisional M8 persistent-value module. It

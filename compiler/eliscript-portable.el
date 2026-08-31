@@ -29,9 +29,10 @@
     value-type host-identity-token string-code-unit-at string-from-code-unit
     string-to-number string-to-bigint number-float64-words
     eq equal null nil? undefined? nullish?
-    list vector array car cdr cons nth aref length
+    list vector hash-map array js-array car cdr cons nth aref length
     object-keys object-has? object-assoc
-    str funcall apply object get cond lambda fn let let* setq set! quote))
+    str funcall apply object js-object get cond lambda fn let let* setq set!
+    quote))
 
 (defconst eliscript-portable--forbidden-operators
   '((js* . "raw JavaScript")
@@ -43,6 +44,8 @@
     (await . "asynchronous suspension")
     (throw . "exception control flow")
     (try . "exception control flow")
+    (vector . "persistent runtime values")
+    (hash-map . "persistent runtime values")
     (jsx . "React runtime access")
     (fragment . "React runtime access")))
 
@@ -313,7 +316,7 @@
       ((or 'setq 'set!)
        (eliscript-portable--assignment
         arguments scope declarations dependencies))
-      ('object
+      ((or 'object 'js-object)
        (eliscript-portable--object
         arguments scope declarations dependencies))
       ((pred (lambda (name) (memq name eliscript-portable--operators)))

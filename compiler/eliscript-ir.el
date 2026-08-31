@@ -28,7 +28,8 @@
     import-named variable-declaration function-declaration export-declaration
     export-default expression-statement parameter-binding
     array-binding-pattern binding-name binding-hole reference literal
-    array-literal quoted-literal function-expression await-expression
+    array-literal persistent-vector-literal persistent-map-literal
+    quoted-literal function-expression await-expression
     throw-expression try-expression catch-clause catch-binding finally-clause
     conditional conditional-sugar
     conditional-chain conditional-clause sequence lexical-bindings
@@ -139,6 +140,14 @@
      (apply #'vector
             (mapcar #'eliscript-ir-node-to-form
                     (eliscript-ir-node-children node))))
+    ('persistent-vector-literal
+     (cons 'vector
+           (mapcar #'eliscript-ir-node-to-form
+                   (eliscript-ir-node-children node))))
+    ('persistent-map-literal
+     (cons 'hash-map
+           (mapcar #'eliscript-ir-node-to-form
+                   (eliscript-ir-node-children node))))
     ('module-declaration
      (cons 'module
            (cons (eliscript-ir-node-value node)

@@ -1,0 +1,39 @@
+import { pathToFileURL } from "node:url";
+
+import {
+  isPersistentHashMap,
+} from "../../runtime/core/map.mjs";
+import {
+  isPersistentVector,
+  persistentVector,
+} from "../../runtime/core/vector.mjs";
+
+const modulePath = process.argv[2];
+if (modulePath === undefined) {
+  throw new TypeError("literal runtime host requires a generated module path");
+}
+
+const generated = await import(pathToFileURL(modulePath).href);
+const nested = generated.vector_value.nth(2);
+const mapKey = persistentVector("value-key");
+const mapResult = generated.map_value.get(mapKey);
+
+console.log(JSON.stringify({
+  vector: {
+    persistent: isPersistentVector(generated.vector_value),
+    count: generated.vector_value.count,
+    values: [...generated.vector_value],
+    nestedPersistent: isPersistentVector(nested),
+  },
+  map: {
+    persistent: isPersistentHashMap(generated.map_value),
+    count: generated.map_value.count,
+    name: generated.map_value.get("name"),
+    valueKey: isPersistentVector(mapResult) ? [...mapResult] : null,
+  },
+  host: {
+    array: Array.isArray(generated.array_value),
+    object: Object.getPrototypeOf(generated.object_value) === Object.prototype,
+    objectValue: generated.object_value,
+  },
+}));
