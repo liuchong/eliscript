@@ -853,6 +853,18 @@
         { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "repository public surface matches every tracked implementation" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "stdlib.portable-numeric-foundation",
+      "title": "Portable Number and safe-integer foundation",
+      "status": "accepted",
+      "spec": "0077",
+      "contracts": ["Classifies finite, NaN, infinite, integral, safe-integral, signed, zero, and parity Number values without coercion", "Defines exact checked safe-integer arithmetic and distinct truncating quotient, remainder, and divisor-signed modulo behavior", "Computes iterative nonnegative GCD and overflow-checked LCM with explicit invalid-input nil results", "Matches self-hosted artifacts and Bun/Node execution over generated algebraic invariants with dependency pruning"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/portable-numeric.test.mjs", "contains": "portable numeric functions preserve exact Number and safe-integer contracts" },
+        { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "repository public surface matches every tracked implementation" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

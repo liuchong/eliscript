@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 76 specifications.
+The registry currently contains 77 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 47 |
+| Accepted design | 48 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 73 |
+| Implemented | 74 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-45 as provisional, and 3 as planning. That baseline is derived from registry
+46 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -54,7 +54,8 @@ canonical runtime plus portable List/collection data text, synchronous Atom
 state references, explicit native JavaScript container conversion, and
 process-local host identity hashing for efficient opaque Map/Set keys, and
 portable value-semantic Result records and combinators, plus a strict portable
-persistent JSON codec implemented.
+persistent JSON codec and a portable Number/safe-integer foundation
+implemented.
 Portable dispatch internals, literal migration, static transient
 escape analysis, and the Emacs value bridge remain ahead.
 
@@ -110,6 +111,7 @@ number.
 20. [0074: Process-local Host Identity Hashing](0074-process-local-host-identity-hashing.md)
 21. [0075: Portable Result Values](0075-portable-result-values.md)
 22. [0076: Portable JSON Values](0076-portable-json-values.md)
+23. [0077: Portable Numeric Foundation](0077-portable-numeric-foundation.md)
 
 ### React and Publishing
 
@@ -252,6 +254,7 @@ The schemas and change workflow are defined by specifications
 | 0074 | [Process-local Host Identity Hashing](0074-process-local-host-identity-hashing.md) | Accepted | Implemented |
 | 0075 | [Portable Result Values](0075-portable-result-values.md) | Accepted | Implemented |
 | 0076 | [Portable JSON Values](0076-portable-json-values.md) | Accepted | Implemented |
+| 0077 | [Portable Numeric Foundation](0077-portable-numeric-foundation.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

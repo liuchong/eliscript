@@ -583,7 +583,11 @@ closures, and stack-safe persistent-Vector traversal. The first portable JSON
 boundary now lands in
 [0076-portable-json-values.md](0076-portable-json-values.md): strict parsing
 directly into persistent values, deterministic string-key encoding, exact
-Result diagnostics, cycle detection, and explicit resource limits.
+Result diagnostics, cycle detection, and explicit resource limits. The first
+numeric foundation now lands in
+[0077-portable-numeric-foundation.md](0077-portable-numeric-foundation.md):
+Number classification, safe-integer checked arithmetic, signed integer
+division, and iterative GCD/LCM without host Math dependencies.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 
@@ -689,9 +693,11 @@ and portability evidence.
 **M11 early implementation:** Portable Result records and combinators now land
 in [0075-portable-result-values.md](0075-portable-result-values.md), and the
 strict persistent JSON boundary lands in
-[0076-portable-json-values.md](0076-portable-json-values.md). Naming and
-behavior remain provisional until the complete M11 core-library audit;
-numeric, platform, and API-metadata work remains open.
+[0076-portable-json-values.md](0076-portable-json-values.md). Portable numeric
+classification and exact safe-integer operations land in
+[0077-portable-numeric-foundation.md](0077-portable-numeric-foundation.md).
+Naming and behavior remain provisional until the complete M11 core-library
+audit; broader mathematics, platform, and API-metadata work remains open.
 
 ### M12: Reliability, Security, and Performance (8-12 weeks)
 

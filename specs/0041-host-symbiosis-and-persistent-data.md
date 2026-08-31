@@ -416,6 +416,13 @@ the exact portable JSON subset. Duplicate keys, unsupported values, cycles,
 and resource violations return value-semantic Result errors; native container
 conversion remains an explicit `interop/js` operation.
 
+The first `core/numeric` implementation now lands in
+[0077-portable-numeric-foundation.md](0077-portable-numeric-foundation.md).
+It exposes the actual binary64 Number categories, restricts exact integer
+algorithms to the safe interval, distinguishes truncating quotient,
+dividend-signed remainder, and divisor-signed modulo, and keeps GCD/LCM
+iterative and dependency-prunable.
+
 Public functions target protocols wherever that produces a real abstraction.
 Representation-specific functions remain in their owning modules. A function
 is not generalized merely to increase API count.

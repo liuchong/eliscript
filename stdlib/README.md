@@ -153,6 +153,30 @@ Exact provisional semantics and evidence are in
 [0057](../specs/0057-portable-value-semantics.md) and
 [0074](../specs/0074-process-local-host-identity-hashing.md).
 
+## Numeric Foundation
+
+`numeric.eli` exposes the binary64 Number model and exact safe-integer
+operations without a JavaScript Math dependency:
+
+```elisp
+(import "../../stdlib/numeric.eli"
+        checked-multiply gcd modulo quot rem safe-integer?)
+
+[(safe-integer? 9007199254740991)
+ (quot -5 3)
+ (rem -5 3)
+ (modulo -5 3)
+ (gcd 54 24)
+ (checked-multiply 9007199254740991 2)]
+```
+
+Classification covers finite values, NaN, infinities, integers, safe
+integers, sign, zero, and parity. Checked arithmetic returns nil instead of a
+rounded unsafe result. `quot` truncates toward zero, `rem` follows the dividend
+sign, and `modulo` follows the divisor sign. GCD and overflow-checked LCM are
+iterative. See [0077](../specs/0077-portable-numeric-foundation.md) for the
+complete 25-operation provisional contract.
+
 ## Result Values
 
 `result.eli` exports portable, value-semantic Ok and Err records plus branch

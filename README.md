@@ -70,8 +70,10 @@ preservation, structured cycle diagnostics, and a focused React props adapter.
 Portable Result values now provide explicit success/failure data without a new
 host class or identity boundary. Portable JSON now parses strict text directly
 into persistent values and emits deterministic string-key order with Result
-errors, cycle detection, and resource bounds. The next language boundary is
-the complete P1 exit audit, followed by portable protocol dispatch policy,
+errors, cycle detection, and resource bounds. Portable numeric functions now
+make Number, NaN, infinity, safe-integer, signed division, and checked-overflow
+semantics explicit without host Math calls. The next language boundary is the
+complete P1 exit audit, followed by portable protocol dispatch policy,
 measured object/text migration, literal migration, and the Emacs value bridge.
 
 The authoritative project state lives in the

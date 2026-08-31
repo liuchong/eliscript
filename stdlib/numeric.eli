@@ -1,0 +1,193 @@
+(module eliscript.numeric
+  (defconst numeric-max-safe-integer 9007199254740991)
+
+  (defportable number? (value)
+    (= (value-type value) "number"))
+
+  (defportable nan? (value)
+    (and (number? value) (/= value value)))
+
+  (defportable finite? (value)
+    (and (number? value)
+         (= value value)
+         (= (- value value) 0)))
+
+  (defportable infinite? (value)
+    (and (number? value)
+         (not (nan? value))
+         (not (finite? value))))
+
+  (defportable integer? (value)
+    (and (finite? value) (= (mod value 1) 0)))
+
+  (defportable safe-integer? (value)
+    (and (integer? value)
+         (<= (- numeric-max-safe-integer) value)
+         (<= value numeric-max-safe-integer)))
+
+  (defportable zero? (value)
+    (and (number? value) (= value 0)))
+
+  (defportable positive? (value)
+    (and (number? value) (> value 0)))
+
+  (defportable negative? (value)
+    (and (number? value) (< value 0)))
+
+  (defportable even? (value)
+    (and (safe-integer? value) (= (mod value 2) 0)))
+
+  (defportable odd? (value)
+    (and (safe-integer? value) (/= (mod value 2) 0)))
+
+  (defportable abs (value)
+    (if (not (number? value))
+        nil
+      (cond
+       ((nan? value) value)
+       ((< value 0) (- value))
+       ((= value 0) 0)
+       (t value))))
+
+  (defportable sign (value)
+    (if (not (number? value))
+        nil
+      (cond
+       ((nan? value) value)
+       ((> value 0) 1)
+       ((< value 0) -1)
+       (t 0))))
+
+  (defportable numeric-comparable? (value)
+    (and (number? value) (not (nan? value))))
+
+  (defportable compare-number (left right)
+    (if (and (numeric-comparable? left)
+             (numeric-comparable? right))
+        (cond
+         ((< left right) -1)
+         ((> left right) 1)
+         (t 0))
+      nil))
+
+  (defportable min-number (first &rest values)
+    (let ((result first)
+          (valid (number? first))
+          (seen-nan (nan? first))
+          (index 0))
+      (while (and valid (< index (length values)))
+        (let ((value (nth index values)))
+          (cond
+           ((not (number? value)) (setq valid false))
+           ((nan? value)
+            (setq result value seen-nan t))
+           ((and (not seen-nan) (< value result))
+            (setq result value))))
+        (setq index (1+ index)))
+      (if valid result nil)))
+
+  (defportable max-number (first &rest values)
+    (let ((result first)
+          (valid (number? first))
+          (seen-nan (nan? first))
+          (index 0))
+      (while (and valid (< index (length values)))
+        (let ((value (nth index values)))
+          (cond
+           ((not (number? value)) (setq valid false))
+           ((nan? value)
+            (setq result value seen-nan t))
+           ((and (not seen-nan) (> value result))
+            (setq result value))))
+        (setq index (1+ index)))
+      (if valid result nil)))
+
+  (defportable clamp (value lower upper)
+    (if (not (and (number? value) (number? lower) (number? upper)))
+        nil
+      (cond
+       ((nan? value) value)
+       ((nan? lower) lower)
+       ((nan? upper) upper)
+       ((> lower upper) nil)
+       ((< value lower) lower)
+       ((> value upper) upper)
+       (t value))))
+
+  (defportable numeric-normalize-zero (value)
+    (if (= value 0) 0 value))
+
+  (defportable checked-add (left right)
+    (if (and (safe-integer? left) (safe-integer? right))
+        (let ((result (+ left right)))
+          (if (safe-integer? result)
+              (numeric-normalize-zero result)
+            nil))
+      nil))
+
+  (defportable checked-subtract (left right)
+    (if (and (safe-integer? left) (safe-integer? right))
+        (let ((result (- left right)))
+          (if (safe-integer? result)
+              (numeric-normalize-zero result)
+            nil))
+      nil))
+
+  (defportable checked-multiply (left right)
+    (if (and (safe-integer? left) (safe-integer? right))
+        (let ((result (* left right)))
+          (if (safe-integer? result)
+              (numeric-normalize-zero result)
+            nil))
+      nil))
+
+  (defportable numeric-integer-operation? (dividend divisor)
+    (and (safe-integer? dividend)
+         (safe-integer? divisor)
+         (/= divisor 0)))
+
+  (defportable rem (dividend divisor)
+    (if (numeric-integer-operation? dividend divisor)
+        (let ((result (mod dividend divisor)))
+          (if (= result 0) 0 result))
+      nil))
+
+  (defportable quot (dividend divisor)
+    (if (numeric-integer-operation? dividend divisor)
+        (let* ((remainder (rem dividend divisor))
+               (result (/ (- dividend remainder) divisor)))
+          (if (= result 0) 0 result))
+      nil))
+
+  (defportable modulo (dividend divisor)
+    (if (numeric-integer-operation? dividend divisor)
+        (let ((remainder (rem dividend divisor)))
+          (cond
+           ((= remainder 0) 0)
+           ((= (negative? remainder) (negative? divisor)) remainder)
+           (t (+ remainder divisor))))
+      nil))
+
+  (defportable gcd (left right)
+    (if (and (safe-integer? left) (safe-integer? right))
+        (let ((first (abs left))
+              (second (abs right)))
+          (while (/= second 0)
+            (let ((next (rem first second)))
+              (setq first second second next)))
+          first)
+      nil))
+
+  (defportable lcm (left right)
+    (if (and (safe-integer? left) (safe-integer? right))
+        (if (or (= left 0) (= right 0))
+            0
+          (let* ((divisor (gcd left right))
+                 (scaled (quot (abs left) divisor)))
+            (checked-multiply scaled (abs right))))
+      nil))
+
+  (export abs checked-add checked-multiply checked-subtract clamp
+          compare-number even? finite? gcd infinite? integer? lcm max-number
+          min-number modulo nan? negative? number? odd? positive? quot rem
+          safe-integer? sign zero?))

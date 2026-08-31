@@ -150,6 +150,13 @@ ordering, unsupported values, non-finite numbers, shared graphs and cycles,
 three resource limits, 2,000 generated value round trips, a 20,000-item scale
 case, and declaration-level parser-only dependency pruning.
 
+The portable numeric suite compiles the zero-dependency `numeric.eli` module
+with both compiler generations, compares ESM and Source Maps byte-for-byte,
+and runs both outputs under Bun and Node. It freezes finite/NaN/infinity and
+negative-zero behavior, safe-integer boundaries, checked overflow, all signed
+quotient/remainder/modulo cases, iterative GCD/LCM, 50,000 generated algebraic
+invariants, and declaration-level GCD dependency pruning.
+
 The identifier runtime suite verifies constructor validation, Keyword
 interning, non-interned Symbol value equality, freezing, explicit serialization
 failure, hostile host-object handling, and runtime persistent Map/Set behavior.
