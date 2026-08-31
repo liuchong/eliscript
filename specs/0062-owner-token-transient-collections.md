@@ -111,8 +111,8 @@ The runtime rejects JSON serialization and structured cloning of transient
 values. Worker-message serialization consequently fails before a transient can
 be copied to another JavaScript realm. Detecting that a value crossed an
 `await` suspension or a module export requires compiler ownership analysis and
-is not claimed by this runtime slice. Those static escape checks remain open
-before the transient contract can become stable.
+is not claimed by this runtime slice. That compiler contract now continues in
+[0093-static-transient-ownership-analysis.md](0093-static-transient-ownership-analysis.md).
 
 ## Transient-backed Into
 
@@ -203,5 +203,6 @@ and
 Protocol-driven object/text migration continues in
 [0081-protocol-driven-text-object.md](0081-protocol-driven-text-object.md).
 Persistent collection literal migration and the first worker value codec now
-land through 0088. Compiler hot paths, transport of protocol definitions, and
-static transient escape analysis remain open.
+land through 0088. Transport-safe protocol definitions land in 0091, and static
+transient ownership analysis lands in 0093. Compiler hot-path migration remains
+open.

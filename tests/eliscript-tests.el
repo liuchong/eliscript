@@ -703,6 +703,120 @@
     (eliscript-compile-string
      "(defun valid () (let* ((value 1) (next value)) next))"))))
 
+(ert-deftest eliscript-transient-analysis-allows-local-owned-construction ()
+  (let ((imports
+         "(import \"./stdlib/core/transient.mjs\"
+         transient conj! persistent!)\n"))
+    (dolist
+        (body
+         '("(defun build (source)
+  (let ((builder (transient source)))
+    (conj! builder 1)
+    (persistent! builder)))"
+           "(defun build (source ready)
+  (let ((builder (transient source)))
+    (if ready (persistent! builder) (persistent! builder))))"
+           "(defasync build (source promise)
+  (let ((builder (transient source)))
+    (conj! builder 1)
+    (persistent! builder))
+  (await promise))"
+           "(defun build (source)
+  (let* ((transient (transient source))
+         (value (persistent! transient)))
+    value))"
+           "(defun build (source)
+  (let ((builder (transient source)))
+    (try (conj! builder 1) (catch error nil))
+    (persistent! builder)))"))
+      (should (string-match-p
+               "function build"
+               (eliscript-compile-string
+                (concat imports body) "transient-valid.eli"))))
+    (should
+     (string-match-p
+      "function build"
+      (eliscript-compile-string
+       "(defun transient (value) value)
+(defun build (source) (transient source))"
+       "ordinary-transient-name.eli")))))
+
+(ert-deftest eliscript-transient-analysis-rejects-ownership-escape ()
+  (let ((imports
+         "(import \"./stdlib/core/transient.mjs\"
+         transient conj! persistent!)\n")
+        (namespace-import
+         "(import \"./runtime/core/transient.mjs\" :as Runtime)\n"))
+    (dolist
+        (case
+         `(("(defasync build (source promise)
+  (let ((builder (transient source)))
+    (await promise)
+    (persistent! builder)))"
+            "cannot remain active across await")
+           ("(defconst builder (transient [])) (export builder)"
+            "cannot be exported")
+           ("(defun build (source)
+  (let ((builder (transient source)))
+    (persistent! builder)
+    (conj! builder 1)
+    nil))"
+            "no longer editable after persistent!")
+           ("(defun sink (value) value)
+(defun build (source)
+  (let ((builder (transient source)))
+    (sink builder)))"
+            "may only be used by a direct transient operation")
+           ("(defun build (source)
+  (let ((builder (transient source)))
+    (lambda () (conj! builder 1))))"
+            "cannot cross a function boundary")
+           ("(defun build (source ready)
+  (let ((builder (transient source)))
+    (when ready (persistent! builder))
+    (conj! builder 1)
+    nil))"
+            "may already be persistent after conditional control flow")
+           ("(defun build (source)
+  (let ((builder (transient source)))
+    (loop ((remaining 1))
+      (persistent! builder))))"
+            "cannot be completed inside a repeated loop")
+           ("(defun build (source) (transient source))"
+            "must be bound directly to one symbol")
+           ("(defun build (source)
+  (let* ((builder (transient source))
+         (result (conj! builder 1)))
+    result))"
+            "update result cannot be used as an ordinary value")
+           ("(defun build (source)
+  (let ((builder (transient source)))
+    (try
+      (persistent! builder)
+      (throw \"failed\")
+      (catch error (conj! builder error)))
+    nil))"
+            "may already be persistent after conditional control flow")))
+      (let ((error-data
+             (should-error
+              (eliscript-compile-string
+               (concat imports (car case)) "transient-invalid.eli")
+              :type 'eliscript-analyze-error)))
+        (should (string-match-p
+                 (regexp-quote (cadr case))
+                 (error-message-string error-data)))))
+    (let ((error-data
+           (should-error
+            (eliscript-compile-string
+             (concat namespace-import
+                     "(defun build (source)
+  (funcall Runtime/transient source))")
+             "transient-indirect.eli")
+            :type 'eliscript-analyze-error)))
+      (should (string-match-p
+               "transient operation Runtime/transient must be called directly"
+               (error-message-string error-data))))))
+
 (ert-deftest eliscript-analyzer-rejects-duplicate-bindings ()
   (should-error
    (eliscript-compile-string "(defun duplicate (value value) value)")

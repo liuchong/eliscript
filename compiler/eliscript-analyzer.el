@@ -12,6 +12,7 @@
 (require 'eliscript-parameters)
 (require 'eliscript-portable)
 (require 'eliscript-symbol)
+(require 'eliscript-transient-analysis)
 
 (cl-defstruct (eliscript-analyzer--binding
                (:constructor eliscript-analyzer--binding-create))
@@ -691,6 +692,7 @@ Return FORMS unchanged for the emitter."
     (eliscript-analyzer--predeclare-top-level flattened scope)
     (dolist (form flattened)
       (eliscript-analyzer--analyze-top-level form scope))
+    (eliscript-transient--analyze-module forms filename)
     (eliscript-portable-validate-module forms filename)
     forms))
 

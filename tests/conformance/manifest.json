@@ -1077,6 +1077,19 @@
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "portable closures produce persistent values for the versioned worker codec" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "compiler.static-transient-ownership",
+      "title": "Static transient ownership analysis",
+      "status": "accepted",
+      "spec": "0093",
+      "contracts": ["Recognizes transient operations only through canonical import provenance", "Enforces direct local ownership and one-way persistent completion", "Rejects async, module, closure, call, container, assignment, and repeated-loop escape", "Merges branch and exception states conservatively", "Keeps application frameworks, UI libraries, bundlers, site generators, and publishing outside core implementation and evidence"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-transient-analysis-allows-local-owned-construction" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-transient-analysis-rejects-ownership-escape" },
+        { "kind": "bun-test", "file": "tests/bootstrap-analyzer.test.mjs", "contains": "bootstrapped analyzer matches seed acceptance and diagnostics" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

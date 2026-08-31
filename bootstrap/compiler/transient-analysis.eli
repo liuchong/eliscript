@@ -1,0 +1,776 @@
+(module bootstrap.compiler.transient-analysis
+  (import "./syntax.mjs"
+    node-kind node-span node-value node-name node-items)
+
+  (defconst transient-fail
+    (js* "(filename, span, message) => { const file = filename || span?.filename || '<input>'; const start = span ? { offset: span.start, line: span.line, column: span.column } : { offset: 0, line: 1, column: 1 }; const end = span ? { offset: span.end, line: span.endLine, column: span.endColumn } : { offset: 0, line: 1, column: 1 }; const diagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-A0001', severity: 'error', phase: 'analysis', message, location: { file, start, end } }; const error = new Error(`${file}:${start.line}:${start.column}: ${message}`); error.eliscriptDiagnostic = diagnostic; throw error; }"))
+
+  (defconst canonical-transient-family
+    (js* "(source) => { if (typeof source !== 'string' || !/(^|\\/)(stdlib|runtime)\\/core\\/transient\\.(mjs|eli)$/.test(source)) return null; return /(^|\\/)runtime\\/core\\//.test(source) ? 'runtime' : 'stdlib'; }"))
+
+  (defconst trusted-core-source-p
+    (js* "(filename) => typeof filename === 'string' && ['stdlib/core/data.eli', 'stdlib/core/seq.eli', 'stdlib/core/transient.eli'].some((suffix) => filename === suffix || filename.endsWith('/' + suffix))"))
+
+  (defun symbol-node-p (node)
+    (and node (= (node-kind node) "symbol")))
+
+  (defun vector-node-p (node)
+    (and node (= (node-kind node) "vector")))
+
+  (defun null-node-p (node)
+    (and node
+         (= (node-kind node) "literal")
+         (null (node-value node))))
+
+  (defun list-items (node)
+    (cond
+      ((and node (= (node-kind node) "list")) (node-items node))
+      ((null-node-p node) (js-array))
+      (t undefined)))
+
+  (defun binding-marker-p (name)
+    (js-call (js-array "&optional" "&rest" "&body") :includes name))
+
+  (defun binding-nodes (pattern context)
+    (cond
+      ((symbol-node-p pattern)
+       (if (binding-marker-p (node-name pattern))
+           (transient-fail
+             (get context :filename) (node-span pattern)
+             "invalid transient-analysis binding marker")
+         (js-array pattern)))
+      ((vector-node-p pattern)
+       (let ((result (js-array)))
+         (js-call (node-items pattern) :forEach
+           (lambda (element)
+             (unless (or (null-node-p element)
+                         (and (symbol-node-p element)
+                              (binding-marker-p (node-name element))))
+               (js-call (binding-nodes element context) :forEach
+                 (lambda (binding) (js-call result :push binding))))))
+         result))
+      (t (js-array))))
+
+  (defun make-scope (parent)
+    (object :parent parent :names (new (js* "Map"))))
+
+  (defun make-binding (node &optional operation namespace)
+    (object
+      :name (node-name node)
+      :operation operation
+      :namespace namespace
+      :resource nil))
+
+  (defun install-binding (scope binding)
+    (js-call (get scope :names) :set (get binding :name) binding)
+    binding)
+
+  (defun declare-binding (scope node &optional operation namespace)
+    (install-binding scope (make-binding node operation namespace)))
+
+  (defun lookup-binding (scope name)
+    (let ((current scope)
+          (binding undefined))
+      (while (and current (not binding))
+        (setq binding (js-call (get current :names) :get name))
+        (setq current (get current :parent)))
+      binding))
+
+  (defun make-pattern-bindings (pattern context)
+    (let ((result (js-array)))
+      (js-call (binding-nodes pattern context) :forEach
+        (lambda (node) (js-call result :push (make-binding node))))
+      result))
+
+  (defun install-bindings (scope bindings)
+    (js-call bindings :forEach
+      (lambda (binding) (install-binding scope binding)))
+    bindings)
+
+  (defun transient-operation (family name)
+    (cond
+      ((= family "stdlib")
+       (cond
+         ((= name "transient") "construct")
+         ((or (= name "conj!") (= name "assoc!") (= name "dissoc!"))
+          "update")
+         ((= name "persistent!") "complete")
+         (t nil)))
+      ((= family "runtime")
+       (cond
+         ((= name "transient") "construct")
+         ((or (= name "conjBang") (= name "assocBang")
+              (= name "dissocBang"))
+          "update")
+         ((= name "persistentBang") "complete")
+         (t nil)))
+      (t nil)))
+
+  (defun operator-binding (operator scope)
+    (when (symbol-node-p operator)
+      (let* ((name (node-name operator))
+             (direct (lookup-binding scope name)))
+        (if (and direct (get direct :operation))
+            direct
+          (let ((separator (js-call name :indexOf "/")))
+            (when (and (> separator 0)
+                       (= separator (js-call name :lastIndexOf "/")))
+              (let* ((namespace-name (js-call name :slice 0 separator))
+                     (member-name (js-call name :slice (1+ separator)))
+                     (namespace (lookup-binding scope namespace-name))
+                     (family (and namespace (get namespace :namespace)))
+                     (operation (and family
+                                     (transient-operation family member-name))))
+                (and operation
+                     (object :name name :operation operation)))))))))
+
+  (defun copy-state (context)
+    (let ((result (new (js* "Map"))))
+      (js-call (get context :state) :forEach
+        (lambda (state resource) (js-call result :set resource state)))
+      result))
+
+  (defun merge-state (baseline branches)
+    (let ((result (new (js* "Map"))))
+      (js-call baseline :forEach
+        (lambda (original resource)
+          (let ((first undefined)
+                (same t))
+            (js-call branches :forEach
+              (lambda (branch)
+                (let ((state
+                       (if (js-call branch :has resource)
+                           (js-call branch :get resource)
+                         original)))
+                  (if (eq first undefined)
+                      (setq first state)
+                    (unless (= state first) (setq same false))))))
+            (js-call result :set resource (if same first "maybe")))))
+      result))
+
+  (defun run-with-state (context state operation)
+    (let ((saved (get context :state)))
+      (put context :state
+        (let ((result (new (js* "Map"))))
+          (js-call state :forEach
+            (lambda (value resource) (js-call result :set resource value)))
+          result))
+      (funcall operation)
+      (let ((result (get context :state)))
+        (put context :state saved)
+        result)))
+
+  (defun retain-state-keys (context baseline)
+    (let ((current (get context :state))
+          (result (new (js* "Map"))))
+      (js-call baseline :forEach
+        (lambda (original resource)
+          (js-call result :set resource
+            (if (js-call current :has resource)
+                (js-call current :get resource)
+              original))))
+      (put context :state result)))
+
+  (defun record-try-prefix (context)
+    (let ((prefixes (get context :tryPrefixes)))
+      (when prefixes (js-call prefixes :push (copy-state context)))))
+
+  (defun resource-state (context resource)
+    (if (js-call (get context :state) :has resource)
+        (js-call (get context :state) :get resource)
+      "active"))
+
+  (defun check-owner (binding context span)
+    (let ((resource (and binding (get binding :resource)))
+          (name (and binding (get binding :name))))
+      (unless resource
+        (transient-fail
+          (get context :filename) span
+          "transient operation requires a directly bound transient value"))
+      (unless (= (get resource :functionId) (get context :functionId))
+        (transient-fail
+          (get context :filename) span
+          (str "transient binding " name " cannot cross a function boundary")))
+      (let ((state (resource-state context resource)))
+        (cond
+          ((= state "active") resource)
+          ((= state "consumed")
+           (transient-fail
+             (get context :filename) span
+             (str "transient binding " name
+                  " is no longer editable after persistent!")))
+          (t
+           (transient-fail
+             (get context :filename) span
+             (str "transient binding " name
+                  " may already be persistent after conditional control flow")))))))
+
+  (defun direct-resource (form scope context)
+    (let ((binding
+           (and (symbol-node-p form)
+                (lookup-binding scope (node-name form)))))
+      (check-owner binding context (and form (node-span form)))))
+
+  (defun analyze-reference (form scope context)
+    (let* ((name (node-name form))
+           (operation (operator-binding form scope))
+           (binding (lookup-binding scope name)))
+      (when operation
+        (transient-fail
+          (get context :filename) (node-span form)
+          (str "transient operation " name " must be called directly")))
+      (when (and binding (get binding :resource))
+        (let ((resource (get binding :resource)))
+          (unless (= (get resource :functionId) (get context :functionId))
+            (transient-fail
+              (get context :filename) (node-span form)
+              (str "transient binding " name
+                   " cannot cross a function boundary")))
+          (let ((state (resource-state context resource)))
+            (cond
+              ((= state "active")
+               (transient-fail
+                 (get context :filename) (node-span form)
+                 (str "transient binding " name
+                      " may only be used by a direct transient operation")))
+              ((= state "consumed")
+               (transient-fail
+                 (get context :filename) (node-span form)
+                 (str "transient binding " name
+                      " is no longer editable after persistent!")))
+              (t
+               (transient-fail
+                 (get context :filename) (node-span form)
+                 (str "transient binding " name
+                      " may already be persistent after conditional control flow")))))))))
+
+  (defun binding-pair (binding)
+    (let ((items (list-items binding)))
+      (if (and (not (eq items undefined)) (> (get items :length) 0))
+          (object :target (js-nth 0 items) :initializer (js-nth 1 items))
+        (object :target binding :initializer nil))))
+
+  (defun new-resource (binding span context)
+    (let ((resource
+           (object
+             :name (get binding :name)
+             :functionId (get context :functionId)
+             :span span)))
+      (put binding :resource resource)
+      (js-call (get context :state) :set resource "active")
+      resource))
+
+  (defun constructor-call-p (form scope)
+    (and form
+         (= (node-kind form) "list")
+         (let* ((items (node-items form))
+                (binding (operator-binding (js-nth 0 items) scope)))
+           (and binding (= (get binding :operation) "construct")))))
+
+  (defun analyze-initializer
+      (initializer scope bindings context &optional predeclared)
+    (if (constructor-call-p initializer scope)
+        (let* ((items (node-items initializer))
+               (arguments (js-call items :slice 1)))
+          (unless (= (get bindings :length) 1)
+            (transient-fail
+              (get context :filename) (node-span initializer)
+              "transient result must be bound directly to one symbol"))
+          (unless (= (get arguments :length) 1)
+            (transient-fail
+              (get context :filename) (node-span initializer)
+              "transient expects 1 argument"))
+          (analyze-expression
+            (js-nth 0 arguments) scope context t)
+          (let ((binding (js-nth 0 bindings)))
+            (unless (and predeclared (get binding :resource))
+              (new-resource binding (node-span initializer) context))))
+      (when initializer
+        (analyze-expression initializer scope context t))))
+
+  (defun analyze-sequence (forms scope context value-context)
+    (let ((index 0))
+      (while (< index (get forms :length))
+        (analyze-expression
+          (js-nth index forms) scope context
+          (and value-context (= index (1- (get forms :length)))))
+        (setq index (1+ index)))))
+
+  (defun analyze-let (arguments scope context sequential value-context)
+    (let* ((baseline (copy-state context))
+           (binding-node (js-nth 0 arguments))
+           (binding-forms (if binding-node (list-items binding-node) undefined))
+           (body (js-call arguments :slice 1))
+           (child (make-scope scope)))
+      (when (eq binding-forms undefined)
+        (transient-fail
+          (get context :filename) (and binding-node (node-span binding-node))
+          "let bindings must be a list"))
+      (if sequential
+          (js-call binding-forms :forEach
+            (lambda (entry)
+              (let* ((parsed (binding-pair entry))
+                     (declared
+                      (make-pattern-bindings (get parsed :target) context)))
+                (analyze-initializer
+                  (get parsed :initializer) child declared context)
+                (install-bindings child declared))))
+        (let ((parsed (js-array))
+              (declared (js-array)))
+          (js-call binding-forms :forEach
+            (lambda (entry)
+              (let* ((pair (binding-pair entry))
+                     (bindings
+                      (make-pattern-bindings (get pair :target) context)))
+                (js-call parsed :push pair)
+                (js-call declared :push bindings))))
+          (let ((index 0))
+            (while (< index (get parsed :length))
+              (analyze-initializer
+                (get (js-nth index parsed) :initializer)
+                scope (js-nth index declared) context)
+              (setq index (1+ index))))
+          (js-call declared :forEach
+            (lambda (bindings) (install-bindings child bindings)))))
+      (analyze-sequence body child context value-context)
+      (retain-state-keys context baseline)))
+
+  (defun declare-parameters (scope parameters context)
+    (let ((items
+           (cond
+             ((= (node-kind parameters) "list") (node-items parameters))
+             ((= (node-kind parameters) "vector") (node-items parameters))
+             (t (js-array)))))
+      (js-call items :forEach
+        (lambda (parameter)
+          (unless (and (symbol-node-p parameter)
+                       (binding-marker-p (node-name parameter)))
+            (install-bindings
+              scope (make-pattern-bindings parameter context)))))))
+
+  (defun analyze-function (parameters body scope context)
+    (let ((saved-state (get context :state))
+          (saved-function-id (get context :functionId))
+          (saved-loop-protected (get context :loopProtected))
+          (child (make-scope scope)))
+      (put context :nextFunctionId (1+ (get context :nextFunctionId)))
+      (put context :functionId (get context :nextFunctionId))
+      (put context :state (copy-state context))
+      (put context :loopProtected (js-array))
+      (declare-parameters child parameters context)
+      (analyze-sequence body child context t)
+      (put context :state saved-state)
+      (put context :functionId saved-function-id)
+      (put context :loopProtected saved-loop-protected)))
+
+  (defun analyze-if (arguments scope context value-context)
+    (analyze-expression (js-nth 0 arguments) scope context t)
+    (let* ((baseline (copy-state context))
+           (then-state
+            (run-with-state context baseline
+              (lambda ()
+                (analyze-expression
+                  (js-nth 1 arguments) scope context value-context))))
+           (else-state
+            (if (> (get arguments :length) 2)
+                (run-with-state context baseline
+                  (lambda ()
+                    (analyze-expression
+                      (js-nth 2 arguments) scope context value-context)))
+              baseline)))
+      (put context :state
+        (merge-state baseline (js-array then-state else-state)))))
+
+  (defun analyze-when (arguments scope context value-context)
+    (analyze-expression (js-nth 0 arguments) scope context t)
+    (let* ((baseline (copy-state context))
+           (body-state
+            (run-with-state context baseline
+              (lambda ()
+                (analyze-sequence
+                  (js-call arguments :slice 1)
+                  scope context value-context)))))
+      (put context :state
+        (merge-state baseline (js-array baseline body-state)))))
+
+  (defun analyze-short-circuit (arguments scope context value-context)
+    (let ((exits (js-array))
+          (index 0))
+      (while (< index (get arguments :length))
+        (analyze-expression
+          (js-nth index arguments) scope context value-context)
+        (js-call exits :push (copy-state context))
+        (setq index (1+ index)))
+      (when (> (get exits :length) 0)
+        (put context :state
+          (merge-state (js-nth 0 exits) exits)))))
+
+  (defun analyze-cond (clauses scope context value-context)
+    (let ((baseline (copy-state context))
+          (exits (js-array))
+          (default-seen false)
+          (index 0))
+      (while (and (< index (get clauses :length)) (not default-seen))
+        (let* ((items (list-items (js-nth index clauses)))
+               (test (js-nth 0 items)))
+          (analyze-expression test scope context t)
+          (let* ((after-test (copy-state context))
+                 (body-state
+                  (run-with-state context after-test
+                    (lambda ()
+                      (analyze-sequence
+                        (js-call items :slice 1)
+                        scope context value-context)))))
+            (js-call exits :push body-state)
+            (when (and (= (node-kind test) "literal")
+                       (eq (node-value test) t))
+              (setq default-seen t))))
+        (setq index (1+ index)))
+      (unless default-seen (js-call exits :push (copy-state context)))
+      (when (> (get exits :length) 0)
+        (put context :state (merge-state baseline exits)))))
+
+  (defun visible-active-resources (context)
+    (let ((resources (js-array)))
+      (js-call (get context :state) :forEach
+        (lambda (state resource)
+          (when (and (= (get resource :functionId) (get context :functionId))
+                     (or (= state "active") (= state "maybe")))
+            (js-call resources :push resource))))
+      (js-call resources :sort
+        (lambda (left right)
+          (js-call (get left :name) :localeCompare (get right :name))))
+      resources))
+
+  (defun analyze-await (form arguments scope context)
+    (analyze-expression (js-nth 0 arguments) scope context t)
+    (let ((active (visible-active-resources context)))
+      (when (> (get active :length) 0)
+        (transient-fail
+          (get context :filename) (node-span form)
+          (str "transient binding " (get (js-nth 0 active) :name)
+               " cannot remain active across await")))))
+
+  (defun analyze-operation
+      (operation form arguments scope context value-context)
+    (cond
+      ((= operation "construct")
+       (transient-fail
+         (get context :filename) (node-span form)
+         "transient result must be bound directly to one symbol"))
+      ((= operation "update")
+       (when (= (get arguments :length) 0)
+         (transient-fail
+           (get context :filename) (node-span form)
+           "transient update requires a directly bound transient value"))
+       (direct-resource (js-nth 0 arguments) scope context)
+       (when value-context
+         (transient-fail
+           (get context :filename) (node-span form)
+           "transient update result cannot be used as an ordinary value"))
+       (let ((index 1))
+         (while (< index (get arguments :length))
+           (analyze-expression (js-nth index arguments) scope context t)
+           (setq index (1+ index)))))
+      ((= operation "complete")
+       (unless (= (get arguments :length) 1)
+         (transient-fail
+           (get context :filename) (node-span form)
+           "persistent! expects 1 argument"))
+       (let ((resource
+              (direct-resource (js-nth 0 arguments) scope context)))
+         (when (js-call (get context :loopProtected) :includes resource)
+           (transient-fail
+             (get context :filename) (node-span (js-nth 0 arguments))
+             (str "transient binding " (get resource :name)
+                  " cannot be completed inside a repeated loop")))
+         (js-call (get context :state) :set resource "consumed")))))
+
+  (defun analyze-loop (arguments scope context value-context)
+    (let* ((baseline (copy-state context))
+           (bindings (list-items (js-nth 0 arguments)))
+           (child (make-scope scope)))
+      (js-call bindings :forEach
+        (lambda (entry)
+          (let* ((parsed (binding-pair entry))
+                 (declared
+                  (make-pattern-bindings (get parsed :target) context)))
+            (analyze-initializer
+              (get parsed :initializer) scope declared context)
+            (install-bindings child declared))))
+      (let ((saved (get context :loopProtected))
+            (protected (js-call (visible-active-resources context) :slice)))
+        (js-call saved :forEach
+          (lambda (resource) (js-call protected :push resource)))
+        (put context :loopProtected protected)
+        (analyze-sequence
+          (js-call arguments :slice 1) child context value-context)
+        (put context :loopProtected saved))
+      (retain-state-keys context baseline)))
+
+  (defun analyze-while (arguments scope context)
+    (analyze-expression (js-nth 0 arguments) scope context t)
+    (let* ((baseline (copy-state context))
+           (saved (get context :loopProtected))
+           (protected (js-call (visible-active-resources context) :slice)))
+      (js-call saved :forEach
+        (lambda (resource) (js-call protected :push resource)))
+      (put context :loopProtected protected)
+      (let ((body-state
+             (run-with-state context baseline
+               (lambda ()
+                 (analyze-sequence
+                   (js-call arguments :slice 1) scope context false)))))
+        (put context :loopProtected saved)
+        (put context :state
+          (merge-state baseline (js-array baseline body-state))))))
+
+  (defun analyze-assignment (arguments scope context)
+    (let ((index 0))
+      (while (< index (get arguments :length))
+        (let* ((name (js-nth index arguments))
+               (binding
+                (and (symbol-node-p name)
+                     (lookup-binding scope (node-name name)))))
+          (when (and binding (get binding :resource))
+            (transient-fail
+              (get context :filename) (node-span name)
+              (str "transient binding " (node-name name)
+                   " cannot be reassigned")))
+          (analyze-expression
+            (js-nth (1+ index) arguments) scope context t))
+        (setq index (+ index 2)))))
+
+  (defun clause-operator (form)
+    (let ((items (list-items form)))
+      (and (not (eq items undefined))
+           (> (get items :length) 0)
+           (symbol-node-p (js-nth 0 items))
+           (node-name (js-nth 0 items)))))
+
+  (defun analyze-try (arguments scope context value-context)
+    (let ((baseline (copy-state context))
+          (body (js-array))
+          (catch-clause nil)
+          (finally-clause nil))
+      (js-call arguments :forEach
+        (lambda (argument)
+          (let ((operator (clause-operator argument)))
+            (cond
+              ((= operator "catch") (setq catch-clause argument))
+              ((= operator "finally") (setq finally-clause argument))
+              (t (js-call body :push argument))))))
+      (let* ((saved-prefixes (get context :tryPrefixes))
+             (prefixes (js-array baseline)))
+        (put context :tryPrefixes prefixes)
+        (let ((normal-state
+               (run-with-state context baseline
+                 (lambda ()
+                   (analyze-sequence body scope context value-context)))))
+          (put context :tryPrefixes saved-prefixes)
+          (let* ((exception-state (merge-state baseline prefixes))
+                 (catch-state
+                  (if catch-clause
+                      (let* ((items (list-items catch-clause))
+                             (child (make-scope scope)))
+                        (install-bindings
+                          child
+                          (make-pattern-bindings (js-nth 1 items) context))
+                        (run-with-state context exception-state
+                          (lambda ()
+                            (analyze-sequence
+                              (js-call items :slice 2)
+                              child context value-context))))
+                    exception-state)))
+            (put context :state
+              (merge-state baseline (js-array normal-state catch-state))))))
+      (when finally-clause
+        (analyze-sequence
+          (js-call (list-items finally-clause) :slice 1)
+          scope context false))))
+
+  (defun analyze-call (form scope context value-context)
+    (let* ((items (node-items form))
+           (operator-node (js-nth 0 items))
+           (operator (and (symbol-node-p operator-node)
+                          (node-name operator-node)))
+           (arguments (js-call items :slice 1))
+           (binding (operator-binding operator-node scope)))
+      (if binding
+          (analyze-operation
+            (get binding :operation) form arguments scope context value-context)
+        (cond
+          ((or (= operator "lambda") (= operator "fn") (= operator "async"))
+           (analyze-function
+             (js-nth 0 arguments)
+             (js-call arguments :slice 1) scope context))
+          ((= operator "await")
+           (analyze-await form arguments scope context))
+          ((or (= operator "quote") (= operator "js*")) nil)
+          ((= operator "let")
+           (analyze-let arguments scope context false value-context))
+          ((= operator "let*")
+           (analyze-let arguments scope context t value-context))
+          ((= operator "loop")
+           (analyze-loop arguments scope context value-context))
+          ((= operator "while") (analyze-while arguments scope context))
+          ((or (= operator "setq") (= operator "set!"))
+           (analyze-assignment arguments scope context))
+          ((= operator "if")
+           (analyze-if arguments scope context value-context))
+          ((or (= operator "when") (= operator "unless"))
+           (analyze-when arguments scope context value-context))
+          ((or (= operator "and") (= operator "or"))
+           (analyze-short-circuit
+             arguments scope context value-context))
+          ((= operator "cond")
+           (analyze-cond arguments scope context value-context))
+          ((= operator "try")
+           (analyze-try arguments scope context value-context))
+          ((or (= operator "progn") (= operator "do"))
+           (analyze-sequence arguments scope context value-context))
+          (t
+           (let ((operator-binding
+                  (and operator (lookup-binding scope operator))))
+             (when (and operator-binding
+                        (or (get operator-binding :operation)
+                            (get operator-binding :resource)))
+               (analyze-reference operator-node scope context)))
+           (js-call arguments :forEach
+             (lambda (argument)
+               (analyze-expression argument scope context t))))))))
+
+  (defun analyze-expression (form scope context value-context)
+    (when form
+      (record-try-prefix context)
+      (cond
+        ((= (node-kind form) "symbol")
+         (analyze-reference form scope context))
+        ((= (node-kind form) "vector")
+         (js-call (node-items form) :forEach
+           (lambda (item) (analyze-expression item scope context t))))
+        ((= (node-kind form) "list")
+         (analyze-call form scope context value-context)))
+      (record-try-prefix context)))
+
+  (defun import-declarations (arguments scope)
+    (let* ((source (node-value (js-nth 0 arguments)))
+           (family (canonical-transient-family source))
+           (index 1))
+      (while (< index (get arguments :length))
+        (let ((specifier (js-nth index arguments)))
+          (if (= (node-kind specifier) "keyword")
+              (let ((keyword (node-name specifier))
+                    (name (js-nth (1+ index) arguments)))
+                (declare-binding
+                  scope name nil (and (= keyword "as") family))
+                (setq index (+ index 2)))
+            (progn
+              (declare-binding
+                scope specifier
+                (and family
+                     (transient-operation family (node-name specifier))))
+              (setq index (1+ index))))))))
+
+  (defun flatten-modules-into (forms result)
+    (js-call forms :forEach
+      (lambda (form)
+        (let ((items (list-items form)))
+          (if (and (not (eq items undefined))
+                   (> (get items :length) 0)
+                   (symbol-node-p (js-nth 0 items))
+                   (= (node-name (js-nth 0 items)) "module"))
+              (flatten-modules-into
+                (js-call items :slice 2) result)
+            (js-call result :push form))))))
+
+  (defun flatten-modules (forms)
+    (let ((result (js-array)))
+      (flatten-modules-into forms result)
+      result))
+
+  (defun predeclare-top-level (forms scope context)
+    (js-call forms :forEach
+      (lambda (form)
+        (let ((items (list-items form)))
+          (when (and (not (eq items undefined))
+                     (> (get items :length) 1)
+                     (symbol-node-p (js-nth 0 items)))
+            (let ((operator (node-name (js-nth 0 items))))
+              (cond
+                ((or (= operator "import") (= operator "import-portable"))
+                 (import-declarations (js-call items :slice 1) scope))
+                ((or (= operator "defvar") (= operator "defconst")
+                     (= operator "defun") (= operator "defn")
+                     (= operator "defportable") (= operator "defasync"))
+                 (declare-binding scope (js-nth 1 items)))))))))
+    (js-call forms :forEach
+      (lambda (form)
+        (let ((items (list-items form)))
+          (when (and (not (eq items undefined))
+                     (> (get items :length) 2)
+                     (symbol-node-p (js-nth 0 items))
+                     (or (= (node-name (js-nth 0 items)) "defvar")
+                         (= (node-name (js-nth 0 items)) "defconst"))
+                     (constructor-call-p (js-nth 2 items) scope))
+            (new-resource
+              (lookup-binding scope (node-name (js-nth 1 items)))
+              (node-span (js-nth 2 items)) context))))))
+
+  (defun check-export (name scope context)
+    (let ((binding
+           (and (symbol-node-p name)
+                (lookup-binding scope (node-name name)))))
+      (when (and binding (get binding :resource))
+        (transient-fail
+          (get context :filename) (node-span name)
+          (str "transient binding " (node-name name) " cannot be exported")))))
+
+  (defun analyze-top-level (form scope context)
+    (let ((items (list-items form)))
+      (if (or (eq items undefined) (= (get items :length) 0))
+          (analyze-expression form scope context false)
+        (let* ((operator-node (js-nth 0 items))
+               (operator (and (symbol-node-p operator-node)
+                              (node-name operator-node)))
+               (arguments (js-call items :slice 1)))
+          (cond
+            ((or (= operator "import") (= operator "import-portable")) nil)
+            ((or (= operator "defvar") (= operator "defconst"))
+             (let ((binding
+                    (lookup-binding scope (node-name (js-nth 0 arguments)))))
+               (analyze-initializer
+                 (js-nth 1 arguments) scope
+                 (js-array binding) context t)))
+            ((or (= operator "defun") (= operator "defn")
+                 (= operator "defportable") (= operator "defasync"))
+             (analyze-function
+               (js-nth 1 arguments)
+               (js-call arguments :slice 2) scope context))
+            ((= operator "export")
+             (js-call arguments :forEach
+               (lambda (name) (check-export name scope context))))
+            ((= operator "export-default")
+             (check-export (js-nth 0 arguments) scope context)
+             (analyze-expression
+               (js-nth 0 arguments) scope context t))
+            (t (analyze-expression form scope context false)))))))
+
+  (defun analyze-transients (forms filename)
+    (unless (trusted-core-source-p filename)
+      (let* ((context
+              (object
+                :filename filename
+                :state (new (js* "Map"))
+                :functionId 0
+                :nextFunctionId 0
+                :loopProtected (js-array)
+                :tryPrefixes nil))
+             (flattened (flatten-modules forms))
+             (scope (make-scope nil)))
+        (predeclare-top-level flattened scope context)
+        (js-call flattened :forEach
+          (lambda (form) (analyze-top-level form scope context)))))
+    forms)
+
+  (export analyze-transients))

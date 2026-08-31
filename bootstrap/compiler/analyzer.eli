@@ -2,6 +2,7 @@
   (import "./symbol.mjs" binding-name reference-name)
   (import "./syntax.mjs"
     node-kind node-span node-value node-name node-items)
+  (import "./transient-analysis.mjs" analyze-transients)
 
   (defconst builtin-operators
     (js-array "if" "when" "unless" "progn" "do" "while" "loop" "recur"
@@ -1241,6 +1242,7 @@
       (predeclare-top-level flattened scope context)
       (js-call flattened :forEach
         (lambda (form) (analyze-top-level form scope context)))
+      (analyze-transients forms filename)
       (validate-portable-module flattened context)
       forms))
 

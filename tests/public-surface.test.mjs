@@ -38,9 +38,9 @@ test("repository public surface matches every tracked implementation", async () 
     standardLibrary: { modules: 29, exports: 304 },
     emacs: {
       functions: 111,
-      records: 35,
+      records: 38,
       publicRecords: 21,
-      internalRecords: 14,
+      internalRecords: 17,
     },
   });
 });

@@ -291,6 +291,7 @@ The schemas and change workflow are defined by specifications
 | 0090 | [Large Emacs Worker Value Stream Memory Probe](0090-large-worker-value-memory-probe.md) | Accepted | Implemented |
 | 0091 | [Transport-safe Protocol Definitions](0091-transport-safe-protocol-definitions.md) | Accepted | Implemented |
 | 0092 | [Persistent Set Source Syntax](0092-persistent-set-source-syntax.md) | Accepted | Implemented |
+| 0093 | [Static Transient Ownership Analysis](0093-static-transient-ownership-analysis.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

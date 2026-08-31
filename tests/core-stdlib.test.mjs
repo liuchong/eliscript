@@ -313,12 +313,6 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect([...api.report["vector-empty"]]).toEqual([]);
     expect([...api.report.transformed]).toEqual([6, 8]);
 
-    const transientApi = await import(pathToFileURL(transientModule).href);
-    expect(() => transientApi.conj_BANG_(api.vector_builder, 5))
-      .toThrow("transient vector is no longer editable");
-    expect(() => transientApi.assoc_BANG_(api.map_builder, "late", 30))
-      .toThrow("transient hash map is no longer editable");
-
     class SourceRange {
       constructor(end, observe) {
         this.end = end;

@@ -19,6 +19,7 @@ const moduleNames = [
   "syntax",
   "reader",
   "expander",
+  "transient-analysis",
   "analyzer",
   "ir",
   "lower",

@@ -753,7 +753,8 @@ sequence/data algorithm bodies now move into Eliscript in
 [0066-eliscript-authored-core-protocol-algorithms.md](0066-eliscript-authored-core-protocol-algorithms.md).
 Protocol dispatch policy and its generated runtime now live in Eliscript, and
 0091 completes the data-only definition transport boundary. Static transient
-escape analysis stays open.
+ownership and escape analysis now land in
+[0093-static-transient-ownership-analysis.md](0093-static-transient-ownership-analysis.md).
 
 ### P0: Semantics and Prototype
 

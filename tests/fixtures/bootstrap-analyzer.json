@@ -66,6 +66,16 @@
       "source": "(import-portable \"./helper.eli\" helper)\n(defportable work (value) (helper value))"
     },
     {
+      "name": "owned-transient-construction",
+      "filename": "transient-valid.eli",
+      "source": "(import \"./stdlib/core/transient.mjs\" transient conj! persistent!) (defun build (source) (let ((builder (transient source))) (conj! builder 1) (persistent! builder)))"
+    },
+    {
+      "name": "owned-transient-through-try",
+      "filename": "transient-try-valid.eli",
+      "source": "(import \"./stdlib/core/transient.mjs\" transient conj! persistent!) (defun build (source) (let ((builder (transient source))) (try (conj! builder 1) (catch error nil)) (persistent! builder)))"
+    },
+    {
       "name": "self-symbol-module",
       "filename": "bootstrap/compiler/symbol.eli",
       "file": "bootstrap/compiler/symbol.eli"
@@ -84,6 +94,11 @@
       "name": "self-expander-module",
       "filename": "bootstrap/compiler/expander.eli",
       "file": "bootstrap/compiler/expander.eli"
+    },
+    {
+      "name": "self-transient-analysis-module",
+      "filename": "bootstrap/compiler/transient-analysis.eli",
+      "file": "bootstrap/compiler/transient-analysis.eli"
     },
     {
       "name": "self-analyzer-module",
@@ -117,6 +132,66 @@
     }
   ],
   "invalid": [
+    {
+      "name": "transient-across-await",
+      "filename": "await.eli",
+      "source": "(import \"./stdlib/core/transient.mjs\" transient persistent!) (defasync build (source promise) (let ((builder (transient source))) (await promise) (persistent! builder)))",
+      "error": "await.eli:1:131: transient binding builder cannot remain active across await"
+    },
+    {
+      "name": "transient-module-export",
+      "filename": "export.eli",
+      "source": "(import \"./stdlib/core/transient.mjs\" transient) (defconst builder (transient [])) (export builder)",
+      "error": "export.eli:1:92: transient binding builder cannot be exported"
+    },
+    {
+      "name": "transient-after-persistent",
+      "filename": "consumed.eli",
+      "source": "(import \"./stdlib/core/transient.mjs\" transient conj! persistent!) (defun build (source) (let ((builder (transient source))) (persistent! builder) (conj! builder 1) nil))",
+      "error": "consumed.eli:1:155: transient binding builder is no longer editable after persistent!"
+    },
+    {
+      "name": "transient-closure-capture",
+      "filename": "closure.eli",
+      "source": "(import \"./stdlib/core/transient.mjs\" transient conj!) (defun build (source) (let ((builder (transient source))) (lambda () (conj! builder 1))))",
+      "error": "closure.eli:1:132: transient binding builder cannot cross a function boundary"
+    },
+    {
+      "name": "transient-conditional-completion",
+      "filename": "maybe.eli",
+      "source": "(import \"./stdlib/core/transient.mjs\" transient conj! persistent!) (defun build (source ready) (let ((builder (transient source))) (when ready (persistent! builder)) (conj! builder 1) nil))",
+      "error": "maybe.eli:1:174: transient binding builder may already be persistent after conditional control flow"
+    },
+    {
+      "name": "transient-loop-completion",
+      "filename": "loop.eli",
+      "source": "(import \"./stdlib/core/transient.mjs\" transient persistent!) (defun build (source) (let ((builder (transient source))) (loop ((remaining 1)) (persistent! builder))))",
+      "error": "loop.eli:1:155: transient binding builder cannot be completed inside a repeated loop"
+    },
+    {
+      "name": "unbound-transient-constructor-result",
+      "filename": "construct.eli",
+      "source": "(import \"./stdlib/core/transient.mjs\" transient) (defun build (source) (transient source))",
+      "error": "construct.eli:1:72: transient result must be bound directly to one symbol"
+    },
+    {
+      "name": "transient-update-as-value",
+      "filename": "update-value.eli",
+      "source": "(import \"./stdlib/core/transient.mjs\" transient conj!) (defun build (source) (let* ((builder (transient source)) (result (conj! builder 1))) result))",
+      "error": "update-value.eli:1:122: transient update result cannot be used as an ordinary value"
+    },
+    {
+      "name": "indirect-transient-operation",
+      "filename": "indirect.eli",
+      "source": "(import \"./runtime/core/transient.mjs\" :as Runtime) (defun build (source) (funcall Runtime/transient source))",
+      "error": "indirect.eli:1:84: transient operation Runtime/transient must be called directly"
+    },
+    {
+      "name": "uncertain-transient-in-catch",
+      "filename": "try-transient.eli",
+      "source": "(import \"./stdlib/core/transient.mjs\" transient conj! persistent!) (defun build (source) (let ((builder (transient source))) (try (persistent! builder) (throw \"failed\") (catch error (conj! builder error))) nil))",
+      "error": "try-transient.eli:1:190: transient binding builder may already be persistent after conditional control flow"
+    },
     {
       "name": "recur-outside-target",
       "filename": "recur-outside.eli",
