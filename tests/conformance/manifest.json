@@ -1129,6 +1129,18 @@
         { "kind": "bun-test", "file": "tests/compiler-runtime-scan.test.mjs", "contains": "committed compiler runtime scan report matches measured sources" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "compiler.constant-time-ir-kind",
+      "title": "Profile-guided constant-time IR node-kind decisions",
+      "status": "accepted",
+      "spec": "0097",
+      "contracts": ["Freezes the inspectable node-kind registry before constructing its private native index", "Uses constant-time native membership for production node-p and make-node decisions", "Retains the original linear membership and node predicate as independent semantic references", "Requires exact optimized/reference agreement over all maintained self-hosted compiler IR and explicit host-value boundaries", "Keeps application frameworks, UI libraries, Vite, bundlers, site generators, and publishing outside core implementation and evidence"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/compiler-ir-kind.test.mjs", "contains": "optimized IR node-kind decisions match the linear reference" },
+        { "kind": "bun-test", "file": "tests/compiler-ir-kind.test.mjs", "contains": "committed compiler IR kind report matches measured sources" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

@@ -8,6 +8,31 @@ committed report records raw samples or bounded peak observations, host
 fingerprints, correctness checks, parameters, and a digest of the source files
 that determine the measurement.
 
+## Compiler IR Node-kind Decisions
+
+Generate the self-hosted compiler and run the IR node-kind benchmark with:
+
+```sh
+bun run build:bootstrap
+bun run benchmark:compiler-ir-kind
+```
+
+The benchmark compiles every maintained self-hosted compiler module to real IR
+and compares the production native `Set` membership decision with the retained
+linear array reference. It requires exact agreement over every real node and
+explicit invalid-value boundaries before recording timings. Refresh the local
+reviewed report with:
+
+```sh
+bun tools/compiler/ir-kind-benchmark.mjs \
+  --output benchmarks/compiler-ir-kind-macos-arm64.json
+```
+
+[`compiler-ir-kind-macos-arm64.json`](compiler-ir-kind-macos-arm64.json)
+records the source-bound evidence. Default tests verify its source digest,
+equivalence result, corpus counts, raw samples, and threshold decision without
+rerunning wall-clock timing.
+
 ## Compiler Runtime Requirement Scan
 
 Run the self-hosted compiler scan benchmark after generating the bootstrap

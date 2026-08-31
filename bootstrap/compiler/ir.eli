@@ -1,26 +1,36 @@
 (module bootstrap.compiler.ir
   (defconst node-kinds
-    (js-array "module-declaration" "import-declaration" "import-default"
-     "import-namespace" "import-named" "variable-declaration"
-     "function-declaration" "export-declaration" "export-default"
-     "expression-statement" "parameter-binding" "array-binding-pattern"
-     "binding-name" "binding-hole" "reference" "literal"
-     "array-literal" "persistent-list-literal" "persistent-vector-literal"
-     "persistent-map-literal" "persistent-set-literal"
-     "quoted-literal" "function-expression"
-     "await-expression" "throw-expression" "try-expression"
-     "catch-clause" "catch-binding" "finally-clause" "conditional"
-     "conditional-sugar" "conditional-chain" "conditional-clause"
-     "sequence" "lexical-bindings" "lexical-binding" "assignment"
-     "assignment-pair" "loop" "binding-loop" "recur"
-     "short-circuit" "intrinsic"
-     "object-literal" "object-property" "property-read" "property-write"
-     "method-call" "constructor-call" "raw-javascript" "print"
-     "string-concat" "invoke" "apply-call" "call" "react-element"
-     "react-fragment"))
+    (js-call globalThis.Object :freeze
+      (js-array "module-declaration" "import-declaration" "import-default"
+       "import-namespace" "import-named" "variable-declaration"
+       "function-declaration" "export-declaration" "export-default"
+       "expression-statement" "parameter-binding" "array-binding-pattern"
+       "binding-name" "binding-hole" "reference" "literal"
+       "array-literal" "persistent-list-literal" "persistent-vector-literal"
+       "persistent-map-literal" "persistent-set-literal"
+       "quoted-literal" "function-expression"
+       "await-expression" "throw-expression" "try-expression"
+       "catch-clause" "catch-binding" "finally-clause" "conditional"
+       "conditional-sugar" "conditional-chain" "conditional-clause"
+       "sequence" "lexical-bindings" "lexical-binding" "assignment"
+       "assignment-pair" "loop" "binding-loop" "recur"
+       "short-circuit" "intrinsic"
+       "object-literal" "object-property" "property-read" "property-write"
+       "method-call" "constructor-call" "raw-javascript" "print"
+       "string-concat" "invoke" "apply-call" "call" "react-element"
+       "react-fragment")))
 
   (defconst fail
     (js* "(message) => { throw new Error(message); }"))
+
+  (defconst node-kind-set
+    (new globalThis.Set node-kinds))
+
+  (defun node-kind-p (kind)
+    (js-call node-kind-set :has kind))
+
+  (defun reference-node-kind-p (kind)
+    (js-call node-kinds :includes kind))
 
   (defun make-program (filename body)
     (unless (js* "Array.isArray(body)")
@@ -32,10 +42,15 @@
   (defun node-p (value)
     (and value
          (= (js* "typeof value") "object")
-         (js-call node-kinds :includes (get value :kind))))
+         (node-kind-p (get value :kind))))
+
+  (defun reference-node-p (value)
+    (and value
+         (= (js* "typeof value") "object")
+         (reference-node-kind-p (get value :kind))))
 
   (defun make-node (kind span value children properties)
-    (unless (js-call node-kinds :includes kind)
+    (unless (node-kind-p kind)
       (fail (str "unknown Eliscript IR node kind: " kind)))
     (unless (js* "Array.isArray(children)")
       (fail "IR node children must be an array"))
@@ -78,7 +93,10 @@
 
   (export
     node-kinds
+    node-kind-p
+    reference-node-kind-p
     node-p
+    reference-node-p
     make-program
     make-node
     program-filename

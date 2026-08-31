@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 96 specifications.
+The registry currently contains 97 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 66 |
+| Accepted design | 67 |
 | Stable design | 29 |
 | Implementation in progress | 3 |
-| Implemented | 93 |
+| Implemented | 94 |
 
 Compatibility Baseline 1 separately classifies 29 specifications as stable,
-64 as provisional, and 3 as planning. That baseline is derived from registry
+65 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -70,8 +70,9 @@ and ordinary List construction plus `car`/`cdr`/`cons` now use the canonical
 persistent List while `js-cons` preserves explicit host-array prepend. The P3
 compatibility freeze now removes the provisional `array`/`object` aliases and
 stabilizes the explicit `js-array`/`js-object` host boundary. P4 now also has a
-source-bound compiler profile and a one-pass runtime requirement scan checked
-against the retained five-pass reference implementation.
+source-bound compiler profile, a one-pass runtime requirement scan checked
+against the retained five-pass reference implementation, and constant-time IR
+node-kind decisions checked against the retained linear reference.
 
 ## Reading Paths
 
@@ -139,6 +140,7 @@ number.
 34. [0091: Transport-safe Protocol Definitions](0091-transport-safe-protocol-definitions.md)
 35. [0092: Persistent Set Source Syntax](0092-persistent-set-source-syntax.md)
 36. [0096: Profile-guided Compiler Runtime Requirement Scan](0096-profile-guided-compiler-runtime-scan.md)
+37. [0097: Profile-guided Constant-time IR Node-kind Decisions](0097-profile-guided-ir-node-kind-decisions.md)
 
 ### React and Publishing
 
@@ -301,6 +303,7 @@ The schemas and change workflow are defined by specifications
 | 0094 | [Persistent List Language Semantics and Explicit Host Cons](0094-persistent-list-language-semantics.md) | Accepted | Implemented |
 | 0095 | [Stable Persistent Value and Explicit Host Container Boundary](0095-stable-persistent-host-container-boundary.md) | Stable | Implemented |
 | 0096 | [Profile-guided Compiler Runtime Requirement Scan](0096-profile-guided-compiler-runtime-scan.md) | Accepted | Implemented |
+| 0097 | [Profile-guided Constant-time IR Node-kind Decisions](0097-profile-guided-ir-node-kind-decisions.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

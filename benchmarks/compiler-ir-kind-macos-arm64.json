@@ -1,7 +1,7 @@
 {
-  "format": "eliscript-compiler-runtime-scan-benchmark",
+  "format": "eliscript-compiler-ir-kind-benchmark",
   "version": 1,
-  "generatedAt": "2026-08-31T20:38:29.567Z",
+  "generatedAt": "2026-08-31T20:30:21.486Z",
   "sourceDigest": {
     "algorithm": "sha256",
     "files": [
@@ -16,9 +16,9 @@
       "bootstrap/compiler/source-map.eli",
       "bootstrap/compiler/emitter.eli",
       "bootstrap/compiler/compiler.eli",
-      "tools/compiler/runtime-scan-benchmark.mjs"
+      "tools/compiler/ir-kind-benchmark.mjs"
     ],
-    "value": "bad9399eeaf578ed80fa291167a813c5e269da9fb42f3f58ff3e6486871a3410"
+    "value": "a450365772c415003c670f39466f05f45cd594f96f2f5fd22b59169ca1bcc42b"
   },
   "host": {
     "runtime": "bun",
@@ -43,52 +43,54 @@
       "bootstrap/compiler/compiler.eli"
     ],
     "sourceBytes": 244173,
-    "programs": 12,
-    "irNodes": 22985
+    "programs": 11,
+    "irNodes": 22965,
+    "boundaryValues": 17
   },
   "parameters": {
-    "warmupIterations": 20,
-    "timingIterations": 80,
+    "warmupIterations": 25,
+    "timingIterations": 100,
     "timingSamples": 9
   },
   "validation": {
     "equivalent": true,
-    "programs": 12,
-    "checksum": 31
+    "values": 22982,
+    "accepted": 22967,
+    "checksum": 2296700
   },
   "measurements": {
     "optimized": {
       "samplesMs": [
-        283.696917,
-        307.5427080000002,
-        311.967208,
-        330.6912090000001,
-        334.0308749999999,
-        351.7233750000005,
-        385.14599999999973,
-        373.680875,
-        378.70454100000006
+        47.27212499999999,
+        48.62745799999993,
+        45.622125000000096,
+        50.14295799999991,
+        49.728583999999955,
+        46.08725000000004,
+        45.323875000000044,
+        45.356083000000126,
+        46.108999999999924
       ],
-      "medianMs": 334.0308749999999
+      "medianMs": 46.108999999999924
     },
     "reference": {
       "samplesMs": [
-        425.3249169999999,
-        446.3003749999999,
-        469.10420799999974,
-        480.5791250000002,
-        513.4410830000002,
-        514.3205420000004,
-        550.4315419999994,
-        538.3510000000006,
-        563.6148750000002
+        426.43933300000003,
+        436.69954199999995,
+        437.1751670000001,
+        440.9518330000001,
+        423.4447089999999,
+        427.1515830000003,
+        425.35075000000006,
+        427.0465000000004,
+        428.47400000000016
       ],
-      "medianMs": 513.4410830000002
+      "medianMs": 427.1515830000003
     },
-    "speedup": 1.5371066611731634
+    "speedup": 9.263952438786376
   },
   "decision": {
-    "minimumSpeedup": 1.25,
+    "minimumSpeedup": 1.5,
     "passed": true
   }
 }
