@@ -1062,6 +1062,16 @@
             value scope declarations dependencies entry context))
         (setq index (+ index 2)))))
 
+  (defun portable-host-key-call
+      (args scope declarations dependencies entry context)
+    (let ((index 0))
+      (while (< index (get args :length))
+        (let ((argument (js-nth index args)))
+          (unless (and (= index 1) (keyword-node-p argument))
+            (portable-expression
+              argument scope declarations dependencies entry context)))
+        (setq index (1+ index)))))
+
   (defun portable-call
       (form scope declarations dependencies entry context)
     (let* ((items (node-items form))
@@ -1107,6 +1117,12 @@
         ((or (= operator "object") (= operator "js-object"))
          (portable-object
            args scope declarations dependencies entry context))
+        ((or (= operator "get")
+             (= operator "aref")
+             (= operator "object-has?")
+             (= operator "object-assoc"))
+         (portable-host-key-call
+           args scope declarations dependencies entry context))
         (t
          (unless (js-call builtin-operators :includes operator)
            (portable-expression
@@ -1119,8 +1135,12 @@
     (when form
       (cond
         ((or (= (node-kind form) "literal")
-             (= (node-kind form) "undefined")
-             (= (node-kind form) "keyword")) nil)
+             (= (node-kind form) "undefined")) nil)
+        ((= (node-kind form) "keyword")
+         (analyzer-fail
+           context (node-span form)
+           (str "portable function " entry
+                " cannot use keyword literal (persistent runtime values)")))
         ((= (node-kind form) "symbol")
          (portable-reference
            form scope declarations dependencies entry context))

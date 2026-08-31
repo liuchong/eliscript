@@ -36,7 +36,9 @@ boundary. Kinds and operators are strings. Properties use camel-case names:
 
 Ordinary null, boolean, number, and string literals stay JSON values. Keywords
 and JavaScript `undefined` use explicit `literalKind` tags so their semantics
-do not depend on host identity.
+do not depend on host identity. An evaluated Keyword tag emits the canonical
+runtime Keyword constructor defined by 0085; the portable IR itself remains
+JSON-compatible.
 
 Quoted compound data is recursively encoded with tagged `symbol`, `keyword`,
 `undefined`, `list`, and `vector` objects. Literal object keys are normalized
@@ -52,7 +54,9 @@ The portable lowerer implements all 55 public IR kinds from specification
 functions and lexical bindings, all control forms, assignments, intrinsics,
 native and persistent collection constructors, JavaScript interop, objects,
 and application-level React elements and fragments. Portable closure analysis
-rejects persistent collection values until their worker codec is implemented.
+rejects persistent collection and evaluated Keyword values until their worker
+codec is implemented. Static host-property Keyword markers remain strings and
+do not cross that value boundary.
 
 Lowering only consumes syntax that has passed macro expansion and lexical
 analysis. It preserves operator distinctions and source order, performs no

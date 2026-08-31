@@ -22,8 +22,8 @@
   "Internal namespace binding for the automatic React JSX runtime.")
 
 (defconst eliscript-ir-emitter--literal-runtime-import
-  "import { hashMap as __eliscript_hash_map, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n"
-  "Generated import for persistent literal construction.")
+  "import { hashMap as __eliscript_hash_map, keyword as __eliscript_keyword, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n"
+  "Generated import for canonical language literal construction.")
 
 (defconst eliscript-ir-emitter--collection-runtime-import
   "import { count as __eliscript_count, nth as __eliscript_nth } from \"eliscript/runtime/core/collection.mjs\";\n"
@@ -863,7 +863,7 @@
        (eliscript-ir-emitter--require-arity node 2 2)
        (format "(%s)[%s]"
                (eliscript-ir-emitter-emit-expression (nth 0 nodes))
-               (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
+               (eliscript-ir-emitter--emit-property-key (nth 1 nodes))))
       ('length
        (eliscript-ir-emitter--require-arity node 1 1)
        (format "__eliscript_count(%s)"
@@ -880,12 +880,12 @@
        (eliscript-ir-emitter--require-arity node 2 2)
        (format "Object.prototype.hasOwnProperty.call((%s) ?? {}, %s)"
                (eliscript-ir-emitter-emit-expression (nth 0 nodes))
-               (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
+               (eliscript-ir-emitter--emit-property-key (nth 1 nodes))))
       ('object-assoc
        (eliscript-ir-emitter--require-arity node 3 3)
        (format "({...((%s) ?? {}), [%s]: %s})"
                (eliscript-ir-emitter-emit-expression (nth 0 nodes))
-               (eliscript-ir-emitter-emit-expression (nth 1 nodes))
+               (eliscript-ir-emitter--emit-property-key (nth 1 nodes))
                (eliscript-ir-emitter-emit-expression (nth 2 nodes))))
       (_ (eliscript-emitter--fail "unknown IR intrinsic: %S" name)))))
 
@@ -949,7 +949,9 @@
       text))
    ((stringp value) (eliscript-emitter--json-string value))
    ((keywordp value)
-    (eliscript-emitter--json-string (substring (symbol-name value) 1)))
+    (format "__eliscript_keyword(%s)"
+            (eliscript-emitter--json-string
+             (substring (symbol-name value) 1))))
    ((eq value 'false) "false")
    ((eq value 'undefined) "undefined")
    (t (eliscript-emitter--fail "unsupported IR literal: %S" value))))
@@ -1221,6 +1223,44 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
        (_ (eliscript-emitter--fail
            "IR node %S is not valid at module top level" kind))))))
 
+(defun eliscript-ir-emitter--keyword-literal-p (node)
+  "Return non-nil when NODE is an evaluated Keyword literal."
+  (and node
+       (eq (eliscript-ir-node-kind node) 'literal)
+       (keywordp (eliscript-ir-node-value node))))
+
+(defun eliscript-ir-emitter--children-use-literal-runtime-p
+    (children &optional static-key-index)
+  "Return non-nil when CHILDREN require the literal runtime.
+
+Ignore a Keyword at STATIC-KEY-INDEX because that position emits a native
+JavaScript property or tag string rather than an Eliscript value."
+  (cl-loop
+   for child in children
+   for index from 0
+   thereis
+   (and (not (and static-key-index
+                  (= index static-key-index)
+                  (eliscript-ir-emitter--keyword-literal-p child)))
+        (eliscript-ir-emitter--node-uses-literal-runtime-p child))))
+
+(defun eliscript-ir-emitter--node-uses-literal-runtime-p (node)
+  "Return non-nil when NODE emits a canonical language literal constructor."
+  (let ((kind (eliscript-ir-node-kind node))
+        (children (eliscript-ir-emitter--children node)))
+    (cond
+     ((memq kind '(persistent-vector-literal persistent-map-literal)) t)
+     ((eliscript-ir-emitter--keyword-literal-p node) t)
+     ((memq kind '(property-read property-write method-call))
+      (eliscript-ir-emitter--children-use-literal-runtime-p children 1))
+     ((eq kind 'react-element)
+      (eliscript-ir-emitter--children-use-literal-runtime-p children 0))
+     ((and (eq kind 'intrinsic)
+           (memq (eliscript-ir-node-value node)
+                 '(aref object-has? object-assoc)))
+      (eliscript-ir-emitter--children-use-literal-runtime-p children 1))
+     (t (eliscript-ir-emitter--children-use-literal-runtime-p children)))))
+
 (defun eliscript-ir-emitter--emit-module (program)
   "Emit IR PROGRAM, retaining source marks when recording is active."
   (unless (eliscript-ir-program-p program)
@@ -1238,9 +1278,6 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
        (when (memq (eliscript-ir-node-kind node)
                    '(react-element react-fragment))
          (setq uses-react-runtime t))
-       (when (memq (eliscript-ir-node-kind node)
-                   '(persistent-vector-literal persistent-map-literal))
-         (setq uses-literal-runtime t))
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (memq (eliscript-ir-node-value node) '(nth length)))
          (setq uses-collection-runtime t))
@@ -1253,6 +1290,9 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
        (when (eq (eliscript-ir-node-kind node) 'export-declaration)
          (dolist (reference (eliscript-ir-node-children node))
            (push (eliscript-ir-node-value reference) exported-bindings)))))
+    (setq uses-literal-runtime
+          (cl-some #'eliscript-ir-emitter--node-uses-literal-runtime-p
+                   (eliscript-ir-program-body program)))
     (setq portable-functions (nreverse portable-functions))
     (concat
      "// Generated by Eliscript. Do not edit.\n"

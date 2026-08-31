@@ -54,13 +54,16 @@ the output path yet.
 | `undefined` | `undefined` |
 | numbers | ECMAScript numbers |
 | strings | ECMAScript strings |
-| keywords | strings without the leading colon |
+| evaluated keywords | canonical immutable Keyword values |
 | vector expressions | persistent Vectors |
 | brace Map expressions | persistent Maps |
 | quoted proper lists | arrays |
 | `(js-object key value ...)` | plain object literals |
 
 Quoted symbols currently become strings. Dotted lists are rejected.
+Keyword-shaped tokens in static JavaScript property, method, JSX tag, and
+import-marker positions remain strings; this is an explicit host-syntax
+boundary rather than the value semantics of evaluated Keywords.
 
 ## Truthiness
 

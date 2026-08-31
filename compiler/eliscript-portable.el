@@ -209,7 +209,11 @@
            (value (eliscript-portable--value form)))
       (cond
        ((or (null value) (eq value t) (numberp value) (stringp value)
-            (keywordp value) (memq value '(false undefined))) nil)
+            (memq value '(false undefined))) nil)
+       ((keywordp value)
+        (eliscript-portable--fail
+         "portable function %s cannot use keyword literal (persistent runtime values)"
+         eliscript-portable--entry))
        ((symbolp value)
         (eliscript-portable--reference form scope declarations dependencies))
        ((vectorp value)
@@ -289,6 +293,17 @@
       (eliscript-portable--expression
        value scope declarations dependencies))))
 
+(defun eliscript-portable--host-key-call
+    (arguments scope declarations dependencies)
+  "Validate host-key ARGUMENTS while keeping Keyword keys syntactic."
+  (cl-loop
+   for argument in arguments
+   for index from 0
+   unless (and (= index 1)
+               (keywordp (eliscript-portable--value argument)))
+   do (eliscript-portable--expression
+       argument scope declarations dependencies)))
+
 (defun eliscript-portable--call (form scope declarations dependencies)
   "Validate portable call FORM."
   (let* ((items (eliscript-portable--value form))
@@ -318,6 +333,9 @@
         arguments scope declarations dependencies))
       ((or 'object 'js-object)
        (eliscript-portable--object
+        arguments scope declarations dependencies))
+      ((or 'get 'aref 'object-has? 'object-assoc)
+       (eliscript-portable--host-key-call
         arguments scope declarations dependencies))
       ((pred (lambda (name) (memq name eliscript-portable--operators)))
        (eliscript-portable--sequence

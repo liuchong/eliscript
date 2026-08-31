@@ -33,7 +33,7 @@
     {
       "name": "empty-values",
       "filename": "empty.eli",
-      "source": "() [] \"\" :"
+      "source": "() [] \"\""
     },
     {
       "name": "self-symbol-module",
@@ -110,6 +110,18 @@
       "filename": "odd-map.eli",
       "source": "{:a 1 :b}",
       "error": "odd-map.eli:1:1: map literal must contain an even number of forms"
+    },
+    {
+      "name": "empty-keyword",
+      "filename": "empty-keyword.eli",
+      "source": ":",
+      "error": "empty-keyword.eli:1:1: invalid keyword literal: :"
+    },
+    {
+      "name": "ambiguous-keyword",
+      "filename": "ambiguous-keyword.eli",
+      "source": ":one/two/three",
+      "error": "ambiguous-keyword.eli:1:1: invalid keyword literal: :one/two/three"
     },
     {
       "name": "unterminated-string",

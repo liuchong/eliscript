@@ -21,9 +21,10 @@ Emacs is more than an editor or task runner. Emacs Lisp should be capable of
 implementing the reader, macro system, analyzer, and emitter, while the
 generated program should participate naturally in the browser ecosystem.
 
-The practical target is similar in spirit to a Lisp-to-JavaScript compiler:
-language semantics remain small and explicit, JavaScript interop is direct,
-and React is consumed as a library rather than wrapped in a second framework.
+The practical target is a Lisp-to-JavaScript compiler whose language semantics
+remain small and explicit and whose JavaScript interop is direct. Application
+probes may consume libraries such as React, but no UI framework or bundler
+defines the language, compiler, runtime, standard library, or maturity target.
 
 ## Design Principles
 
@@ -42,6 +43,9 @@ and React is consumed as a library rather than wrapped in a second framework.
    symbol names matter from the first usable compiler.
 7. **Self-hosting is a destination.** The Emacs Lisp compiler bootstraps an
    Eliscript implementation, which eventually becomes the primary compiler.
+8. **Applications are evidence, not architecture.** Framework, publishing, and
+   development-server adapters may validate public output, but remain
+   replaceable consumers outside every core dependency boundary.
 
 ## Initial Source Model
 
@@ -193,7 +197,9 @@ way to build Eliscript from a clean Emacs installation.
 - `tests/fixtures/` stores source programs and expected diagnostics.
 - `tests/snapshots/` stores stable generated JavaScript for review.
 
-The core compiler must not depend on files in `tools/`.
+The compiler, runtime, and standard library must not depend on files in
+`tools/`. Tool-specific behavior cannot become a core language goal or a core
+acceptance prerequisite.
 
 ## Roadmap
 

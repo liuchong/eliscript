@@ -20,8 +20,8 @@ modules, and bootstraps a compiler written in Eliscript itself.
 Eliscript has a working Emacs Lisp seed compiler, a reproducible self-hosted
 compiler, multi-file builds, persistent values, protocols, and a long-lived
 Emacs-to-JavaScript worker. The repository also carries React, Org, and
-optional bundler application probes. The project is now in **M8: Language
-Contract Closure**.
+optional bundler probes as replaceable application-level evidence. The project
+is now in **M8: Language Contract Closure**.
 
 The current M8 work provides:
 
@@ -57,6 +57,8 @@ The current M8 work provides:
   tail-position diagnostics, simultaneous pattern rebinding, and async support
 - deterministic macro-generated symbols through `gensym` and trailing `$`
   template names, with explicit caller-capture and quote boundaries
+- first-class unqualified and qualified source Keyword values with canonical
+  interning, hashing, persistent-Map keys, and explicit host-property syntax
 - structural-sharing and cross-host evidence through million-value workloads
 
 First-class immutable Keyword and Symbol values now have optimized and
@@ -84,8 +86,10 @@ Vector literals, `(hash-map ...)`, and brace Map literals now link through a
 standard ESM literal ABI. `js-array`, `js-object`, `js-nth`, and `js-length`
 make host-container construction and access explicit, while language-level
 `nth` and `length` use collection protocols. First-class source Keyword
-emission, quoted persistent data, and the Emacs value bridge remain open;
-transport-safe protocol representation is not yet implemented.
+expressions now construct canonical immutable runtime values while
+Keyword-shaped host property keys retain explicit string-key behavior. Quoted
+persistent data and the Emacs value bridge remain open; transport-safe protocol
+representation is not yet implemented.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in

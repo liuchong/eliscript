@@ -83,6 +83,7 @@ test("square literals, persistent constructors, and host containers are distinct
     expect(javascript.match(/runtime\/core\/collection\.mjs/g)).toHaveLength(1);
     expect(javascript).toContain("__eliscript_vector(");
     expect(javascript).toContain("__eliscript_hash_map(");
+    expect(javascript).toContain("__eliscript_keyword(");
     expect(javascript).not.toContain("vite");
     expect(javascript).not.toContain("react");
 
@@ -112,6 +113,20 @@ test("square literals, persistent constructors, and host containers are distinct
         nestedPersistent: true,
         nestedReady: true,
         duplicate: 2,
+      },
+      keyword: {
+        value: true,
+        interned: true,
+        qualifiedName: "article/title",
+        printed: ":article/title",
+        mapPersistent: true,
+        mapCount: 2,
+        mapQualified: "qualified",
+        mapReady: true,
+        stringKeyMiss: null,
+        macroValue: true,
+        macroQualifiedName: "macro/value",
+        quotedSyntax: ":quoted/value",
       },
       host: {
         array: true,
@@ -157,14 +172,18 @@ test("explicit host-only modules do not link the persistent runtime", async () =
   const source = resolve(directory, "host-only.eli");
   const seedOutput = resolve(directory, "seed/module.mjs");
   const selfOutput = resolve(directory, "self/module.mjs");
-  await Bun.write(
-    source,
+    await Bun.write(
+      source,
     "(defconst values (js-array 1 2))\n" +
       "(defconst first (js-nth 0 values))\n" +
       "(defconst count (js-length values))\n" +
       "(defconst options (js-object :ready t))\n" +
+      "(defconst ready (get options :ready))\n" +
+      "(defconst present (object-has? options :ready))\n" +
+      "(defconst copied (object-assoc options :count 3))\n" +
       "(defconst quoted '(vector 1))\n" +
-      "(export values first count options quoted)\n",
+      "(defconst quoted-keyword ':ready)\n" +
+      "(export values first count options ready present copied quoted quoted-keyword)\n",
   );
 
   try {
@@ -179,10 +198,17 @@ test("explicit host-only modules do not link the persistent runtime", async () =
     expect(await readFile(selfOutput, "utf8")).toBe(seed);
     expect(seed).not.toContain("eliscript/runtime/literals");
     expect(seed).not.toContain("runtime/core/collection.mjs");
+    expect(seed).not.toContain("__eliscript_keyword");
     expect(seed).toContain("const values = [1, 2]");
     expect(seed).toContain("const first = ((((values) ?? [])[0]) ?? null)");
     expect(seed).toContain("const count = ((values) ?? []).length");
     expect(seed).toContain('const options = ({"ready": true})');
+    expect(seed).toContain('const ready = (options)["ready"]');
+    expect(seed).toContain('const quoted_keyword = ":ready"');
+    expect(seed).toContain(
+      'Object.prototype.hasOwnProperty.call((options) ?? {}, "ready")',
+    );
+    expect(seed).toContain('["count"]: 3');
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -201,6 +227,7 @@ test("portable closures reject persistent constructors and collection literals",
       "[1 2]",
       "(hash-map :ready t)",
       "{:ready t}",
+      ":ready",
     ]) {
       await Bun.write(
         source,

@@ -957,6 +957,22 @@
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "square literals, persistent constructors, and host containers are distinct" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "language.first-class-source-keyword-values",
+      "title": "First-class source Keyword values",
+      "status": "accepted",
+      "spec": "0085",
+      "contracts": ["Constructs source Keywords as canonical interned runtime values", "Preserves explicit native string semantics for host property and tag positions", "Keeps quoted syntax and portable worker values outside optimized Keyword evaluation", "Matches seed/self-hosted readers, macros, IR, ESM, Source Maps, diagnostics, and fixed point"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-first-class-keyword-values" },
+        { "kind": "bun-test", "file": "tests/bootstrap-reader.test.mjs", "contains": "bootstrapped reader matches normalized seed syntax and diagnostics" },
+        { "kind": "bun-test", "file": "tests/bootstrap-expander.test.mjs", "contains": "bootstrapped expander matches seed syntax, spans, and diagnostics" },
+        { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" },
+        { "kind": "bun-test", "file": "tests/bootstrap-emitter.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "square literals, persistent constructors, and host containers are distinct" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

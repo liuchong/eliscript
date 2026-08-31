@@ -13,7 +13,7 @@
 
   (defconst react-runtime-binding "__eliscript_react_jsx_runtime")
   (defconst literal-runtime-import
-    "import { hashMap as __eliscript_hash_map, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n")
+    "import { hashMap as __eliscript_hash_map, keyword as __eliscript_keyword, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n")
   (defconst collection-runtime-import
     "import { count as __eliscript_count, nth as __eliscript_nth } from \"eliscript/runtime/core/collection.mjs\";\n")
   (defconst host-identity-token-helper
@@ -885,7 +885,7 @@
          (require-node-arity node 2 2)
          (combine
            (js-array "(" (emit-expression (js-nth 0 nodes)) ")["
-            (emit-expression (js-nth 1 nodes)) "]")))
+            (emit-property-key (js-nth 1 nodes)) "]")))
         ((= name "length")
          (require-node-arity node 1 1)
          (combine (js-array "__eliscript_count(" (emit-expression (js-nth 0 nodes)) ")")))
@@ -900,12 +900,12 @@
          (combine
            (js-array "Object.prototype.hasOwnProperty.call(("
             (emit-expression (js-nth 0 nodes)) ") ?? {}, "
-            (emit-expression (js-nth 1 nodes)) ")")))
+            (emit-property-key (js-nth 1 nodes)) ")")))
         ((= name "object-assoc")
          (require-node-arity node 3 3)
          (combine
            (js-array "({...((" (emit-expression (js-nth 0 nodes)) ") ?? {}), ["
-            (emit-expression (js-nth 1 nodes)) "]: "
+            (emit-property-key (js-nth 1 nodes)) "]: "
             (emit-expression (js-nth 2 nodes)) "})")))
         (t (fail (str "unknown IR intrinsic: " name))))))
 
@@ -937,7 +937,9 @@
           (kind (literal-kind node)))
       (cond
         ((= kind "undefined") (text-fragment "undefined"))
-        ((= kind "keyword") (text-fragment (json-string value)))
+        ((= kind "keyword")
+         (combine
+           (js-array "__eliscript_keyword(" (json-string value) ")")))
         ((null value) (text-fragment "null"))
         ((eq value t) (text-fragment "true"))
         ((eq value false) (text-fragment "false"))
@@ -1243,15 +1245,38 @@
         found)))
 
   (defun node-uses-literal-runtime-p (node)
-    (if (or (= (ir-kind node) "persistent-vector-literal")
-            (= (ir-kind node) "persistent-map-literal"))
-        t
-      (let ((found false))
-        (js-call (children node) :forEach
-          (lambda (child)
+    (let ((kind (ir-kind node))
+          (nodes (children node)))
+      (cond
+        ((or (= kind "persistent-vector-literal")
+             (= kind "persistent-map-literal")) t)
+        ((and (= kind "literal") (= (literal-kind node) "keyword")) t)
+        ((or (= kind "property-read")
+             (= kind "property-write")
+             (= kind "method-call"))
+         (children-use-literal-runtime-p nodes 1))
+        ((= kind "react-element")
+         (children-use-literal-runtime-p nodes 0))
+        ((and (= kind "intrinsic")
+              (or (= (ir-value node) "aref")
+                  (= (ir-value node) "object-has?")
+                  (= (ir-value node) "object-assoc")))
+         (children-use-literal-runtime-p nodes 1))
+        (t (children-use-literal-runtime-p nodes nil)))))
+
+  (defun children-use-literal-runtime-p (nodes static-key-index)
+    (let ((found false)
+          (index 0))
+      (while (< index (get nodes :length))
+        (let ((child (js-nth index nodes)))
+          (unless (and static-key-index
+                       (= index static-key-index)
+                       (= (ir-kind child) "literal")
+                       (= (literal-kind child) "keyword"))
             (when (node-uses-literal-runtime-p child)
               (setq found t))))
-        found)))
+        (setq index (1+ index)))
+      found))
 
   (defun node-uses-collection-runtime-p (node)
     (if (and (= (ir-kind node) "intrinsic")

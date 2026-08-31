@@ -1,4 +1,6 @@
 (module fixture.literal-runtime
+  (defmacro generated-keyword () :macro/value)
+
   (defconst vector-value [1 2 [3 4]])
   (defconst map-value
     (hash-map
@@ -10,6 +12,12 @@
      "nested" {:ready t}
      "duplicate" 1
      "duplicate" 2})
+  (defconst keyword-value :article/title)
+  (defconst keyword-map
+    {:article/title "qualified"
+     :ready t})
+  (defconst macro-keyword (generated-keyword))
+  (defconst quoted-keyword ':quoted/value)
   (defconst array-value (js-array 1 2 3))
   (defconst object-value
     (js-object :name "host" :count 2))
@@ -19,5 +27,7 @@
   (defconst array-count (length array-value))
 
   (export
-    vector-value map-value map-literal array-value object-value
+    vector-value map-value map-literal keyword-value keyword-map
+    macro-keyword quoted-keyword
+    array-value object-value
     vector-first vector-count array-second array-count))

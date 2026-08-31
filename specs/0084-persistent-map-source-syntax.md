@@ -121,11 +121,10 @@ the complete persistent literal and quoted-data family is promoted.
 
 ## Remaining P3 Work
 
-1. emit source keywords as first-class runtime Keyword values
-2. integrate quoted persistent values with the canonical data reader
-3. implement transport-safe persistent values in the Emacs worker codec
-4. audit legacy List and host-container compatibility forms
-5. promote the complete literal and host-container contract after migration
+1. integrate quoted persistent values with the canonical data reader
+2. implement transport-safe persistent values in the Emacs worker codec
+3. audit legacy List and host-container compatibility forms
+4. promote the complete literal and host-container contract after migration
 
 ## Acceptance Criteria
 

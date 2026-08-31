@@ -143,10 +143,44 @@
   (should (equal (eliscript-emitter-emit-expression t) "true"))
   (should (equal (eliscript-emitter-emit-expression 'false) "false"))
   (should (equal (eliscript-emitter-emit-expression [1 "two" :three])
-                 "__eliscript_vector(1, \"two\", \"three\")"))
+                 "__eliscript_vector(1, \"two\", __eliscript_keyword(\"three\"))"))
   (should (equal (eliscript-emitter-emit-expression
                  '(object :name "Ada" :active t))
                  "({\"name\": \"Ada\", \"active\": true})")))
+
+(ert-deftest eliscript-emits-first-class-keyword-values ()
+  (let* ((source
+          "(defconst keyword-value :article/title)
+(defconst data {:article/title keyword-value})
+(defconst host (js-object :ready t))
+(defconst host-ready (get host :ready))
+(defconst host-indexed (aref host :ready))
+(defconst host-has (object-has? host :ready))
+(defconst host-copy (object-assoc host :count 1))")
+         (output (eliscript-compile-string source "keywords.eli")))
+    (should (equal output
+                   (eliscript-tests--legacy-compile-string
+                    source "keywords.eli")))
+    (should (= (length (split-string output "eliscript/runtime/literals" t))
+               2))
+    (should (= (length (split-string output "__eliscript_keyword(" t))
+               3))
+    (should (string-match-p
+             (regexp-quote
+              "const keyword_value = __eliscript_keyword(\"article/title\")")
+             output))
+    (should (string-match-p
+             (regexp-quote "const host_ready = (host)[\"ready\"]")
+             output))
+    (should (string-match-p
+             (regexp-quote "const host_indexed = (host)[\"ready\"]")
+             output))
+    (should (string-match-p
+             (regexp-quote
+              "Object.prototype.hasOwnProperty.call((host) ?? {}, \"ready\")")
+             output))
+    (should (string-match-p
+             (regexp-quote "[\"count\"]: 1") output))))
 
 (ert-deftest eliscript-separates-persistent-vectors-from-host-arrays ()
   (let* ((source

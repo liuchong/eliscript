@@ -158,8 +158,9 @@ when a limit is exceeded.
   generations.
 - **PDT-11:** The three conversion intrinsics have seed/self-hosted emission
   and arity evidence and remain legal inside portable closures.
-- **PDT-12:** Public-surface, compatibility, conformance, full test, CLI, Vite,
-  and strict byte-compilation gates remain green.
+- **PDT-12:** Public-surface, compatibility, conformance, full default-test,
+  CLI, and strict byte-compilation gates remain green. Application frameworks
+  are not prerequisites for portable data text.
 
 ## Next Boundary
 

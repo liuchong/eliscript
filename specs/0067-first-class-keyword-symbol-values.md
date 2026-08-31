@@ -20,9 +20,10 @@ keys or Set members through both the optimized runtime and portable Eliscript
 value cores.
 
 This is the first prerequisite for metadata, deterministic printing/reading,
-and persistent literal migration. Existing source keyword and quoted-symbol
-emission does not change in this slice; explicit constructors provide the new
-values while later specifications decide literal compatibility.
+and persistent literal migration. This slice originally introduced explicit
+constructors without changing source keyword or quoted-symbol emission;
+specification 0085 now applies the same canonical Keyword values to evaluated
+source literals.
 
 ## Value Model
 
@@ -120,10 +121,10 @@ compiler binding Symbols.
 Immutable Symbol metadata is now specified by 0068; Keywords remain
 unannotated because they are interned. Canonical optimized-runtime
 printing/reading is specified by 0069, including tagged escape forms for
-otherwise ambiguous names. Portable data text, serialization codecs, automatic
-literal emission, namespace aliases, and Emacs boundary conversion remain
-separate work. Native JavaScript `Symbol` values retain the behavior defined
-by 0048.
+otherwise ambiguous names. Portable data text, serialization codecs, namespace
+aliases, and Emacs boundary conversion remain separate work. Automatic source
+Keyword emission is implemented by 0085. Native JavaScript `Symbol` values
+retain the behavior defined by 0048.
 
 ## Acceptance Criteria
 
@@ -145,8 +146,9 @@ by 0048.
   `stdlib/value.eli`, and `stdlib/core/identifier.eli` artifacts.
 - **KSV-09:** JSON serialization fails explicitly until a versioned codec is
   accepted.
-- **KSV-10:** Public-surface, compatibility, conformance, documentation, full
-  test, CLI, Vite, and strict byte-compilation checks remain green.
+- **KSV-10:** Public-surface, compatibility, conformance, documentation, CLI,
+  full default-test, and strict byte-compilation checks remain green. No
+  application framework is a prerequisite for identifier semantics.
 
 ## Next Slice
 
@@ -154,6 +156,7 @@ Immutable metadata is implemented by
 [0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).
 The optimized-runtime printer/reader round trip exists in 0069. Portable
 Keyword/Symbol values and collection/List data text are implemented by 0070
-and 0071. Complete the P1 exit audit before changing literal emission. Literal
-migration must preserve explicit native JavaScript property keys and JSX tag
-semantics rather than treating every current keyword-shaped token alike.
+and 0071. The P1 exit audit is complete, and specification 0085 implements
+source Keyword emission while preserving explicit native JavaScript property
+keys and JSX tag semantics rather than treating every keyword-shaped token
+alike.

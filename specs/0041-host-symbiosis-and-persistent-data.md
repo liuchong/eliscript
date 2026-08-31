@@ -888,8 +888,10 @@ converts maintained compiler and standard-library host buffers. Native
 conversion was already implemented by 0073. Specification
 [0084-persistent-map-source-syntax.md](0084-persistent-map-source-syntax.md)
 adds canonical brace Map expressions and seed/self-hosted reader, macro, IR,
-diagnostic, and cross-host evidence. First-class source Keyword emission,
-quoted persistent data, the worker codec, and the complete compatibility
+diagnostic, and cross-host evidence. Specification
+[0085-first-class-source-keywords.md](0085-first-class-source-keywords.md)
+adds canonical source Keyword values while preserving static host-property
+keys. Quoted persistent data, the worker codec, and the complete compatibility
 freeze remain open; the P3 exit is not yet satisfied.
 
 ### P4: Transients and Hot-Path Optimization

@@ -41,6 +41,11 @@
       "source": "(defmacro entry (key value) `{,key ,value})\n(defconst generated (entry :answer 42))\n(defconst direct {:nested (entry :ready t)})\n(export generated direct)"
     },
     {
+      "name": "keyword-value-and-quote-boundaries",
+      "filename": "keyword-macro.eli",
+      "source": "(defmacro generated-keyword () :macro/value)\n(defconst generated (generated-keyword))\n(defconst syntax ':quoted/value)\n(export generated syntax)"
+    },
+    {
       "name": "generated-top-level-declaration",
       "filename": "declaration.eli",
       "source": "(defmacro define-answer () '(defconst answer 42))\n(define-answer)\n(export answer)"

@@ -18,8 +18,8 @@
   "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n"
   "Generated module helper for process-local opaque host identities.")
 (defconst eliscript-emitter--literal-runtime-import
-  "import { hashMap as __eliscript_hash_map, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n"
-  "Generated import for persistent literal construction.")
+  "import { hashMap as __eliscript_hash_map, keyword as __eliscript_keyword, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n"
+  "Generated import for canonical language literal construction.")
 (defconst eliscript-emitter--collection-runtime-import
   "import { count as __eliscript_count, nth as __eliscript_nth } from \"eliscript/runtime/core/collection.mjs\";\n"
   "Generated import for protocol-driven collection operations.")
@@ -971,7 +971,7 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
        (eliscript-emitter--require-arity "aref" arguments 2 2)
        (format "(%s)[%s]"
                (eliscript-emitter-emit-expression (nth 0 arguments))
-               (eliscript-emitter-emit-expression (nth 1 arguments))))
+               (eliscript-emitter--emit-property-key (nth 1 arguments))))
       ('length
        (eliscript-emitter--require-arity "length" arguments 1 1)
        (format "__eliscript_count(%s)"
@@ -988,12 +988,12 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
        (eliscript-emitter--require-arity "object-has?" arguments 2 2)
        (format "Object.prototype.hasOwnProperty.call((%s) ?? {}, %s)"
                (eliscript-emitter-emit-expression (nth 0 arguments))
-               (eliscript-emitter-emit-expression (nth 1 arguments))))
+               (eliscript-emitter--emit-property-key (nth 1 arguments))))
       ('object-assoc
        (eliscript-emitter--require-arity "object-assoc" arguments 3 3)
        (format "({...((%s) ?? {}), [%s]: %s})"
                (eliscript-emitter-emit-expression (nth 0 arguments))
-               (eliscript-emitter-emit-expression (nth 1 arguments))
+               (eliscript-emitter--emit-property-key (nth 1 arguments))
                (eliscript-emitter-emit-expression (nth 2 arguments))))
       ((or 'object 'js-object)
        (eliscript-emitter--emit-object arguments))
@@ -1056,7 +1056,9 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
       text))
    ((stringp form) (eliscript-emitter--json-string form))
    ((keywordp form)
-    (eliscript-emitter--json-string (substring (symbol-name form) 1)))
+    (format "__eliscript_keyword(%s)"
+            (eliscript-emitter--json-string
+             (substring (symbol-name form) 1))))
    ((eq form 'false) "false")
    ((eq form 'undefined) "undefined")
    ((symbolp form) (eliscript-emitter--reference-name form))
@@ -1176,17 +1178,47 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
     (cl-some #'walk forms)))
 
 (defun eliscript-emitter--uses-literal-runtime-p (forms)
-  "Return non-nil when FORMS contain persistent literal constructors."
+  "Return non-nil when FORMS construct canonical language literal values."
   (cl-labels
-      ((walk
+      ((walk-object
+        (arguments)
+        (let (found)
+          (while arguments
+            (let ((key (pop arguments))
+                  (value (pop arguments)))
+              (when (or (and (not (or (keywordp key)
+                                      (stringp key)
+                                      (symbolp key)))
+                             (walk key))
+                        (walk value))
+                (setq found t))))
+          found))
+       (walk-static-key-call
+        (arguments key-index)
+        (cl-loop
+         for argument in arguments
+         for index from 0
+         thereis
+         (and (not (and (= index key-index) (keywordp argument)))
+              (walk argument))))
+       (walk
         (form)
         (cond
+         ((keywordp form) t)
          ((vectorp form) t)
          ((consp form)
-          (cond
-           ((eq (car form) 'quote) nil)
-           ((memq (car form) '(vector hash-map)) t)
-           (t (cl-some #'walk form))))
+          (let ((operator (car form))
+                (arguments (cdr form)))
+            (cond
+             ((eq operator 'quote) nil)
+             ((memq operator '(import import-portable)) nil)
+             ((memq operator '(vector hash-map)) t)
+             ((memq operator '(object js-object)) (walk-object arguments))
+             ((memq operator '(get put js-call aref object-has? object-assoc))
+              (walk-static-key-call arguments 1))
+             ((eq operator 'jsx)
+              (walk-static-key-call arguments 0))
+             (t (cl-some #'walk form)))))
          (t nil))))
     (cl-some #'walk forms)))
 

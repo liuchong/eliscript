@@ -66,15 +66,17 @@ Eliscript and its bootstrap compiler sources:
 - null, true, false, and undefined literals
 - decimal integers and floats, including exponent notation
 - JSON-compatible quoted strings
-- keywords and Lisp-style symbols
+- validated unqualified and single-namespace keywords, plus Lisp-style symbols
 - quote, backquote, comma, comma-at, and function-quote prefixes
 
 Reader prefixes become explicit list nodes. The synthetic prefix symbol owns
 the prefix span, while the list owns the complete prefix-plus-value span.
 
-The reader rejects odd Map forms, unexpected or mismatched closing delimiters,
-unknown `#` dispatch syntax, missing prefixed values, and unterminated
-collections or strings with filename, line, and column diagnostics.
+The reader rejects empty Keyword names, leading or trailing namespace
+separators, multiple separators, odd Map forms, unexpected or mismatched
+closing delimiters, unknown `#` dispatch syntax, missing prefixed values, and
+unterminated collections or strings with filename, line, and column
+diagnostics.
 
 The seed's underlying Emacs reader accepts additional host syntax. That extra
 surface is not automatically part of the portable language contract. Any

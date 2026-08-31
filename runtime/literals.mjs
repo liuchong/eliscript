@@ -1,6 +1,8 @@
 import { persistentHashMap } from "./core/map.mjs";
 import { persistentVector } from "./core/vector.mjs";
 
+export { keyword } from "./core/identifier.mjs";
+
 export function vector(...values) {
   return persistentVector(...values);
 }

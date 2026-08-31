@@ -34,17 +34,20 @@ The package export resolves to `runtime/literals.mjs`. Its public surface is:
 ```text
 vector(...values)
 hashMap(...keyValues)
+keyword(name)
 ```
 
 `vector` returns the canonical optimized persistent Vector. `hashMap` requires
 complete key/value pairs and returns the canonical value-semantic persistent
 HAMT Map. Duplicate value-equal keys use ordinary Map association semantics,
 so the last supplied value wins. The ABI delegates to the existing persistent
-implementations and does not define another collection representation.
+and interned Keyword implementations and does not define another value
+representation. Specification 0085 adds `keyword` to this ABI without changing
+the Vector or Map contracts.
 
-The compiler inserts one named ESM import only when a module contains a
-persistent constructor node. Modules using only scalar or explicit host
-values do not acquire a runtime dependency.
+The compiler inserts one named ESM import only when a module constructs a
+persistent literal or evaluated Keyword value. Modules using only scalar,
+quoted syntax, or explicit host values do not acquire a runtime dependency.
 
 ## Source Forms and IR
 
@@ -90,11 +93,10 @@ Specifications 0083 and 0084 complete default Vector and Map expression
 syntax, maintained-source annotation, protocol collection access, and
 compatibility recording. The following work remains explicit:
 
-1. add first-class source Keyword emission
-2. integrate quoted collection values with the canonical data reader
-3. integrate persistent values with the Emacs transport codec
-4. audit legacy list and native-container compatibility forms
-5. promote the complete literal boundary after the remaining migration
+1. integrate quoted collection values with the canonical data reader
+2. integrate persistent values with the Emacs transport codec
+3. audit legacy list and native-container compatibility forms
+4. promote the complete literal boundary after the remaining migration
 
 ## Acceptance Criteria
 

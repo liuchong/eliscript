@@ -176,8 +176,9 @@ semantics in both implementations.
 - **MET-11:** Seed and self-hosted compilers emit byte-identical metadata and
   dependency artifacts, including Source Maps.
 - **MET-12:** Bun and Node execute equivalent runtime and portable metadata
-  fixtures; public-surface, compatibility, conformance, CLI, Vite, full test,
-  and strict byte-compilation checks remain green.
+  fixtures; public-surface, compatibility, conformance, CLI, full default-test,
+  and strict byte-compilation checks remain green. Application frameworks are
+  not prerequisites for metadata semantics.
 
 ## Next Boundary
 

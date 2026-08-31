@@ -5,7 +5,7 @@
 
   (defconst source
     (object :name "Eliscript" :count 2 :ready false :empty nil))
-  (defconst associated (assoc source :count 3))
+  (defconst associated (assoc source "count" 3))
   (defconst records
     (js-array
       (object :slug "intro" :kind "note" :order 1)
@@ -15,22 +15,22 @@
     (object
       :keys (keys source)
       :nil-keys (keys nil)
-      :has-name (has? source :name)
-      :has-missing (has? source :missing)
-      :nil-has (has? nil :name)
-      :from-nil (assoc nil :created t)
+      :has-name (has? source "name")
+      :has-missing (has? source "missing")
+      :nil-has (has? nil "name")
+      :from-nil (assoc nil "created" t)
       :associated associated
-      :dissociated (dissoc source :name)
-      :dissociated-empty (dissoc (object :only 1) :only)
+      :dissociated (dissoc source "name")
+      :dissociated-empty (dissoc (object :only 1) "only")
       :merged (merge source (object :count 7 :extra "new"))
       :merged-empty (merge nil nil)
       :mapped (map-values (lambda (value) (* value 2))
                           (object :first 2 :second 4))
       :filtered (filter-values (lambda (value) (not (null value))) source)
-      :picked (pick source (js-array :ready :name :missing))
-      :picked-empty (pick source (js-array :missing))
-      :omitted (omit source (js-array :count :empty))
-      :updated (update source :count (lambda (value) (+ value 5)))
+      :picked (pick source (js-array "ready" "name" "missing"))
+      :picked-empty (pick source (js-array "missing"))
+      :omitted (omit source (js-array "count" "empty"))
+      :updated (update source "count" (lambda (value) (+ value 5)))
       :indexed (index-by (lambda (value) (get value :slug)) records)
       :grouped (group-by (lambda (value) (get value :kind)) records)
       :counted (count-by (lambda (value) (get value :kind)) records)
@@ -38,7 +38,7 @@
       :grouped-empty (group-by (lambda (value) value) nil)
       :counted-empty (count-by (lambda (value) value) nil)
       :source-unchanged (= (get source :count) 2)
-      :source-has-no-extra (not (has? source :extra))))
+      :source-has-no-extra (not (has? source "extra"))))
 
   (print (JSON/stringify result))
   (export result))

@@ -130,8 +130,9 @@ static transient escape analysis remain later work.
 - **ECA-10:** Bun and Node.js execute the generated protocol and algorithm
   corpus with identical observable results.
 - **ECA-11:** Existing compiler, bootstrap, persistent-data, protocol,
-  transducer, transient, standard-library, contract, CLI, Vite, and strict
-  byte-compilation suites remain green.
+  transducer, transient, standard-library, contract, CLI, default-test, and
+  strict byte-compilation suites remain green. No application framework is a
+  core dependency or acceptance prerequisite.
 
 ## Follow-up
 

@@ -146,12 +146,29 @@ their persistent Map semantics after the host reader has produced a list."
    :end-line (eliscript-source-span-line span)
    :end-column (1+ (eliscript-source-span-column span))))
 
+(defun eliscript-reader--valid-keyword-name-p (name)
+  "Return non-nil when NAME is a valid source Keyword name."
+  (let ((slash-count (cl-count ?/ name)))
+    (and (> (length name) 0)
+         (or (= slash-count 0)
+             (and (= slash-count 1)
+                  (not (= (aref name 0) ?/))
+                  (not (= (aref name (1- (length name))) ?/)))))))
+
 (defun eliscript-reader--locate-value (value node)
   "Attach locations from NODE to recursively read VALUE."
   (let ((span (eliscript-reader--node-span node))
         (children (eliscript-reader--node-children node))
         (kind (eliscript-reader--node-kind node)))
     (cond
+     ((keywordp value)
+      (let ((name (substring (symbol-name value) 1)))
+        (unless (eliscript-reader--valid-keyword-name-p name)
+          (eliscript-diagnostic-signal
+           'eliscript-read-error "ELI-R0001" "reader"
+           (eliscript-source-span-filename span) span
+           "invalid keyword literal: %s" value))
+        (eliscript-form-locate-generated value span)))
      ((eq kind 'map)
       (when (= (% (length children) 2) 1)
         (eliscript-diagnostic-signal

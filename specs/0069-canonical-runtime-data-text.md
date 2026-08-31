@@ -180,8 +180,9 @@ format as an unframed wire protocol.
 - **CDT-11:** Bun and Node produce identical canonical reports.
 - **CDT-12:** The Lisp-named core module compiles identically under seed and
   self-hosted compilers and executes from generated Eliscript code.
-- **CDT-13:** Public-surface, compatibility, conformance, full test, CLI, Vite,
-  and strict byte-compilation checks remain green.
+- **CDT-13:** Public-surface, compatibility, conformance, full default-test,
+  CLI, and strict byte-compilation checks remain green. Application frameworks
+  are not prerequisites for canonical data text.
 
 ## Next Boundary
 

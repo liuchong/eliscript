@@ -599,8 +599,12 @@ and default persistent Vector literals plus explicit host access continue it in
 [0083-default-persistent-vector-literals.md](0083-default-persistent-vector-literals.md).
 Canonical brace Map expressions continue it in
 [0084-persistent-map-source-syntax.md](0084-persistent-map-source-syntax.md).
-First-class source Keyword emission, quoted persistent data, transport-safe
-protocol representation, and static escape analysis remain open. Canonical
+First-class source Keyword values now land in
+[0085-first-class-source-keywords.md](0085-first-class-source-keywords.md),
+including reader validation, canonical interning, Map-key behavior, static
+host-property boundaries, and conditional runtime linking. Quoted persistent
+data, transport-safe protocol representation, and static escape analysis remain
+open. Canonical
 printing/reading for the optimized runtime family now lands in
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md);
 portable Keyword/Symbol values and List/collection data text now land in

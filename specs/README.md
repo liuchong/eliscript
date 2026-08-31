@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 84 specifications.
+The registry currently contains 85 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 55 |
+| Accepted design | 56 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 81 |
+| Implemented | 82 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-53 as provisional, and 3 as planning. That baseline is derived from registry
+54 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -57,9 +57,10 @@ portable value-semantic Result records and combinators, plus a strict portable
 persistent JSON codec and a portable Number/safe-integer foundation
 implemented. The P1 persistent collection core now passes its complete
 Bun/Node million-value exit audit, and P3 now has canonical persistent Vector
-and Map expression syntax with explicit native host containers.
-Portable dispatch internals, literal migration, static transient
-escape analysis, and the Emacs value bridge remain ahead.
+and Map expression syntax plus first-class source Keyword values with explicit
+native host-property boundaries. Quoted persistent data, transport-safe
+values, static transient escape analysis, and the Emacs value bridge remain
+ahead.
 
 ## Reading Paths
 
@@ -121,6 +122,7 @@ number.
 28. [0082: Persistent Literal Runtime ABI and Explicit Host Containers](0082-persistent-literal-runtime-abi.md)
 29. [0083: Default Persistent Vector Literals and Explicit Host Access](0083-default-persistent-vector-literals.md)
 30. [0084: Persistent Map Source Syntax](0084-persistent-map-source-syntax.md)
+31. [0085: First-class Source Keyword Values](0085-first-class-source-keywords.md)
 
 ### React and Publishing
 
@@ -271,6 +273,7 @@ The schemas and change workflow are defined by specifications
 | 0082 | [Persistent Literal Runtime ABI and Explicit Host Containers](0082-persistent-literal-runtime-abi.md) | Accepted | Implemented |
 | 0083 | [Default Persistent Vector Literals and Explicit Host Access](0083-default-persistent-vector-literals.md) | Accepted | Implemented |
 | 0084 | [Persistent Map Source Syntax](0084-persistent-map-source-syntax.md) | Accepted | Implemented |
+| 0085 | [First-class Source Keyword Values](0085-first-class-source-keywords.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

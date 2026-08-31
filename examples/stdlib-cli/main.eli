@@ -14,9 +14,9 @@
      :summary (join ", " (map (lambda (value) (str value)) values))
      :slug (strip-prefix "#" "#eliscript")
      :title (trim "  Emacs + JavaScript \n")
-     :profile (assoc profile :runtime "JavaScript")
+     :profile (assoc profile "runtime" "JavaScript")
      :selected (pick (merge profile (object :runtime "JavaScript"))
-                     (js-array :language :runtime))))
+                     (js-array "language" "runtime"))))
 
   (print (JSON/stringify result))
   (export result))
