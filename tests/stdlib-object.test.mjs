@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
@@ -29,7 +28,7 @@ async function runSuccessful(command) {
 }
 
 test("portable object and data libraries preserve immutable own-property semantics", async () => {
-  const directory = await mkdtemp(resolve(tmpdir(), "eliscript-object-"));
+  const directory = await mkdtemp(resolve(projectDirectory, ".eliscript-object-"));
   const dataSource = resolve(projectDirectory, "stdlib/data.eli");
   const usageSource = resolve(projectDirectory, "tests/fixtures/object-usage.eli");
   const objectModule = resolve(directory, "object.mjs");

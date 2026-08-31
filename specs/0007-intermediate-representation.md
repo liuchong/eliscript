@@ -34,8 +34,9 @@ body. Every `eliscript-ir-node` contains:
 The node-kind vocabulary covers the complete implemented language surface:
 
 - modules, imports, variables, functions, exports, and expression statements
-- scalar and array-pattern bindings, references, literals, arrays, quoted
-  values, functions, await, and throw
+- scalar and array-pattern bindings, references, scalar and quoted literals,
+  native arrays, persistent Vector/Map construction, functions, await, and
+  throw
 - conditionals, sequences, lexical bindings, assignments, loops, and
   short-circuit and exception expressions
 - intrinsics, ordinary and computed calls, invocation, and application

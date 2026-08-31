@@ -6,7 +6,6 @@ import {
   rm,
   symlink,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -221,7 +220,7 @@ test("indexBy uses a transient HAMT builder at scale", () => {
 });
 
 test("Eliscript core modules compile and execute against runtime protocols", async () => {
-  const directory = await mkdtemp(resolve(tmpdir(), "eliscript-core-stdlib-"));
+  const directory = await mkdtemp(resolve(ROOT, ".eliscript-core-stdlib-"));
   const runtimeLink = resolve(directory, "runtime");
   const protocolModule = resolve(directory, "stdlib/core/protocol.mjs");
   const identifierModule = resolve(directory, "stdlib/core/identifier.mjs");

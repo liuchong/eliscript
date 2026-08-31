@@ -57,8 +57,8 @@
         (let ((keys (object-keys options))
               (valid t)
               (index 0))
-          (while (and valid (< index (length keys)))
-            (let ((key (nth index keys)))
+          (while (and valid (< index (js-length keys)))
+            (let ((key (js-nth index keys)))
               (unless (or (= key "maxDepth")
                           (= key "maxLength")
                           (= key "maxValues"))
@@ -90,11 +90,11 @@
   (defportable json-error
       (code message offset path)
     (value-map-from-entries
-     [["kind" json-error-kind]
-      ["code" code]
-      ["message" message]
-      ["offset" offset]
-      ["path" path]]))
+     (js-array (js-array "kind" json-error-kind)
+      (js-array "code" code)
+      (js-array "message" message)
+      (js-array "offset" offset)
+      (js-array "path" path))))
 
   (defportable json-error? (value)
     (and (persistent-map? value)
@@ -151,7 +151,7 @@
     (let ((result "")
           (index start))
       (while (< index end)
-        (setq result (str result (nth index text))
+        (setq result (str result (js-nth index text))
               index (1+ index)))
       result))
 
@@ -163,8 +163,8 @@
 
   (defportable json-skip-whitespace (source start)
     (let ((index start))
-      (while (and (< index (length source))
-                  (json-whitespace? (nth index source)))
+      (while (and (< index (js-length source))
+                  (json-whitespace? (js-nth index source)))
         (setq index (1+ index)))
       index))
 
@@ -187,7 +187,7 @@
      (t -1)))
 
   (defportable json-hex-digit (value)
-    (nth value "0123456789abcdef"))
+    (js-nth value "0123456789abcdef"))
 
   (defportable json-hex4 (value)
     (str (json-hex-digit (bit-and
@@ -201,8 +201,8 @@
   (defportable json-encode-string (value)
     (let ((result "\"")
           (index 0))
-      (while (< index (length value))
-        (let ((character (nth index value))
+      (while (< index (js-length value))
+        (let ((character (js-nth index value))
               (code (string-code-unit-at value index)))
           (cond
            ((= character "\"") (setq result (str result "\\\"")))
@@ -230,8 +230,8 @@
           (result "")
           (done false)
           (failure nil))
-      (while (and (not done) (nil? failure) (< index (length source)))
-        (let ((character (nth index source))
+      (while (and (not done) (nil? failure) (< index (js-length source)))
+        (let ((character (js-nth index source))
               (code (string-code-unit-at source index)))
           (cond
            ((= character "\"")
@@ -243,13 +243,13 @@
                    "unescaped control character in string"
                    index path count)))
            ((= character "\\")
-            (if (>= (1+ index) (length source))
+            (if (>= (1+ index) (js-length source))
                 (setq failure
                       (json-step-failure
                        "ELI-JSON-SYNTAX"
                        "unexpected end of string"
                        start path count))
-              (let ((escape (nth (1+ index) source)))
+              (let ((escape (js-nth (1+ index) source)))
                 (cond
                  ((= escape "\"")
                   (setq result (str result "\"") index (+ index 2)))
@@ -270,7 +270,7 @@
                  ((= escape "t")
                   (setq result (str result "\t") index (+ index 2)))
                  ((= escape "u")
-                  (if (> (+ index 6) (length source))
+                  (if (> (+ index 6) (js-length source))
                       (setq failure
                             (json-step-failure
                              "ELI-JSON-SYNTAX"
@@ -283,7 +283,7 @@
                       (while (and valid (< digit-index limit))
                         (let ((digit
                                (json-hex-value
-                                (nth digit-index source))))
+                                (js-nth digit-index source))))
                           (if (< digit 0)
                               (setq valid false)
                             (setq value (+ (* value 16) digit)
@@ -317,53 +317,53 @@
   (defportable json-read-number (source start count path)
     (let ((index start)
           (failure nil))
-      (when (= (nth index source) "-")
+      (when (= (js-nth index source) "-")
         (setq index (1+ index)))
       (cond
-       ((>= index (length source))
+       ((>= index (js-length source))
         (setq failure
               (json-step-failure
                "ELI-JSON-SYNTAX" "incomplete number"
                start path count)))
-       ((= (nth index source) "0")
+       ((= (js-nth index source) "0")
         (setq index (1+ index))
-        (when (json-digit? (nth index source))
+        (when (json-digit? (js-nth index source))
           (setq failure
                 (json-step-failure
                  "ELI-JSON-SYNTAX" "number has a leading zero"
                  index path count))))
-       ((json-nonzero-digit? (nth index source))
-        (while (json-digit? (nth index source))
+       ((json-nonzero-digit? (js-nth index source))
+        (while (json-digit? (js-nth index source))
           (setq index (1+ index))))
        (t
         (setq failure
               (json-step-failure
                "ELI-JSON-SYNTAX" "invalid number"
                index path count))))
-      (when (and (nil? failure) (= (nth index source) "."))
+      (when (and (nil? failure) (= (js-nth index source) "."))
         (setq index (1+ index))
-        (if (not (json-digit? (nth index source)))
+        (if (not (json-digit? (js-nth index source)))
             (setq failure
                   (json-step-failure
                    "ELI-JSON-SYNTAX"
                    "fraction requires at least one digit"
                    index path count))
-          (while (json-digit? (nth index source))
+          (while (json-digit? (js-nth index source))
             (setq index (1+ index)))))
       (when (and (nil? failure)
-                 (or (= (nth index source) "e")
-                     (= (nth index source) "E")))
+                 (or (= (js-nth index source) "e")
+                     (= (js-nth index source) "E")))
         (setq index (1+ index))
-        (when (or (= (nth index source) "+")
-                  (= (nth index source) "-"))
+        (when (or (= (js-nth index source) "+")
+                  (= (js-nth index source) "-"))
           (setq index (1+ index)))
-        (if (not (json-digit? (nth index source)))
+        (if (not (json-digit? (js-nth index source)))
             (setq failure
                   (json-step-failure
                    "ELI-JSON-SYNTAX"
                    "exponent requires at least one digit"
                    index path count))
-          (while (json-digit? (nth index source))
+          (while (json-digit? (js-nth index source))
             (setq index (1+ index)))))
       (if (not (nil? failure))
           failure
@@ -379,9 +379,9 @@
   (defportable json-literal-matches? (source start literal)
     (let ((index 0)
           (matches t))
-      (while (and matches (< index (length literal)))
-        (unless (= (nth (+ start index) source)
-                   (nth index literal))
+      (while (and matches (< index (js-length literal)))
+        (unless (= (js-nth (+ start index) source)
+                   (js-nth index literal))
           (setq matches false))
         (setq index (1+ index)))
       matches))
@@ -389,7 +389,7 @@
   (defportable json-read-literal
       (source start count path literal value)
     (if (json-literal-matches? source start literal)
-        (json-step-success value (+ start (length literal)) count)
+        (json-step-success value (+ start (js-length literal)) count)
       (json-step-failure
        "ELI-JSON-SYNTAX" (str "expected " literal)
        start path count)))
@@ -402,7 +402,7 @@
           (item-index 0)
           (done false)
           (failure nil))
-      (if (= (nth index source) "]")
+      (if (= (js-nth index source) "]")
           (json-step-success result (1+ index) current-count)
         (progn
           (while (and (not done) (nil? failure))
@@ -421,13 +421,13 @@
                         (json-skip-whitespace
                          source (get item "index" index)))
                   (cond
-                   ((= (nth index source) "]")
+                   ((= (js-nth index source) "]")
                     (setq done t index (1+ index)))
-                   ((= (nth index source) ",")
+                   ((= (js-nth index source) ",")
                     (setq index
                           (json-skip-whitespace source (1+ index))
                           item-index (1+ item-index))
-                    (when (= (nth index source) "]")
+                    (when (= (js-nth index source) "]")
                       (setq failure
                             (json-step-failure
                              "ELI-JSON-SYNTAX"
@@ -450,11 +450,11 @@
           (current-count count)
           (done false)
           (failure nil))
-      (if (= (nth index source) "}")
+      (if (= (js-nth index source) "}")
           (json-step-success result (1+ index) current-count)
         (progn
           (while (and (not done) (nil? failure))
-            (if (/= (nth index source) "\"")
+            (if (/= (js-nth index source) "\"")
                 (setq failure
                       (json-step-failure
                        "ELI-JSON-SYNTAX"
@@ -470,7 +470,7 @@
                          (colon-index
                           (json-skip-whitespace
                            source (get key-result "index" index))))
-                    (if (/= (nth colon-index source) ":")
+                    (if (/= (js-nth colon-index source) ":")
                         (setq failure
                               (json-step-failure
                                "ELI-JSON-SYNTAX"
@@ -503,13 +503,13 @@
                                      source
                                      (get value-result "index" value-index)))
                               (cond
-                               ((= (nth index source) "}")
+                               ((= (js-nth index source) "}")
                                 (setq done t index (1+ index)))
-                               ((= (nth index source) ",")
+                               ((= (js-nth index source) ",")
                                 (setq index
                                       (json-skip-whitespace
                                        source (1+ index)))
-                                (when (= (nth index source) "}")
+                                (when (= (js-nth index source) "}")
                                   (setq failure
                                         (json-step-failure
                                          "ELI-JSON-SYNTAX"
@@ -541,13 +541,13 @@
          (str "JSON exceeds maxValues "
               (get options "maxValues" json-default-max-values))
          index path count))
-       ((>= index (length source))
+       ((>= index (js-length source))
         (json-step-failure
          "ELI-JSON-SYNTAX" "unexpected end of input"
          index path count))
        (t
         (let ((next-count (1+ count))
-              (character (nth index source)))
+              (character (js-nth index source)))
           (cond
            ((= character "\"")
             (json-read-string source index next-count path))
@@ -584,7 +584,7 @@
         (err
          (json-error
           "ELI-JSON-OPTIONS" "invalid JSON options" 0 "$")))
-       ((> (length source)
+       ((> (js-length source)
            (get normalized "maxLength" json-default-max-length))
         (err
          (json-error
@@ -599,7 +599,7 @@
             (let ((index
                    (json-skip-whitespace
                     source (get result "index" 0))))
-              (if (/= index (length source))
+              (if (/= index (js-length source))
                   (err
                    (json-error
                     "ELI-JSON-SYNTAX"
@@ -627,7 +627,7 @@
             :count count))
 
   (defportable json-encode-text (text options path count)
-    (if (> (length text)
+    (if (> (js-length text)
            (get options "maxLength" json-default-max-length))
         (json-encode-failure
          "ELI-JSON-LENGTH"
@@ -637,7 +637,7 @@
       (json-encode-success text count)))
 
   (defportable json-entry-key (entry)
-    (nth 0 entry))
+    (js-nth 0 entry))
 
   (defportable json-sort-entry-pass (entries width)
     (let ((result (empty-persistent-vector))
@@ -719,7 +719,7 @@
                            (get encoded "text" ""))
                       current-count
                       (get encoded "count" current-count))
-                (when (> (length text)
+                (when (> (js-length text)
                          (get options "maxLength"
                               json-default-max-length))
                   (setq failure
@@ -773,11 +773,11 @@
             (while (and (nil? failure) (< index entry-count))
               (let* ((entry
                       (persistent-vector-nth entries index nil))
-                     (key (nth 0 entry))
+                     (key (js-nth 0 entry))
                      (key-path (json-path-key path key))
                      (encoded
                       (json-encode-node
-                       (nth 1 entry) options (1+ depth)
+                       (js-nth 1 entry) options (1+ depth)
                        current-count key-path next-active)))
                 (if (not (get encoded "ok" false))
                     (setq failure encoded)
@@ -790,7 +790,7 @@
                                (get encoded "text" ""))
                           current-count
                           (get encoded "count" current-count))
-                    (when (> (length text)
+                    (when (> (js-length text)
                              (get options "maxLength"
                                   json-default-max-length))
                       (setq failure

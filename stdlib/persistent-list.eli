@@ -104,9 +104,9 @@
      list))
 
   (defportable persistent-list-array-reverse (values)
-    (let ((result [])
+    (let ((result (js-array))
           (index 0))
-      (while (< index (length values))
+      (while (< index (js-length values))
         (setq result (cons (get values index) result)
               index (1+ index)))
       result))
@@ -115,12 +115,12 @@
     (persistent-list-array-reverse
      (persistent-list-reduce
       (lambda (result value) (cons value result))
-      []
+      (js-array)
       list)))
 
   (defportable persistent-list-from-array (values)
     (let ((result (empty-persistent-list))
-          (index (1- (length values))))
+          (index (1- (js-length values))))
       (while (>= index 0)
         (setq result (persistent-list-cons result (get values index))
               index (1- index)))

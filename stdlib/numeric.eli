@@ -75,8 +75,8 @@
           (valid (number? first))
           (seen-nan (nan? first))
           (index 0))
-      (while (and valid (< index (length values)))
-        (let ((value (nth index values)))
+      (while (and valid (< index (js-length values)))
+        (let ((value (js-nth index values)))
           (cond
            ((not (number? value)) (setq valid false))
            ((nan? value)
@@ -91,8 +91,8 @@
           (valid (number? first))
           (seen-nan (nan? first))
           (index 0))
-      (while (and valid (< index (length values)))
-        (let ((value (nth index values)))
+      (while (and valid (< index (js-length values)))
+        (let ((value (js-nth index values)))
           (cond
            ((not (number? value)) (setq valid false))
            ((nan? value)

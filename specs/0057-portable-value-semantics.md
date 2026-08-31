@@ -210,9 +210,10 @@ scalar, Vector, Map, and Set hash outputs agree with 0048-0050; List hashes are
 newly frozen here. Process-local opaque identity hashing extends this contract
 through [0074](0074-process-local-host-identity-hashing.md).
 
-No literal changes in this slice. Native JavaScript arrays, objects, Maps, and
-Sets retain their current behavior. Persistent literal migration remains P3
-work and requires its own compatibility decision.
+No literal changes occurred in this slice. Native JavaScript arrays, objects,
+Maps, and Sets retain their host behavior. Specification 0083 later completes
+persistent Vector literal migration; Map/Set syntax and transport integration
+remain P3 work.
 
 Portable persistent metadata now layers on these values through
 [0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).

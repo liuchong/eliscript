@@ -4,19 +4,19 @@
   (import "./ir.mjs" make-program make-node)
 
   (defconst intrinsics
-    ["not" "+" "*" "-" "/" "%" "mod" "=" "/=" "not=" "<" "<="
+    (js-array "not" "+" "*" "-" "/" "%" "mod" "=" "/=" "not=" "<" "<="
      ">" ">=" "1+" "1-" "eq" "equal" "null" "nil?" "undefined?"
      "int32" "uint32" "imul32" "bit-and" "bit-or" "bit-xor" "bit-not"
      "bit-shift-left" "bit-shift-right" "unsigned-bit-shift-right"
      "value-type" "host-identity-token" "string-code-unit-at" "string-from-code-unit"
      "string-to-number" "string-to-bigint" "number-float64-words"
-     "nullish?" "list" "array" "js-array" "car" "cdr" "cons" "nth"
-     "aref" "length"
-     "object-keys" "object-has?" "object-assoc"])
+     "nullish?" "list" "car" "cdr" "cons" "nth" "js-nth"
+     "aref" "length" "js-length"
+     "object-keys" "object-has?" "object-assoc"))
 
   (defconst fail
     (js* "(message) => { throw new Error(message); }"))
-  (defvar recur-targets [])
+  (defvar recur-targets (js-array))
 
   (defun symbol-node-p (node)
     (and node (= (node-kind node) "symbol")))
@@ -39,7 +39,7 @@
 
   (defun list-items (node)
     (cond
-      ((null-node-p node) [])
+      ((null-node-p node) (js-array))
       ((and node (= (node-kind node) "list")) (node-items node))
       (t undefined)))
 
@@ -55,7 +55,7 @@
       ((= (node-kind node) "keyword")
        (object :kind "keyword" :name (node-name node)))
       ((or (= (node-kind node) "list") (= (node-kind node) "vector"))
-       (let ((items []))
+       (let ((items (js-array)))
          (js-call (node-items node) :forEach
            (lambda (item) (js-call items :push (syntax-datum item))))
          (object :kind (node-kind node) :items items)))
@@ -63,7 +63,7 @@
        (fail (str "cannot encode quoted syntax kind: " (node-kind node))))))
 
   (defun lower-sequence (forms)
-    (let ((nodes []))
+    (let ((nodes (js-array)))
       (js-call forms :forEach
         (lambda (form) (js-call nodes :push (lower-expression form))))
       nodes))
@@ -77,23 +77,23 @@
     (cond
       ((= (node-kind form) "undefined")
        (make-node
-         "literal" (node-span form) nil []
+         "literal" (node-span form) nil (js-array)
          (object :literalKind "undefined")))
       ((= (node-kind form) "keyword")
        (make-node
-         "literal" (node-span form) (node-name form) []
+         "literal" (node-span form) (node-name form) (js-array)
          (object :literalKind "keyword")))
       (t
        (make-node
-         "literal" (node-span form) (node-value form) [] nil))))
+         "literal" (node-span form) (node-value form) (js-array) nil))))
 
   (defun lower-binding-target (pattern)
     (cond
       ((symbol-node-p pattern)
        (make-node
-         "binding-name" (node-span pattern) (node-name pattern) [] nil))
+         "binding-name" (node-span pattern) (node-name pattern) (js-array) nil))
       ((vector-node-p pattern)
-       (let ((children [])
+       (let ((children (js-array))
              (rest false))
          (js-call (node-items pattern) :forEach
            (lambda (element)
@@ -104,7 +104,7 @@
                ((null-node-p element)
                 (js-call children :push
                   (make-node
-                    "binding-hole" (node-span element) nil [] nil)))
+                    "binding-hole" (node-span element) nil (js-array) nil)))
                (t
                 (js-call children :push
                   (lower-binding-target element))))))
@@ -114,7 +114,7 @@
       (t (fail "cannot lower invalid binding pattern"))))
 
   (defun lower-parameter-nodes (parameters)
-    (let ((result [])
+    (let ((result (js-array))
           (items (list-items parameters))
           (mode "required"))
       (js-call items :forEach
@@ -130,43 +130,43 @@
                        "parameter-binding"
                        (node-span parameter)
                        nil
-                       [(lower-binding-target parameter)]
+                       (js-array (lower-binding-target parameter))
                        (object :parameterKind mode :pattern t)))
                  (js-call result :push
                    (make-node
                      "parameter-binding"
                      (node-span parameter)
                      name
-                     [] (object :parameterKind mode))))
+                     (js-array) (object :parameterKind mode))))
                (when (= mode "rest") (setq mode "done")))))))
       result))
 
   (defun lower-binding (binding)
     (if (symbol-node-p binding)
         (make-node
-          "lexical-binding" (node-span binding) (node-name binding) []
+          "lexical-binding" (node-span binding) (node-name binding) (js-array)
           (object :style "symbol"))
       (if (vector-node-p binding)
           (make-node
             "lexical-binding" (node-span binding) nil
-            [(lower-binding-target binding)]
+            (js-array (lower-binding-target binding))
             (object :style "symbol" :pattern t))
         (let* ((items (list-items binding))
-               (target (nth 0 items))
-               (children []))
+               (target (js-nth 0 items))
+               (children (js-array)))
           (if (vector-node-p target)
               (progn
                 (js-call children :push (lower-binding-target target))
                 (when (> (get items :length) 1)
                   (js-call children :push
-                    (lower-expression (nth 1 items))))
+                    (lower-expression (js-nth 1 items))))
                 (make-node
                   "lexical-binding" (node-span binding) nil children
                   (object :style "list" :pattern t)))
             (progn
               (when (> (get items :length) 1)
                 (js-call children :push
-                  (lower-expression (nth 1 items))))
+                  (lower-expression (js-nth 1 items))))
               (make-node
                 "lexical-binding" (node-span binding)
                 (node-name target) children
@@ -177,17 +177,17 @@
       kind (node-span form) operator (lower-sequence args) nil))
 
   (defun lower-assignments (form operator args)
-    (let ((pairs [])
+    (let ((pairs (js-array))
           (index 0))
       (while (< index (get args :length))
-        (let ((name (nth index args))
-              (value (nth (1+ index) args)))
+        (let ((name (js-nth index args))
+              (value (js-nth (1+ index) args)))
           (js-call pairs :push
             (make-node
               "assignment-pair"
               (node-span name)
               (node-name name)
-              [(lower-expression value)]
+              (js-array (lower-expression value))
               nil)))
         (setq index (+ index 2)))
       (make-node "assignment" (node-span form) operator pairs nil)))
@@ -201,25 +201,25 @@
       (node-value node)))
 
   (defun lower-object (form args)
-    (let ((properties [])
+    (let ((properties (js-array))
           (index 0))
       (while (< index (get args :length))
-        (let ((key (nth index args))
-              (value (nth (1+ index) args)))
+        (let ((key (js-nth index args))
+              (value (js-nth (1+ index) args)))
           (if (literal-object-key-p key)
               (js-call properties :push
                 (make-node
                   "object-property"
                   (node-span key)
                   (literal-object-key key)
-                  [(lower-expression value)]
+                  (js-array (lower-expression value))
                   (object :computed false)))
             (js-call properties :push
               (make-node
                 "object-property"
                 (node-span key)
                 nil
-                [(lower-expression key) (lower-expression value)]
+                (js-array (lower-expression key) (lower-expression value))
                 (object :computed t)))))
         (setq index (+ index 2)))
       (make-node "object-literal" (node-span form) nil properties nil)))
@@ -228,30 +228,30 @@
     (let ((items (list-items form)))
       (and (not (eq items undefined))
            (> (get items :length) 0)
-           (symbol-node-p (nth 0 items))
-           (node-name (nth 0 items)))))
+           (symbol-node-p (js-nth 0 items))
+           (node-name (js-nth 0 items)))))
 
   (defun lower-try (form args)
-    (let ((body [])
-          (clauses []))
+    (let ((body (js-array))
+          (clauses (js-array)))
       (js-call args :forEach
         (lambda (argument)
           (let ((items (list-items argument))
                 (operator (clause-operator argument)))
             (cond
               ((= operator "catch")
-               (let ((binding (nth 1 items))
-                     (children []))
+               (let ((binding (js-nth 1 items))
+                     (children (js-array)))
                  (if (vector-node-p binding)
                      (js-call children :push
                        (make-node
                          "catch-binding" (node-span binding) nil
-                         [(lower-binding-target binding)]
+                         (js-array (lower-binding-target binding))
                          (object :pattern t)))
                    (js-call children :push
                      (make-node
                        "catch-binding" (node-span binding)
-                       (node-name binding) [] nil)))
+                       (node-name binding) (js-array) nil)))
                  (append-nodes children
                    (lower-sequence (js-call items :slice 2)))
                  (js-call clauses :push
@@ -263,7 +263,7 @@
                    "finally-clause" (node-span argument) nil
                    (lower-sequence (js-call items :slice 1)) nil)))
               (t (js-call body :push (lower-expression argument)))))))
-      (let ((children []))
+      (let ((children (js-array)))
         (append-nodes children body)
         (append-nodes children clauses)
         (make-node
@@ -271,7 +271,7 @@
           (object :bodyCount (get body :length))))))
 
   (defun lower-cond (form args)
-    (let ((clauses []))
+    (let ((clauses (js-array)))
       (js-call args :forEach
         (lambda (clause)
           (js-call clauses :push
@@ -284,9 +284,9 @@
       (make-node "conditional-chain" (node-span form) nil clauses nil)))
 
   (defun lower-let (form operator args)
-    (let ((bindings [])
-          (children []))
-      (js-call (list-items (nth 0 args)) :forEach
+    (let ((bindings (js-array))
+          (children (js-array)))
+      (js-call (list-items (js-nth 0 args)) :forEach
         (lambda (binding)
           (js-call bindings :push (lower-binding binding))))
       (append-nodes children bindings)
@@ -300,9 +300,9 @@
   (defun lower-function
       (kind form value parameters body &optional asynchronous)
     (let ((parameter-nodes (lower-parameter-nodes parameters))
-          (children [])
+          (children (js-array))
           (previous-targets recur-targets))
-      (setq recur-targets ["function"])
+      (setq recur-targets (js-array "function"))
       (append-nodes children parameter-nodes)
       (append-nodes children (lower-sequence body))
       (setq recur-targets previous-targets)
@@ -319,14 +319,14 @@
            (= (node-kind form) "keyword"))
        (lower-literal form))
       ((= (node-kind form) "symbol")
-       (make-node "reference" (node-span form) (node-name form) [] nil))
+       (make-node "reference" (node-span form) (node-name form) (js-array) nil))
       ((= (node-kind form) "vector")
        (make-node
-         "array-literal" (node-span form) nil
+         "persistent-vector-literal" (node-span form) nil
          (lower-sequence (node-items form)) nil))
       ((= (node-kind form) "list")
        (let* ((items (node-items form))
-              (operator-node (nth 0 items))
+              (operator-node (js-nth 0 items))
               (operator (and (symbol-node-p operator-node)
                              (node-name operator-node)))
               (args (js-call items :slice 1)))
@@ -334,21 +334,21 @@
            ((= operator "quote")
             (make-node
               "quoted-literal" (node-span form)
-              (syntax-datum (nth 0 args)) [] nil))
+              (syntax-datum (js-nth 0 args)) (js-array) nil))
            ((or (= operator "lambda") (= operator "fn")
                 (= operator "async"))
             (lower-function
               "function-expression" form nil
-              (nth 0 args) (js-call args :slice 1)
+              (js-nth 0 args) (js-call args :slice 1)
               (= operator "async")))
            ((= operator "await")
             (make-node
               "await-expression" (node-span form) nil
-              [(lower-expression (nth 0 args))] nil))
+              (js-array (lower-expression (js-nth 0 args))) nil))
            ((= operator "throw")
             (make-node
               "throw-expression" (node-span form) nil
-              [(lower-expression (nth 0 args))] nil))
+              (js-array (lower-expression (js-nth 0 args))) nil))
            ((= operator "try") (lower-try form args))
            ((= operator "if")
             (lower-call-node "conditional" form "if" args))
@@ -360,11 +360,11 @@
            ((or (= operator "let") (= operator "let*"))
             (lower-let form operator args))
            ((= operator "loop")
-            (let ((bindings [])
-                  (children [])
+            (let ((bindings (js-array))
+                  (children (js-array))
                   (previous-targets recur-targets)
-                  (targets ["loop"]))
-              (js-call (list-items (nth 0 args)) :forEach
+                  (targets (js-array "loop")))
+              (js-call (list-items (js-nth 0 args)) :forEach
                 (lambda (binding)
                   (js-call bindings :push (lower-binding binding))))
               (js-call previous-targets :forEach
@@ -380,7 +380,7 @@
            ((= operator "recur")
             (make-node
               "recur" (node-span form) nil (lower-sequence args)
-              (object :targetKind (nth 0 recur-targets))))
+              (object :targetKind (js-nth 0 recur-targets))))
            ((or (= operator "setq") (= operator "set!"))
             (lower-assignments form operator args))
            ((= operator "while")
@@ -394,6 +394,10 @@
            ((= operator "hash-map")
             (make-node
               "persistent-map-literal" (node-span form) nil
+              (lower-sequence args) nil))
+           ((or (= operator "array") (= operator "js-array"))
+            (make-node
+              "array-literal" (node-span form) nil
               (lower-sequence args) nil))
            ((= operator "jsx")
             (make-node
@@ -432,33 +436,33 @@
        (fail (str "cannot lower syntax kind: " (node-kind form))))))
 
   (defun lower-import (form args portable)
-    (let ((source (node-value (nth 0 args)))
-          (children [])
+    (let ((source (node-value (js-nth 0 args)))
+          (children (js-array))
           (index 1))
       (while (< index (get args :length))
-        (let ((specifier (nth index args)))
+        (let ((specifier (js-nth index args)))
           (cond
             ((and (keyword-node-p specifier)
                   (= (node-name specifier) "default"))
              (setq index (1+ index))
-             (let ((name (nth index args)))
+             (let ((name (js-nth index args)))
                (js-call children :push
                  (make-node
-                   "import-default" (node-span name) (node-name name) [] nil))))
+                   "import-default" (node-span name) (node-name name) (js-array) nil))))
             ((and (keyword-node-p specifier)
                   (= (node-name specifier) "as"))
              (setq index (1+ index))
-             (let ((name (nth index args)))
+             (let ((name (js-nth index args)))
                (js-call children :push
                  (make-node
-                   "import-namespace" (node-span name) (node-name name) [] nil))))
+                   "import-namespace" (node-span name) (node-name name) (js-array) nil))))
             (t
              (js-call children :push
                (make-node
                  "import-named"
                  (node-span specifier)
                  (node-name specifier)
-                 [] nil))))
+                 (js-array) nil))))
           (setq index (1+ index))))
       (make-node
         "import-declaration" (node-span form) source children
@@ -468,30 +472,30 @@
     (if (not (= (node-kind form) "list"))
         (make-node
           "expression-statement" (node-span form) nil
-          [(lower-expression form)] nil)
+          (js-array (lower-expression form)) nil)
       (let* ((items (node-items form))
-             (operator-node (nth 0 items))
+             (operator-node (js-nth 0 items))
              (operator (and (symbol-node-p operator-node)
                             (node-name operator-node)))
              (args (js-call items :slice 1)))
         (cond
           ((= operator "module")
-           (let ((children []))
+           (let ((children (js-array)))
              (js-call (js-call args :slice 1) :forEach
                (lambda (child)
                  (js-call children :push (lower-top-level child))))
              (make-node
                "module-declaration" (node-span form)
-               (node-name (nth 0 args)) children nil)))
+               (node-name (js-nth 0 args)) children nil)))
           ((= operator "import") (lower-import form args false))
           ((= operator "import-portable") (lower-import form args t))
           ((or (= operator "defvar") (= operator "defconst"))
-           (let ((children []))
+           (let ((children (js-array)))
              (when (> (get args :length) 1)
-               (js-call children :push (lower-expression (nth 1 args))))
+               (js-call children :push (lower-expression (js-nth 1 args))))
              (make-node
                "variable-declaration" (node-span form)
-               (node-name (nth 0 args)) children
+               (node-name (js-nth 0 args)) children
                (object
                  :sourceOperator operator
                  :mutable (= operator "defvar")))))
@@ -499,8 +503,8 @@
                (= operator "defportable") (= operator "defasync"))
            (let ((node
                   (lower-function
-                    "function-declaration" form (node-name (nth 0 args))
-                    (nth 1 args) (js-call args :slice 2)
+                    "function-declaration" form (node-name (js-nth 0 args))
+                    (js-nth 1 args) (js-call args :slice 2)
                     (= operator "defasync"))))
              (put node :properties
                (object
@@ -511,26 +515,26 @@
                  :async (= operator "defasync")))
              node))
           ((= operator "export")
-           (let ((children []))
+           (let ((children (js-array)))
              (js-call args :forEach
                (lambda (name)
                  (js-call children :push
                    (make-node
-                     "reference" (node-span name) (node-name name) [] nil))))
+                     "reference" (node-span name) (node-name name) (js-array) nil))))
              (make-node
                "export-declaration" (node-span form) nil children nil)))
           ((= operator "export-default")
            (make-node
              "export-default" (node-span form) nil
-             [(lower-expression (nth 0 args))] nil))
+             (js-array (lower-expression (js-nth 0 args))) nil))
           (t
            (make-node
              "expression-statement" (node-span form) nil
-             [(lower-expression form)] nil))))))
+             (js-array (lower-expression form)) nil))))))
 
   (defun lower-module (forms filename)
-    (let ((body []))
-      (setq recur-targets [])
+    (let ((body (js-array)))
+      (setq recur-targets (js-array))
       (js-call forms :forEach
         (lambda (form) (js-call body :push (lower-top-level form))))
       (make-program filename body)))

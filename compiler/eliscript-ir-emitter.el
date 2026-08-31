@@ -25,6 +25,10 @@
   "import { hashMap as __eliscript_hash_map, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n"
   "Generated import for persistent literal construction.")
 
+(defconst eliscript-ir-emitter--collection-runtime-import
+  "import { count as __eliscript_count, nth as __eliscript_nth } from \"eliscript/runtime/core/collection.mjs\";\n"
+  "Generated import for protocol-driven collection operations.")
+
 (defun eliscript-ir-emitter--locate (node output)
   "Mark OUTPUT with NODE's source span when source-map recording is active."
   (if eliscript-ir-emitter--record-source-spans
@@ -847,6 +851,11 @@
                (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
       ('nth
        (eliscript-ir-emitter--require-arity node 2 2)
+       (format "__eliscript_nth(%s, %s, null)"
+               (eliscript-ir-emitter-emit-expression (nth 1 nodes))
+               (eliscript-ir-emitter-emit-expression (nth 0 nodes))))
+      ('js-nth
+       (eliscript-ir-emitter--require-arity node 2 2)
        (format "((((%s) ?? [])[%s]) ?? null)"
                (eliscript-ir-emitter-emit-expression (nth 1 nodes))
                (eliscript-ir-emitter-emit-expression (nth 0 nodes))))
@@ -856,6 +865,10 @@
                (eliscript-ir-emitter-emit-expression (nth 0 nodes))
                (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
       ('length
+       (eliscript-ir-emitter--require-arity node 1 1)
+       (format "__eliscript_count(%s)"
+               (eliscript-ir-emitter-emit-expression (car nodes))))
+      ('js-length
        (eliscript-ir-emitter--require-arity node 1 1)
        (format "((%s) ?? []).length"
                (eliscript-ir-emitter-emit-expression (car nodes))))
@@ -1215,6 +1228,7 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
   (let ((eliscript-emitter--temporary-counter 0)
         uses-react-runtime
         uses-literal-runtime
+        uses-collection-runtime
         uses-host-identity-token
         portable-functions
         exported-bindings)
@@ -1227,6 +1241,9 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
        (when (memq (eliscript-ir-node-kind node)
                    '(persistent-vector-literal persistent-map-literal))
          (setq uses-literal-runtime t))
+       (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
+                  (memq (eliscript-ir-node-value node) '(nth length)))
+         (setq uses-collection-runtime t))
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (eq (eliscript-ir-node-value node) 'host-identity-token))
          (setq uses-host-identity-token t))
@@ -1245,6 +1262,9 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
        "")
      (if uses-literal-runtime
          eliscript-ir-emitter--literal-runtime-import
+       "")
+     (if uses-collection-runtime
+         eliscript-ir-emitter--collection-runtime-import
        "")
      "const __eliscript_truthy = (value) => value !== false && value != null;\n"
      (if uses-host-identity-token

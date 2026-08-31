@@ -17,12 +17,12 @@
     (let* ((hash (get window/location :hash ""))
            (slug (strip-prefix "#" hash)))
       (or (get articles-by-slug slug nil)
-          (nth 0 articles))))
+          (js-nth 0 articles))))
 
   (defcomponent OrgSite ()
     (let* ((selection-state (useState (article-from-location)))
-           (selected (nth 0 selection-state))
-           (set-selected (nth 1 selection-state))
+           (selected (js-nth 0 selection-state))
+           (set-selected (js-nth 1 selection-state))
            (sync-selection
             (lambda ()
               (progn
@@ -37,7 +37,7 @@
                 (lambda ()
                   (js-call browser-window :removeEventListener
                     "hashchange" sync-selection)))
-              [])))
+              (js-array))))
       (jsx :main (object :className "site-shell")
         (jsx :header (object :className "site-header")
           (jsx :a (object :className "brand" :href "#")

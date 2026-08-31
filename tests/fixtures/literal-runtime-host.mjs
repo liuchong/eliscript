@@ -22,6 +22,8 @@ console.log(JSON.stringify({
   vector: {
     persistent: isPersistentVector(generated.vector_value),
     count: generated.vector_value.count,
+    languageCount: generated.vector_count,
+    first: generated.vector_first,
     values: [...generated.vector_value],
     nestedPersistent: isPersistentVector(nested),
   },
@@ -33,6 +35,8 @@ console.log(JSON.stringify({
   },
   host: {
     array: Array.isArray(generated.array_value),
+    languageCount: generated.array_count,
+    second: generated.array_second,
     object: Object.getPrototypeOf(generated.object_value) === Object.prototype,
     objectValue: generated.object_value,
   },

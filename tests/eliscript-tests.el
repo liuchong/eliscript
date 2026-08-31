@@ -143,10 +143,42 @@
   (should (equal (eliscript-emitter-emit-expression t) "true"))
   (should (equal (eliscript-emitter-emit-expression 'false) "false"))
   (should (equal (eliscript-emitter-emit-expression [1 "two" :three])
-                 "[1, \"two\", \"three\"]"))
+                 "__eliscript_vector(1, \"two\", \"three\")"))
   (should (equal (eliscript-emitter-emit-expression
-                  '(object :name "Ada" :active t))
+                 '(object :name "Ada" :active t))
                  "({\"name\": \"Ada\", \"active\": true})")))
+
+(ert-deftest eliscript-separates-persistent-vectors-from-host-arrays ()
+  (let* ((source
+          "(defconst persistent [1 [2]])
+(defconst host (js-array 3 4))
+(defconst report
+  [(nth 0 persistent) (length persistent)
+   (nth 0 host) (length host)])")
+         (program (eliscript-compile-ir-string source "vectors.eli"))
+         (output (eliscript-compile-string source "vectors.eli"))
+         kinds)
+    (eliscript-ir-walk
+     program
+     (lambda (node) (push (eliscript-ir-node-kind node) kinds)))
+    (should (= (cl-count 'persistent-vector-literal kinds) 3))
+    (should (= (cl-count 'array-literal kinds) 1))
+    (should (= (length (split-string output "eliscript/runtime/literals" t))
+               2))
+    (should (= (length (split-string output "runtime/core/collection.mjs" t))
+               2))
+    (should (equal output
+                   (eliscript-tests--legacy-compile-string
+                    source "vectors.eli")))
+    (should
+     (equal
+      (eliscript-ir-program-to-forms program)
+      '((defconst persistent (vector 1 (vector 2)))
+        (defconst host (js-array 3 4))
+        (defconst report
+          (vector
+           (nth 0 persistent) (length persistent)
+           (nth 0 host) (length host))))))))
 
 (ert-deftest eliscript-distinguishes-nullish-values ()
   (let* ((source
@@ -164,7 +196,7 @@
     "function portable_classify(value)"
     (eliscript-compile-string
      "(defportable portable-classify (value)
-  [(nil? value) (undefined? value) (nullish? value)])"
+  (js-array (nil? value) (undefined? value) (nullish? value)))"
      "portable-nullish.eli")))
   (dolist (operator '(nil? undefined? nullish? null))
     (let ((error-data
@@ -229,16 +261,16 @@
              (eliscript-ir-program-to-forms program)
              '((defun collect
                    (required &optional optional &rest rest)
-                 [required optional rest])
+                 (vector required optional rest))
                (defconst invoke
                  (lambda (first &optional second &rest tail)
-                   [first second tail]))))))
+                   (vector first second tail)))))))
   (should
    (string-match-p
     (regexp-quote "function collect(required, optional = null, ...rest)")
     (eliscript-compile-portable-string
      "(defportable collect (required &optional optional &rest rest)
-  [required optional rest])"
+  (js-array required optional rest))"
      '(collect)
      "portable-parameters.eli")))
   (dolist (source
@@ -290,12 +322,12 @@
       '((defun unpack
             ([first [second nil fourth] &rest tail] &optional [fallback])
           (let* (([head &rest rest] tail)
-                 ([nested] [fallback]))
-            [first second fourth tail fallback head rest nested]))
+                 ([nested] (vector fallback)))
+            (vector first second fourth tail fallback head rest nested)))
         (defun catch-pair nil
           (try
-            (throw [7 "caught"])
-            (catch [code message] [code message])))))))
+            (throw (vector 7 "caught"))
+            (catch [code message] (vector code message))))))))
   (should
    (string-match-p
     (regexp-quote "function pair_sum([left, right])")
@@ -472,7 +504,7 @@
   (should
    (equal
     (eliscript-emitter-emit-expression
-     '(js-call [1 2 3] :map (lambda (value) (* value 2))))
+     '(js-call (js-array 1 2 3) :map (lambda (value) (* value 2))))
     "([1, 2, 3])[\"map\"]((value) => {\n  return (value * 2);\n})"))
   (should
    (equal (eliscript-emitter-emit-expression '(get user :name "unknown"))
@@ -974,7 +1006,7 @@
     (should
      (equal (eliscript-ir-program-to-forms program)
             '((loop ((left 1) (right 2))
-                (if left (recur right left) [left right])))))))
+                (if left (recur right left) (vector left right))))))))
 
 (ert-deftest eliscript-emits-portable-32-bit-operations ()
   (let* ((source
@@ -1033,10 +1065,10 @@
          (portable-output
           (eliscript-compile-portable-string
            "(defportable inspect-value (value text index)
-  [(value-type value) (host-identity-token value)
+  (js-array (value-type value) (host-identity-token value)
    (string-code-unit-at text index)
    (string-from-code-unit 65) (string-to-number \"1.5\")
-   (string-to-bigint \"42\") (number-float64-words value)])"
+   (string-to-bigint \"42\") (number-float64-words value)))"
            '(inspect-value)
            filename)))
     (should

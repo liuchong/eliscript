@@ -4,9 +4,9 @@
           (round 0))
       (while (< round rounds)
         (let ((index 0))
-          (while (< index (length values))
+          (while (< index (js-length values))
             (setq total
-              (% (+ (* total 33) (nth index values) round) 1000000007))
+              (% (+ (* total 33) (js-nth index values) round) 1000000007))
             (setq index (1+ index))))
         (setq round (1+ round)))
       total))

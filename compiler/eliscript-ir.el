@@ -137,9 +137,9 @@
     ('quoted-literal
      (list 'quote (eliscript-ir-node-value node)))
     ('array-literal
-     (apply #'vector
-            (mapcar #'eliscript-ir-node-to-form
-                    (eliscript-ir-node-children node))))
+     (cons 'js-array
+           (mapcar #'eliscript-ir-node-to-form
+                   (eliscript-ir-node-children node))))
     ('persistent-vector-literal
      (cons 'vector
            (mapcar #'eliscript-ir-node-to-form

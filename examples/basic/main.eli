@@ -24,11 +24,11 @@
   (defvar result
     (object
       :message (str greeting " from Eliscript")
-      :values [1 2 3]
+      :values (js-array 1 2 3)
       :factorial (factorial 5)
       :class (classify 7)
       :sum (sum-to 5)
-      :doubled (js-call [1 2 3] :map (lambda (value) (* value 2)))
+      :doubled (js-call (js-array 1 2 3) :map (lambda (value) (* value 2)))
       :consed (cons 0 '(1 2))
       :empty-car (car nil)))
 

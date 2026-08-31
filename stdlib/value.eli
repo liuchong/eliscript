@@ -65,15 +65,15 @@
      (value-mix-hash hash (uint32 count))))
 
   (defportable value-hash-string-with-tag (value tag)
-    (let ((hash (value-mix-hash tag (length value)))
+    (let ((hash (value-mix-hash tag (js-length value)))
           (index 0))
-      (while (< index (length value))
+      (while (< index (js-length value))
         (setq hash
               (value-mix-hash
                hash
                (string-code-unit-at value index))
               index (1+ index)))
-      (value-finish-hash hash (length value))))
+      (value-finish-hash hash (js-length value))))
 
   (defportable value-hash-number (value)
     (if (not (= value value))
@@ -81,8 +81,8 @@
       (let ((words (number-float64-words value)))
         (value-finish-hash
          (value-mix-hash
-          (value-mix-hash value-number-tag (nth 0 words))
-          (nth 1 words))
+          (value-mix-hash value-number-tag (js-nth 0 words))
+          (js-nth 1 words))
          2))))
 
   (defportable value-list-equal? (left right)

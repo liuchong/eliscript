@@ -12,19 +12,19 @@
   (defconst persistent-map-max-count 2147483647)
 
   (defportable persistent-map-array-reverse (values)
-    (let ((result [])
+    (let ((result (js-array))
           (index 0))
-      (while (< index (length values))
+      (while (< index (js-length values))
         (setq result (cons (get values index) result)
               index (1+ index)))
       result))
 
   (defportable persistent-map-array-copy-assoc (values wanted-index value)
-    (let ((result [])
+    (let ((result (js-array))
           (index 0)
           (result-length
-           (if (< wanted-index (length values))
-               (length values)
+           (if (< wanted-index (js-length values))
+               (js-length values)
              (1+ wanted-index))))
       (while (< index result-length)
         (setq result
@@ -35,28 +35,28 @@
       (persistent-map-array-reverse result)))
 
   (defportable persistent-map-array-insert (values wanted-index value)
-    (let ((result [])
+    (let ((result (js-array))
           (index 0))
-      (while (< index (length values))
+      (while (< index (js-length values))
         (when (= index wanted-index)
           (setq result (cons value result)))
         (setq result (cons (get values index) result)
               index (1+ index)))
-      (when (= wanted-index (length values))
+      (when (= wanted-index (js-length values))
         (setq result (cons value result)))
       (persistent-map-array-reverse result)))
 
   (defportable persistent-map-array-remove (values wanted-index)
-    (let ((result [])
+    (let ((result (js-array))
           (index 0))
-      (while (< index (length values))
+      (while (< index (js-length values))
         (unless (= index wanted-index)
           (setq result (cons (get values index) result)))
         (setq index (1+ index)))
       (persistent-map-array-reverse result)))
 
   (defportable persistent-map-array-append (values value)
-    (persistent-map-array-copy-assoc values (length values) value))
+    (persistent-map-array-copy-assoc values (js-length values) value))
 
   (defportable persistent-map-bit-count (value)
     (let* ((bits (uint32 value))
@@ -134,7 +134,7 @@
       (if (= left-hash right-hash)
           (persistent-map-make-collision-node
            left-hash
-           [left right])
+           (js-array left right))
         (let* ((left-index
                 (persistent-map-branch-index left-hash shift))
                (right-index
@@ -142,18 +142,18 @@
           (if (= left-index right-index)
               (persistent-map-make-bitmap-node
                (persistent-map-bit-position left-hash shift)
-               [(persistent-map-merge-entries
+               (js-array (persistent-map-merge-entries
                  (+ shift persistent-map-branch-bits)
                  left
-                 right)])
+                 right)))
             (persistent-map-make-bitmap-node
              (uint32
               (bit-or
                (persistent-map-bit-position left-hash shift)
                (persistent-map-bit-position right-hash shift)))
              (if (< left-index right-index)
-                 [left right]
-               [right left])))))))
+                 (js-array left right)
+               (js-array right left))))))))
 
   (defportable persistent-map-merge-hash-node-entry
       (shift node node-hash entry)
@@ -163,26 +163,26 @@
       (if (= node-index entry-index)
           (persistent-map-make-bitmap-node
            (persistent-map-bit-position node-hash shift)
-           [(persistent-map-merge-hash-node-entry
+           (js-array (persistent-map-merge-hash-node-entry
              (+ shift persistent-map-branch-bits)
              node
              node-hash
-             entry)])
+             entry)))
         (persistent-map-make-bitmap-node
          (uint32
           (bit-or
            (persistent-map-bit-position node-hash shift)
            (persistent-map-bit-position (get entry "hash" 0) shift)))
          (if (< node-index entry-index)
-             [node entry]
-           [entry node])))))
+             (js-array node entry)
+           (js-array entry node))))))
 
   (defportable persistent-map-promote-bitmap-node (node shift entry)
-    (let ((children [])
+    (let ((children (js-array))
           (index 0)
           (packed 0)
           (bitmap (get node "bitmap" 0))
-          (items (get node "items" []))
+          (items (get node "items" (js-array)))
           (entry-index
            (persistent-map-branch-index (get entry "hash" 0) shift)))
       (while (< index persistent-map-branch-width)
@@ -190,23 +190,23 @@
                (occupied (/= (bit-and bitmap bit) 0))
                (child
                 (if occupied
-                    (nth packed items)
+                    (js-nth packed items)
                   (if (= index entry-index) entry nil))))
           (setq children (cons child children))
           (when occupied
             (setq packed (1+ packed))))
         (setq index (1+ index)))
       (persistent-map-make-array-node
-       (1+ (length items))
+       (1+ (js-length items))
        (persistent-map-array-reverse children))))
 
   (defportable persistent-map-pack-array-node (node)
     (let ((bitmap 0)
-          (items [])
-          (children (get node "children" []))
+          (items (js-array))
+          (children (get node "children" (js-array)))
           (index 0))
       (while (< index persistent-map-branch-width)
-        (let ((child (nth index children)))
+        (let ((child (js-nth index children)))
           (when child
             (setq bitmap
                   (uint32 (bit-or bitmap (bit-shift-left 1 index)))
@@ -253,10 +253,10 @@
         (if (= kind persistent-map-bitmap-kind)
             (let* ((bit (persistent-map-bit-position hash shift))
                    (bitmap (get item "bitmap" 0))
-                   (items (get item "items" []))
+                   (items (get item "items" (js-array)))
                    (index (persistent-map-packed-index bitmap bit)))
               (if (= (bit-and bitmap bit) 0)
-                  (if (>= (1+ (length items))
+                  (if (>= (1+ (js-length items))
                           persistent-map-array-threshold)
                       (persistent-map-make-result
                        (persistent-map-promote-bitmap-node
@@ -274,7 +274,7 @@
                        (persistent-map-make-entry hash key value)))
                      t
                      t))
-                (let* ((existing (nth index items))
+                (let* ((existing (js-nth index items))
                        (result
                         (persistent-map-assoc-item
                          existing
@@ -297,8 +297,8 @@
                      t)))))
           (if (= kind persistent-map-array-kind)
               (let* ((index (persistent-map-branch-index hash shift))
-                     (children (get item "children" []))
-                     (existing (nth index children)))
+                     (children (get item "children" (js-array)))
+                     (existing (js-nth index children)))
                 (if (nil? existing)
                     (persistent-map-make-result
                      (persistent-map-make-array-node
@@ -339,19 +339,19 @@
                     (persistent-map-make-entry hash key value))
                    t
                    t)
-                (let ((entries (get item "entries" []))
+                (let ((entries (get item "entries" (js-array)))
                       (index 0)
                       (found-index -1))
-                  (while (and (< index (length entries))
+                  (while (and (< index (js-length entries))
                               (< found-index 0))
                     (when (funcall
                            key-equal-function
-                           (get (nth index entries) "key")
+                           (get (js-nth index entries) "key")
                            key)
                       (setq found-index index))
                     (setq index (1+ index)))
                   (if (>= found-index 0)
-                      (let ((existing (nth found-index entries)))
+                      (let ((existing (js-nth found-index entries)))
                         (if (funcall
                              value-equal-function
                              (get existing "value")
@@ -381,12 +381,12 @@
   (defportable persistent-map-remove-bitmap-item (node bit index)
     (let* ((items
             (persistent-map-array-remove
-             (get node "items" [])
+             (get node "items" (js-array))
              index))
            (bitmap
             (uint32
              (bit-and (get node "bitmap" 0) (bit-not bit)))))
-      (if (= (length items) 0)
+      (if (= (js-length items) 0)
           nil
         (persistent-map-make-bitmap-node bitmap items))))
 
@@ -405,8 +405,8 @@
                   (persistent-map-make-removal item false)
                 (let* ((index
                         (persistent-map-packed-index bitmap bit))
-                       (items (get item "items" []))
-                       (existing (nth index items))
+                       (items (get item "items" (js-array)))
+                       (existing (js-nth index items))
                        (result
                         (persistent-map-dissoc-item
                          existing
@@ -430,8 +430,8 @@
                          t)))))))
           (if (= kind persistent-map-array-kind)
               (let* ((index (persistent-map-branch-index hash shift))
-                     (children (get item "children" []))
-                     (existing (nth index children)))
+                     (children (get item "children" (js-array)))
+                     (existing (js-nth index children)))
                 (if (nil? existing)
                     (persistent-map-make-removal item false)
                   (let ((result
@@ -461,22 +461,22 @@
                          t))))))
             (if (/= (get item "hash" 0) hash)
                 (persistent-map-make-removal item false)
-              (let ((entries (get item "entries" []))
+              (let ((entries (get item "entries" (js-array)))
                     (index 0)
                     (found-index -1))
-                (while (and (< index (length entries))
+                (while (and (< index (js-length entries))
                             (< found-index 0))
                   (when (funcall
                          key-equal-function
-                         (get (nth index entries) "key")
+                         (get (js-nth index entries) "key")
                          key)
                     (setq found-index index))
                   (setq index (1+ index)))
                 (if (< found-index 0)
                     (persistent-map-make-removal item false)
-                  (if (= (length entries) 2)
+                  (if (= (js-length entries) 2)
                       (persistent-map-make-removal
-                       (nth (if (= found-index 0) 1 0) entries)
+                       (js-nth (if (= found-index 0) 1 0) entries)
                        t)
                     (persistent-map-make-removal
                      (persistent-map-make-collision-node
@@ -507,17 +507,17 @@
                   (if (= (bit-and bitmap bit) 0)
                       (setq finished t)
                     (setq current
-                          (nth
+                          (js-nth
                            (persistent-map-packed-index bitmap bit)
-                           (get current "items" []))
+                           (get current "items" (js-array)))
                           current-shift
                           (+ current-shift persistent-map-branch-bits))))
               (if (= kind persistent-map-array-kind)
                   (let ((child
-                         (nth
+                         (js-nth
                           (persistent-map-branch-index
                            hash current-shift)
-                          (get current "children" []))))
+                          (get current "children" (js-array)))))
                     (if (nil? child)
                         (setq finished t)
                       (setq current child
@@ -526,10 +526,10 @@
                                persistent-map-branch-bits))))
                 (progn
                   (when (= (get current "hash" 0) hash)
-                    (let ((entries (get current "entries" []))
+                    (let ((entries (get current "entries" (js-array)))
                           (index 0))
-                      (while (and (< index (length entries)) (not found))
-                        (let ((entry (nth index entries)))
+                      (while (and (< index (js-length entries)) (not found))
+                        (let ((entry (js-nth index entries)))
                           (when (funcall
                                  key-equal-function
                                  (get entry "key")
@@ -551,12 +551,12 @@
               (index 0)
               (children
                (if (= kind persistent-map-bitmap-kind)
-                   (get item "items" [])
+                   (get item "items" (js-array))
                  (if (= kind persistent-map-array-kind)
-                     (get item "children" [])
-                   (get item "entries" [])))))
-          (while (< index (length children))
-            (let ((child (nth index children)))
+                     (get item "children" (js-array))
+                   (get item "entries" (js-array))))))
+          (while (< index (js-length children))
+            (let ((child (js-nth index children)))
               (when child
                 (setq result
                       (persistent-map-reduce-item
@@ -690,8 +690,8 @@
   (defportable persistent-map-to-entries (map)
     (persistent-map-array-reverse
      (persistent-map-reduce
-      (lambda (result key value) (cons [key value] result))
-      []
+      (lambda (result key value) (cons (js-array key value) result))
+      (js-array)
       map)))
 
   (defportable persistent-map-from-entries
@@ -700,7 +700,7 @@
            (empty-persistent-map
             hash-function key-equal-function value-equal-function))
           (index 0))
-      (while (< index (length entries))
+      (while (< index (js-length entries))
         (let ((entry (get entries index)))
           (setq result
                 (persistent-map-assoc

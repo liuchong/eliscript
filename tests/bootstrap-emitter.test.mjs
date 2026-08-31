@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -66,7 +65,9 @@ async function seedResults() {
 }
 
 test("bootstrapped emitter matches seed ESM and Source Map output", async () => {
-  const directory = await mkdtemp(resolve(tmpdir(), "eliscript-emitter-"));
+  const directory = await mkdtemp(
+    resolve(projectDirectory, ".eliscript-emitter-"),
+  );
   try {
     await run([buildPath], {
       env: {

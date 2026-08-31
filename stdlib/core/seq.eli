@@ -43,9 +43,9 @@
   (defun concat (&rest collections)
     (let ((result (transient EMPTY_VECTOR))
           (index 0))
-      (while (< index (length collections))
+      (while (< index (js-length collections))
         (reduce
-          (nth index collections)
+          (js-nth index collections)
           (lambda (builder value)
             (conjBang builder value))
           result)

@@ -193,12 +193,12 @@
       (let ((child (read-node state)))
         (collection-node
           "list"
-          [(symbol-node name prefix-span) child]
+          (js-array (symbol-node name prefix-span) child)
           (span-from state start)))))
 
   (defun read-collection (state start closing kind)
     (advance state)
-    (let ((items [])
+    (let ((items (js-array))
           (done false))
       (while (not done)
         (skip-space-and-comments state)
@@ -249,7 +249,7 @@
 
   (defun read-string (source filename)
     (let ((state (make-state source filename))
-          (forms []))
+          (forms (js-array)))
       (skip-space-and-comments state)
       (while (not (eq (peek-code state) undefined))
         (js-call forms :push (read-node state))

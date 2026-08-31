@@ -4,7 +4,7 @@
     node-kind node-span node-value node-name node-items)
 
   (defconst builtin-operators
-    ["if" "when" "unless" "progn" "do" "while" "loop" "recur"
+    (js-array "if" "when" "unless" "progn" "do" "while" "loop" "recur"
      "and" "or" "not"
      "+" "*" "-" "/" "%" "mod" "=" "/=" "not=" "<" "<=" ">" ">="
      "1+" "1-" "eq" "equal" "null" "nil?" "undefined?" "nullish?"
@@ -13,12 +13,13 @@
      "value-type" "host-identity-token" "string-code-unit-at" "string-from-code-unit"
      "string-to-number" "string-to-bigint" "number-float64-words"
      "list" "vector" "hash-map" "array" "js-array" "car"
-     "cdr" "cons" "nth" "aref" "length" "new" "print" "str"
-     "object-keys" "object-has?" "object-assoc" "funcall" "apply"])
+     "cdr" "cons" "nth" "js-nth" "aref" "length" "js-length"
+     "new" "print" "str"
+     "object-keys" "object-has?" "object-assoc" "funcall" "apply"))
 
   (defconst portable-forbidden-operators
-    ["js*" "print" "put" "js-call" "new" "async" "await" "throw" "try"
-     "vector" "hash-map" "jsx" "fragment"])
+    (js-array "js*" "print" "put" "js-call" "new" "async" "await" "throw" "try"
+     "vector" "hash-map" "jsx" "fragment"))
 
   (defconst fail
     (js* "(diagnostic) => { const p = diagnostic.location.start; const error = new Error(`${diagnostic.location.file}:${p.line}:${p.column}: ${diagnostic.message}`); error.eliscriptDiagnostic = diagnostic; throw error; }"))
@@ -73,11 +74,11 @@
   (defun list-items (node)
     (cond
       ((and node (= (node-kind node) "list")) (node-items node))
-      ((null-node-p node) [])
+      ((null-node-p node) (js-array))
       (t undefined)))
 
   (defun binding-marker-p (name)
-    (js-call ["&optional" "&rest" "&body"] :includes name))
+    (js-call (js-array "&optional" "&rest" "&body") :includes name))
 
   (defun binding-nodes (pattern context)
     (cond
@@ -85,9 +86,9 @@
        (if (binding-marker-p (node-name pattern))
            (analyzer-fail
              context (node-span pattern) "invalid binding pattern marker")
-         [pattern]))
+         (js-array pattern)))
       ((vector-node-p pattern)
-       (let ((result [])
+       (let ((result (js-array))
              (rest-seen false)
              (rest-done false))
          (js-call (node-items pattern) :forEach
@@ -135,14 +136,14 @@
 
   (defun function-parameters (parameters context)
     (let ((items (list-items parameters))
-          (parsed [])
+          (parsed (js-array))
           (mode "required")
           (index 0))
       (when (eq items undefined)
         (analyzer-fail
           context (node-span parameters) "function arguments must be a list"))
       (while (< index (get items :length))
-        (let* ((parameter (nth index items))
+        (let* ((parameter (js-nth index items))
                (name (and (symbol-node-p parameter) (node-name parameter))))
           (cond
             ((= name "&optional")
@@ -167,7 +168,7 @@
                  context (node-span parameter)
                  "function &rest parameter must be a symbol"))
              (js-call parsed :push
-               (object :kind "rest" :node parameter :bindings [parameter]))
+               (object :kind "rest" :node parameter :bindings (js-array parameter)))
              (setq mode "done"))
             ((= mode "done")
              (analyzer-fail
@@ -214,9 +215,9 @@
          (cond
            ((and (= (node-kind node) "list")
                  (= (get items :length) 2)
-                 (symbol-node-p (nth 0 items))
-                 (= (node-name (nth 0 items)) "quote"))
-            (str "'" (node-display (nth 1 items))))
+                 (symbol-node-p (js-nth 0 items))
+                 (= (node-name (js-nth 0 items)) "quote"))
+            (str "'" (node-display (js-nth 1 items))))
            ((= (node-kind node) "list") (str "(" contents ")"))
            (t (str "[" contents "]")))))
       (t "<unsupported>")))
@@ -308,7 +309,7 @@
       (while (< index (get forms :length))
         (put context :tailPosition
           (and tail-position (= index (1- (get forms :length)))))
-        (analyze-expression (nth index forms) scope context)
+        (analyze-expression (js-nth index forms) scope context)
         (setq index (1+ index)))
       (put context :tailPosition tail-position)))
 
@@ -328,16 +329,16 @@
     (cond
       ((binding-pattern-p binding)
        (binding-nodes binding context)
-       [binding undefined])
+       (js-array binding undefined))
       (t
        (let ((items (list-items binding)))
          (if (and (not (eq items undefined))
                   (>= (get items :length) 1)
                   (<= (get items :length) 2)
-                  (binding-pattern-p (nth 0 items)))
+                  (binding-pattern-p (js-nth 0 items)))
              (progn
-               (binding-nodes (nth 0 items) context)
-               [(nth 0 items) (nth 1 items)])
+               (binding-nodes (js-nth 0 items) context)
+               (js-array (js-nth 0 items) (js-nth 1 items)))
            (analyzer-fail
              context (node-span binding)
              (str "invalid let binding: " (node-display binding))))))))
@@ -347,7 +348,7 @@
       (analyzer-fail
         context form-span
         (str (if sequential "let*" "let") " requires a binding list")))
-    (let* ((bindings-form (nth 0 args))
+    (let* ((bindings-form (js-nth 0 args))
            (bindings (list-items bindings-form))
            (body (js-call args :slice 1))
            (child (make-scope scope)))
@@ -358,19 +359,19 @@
           (js-call bindings :forEach
             (lambda (binding)
               (let ((pair (binding-pair binding context)))
-                (analyze-non-tail (nth 1 pair) child context)
+                (analyze-non-tail (js-nth 1 pair) child context)
                 (declare-pattern
-                  child (nth 0 pair) "local" t context))))
+                  child (js-nth 0 pair) "local" t context))))
         (let ((parsed
                (js-call bindings :map
                  (lambda (binding) (binding-pair binding context)))))
           (js-call parsed :forEach
             (lambda (pair)
-              (analyze-non-tail (nth 1 pair) scope context)))
+              (analyze-non-tail (js-nth 1 pair) scope context)))
           (js-call parsed :forEach
             (lambda (pair)
               (declare-pattern
-                child (nth 0 pair) "local" t context)))))
+                child (js-nth 0 pair) "local" t context)))))
       (analyze-sequence body child context)))
 
   (defun analyze-function
@@ -388,8 +389,8 @@
               (tail-position (get context :tailPosition))
               (recur-barrier (get context :recurBarrier)))
           (put context :recurTargets
-            [(object :kind "function"
-                     :arity (get parameter-items :length))])
+            (js-array (object :kind "function"
+                     :arity (get parameter-items :length))))
           (put context :tailPosition t)
           (put context :recurBarrier false)
           (analyze-sequence body child context)
@@ -400,11 +401,11 @@
   (defun analyze-loop (args scope context form-span)
     (when (= (get args :length) 0)
       (analyzer-fail context form-span "loop requires a binding list"))
-    (let* ((bindings-form (nth 0 args))
+    (let* ((bindings-form (js-nth 0 args))
            (bindings (list-items bindings-form))
            (body (js-call args :slice 1))
            (child (make-scope scope))
-           (parsed []))
+           (parsed (js-array)))
       (when (eq bindings undefined)
         (analyzer-fail
           context (node-span bindings-form) "loop bindings must be a list"))
@@ -420,14 +421,14 @@
             (js-call parsed :push (binding-pair binding context)))))
       (js-call parsed :forEach
         (lambda (pair)
-          (analyze-non-tail (nth 1 pair) scope context)))
+          (analyze-non-tail (js-nth 1 pair) scope context)))
       (js-call parsed :forEach
         (lambda (pair)
-          (declare-pattern child (nth 0 pair) "loop" t context)))
+          (declare-pattern child (js-nth 0 pair) "loop" t context)))
       (let ((recur-targets (get context :recurTargets))
             (tail-position (get context :tailPosition))
             (recur-barrier (get context :recurBarrier))
-            (targets []))
+            (targets (js-array)))
         (js-call targets :push
           (object :kind "loop" :arity (get parsed :length)))
         (js-call recur-targets :forEach
@@ -442,7 +443,7 @@
 
   (defun analyze-recur (args scope context form-span)
     (let* ((targets (get context :recurTargets))
-           (target (and (> (get targets :length) 0) (nth 0 targets))))
+           (target (and (> (get targets :length) 0) (js-nth 0 targets))))
       (unless target
         (analyzer-fail
           context form-span
@@ -470,8 +471,8 @@
         (str form-name " expects one or more name/value pairs")))
     (let ((index 0))
       (while (< index (get args :length))
-        (let* ((name-node (nth index args))
-               (value (nth (1+ index) args)))
+        (let* ((name-node (js-nth index args))
+               (value (js-nth (1+ index) args)))
           (unless (symbol-node-p name-node)
             (analyzer-fail
               context form-span
@@ -492,8 +493,8 @@
         context form-span (str form-name " expects key/value pairs")))
     (let ((index 0))
       (while (< index (get args :length))
-        (let ((key (nth index args))
-              (value (nth (1+ index) args)))
+        (let ((key (js-nth index args))
+              (value (js-nth (1+ index) args)))
           (unless (or (keyword-node-p key)
                       (string-node-p key)
                       (symbol-node-p key))
@@ -514,8 +515,8 @@
       ((= operator "js-call")
        (when (< (get args :length) 2)
          (analyzer-fail context form-span "js-call expects 2+ arguments"))))
-    (analyze-non-tail (nth 0 args) scope context)
-    (let ((key (nth 1 args)))
+    (analyze-non-tail (js-nth 0 args) scope context)
+    (let ((key (js-nth 1 args)))
       (unless (or (keyword-node-p key) (string-node-p key))
         (analyze-non-tail key scope context)))
     (analyze-non-tail-sequence (js-call args :slice 2) scope context))
@@ -528,15 +529,15 @@
             (analyzer-fail
               context (node-span clause)
               (str "invalid cond clause: " (node-display clause))))
-          (analyze-non-tail (nth 0 items) scope context)
+          (analyze-non-tail (js-nth 0 items) scope context)
           (analyze-sequence (js-call items :slice 1) scope context)))))
 
   (defun clause-operator (form)
     (let ((items (list-items form)))
       (and (not (eq items undefined))
            (> (get items :length) 0)
-           (symbol-node-p (nth 0 items))
-           (node-name (nth 0 items)))))
+           (symbol-node-p (js-nth 0 items))
+           (node-name (js-nth 0 items)))))
 
   (defun analyze-try (args scope context form-span)
     (let ((recur-barrier (get context :recurBarrier))
@@ -558,7 +559,7 @@
                (setq clauses-started t)
                (setq catch-seen t)
                (let* ((items (list-items argument))
-                      (binding (nth 1 items)))
+                      (binding (js-nth 1 items)))
                  (unless (binding-pattern-p binding)
                    (analyzer-fail
                      context (node-span argument)
@@ -591,14 +592,14 @@
       (analyzer-fail
         context form-span
         "jsx expects a type, props, and optional children"))
-    (let ((type (nth 0 args)))
+    (let ((type (js-nth 0 args)))
       (unless (or (keyword-node-p type) (string-node-p type))
         (analyze-non-tail type scope context)))
     (analyze-non-tail-sequence (js-call args :slice 1) scope context))
 
   (defun analyze-call (form scope context)
     (let* ((items (node-items form))
-           (operator-node (nth 0 items))
+           (operator-node (js-nth 0 items))
            (operator (and (symbol-node-p operator-node)
                           (node-name operator-node)))
            (args (js-call items :slice 1))
@@ -610,13 +611,13 @@
              context form-span
              (str operator " requires an argument list")))
          (analyze-function
-           (nth 0 args) (js-call args :slice 1) scope context))
+           (js-nth 0 args) (js-call args :slice 1) scope context))
         ((= operator "async")
          (when (= (get args :length) 0)
            (analyzer-fail
              context form-span "async requires an argument list"))
          (analyze-function
-           (nth 0 args) (js-call args :slice 1) scope context t))
+           (js-nth 0 args) (js-call args :slice 1) scope context t))
         ((= operator "await")
          (unless (= (get args :length) 1)
            (analyzer-fail context form-span "await expects 1 argument"))
@@ -624,11 +625,11 @@
            (analyzer-fail
              context form-span
              "await is only valid inside an async function"))
-         (analyze-non-tail (nth 0 args) scope context))
+         (analyze-non-tail (js-nth 0 args) scope context))
         ((= operator "throw")
          (unless (= (get args :length) 1)
            (analyzer-fail context form-span "throw expects 1 argument"))
-         (analyze-non-tail (nth 0 args) scope context))
+         (analyze-non-tail (js-nth 0 args) scope context))
         ((= operator "try")
          (analyze-try args scope context form-span))
         ((or (= operator "catch") (= operator "finally"))
@@ -654,13 +655,13 @@
          (unless (and (>= (get args :length) 2)
                       (<= (get args :length) 3))
            (analyzer-fail context form-span "if expects 2..3 arguments"))
-         (analyze-non-tail (nth 0 args) scope context)
+         (analyze-non-tail (js-nth 0 args) scope context)
          (analyze-sequence (js-call args :slice 1) scope context))
         ((or (= operator "when") (= operator "unless"))
          (when (= (get args :length) 0)
            (analyzer-fail
              context form-span (str operator " expects 1+ arguments")))
-         (analyze-non-tail (nth 0 args) scope context)
+         (analyze-non-tail (js-nth 0 args) scope context)
          (analyze-sequence (js-call args :slice 1) scope context))
         ((or (= operator "progn") (= operator "do")
              (= operator "and") (= operator "or"))
@@ -689,9 +690,9 @@
         ((js-call builtin-operators :includes operator)
          (analyze-non-tail-sequence args scope context))
         ((js-call
-          ["defun" "defn" "defportable" "defasync" "defcomponent"
+          (js-array "defun" "defn" "defportable" "defasync" "defcomponent"
             "defvar" "defconst"
-            "export" "export-default" "import" "import-portable" "module"]
+            "export" "export-default" "import" "import-portable" "module")
            :includes operator)
          (analyzer-fail
            context form-span
@@ -722,14 +723,14 @@
 
   (defun import-bindings (args context form-span portable)
     (unless (and (> (get args :length) 0)
-                 (string-node-p (nth 0 args)))
+                 (string-node-p (js-nth 0 args)))
       (analyzer-fail context form-span "import module must be a string"))
-    (let ((bindings [])
+    (let ((bindings (js-array))
           (index 1)
           (default-seen false)
           (namespace-seen false))
       (while (< index (get args :length))
-        (let ((specifier (nth index args)))
+        (let ((specifier (js-nth index args)))
           (cond
             ((and (keyword-node-p specifier)
                   (= (node-name specifier) "default"))
@@ -745,7 +746,7 @@
                  context form-span ":default requires a binding"))
              (setq default-seen t)
              (setq index (1+ index))
-             (js-call bindings :push (nth index args)))
+             (js-call bindings :push (js-nth index args)))
             ((and (keyword-node-p specifier)
                   (= (node-name specifier) "as"))
              (when portable
@@ -760,7 +761,7 @@
                  context form-span ":as requires a namespace binding"))
              (setq namespace-seen t)
              (setq index (1+ index))
-             (js-call bindings :push (nth index args)))
+             (js-call bindings :push (js-nth index args)))
             ((symbol-node-p specifier)
              (js-call bindings :push specifier))
             (t
@@ -779,11 +780,11 @@
     (js-call forms :forEach
       (lambda (form)
         (if (and (= (node-kind form) "list")
-                 (symbol-node-p (nth 0 (node-items form)))
-                 (= (node-name (nth 0 (node-items form))) "module"))
+                 (symbol-node-p (js-nth 0 (node-items form)))
+                 (= (node-name (js-nth 0 (node-items form))) "module"))
             (let ((items (node-items form)))
               (unless (and (> (get items :length) 1)
-                           (symbol-node-p (nth 1 items)))
+                           (symbol-node-p (js-nth 1 items)))
                 (analyzer-fail
                   context (node-span form) "module name must be a symbol"))
               (append-flattened-modules
@@ -791,7 +792,7 @@
           (js-call result :push form)))))
 
   (defun flatten-modules (forms context)
-    (let ((result []))
+    (let ((result (js-array)))
       (append-flattened-modules forms result context)
       result))
 
@@ -800,7 +801,7 @@
       (lambda (form)
         (when (= (node-kind form) "list")
           (let* ((items (node-items form))
-                 (operator-node (nth 0 items))
+                 (operator-node (js-nth 0 items))
                  (operator (and (symbol-node-p operator-node)
                                 (node-name operator-node)))
                  (args (js-call items :slice 1))
@@ -823,13 +824,13 @@
                  (analyzer-fail
                    context (node-span form) "defvar expects 1..2 arguments"))
                (declare-binding
-                 scope (nth 0 args) "variable" t context))
+                 scope (js-nth 0 args) "variable" t context))
               ((= operator "defconst")
                (unless (and (>= count 1) (<= count 2))
                  (analyzer-fail
                    context (node-span form) "defconst expects 1..2 arguments"))
                (declare-binding
-                 scope (nth 0 args) "constant" false context))
+                 scope (js-nth 0 args) "constant" false context))
               ((or (= operator "defun") (= operator "defn")
                    (= operator "defportable") (= operator "defasync"))
                (unless (>= count 2)
@@ -837,13 +838,13 @@
                    context (node-span form)
                    (str operator " expects 2+ arguments")))
                (declare-binding
-                 scope (nth 0 args) "function" false context))))))))
+                 scope (js-nth 0 args) "function" false context))))))))
 
   (defun analyze-top-level (form scope context)
     (if (not (= (node-kind form) "list"))
         (analyze-expression form scope context)
       (let* ((items (node-items form))
-             (operator-node (nth 0 items))
+             (operator-node (js-nth 0 items))
              (operator (and (symbol-node-p operator-node)
                             (node-name operator-node)))
              (args (js-call items :slice 1))
@@ -855,7 +856,7 @@
              (analyzer-fail
                context (node-span form)
                (str operator " expects 1..2 arguments")))
-           (analyze-expression (nth 1 args) scope context))
+           (analyze-expression (js-nth 1 args) scope context))
           ((or (= operator "defun") (= operator "defn")
                (= operator "defportable") (= operator "defasync"))
            (unless (>= count 2)
@@ -863,7 +864,7 @@
                context (node-span form)
                (str operator " expects 2+ arguments")))
            (analyze-function
-             (nth 1 args)
+             (js-nth 1 args)
              (js-call args :slice 2)
              scope context (= operator "defasync")))
           ((= operator "export")
@@ -884,7 +885,7 @@
              (analyzer-fail
                context (node-span form)
                "export-default expects 1 argument"))
-           (analyze-expression (nth 0 args) scope context))
+           (analyze-expression (js-nth 0 args) scope context))
           (t (analyze-expression form scope context))))))
 
   (defun portable-declarations (forms context)
@@ -893,26 +894,26 @@
         (lambda (form)
           (when (= (node-kind form) "list")
             (let* ((items (node-items form))
-                   (operator-node (nth 0 items))
+                   (operator-node (js-nth 0 items))
                    (operator (and (symbol-node-p operator-node)
                                   (node-name operator-node)))
                    (args (js-call items :slice 1)))
               (cond
                 ((= operator "defconst")
-                 (js-call declarations :set (node-name (nth 0 args))
+                 (js-call declarations :set (node-name (js-nth 0 args))
                    (object :kind "constant" :form form
-                           :initializer (nth 1 args))))
+                           :initializer (js-nth 1 args))))
                 ((= operator "defvar")
-                 (js-call declarations :set (node-name (nth 0 args))
+                 (js-call declarations :set (node-name (js-nth 0 args))
                    (object :kind "variable" :form form)))
                 ((or (= operator "defun") (= operator "defn")
                      (= operator "defportable") (= operator "defasync"))
-                 (js-call declarations :set (node-name (nth 0 args))
+                 (js-call declarations :set (node-name (js-nth 0 args))
                    (object
                      :kind (if (= operator "defportable")
                                "portable" "function")
                      :form form
-                     :parameters (nth 1 args)
+                     :parameters (js-nth 1 args)
                      :body (js-call args :slice 2))))
                 ((or (= operator "import") (= operator "import-portable"))
                  (js-call
@@ -976,7 +977,7 @@
   (defun portable-function-expression
       (args scope declarations dependencies entry context)
     (let ((child (copy-portable-scope scope)))
-      (js-call (function-parameters (nth 0 args) context) :forEach
+      (js-call (function-parameters (js-nth 0 args) context) :forEach
         (lambda (parameter)
           (js-call (get parameter :bindings) :forEach
             (lambda (binding)
@@ -987,14 +988,14 @@
 
   (defun portable-let-expression
       (args scope sequential declarations dependencies entry context)
-    (let ((bindings (list-items (nth 0 args)))
+    (let ((bindings (list-items (js-nth 0 args)))
           (child (copy-portable-scope scope)))
       (if sequential
           (js-call bindings :forEach
             (lambda (binding)
               (let* ((items (list-items binding))
-                     (name (if items (nth 0 items) binding))
-                     (initializer (and items (nth 1 items))))
+                     (name (if items (js-nth 0 items) binding))
+                     (initializer (and items (js-nth 1 items))))
                 (portable-expression
                   initializer child declarations dependencies entry context)
                 (add-portable-pattern name child context))))
@@ -1004,29 +1005,29 @@
               (let ((items (list-items binding)))
                 (when items
                   (portable-expression
-                    (nth 1 items) scope declarations dependencies entry context)))))
+                    (js-nth 1 items) scope declarations dependencies entry context)))))
           (js-call bindings :forEach
             (lambda (binding)
               (let ((items (list-items binding)))
                 (add-portable-pattern
-                  (if items (nth 0 items) binding) child context))))))
+                  (if items (js-nth 0 items) binding) child context))))))
       (portable-sequence
         (js-call args :slice 1)
         child declarations dependencies entry context)))
 
   (defun portable-loop-expression
       (args scope declarations dependencies entry context)
-    (let ((bindings (list-items (nth 0 args)))
+    (let ((bindings (list-items (js-nth 0 args)))
           (child (copy-portable-scope scope)))
       (js-call bindings :forEach
         (lambda (binding)
           (let ((items (list-items binding)))
             (portable-expression
-              (nth 1 items) scope declarations dependencies entry context))))
+              (js-nth 1 items) scope declarations dependencies entry context))))
       (js-call bindings :forEach
         (lambda (binding)
           (add-portable-pattern
-            (nth 0 (list-items binding)) child context)))
+            (js-nth 0 (list-items binding)) child context)))
       (portable-sequence
         (js-call args :slice 1)
         child declarations dependencies entry context)))
@@ -1035,8 +1036,8 @@
       (args scope declarations dependencies entry context)
     (let ((index 0))
       (while (< index (get args :length))
-        (let ((name (nth index args))
-              (value (nth (1+ index) args)))
+        (let ((name (js-nth index args))
+              (value (js-nth (1+ index) args)))
           (unless (js-call scope :has (node-name name))
             (analyzer-fail
               context (node-span name)
@@ -1050,8 +1051,8 @@
       (args scope declarations dependencies entry context)
     (let ((index 0))
       (while (< index (get args :length))
-        (let ((key (nth index args))
-              (value (nth (1+ index) args)))
+        (let ((key (js-nth index args))
+              (value (js-nth (1+ index) args)))
           (unless (or (keyword-node-p key)
                       (string-node-p key)
                       (symbol-node-p key))
@@ -1064,7 +1065,7 @@
   (defun portable-call
       (form scope declarations dependencies entry context)
     (let* ((items (node-items form))
-           (operator-node (nth 0 items))
+           (operator-node (js-nth 0 items))
            (operator (and (symbol-node-p operator-node)
                           (node-name operator-node)))
            (args (js-call items :slice 1)))
@@ -1124,8 +1125,10 @@
          (portable-reference
            form scope declarations dependencies entry context))
         ((= (node-kind form) "vector")
-         (portable-sequence
-           (node-items form) scope declarations dependencies entry context))
+         (analyzer-fail
+           context (node-span form)
+           (str "portable function " entry
+                " cannot use vector literal (persistent runtime values)")))
         ((= (node-kind form) "list")
          (portable-call
            form scope declarations dependencies entry context)))))
@@ -1144,7 +1147,7 @@
 
   (defun validate-portable-module (forms context)
     (let ((declarations (portable-declarations forms context))
-          (pending [])
+          (pending (js-array))
           (visited (new (js* "Set"))))
       (js-call declarations :forEach
         (lambda (declaration name)
@@ -1167,7 +1170,7 @@
     (let* ((context (object :filename filename))
            (flattened (flatten-modules forms context))
            (declarations (portable-declarations flattened context))
-           (pending [])
+           (pending (js-array))
            (selected (new (js* "Set"))))
       (js-call entries :forEach
         (lambda (entry)
@@ -1198,11 +1201,11 @@
         (lambda (form)
           (when (= (node-kind form) "list")
             (let* ((items (node-items form))
-                   (operator (and (symbol-node-p (nth 0 items))
-                                  (node-name (nth 0 items))))
+                   (operator (and (symbol-node-p (js-nth 0 items))
+                                  (node-name (js-nth 0 items))))
                    (name (and (> (get items :length) 1)
-                              (symbol-node-p (nth 1 items))
-                              (node-name (nth 1 items)))))
+                              (symbol-node-p (js-nth 1 items))
+                              (node-name (js-nth 1 items)))))
               (or
                 (and (or (= operator "defconst")
                          (= operator "defportable"))
@@ -1219,7 +1222,7 @@
             (object
               :filename filename
               :tailPosition false
-              :recurTargets []
+              :recurTargets (js-array)
               :recurBarrier false))
            (flattened (flatten-modules forms context))
            (scope (make-scope nil)))

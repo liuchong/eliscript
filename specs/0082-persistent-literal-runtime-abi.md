@@ -17,11 +17,9 @@ with dedicated IR nodes and link those nodes through one standard ESM runtime
 ABI. Native JavaScript arrays and ordinary objects have explicit source forms
 that do not use the persistent runtime.
 
-This slice deliberately does not change square-bracket source literals yet.
-Existing `[...]` expressions remain provisional native arrays until compiler,
-standard-library, and application internals are annotated with explicit host
-constructors. The next migration slice changes that default and freezes the
-result in the compatibility corpus.
+This slice deliberately did not change square-bracket source literals. That
+follow-up is now implemented by specification 0083, which makes `[...]` values
+persistent Vectors and annotates host-dependent maintained sources explicitly.
 
 ## Runtime ABI
 
@@ -61,9 +59,11 @@ retaining literal and computed property-key behavior. The older `array` and
 `object` forms remain provisional aliases during source migration; new host
 dependent code should use the explicit `js-` names.
 
-The existing `array-literal` IR kind continues to represent the provisional
-square-bracket expression. Binding patterns remain `array-binding-pattern` and
-are independent of value construction.
+At this specification boundary, `array-literal` represented the provisional
+square-bracket expression. Specification 0083 reassigns square-bracket values
+to `persistent-vector-literal`; `array-literal` now represents only explicit
+`js-array`/`array` construction. Binding patterns remain
+`array-binding-pattern` and are independent of value construction.
 
 ## Bootstrap and Portable Boundaries
 
@@ -71,11 +71,10 @@ The Emacs Lisp seed and Eliscript-authored compiler implement the same IR,
 analysis, lowering, import discovery, emission, diagnostics, and Source Map
 behavior. Three-generation compiler fixed-point evidence remains mandatory.
 
-Portable worker closures reject `(vector ...)` and `(hash-map ...)` for now.
-Their optimized runtime values are not JSON-compatible, and transport-safe
-protocol/value encoding remains a separate requirement. Square-bracket values
-retain their provisional portable behavior until the default-literal and
-worker-codec migrations are specified together.
+Portable worker closures reject `(vector ...)`, square-bracket Vector values,
+and `(hash-map ...)` for now. Their optimized runtime values are not
+JSON-compatible, and transport-safe protocol/value encoding remains a separate
+requirement. Explicit native arrays remain portable.
 
 ## Architecture Boundary
 
@@ -87,14 +86,15 @@ but cannot alter literal semantics or runtime resolution.
 ## Remaining P3 Migration
 
 This specification completes P3 construction prerequisites, not the P3 exit.
-The following work remains explicit:
+Specification 0083 completes the default Vector, maintained-source annotation,
+protocol collection access, and compatibility-recording items. The following
+work remains explicit:
 
-1. change `[...]` expressions to `persistent-vector-literal`
-2. add final persistent Map source syntax and first-class Keyword emission
-3. migrate compiler and library work buffers to `js-array`/`js-object`
-4. migrate collection access away from accidental native properties
-5. freeze default literal behavior in the compatibility corpus
-6. integrate persistent values with the Emacs transport codec
+1. add final persistent Map source syntax and first-class Keyword emission
+2. integrate quoted collection values with the canonical data reader
+3. integrate persistent values with the Emacs transport codec
+4. audit legacy list and native-container compatibility forms
+5. promote the complete literal boundary after the remaining migration
 
 ## Acceptance Criteria
 

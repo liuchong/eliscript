@@ -6,19 +6,19 @@
   (defconst persistent-vector-max-count 2147483647)
 
   (defportable array-reverse (values)
-    (let ((result [])
+    (let ((result (js-array))
           (index 0))
-      (while (< index (length values))
+      (while (< index (js-length values))
         (setq result (cons (get values index) result)
               index (1+ index)))
       result))
 
   (defportable array-copy-assoc (values wanted-index wanted-value)
-    (let ((result [])
+    (let ((result (js-array))
           (index 0)
           (result-length
-           (if (< wanted-index (length values))
-               (length values)
+           (if (< wanted-index (js-length values))
+               (js-length values)
              (1+ wanted-index))))
       (while (< index result-length)
         (setq result
@@ -31,9 +31,9 @@
       (array-reverse result)))
 
   (defportable array-drop-last (values)
-    (let ((result [])
+    (let ((result (js-array))
           (index 0)
-          (result-length (1- (length values))))
+          (result-length (1- (js-length values))))
       (while (< index result-length)
         (setq result (cons (get values index) result)
               index (1+ index)))
@@ -43,10 +43,10 @@
     (object :slots slots))
 
   (defportable empty-vector-node ()
-    (make-vector-node []))
+    (make-vector-node (js-array)))
 
   (defportable vector-node-slots (node)
-    (get node "slots" []))
+    (get node "slots" (js-array)))
 
   (defportable make-persistent-vector (count shift root tail metadata)
     (object :kind persistent-vector-kind
@@ -65,7 +65,7 @@
     (make-persistent-vector 0
                             persistent-vector-branch-bits
                             (empty-vector-node)
-                            []
+                            (js-array)
                             nil))
 
   (defportable persistent-vector-count (vector)
@@ -81,7 +81,7 @@
        (persistent-vector-count vector)
        (get vector "shift" persistent-vector-branch-bits)
        (get vector "root" nil)
-       (get vector "tail" [])
+       (get vector "tail" (js-array))
        metadata)))
 
   (defportable persistent-vector-tail-offset (vector)
@@ -104,7 +104,7 @@
     (if (= level 0)
         node
       (make-vector-node
-       [(vector-new-path (- level persistent-vector-branch-bits) node)])))
+       (js-array (vector-new-path (- level persistent-vector-branch-bits) node)))))
 
   (defportable vector-push-tail (level parent tail-node count)
     (let* ((subindex
@@ -115,7 +115,7 @@
            (child
             (if (= level persistent-vector-branch-bits)
                 tail-node
-              (let ((existing (nth subindex slots)))
+              (let ((existing (js-nth subindex slots)))
                 (if existing
                     (vector-push-tail
                      (- level persistent-vector-branch-bits)
@@ -138,7 +138,7 @@
                 value
               (vector-assoc-node
                (- level persistent-vector-branch-bits)
-               (nth subindex slots)
+               (js-nth subindex slots)
                index
                value))))
       (make-vector-node (array-copy-assoc slots subindex replacement))))
@@ -153,7 +153,7 @@
           (let ((child
                  (vector-pop-tail
                   (- level persistent-vector-branch-bits)
-                  (nth subindex slots)
+                  (js-nth subindex slots)
                   count)))
             (if (and (nil? child) (= subindex 0))
                 nil
@@ -165,12 +165,12 @@
 
   (defportable persistent-vector-array-for (vector index)
     (if (>= index (persistent-vector-tail-offset vector))
-        (get vector "tail" [])
+        (get vector "tail" (js-array))
       (let ((node (get vector "root" nil))
             (level (get vector "shift" persistent-vector-branch-bits)))
         (while (> level 0)
           (setq node
-                (nth
+                (js-nth
                  (bit-and
                   (unsigned-bit-shift-right index level)
                   persistent-vector-branch-mask)
@@ -187,17 +187,17 @@
 
   (defportable persistent-vector-conj (vector value)
     (let* ((count (persistent-vector-count vector))
-           (tail (get vector "tail" []))
+           (tail (get vector "tail" (js-array)))
            (shift (get vector "shift" persistent-vector-branch-bits))
            (root (get vector "root" nil)))
       (if (>= count persistent-vector-max-count)
           nil
-        (if (< (length tail) persistent-vector-branch-width)
+        (if (< (js-length tail) persistent-vector-branch-width)
             (make-persistent-vector
              (1+ count)
              shift
              root
-             (array-copy-assoc tail (length tail) value)
+             (array-copy-assoc tail (js-length tail) value)
              (persistent-vector-meta vector))
           (let* ((tail-node (make-vector-node tail))
                  (root-overflow
@@ -212,20 +212,20 @@
                  (next-root
                   (if root-overflow
                       (make-vector-node
-                       [root (vector-new-path shift tail-node)])
+                       (js-array root (vector-new-path shift tail-node)))
                     (vector-push-tail shift root tail-node count))))
             (make-persistent-vector
              (1+ count)
              next-shift
              next-root
-             [value]
+             (js-array value)
              (persistent-vector-meta vector)))))))
 
   (defportable persistent-vector-assoc (vector index value)
     (let* ((count (persistent-vector-count vector))
            (shift (get vector "shift" persistent-vector-branch-bits))
            (root (get vector "root" nil))
-           (tail (get vector "tail" [])))
+           (tail (get vector "tail" (js-array))))
       (if (not (persistent-vector-valid-index? index count t))
           nil
         (if (= index count)
@@ -251,7 +251,7 @@
     (let* ((count (persistent-vector-count vector))
            (shift (get vector "shift" persistent-vector-branch-bits))
            (root (get vector "root" nil))
-           (tail (get vector "tail" [])))
+           (tail (get vector "tail" (js-array))))
       (if (= count 0)
           nil
         (if (= count 1)
@@ -259,9 +259,9 @@
              0
              persistent-vector-branch-bits
              (empty-vector-node)
-             []
+             (js-array)
              (persistent-vector-meta vector))
-          (if (> (length tail) 1)
+          (if (> (js-length tail) 1)
               (make-persistent-vector
                (1- count)
                shift
@@ -275,11 +275,11 @@
                     (if popped-root popped-root (empty-vector-node)))
                    (collapse-root
                     (and (> shift persistent-vector-branch-bits)
-                         (nil? (nth 1 (vector-node-slots next-root)))))
+                         (nil? (js-nth 1 (vector-node-slots next-root)))))
                    (collapsed-root
                     (if collapse-root
                         (let ((first
-                               (nth 0 (vector-node-slots next-root))))
+                               (js-nth 0 (vector-node-slots next-root))))
                           (if first first (empty-vector-node)))
                       next-root))
                    (next-shift
@@ -306,7 +306,7 @@
       (while (< index count)
         (let* ((leaf (persistent-vector-array-for vector index))
                (leaf-index (bit-and index persistent-vector-branch-mask)))
-          (while (and (< index count) (< leaf-index (length leaf)))
+          (while (and (< index count) (< leaf-index (js-length leaf)))
             (setq result (funcall function result (get leaf leaf-index))
                   index (1+ index)
                   leaf-index (1+ leaf-index)))))
@@ -316,13 +316,13 @@
     (array-reverse
      (persistent-vector-reduce
       (lambda (result value) (cons value result))
-      []
+      (js-array)
       vector)))
 
   (defportable persistent-vector-from-array (values)
     (let ((result (empty-persistent-vector))
           (index 0))
-      (while (< index (length values))
+      (while (< index (js-length values))
         (setq result (persistent-vector-conj result (get values index))
               index (1+ index)))
       result))

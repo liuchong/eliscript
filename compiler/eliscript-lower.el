@@ -19,7 +19,7 @@
     value-type host-identity-token string-code-unit-at string-from-code-unit
     string-to-number string-to-bigint number-float64-words
     eq equal null nil? undefined? nullish?
-    list array js-array car cdr cons nth aref length
+    list car cdr cons nth js-nth aref length js-length
     object-keys object-has? object-assoc)
   "Operators represented by the generic intrinsic IR node.")
 
@@ -196,7 +196,7 @@
       (eliscript-lower--node 'reference form value))
      ((vectorp value)
       (eliscript-lower--node
-       'array-literal form nil
+       'persistent-vector-literal form nil
        (mapcar #'eliscript-lower-expression (append value nil))))
      ((consp value)
       (let* ((operator (eliscript-form-value (car value)))
@@ -283,6 +283,10 @@
           ('hash-map
            (eliscript-lower--node
             'persistent-map-literal form nil
+            (mapcar #'eliscript-lower-expression arguments)))
+          ((or 'array 'js-array)
+           (eliscript-lower--node
+            'array-literal form nil
             (mapcar #'eliscript-lower-expression arguments)))
           ('jsx
            (eliscript-lower--node

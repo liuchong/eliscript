@@ -79,11 +79,13 @@ make Number, NaN, infinity, safe-integer, signed division, and checked-overflow
 semantics explicit without host Math calls. The persistent collection core now
 passes its complete cross-host million-value exit audit. Protocol dispatch and
 text/object algorithms are now maintained in Eliscript and checked against
-generated production artifacts. Persistent `(vector ...)` and `(hash-map ...)`
-construction now links through a standard ESM literal ABI, while `js-array`
-and `js-object` make host containers explicit. The next language boundary is
-changing square-bracket defaults and migrating maintained sources, followed by
-the Emacs value bridge; transport-safe protocol representation remains open.
+generated production artifacts. Persistent `(vector ...)`, square-bracket
+Vector literals, and `(hash-map ...)` construction now link through a standard
+ESM literal ABI. `js-array`, `js-object`, `js-nth`, and `js-length` make
+host-container construction and access explicit, while language-level `nth`
+and `length` use collection protocols. Final Map source syntax and the Emacs
+value bridge remain open; transport-safe protocol representation is not yet
+implemented.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in

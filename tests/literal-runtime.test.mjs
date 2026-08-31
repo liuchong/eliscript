@@ -58,7 +58,7 @@ async function execute(host, modulePath) {
   return JSON.parse(result.stdout);
 }
 
-test("persistent constructors and explicit host containers are distinct", async () => {
+test("square literals, persistent constructors, and host containers are distinct", async () => {
   const directory = await mkdtemp(resolve(ROOT, ".eliscript-literals-"));
   const bootstrap = resolve(directory, "bootstrap");
   const seedOutput = resolve(directory, "seed/module.mjs");
@@ -80,6 +80,7 @@ test("persistent constructors and explicit host containers are distinct", async 
 
     const javascript = await readFile(seedOutput, "utf8");
     expect(javascript.match(/eliscript\/runtime\/literals/g)).toHaveLength(1);
+    expect(javascript.match(/runtime\/core\/collection\.mjs/g)).toHaveLength(1);
     expect(javascript).toContain("__eliscript_vector(");
     expect(javascript).toContain("__eliscript_hash_map(");
     expect(javascript).not.toContain("vite");
@@ -92,6 +93,8 @@ test("persistent constructors and explicit host containers are distinct", async 
       vector: {
         persistent: true,
         count: 3,
+        languageCount: 3,
+        first: 1,
         values: [1, 2, {}],
         nestedPersistent: true,
       },
@@ -103,6 +106,8 @@ test("persistent constructors and explicit host containers are distinct", async 
       },
       host: {
         array: true,
+        languageCount: 3,
+        second: 2,
         object: true,
         objectValue: { name: "host", count: 2 },
       },
@@ -146,9 +151,11 @@ test("explicit host-only modules do not link the persistent runtime", async () =
   await Bun.write(
     source,
     "(defconst values (js-array 1 2))\n" +
+      "(defconst first (js-nth 0 values))\n" +
+      "(defconst count (js-length values))\n" +
       "(defconst options (js-object :ready t))\n" +
       "(defconst quoted '(vector 1))\n" +
-      "(export values options quoted)\n",
+      "(export values first count options quoted)\n",
   );
 
   try {
@@ -162,38 +169,42 @@ test("explicit host-only modules do not link the persistent runtime", async () =
     const seed = await readFile(seedOutput, "utf8");
     expect(await readFile(selfOutput, "utf8")).toBe(seed);
     expect(seed).not.toContain("eliscript/runtime/literals");
+    expect(seed).not.toContain("runtime/core/collection.mjs");
     expect(seed).toContain("const values = [1, 2]");
+    expect(seed).toContain("const first = ((((values) ?? [])[0]) ?? null)");
+    expect(seed).toContain("const count = ((values) ?? []).length");
     expect(seed).toContain('const options = ({"ready": true})');
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 }, 60_000);
 
-test("portable closures reject optimized persistent constructors", async () => {
+test("portable closures reject persistent constructors and square literals", async () => {
   const directory = await mkdtemp(resolve(ROOT, ".eliscript-portable-values-"));
   const bootstrap = resolve(directory, "bootstrap");
   const source = resolve(directory, "portable.eli");
-  await Bun.write(
-    source,
-    "(defportable build () (vector 1 2))\n(export build)\n",
-  );
-
   try {
     await run([BUILD_BOOTSTRAP], {
       ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrap,
     });
-    const seed = await run([SEED, "--portable", "build", source], {}, true);
-    const selfHosted = await run([
-      SELF_HOSTED,
-      "--portable",
-      "build",
-      source,
-    ], {
-      ELISCRIPT_BOOTSTRAP_MODULE_DIR: bootstrap,
-    }, true);
-    for (const result of [seed, selfHosted]) {
-      expect(result.exitCode).not.toBe(0);
-      expect(result.stderr).toContain("persistent runtime values");
+    for (const expression of ["(vector 1 2)", "[1 2]"]) {
+      await Bun.write(
+        source,
+        `(defportable build () ${expression})\n(export build)\n`,
+      );
+      const seed = await run([SEED, "--portable", "build", source], {}, true);
+      const selfHosted = await run([
+        SELF_HOSTED,
+        "--portable",
+        "build",
+        source,
+      ], {
+        ELISCRIPT_BOOTSTRAP_MODULE_DIR: bootstrap,
+      }, true);
+      for (const result of [seed, selfHosted]) {
+        expect(result.exitCode).not.toBe(0);
+        expect(result.stderr).toContain("persistent runtime values");
+      }
     }
   } finally {
     await rm(directory, { recursive: true, force: true });

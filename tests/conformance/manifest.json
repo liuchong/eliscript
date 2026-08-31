@@ -923,9 +923,23 @@
       "spec": "0082",
       "contracts": ["Links persistent Vector and Map constructors through one standard ESM runtime ABI", "Separates persistent constructor IR from provisional array and host object IR", "Provides explicit js-array and js-object forms without framework or bundler dependencies", "Matches seed/self-hosted ESM and Source Maps plus Bun and Node value reports"],
       "evidence": [
-        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "persistent constructors and explicit host containers are distinct" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "square literals, persistent constructors, and host containers are distinct" },
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "hash-map rejects incomplete pairs in both compilers" },
         { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
+    },
+    {
+      "id": "language.default-persistent-vector-literals",
+      "title": "Default persistent Vector literals and explicit host access",
+      "status": "accepted",
+      "spec": "0083",
+      "contracts": ["Makes square-bracket value expressions canonical persistent Vectors while preserving binding patterns", "Keeps native Arrays and their indexed access explicit through js-array, js-nth, and js-length", "Dispatches language nth and length through public collection protocols", "Preserves seed/self-hosted fixed point and excludes frameworks and bundlers from core evidence"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-separates-persistent-vectors-from-host-arrays" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "square literals, persistent constructors, and host containers are distinct" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "explicit host-only modules do not link the persistent runtime" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "portable closures reject persistent constructors and square literals" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
     }

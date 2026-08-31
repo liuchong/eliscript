@@ -558,12 +558,15 @@ policy-free JavaScript compatibility facade. Protocol-driven text and keyed
 object algorithms then close the remaining P2 migration in
 [0081-protocol-driven-text-object.md](0081-protocol-driven-text-object.md),
 including generated production artifacts and transient persistent-Map
-construction. The first P3 language-integration layer now lands in
+construction. The first P3 language-integration layer lands in
 [0082-persistent-literal-runtime-abi.md](0082-persistent-literal-runtime-abi.md):
 dedicated persistent Vector/Map IR, one standard ESM runtime ABI, and explicit
-native container forms. Square-bracket default migration and maintained-source
-conversion remain open. Stack-safe function and binding
-iteration now lands in
+native container forms. Specification
+[0083-default-persistent-vector-literals.md](0083-default-persistent-vector-literals.md)
+then makes square-bracket values persistent Vectors, routes `nth` and `length`
+through collection protocols, adds explicit host access, and annotates all
+maintained compiler and standard-library host arrays. Stack-safe function and
+binding iteration now lands in
 [0064-stack-safe-loop-recur.md](0064-stack-safe-loop-recur.md), with exact tail
 positions, nearest-target analysis, simultaneous pattern rebinding,
 seed/self-hosted fixed-point evidence, and million-step Bun/Node execution.
@@ -588,11 +591,12 @@ runtime, and protocol-driven object/text algorithms now land in
 and
 [0081-protocol-driven-text-object.md](0081-protocol-driven-text-object.md).
 The literal ABI and explicit host constructors begin P3 in
-[0082-persistent-literal-runtime-abi.md](0082-persistent-literal-runtime-abi.md).
-Default persistent collection literal migration, compiler specialization,
-transport-safe protocol representation, and static escape analysis remain
-open. Canonical printing/reading for
-the optimized runtime family now lands in
+[0082-persistent-literal-runtime-abi.md](0082-persistent-literal-runtime-abi.md),
+and default persistent Vector literals plus explicit host access continue it in
+[0083-default-persistent-vector-literals.md](0083-default-persistent-vector-literals.md).
+Persistent Map source syntax, compiler specialization, transport-safe protocol
+representation, and static escape analysis remain open. Canonical
+printing/reading for the optimized runtime family now lands in
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md);
 portable Keyword/Symbol values and List/collection data text now land in
 [0070-portable-identifier-values.md](0070-portable-identifier-values.md) and

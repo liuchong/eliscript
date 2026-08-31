@@ -5,11 +5,11 @@
     (let ((frequencies (count-by (lambda (term) term) terms))
           (query-index 0)
           (matches 0))
-      (while (< query-index (length query-terms))
+      (while (< query-index (js-length query-terms))
         (setq matches
               (+ matches
-                 (get frequencies (nth query-index query-terms) 0))
+                 (get frequencies (js-nth query-index query-terms) 0))
               query-index (1+ query-index)))
       (object :id id
               :matches matches
-              :terms (length terms)))))
+              :terms (js-length terms)))))

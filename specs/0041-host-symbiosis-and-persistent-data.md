@@ -175,10 +175,10 @@ Before the stable 1.0 language contract is frozen:
 - explicit constructors create native JavaScript arrays and objects for
   interop
 
-This changes the current provisional vector-as-array behavior and therefore
-must be completed before the compatibility corpus is frozen. During migration,
-the compiler and examples use explicit host constructors wherever native array
-identity or mutation is required.
+Specification 0083 completes the provisional vector-as-array change and records
+the new default in the compatibility corpus. The compiler and maintained
+sources now use explicit host constructors wherever native array identity or
+mutation is required. Map and Set literal integration remains unfinished.
 
 Conversion is never implicit at a JavaScript call boundary. `to-js` and
 `from-js` perform declared shallow or deep conversion. Deep conversion rejects
@@ -716,7 +716,8 @@ Map/Set constructors, nullish preservation, collision discipline, and
 cross-family generated evidence. Keyword/Symbol values, metadata, and portable
 printer/reader integration now complete the remaining P1 construction steps,
 and [0078-persistent-collection-core-exit-audit.md](0078-persistent-collection-core-exit-audit.md)
-closes the complete cross-host gate. Literal migration remains P3 work.
+closes the complete cross-host gate. Default Vector literal migration is
+implemented by 0083; Map syntax and transport integration remain P3 work.
 The reusable dispatch mechanism now begins in
 [0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md): frozen
 protocol objects own direct Symbol slots and private exact-type/category/default
@@ -878,10 +879,14 @@ literals, and JavaScript interop remains explicit and ergonomic.
 **P3 status:** Specification
 [0082-persistent-literal-runtime-abi.md](0082-persistent-literal-runtime-abi.md)
 implements dedicated persistent Vector/Map IR, the standard ESM constructor
-ABI, and explicit `js-array`/`js-object` forms. Native conversion was already
-implemented by 0073. Square-bracket default migration, final Map syntax,
-first-class source Keyword emission, maintained-source conversion, and the
-compatibility freeze remain open; the P3 exit is not yet satisfied.
+ABI, and explicit `js-array`/`js-object` forms. Specification
+[0083-default-persistent-vector-literals.md](0083-default-persistent-vector-literals.md)
+makes square-bracket values persistent Vectors, adds explicit `js-nth` and
+`js-length`, dispatches language collection access through protocols, and
+converts maintained compiler and standard-library host buffers. Native
+conversion was already implemented by 0073. Final Map syntax, first-class
+source Keyword emission, quoted persistent data, the worker codec, and the
+complete compatibility freeze remain open; the P3 exit is not yet satisfied.
 
 ### P4: Transients and Hot-Path Optimization
 

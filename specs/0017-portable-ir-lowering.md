@@ -48,7 +48,9 @@ serialized, compared, cached, or passed to a future host-neutral driver.
 The portable lowerer implements all 55 public IR kinds from specification
 0007. The surface includes modules and imports, declarations and exports,
 functions and lexical bindings, all control forms, assignments, intrinsics,
-calls, JavaScript interop, objects, and React elements and fragments.
+native and persistent collection constructors, JavaScript interop, objects,
+and application-level React elements and fragments. Portable closure analysis
+rejects persistent collection values until their worker codec is implemented.
 
 Lowering only consumes syntax that has passed macro expansion and lexical
 analysis. It preserves operator distinctions and source order, performs no

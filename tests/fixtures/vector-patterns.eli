@@ -2,7 +2,7 @@
                &optional [fallback])
   (let* (([head &rest rest] tail)
          ([nested] [fallback]))
-    [first second fourth tail fallback head rest nested]))
+    (js-array first second fourth tail fallback head rest nested)))
 
 (defun let-pattern ()
   (let (([nil value] [1 8]))
@@ -20,6 +20,6 @@
   (try
     (throw [7 "caught"])
     (catch [code message]
-      [code message])))
+      (js-array code message))))
 
 (export unpack let-pattern let-star-pattern pair-sum catch-pair)

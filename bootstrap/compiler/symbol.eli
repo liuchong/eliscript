@@ -1,15 +1,15 @@
 (module bootstrap.compiler.symbol
   (defconst reserved-words
-    ["await" "break" "case" "catch" "class" "const" "continue"
+    (js-array "await" "break" "case" "catch" "class" "const" "continue"
      "debugger" "default" "delete" "do" "else" "enum" "export"
      "extends" "false" "finally" "for" "function" "if" "implements"
      "import" "in" "instanceof" "interface" "let" "new" "null"
      "package" "private" "protected" "public" "return" "static"
      "super" "switch" "this" "throw" "true" "try" "typeof" "var"
-     "void" "while" "with" "yield"])
+     "void" "while" "with" "yield"))
 
-  (defconst reserved-values ["nil" "t" "false" "undefined"])
-  (defconst strict-binding-names ["arguments" "eval"])
+  (defconst reserved-values (js-array "nil" "t" "false" "undefined"))
+  (defconst strict-binding-names (js-array "arguments" "eval"))
   (defconst internal-prefix "__eliscript_")
   (defconst fail
     (js* "(message) => { throw new Error(message); }"))
@@ -43,7 +43,7 @@
 
   (defun munge-segment (name)
     (let ((index 0)
-          (pieces []))
+          (pieces (js-array)))
       (while (< index (get name :length))
         (let ((code (js-call name :codePointAt index)))
           (js-call pieces :push (munge-character code))

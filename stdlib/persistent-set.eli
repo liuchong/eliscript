@@ -97,9 +97,9 @@
      (get set "map" nil)))
 
   (defportable persistent-set-array-reverse (values)
-    (let ((result [])
+    (let ((result (js-array))
           (index 0))
-      (while (< index (length values))
+      (while (< index (js-length values))
         (setq result (cons (get values index) result)
               index (1+ index)))
       result))
@@ -108,7 +108,7 @@
     (persistent-set-array-reverse
      (persistent-set-reduce
       (lambda (result value) (cons value result))
-      []
+      (js-array)
       set)))
 
   (defportable persistent-set-from-array
@@ -116,7 +116,7 @@
     (let ((result
            (empty-persistent-set hash-function key-equal-function))
           (index 0))
-      (while (< index (length values))
+      (while (< index (js-length values))
         (setq result (persistent-set-conj result (get values index))
               index (1+ index)))
       result))

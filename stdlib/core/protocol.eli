@@ -4,8 +4,8 @@
   (defconst protocol-states (js* "new WeakMap()"))
   (defconst protocol-missing (js* "Symbol(\"eliscript.protocol.missing\")"))
   (defconst protocol-host-categories
-    ["null" "undefined" "boolean" "number" "bigint" "string"
-     "symbol" "function" "object"])
+    (js-array "null" "undefined" "boolean" "number" "bigint" "string"
+     "symbol" "function" "object"))
 
   ;; These capabilities isolate host reflection from dispatch policy. They are
   ;; deliberately private and contain no protocol-specific decisions.
@@ -42,7 +42,7 @@
 
   (defun normalize-name (value label)
     (if (or (not (= (value-type value) "string"))
-            (= (length value) 0))
+            (= (js-length value) 0))
         (protocol-fail (str label " must be a non-empty string"))
       value))
 
@@ -60,8 +60,8 @@
   (defun known-host-category? (category)
     (let ((index 0)
           (found false))
-      (while (and (< index (length protocol-host-categories)) (not found))
-        (when (= category (nth index protocol-host-categories))
+      (while (and (< index (js-length protocol-host-categories)) (not found))
+        (when (= category (js-nth index protocol-host-categories))
           (setq found t))
         (setq index (1+ index)))
       found))
@@ -76,12 +76,12 @@
            (keys (funcall protocol-own-keys descriptors))
            (normalized (funcall protocol-null-object))
            (index 0))
-      (when (= (length keys) 0)
+      (when (= (js-length keys) 0)
         (protocol-fail
          (str "protocol " (get protocol :name)
               " extension must implement at least one operation")))
-      (while (< index (length keys))
-        (let* ((key (nth index keys))
+      (while (< index (js-length keys))
+        (let* ((key (js-nth index keys))
                (descriptor (get descriptors key)))
           (when (not (= (value-type key) "string"))
             (protocol-fail
@@ -106,8 +106,8 @@
               (unless (nullish? source)
                 (let ((keys (object-keys source))
                       (index 0))
-                  (while (< index (length keys))
-                    (let ((key (nth index keys)))
+                  (while (< index (js-length keys))
+                    (let ((key (js-nth index keys)))
                       (funcall protocol-define-enumerable
                                merged key (get source key)))
                     (setq index (1+ index)))))))
@@ -168,15 +168,15 @@
   (defun define-protocol (name operations)
     (let ((protocol-name (normalize-name name "protocol name")))
       (when (or (not (funcall protocol-array? operations))
-                (= (length operations) 0))
+                (= (js-length operations) 0))
         (protocol-fail "protocol operations must be a non-empty array"))
       (let ((records (funcall protocol-map))
             (operation-table (funcall protocol-null-object))
             (protocol nil)
             (index 0))
-        (while (< index (length operations))
+        (while (< index (js-length operations))
           (let ((operation
-                 (normalize-name (nth index operations) "protocol operation")))
+                 (normalize-name (js-nth index operations) "protocol operation")))
             (when (js-call records :has operation)
               (protocol-fail
                (str "protocol " protocol-name
@@ -187,7 +187,7 @@
                                   protocol-name "/" operation)))
                    (method
                     (lambda (&rest invocation)
-                      (when (= (length invocation) 0)
+                      (when (= (js-length invocation) 0)
                         (protocol-fail
                          (str "protocol " protocol-name "/" operation
                               " requires a dispatch value")))
@@ -208,8 +208,8 @@
                                :operations
                                (funcall protocol-freeze operation-table))))
         (setq index 0)
-        (while (< index (length operations))
-          (let* ((operation (nth index operations))
+        (while (< index (js-length operations))
+          (let* ((operation (js-nth index operations))
                  (record (js-call records :get operation))
                  (method (get record :method)))
             (funcall protocol-define-metadata
@@ -283,9 +283,9 @@
            (operations (object-keys (get protocol :operations)))
            (index 0)
            (implemented t))
-      (while (and (< index (length operations)) implemented)
+      (while (and (< index (js-length operations)) implemented)
         (let* ((record
-                (js-call (get state :operations) :get (nth index operations)))
+                (js-call (get state :operations) :get (js-nth index operations)))
                (direct (direct-method record value)))
           (when (or (nil? direct)
                     (and (= direct protocol-missing)

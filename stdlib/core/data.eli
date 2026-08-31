@@ -26,7 +26,7 @@
                  (index (js-call bucket-index :get key missing-value)))
             (if (eq index missing-value)
                 (progn
-                  (setq index (length keys)
+                  (setq index (js-length keys)
                         bucket-index (js-call bucket-index :assoc key index))
                   (js-call keys :push key)
                   (js-call buckets :push (funcall create-bucket value)))
@@ -38,11 +38,11 @@
   (defun persistent-map-from-buckets (keys buckets finish-bucket)
     (let ((result (transient EMPTY_MAP))
           (index 0))
-      (while (< index (length keys))
+      (while (< index (js-length keys))
         (assocBang
           result
-          (nth index keys)
-          (funcall finish-bucket (nth index buckets)))
+          (js-nth index keys)
+          (funcall finish-bucket (js-nth index buckets)))
         (setq index (1+ index)))
       (persistentBang result)))
 
@@ -64,7 +64,7 @@
               collection
               (lambda (value) (array value))
               (lambda (buckets index value)
-                (js-call (nth index buckets) :push value))))
+                (js-call (js-nth index buckets) :push value))))
            (keys (get grouped :keys))
            (buckets (get grouped :buckets)))
       (persistent-map-from-buckets
@@ -77,7 +77,7 @@
               collection
               (lambda (_value) 1)
               (lambda (counts index _value)
-                (put counts index (1+ (nth index counts))))))
+                (put counts index (1+ (js-nth index counts))))))
            (keys (get counted :keys))
            (buckets (get counted :buckets)))
       (persistent-map-from-buckets keys buckets (lambda (count) count))))

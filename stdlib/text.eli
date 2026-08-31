@@ -1,23 +1,23 @@
 (module eliscript.text
   (defportable empty? (text)
-    (= (length text) 0))
+    (= (js-length text) 0))
 
   (defportable slice (start end text)
     (let ((result "")
           (index (if (< start 0) 0 start))
-          (limit (if (> end (length text)) (length text) end)))
+          (limit (if (> end (js-length text)) (js-length text) end)))
       (while (< index limit)
-        (setq result (str result (nth index text))
+        (setq result (str result (js-nth index text))
               index (1+ index)))
       result))
 
   (defportable starts-at? (prefix offset text)
     (let ((matched
            (and (>= offset 0)
-                (<= (+ offset (length prefix)) (length text))))
+                (<= (+ offset (js-length prefix)) (js-length text))))
           (index 0))
-      (while (and matched (< index (length prefix)))
-        (unless (= (nth index prefix) (nth (+ offset index) text))
+      (while (and matched (< index (js-length prefix)))
+        (unless (= (js-nth index prefix) (js-nth (+ offset index) text))
           (setq matched false))
         (setq index (1+ index)))
       matched))
@@ -26,12 +26,12 @@
     (starts-at? prefix 0 text))
 
   (defportable ends-with? (suffix text)
-    (starts-at? suffix (- (length text) (length suffix)) text))
+    (starts-at? suffix (- (js-length text) (js-length suffix)) text))
 
   (defportable contains? (needle text)
     (let ((found false)
           (offset 0)
-          (last-offset (- (length text) (length needle))))
+          (last-offset (- (js-length text) (js-length needle))))
       (while (and (not found) (<= offset last-offset))
         (when (starts-at? needle offset text)
           (setq found t))
@@ -40,12 +40,12 @@
 
   (defportable strip-prefix (prefix text)
     (if (starts-with? prefix text)
-        (slice (length prefix) (length text) text)
+        (slice (js-length prefix) (js-length text) text)
       text))
 
   (defportable strip-suffix (suffix text)
     (if (ends-with? suffix text)
-        (slice 0 (- (length text) (length suffix)) text)
+        (slice 0 (- (js-length text) (js-length suffix)) text)
       text))
 
   (defportable whitespace? (character)
@@ -56,10 +56,10 @@
 
   (defportable trim (text)
     (let ((start 0)
-          (end (1- (length text))))
-      (while (and (<= start end) (whitespace? (nth start text)))
+          (end (1- (js-length text))))
+      (while (and (<= start end) (whitespace? (js-nth start text)))
         (setq start (1+ start)))
-      (while (and (>= end start) (whitespace? (nth end text)))
+      (while (and (>= end start) (whitespace? (js-nth end text)))
         (setq end (1- end)))
       (slice start (1+ end) text)))
 
@@ -69,10 +69,10 @@
   (defportable join (separator values)
     (let ((result "")
           (index 0))
-      (while (< index (length values))
+      (while (< index (js-length values))
         (when (> index 0)
           (setq result (str result separator)))
-        (setq result (str result (nth index values))
+        (setq result (str result (js-nth index values))
               index (1+ index)))
       result))
 

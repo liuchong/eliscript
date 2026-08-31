@@ -38,9 +38,9 @@
   (defconst data-text-hex-digits "0123456789abcdef")
 
   (defportable data-text-array-reverse (values)
-    (let ((result [])
+    (let ((result (js-array))
           (index 0))
-      (while (< index (length values))
+      (while (< index (js-length values))
         (setq result (cons (get values index) result)
               index (1+ index)))
       result))
@@ -49,7 +49,7 @@
     (let ((result "")
           (index start))
       (while (< index end)
-        (setq result (str result (nth index text))
+        (setq result (str result (js-nth index text))
               index (1+ index)))
       result))
 
@@ -81,10 +81,10 @@
             nil)))))
 
   (defportable data-text-success (value count index)
-    (object :ok t :payload [value] :count count :index index))
+    (object :ok t :payload (js-array value) :count count :index index))
 
   (defportable data-text-result-value (result)
-    (aref (get result "payload" [nil]) 0))
+    (aref (get result "payload" (js-array nil)) 0))
 
   (defportable data-text-position (source offset)
     (let ((index 0)
@@ -118,7 +118,7 @@
                :offset offset
                :line (get position "line" 1)
                :column (get position "column" 1)
-               :sourceLength (length source)))))
+               :sourceLength (js-length source)))))
 
   (defportable data-text-print-failure (message count)
     (object :ok false
@@ -134,50 +134,50 @@
 
   (defportable data-text-number-token? (token)
     (let ((index 0)
-          (size (length token))
+          (size (js-length token))
           (valid t))
-      (when (and (< index size) (= (nth index token) "-"))
+      (when (and (< index size) (= (js-nth index token) "-"))
         (setq index (1+ index)))
       (if (>= index size)
           (setq valid false)
-        (if (= (nth index token) "0")
+        (if (= (js-nth index token) "0")
             (setq index (1+ index))
-          (if (data-text-nonzero-digit? (nth index token))
+          (if (data-text-nonzero-digit? (js-nth index token))
               (progn
                 (setq index (1+ index))
                 (while (and (< index size)
-                            (data-text-digit? (nth index token)))
+                            (data-text-digit? (js-nth index token)))
                   (setq index (1+ index))))
             (setq valid false))))
-      (when (and valid (< index size) (= (nth index token) "."))
+      (when (and valid (< index size) (= (js-nth index token) "."))
         (setq index (1+ index))
         (if (or (>= index size)
-                (not (data-text-digit? (nth index token))))
+                (not (data-text-digit? (js-nth index token))))
             (setq valid false)
           (while (and (< index size)
-                      (data-text-digit? (nth index token)))
+                      (data-text-digit? (js-nth index token)))
             (setq index (1+ index)))))
       (when (and valid
                  (< index size)
-                 (or (= (nth index token) "e")
-                     (= (nth index token) "E")))
+                 (or (= (js-nth index token) "e")
+                     (= (js-nth index token) "E")))
         (setq index (1+ index))
         (when (and (< index size)
-                   (or (= (nth index token) "+")
-                       (= (nth index token) "-")))
+                   (or (= (js-nth index token) "+")
+                       (= (js-nth index token) "-")))
           (setq index (1+ index)))
         (if (or (>= index size)
-                (not (data-text-digit? (nth index token))))
+                (not (data-text-digit? (js-nth index token))))
             (setq valid false)
           (while (and (< index size)
-                      (data-text-digit? (nth index token)))
+                      (data-text-digit? (js-nth index token)))
             (setq index (1+ index)))))
       (and valid (= index size))))
 
   (defportable data-text-bigint-token? (token)
-    (let ((size (length token)))
+    (let ((size (js-length token)))
       (and (> size 1)
-           (= (nth (1- size) token) "N")
+           (= (js-nth (1- size) token) "N")
            (data-text-number-token?
             (data-text-slice 0 (1- size) token))
            (let ((body (data-text-slice 0 (1- size) token)))
@@ -188,8 +188,8 @@
   (defportable data-text-contains? (needle text)
     (let ((found false)
           (index 0))
-      (while (and (not found) (< index (length text)))
-        (when (= (nth index text) needle)
+      (while (and (not found) (< index (js-length text)))
+        (when (= (js-nth index text) needle)
           (setq found t))
         (setq index (1+ index)))
       found))
@@ -241,10 +241,10 @@
         (= character "\\")))
 
   (defportable data-text-safe-identifier-part? (text)
-    (let ((valid (> (length text) 0))
+    (let ((valid (> (js-length text) 0))
           (index 0))
-      (while (and valid (< index (length text)))
-        (when (data-text-unsafe-identifier-character? (nth index text))
+      (while (and valid (< index (js-length text)))
+        (when (data-text-unsafe-identifier-character? (js-nth index text))
           (setq valid false))
         (setq index (1+ index)))
       valid))
@@ -260,14 +260,14 @@
                (and (not (data-text-reserved-symbol? qualified))
                     (not (data-text-number-token? qualified))
                     (not (data-text-bigint-token? qualified))
-                    (not (= (nth 0 qualified) ":"))
-                    (not (= (nth 0 qualified) "#")))))))
+                    (not (= (js-nth 0 qualified) ":"))
+                    (not (= (js-nth 0 qualified) "#")))))))
 
   (defportable data-text-json-string (value)
     (let ((result "\"")
           (index 0))
-      (while (< index (length value))
-        (let ((character (nth index value))
+      (while (< index (js-length value))
+        (let ((character (js-nth index value))
               (code (string-code-unit-at value index)))
           (setq result
                 (str
@@ -282,8 +282,8 @@
                   ((= code 13) "\\r")
                   ((< code 32)
                    (str "\\u00"
-                        (nth (int32 (/ code 16)) data-text-hex-digits)
-                        (nth (mod code 16) data-text-hex-digits)))
+                        (js-nth (int32 (/ code 16)) data-text-hex-digits)
+                        (js-nth (mod code 16) data-text-hex-digits)))
                   (t character)))))
         (setq index (1+ index)))
       (str result "\"")))
@@ -304,7 +304,7 @@
        value)))
 
   (defportable data-text-array-take (values count)
-    (let ((result [])
+    (let ((result (js-array))
           (index 0))
       (while (< index count)
         (setq result (cons (get values index) result)
@@ -312,9 +312,9 @@
       (data-text-array-reverse result)))
 
   (defportable data-text-array-drop (values count)
-    (let ((result [])
+    (let ((result (js-array))
           (index count))
-      (while (< index (length values))
+      (while (< index (js-length values))
         (setq result (cons (get values index) result)
               index (1+ index)))
       (data-text-array-reverse result)))
@@ -330,11 +330,11 @@
                    (= left-value right-value))))))
 
   (defportable data-text-merge-items (left right)
-    (let ((result [])
+    (let ((result (js-array))
           (left-index 0)
           (right-index 0))
-      (while (and (< left-index (length left))
-                  (< right-index (length right)))
+      (while (and (< left-index (js-length left))
+                  (< right-index (js-length right)))
         (if (data-text-item<=?
              (get left left-index)
              (get right right-index))
@@ -342,18 +342,18 @@
                   left-index (1+ left-index))
           (setq result (cons (get right right-index) result)
                 right-index (1+ right-index))))
-      (while (< left-index (length left))
+      (while (< left-index (js-length left))
         (setq result (cons (get left left-index) result)
               left-index (1+ left-index)))
-      (while (< right-index (length right))
+      (while (< right-index (js-length right))
         (setq result (cons (get right right-index) result)
               right-index (1+ right-index)))
       (data-text-array-reverse result)))
 
   (defportable data-text-sort-items (items)
-    (if (<= (length items) 1)
+    (if (<= (js-length items) 1)
         items
-      (let ((middle (int32 (/ (length items) 2))))
+      (let ((middle (int32 (/ (js-length items) 2))))
         (data-text-merge-items
          (data-text-sort-items (data-text-array-take items middle))
          (data-text-sort-items (data-text-array-drop items middle))))))
@@ -361,7 +361,7 @@
   (defportable data-text-join-items (items)
     (let ((result "")
           (index 0))
-      (while (< index (length items))
+      (while (< index (js-length items))
         (when (> index 0) (setq result (str result " ")))
         (setq result
               (str result (get (get items index) "text" ""))
@@ -370,7 +370,7 @@
 
   (defportable data-text-print-sequential
       (open close value options depth count list-value)
-    (let ((items [])
+    (let ((items (js-array))
           (state (data-text-success "" count 0)))
       (if list-value
           (let ((node value))
@@ -438,7 +438,7 @@
                                (data-text-result-value value-result)))
                           (object
                            :ok t
-                           :payload [""]
+                           :payload (js-array "")
                            :count (get value-result "count" count)
                            :index 0
                            :items
@@ -446,15 +446,15 @@
                             (object :sortKey key-text
                                     :sortValue value-text
                                     :text (str key-text " " value-text))
-                            (get current "items" []))))))))))
-            (object :ok t :payload [""] :count count :index 0 :items [])
+                            (get current "items" (js-array)))))))))))
+            (object :ok t :payload (js-array "") :count count :index 0 :items (js-array))
             value)))
       (if (not (get state "ok" false))
           state
         (data-text-success
          (str "{"
               (data-text-join-items
-               (data-text-sort-items (get state "items" [])))
+               (data-text-sort-items (get state "items" (js-array))))
               "}")
          (get state "count" count)
          0))))
@@ -474,22 +474,22 @@
                     (let ((text (data-text-result-value printed)))
                       (object
                        :ok t
-                       :payload [""]
+                       :payload (js-array "")
                        :count (get printed "count" count)
                        :index 0
                        :items
                        (cons (object :sortKey text
                                      :sortValue ""
                                      :text text)
-                             (get current "items" []))))))))
-            (object :ok t :payload [""] :count count :index 0 :items [])
+                             (get current "items" (js-array)))))))))
+            (object :ok t :payload (js-array "") :count count :index 0 :items (js-array))
             value)))
       (if (not (get state "ok" false))
           state
         (data-text-success
          (str "#{"
               (data-text-join-items
-               (data-text-sort-items (get state "items" [])))
+               (data-text-sort-items (get state "items" (js-array))))
               "}")
          (get state "count" count)
          0))))
@@ -563,7 +563,7 @@
                                 (data-text-result-value metadata-result)
                                 " "
                                 (data-text-result-value body-result)))))
-                    (if (> (length text)
+                    (if (> (js-length text)
                            (get options "maxLength"
                                 data-text-default-max-length))
                         (data-text-print-failure
@@ -585,15 +585,15 @@
           (again t))
       (while again
         (setq again false)
-        (while (and (< index (length source))
-                    (or (= (nth index source) ",")
-                        (data-text-whitespace? (nth index source))))
+        (while (and (< index (js-length source))
+                    (or (= (js-nth index source) ",")
+                        (data-text-whitespace? (js-nth index source))))
           (setq index (1+ index)))
-        (when (and (< index (length source))
-                   (= (nth index source) ";"))
+        (when (and (< index (js-length source))
+                   (= (js-nth index source) ";"))
           (setq again t index (1+ index))
-          (while (and (< index (length source))
-                      (not (= (nth index source) "\n")))
+          (while (and (< index (js-length source))
+                      (not (= (js-nth index source) "\n")))
             (setq index (1+ index)))))
       index))
 
@@ -613,8 +613,8 @@
 
   (defportable data-text-token (source start count)
     (let ((index start))
-      (while (and (< index (length source))
-                  (not (data-text-delimiter? (nth index source))))
+      (while (and (< index (js-length source))
+                  (not (data-text-delimiter? (js-nth index source))))
         (setq index (1+ index)))
       (if (= index start)
           (data-text-failure source start "expected token" count)
@@ -638,8 +638,8 @@
           (result "")
           (done false)
           (failure nil))
-      (while (and (not done) (nil? failure) (< index (length source)))
-        (let ((character (nth index source))
+      (while (and (not done) (nil? failure) (< index (js-length source)))
+        (let ((character (js-nth index source))
               (code (string-code-unit-at source index)))
           (cond
            ((= character "\"")
@@ -649,11 +649,11 @@
                   (data-text-failure
                    source index "unescaped control character in string" count)))
            ((= character "\\")
-            (if (>= (1+ index) (length source))
+            (if (>= (1+ index) (js-length source))
                 (setq failure
                       (data-text-failure
                        source start "unexpected end of string" count))
-              (let ((escape (nth (1+ index) source)))
+              (let ((escape (js-nth (1+ index) source)))
                 (cond
                  ((= escape "\"")
                   (setq result (str result "\"") index (+ index 2)))
@@ -674,7 +674,7 @@
                  ((= escape "t")
                   (setq result (str result "\t") index (+ index 2)))
                  ((= escape "u")
-                  (if (> (+ index 6) (length source))
+                  (if (> (+ index 6) (js-length source))
                       (setq failure
                             (data-text-failure
                              source index "incomplete Unicode escape" count))
@@ -685,7 +685,7 @@
                       (while (and valid (< digit-index limit))
                         (let ((digit
                                (data-text-hex-value
-                                (nth digit-index source))))
+                                (js-nth digit-index source))))
                           (if (< digit 0)
                               (setq valid false)
                             (setq value (+ (* value 16) digit)
@@ -712,14 +712,14 @@
   (defportable data-text-read-sequential
       (source options depth count start close list-value)
     (let ((index (1+ start))
-          (items [])
+          (items (js-array))
           (current-count count)
           (failure nil)
           (done false))
       (while (and (nil? failure) (not done))
         (setq index (data-text-skip-ignored source index))
         (cond
-         ((>= index (length source))
+         ((>= index (js-length source))
           (setq failure
                 (data-text-failure
                  source start
@@ -727,7 +727,7 @@
                      "unexpected end of list"
                    "unexpected end of vector")
                  current-count)))
-         ((= (nth index source) close)
+         ((= (js-nth index source) close)
           (setq done t index (1+ index)))
          (t
           (let ((item
@@ -758,11 +758,11 @@
       (while (and (nil? failure) (not done))
         (setq index (data-text-skip-ignored source index))
         (cond
-         ((>= index (length source))
+         ((>= index (js-length source))
           (setq failure
                 (data-text-failure
                  source start "unexpected end of map" current-count)))
-         ((= (nth index source) "}")
+         ((= (js-nth index source) "}")
           (setq done t index (1+ index)))
          (t
           (let* ((key-start index)
@@ -775,8 +775,8 @@
                      (value-index
                       (data-text-skip-ignored
                        source (get key-result "index" index))))
-                (if (or (>= value-index (length source))
-                        (= (nth value-index source) "}"))
+                (if (or (>= value-index (js-length source))
+                        (= (js-nth value-index source) "}"))
                     (setq failure
                           (data-text-failure
                            source key-start
@@ -814,11 +814,11 @@
       (while (and (nil? failure) (not done))
         (setq index (data-text-skip-ignored source index))
         (cond
-         ((>= index (length source))
+         ((>= index (js-length source))
           (setq failure
                 (data-text-failure
                  source start "unexpected end of set" current-count)))
-         ((= (nth index source) "}")
+         ((= (js-nth index source) "}")
           (setq done t index (1+ index)))
          (t
           (let* ((item-start index)
@@ -878,8 +878,8 @@
 
   (defportable data-text-read-dispatch
       (source options depth count start)
-    (if (and (< (1+ start) (length source))
-             (= (nth (1+ start) source) "{"))
+    (if (and (< (1+ start) (js-length source))
+             (= (js-nth (1+ start) source) "{"))
         (data-text-read-set source options depth count start)
       (let ((token-result (data-text-token source start count)))
         (if (not (get token-result "ok" false))
@@ -919,19 +919,19 @@
            ((= token "true") (data-text-success t count index))
            ((= token "false") (data-text-success false count index))
            ((= token "undefined")
-            (data-text-success (aref [undefined] 0) count index))
+            (data-text-success (aref (js-array undefined) 0) count index))
            ((data-text-bigint-token? token)
             (let ((value
                    (string-to-bigint
-                    (data-text-slice 0 (1- (length token)) token))))
+                    (data-text-slice 0 (1- (js-length token)) token))))
               (if (nil? value)
                   (data-text-failure source start "invalid BigInt" count)
                 (data-text-success value count index))))
            ((data-text-number-token? token)
             (data-text-success (string-to-number token) count index))
-           ((= (nth 0 token) ":")
+           ((= (js-nth 0 token) ":")
             (let ((value
-                   (keyword (data-text-slice 1 (length token) token))))
+                   (keyword (data-text-slice 1 (js-length token) token))))
               (if (nil? value)
                   (data-text-failure source start "invalid keyword" count)
                 (data-text-success value count index))))
@@ -990,11 +990,11 @@
          (str "data text exceeds maxValues "
               (get options "maxValues" data-text-default-max-values))
          (1+ count)))
-       ((>= index (length source))
+       ((>= index (js-length source))
         (data-text-failure source index "unexpected end of input" count))
        (t
         (let ((next-count (1+ count))
-              (character (nth index source)))
+              (character (js-nth index source)))
           (cond
            ((= character "\"")
             (data-text-read-string source index next-count))
@@ -1028,7 +1028,7 @@
         (data-text-failure "" 0 "data text source must be a string" 0))
        ((nil? normalized)
         (data-text-failure source 0 "invalid data text options" 0))
-       ((> (length source)
+       ((> (js-length source)
            (get normalized "maxLength" data-text-default-max-length))
         (data-text-failure
          source 0
@@ -1042,7 +1042,7 @@
             (let ((index
                    (data-text-skip-ignored
                     source (get result "index" 0))))
-              (if (= index (length source))
+              (if (= index (js-length source))
                   (data-text-success
                    (data-text-result-value result)
                    (get result "count" 0)
@@ -1058,7 +1058,7 @@
         (data-text-failure "" 0 "data text source must be a string" 0))
        ((nil? normalized)
         (data-text-failure source 0 "invalid data text options" 0))
-       ((> (length source)
+       ((> (js-length source)
            (get normalized "maxLength" data-text-default-max-length))
         (data-text-failure
          source 0
@@ -1068,9 +1068,9 @@
        (t
         (let ((index (data-text-skip-ignored source 0))
               (count 0)
-              (values [])
+              (values (js-array))
               (failure nil))
-          (while (and (nil? failure) (< index (length source)))
+          (while (and (nil? failure) (< index (js-length source)))
             (let ((result
                    (data-text-read-node source normalized 0 count index)))
               (if (not (get result "ok" false))

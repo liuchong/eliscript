@@ -22,27 +22,28 @@
         total)))
 
   (defun collect (required &optional optional &rest rest)
-    [required optional rest])
+    (js-array required optional rest))
 
   (defvar result
     (object
       :message (str greeting " from Eliscript")
-      :values [1 2 3]
+      :values (js-array 1 2 3)
       :factorial (factorial 5)
       :class (classify 7)
       :sum (sum-to 5)
-      :doubled (js-call [1 2 3] :map (lambda (value) (* value 2)))
+      :doubled (js-call (js-array 1 2 3) :map (lambda (value) (* value 2)))
       :consed (cons 0 '(1 2))
       :empty-car (car nil)
-      :nil-only [(nil? nil) (nil? undefined)]
-      :undefined-only [(undefined? nil) (undefined? undefined)]
-      :nullish [(nullish? nil) (nullish? undefined) (nullish? false)]
-      :legacy-null [(null nil) (null undefined) (null false)]))
+      :nil-only (js-array (nil? nil) (nil? undefined))
+      :undefined-only (js-array (undefined? nil) (undefined? undefined))
+      :nullish (js-array (nullish? nil) (nullish? undefined) (nullish? false))
+      :legacy-null (js-array (null nil) (null undefined) (null false))))
 
   (put result :parameters
-    [(collect "required")
-     (collect "required" undefined)
-     (collect "required" "optional" 3 4)])
+    (js-array
+      (collect "required")
+      (collect "required" undefined)
+      (collect "required" "optional" 3 4)))
 
   (print (JSON/stringify result))
   (export factorial classify sum-to collect result))

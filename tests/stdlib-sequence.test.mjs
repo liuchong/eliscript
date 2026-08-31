@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 const projectDirectory = resolve(import.meta.dir, "..");
@@ -27,7 +26,7 @@ async function runSuccessful(command) {
 }
 
 test("portable sequence library compiles and executes as an ESM module", async () => {
-  const directory = await mkdtemp(resolve(tmpdir(), "eliscript-sequence-"));
+  const directory = await mkdtemp(resolve(projectDirectory, ".eliscript-sequence-"));
   const sequenceSource = resolve(projectDirectory, "stdlib/sequence.eli");
   const usageSource = resolve(
     projectDirectory,

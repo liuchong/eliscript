@@ -33,13 +33,13 @@ The registry currently contains 78 specifications.
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 49 |
+| Accepted design | 54 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 75 |
+| Implemented | 80 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-47 as provisional, and 3 as planning. That baseline is derived from registry
+52 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -265,6 +265,7 @@ The schemas and change workflow are defined by specifications
 | 0080 | [Canonical Generated Protocol Runtime](0080-canonical-generated-protocol-runtime.md) | Accepted | Implemented |
 | 0081 | [Protocol-driven Text and Keyed Object Algorithms](0081-protocol-driven-text-object.md) | Accepted | Implemented |
 | 0082 | [Persistent Literal Runtime ABI and Explicit Host Containers](0082-persistent-literal-runtime-abi.md) | Accepted | Implemented |
+| 0083 | [Default Persistent Vector Literals and Explicit Host Access](0083-default-persistent-vector-literals.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

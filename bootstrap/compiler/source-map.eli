@@ -11,7 +11,7 @@
 
   (defun encode-vlq (value)
     (let ((remaining (signed-vlq value))
-          (characters []))
+          (characters (js-array)))
       (while (>= remaining 32)
         (js-call characters :push
           (js-call base64 :charAt (+ (% remaining 32) 32)))
@@ -24,12 +24,12 @@
           (mark-index 0)
           (line 0)
           (column 0)
-          (result []))
+          (result (js-array)))
       (while (< index (get generated :length))
         (while (and (< mark-index (get marks :length))
-                    (= (get (nth mark-index marks) :offset) index))
+                    (= (get (js-nth mark-index marks) :offset) index))
           (js-call result :push
-            [line column (get (nth mark-index marks) :span)])
+            (js-array line column (get (js-nth mark-index marks) :span)))
           (setq mark-index (1+ mark-index)))
         (if (= (js-call generated :charCodeAt index) 10)
             (progn
@@ -44,7 +44,7 @@
           (locations (new (js* "Map"))))
       (js-call marks :forEach
         (lambda (mark)
-          (let ((start (get (nth 2 mark) :start)))
+          (let ((start (get (js-nth 2 mark) :start)))
             (unless (eq start undefined)
               (js-call wanted :set start t)))))
       (let ((index 0)
@@ -53,7 +53,7 @@
             (column 0))
         (while (<= index (get source :length))
           (when (js-call wanted :has offset)
-            (js-call locations :set offset [line column]))
+            (js-call locations :set offset (js-array line column)))
           (when (< index (get source :length))
             (let* ((code (js-call source :codePointAt index))
                    (width (if (> code 65535) 2 1)))
@@ -73,30 +73,30 @@
       (if (and (not (eq start undefined))
                (js-call locations :has start))
           (js-call locations :get start)
-        [(1- (get span :line)) (1- (get span :column))])))
+        (js-array (1- (get span :line)) (1- (get span :column))))))
 
   (defun group-marks (marks locations)
     (let ((current-line 0)
-          (current-segments [])
-          (lines []))
+          (current-segments (js-array))
+          (lines (js-array)))
       (js-call marks :forEach
         (lambda (mark)
-          (let ((generated-line (nth 0 mark)))
+          (let ((generated-line (js-nth 0 mark)))
             (while (< current-line generated-line)
               (js-call lines :push current-segments)
-              (setq current-segments [])
+              (setq current-segments (js-array))
               (setq current-line (1+ current-line)))
-            (let ((original (original-location (nth 2 mark) locations)))
+            (let ((original (original-location (js-nth 2 mark) locations)))
               (js-call current-segments :push
-                [(nth 1 mark) 0 (nth 0 original) (nth 1 original)])))))
+                (js-array (js-nth 1 mark) 0 (js-nth 0 original) (js-nth 1 original)))))))
       (js-call lines :push current-segments)
       lines))
 
   (defun encode-segment (segment state)
-    (let ((generated-column (nth 0 segment))
-          (source (nth 1 segment))
-          (original-line (nth 2 segment))
-          (original-column (nth 3 segment)))
+    (let ((generated-column (js-nth 0 segment))
+          (source (js-nth 1 segment))
+          (original-line (js-nth 2 segment))
+          (original-column (js-nth 3 segment)))
       (let ((encoded
              (str
                (encode-vlq
@@ -119,11 +119,11 @@
              :source 0
              :originalLine 0
              :originalColumn 0))
-          (encoded-lines []))
+          (encoded-lines (js-array)))
       (js-call lines :forEach
         (lambda (segments)
           (put state :generatedColumn 0)
-          (let ((encoded []))
+          (let ((encoded (js-array)))
             (js-call segments :forEach
               (lambda (segment)
                 (js-call encoded :push (encode-segment segment state))))
@@ -140,9 +140,9 @@
            (document (object :version 3)))
       (when generated-name
         (put document :file generated-name))
-      (put document :sources [source-name])
-      (put document :sourcesContent [source])
-      (put document :names [])
+      (put document :sources (js-array source-name))
+      (put document :sourcesContent (js-array source))
+      (put document :names (js-array))
       (put document :mappings mappings)
       (str (JSON/stringify document) "\n")))
 

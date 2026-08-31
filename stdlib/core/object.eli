@@ -54,7 +54,7 @@
       object
       (Transducer/mapping
         (lambda (entry)
-          [(entry-key entry) (funcall function (entry-value entry))]))
+          (js-array (entry-key entry) (funcall function (entry-value entry)))))
       object))
 
   (defun filter-values (predicate object)
@@ -71,7 +71,7 @@
       (Transducer/composeTransducers
         (Transducer/filtering (lambda (key) (has? object key)))
         (Transducer/mapping
-          (lambda (key) [key (Collection/get object key)])))
+          (lambda (key) (js-array key (Collection/get object key)))))
       wanted-keys))
 
   (defun omit (object omitted-keys)

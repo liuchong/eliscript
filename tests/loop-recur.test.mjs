@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -61,7 +60,7 @@ const source = `(defportable function-countdown (remaining count)
   (or (= remaining 0)
       (recur (1- remaining))))
 
-(defvar evaluation-events [])
+(defvar evaluation-events (js-array))
 
 (defun record-evaluation (value)
   (js-call evaluation-events :push value)
@@ -130,7 +129,7 @@ async function run(command, options = {}) {
 }
 
 test("loop/recur is stack-safe and identical after self-hosting", async () => {
-  const directory = await mkdtemp(resolve(tmpdir(), "eliscript-recur-"));
+  const directory = await mkdtemp(resolve(projectDirectory, ".eliscript-recur-"));
   try {
     const compilerDirectory = resolve(directory, "compiler");
     const sourcePath = resolve(directory, "recur.eli");
@@ -175,15 +174,16 @@ test("loop/recur is stack-safe and identical after self-hosting", async () => {
     const module = await import(`${pathToFileURL(outputPath).href}?bun`);
     expect(module.function_countdown(1_000_000, 0)).toBe(1_000_000);
     expect(module.loop_countdown(1_000_000)).toBe(1_000_000);
-    expect(module.swap_once(1, 2)).toEqual([2, 1]);
-    expect(module.pattern_loop(1)).toEqual([2, 1]);
-    expect(module.pattern_function([1, 2], 1)).toEqual([2, 1]);
+    expect([...module.swap_once(1, 2)]).toEqual([2, 1]);
+    expect([...module.pattern_loop(1)]).toEqual([2, 1]);
+    expect([...module.pattern_function([1, 2], 1)]).toEqual([2, 1]);
     expect(module.nested_targets(100)).toBe(10_100);
     expect(module.conditional_tail(100_000, 0)).toBe(100_000);
     expect(module.short_circuit_tail(100_000)).toBe(true);
     expect(module.evaluation_order()).toEqual([1, 2, 3, 4, 0]);
-    expect(module.optional_rest_recur(2, 10, 99))
-      .toEqual([12, [11, 10, 99]]);
+    const optionalRest = [...module.optional_rest_recur(2, 10, 99)];
+    expect(optionalRest[0]).toBe(12);
+    expect(optionalRest[1]).toEqual([11, 10, 99]);
     expect(module.combined_tail_positions(100_000)).toBe(0);
     expect(module.loop_inside_try(100_000)).toBe(0);
     expect(await module.async_countdown(5_000, 0)).toBe(5_000);

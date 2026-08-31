@@ -28,12 +28,12 @@
     {
       "name": "portable-nullish-predicates",
       "filename": "nullish.eli",
-      "source": "(defportable classify (value)\n  [(nil? value) (undefined? value) (nullish? value) (null value)])"
+      "source": "(defportable classify (value)\n  (js-array (nil? value) (undefined? value) (nullish? value) (null value)))"
     },
     {
       "name": "optional-and-rest-parameters",
       "filename": "parameters.eli",
-      "source": "(defportable collect (required &optional optional &rest rest)\n  [required optional rest])\n(defconst invoke (lambda (first &optional second &rest tail) [first second tail]))"
+      "source": "(defportable collect (required &optional optional &rest rest)\n  (js-array required optional rest))\n(defconst invoke (lambda (first &optional second &rest tail) [first second tail]))"
     },
     {
       "name": "async-functions-and-await",

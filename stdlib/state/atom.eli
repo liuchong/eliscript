@@ -42,11 +42,11 @@
            "Atom options must be an object or nil")
         (let ((keys (object-keys options))
               (index 0))
-          (while (< index (length keys))
-            (unless (= (nth index keys) "validator")
+          (while (< index (js-length keys))
+            (unless (= (js-nth index keys) "validator")
               (atom-fail
                "ELI-ATOM-INVALID-OPTIONS"
-               (str "unknown Atom option: " (nth index keys))))
+               (str "unknown Atom option: " (js-nth index keys))))
             (setq index (1+ index)))
           (let ((validator
                  (if (object-has? options "validator")

@@ -1,6 +1,6 @@
 (module bootstrap.compiler.ir
   (defconst node-kinds
-    ["module-declaration" "import-declaration" "import-default"
+    (js-array "module-declaration" "import-declaration" "import-default"
      "import-namespace" "import-named" "variable-declaration"
      "function-declaration" "export-declaration" "export-default"
      "expression-statement" "parameter-binding" "array-binding-pattern"
@@ -16,7 +16,7 @@
      "object-literal" "object-property" "property-read" "property-write"
      "method-call" "constructor-call" "raw-javascript" "print"
      "string-concat" "invoke" "apply-call" "call" "react-element"
-     "react-fragment"])
+     "react-fragment"))
 
   (defconst fail
     (js* "(message) => { throw new Error(message); }"))

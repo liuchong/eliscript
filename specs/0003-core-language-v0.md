@@ -55,7 +55,7 @@ the output path yet.
 | numbers | ECMAScript numbers |
 | strings | ECMAScript strings |
 | keywords | strings without the leading colon |
-| vectors | arrays |
+| vector expressions | persistent Vectors |
 | quoted proper lists | arrays |
 | `(object key value ...)` | plain object literals |
 
@@ -138,14 +138,17 @@ The initial arithmetic and comparison forms are:
 
 The initial collection forms are:
 
-- `list`, `vector`, and `array`
-- `car`, `cdr`, `cons`, `nth`, `aref`, and `length`
+- `list`, persistent `vector`, and native `array`/`js-array`
+- `car`, `cdr`, `cons`, protocol-driven `nth`/`length`, and host `aref`/`js-nth`/`js-length`
 - `object`, `get`, and `put`
 - `object-keys`, `object-has?`, and `object-assoc`
 
-Lists and vectors currently share the ECMAScript array representation. `equal`
-currently uses strict identity equality; structural equality is deferred to the
-portable runtime.
+Square-bracket expressions and `(vector ...)` construct canonical persistent
+Vectors. `list`, `array`, and `js-array` retain the provisional ECMAScript Array
+representation. `nth` and `length` dispatch through collection protocols;
+`js-nth` and `js-length` are explicit native access. `equal` currently uses
+strict identity equality in the language intrinsic; structural equality is
+available through the persistent value runtime.
 
 Higher-order, non-mutating sequence operations are implemented as Eliscript
 library code rather than special forms. See
@@ -210,7 +213,8 @@ in one scope that map to the same output identifier.
 
 - lexical scope is mandatory
 - numbers follow ECMAScript behavior rather than Emacs integer semantics
-- list and vector values currently use arrays rather than cons cells
+- list values currently use arrays rather than cons cells; Vector expressions
+  use the persistent Vector runtime
 - `false` is distinct from `nil`
 - JavaScript modules and objects are first-class interop concepts
 - browser and JavaScript host APIs are explicit

@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -85,7 +84,7 @@ async function run(command, options = {}) {
 }
 
 test("macro-generated names are deterministic and capture-safe", async () => {
-  const directory = await mkdtemp(resolve(tmpdir(), "eliscript-gensym-"));
+  const directory = await mkdtemp(resolve(projectDirectory, ".eliscript-gensym-"));
   try {
     const compilerDirectory = resolve(directory, "compiler");
     const sourcePath = resolve(directory, "generated-names.eli");
@@ -131,11 +130,11 @@ test("macro-generated names are deterministic and capture-safe", async () => {
     expect(seedJavaScript).not.toContain("((value$G1) =>");
 
     const module = await import(`${pathToFileURL(outputPath).href}?bun`);
-    expect(module.source_collision(7)).toEqual([8, 1]);
+    expect([...module.source_collision(7)]).toEqual([8, 1]);
     module.reset_calls();
-    expect(module.duplicate_value(9)).toEqual([9, 9]);
+    expect([...module.duplicate_value(9)]).toEqual([9, 9]);
     expect(module.generated_names).toEqual(["slot$G4", "slot$G5"]);
-    expect(module.explicit_pair(10, 20)).toEqual([10, 20]);
+    expect([...module.explicit_pair(10, 20)]).toEqual([10, 20]);
     expect(module.default_name).toBe("G$G10");
     expect(module.deliberate_capture(4)).toBe(5);
     expect(module.quoted_marker).toBe("value$");
@@ -143,9 +142,9 @@ test("macro-generated names are deterministic and capture-safe", async () => {
     const nodeCheck = [
       `import(${JSON.stringify(pathToFileURL(outputPath).href)})`,
       ".then((m) => {",
-      "if (JSON.stringify(m.source_collision(7)) !== '[8,1]') process.exit(1);",
+      "if (JSON.stringify([...m.source_collision(7)]) !== '[8,1]') process.exit(1);",
       "m.reset_calls();",
-      "if (JSON.stringify(m.duplicate_value(9)) !== '[9,9]') process.exit(1);",
+      "if (JSON.stringify([...m.duplicate_value(9)]) !== '[9,9]') process.exit(1);",
       "if (JSON.stringify(m.generated_names) !== '[\"slot$G4\",\"slot$G5\"]') process.exit(1);",
       "if (m.default_name !== 'G$G10') process.exit(1);",
       "if (m.deliberate_capture(4) !== 5) process.exit(1);",

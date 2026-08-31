@@ -75,44 +75,44 @@
   (defun js-array (&rest values) values)
 
   (defun js-object (&rest key-values)
-    (when (/= (mod (length key-values) 2) 0)
+    (when (/= (mod (js-length key-values) 2) 0)
       (interop-fail
        "ELI-INTEROP-INVALID-ENTRY"
        "js-object requires an even number of key/value arguments"
        "$"))
     (let ((result (funcall interop-object-factory))
           (index 0))
-      (while (< index (length key-values))
-        (let ((key (nth index key-values)))
+      (while (< index (js-length key-values))
+        (let ((key (js-nth index key-values)))
           (when (not (= (value-type key) "string"))
             (interop-fail
              "ELI-INTEROP-INVALID-KEY"
              "js-object keys must be strings"
              (str "$[" index "]")))
           (funcall interop-define-property
-                   result key (nth (1+ index) key-values)))
+                   result key (js-nth (1+ index) key-values)))
         (setq index (+ index 2)))
       result))
 
   (defun js-map (&rest entries)
     (let ((result (funcall interop-map-factory))
           (index 0))
-      (while (< index (length entries))
-        (let ((entry (nth index entries)))
-          (when (not (and (array? entry) (= (length entry) 2)))
+      (while (< index (js-length entries))
+        (let ((entry (js-nth index entries)))
+          (when (not (and (array? entry) (= (js-length entry) 2)))
             (interop-fail
              "ELI-INTEROP-INVALID-ENTRY"
              "js-map entries must be two-value native arrays"
              (str "$[" index "]")))
-          (funcall interop-map-set result (nth 0 entry) (nth 1 entry)))
+          (funcall interop-map-set result (js-nth 0 entry) (js-nth 1 entry)))
         (setq index (1+ index)))
       result))
 
   (defun js-set (&rest values)
     (let ((result (funcall interop-set-factory))
           (index 0))
-      (while (< index (length values))
-        (funcall interop-set-add result (nth index values))
+      (while (< index (js-length values))
+        (funcall interop-set-add result (js-nth index values))
         (setq index (1+ index)))
       result))
 
@@ -138,8 +138,8 @@
            "$"))
         (let ((keys (funcall interop-enumerable-own-keys options))
               (index 0))
-          (while (< index (length keys))
-            (let ((key (nth index keys)))
+          (while (< index (js-length keys))
+            (let ((key (js-nth index keys)))
               (when (not (or (= key "deep")
                              (= key "maxDepth")
                              (= key "maxValues")))
@@ -272,7 +272,7 @@
      ((= kind "portable-list")
       (persistent-list-to-array source))
      ((= kind "portable-vector")
-      (let ((values [])
+      (let ((values (js-array))
             (index 0))
         (while (< index (persistent-vector-count source))
           (js-call values :push (persistent-vector-nth source index nil))
@@ -287,9 +287,9 @@
      ((= kind "portable-map")
       (persistent-map-reduce
        (lambda (entries key value)
-         (js-call entries :push [key value])
+         (js-call entries :push (js-array key value))
          entries)
-       []
+       (js-array)
        source))
      ((= kind "runtime-map")
       (funcall interop-iterable-values source))
@@ -297,10 +297,10 @@
       (funcall interop-map-entries source))
      (t
       (let ((keys (funcall interop-enumerable-own-keys source))
-            (entries [])
+            (entries (js-array))
             (index 0))
-        (while (< index (length keys))
-          (let* ((key (nth index keys))
+        (while (< index (js-length keys))
+          (let* ((key (js-nth index keys))
                  (_valid-key
                   (when (not (= (value-type key) "string"))
                     (interop-fail
@@ -315,7 +315,7 @@
                "ELI-INTEROP-ACCESSOR"
                "plain object accessors are not converted"
                key-path))
-            (js-call entries :push [key (get property "value" nil)]))
+            (js-call entries :push (js-array key (get property "value" nil))))
           (setq index (1+ index)))
         entries))))
 
@@ -326,7 +326,7 @@
        (lambda (values value)
          (js-call values :push value)
          values)
-       []
+       (js-array)
        source))
      ((= kind "runtime-set")
       (funcall interop-iterable-values source))
@@ -344,14 +344,14 @@
 
   (defun interop-to-js-sequence (source kind context path depth)
     (let ((source-values (interop-sequence-source source kind))
-          (result [])
+          (result (js-array))
           (index 0))
-      (while (< index (length source-values))
+      (while (< index (js-length source-values))
         (js-call
          result
          :push
          (interop-child-to-js
-          (nth index source-values)
+          (js-nth index source-values)
           context
           (interop-index-path path index)
           (1+ depth)))
@@ -362,16 +362,16 @@
     (let ((entries (interop-map-source source kind context path))
           (result (funcall interop-map-factory))
           (index 0))
-      (while (< index (length entries))
-        (let ((entry (nth index entries)))
+      (while (< index (js-length entries))
+        (let ((entry (js-nth index entries)))
           (funcall
            interop-map-set
            result
            (interop-child-to-js
-            (nth 0 entry) context
+            (js-nth 0 entry) context
             (interop-map-key-path path index) (1+ depth))
            (interop-child-to-js
-            (nth 1 entry) context
+            (js-nth 1 entry) context
             (interop-map-value-path path index) (1+ depth))))
         (setq index (1+ index)))
       result))
@@ -380,12 +380,12 @@
     (let ((values (interop-set-source source kind))
           (result (funcall interop-set-factory))
           (index 0))
-      (while (< index (length values))
+      (while (< index (js-length values))
         (funcall
          interop-set-add
          result
          (interop-child-to-js
-          (nth index values) context
+          (js-nth index values) context
           (interop-set-path path index) (1+ depth)))
         (setq index (1+ index)))
       result))
@@ -394,14 +394,14 @@
     (let ((entries (interop-map-source source "host-object" context path))
           (result (funcall interop-object-factory))
           (index 0))
-      (while (< index (length entries))
-        (let* ((entry (nth index entries))
-               (key (nth 0 entry)))
+      (while (< index (js-length entries))
+        (let* ((entry (js-nth index entries))
+               (key (js-nth 0 entry)))
           (funcall
            interop-define-property
            result key
            (interop-child-to-js
-            (nth 1 entry) context
+            (js-nth 1 entry) context
             (interop-object-path path key) (1+ depth))))
         (setq index (1+ index)))
       result))
@@ -447,14 +447,14 @@
 
   (defun interop-from-js-sequence (source kind context path depth)
     (let ((source-values (interop-sequence-source source kind))
-          (values [])
+          (values (js-array))
           (index 0))
-      (while (< index (length source-values))
+      (while (< index (js-length source-values))
         (js-call
          values
          :push
          (interop-child-from-js
-          (nth index source-values) context
+          (js-nth index source-values) context
           (interop-index-path path index) (1+ depth)))
         (setq index (1+ index)))
       (cond
@@ -470,23 +470,23 @@
                (empty-value-map)
              RuntimeMap/EMPTY_MAP))
           (index 0))
-      (while (< index (length entries))
-        (let* ((entry (nth index entries))
+      (while (< index (js-length entries))
+        (let* ((entry (js-nth index entries))
                (key-path
                 (if (= kind "host-object")
-                    (interop-object-path path (nth 0 entry))
+                    (interop-object-path path (js-nth 0 entry))
                   (interop-map-key-path path index)))
                (value-path
                 (if (= kind "host-object")
-                    (interop-object-path path (nth 0 entry))
+                    (interop-object-path path (js-nth 0 entry))
                   (interop-map-value-path path index)))
                (key
                 (interop-child-from-js
-                 (nth 0 entry) context
+                 (js-nth 0 entry) context
                  key-path (1+ depth)))
                (item-value
                 (interop-child-from-js
-                 (nth 1 entry) context
+                 (js-nth 1 entry) context
                  value-path (1+ depth)))
                (present
                 (if portable
@@ -512,10 +512,10 @@
                (empty-value-set)
              RuntimeSet/EMPTY_SET))
           (index 0))
-      (while (< index (length values))
+      (while (< index (js-length values))
         (let* ((value
                 (interop-child-from-js
-                 (nth index values) context
+                 (js-nth index values) context
                  (interop-set-path path index) (1+ depth)))
                (present
                 (if portable
@@ -570,9 +570,9 @@
     (let ((entries (interop-map-source source kind context path))
           (result (funcall interop-object-factory))
           (index 0))
-      (while (< index (length entries))
-        (let* ((entry (nth index entries))
-               (key (nth 0 entry)))
+      (while (< index (js-length entries))
+        (let* ((entry (js-nth index entries))
+               (key (js-nth 0 entry)))
           (when (not (= (value-type key) "string"))
             (interop-fail
              "ELI-INTEROP-INVALID-KEY"
@@ -582,7 +582,7 @@
            interop-define-property
            result key
            (interop-child-to-js
-            (nth 1 entry) context
+            (js-nth 1 entry) context
             (interop-object-path path key) (1+ depth))))
         (setq index (1+ index)))
       result))

@@ -20,7 +20,7 @@
   (import "./runtime/core/map.mjs" EMPTY_MAP)
   (import "./runtime/core/vector.mjs" EMPTY_VECTOR)
 
-  (defconst IDescribe (define-protocol "IDescribe" ["describe"]))
+  (defconst IDescribe (define-protocol "IDescribe" (js-array "describe")))
   (defconst describe (protocol-method IDescribe "describe"))
 
   (extend-protocol-category

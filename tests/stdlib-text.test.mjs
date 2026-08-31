@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 const projectDirectory = resolve(import.meta.dir, "..");
@@ -27,7 +26,7 @@ async function runSuccessful(command) {
 }
 
 test("portable text library compiles and executes as an ESM module", async () => {
-  const directory = await mkdtemp(resolve(tmpdir(), "eliscript-text-"));
+  const directory = await mkdtemp(resolve(projectDirectory, ".eliscript-text-"));
   const textSource = resolve(projectDirectory, "stdlib/text.eli");
   const usageSource = resolve(projectDirectory, "tests/fixtures/text-usage.eli");
   const textModule = resolve(directory, "text.mjs");

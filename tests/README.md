@@ -81,11 +81,12 @@ all ten ESM and Source Map artifacts byte-for-byte, checks the portable CLI
 against seed output, and verifies mapped file output and located diagnostics.
 It also compares seed and self-hosted `defportable` closure builds.
 
-`literal-runtime.test.mjs` compiles persistent constructors through both
-compilers, compares ESM and Source Maps byte-for-byte, and executes the output
-under Bun and Node. It also proves explicit native Array/Object construction,
-value-semantic Vector Map keys, one runtime import, and matching malformed Map
-diagnostics.
+`literal-runtime.test.mjs` compiles square-bracket Vector literals and explicit
+persistent constructors through both compilers, compares ESM and Source Maps
+byte-for-byte, and executes the output under Bun and Node. It proves explicit
+native Array/Object construction and host access, generic protocol `nth` and
+`length`, value-semantic Vector Map keys, exact conditional imports, portable
+rejection, and matching malformed Map diagnostics.
 
 The loop/recur suite compares seed and self-hosted JavaScript plus Source Maps
 byte-for-byte, then executes the same module under Bun and Node. It covers one

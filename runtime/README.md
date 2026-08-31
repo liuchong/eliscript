@@ -24,15 +24,17 @@ runtime for element construction.
 `literals.mjs` is the package-owned standard ESM link for generated persistent
 constructors. It exports `vector` and `hashMap`, delegating directly to the
 canonical persistent Vector and HAMT Map implementations. The compiler imports
-it only for dedicated persistent literal IR nodes. It has no application
-framework, bundler, server, or publishing dependency. Explicit `js-array` and
-`js-object` forms bypass this ABI and emit native containers directly.
+it only for dedicated persistent literal IR nodes, including square-bracket
+Vector expressions. It has no application framework, bundler, server, or
+publishing dependency. Explicit `js-array` and `js-object` forms bypass this
+ABI and emit native containers directly; `js-nth` and `js-length` likewise
+bypass collection protocol dispatch.
 
 ### Persistent Vector
 
-`core/vector.mjs` is the first provisional M8 persistent-value module. It
-implements an immutable 32-way bit-partitioned vector trie with a short tail.
-It is tested independently before vector literal behavior changes. Internal
+`core/vector.mjs` is the canonical provisional M8 persistent Vector module. It
+implements an immutable 32-way bit-partitioned vector trie with a short tail
+and now backs square-bracket value expressions. Internal
 node shape, allocation, visit, and sharing observations are isolated in
 `testing/vector.mjs`; applications must not depend on those test adapters.
 

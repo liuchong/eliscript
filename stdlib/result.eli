@@ -21,9 +21,9 @@
 
   (defportable result-make (status payload)
     (value-map-from-entries
-     [[result-kind-key result-kind]
-      [result-status-key status]
-      [result-payload-key payload]]))
+     (js-array (js-array result-kind-key result-kind)
+      (js-array result-status-key status)
+      (js-array result-payload-key payload))))
 
   (defportable ok (value)
     (result-make result-ok-status value))
