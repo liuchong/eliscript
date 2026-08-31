@@ -41,7 +41,7 @@
     (let ((result (js-array))
           (index 0))
       (while (< index (js-length values))
-        (setq result (cons (get values index) result)
+        (setq result (js-cons (get values index) result)
               index (1+ index)))
       result))
 
@@ -307,7 +307,7 @@
     (let ((result (js-array))
           (index 0))
       (while (< index count)
-        (setq result (cons (get values index) result)
+        (setq result (js-cons (get values index) result)
               index (1+ index)))
       (data-text-array-reverse result)))
 
@@ -315,7 +315,7 @@
     (let ((result (js-array))
           (index count))
       (while (< index (js-length values))
-        (setq result (cons (get values index) result)
+        (setq result (js-cons (get values index) result)
               index (1+ index)))
       (data-text-array-reverse result)))
 
@@ -338,15 +338,15 @@
         (if (data-text-item<=?
              (get left left-index)
              (get right right-index))
-            (setq result (cons (get left left-index) result)
+            (setq result (js-cons (get left left-index) result)
                   left-index (1+ left-index))
-          (setq result (cons (get right right-index) result)
+          (setq result (js-cons (get right right-index) result)
                 right-index (1+ right-index))))
       (while (< left-index (js-length left))
-        (setq result (cons (get left left-index) result)
+        (setq result (js-cons (get left left-index) result)
               left-index (1+ left-index)))
       (while (< right-index (js-length right))
-        (setq result (cons (get right right-index) result)
+        (setq result (js-cons (get right right-index) result)
               right-index (1+ right-index)))
       (data-text-array-reverse result)))
 
@@ -385,7 +385,7 @@
                 (setq state printed)
                 (when (get printed "ok" false)
                   (setq items
-                        (cons
+                        (js-cons
                          (object :text (data-text-result-value printed))
                          items))))
               (setq node (persistent-list-rest node nil))))
@@ -401,7 +401,7 @@
               (setq state printed)
               (when (get printed "ok" false)
                 (setq items
-                      (cons
+                      (js-cons
                        (object :text (data-text-result-value printed))
                        items))))
             (setq index (1+ index)))))
@@ -442,7 +442,7 @@
                            :count (get value-result "count" count)
                            :index 0
                            :items
-                           (cons
+                           (js-cons
                             (object :sortKey key-text
                                     :sortValue value-text
                                     :text (str key-text " " value-text))
@@ -478,7 +478,7 @@
                        :count (get printed "count" count)
                        :index 0
                        :items
-                       (cons (object :sortKey text
+                       (js-cons (object :sortKey text
                                      :sortValue ""
                                      :text text)
                              (get current "items" (js-array)))))))))
@@ -735,7 +735,7 @@
                   source options (1+ depth) current-count index)))
             (if (not (get item "ok" false))
                 (setq failure item)
-              (setq items (cons (data-text-result-value item) items)
+              (setq items (js-cons (data-text-result-value item) items)
                     current-count (get item "count" current-count)
                     index (get item "index" index)))))))
       (if (not (nil? failure))
@@ -1076,7 +1076,7 @@
               (if (not (get result "ok" false))
                   (setq failure result)
                 (setq values
-                      (cons (data-text-result-value result) values)
+                      (js-cons (data-text-result-value result) values)
                       count (get result "count" count)
                       index
                       (data-text-skip-ignored

@@ -107,8 +107,20 @@ console.log(JSON.stringify({
     mapSyntax: printValue(generated.quoted_map),
     setSyntax: printValue(generated.quoted_set),
   },
+  list: {
+    persistent: isPersistentList(generated.list_value),
+    values: [...generated.list_value],
+    first: generated.list_first,
+    restPersistent: isPersistentList(generated.list_rest),
+    restValues: [...generated.list_rest],
+    consPersistent: isPersistentList(generated.list_cons),
+    consValues: [...generated.list_cons],
+    emptyRest: isPersistentList(generated.empty_list_rest) &&
+      generated.empty_list_rest.isEmpty,
+  },
   host: {
     array: Array.isArray(generated.array_value),
+    prependedArray: generated.prepended_array,
     languageCount: generated.array_count,
     second: generated.array_second,
     object: Object.getPrototypeOf(generated.object_value) === Object.prototype,

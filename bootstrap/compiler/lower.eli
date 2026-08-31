@@ -10,7 +10,7 @@
      "bit-shift-left" "bit-shift-right" "unsigned-bit-shift-right"
      "value-type" "host-identity-token" "string-code-unit-at" "string-from-code-unit"
      "string-to-number" "string-to-bigint" "number-float64-words"
-     "nullish?" "list" "car" "cdr" "cons" "nth" "js-nth"
+     "nullish?" "car" "cdr" "cons" "js-cons" "nth" "js-nth"
      "aref" "length" "js-length"
      "object-keys" "object-has?" "object-assoc"))
 
@@ -398,6 +398,10 @@
            ((= operator "hash-set")
             (make-node
               "persistent-set-literal" (node-span form) nil
+              (lower-sequence args) nil))
+           ((= operator "list")
+            (make-node
+              "persistent-list-literal" (node-span form) nil
               (lower-sequence args) nil))
            ((or (= operator "array") (= operator "js-array"))
             (make-node

@@ -234,7 +234,7 @@
           (if (= external protocol-missing)
               (throw
                (new ProtocolDispatchError protocol (get record :name) receiver))
-            (apply external (cons receiver arguments)))))))
+            (apply external (js-cons receiver arguments)))))))
 
   (defun define-protocol (name operations)
     (let ((protocol-name (normalize-name name "protocol name"))

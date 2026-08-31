@@ -13,8 +13,11 @@ import { keyword } from "../runtime/core/identifier.mjs";
 import {
   EMPTY_LIST,
   PersistentList,
+  cons,
+  first,
   isPersistentList,
   persistentList,
+  rest,
 } from "../runtime/core/list.mjs";
 import { persistentHashMap } from "../runtime/core/map.mjs";
 import { meta, withMeta } from "../runtime/core/metadata.mjs";
@@ -82,6 +85,22 @@ test("persistent list preserves order and constant-time front operations", () =>
   expect(() => EMPTY_LIST.reduce((left, right) => left + right)).toThrow(
     TypeError,
   );
+});
+
+test("language List operations accept only persistent Lists and nil", () => {
+  const values = persistentList(1, 2, 3);
+  expect(first(values)).toBe(1);
+  expect(first(null)).toBeNull();
+  expect(first(null, "missing")).toBe("missing");
+  expect(rest(values).toArray()).toEqual([2, 3]);
+  expect(rest(null)).toBe(EMPTY_LIST);
+  expect(cons(0, values).toArray()).toEqual([0, 1, 2, 3]);
+  expect(cons(0, null).toArray()).toEqual([0]);
+  for (const hostValue of [[], {}, "text"]) {
+    expect(() => first(hostValue)).toThrow(TypeError);
+    expect(() => rest(hostValue)).toThrow(TypeError);
+    expect(() => cons(0, hostValue)).toThrow(TypeError);
+  }
 });
 
 test("persistent list implements collection, value, and metadata protocols", () => {

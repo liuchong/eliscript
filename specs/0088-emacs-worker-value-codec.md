@@ -167,7 +167,8 @@ using JSON-compatible values.
 Specification
 [0089-chunked-emacs-worker-values.md](0089-chunked-emacs-worker-values.md)
 adds bounded incremental framing, backpressure, and upload-stage cancellation.
-Static transient escape analysis remains open. The codec does not transport
-transient collections, Atoms, functions, protocol definitions, or arbitrary
-host identities. Promotion of the provisional persistent literal and worker
-value surfaces requires the complete M8 compatibility audit.
+Specification 0091 adds data-only protocol-definition transport, and 0093
+closes static transient ownership analysis. The codec does not transport
+transient collections, Atoms, functions, executable protocol identity, or
+arbitrary host identities. Promotion of the provisional persistent literal and
+worker value surfaces requires the complete M8 compatibility audit.

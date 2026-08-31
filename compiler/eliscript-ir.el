@@ -28,8 +28,8 @@
     import-named variable-declaration function-declaration export-declaration
     export-default expression-statement parameter-binding
     array-binding-pattern binding-name binding-hole reference literal
-    array-literal persistent-vector-literal persistent-map-literal
-    persistent-set-literal
+    array-literal persistent-list-literal persistent-vector-literal
+    persistent-map-literal persistent-set-literal
     quoted-literal function-expression await-expression
     throw-expression try-expression catch-clause catch-binding finally-clause
     conditional conditional-sugar
@@ -139,6 +139,10 @@
      (list 'quote (eliscript-ir-node-value node)))
     ('array-literal
      (cons 'js-array
+           (mapcar #'eliscript-ir-node-to-form
+                   (eliscript-ir-node-children node))))
+    ('persistent-list-literal
+     (cons 'list
            (mapcar #'eliscript-ir-node-to-form
                    (eliscript-ir-node-children node))))
     ('persistent-vector-literal

@@ -131,10 +131,10 @@ remain separate contracts.
 
 ## Remaining P3 Work
 
-1. audit legacy List and native-container compatibility forms
-2. add static transient escape analysis
-3. complete application and package migration evidence
-4. promote the literal and host-container family after compatibility review
+Specifications 0093 and 0094 now close static transient ownership analysis and
+legacy List-operation migration. The remaining work is the final provisional
+host-alias compatibility review and promotion of the literal/host-container
+family; application clients are not core acceptance evidence.
 
 ## Acceptance Criteria
 

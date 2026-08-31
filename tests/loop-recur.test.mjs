@@ -79,7 +79,7 @@ const source = `(defportable function-countdown (remaining count)
 (defun optional-rest-recur (remaining &optional value &rest tail)
   (if (= remaining 0)
       [value tail]
-    (recur (1- remaining) (1+ value) (cons value tail))))
+    (recur (1- remaining) (1+ value) (js-cons value tail))))
 
 (defun combined-tail-positions (remaining)
   (if (= remaining 0)

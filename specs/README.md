@@ -65,8 +65,10 @@ native host-property boundaries, and quote now preserves persistent List/
 Vector and first-class identifier categories. The Emacs value bridge now has a
 bounded 256 MiB real-process gate, and protocol definitions now cross that
 value boundary as strict versioned data while retaining fresh local execution
-identity. Static transient escape analysis and the P3 compatibility freeze
-remain ahead.
+identity. Static transient ownership analysis now rejects lifecycle escape,
+and ordinary List construction plus `car`/`cdr`/`cons` now use the canonical
+persistent List while `js-cons` preserves explicit host-array prepend. The
+final P3 host-alias compatibility freeze remains ahead.
 
 ## Reading Paths
 
@@ -292,6 +294,7 @@ The schemas and change workflow are defined by specifications
 | 0091 | [Transport-safe Protocol Definitions](0091-transport-safe-protocol-definitions.md) | Accepted | Implemented |
 | 0092 | [Persistent Set Source Syntax](0092-persistent-set-source-syntax.md) | Accepted | Implemented |
 | 0093 | [Static Transient Ownership Analysis](0093-static-transient-ownership-analysis.md) | Accepted | Implemented |
+| 0094 | [Persistent List Language Semantics and Explicit Host Cons](0094-persistent-list-language-semantics.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

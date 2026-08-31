@@ -34,7 +34,13 @@
   (defconst quoted-data '(alpha :beta [1 undefined] nil false))
   (defconst quoted-map '{:ready t})
   (defconst quoted-set '#{:ready [1 undefined]})
+  (defconst list-value (list 1 2 3))
+  (defconst list-first (car list-value))
+  (defconst list-rest (cdr list-value))
+  (defconst list-cons (cons 0 list-value))
+  (defconst empty-list-rest (cdr nil))
   (defconst array-value (js-array 1 2 3))
+  (defconst prepended-array (js-cons 0 array-value))
   (defconst object-value
     (js-object :name "host" :count 2))
   (defconst vector-first (nth 0 vector-value))
@@ -46,5 +52,6 @@
     vector-value map-value map-literal set-value set-literal macro-set
     set-evaluation-order keyword-value keyword-map
     macro-keyword quoted-keyword quoted-data quoted-map quoted-set
-    array-value object-value
+    list-value list-first list-rest list-cons empty-list-rest
+    array-value prepended-array object-value
     vector-first vector-count array-second array-count))

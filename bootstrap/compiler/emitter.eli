@@ -16,6 +16,8 @@
     "import { hashMap as __eliscript_hash_map, hashSet as __eliscript_hash_set, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n")
   (defconst collection-runtime-import
     "import { count as __eliscript_count, nth as __eliscript_nth } from \"eliscript/runtime/core/collection.mjs\";\n")
+  (defconst list-runtime-import
+    "import { cons as __eliscript_cons, first as __eliscript_first, rest as __eliscript_rest } from \"eliscript/runtime/core/list.mjs\";\n")
   (defconst host-identity-token-helper
     "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n")
   (defconst fail
@@ -858,15 +860,20 @@
         ((or (= name "null") (= name "nullish?"))
          (require-node-arity node 1 1)
          (combine (js-array "(" (emit-expression (js-nth 0 nodes)) " == null)")))
-        ((or (= name "list") (= name "array") (= name "js-array"))
+        ((or (= name "array") (= name "js-array"))
          (combine (js-array "[" (emit-arguments nodes) "]")))
         ((= name "car")
          (require-node-arity node 1 1)
-         (combine (js-array "(((" (emit-expression (js-nth 0 nodes)) ") ?? [])[0] ?? null)")))
+         (combine (js-array "__eliscript_first(" (emit-expression (js-nth 0 nodes)) ")")))
         ((= name "cdr")
          (require-node-arity node 1 1)
-         (combine (js-array "((" (emit-expression (js-nth 0 nodes)) ") ?? []).slice(1)")))
+         (combine (js-array "__eliscript_rest(" (emit-expression (js-nth 0 nodes)) ")")))
         ((= name "cons")
+         (require-node-arity node 2 2)
+         (combine
+           (js-array "__eliscript_cons(" (emit-expression (js-nth 0 nodes)) ", "
+            (emit-expression (js-nth 1 nodes)) ")")))
+        ((= name "js-cons")
          (require-node-arity node 2 2)
          (combine
            (js-array "[" (emit-expression (js-nth 0 nodes)) ", ...(("
@@ -1096,6 +1103,8 @@
           ((= kind "literal") (emit-literal node))
           ((= kind "reference") (text-fragment (reference-name (ir-value node))))
           ((= kind "array-literal") (combine (js-array "[" (emit-arguments nodes) "]")))
+          ((= kind "persistent-list-literal")
+           (combine (js-array "__eliscript_list(" (emit-arguments nodes) ")")))
           ((= kind "persistent-vector-literal")
            (combine (js-array "__eliscript_vector(" (emit-arguments nodes) ")")))
           ((= kind "persistent-map-literal")
@@ -1273,7 +1282,8 @@
     (let ((kind (ir-kind node))
           (nodes (children node)))
       (cond
-        ((or (= kind "persistent-vector-literal")
+        ((or (= kind "persistent-list-literal")
+             (= kind "persistent-vector-literal")
              (= kind "persistent-map-literal")
              (= kind "persistent-set-literal")) t)
         ((= kind "quoted-literal")
@@ -1317,6 +1327,19 @@
               (setq found t))))
         found)))
 
+  (defun node-uses-list-runtime-p (node)
+    (if (and (= (ir-kind node) "intrinsic")
+             (or (= (ir-value node) "car")
+                 (= (ir-value node) "cdr")
+                 (= (ir-value node) "cons")))
+        t
+      (let ((found false))
+        (js-call (children node) :forEach
+          (lambda (child)
+            (when (node-uses-list-runtime-p child)
+              (setq found t))))
+        found)))
+
   (defun program-uses-react-p (program)
     (let ((found false))
       (js-call (program-body program) :forEach
@@ -1346,6 +1369,14 @@
       (js-call (program-body program) :forEach
         (lambda (node)
           (when (node-uses-collection-runtime-p node)
+            (setq found t))))
+      found))
+
+  (defun program-uses-list-runtime-p (program)
+    (let ((found false))
+      (js-call (program-body program) :forEach
+        (lambda (node)
+          (when (node-uses-list-runtime-p node)
             (setq found t))))
       found))
 
@@ -1411,6 +1442,9 @@
            "")
          (if (program-uses-collection-runtime-p program)
              collection-runtime-import
+           "")
+         (if (program-uses-list-runtime-p program)
+             list-runtime-import
            "")
          "const __eliscript_truthy = (value) => value !== false && value != null;\n"
          (if (program-uses-host-identity-token-p program)

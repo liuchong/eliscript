@@ -19,7 +19,7 @@
     value-type host-identity-token string-code-unit-at string-from-code-unit
     string-to-number string-to-bigint number-float64-words
     eq equal null nil? undefined? nullish?
-    list car cdr cons nth js-nth aref length js-length
+    car cdr cons js-cons nth js-nth aref length js-length
     object-keys object-has? object-assoc)
   "Operators represented by the generic intrinsic IR node.")
 
@@ -287,6 +287,10 @@
           ('hash-set
            (eliscript-lower--node
             'persistent-set-literal form nil
+            (mapcar #'eliscript-lower-expression arguments)))
+          ('list
+           (eliscript-lower--node
+            'persistent-list-literal form nil
             (mapcar #'eliscript-lower-expression arguments)))
           ((or 'array 'js-array)
            (eliscript-lower--node

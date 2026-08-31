@@ -121,11 +121,10 @@ distinction before the persistent literal family is promoted to stable.
 
 ## Remaining P3 Work
 
-The following integration work remains after this slice:
-
-1. audit legacy `car`, `cdr`, `cons`, `list`, and `array` compatibility forms
-2. add static transient escape analysis
-3. promote the complete literal and host-container contract after migration
+Specifications 0093 and 0094 now close static transient ownership analysis and
+the `car`/`cdr`/`cons`/`list` compatibility migration. The final review of the
+provisional native `array`/`object` aliases and promotion of the complete
+literal/host-container contract remain open.
 
 ## Acceptance Criteria
 

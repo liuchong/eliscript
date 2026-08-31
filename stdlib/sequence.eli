@@ -3,7 +3,7 @@
     (let ((result (js-array))
           (index 0))
       (while (< index (js-length values))
-        (setq result (cons (js-nth index values) result)
+        (setq result (js-cons (js-nth index values) result)
               index (1+ index)))
       result))
 
@@ -11,7 +11,7 @@
     (let ((result (js-array))
           (index 0))
       (while (< index (js-length values))
-        (setq result (cons (funcall function (js-nth index values)) result)
+        (setq result (js-cons (funcall function (js-nth index values)) result)
               index (1+ index)))
       (reverse result)))
 
@@ -20,7 +20,7 @@
           (index 0))
       (while (< index (js-length values))
         (when (funcall predicate (js-nth index values))
-          (setq result (cons (js-nth index values) result)))
+          (setq result (js-cons (js-nth index values) result)))
         (setq index (1+ index)))
       (reverse result)))
 
@@ -36,11 +36,11 @@
     (let ((result (js-array))
           (index 0))
       (while (< index (js-length left))
-        (setq result (cons (js-nth index left) result)
+        (setq result (js-cons (js-nth index left) result)
               index (1+ index)))
       (setq index 0)
       (while (< index (js-length right))
-        (setq result (cons (js-nth index right) result)
+        (setq result (js-cons (js-nth index right) result)
               index (1+ index)))
       (reverse result)))
 
@@ -50,7 +50,7 @@
       (let ((result (js-array))
             (current start))
         (while (if (> step 0) (< current end) (> current end))
-          (setq result (cons current result)
+          (setq result (js-cons current result)
                 current (+ current step)))
         (reverse result))))
 
@@ -61,7 +61,7 @@
     (let ((result (js-array))
           (index 0))
       (while (and (< index count) (< index (js-length values)))
-        (setq result (cons (js-nth index values) result)
+        (setq result (js-cons (js-nth index values) result)
               index (1+ index)))
       (reverse result)))
 
@@ -69,7 +69,7 @@
     (let ((result (js-array))
           (index (if (> count 0) count 0)))
       (while (< index (js-length values))
-        (setq result (cons (js-nth index values) result)
+        (setq result (js-cons (js-nth index values) result)
               index (1+ index)))
       (reverse result)))
 

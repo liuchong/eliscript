@@ -916,8 +916,13 @@ and resolves package-owned runtime imports for temporary worker modules. The
 canonical persistent Set source layer now lands in
 [0092-persistent-set-source-syntax.md](0092-persistent-set-source-syntax.md),
 with `#{...}`, `(hash-set ...)`, dedicated IR, literal ABI, quote, portable,
-and worker-codec evidence. The complete compatibility freeze remains open;
-the P3 exit is not yet satisfied.
+and worker-codec evidence. Specification
+[0094-persistent-list-language-semantics.md](0094-persistent-list-language-semantics.md)
+then closes accidental native-Array behavior in `list`, `car`, `cdr`, and
+`cons`, introduces dedicated persistent List IR, and gives host prepend the
+explicit `js-cons` spelling. The final provisional `array`/`object` alias
+review and compatibility promotion remain open; the P3 exit is not yet
+satisfied.
 
 ### P4: Transients and Hot-Path Optimization
 
@@ -938,8 +943,11 @@ invalidation, message/serialization rejection, transient-backed `into`,
 retained-generation tests, and structural allocation gates. Specification
 [0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md)
 now applies transients to indexing and final grouped/count Map construction.
-Static async and module-export escape analysis, compiler hot-path profiles,
-and portable reference implementations remain required.
+Specification
+[0093-static-transient-ownership-analysis.md](0093-static-transient-ownership-analysis.md)
+now rejects async, module, closure, call, container, assignment, and repeated
+loop escape with seed/self-hosted agreement. Compiler hot-path profiles and
+portable reference implementation review remain required.
 
 ### P5: Emacs Value Bridge
 

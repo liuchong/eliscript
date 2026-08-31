@@ -105,9 +105,10 @@ misclassifying Symbol slots, constructors, WeakMap state, or exceptions as
 JSON-portable values. Specification 0081 completes the protocol-driven
 text/object algorithm migration. Persistent collection literals and the first
 worker value codec now land through 0088. Compiler direct-call specialization
-and static transient escape analysis remain later work. Specification 0091
-adds the versioned data-only protocol definition and isolated local import
-path; executable protocol state remains deliberately non-transportable.
+remains later work. Specification 0091 adds the versioned data-only protocol
+definition and isolated local import path, while 0093 closes static transient
+ownership analysis; executable protocol state remains deliberately
+non-transportable.
 
 ## Acceptance Criteria
 

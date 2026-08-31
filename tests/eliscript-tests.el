@@ -656,13 +656,42 @@
     (should-error (eliscript-emitter-emit-expression form)
                   :type 'eliscript-compile-error)))
 
-(ert-deftest eliscript-handles-empty-list-operations ()
+(ert-deftest eliscript-emits-persistent-list-and-explicit-host-cons ()
+  (should (equal (eliscript-emitter-emit-expression '(list 1 2))
+                 "__eliscript_list(1, 2)"))
   (should (equal (eliscript-emitter-emit-expression '(car nil))
-                 "(((null) ?? [])[0] ?? null)"))
+                 "__eliscript_first(null)"))
   (should (equal (eliscript-emitter-emit-expression '(cdr nil))
-                 "((null) ?? []).slice(1)"))
+                 "__eliscript_rest(null)"))
   (should (equal (eliscript-emitter-emit-expression '(cons 1 nil))
+                 "__eliscript_cons(1, null)"))
+  (should (equal (eliscript-emitter-emit-expression '(js-cons 1 nil))
                  "[1, ...((null) ?? [])]")))
+
+(ert-deftest eliscript-lowers-list-construction-to-persistent-ir ()
+  (let* ((source
+          "(defconst values (list 1 2))\n(defconst tail (cdr values))\n(defconst host (js-cons 0 (js-array 1 2)))")
+         (program (eliscript-compile-ir-string source "lists.eli"))
+         (output (eliscript-compile-string source "lists.eli"))
+         kinds)
+    (eliscript-ir-walk
+     program
+     (lambda (node) (push (eliscript-ir-node-kind node) kinds)))
+    (should (= (cl-count 'persistent-list-literal kinds) 1))
+    (should (= (cl-count 'array-literal kinds) 1))
+    (should (string-match-p "__eliscript_list(1, 2)" output))
+    (should (string-match-p "__eliscript_rest(values)" output))
+    (should
+     (string-match-p
+      (regexp-quote "[0, ...(([1, 2]) ?? [])]")
+      output))
+    (should (string-match-p "runtime/core/list.mjs" output))
+    (should
+     (equal
+      (eliscript-ir-program-to-forms program)
+      '((defconst values (list 1 2))
+        (defconst tail (cdr values))
+        (defconst host (js-cons 0 (js-array 1 2))))))))
 
 (ert-deftest eliscript-rejects-special-binding-names ()
   (should-error (eliscript-compile-string "(defvar nil 1)")

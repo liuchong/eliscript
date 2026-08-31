@@ -238,3 +238,26 @@ export function persistentList(...values) {
 export function isPersistentList(value) {
   return value instanceof PersistentList;
 }
+
+function requireList(value, operation) {
+  if (!(value instanceof PersistentList)) {
+    throw new TypeError(`${operation} expects a persistent List or nil`);
+  }
+  return value;
+}
+
+export function first(value, notFound = null) {
+  return value == null
+    ? notFound
+    : requireList(value, "first").first(notFound);
+}
+
+export function rest(value) {
+  return value == null
+    ? EMPTY_LIST
+    : requireList(value, "rest").rest();
+}
+
+export function cons(value, list) {
+  return (list == null ? EMPTY_LIST : requireList(list, "cons")).cons(value);
+}

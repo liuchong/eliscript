@@ -35,7 +35,7 @@
         "spec": "0003",
         "sources": ["compiler/eliscript-analyzer.el", "compiler/eliscript-ir-emitter.el", "compiler/eliscript-lower.el"],
         "verifyNames": true,
-        "names": ["%", "*", "+", "-", "/", "/=", "1+", "1-", "<", "<=", "=", ">", ">=", "and", "apply", "aref", "array", "async", "await", "car", "catch", "cdr", "cond", "cons", "do", "eq", "equal", "finally", "fn", "fragment", "funcall", "get", "hash-map", "hash-set", "if", "js*", "js-array", "js-call", "js-length", "js-nth", "js-object", "jsx", "lambda", "length", "let", "let*", "list", "mod", "new", "nil?", "not", "not=", "null", "nullish?", "object", "object-assoc", "object-has?", "object-keys", "or", "print", "progn", "put", "quote", "set!", "setq", "str", "throw", "try", "undefined?", "unless", "vector", "when", "while"]
+        "names": ["%", "*", "+", "-", "/", "/=", "1+", "1-", "<", "<=", "=", ">", ">=", "and", "apply", "aref", "array", "async", "await", "car", "catch", "cdr", "cond", "cons", "do", "eq", "equal", "finally", "fn", "fragment", "funcall", "get", "hash-map", "hash-set", "if", "js*", "js-array", "js-call", "js-cons", "js-length", "js-nth", "js-object", "jsx", "lambda", "length", "let", "let*", "list", "mod", "new", "nil?", "not", "not=", "null", "nullish?", "object", "object-assoc", "object-has?", "object-keys", "or", "print", "progn", "put", "quote", "set!", "setq", "str", "throw", "try", "undefined?", "unless", "vector", "when", "while"]
       },
       {
         "id": "tail-control-flow",
@@ -90,7 +90,7 @@
   },
   "ir": {
     "source": "compiler/eliscript-ir.el",
-    "nodeKinds": ["apply-call", "array-binding-pattern", "array-literal", "assignment", "assignment-pair", "await-expression", "binding-hole", "binding-loop", "binding-name", "call", "catch-binding", "catch-clause", "conditional", "conditional-chain", "conditional-clause", "conditional-sugar", "constructor-call", "export-declaration", "export-default", "expression-statement", "finally-clause", "function-declaration", "function-expression", "import-declaration", "import-default", "import-named", "import-namespace", "intrinsic", "invoke", "lexical-binding", "lexical-bindings", "literal", "loop", "method-call", "module-declaration", "object-literal", "object-property", "parameter-binding", "persistent-map-literal", "persistent-set-literal", "persistent-vector-literal", "print", "property-read", "property-write", "quoted-literal", "raw-javascript", "react-element", "react-fragment", "recur", "reference", "sequence", "short-circuit", "string-concat", "throw-expression", "try-expression", "variable-declaration"]
+    "nodeKinds": ["apply-call", "array-binding-pattern", "array-literal", "assignment", "assignment-pair", "await-expression", "binding-hole", "binding-loop", "binding-name", "call", "catch-binding", "catch-clause", "conditional", "conditional-chain", "conditional-clause", "conditional-sugar", "constructor-call", "export-declaration", "export-default", "expression-statement", "finally-clause", "function-declaration", "function-expression", "import-declaration", "import-default", "import-named", "import-namespace", "intrinsic", "invoke", "lexical-binding", "lexical-bindings", "literal", "loop", "method-call", "module-declaration", "object-literal", "object-property", "parameter-binding", "persistent-list-literal", "persistent-map-literal", "persistent-set-literal", "persistent-vector-literal", "print", "property-read", "property-write", "quoted-literal", "raw-javascript", "react-element", "react-fragment", "recur", "reference", "sequence", "short-circuit", "string-concat", "throw-expression", "try-expression", "variable-declaration"]
   },
   "commands": [
     {
@@ -384,10 +384,10 @@
     },
     {
       "id": "persistent-list",
-      "spec": "0086",
+      "spec": "0094",
       "visibility": "public",
       "file": "runtime/core/list.mjs",
-      "namedExports": ["EMPTY_LIST", "PersistentList", "isPersistentList", "persistentList"],
+      "namedExports": ["EMPTY_LIST", "PersistentList", "cons", "first", "isPersistentList", "persistentList", "rest"],
       "defaultExport": false
     },
     {

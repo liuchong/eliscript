@@ -22,7 +22,7 @@
 
   (defun assoc (object key value &rest key-values)
     (apply Collection/assoc
-           (cons object (cons key (cons value key-values)))))
+           (js-cons object (js-cons key (js-cons value key-values)))))
 
   (defun key-in? (key key-list)
     (Collection/reduce

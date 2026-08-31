@@ -137,9 +137,9 @@ utility validation; they cannot define, alter, or certify Set semantics.
 
 ## Remaining P3 Work
 
-1. audit legacy List and host-container compatibility forms
-2. add static transient escape analysis
-3. promote the complete literal and host-container contract after migration
+Specifications 0093 and 0094 now close static transient ownership analysis and
+legacy List-operation migration. Final provisional host-alias review and
+promotion of the complete literal/host-container contract remain open.
 
 ## Acceptance Criteria
 

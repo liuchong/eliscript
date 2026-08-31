@@ -23,6 +23,9 @@
 (defconst eliscript-emitter--collection-runtime-import
   "import { count as __eliscript_count, nth as __eliscript_nth } from \"eliscript/runtime/core/collection.mjs\";\n"
   "Generated import for protocol-driven collection operations.")
+(defconst eliscript-emitter--list-runtime-import
+  "import { cons as __eliscript_cons, first as __eliscript_first, rest as __eliscript_rest } from \"eliscript/runtime/core/list.mjs\";\n"
+  "Generated import for canonical persistent List operations.")
 (require 'eliscript-symbol)
 
 (defalias 'eliscript-emitter--munge-segment
@@ -962,18 +965,26 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
       ('hash-set
        (format "__eliscript_hash_set(%s)"
                (eliscript-emitter--emit-arguments arguments)))
-      ((or 'list 'array 'js-array)
+      ('list
+       (format "__eliscript_list(%s)"
+               (eliscript-emitter--emit-arguments arguments)))
+      ((or 'array 'js-array)
        (format "[%s]" (eliscript-emitter--emit-arguments arguments)))
       ('car
        (eliscript-emitter--require-arity "car" arguments 1 1)
-       (format "(((%s) ?? [])[0] ?? null)"
+       (format "__eliscript_first(%s)"
                (eliscript-emitter-emit-expression (car arguments))))
       ('cdr
        (eliscript-emitter--require-arity "cdr" arguments 1 1)
-       (format "((%s) ?? []).slice(1)"
+       (format "__eliscript_rest(%s)"
                (eliscript-emitter-emit-expression (car arguments))))
       ('cons
        (eliscript-emitter--require-arity "cons" arguments 2 2)
+       (format "__eliscript_cons(%s, %s)"
+               (eliscript-emitter-emit-expression (nth 0 arguments))
+               (eliscript-emitter-emit-expression (nth 1 arguments))))
+      ('js-cons
+       (eliscript-emitter--require-arity "js-cons" arguments 2 2)
        (format "[%s, ...((%s) ?? [])]"
                (eliscript-emitter-emit-expression (nth 0 arguments))
                (eliscript-emitter-emit-expression (nth 1 arguments))))
@@ -1234,7 +1245,7 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
               (eliscript-emitter--quoted-uses-literal-runtime-p
                (car arguments)))
              ((memq operator '(import import-portable)) nil)
-             ((memq operator '(vector hash-map hash-set)) t)
+             ((memq operator '(list vector hash-map hash-set)) t)
              ((memq operator '(object js-object)) (walk-object arguments))
              ((memq operator '(get put js-call aref object-has? object-assoc))
               (walk-static-key-call arguments 1))
@@ -1259,6 +1270,21 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
          (t nil))))
     (cl-some #'walk forms)))
 
+(defun eliscript-emitter--uses-list-runtime-p (forms)
+  "Return non-nil when FORMS use canonical persistent List operations."
+  (cl-labels
+      ((walk
+        (form)
+        (cond
+         ((vectorp form) (cl-some #'walk (append form nil)))
+         ((consp form)
+          (cond
+           ((eq (car form) 'quote) nil)
+           ((memq (car form) '(car cdr cons)) t)
+           (t (cl-some #'walk form))))
+         (t nil))))
+    (cl-some #'walk forms)))
+
 (defun eliscript-emit-module (forms)
   "Emit FORMS as one ECMAScript module."
   (let ((eliscript-emitter--temporary-counter 0))
@@ -1269,6 +1295,9 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
        "")
      (if (eliscript-emitter--uses-collection-runtime-p forms)
          eliscript-emitter--collection-runtime-import
+       "")
+     (if (eliscript-emitter--uses-list-runtime-p forms)
+         eliscript-emitter--list-runtime-import
        "")
      "const __eliscript_truthy = (value) => value !== false && value != null;\n"
      (if (eliscript-emitter--uses-host-identity-token-p forms)

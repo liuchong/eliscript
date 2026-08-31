@@ -102,9 +102,10 @@ Specifications 0083 and 0084 complete default Vector and Map expression
 syntax, maintained-source annotation, protocol collection access, and
 compatibility recording. The following work remains explicit:
 
-1. audit legacy list and native-container compatibility forms
-2. add static transient escape analysis
-3. promote the complete literal boundary after the remaining migration
+Specifications 0093 and 0094 now close static transient ownership analysis and
+the legacy List-operation audit. The remaining P3 work is the final review of
+the provisional `array`/`object` aliases and promotion of the complete literal
+and host-container boundary.
 
 ## Acceptance Criteria
 

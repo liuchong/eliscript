@@ -29,7 +29,7 @@
       :class (classify 7)
       :sum (sum-to 5)
       :doubled (js-call (js-array 1 2 3) :map (lambda (value) (* value 2)))
-      :consed (cons 0 '(1 2))
+      :consed (js-cons 0 (js-array 1 2))
       :empty-car (car nil)))
 
   (print (JSON/stringify result))

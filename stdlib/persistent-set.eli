@@ -100,14 +100,14 @@
     (let ((result (js-array))
           (index 0))
       (while (< index (js-length values))
-        (setq result (cons (get values index) result)
+        (setq result (js-cons (get values index) result)
               index (1+ index)))
       result))
 
   (defportable persistent-set-to-array (set)
     (persistent-set-array-reverse
      (persistent-set-reduce
-      (lambda (result value) (cons value result))
+      (lambda (result value) (js-cons value result))
       (js-array)
       set)))
 

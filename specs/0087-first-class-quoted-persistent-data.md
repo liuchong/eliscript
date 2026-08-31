@@ -153,6 +153,7 @@ runtime-value migration.
 
 ## Next Boundary
 
-The versioned persistent-value codec is implemented by 0088. Static transient
-escape analysis and the complete provisional compatibility freeze remain
-separate later gates.
+The versioned persistent-value codec is implemented by 0088, static transient
+ownership analysis by 0093, and ordinary List construction/operations by
+0094. Only the final provisional host-alias compatibility review and promotion
+remain in the P3 gate.

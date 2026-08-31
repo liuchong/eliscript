@@ -29,6 +29,10 @@
   "import { count as __eliscript_count, nth as __eliscript_nth } from \"eliscript/runtime/core/collection.mjs\";\n"
   "Generated import for protocol-driven collection operations.")
 
+(defconst eliscript-ir-emitter--list-runtime-import
+  "import { cons as __eliscript_cons, first as __eliscript_first, rest as __eliscript_rest } from \"eliscript/runtime/core/list.mjs\";\n"
+  "Generated import for canonical persistent List operations.")
+
 (defun eliscript-ir-emitter--locate (node output)
   "Mark OUTPUT with NODE's source span when source-map recording is active."
   (if eliscript-ir-emitter--record-source-spans
@@ -834,17 +838,22 @@
        (eliscript-ir-emitter--require-arity node 1 1)
        (format "(%s == null)"
                (eliscript-ir-emitter-emit-expression (car nodes))))
-      ((or 'list 'array 'js-array)
+      ((or 'array 'js-array)
        (format "[%s]" (eliscript-ir-emitter--emit-arguments nodes)))
       ('car
        (eliscript-ir-emitter--require-arity node 1 1)
-       (format "(((%s) ?? [])[0] ?? null)"
+       (format "__eliscript_first(%s)"
                (eliscript-ir-emitter-emit-expression (car nodes))))
       ('cdr
        (eliscript-ir-emitter--require-arity node 1 1)
-       (format "((%s) ?? []).slice(1)"
+       (format "__eliscript_rest(%s)"
                (eliscript-ir-emitter-emit-expression (car nodes))))
       ('cons
+       (eliscript-ir-emitter--require-arity node 2 2)
+       (format "__eliscript_cons(%s, %s)"
+               (eliscript-ir-emitter-emit-expression (nth 0 nodes))
+               (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
+      ('js-cons
        (eliscript-ir-emitter--require-arity node 2 2)
        (format "[%s, ...((%s) ?? [])]"
                (eliscript-ir-emitter-emit-expression (nth 0 nodes))
@@ -1058,6 +1067,9 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
        (eliscript-emitter--reference-name (eliscript-ir-node-value node)))
       ('array-literal
        (format "[%s]" (eliscript-ir-emitter--emit-arguments children)))
+      ('persistent-list-literal
+       (format "__eliscript_list(%s)"
+               (eliscript-ir-emitter--emit-arguments children)))
       ('persistent-vector-literal
        (format "__eliscript_vector(%s)"
                (eliscript-ir-emitter--emit-arguments children)))
@@ -1252,8 +1264,8 @@ JavaScript property or tag string rather than an Eliscript value."
   (let ((kind (eliscript-ir-node-kind node))
         (children (eliscript-ir-emitter--children node)))
     (cond
-     ((memq kind '(persistent-vector-literal persistent-map-literal
-                    persistent-set-literal)) t)
+     ((memq kind '(persistent-list-literal persistent-vector-literal
+                    persistent-map-literal persistent-set-literal)) t)
      ((eq kind 'quoted-literal)
       (eliscript-emitter--quoted-uses-literal-runtime-p
        (eliscript-ir-node-value node)))
@@ -1276,6 +1288,7 @@ JavaScript property or tag string rather than an Eliscript value."
         uses-react-runtime
         uses-literal-runtime
         uses-collection-runtime
+        uses-list-runtime
         uses-host-identity-token
         portable-functions
         exported-bindings)
@@ -1288,6 +1301,9 @@ JavaScript property or tag string rather than an Eliscript value."
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (memq (eliscript-ir-node-value node) '(nth length)))
          (setq uses-collection-runtime t))
+       (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
+                  (memq (eliscript-ir-node-value node) '(car cdr cons)))
+         (setq uses-list-runtime t))
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (eq (eliscript-ir-node-value node) 'host-identity-token))
          (setq uses-host-identity-token t))
@@ -1312,6 +1328,9 @@ JavaScript property or tag string rather than an Eliscript value."
        "")
      (if uses-collection-runtime
          eliscript-ir-emitter--collection-runtime-import
+       "")
+     (if uses-list-runtime
+         eliscript-ir-emitter--list-runtime-import
        "")
      "const __eliscript_truthy = (value) => value !== false && value != null;\n"
      (if uses-host-identity-token

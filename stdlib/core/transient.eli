@@ -8,14 +8,14 @@
     (Runtime/transient collection))
 
   (defun conj! (collection &rest values)
-    (apply Runtime/conjBang (cons collection values)))
+    (apply Runtime/conjBang (js-cons collection values)))
 
   (defun assoc! (collection key value &rest key-values)
     (apply Runtime/assocBang
-           (cons collection (cons key (cons value key-values)))))
+           (js-cons collection (js-cons key (js-cons value key-values)))))
 
   (defun dissoc! (collection &rest keys)
-    (apply Runtime/dissocBang (cons collection keys)))
+    (apply Runtime/dissocBang (js-cons collection keys)))
 
   (defun persistent! (collection)
     (Runtime/persistentBang collection))
