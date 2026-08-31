@@ -1178,6 +1178,18 @@
         { "kind": "bun-test", "file": "tests/compiler-binary-comparison.test.mjs", "contains": "committed binary comparison report matches measured sources" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "compiler.reader-character-classification",
+      "title": "Profile-guided reader character classification",
+      "status": "accepted",
+      "spec": "0101",
+      "contracts": ["Uses bounded compiler-private predicates for production whitespace and delimiter decisions", "Retains the original Eliscript or chains as independent semantic references", "Requires exhaustive Unicode and maintained host-boundary agreement", "Requires byte-identical complete-compiler ESM and Source Maps before alternating timing", "Keeps application frameworks, UI libraries, Vite, bundlers, blog and site generators, publishing, Pages hosting, and development servers outside core goals, implementation, evidence, and maturity credit"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/compiler-reader-character.test.mjs", "contains": "reader character predicates match their Eliscript references" },
+        { "kind": "bun-test", "file": "tests/compiler-reader-character.test.mjs", "contains": "committed reader character report matches measured sources" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

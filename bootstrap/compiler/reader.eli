@@ -11,6 +11,10 @@
     (js* "(diagnostic) => { const p = diagnostic.location.start; const error = new Error(`${diagnostic.location.file}:${p.line}:${p.column}: ${diagnostic.message}`); error.eliscriptDiagnostic = diagnostic; throw error; }"))
   (defconst number-pattern
     (js* "/^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$/"))
+  (defconst native-whitespace-code-p
+    (js* "(code) => code === 32 || code === 9 || code === 10 || code === 13 || code === 12"))
+  (defconst native-delimiter-code-p
+    (js* "(code) => code === undefined || code === 32 || code === 9 || code === 10 || code === 13 || code === 12 || code === 40 || code === 41 || code === 91 || code === 93 || code === 123 || code === 125 || code === 34 || code === 39 || code === 44 || code === 59 || code === 96"))
 
   (defun make-state (source filename)
     (js-object
@@ -83,16 +87,19 @@
           (put state :column (1+ (get state :column)))))
       code))
 
-  (defun whitespace-code-p (code)
+  (defun reference-whitespace-code-p (code)
     (or (= code 32)
         (= code 9)
         (= code 10)
         (= code 13)
         (= code 12)))
 
-  (defun delimiter-code-p (code)
+  (defun whitespace-code-p (code)
+    (funcall native-whitespace-code-p code))
+
+  (defun reference-delimiter-code-p (code)
     (or (eq code undefined)
-        (whitespace-code-p code)
+        (reference-whitespace-code-p code)
         (= code 40)
         (= code 41)
         (= code 91)
@@ -104,6 +111,9 @@
         (= code 44)
         (= code 59)
         (= code 96)))
+
+  (defun delimiter-code-p (code)
+    (funcall native-delimiter-code-p code))
 
   (defun closing-code-p (code)
     (or (= code 41) (= code 93) (= code 125)))
@@ -292,4 +302,9 @@
         (skip-space-and-comments state))
       forms))
 
-  (export read-string))
+  (export
+    read-string
+    whitespace-code-p
+    reference-whitespace-code-p
+    delimiter-code-p
+    reference-delimiter-code-p))

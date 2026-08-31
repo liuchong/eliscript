@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 100 specifications.
+The registry currently contains 101 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 70 |
+| Accepted design | 71 |
 | Stable design | 29 |
 | Implementation in progress | 3 |
-| Implemented | 97 |
+| Implemented | 98 |
 
 Compatibility Baseline 1 separately classifies 29 specifications as stable,
-68 as provisional, and 3 as planning. That baseline is derived from registry
+69 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -75,9 +75,9 @@ against the retained five-pass reference implementation, and constant-time IR
 node-kind decisions checked against the retained linear reference.
 Source-map-aware emitter indentation now also uses line-segment assembly while
 retaining the original character loop as an executable reference. Ordered
-source-mark location and direct binary comparison emission now remove two more
-generated hot paths while preserving independent semantic and historical
-baselines.
+source-mark location, direct binary comparison emission, and bounded reader
+character classification now remove three more generated hot paths while
+preserving independent semantic and historical baselines.
 
 ## Reading Paths
 
@@ -149,8 +149,12 @@ number.
 38. [0098: Profile-guided Source-map-aware Emitter Indentation](0098-profile-guided-emitter-indentation.md)
 39. [0099: Profile-guided Ordered Source-mark Location](0099-profile-guided-source-mark-location.md)
 40. [0100: Profile-guided Binary Comparison Emission](0100-profile-guided-binary-comparison-emission.md)
+41. [0101: Profile-guided Reader Character Classification](0101-profile-guided-reader-character-classification.md)
 
-### React and Publishing
+### Application Validation (Non-core)
+
+These specifications exercise public compiler and ESM boundaries. They are
+replaceable application evidence and do not define core goals or maturity.
 
 1. [0010: React Element Compilation](0010-react-elements.md)
 2. [0011: Vite Adapter](0011-vite-adapter.md)
@@ -315,6 +319,7 @@ The schemas and change workflow are defined by specifications
 | 0098 | [Profile-guided Source-map-aware Emitter Indentation](0098-profile-guided-emitter-indentation.md) | Accepted | Implemented |
 | 0099 | [Profile-guided Ordered Source-mark Location](0099-profile-guided-source-mark-location.md) | Accepted | Implemented |
 | 0100 | [Profile-guided Binary Comparison Emission](0100-profile-guided-binary-comparison-emission.md) | Accepted | Implemented |
+| 0101 | [Profile-guided Reader Character Classification](0101-profile-guided-reader-character-classification.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

@@ -8,6 +8,29 @@ committed report records raw samples or bounded peak observations, host
 fingerprints, correctness checks, parameters, and a digest of the source files
 that determine the measurement.
 
+## Compiler Reader Character Classification
+
+Create the exact pre-specialization baseline, generate both compilers, and run:
+
+```sh
+git worktree add --detach /tmp/eliscript-reader-baseline \
+  d6822134a187d4247611db56822ef47164a76a61
+(cd /tmp/eliscript-reader-baseline && bun run build:bootstrap)
+bun run build:bootstrap
+bun tools/compiler/reader-character-benchmark.mjs \
+  --baseline-root /tmp/eliscript-reader-baseline \
+  --output benchmarks/compiler-reader-character-macos-arm64.json
+git worktree remove /tmp/eliscript-reader-baseline
+```
+
+The benchmark refuses another baseline. It checks production whitespace and
+delimiter predicates against retained Eliscript references over the real
+compiler source trace, then requires both compilers to emit identical ESM and
+Source Maps for all eleven current modules before alternating complete-compiler
+timings. [`compiler-reader-character-macos-arm64.json`](compiler-reader-character-macos-arm64.json)
+records the reviewed predicate and whole-compiler evidence. Default tests add
+an exhaustive Unicode decision check and validate the report digest.
+
 ## Compiler Binary Comparison Emission
 
 Create an exact detached baseline worktree, generate both compilers, and run:

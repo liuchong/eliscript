@@ -70,7 +70,8 @@ The current M8 work provides:
   value-semantic duplicate collapse and quoted constructor syntax
 - structural-sharing and cross-host evidence through million-value workloads
 - profile-guided self-hosted compiler improvements with source-bound reports,
-  including direct binary comparison emission and complete-compiler benchmarks
+  including direct binary comparisons, bounded reader character decisions,
+  and complete-compiler benchmarks
 
 First-class immutable Keyword and Symbol values now have optimized and
 portable representations that share equality, hashing, Map keys, and Set
@@ -433,6 +434,11 @@ replaceable application-level proving grounds. They consume public compiler
 and ESM boundaries; they do not define language semantics, compiler
 architecture, runtime behavior, standard-library dependencies, core goals, or
 1.0 language maturity.
+
+In particular, Vite, React, blog and site generators, Pages hosting, and
+development servers cannot appear in core acceptance evidence. Their removal
+or replacement must leave the compiler, runtime, standard library, bootstrap
+fixed point, and language conformance results unchanged.
 
 ### Non-goals
 
