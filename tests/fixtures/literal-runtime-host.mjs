@@ -10,6 +10,7 @@ import {
   qualifiedIdentifierName,
 } from "../../runtime/core/identifier.mjs";
 import { isPersistentList } from "../../runtime/core/list.mjs";
+import { isPersistentHashSet } from "../../runtime/core/set.mjs";
 import { printValue } from "../../runtime/core/data-text.mjs";
 import {
   isPersistentVector,
@@ -31,6 +32,8 @@ const readyKeyword = keyword("ready");
 const qualifiedKeyword = keyword("article/title");
 const quotedData = generated.quoted_data;
 const quotedValues = [...quotedData];
+const literalSetMap = [...generated.set_literal]
+  .find((value) => isPersistentHashMap(value));
 
 console.log(JSON.stringify({
   vector: {
@@ -57,6 +60,21 @@ console.log(JSON.stringify({
     nestedPersistent: isPersistentHashMap(nestedMap),
     nestedReady: nestedMap.get(readyKeyword),
     duplicate: generated.map_literal.get("duplicate"),
+  },
+  set: {
+    explicitPersistent: isPersistentHashSet(generated.set_value),
+    explicitCount: generated.set_value.count,
+    explicitValueKey: generated.set_value.has(persistentVector(5, 6)),
+    literalPersistent: isPersistentHashSet(generated.set_literal),
+    literalCount: generated.set_literal.count,
+    duplicate: generated.set_literal.has("source"),
+    valueKey: generated.set_literal.has(persistentVector(7, 8)),
+    nestedMap: isPersistentHashMap(literalSetMap),
+    nestedReady: literalSetMap?.get(readyKeyword) ?? null,
+    evaluationOrder: generated.set_evaluation_order,
+    macroPersistent: isPersistentHashSet(generated.macro_set),
+    macroKeyword: generated.macro_set.has(keyword("macro/value")),
+    macroValue: generated.macro_set.has(persistentVector(9)),
   },
   keyword: {
     value: isKeyword(generated.keyword_value),
@@ -87,6 +105,7 @@ console.log(JSON.stringify({
     falseSymbol: isEliscriptSymbol(quotedValues[4]),
     text: printValue(quotedData),
     mapSyntax: printValue(generated.quoted_map),
+    setSyntax: printValue(generated.quoted_set),
   },
   host: {
     array: Array.isArray(generated.array_value),

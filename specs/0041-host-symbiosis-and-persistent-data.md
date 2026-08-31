@@ -912,7 +912,11 @@ values, with scalar and portable boundaries. Specification
 [0088-emacs-worker-value-codec.md](0088-emacs-worker-value-codec.md) then
 enables persistent values in portable closures, adds explicit Emacs records,
 and resolves package-owned runtime imports for temporary worker modules. The
-complete compatibility freeze remains open; the P3 exit is not yet satisfied.
+canonical persistent Set source layer now lands in
+[0092-persistent-set-source-syntax.md](0092-persistent-set-source-syntax.md),
+with `#{...}`, `(hash-set ...)`, dedicated IR, literal ABI, quote, portable,
+and worker-codec evidence. The complete compatibility freeze remains open;
+the P3 exit is not yet satisfied.
 
 ### P4: Transients and Hot-Path Optimization
 

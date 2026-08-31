@@ -18,7 +18,7 @@
   "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n"
   "Generated module helper for process-local opaque host identities.")
 (defconst eliscript-emitter--literal-runtime-import
-  "import { hashMap as __eliscript_hash_map, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n"
+  "import { hashMap as __eliscript_hash_map, hashSet as __eliscript_hash_set, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n"
   "Generated import for canonical language literal construction.")
 (defconst eliscript-emitter--collection-runtime-import
   "import { count as __eliscript_count, nth as __eliscript_nth } from \"eliscript/runtime/core/collection.mjs\";\n"
@@ -959,6 +959,9 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
           "hash-map expects complete key/value pairs"))
        (format "__eliscript_hash_map(%s)"
                (eliscript-emitter--emit-arguments arguments)))
+      ('hash-set
+       (format "__eliscript_hash_set(%s)"
+               (eliscript-emitter--emit-arguments arguments)))
       ((or 'list 'array 'js-array)
        (format "[%s]" (eliscript-emitter--emit-arguments arguments)))
       ('car
@@ -1231,7 +1234,7 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
               (eliscript-emitter--quoted-uses-literal-runtime-p
                (car arguments)))
              ((memq operator '(import import-portable)) nil)
-             ((memq operator '(vector hash-map)) t)
+             ((memq operator '(vector hash-map hash-set)) t)
              ((memq operator '(object js-object)) (walk-object arguments))
              ((memq operator '(get put js-call aref object-has? object-assoc))
               (walk-static-key-call arguments 1))

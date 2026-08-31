@@ -21,6 +21,16 @@
       "source": "\"{not a map}\" ; {ignored}\n{:ok t}"
     },
     {
+      "name": "set-literals",
+      "filename": "sets.eli",
+      "source": "#{:ready [1 2] #{:nested} {:map t}} #{} '#{:quoted}"
+    },
+    {
+      "name": "set-dispatch-in-text",
+      "filename": "set-text.eli",
+      "source": "\"#{not a set}\" ; #{ignored}\n#{:ok t}"
+    },
+    {
       "name": "reader-prefixes",
       "filename": "prefixes.eli",
       "source": "'name `(a ,b ,@items) #'handler"
@@ -104,6 +114,12 @@
       "filename": "unclosed-map.eli",
       "source": "{:a 1",
       "error": "unclosed-map.eli:1:1: unexpected end of input"
+    },
+    {
+      "name": "unclosed-set",
+      "filename": "unclosed-set.eli",
+      "source": "#{:a 1",
+      "error": "unclosed-set.eli:1:1: unexpected end of input"
     },
     {
       "name": "odd-map",

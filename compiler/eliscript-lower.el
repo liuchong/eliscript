@@ -284,6 +284,10 @@
            (eliscript-lower--node
             'persistent-map-literal form nil
             (mapcar #'eliscript-lower-expression arguments)))
+          ('hash-set
+           (eliscript-lower--node
+            'persistent-set-literal form nil
+            (mapcar #'eliscript-lower-expression arguments)))
           ((or 'array 'js-array)
            (eliscript-lower--node
             'array-literal form nil

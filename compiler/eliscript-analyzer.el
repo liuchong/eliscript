@@ -40,7 +40,7 @@
     value-type host-identity-token string-code-unit-at string-from-code-unit
     string-to-number string-to-bigint number-float64-words
     eq equal null nil? undefined? nullish?
-    list vector hash-map array js-array car cdr cons nth js-nth aref
+    list vector hash-map hash-set array js-array car cdr cons nth js-nth aref
     length js-length
     object-keys object-has? object-assoc
     new print str funcall apply))

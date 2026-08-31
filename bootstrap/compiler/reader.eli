@@ -238,19 +238,29 @@
              (js-call items :forEach
                (lambda (item) (js-call form-items :push item)))
              (collection-node "list" form-items span)))
+          ((= kind "set")
+           (let ((form-items
+                  (js-array (symbol-node "hash-set" opening-span))))
+             (js-call items :forEach
+               (lambda (item) (js-call form-items :push item)))
+             (collection-node "list" form-items span)))
           ((and (= kind "list") (= (get items :length) 0))
            (literal-node nil span))
           (t (collection-node kind items span))))))
 
   (defun read-dispatch (state start)
-    (if (= (peek-code-ahead state 1) 39)
-        (read-prefix state start "function" 2)
-      (let ((next (peek-code-ahead state 1)))
-        (fail-at
-          state start
-          (str "Invalid read syntax: \"#"
-               (if (eq next undefined) "" (code-character next))
-               "\"")))))
+    (let ((next (peek-code-ahead state 1)))
+      (cond
+        ((= next 39) (read-prefix state start "function" 2))
+        ((= next 123)
+         (advance state)
+         (read-collection state start 125 "set"))
+        (t
+         (fail-at
+           state start
+           (str "Invalid read syntax: \"#"
+                (if (eq next undefined) "" (code-character next))
+                "\""))))))
 
   (defun read-node (state)
     (skip-space-and-comments state)

@@ -258,6 +258,52 @@
                     (vector 1 2)
                     (hash-map :nested (vector 3)))))))))
 
+(ert-deftest eliscript-lowers-set-syntax-to-persistent-set-literals ()
+  (let* ((source
+          "(defconst data
+  #{:name [1 2] #{:nested} {:ready t} :name})")
+         (located (eliscript-read-located-string source "sets.eli"))
+         (program (eliscript-compile-ir-string source "sets.eli"))
+         (output (eliscript-compile-string source "sets.eli"))
+         kinds)
+    (eliscript-ir-walk
+     program
+     (lambda (node) (push (eliscript-ir-node-kind node) kinds)))
+    (should
+     (equal (mapcar #'eliscript-form-strip located)
+            '((defconst data
+                (hash-set :name [1 2] (hash-set :nested)
+                          (hash-map :ready t) :name)))))
+    (let* ((declaration (car located))
+           (set-form (nth 2 (eliscript-form-value declaration)))
+           (operator (car (eliscript-form-value set-form)))
+           (set-span (eliscript-form-span set-form))
+           (operator-span (eliscript-form-span operator)))
+      (should (string-prefix-p
+               "#{" (substring source
+                               (eliscript-source-span-start set-span)
+                               (eliscript-source-span-end set-span))))
+      (should (equal
+               (substring source
+                          (eliscript-source-span-start operator-span)
+                          (eliscript-source-span-end operator-span))
+               "#{")))
+    (should (= (cl-count 'persistent-set-literal kinds) 2))
+    (should (= (cl-count 'persistent-map-literal kinds) 1))
+    (should (= (cl-count 'persistent-vector-literal kinds) 1))
+    (should (= (length (split-string output "eliscript/runtime/literals" t))
+               2))
+    (should (string-match-p "__eliscript_hash_set" output))
+    (should (equal output
+                   (eliscript-tests--legacy-compile-string
+                    source "sets.eli")))
+    (should
+     (equal
+      (eliscript-ir-program-to-forms program)
+      '((defconst data
+          (hash-set :name (vector 1 2) (hash-set :nested)
+                    (hash-map :ready t) :name)))))))
+
 (ert-deftest eliscript-distinguishes-nullish-values ()
   (let* ((source
           "(defun classify (value)

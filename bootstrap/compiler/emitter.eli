@@ -13,7 +13,7 @@
 
   (defconst react-runtime-binding "__eliscript_react_jsx_runtime")
   (defconst literal-runtime-import
-    "import { hashMap as __eliscript_hash_map, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n")
+    "import { hashMap as __eliscript_hash_map, hashSet as __eliscript_hash_set, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n")
   (defconst collection-runtime-import
     "import { count as __eliscript_count, nth as __eliscript_nth } from \"eliscript/runtime/core/collection.mjs\";\n")
   (defconst host-identity-token-helper
@@ -1100,6 +1100,8 @@
            (combine (js-array "__eliscript_vector(" (emit-arguments nodes) ")")))
           ((= kind "persistent-map-literal")
            (combine (js-array "__eliscript_hash_map(" (emit-arguments nodes) ")")))
+          ((= kind "persistent-set-literal")
+           (combine (js-array "__eliscript_hash_set(" (emit-arguments nodes) ")")))
           ((= kind "quoted-literal") (emit-quoted (ir-value node)))
           ((= kind "function-expression") (emit-function node))
           ((= kind "await-expression")
@@ -1272,7 +1274,8 @@
           (nodes (children node)))
       (cond
         ((or (= kind "persistent-vector-literal")
-             (= kind "persistent-map-literal")) t)
+             (= kind "persistent-map-literal")
+             (= kind "persistent-set-literal")) t)
         ((= kind "quoted-literal")
          (quoted-uses-literal-runtime-p (ir-value node)))
         ((and (= kind "literal") (= (literal-kind node) "keyword")) t)

@@ -395,6 +395,10 @@
             (make-node
               "persistent-map-literal" (node-span form) nil
               (lower-sequence args) nil))
+           ((= operator "hash-set")
+            (make-node
+              "persistent-set-literal" (node-span form) nil
+              (lower-sequence args) nil))
            ((or (= operator "array") (= operator "js-array"))
             (make-node
               "array-literal" (node-span form) nil

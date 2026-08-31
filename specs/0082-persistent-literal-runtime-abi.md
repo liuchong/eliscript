@@ -32,9 +32,12 @@ eliscript/runtime/literals.mjs
 The package export resolves to `runtime/literals.mjs`. Its public surface is:
 
 ```text
+list(...values)
 vector(...values)
 hashMap(...keyValues)
+hashSet(...values)
 keyword(name)
+symbol(name)
 ```
 
 `vector` returns the canonical optimized persistent Vector. `hashMap` requires
@@ -43,7 +46,8 @@ HAMT Map. Duplicate value-equal keys use ordinary Map association semantics,
 so the last supplied value wins. The ABI delegates to the existing persistent
 and interned Keyword implementations and does not define another value
 representation. Specification 0085 adds `keyword` to this ABI without changing
-the Vector or Map contracts.
+the Vector or Map contracts. Specification 0092 adds `hashSet`, delegating to
+the canonical map-backed persistent Set without changing the existing ABI.
 
 The compiler inserts one named ESM import only when a module constructs a
 persistent literal, identifier value, or persistent quoted datum. Modules
@@ -57,6 +61,8 @@ and `symbol` constructors.
 the ABI `vector` constructor. `(hash-map key value...)` lowers to
 `persistent-map-literal` and emits one call to the ABI `hashMap` constructor.
 The analyzer rejects an incomplete final Map pair before emission.
+`(hash-set value...)` lowers to `persistent-set-literal` and emits one call to
+the ABI `hashSet` constructor.
 
 `(js-array value...)` constructs a native mutable JavaScript Array.
 `(js-object key value...)` constructs a native ordinary JavaScript Object,

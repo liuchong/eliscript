@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { keyword } from "../runtime/core/identifier.mjs";
 import { isPersistentList } from "../runtime/core/list.mjs";
 import { isPersistentHashMap } from "../runtime/core/map.mjs";
+import { isPersistentHashSet } from "../runtime/core/set.mjs";
 import { equalValues } from "../runtime/core/value.mjs";
 import { isPersistentVector, persistentVector } from "../runtime/core/vector.mjs";
 import {
@@ -92,6 +93,7 @@ test("persistent literals and quoted data preserve language value categories", a
     expect(javascript.match(/runtime\/core\/collection\.mjs/g)).toHaveLength(1);
     expect(javascript).toContain("__eliscript_vector(");
     expect(javascript).toContain("__eliscript_hash_map(");
+    expect(javascript).toContain("__eliscript_hash_set(");
     expect(javascript).toContain("__eliscript_keyword(");
     expect(javascript).toContain("__eliscript_list(");
     expect(javascript).toContain("__eliscript_symbol(");
@@ -125,6 +127,21 @@ test("persistent literals and quoted data preserve language value categories", a
         nestedReady: true,
         duplicate: 2,
       },
+      set: {
+        explicitPersistent: true,
+        explicitCount: 2,
+        explicitValueKey: true,
+        literalPersistent: true,
+        literalCount: 3,
+        duplicate: true,
+        valueKey: true,
+        nestedMap: true,
+        nestedReady: true,
+        evaluationOrder: "12",
+        macroPersistent: true,
+        macroKeyword: true,
+        macroValue: true,
+      },
       keyword: {
         value: true,
         interned: true,
@@ -154,6 +171,7 @@ test("persistent literals and quoted data preserve language value categories", a
         falseSymbol: true,
         text: '(alpha :beta [1 undefined] () #eliscript/symbol [nil "false"])',
         mapSyntax: "(hash-map :ready true)",
+        setSyntax: "(hash-set :ready [1 undefined])",
       },
       host: {
         array: true,
@@ -258,6 +276,7 @@ test("portable closures produce persistent values for the versioned worker codec
         "   :keyword :ready\n" +
         "   :vector [1 undefined]\n" +
         "   :map {:nested [2]}\n" +
+        "   :set #{argument [4]}\n" +
         "   :quote '(alpha :beta [3] nil)})\n" +
         "(export build)\n",
     );
@@ -286,6 +305,7 @@ test("portable closures produce persistent values for the versioned worker codec
     expect(seedValue.get(keyword("keyword"))).toBe(keyword("ready"));
     expect(isPersistentVector(seedValue.get(keyword("vector")))).toBe(true);
     expect(isPersistentHashMap(seedValue.get(keyword("map")))).toBe(true);
+    expect(isPersistentHashSet(seedValue.get(keyword("set")))).toBe(true);
     expect(isPersistentList(seedValue.get(keyword("quote")))).toBe(true);
 
     await Bun.write(

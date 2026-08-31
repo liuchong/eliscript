@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 91 specifications.
+The registry currently contains 92 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 62 |
+| Accepted design | 63 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 88 |
+| Implemented | 89 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-60 as provisional, and 3 as planning. That baseline is derived from registry
+61 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -59,7 +59,8 @@ portable value-semantic Result records and combinators, plus a strict portable
 persistent JSON codec and a portable Number/safe-integer foundation
 implemented. The P1 persistent collection core now passes its complete
 Bun/Node million-value exit audit, and P3 now has canonical persistent Vector
-and Map expression syntax plus first-class source Keyword values with explicit
+and Map expression syntax plus canonical persistent Set dispatch syntax and
+first-class source Keyword values with explicit
 native host-property boundaries, and quote now preserves persistent List/
 Vector and first-class identifier categories. The Emacs value bridge now has a
 bounded 256 MiB real-process gate, and protocol definitions now cross that
@@ -131,6 +132,7 @@ number.
 32. [0086: Optimized Runtime Persistent List and Canonical Data Text](0086-optimized-runtime-persistent-list.md)
 33. [0087: First-class Quoted Persistent Data](0087-first-class-quoted-persistent-data.md)
 34. [0091: Transport-safe Protocol Definitions](0091-transport-safe-protocol-definitions.md)
+35. [0092: Persistent Set Source Syntax](0092-persistent-set-source-syntax.md)
 
 ### React and Publishing
 
@@ -287,6 +289,8 @@ The schemas and change workflow are defined by specifications
 | 0088 | [Versioned Emacs Worker Persistent Value Codec](0088-emacs-worker-value-codec.md) | Accepted | Implemented |
 | 0089 | [Chunked Emacs Worker Value Streams](0089-chunked-emacs-worker-values.md) | Accepted | Implemented |
 | 0090 | [Large Emacs Worker Value Stream Memory Probe](0090-large-worker-value-memory-probe.md) | Accepted | Implemented |
+| 0091 | [Transport-safe Protocol Definitions](0091-transport-safe-protocol-definitions.md) | Accepted | Implemented |
+| 0092 | [Persistent Set Source Syntax](0092-persistent-set-source-syntax.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

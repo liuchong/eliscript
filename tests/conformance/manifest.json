@@ -1063,6 +1063,20 @@
         { "kind": "bun-test", "file": "tests/worker-value-codec.test.mjs", "contains": "worker value codec transports protocol definitions without runtime identity" },
         { "kind": "bun-test", "file": "tests/eliscript-protocol.test.mjs", "contains": "Eliscript-authored protocol policy preserves open dispatch semantics" }
       ]
+    },
+    {
+      "id": "language.persistent-set-source-syntax",
+      "title": "Persistent Set source syntax",
+      "status": "accepted",
+      "spec": "0092",
+      "contracts": ["Reads canonical #{...} syntax as located hash-set constructor forms", "Lowers explicit and dispatch Set forms to dedicated persistent Set IR", "Evaluates members left to right and collapses value-equal duplicates", "Preserves quoted constructor syntax and portable worker values", "Keeps application frameworks, Vite, bundlers, and publishing outside core implementation and evidence"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-lowers-set-syntax-to-persistent-set-literals" },
+        { "kind": "bun-test", "file": "tests/bootstrap-reader.test.mjs", "contains": "bootstrapped reader matches normalized seed syntax and diagnostics" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "persistent literals and quoted data preserve language value categories" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "portable closures produce persistent values for the versioned worker codec" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

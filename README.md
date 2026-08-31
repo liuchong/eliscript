@@ -66,6 +66,8 @@ The current M8 work provides:
   interning, hashing, persistent-Map keys, and explicit host-property syntax
 - first-class quoted persistent List/Vector data and Symbol/Keyword values,
   with quoted brace forms retained as non-evaluated constructor syntax
+- canonical `#{...}` and `(hash-set ...)` persistent Set expressions with
+  value-semantic duplicate collapse and quoted constructor syntax
 - structural-sharing and cross-host evidence through million-value workloads
 
 First-class immutable Keyword and Symbol values now have optimized and
@@ -90,8 +92,9 @@ semantics explicit without host Math calls. The persistent collection core now
 passes its complete cross-host million-value exit audit. Protocol dispatch and
 text/object algorithms are now maintained in Eliscript and checked against
 generated production artifacts. Persistent `(vector ...)`, square-bracket
-Vector literals, `(hash-map ...)`, and brace Map literals now link through a
-standard ESM literal ABI. `js-array`, `js-object`, `js-nth`, and `js-length`
+Vector literals, `(hash-map ...)`, brace Map literals, `(hash-set ...)`, and
+`#{...}` Set literals now link through a standard ESM literal ABI. `js-array`,
+`js-object`, `js-nth`, and `js-length`
 make host-container construction and access explicit, while language-level
 `nth` and `length` use collection protocols. First-class source Keyword
 expressions now construct canonical immutable runtime values while
@@ -107,8 +110,8 @@ codec traversal. A source-bound 256 MiB real-process round trip now verifies
 1,058 chunks in each direction within explicit Emacs, Bun, and combined RSS
 budgets, completing the P5 value-bridge gate. Protocol-definition transport
 now uses a strict versioned data descriptor with fresh local identities,
-completing P2. Static transient escape analysis and the P3 compatibility freeze
-remain open.
+completing P2. The persistent Vector/Map/Set literal family is now complete;
+static transient escape analysis and the P3 compatibility freeze remain open.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in

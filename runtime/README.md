@@ -22,7 +22,8 @@ runtime for element construction.
 ### Literal Runtime ABI
 
 `literals.mjs` is the package-owned standard ESM link for generated persistent
-constructors. It exports `list`, `vector`, `hashMap`, `keyword`, and `symbol`,
+constructors. It exports `list`, `vector`, `hashMap`, `hashSet`, `keyword`, and
+`symbol`,
 delegating directly to the canonical persistent collection and identifier
 implementations. The compiler imports it only when evaluated source or quoted
 data constructs one of those runtime values. Static JavaScript property keys

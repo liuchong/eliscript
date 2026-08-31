@@ -26,8 +26,10 @@
 (defun eliscript-reader--emacs-source (source)
   "Return a length-preserving Emacs-readable copy of SOURCE.
 
-Map braces outside strings and comments become parentheses.  Eliscript owns
-their persistent Map semantics after the host reader has produced a list."
+Map braces outside strings and comments become parentheses.  Set literals
+become a same-length parenthesized form with the dispatch brace replaced by
+whitespace.  Eliscript owns both persistent value semantics after the host
+reader has produced a list."
   (let ((result (copy-sequence source))
         (index 0)
         (in-string nil)
@@ -46,6 +48,11 @@ their persistent Map semantics after the host reader has produced a list."
            ((= character ?\") (setq in-string nil))))
          ((= character ?\;) (setq in-comment t))
          ((= character ?\") (setq in-string t))
+         ((and (= character ?#)
+               (< (1+ index) (length result))
+               (= (aref result (1+ index)) ?\{))
+          (aset result index ?\()
+          (aset result (1+ index) ?\s))
          ((= character ?\{) (aset result index ?\())
          ((= character ?\}) (aset result index ?\)))))
       (setq index (1+ index)))
@@ -100,6 +107,24 @@ their persistent Map semantics after the host reader has produced a list."
          :span (eliscript-reader--span start end filename)
          :children children
          :kind 'prefix)))
+     ((and (eq (char-after) ?#)
+           (eq (char-after (1+ (point))) ?\{))
+      (forward-char 2)
+      (forward-comment (point-max))
+      (while (and (char-after) (not (eq (char-after) ?\})))
+        (when (memq (char-after) '(?\) ?\]))
+          (eliscript-diagnostic-signal
+           'eliscript-read-error "ELI-R0001" "reader"
+           filename (eliscript-reader--span start (+ start 2) filename)
+           "Invalid read syntax: %S" (char-to-string (char-after))))
+        (push (eliscript-reader--scan-node filename) children)
+        (forward-comment (point-max)))
+      (when (eq (char-after) ?\})
+        (forward-char 1))
+      (eliscript-reader--node-create
+       :span (eliscript-reader--span start (point) filename)
+       :children (nreverse children)
+       :kind 'set))
      ((memq (char-after) '(?\( ?\[ ?\{))
       (let* ((opening (char-after))
              (closing (pcase opening
@@ -146,6 +171,17 @@ their persistent Map semantics after the host reader has produced a list."
    :end-line (eliscript-source-span-line span)
    :end-column (1+ (eliscript-source-span-column span))))
 
+(defun eliscript-reader--set-operator-span (span)
+  "Return the dispatch-brace operator span within Set SPAN."
+  (eliscript-source-span-create
+   :filename (eliscript-source-span-filename span)
+   :start (eliscript-source-span-start span)
+   :end (+ 2 (eliscript-source-span-start span))
+   :line (eliscript-source-span-line span)
+   :column (eliscript-source-span-column span)
+   :end-line (eliscript-source-span-line span)
+   :end-column (+ 2 (eliscript-source-span-column span))))
+
 (defun eliscript-reader--valid-keyword-name-p (name)
   "Return non-nil when NAME is a valid source Keyword name."
   (let ((slash-count (cl-count ?/ name)))
@@ -179,6 +215,13 @@ their persistent Map semantics after the host reader has produced a list."
        (cons
         (eliscript-form-wrap
          'hash-map (eliscript-reader--map-operator-span span))
+        (cl-mapcar #'eliscript-reader--locate-value value children))
+       span))
+     ((eq kind 'set)
+      (eliscript-form-wrap
+       (cons
+        (eliscript-form-wrap
+         'hash-set (eliscript-reader--set-operator-span span))
         (cl-mapcar #'eliscript-reader--locate-value value children))
        span))
      ((and (vectorp value) (= (length value) (length children)))

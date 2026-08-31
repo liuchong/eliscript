@@ -624,7 +624,12 @@ static escape analysis were the remaining adjacent items. Specification
 [0091-transport-safe-protocol-definitions.md](0091-transport-safe-protocol-definitions.md)
 now closes protocol-definition transport with a versioned data-only descriptor,
 fresh local runtime identity, and strict non-executable validation. Static
-transient escape analysis remains open. Canonical
+transient escape analysis remains open. Canonical executable Set syntax now
+lands in
+[0092-persistent-set-source-syntax.md](0092-persistent-set-source-syntax.md),
+completing the Vector/Map/Set literal family through dedicated IR and the
+standard literal runtime ABI without an application-framework dependency.
+Canonical
 printing/reading for the optimized runtime family now lands in
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md);
 portable Keyword/Symbol values and List/collection data text now land in

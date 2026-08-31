@@ -46,16 +46,19 @@ rebinding.
 
 ## Persistent Literal Linking
 
-`persistent-vector-literal`, `persistent-map-literal`, and evaluated Keyword
+`persistent-vector-literal`, `persistent-map-literal`,
+`persistent-set-literal`, and evaluated Keyword
 literals emit calls through the package-owned `eliscript/runtime/literals.mjs` ESM
 ABI. The import is inserted once and only when one of those runtime values is
-constructed. Square-bracket expressions, brace Map expressions, `(vector
-...)`, `(hash-map ...)`, and source `:keywords` use that path; `js-array` and
+constructed. Square-bracket expressions, brace Map expressions, `#{...}` Set
+expressions, `(vector ...)`, `(hash-map ...)`, `(hash-set ...)`, and source
+`:keywords` use that path; `js-array` and
 `js-object` remain direct native container forms. Keyword-shaped tokens in
 static host-key positions also remain JavaScript strings and do not link the
 literal runtime by themselves. The reader desugars `{key value ...}` into
-located `hash-map` syntax, validates Keyword names, and rejects odd or
-mismatched forms before analysis. Language-level `nth` and `length` link the
+located `hash-map` syntax and `#{...}` into located `hash-set` syntax,
+validates Keyword names, and rejects malformed delimiters or odd Map forms
+before analysis. Language-level `nth` and `length` link the
 collection protocol runtime, while `js-nth` and `js-length` retain direct host
 access without that dependency.
 

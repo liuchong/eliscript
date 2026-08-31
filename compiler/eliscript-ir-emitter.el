@@ -22,7 +22,7 @@
   "Internal namespace binding for the automatic React JSX runtime.")
 
 (defconst eliscript-ir-emitter--literal-runtime-import
-  "import { hashMap as __eliscript_hash_map, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n"
+  "import { hashMap as __eliscript_hash_map, hashSet as __eliscript_hash_set, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n"
   "Generated import for canonical language literal construction.")
 
 (defconst eliscript-ir-emitter--collection-runtime-import
@@ -1064,6 +1064,9 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
       ('persistent-map-literal
        (format "__eliscript_hash_map(%s)"
                (eliscript-ir-emitter--emit-arguments children)))
+      ('persistent-set-literal
+       (format "__eliscript_hash_set(%s)"
+               (eliscript-ir-emitter--emit-arguments children)))
       ('quoted-literal
        (eliscript-emitter--emit-quoted (eliscript-ir-node-value node)))
       ('function-expression (eliscript-ir-emitter--emit-function node))
@@ -1249,7 +1252,8 @@ JavaScript property or tag string rather than an Eliscript value."
   (let ((kind (eliscript-ir-node-kind node))
         (children (eliscript-ir-emitter--children node)))
     (cond
-     ((memq kind '(persistent-vector-literal persistent-map-literal)) t)
+     ((memq kind '(persistent-vector-literal persistent-map-literal
+                    persistent-set-literal)) t)
      ((eq kind 'quoted-literal)
       (eliscript-emitter--quoted-uses-literal-runtime-p
        (eliscript-ir-node-value node)))
