@@ -235,7 +235,8 @@ rules.
 ## Next Slice
 
 Use stack-safe recurrence when portable Eliscript implementations need
-iterative control, while keeping migrations profile- and design-driven. The
-next language-closure work remains macro-generated-name hygiene, persistent
-literal integration, explicit host conversion, and portable protocol/core
-definitions.
+iterative control, while keeping migrations profile- and design-driven.
+Deterministic macro-generated names and capture rules are now implemented in
+[0065-deterministic-macro-generated-names.md](0065-deterministic-macro-generated-names.md).
+The next language-closure work remains persistent literal integration, explicit
+host conversion, and portable protocol/core definitions.

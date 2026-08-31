@@ -781,6 +781,18 @@
   (should-error (eliscript-compile-string "(twice 1)")
                 :type 'eliscript-analyze-error))
 
+(ert-deftest eliscript-expander-generates-deterministic-capture-safe-names ()
+  (let* ((source
+          "(defmacro once (form) `(let ((value$ ,form)) value$))
+(defun work (value$G1) (once (+ value$G1 1)))")
+         (first (eliscript-compile-string source "generated.eli"))
+         (second (eliscript-compile-string source "generated.eli")))
+    (should (equal first second))
+    (should (string-match-p
+             (regexp-quote "((value$G2) =>") first))
+    (should-not (string-match-p
+                 (regexp-quote "((value$G1) =>") first))))
+
 (ert-deftest eliscript-expander-rejects-runaway-expansion ()
   (should-error
    (eliscript-compile-string

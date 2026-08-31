@@ -28,27 +28,28 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 63 specifications.
+The registry currently contains 65 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 34 |
+| Accepted design | 36 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 60 |
+| Implemented | 62 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-32 as provisional, and 3 as planning. That baseline is derived from registry
+34 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
 implementations, shared value semantics, open protocol dispatch, collection
 capabilities, immutable collection construction, single-pass transducers,
 owner-token transient Vector, Map, and Set builders, and protocol-driven core
-sequence/data algorithms implemented. Portable protocol and algorithm
-definitions, literal migration, metadata, host conversion, static transient
-escape analysis, and the Emacs value bridge remain ahead.
+sequence/data algorithms, stack-safe recurrence, and deterministic
+macro-generated names implemented. Portable protocol and algorithm definitions,
+literal migration, metadata, host conversion, static transient escape analysis,
+and the Emacs value bridge remain ahead.
 
 ## Reading Paths
 
@@ -221,6 +222,7 @@ The schemas and change workflow are defined by specifications
 | 0062 | [Owner-token Transient Collections](0062-owner-token-transient-collections.md) | Accepted | Implemented |
 | 0063 | [Protocol-driven Core Sequence and Data Algorithms](0063-protocol-driven-core-algorithms.md) | Accepted | Implemented |
 | 0064 | [Stack-safe Loop and Recur](0064-stack-safe-loop-recur.md) | Accepted | Implemented |
+| 0065 | [Deterministic Macro-generated Names and Capture Rules](0065-deterministic-macro-generated-names.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

@@ -540,8 +540,11 @@ iteration now lands in
 [0064-stack-safe-loop-recur.md](0064-stack-safe-loop-recur.md), with exact tail
 positions, nearest-target analysis, simultaneous pattern rebinding,
 seed/self-hosted fixed-point evidence, and million-step Bun/Node execution.
-Macro hygiene, object/text migration, static escape analysis, efficient host
-identity hashing, metadata, printing, and reading remain open.
+Deterministic generated symbols and explicit capture rules now land in
+[0065-deterministic-macro-generated-names.md](0065-deterministic-macro-generated-names.md),
+including module-wide collision avoidance and Bun/Node execution evidence.
+Declared macro dependencies, object/text migration, static escape analysis,
+efficient host identity hashing, metadata, printing, and reading remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

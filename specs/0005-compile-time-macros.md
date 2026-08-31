@@ -36,7 +36,9 @@ expanded until the call site no longer names a registered macro.
 
 The parameter model supports required parameters, `&optional`, and one trailing
 parameter after `&rest` or `&body`. Backquote, comma, and comma-splicing provide
-syntax construction in the shared interpreter.
+syntax construction in the shared interpreter. The provisional generated-name
+extension adds explicit `gensym` and trailing-`$` quasiquote symbols without
+changing the stable expansion order.
 
 ## Expansion Boundaries
 
@@ -80,8 +82,8 @@ language rules, so macros cannot bypass semantic checks.
 ## Acceptance Evidence
 
 - ERT tests cover ordinary expansion, `&body`, generated declarations, quoted
-  data, build isolation, runaway recursion, macro failures, and analyzer checks
-  on expanded code.
+  data, generated-name determinism, build isolation, runaway recursion, macro
+  failures, and analyzer checks on expanded code.
 - The CLI compiles a file containing a macro, verifies that the declaration is
   absent from output, and executes the generated module with Bun.
 - Existing M0 snapshots remain byte-for-byte stable.
@@ -96,3 +98,5 @@ The portable evaluator and its exact compatibility boundary are specified in
 [0016-portable-macro-expander.md](0016-portable-macro-expander.md). The seed
 migration is specified in
 [0035-deterministic-seed-macros.md](0035-deterministic-seed-macros.md).
+Generated symbols and caller-capture rules are specified in
+[0065-deterministic-macro-generated-names.md](0065-deterministic-macro-generated-names.md).

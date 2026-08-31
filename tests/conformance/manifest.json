@@ -707,6 +707,18 @@
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-loop-recur-matches-compatibility-backend" },
         { "kind": "bun-test", "file": "tests/loop-recur.test.mjs", "contains": "loop/recur is stack-safe and identical after self-hosting" }
       ]
+    },
+    {
+      "id": "macro.deterministic-generated-names",
+      "title": "Deterministic macro-generated names and capture rules",
+      "status": "accepted",
+      "spec": "0065",
+      "contracts": ["Avoids source and dynamically interned symbol collisions", "Reuses automatic names within one template and allocates fresh names across calls", "Defines deliberate caller capture and quote boundaries", "Matches seed and self-hosted artifacts under Bun and Node"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-expander-generates-deterministic-capture-safe-names" },
+        { "kind": "bun-test", "file": "tests/bootstrap-expander.test.mjs", "contains": "bootstrapped expander matches seed syntax, spans, and diagnostics" },
+        { "kind": "bun-test", "file": "tests/macro-generated-names.test.mjs", "contains": "macro-generated names are deterministic and capture-safe" }
+      ]
     }
   ]
 }

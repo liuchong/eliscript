@@ -51,8 +51,12 @@ current bootstrap sources. The generated reader must successfully read its own
 `.eli` implementation.
 
 The macro fixture compares complete expanded syntax and call-site spans, exact
-diagnostics, deterministic macro evaluation, and recursive expansion. Every
-valid result is then accepted by the generated lexical analyzer.
+diagnostics, deterministic macro evaluation, recursive expansion, explicit and
+automatic generated symbols, source and dynamic-name collision avoidance, and
+capture boundaries. Every valid result is then accepted by the generated
+lexical analyzer. `macro-generated-names.test.mjs` additionally compares seed
+and self-hosted JavaScript and Source Maps, then executes the capture and
+single-evaluation corpus under Bun and Node.js.
 
 The analyzer fixture runs after both readers. It compares success and complete
 diagnostic strings for scope resolution, declaration collisions, mutability,

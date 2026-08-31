@@ -48,7 +48,7 @@ The whitelist matches the portable evaluator:
 - list and vector construction, access, append, and length
 - type, identity, structural equality, and nullish predicates
 - arithmetic and numeric comparisons
-- `symbol-name`, `intern`, `concat`, `str`, and explicit `error`
+- `symbol-name`, `intern`, `gensym`, `concat`, `str`, and explicit `error`
 
 Eliscript truthiness applies during macro execution: `nil`, `false`, and
 `undefined` are false, while zero and empty strings are true. Predicates return
@@ -86,3 +86,7 @@ must arrive through an explicit compiler context that records every input.
   diagnostic.
 - Arity failures and explicit macro errors remain byte-identical across the
   seed and self-hosted compilers.
+
+Deterministic module-level allocation, automatic trailing-`$` template names,
+and the explicit capture model are specified by
+[0065-deterministic-macro-generated-names.md](0065-deterministic-macro-generated-names.md).

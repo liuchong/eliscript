@@ -12,6 +12,8 @@
     node-items)
 
   (defconst maximum-depth 100)
+  (defconst gensym-prefix-pattern
+    (js* "/^[A-Za-z_$][A-Za-z0-9_$?!*+=<>-]*$/"))
   (defconst raise-error
     (js* "(message) => { throw new Error(message); }"))
   (defconst raise-diagnostic
@@ -141,8 +143,11 @@
            (symbol-node-p (nth 0 items))
            (= (node-name (nth 0 items)) name))))
 
-  (defun make-eval-scope (parent)
-    (object :parent parent :values (new (js* "Map"))))
+  (defun make-eval-scope (parent &optional context)
+    (object
+      :parent parent
+      :values (new (js* "Map"))
+      :context (or context (and parent (get parent :context)))))
 
   (defun scope-bind (scope name value)
     (js-call (get scope :values) :set name value)
@@ -171,6 +176,47 @@
         (progn
           (js-call (get (get found :scope) :values) :set name value)
           value))))
+
+  (defun reserve-name (scope name)
+    (js-call (get (get scope :context) :reservedNames) :add name)
+    name)
+
+  (defun gensym-prefix (node)
+    (let ((prefix
+           (cond
+             ((symbol-node-p node) (node-name node))
+             ((and (literal-node-p node)
+                   (= (js* "typeof node.value") "string"))
+              (node-value node))
+             (t (raise-error "gensym prefix must be a symbol or string")))))
+      (when (or (not (js-call gensym-prefix-pattern :test prefix))
+                (js-call prefix :startsWith "__eliscript_"))
+        (raise-error (str "invalid gensym prefix: " prefix)))
+      prefix))
+
+  (defun allocate-name (scope prefix-node)
+    (let* ((context (get scope :context))
+           (reserved (get context :reservedNames))
+           (prefix (gensym-prefix prefix-node))
+           (candidate undefined))
+      (while (or (eq candidate undefined)
+                 (js-call reserved :has candidate))
+        (put context :gensymCounter (1+ (get context :gensymCounter)))
+        (setq candidate
+          (str prefix "$G" (get context :gensymCounter))))
+      (js-call reserved :add candidate)
+      (symbol-node candidate nil)))
+
+  (defun auto-gensym (node scope names)
+    (let ((name (node-name node)))
+      (if (js-call names :has name)
+          (js-call names :get name)
+        (let ((generated
+               (allocate-name
+                 scope
+                 (literal-node (js-call name :slice 0 -1) nil))))
+          (js-call names :set name generated)
+          generated))))
 
   (defun truthy-p (node)
     (not (or (null-node-p node)
@@ -328,7 +374,7 @@
   (defun splice-form-p (node depth)
     (and (= depth 1) (form-operator-p node ",@")))
 
-  (defun quasiquote-items (items scope depth)
+  (defun quasiquote-items (items scope depth auto-gensyms)
     (let ((result []))
       (js-call items :forEach
         (lambda (item)
@@ -344,15 +390,16 @@
                     (str "cannot splice " (node-display value))))
                 (js-call spliced :forEach
                   (lambda (part) (js-call result :push part))))
-            (js-call result :push (quasiquote-node item scope depth)))))
+            (js-call result :push
+              (quasiquote-node item scope depth auto-gensyms)))))
       result))
 
-  (defun quasiquote-node (node scope depth)
+  (defun quasiquote-node (node scope depth auto-gensyms)
     (cond
       ((vector-node-p node)
        (collection-node
          "vector"
-         (quasiquote-items (node-items node) scope depth)
+         (quasiquote-items (node-items node) scope depth auto-gensyms)
          (node-span node)))
       ((and (= depth 1) (form-operator-p node ","))
        (let ((items (node-items node)))
@@ -366,19 +413,26 @@
          (if (= (get items :length) 2)
              (make-list
                [(nth 0 items)
-                (quasiquote-node (nth 1 items) scope (1+ depth))]
+                (quasiquote-node
+                  (nth 1 items) scope (1+ depth) auto-gensyms)]
                (node-span node))
            (raise-error "` expects one value"))))
       ((and (> depth 1) (form-operator-p node ","))
        (let ((items (node-items node)))
          (make-list
            [(nth 0 items)
-            (quasiquote-node (nth 1 items) scope (1- depth))]
+            (quasiquote-node
+              (nth 1 items) scope (1- depth) auto-gensyms)]
            (node-span node))))
       ((list-node-p node)
        (make-list
-         (quasiquote-items (list-items node) scope depth)
+         (quasiquote-items
+           (list-items node) scope depth auto-gensyms)
          (node-span node)))
+      ((and (= depth 1)
+            (symbol-node-p node)
+            (js-call (node-name node) :endsWith "$"))
+       (auto-gensym node scope auto-gensyms))
       (t node)))
 
   (defun eval-list-operation (operator values)
@@ -611,7 +665,8 @@
           ((= operator "`")
            (unless (= (get args :length) 1)
              (raise-error "` expects 1 argument"))
-           (quasiquote-node (nth 0 args) scope 1))
+           (quasiquote-node
+             (nth 0 args) scope 1 (new (js* "Map"))))
           ((= operator "if") (eval-if args scope))
           ((= operator "when")
            (if (and (> (get args :length) 0)
@@ -647,6 +702,14 @@
            (unless (> (get args :length) 0)
              (raise-error "error expects a message"))
            (raise-error (value-string (eval-form (nth 0 args) scope))))
+          ((= operator "gensym")
+           (unless (<= (get args :length) 1)
+             (raise-error "gensym expects 0..1 arguments"))
+           (allocate-name
+             scope
+             (if (= (get args :length) 0)
+                 (literal-node "G" nil)
+               (eval-form (nth 0 args) scope))))
           (t
            (let* ((values (eval-args args scope))
                   (list-result (eval-list-operation operator values))
@@ -668,12 +731,14 @@
                              (symbol-node-p (nth 0 values)))
                   (raise-error "symbol-name expects a symbol"))
                 (literal-node (node-name (nth 0 values)) nil))
-               ((= operator "intern")
+              ((= operator "intern")
                 (unless (and (= (get values :length) 1)
                              (literal-node-p (nth 0 values))
                              (= (js* "typeof values[0].value") "string"))
                   (raise-error "intern expects a string"))
-                (symbol-node (node-value (nth 0 values)) nil))
+                (let ((name (node-value (nth 0 values))))
+                  (reserve-name scope name)
+                  (symbol-node name nil)))
                ((or (= operator "concat") (= operator "str"))
                 (let ((pieces []))
                   (js-call values :forEach
@@ -762,7 +827,7 @@
               :parameters (parse-parameters parameters context span)
               :body (js-call args :slice 2)))))))
 
-  (defun bind-macro-args (definition args)
+  (defun bind-macro-args (definition args context)
     (let* ((parameters (get definition :parameters))
            (required (get parameters :required))
            (optional (get parameters :optional))
@@ -770,7 +835,7 @@
            (minimum (get required :length))
            (maximum (+ minimum (get optional :length)))
            (count (get args :length))
-           (scope (make-eval-scope nil)))
+           (scope (make-eval-scope nil context)))
       (when (< count minimum)
         (raise-error
           (str "wrong number of arguments for " (get definition :name))))
@@ -803,7 +868,7 @@
     (funcall
       guard
       (lambda ()
-        (let ((scope (bind-macro-args definition args)))
+        (let ((scope (bind-macro-args definition args context)))
           (eval-sequence (get definition :body) scope)))
       (lambda (message)
         (expander-fail
@@ -1115,11 +1180,25 @@
             (lambda (expanded) (js-call result :push expanded)))))
       result))
 
+  (defun collect-symbol-names (node names)
+    (cond
+      ((symbol-node-p node) (js-call names :add (node-name node)))
+      ((or (= (node-kind node) "list") (= (node-kind node) "vector"))
+       (js-call (node-items node) :forEach
+         (lambda (item) (collect-symbol-names item names)))))
+    names)
+
   (defun expand-module (forms filename)
-    (expand-top-level-sequence
-      forms
-      (new (js* "Map"))
-      0
-      (object :filename filename)))
+    (let ((reserved-names (new (js* "Set"))))
+      (js-call forms :forEach
+        (lambda (form) (collect-symbol-names form reserved-names)))
+      (expand-top-level-sequence
+        forms
+        (new (js* "Map"))
+        0
+        (object
+          :filename filename
+          :gensymCounter 0
+          :reservedNames reserved-names))))
 
   (export expand-module))

@@ -24,6 +24,7 @@
 
 (defvar eliscript-expander--filename nil)
 (defvar eliscript-expander--current-span nil)
+(defvar eliscript-expander--macro-context nil)
 
 (defun eliscript-expander--fail (format-string &rest arguments)
   "Signal an expansion error using FORMAT-STRING and ARGUMENTS."
@@ -31,6 +32,20 @@
          'eliscript-expand-error "ELI-X0001" "expansion"
          eliscript-expander--filename eliscript-expander--current-span
          format-string arguments))
+
+(defun eliscript-expander--collect-symbol-names (form names)
+  "Add every source symbol reachable from FORM to NAMES."
+  (let ((value (eliscript-form-value form)))
+    (cond
+     ((symbolp value) (puthash (symbol-name value) t names))
+     ((consp value)
+      (eliscript-expander--collect-symbol-names (car value) names)
+      (eliscript-expander--collect-symbol-names (cdr value) names))
+     ((vectorp value)
+      (mapc (lambda (item)
+              (eliscript-expander--collect-symbol-names item names))
+            (append value nil)))))
+  names)
 
 (defun eliscript-expander--register (form environment)
   "Validate macro definition FORM and add it to ENVIRONMENT."
@@ -69,7 +84,8 @@
        (eliscript-expander--macro-name definition)
        (eliscript-expander--macro-parameters definition)
        (eliscript-expander--macro-body definition)
-       (mapcar #'eliscript-form-strip arguments))
+       (mapcar #'eliscript-form-strip arguments)
+       eliscript-expander--macro-context)
     (eliscript-macro-eval-error
      (eliscript-expander--fail
       "macro %s failed: %s"
@@ -372,9 +388,14 @@
 
 (defun eliscript-expand-module (forms &optional filename)
   "Expand compile-time macros in module FORMS read from FILENAME."
-  (let ((eliscript-expander--filename filename)
-        (environment (make-hash-table :test #'eq)))
-    (eliscript-expander--expand-top-level-sequence forms environment 0)))
+  (let ((reserved-names (make-hash-table :test #'equal)))
+    (dolist (form forms)
+      (eliscript-expander--collect-symbol-names form reserved-names))
+    (let ((eliscript-expander--filename filename)
+          (eliscript-expander--macro-context
+           (eliscript-macro-eval--make-context reserved-names))
+          (environment (make-hash-table :test #'eq)))
+      (eliscript-expander--expand-top-level-sequence forms environment 0))))
 
 (provide 'eliscript-expander)
 

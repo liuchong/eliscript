@@ -44,12 +44,17 @@ current macro contract:
 - `list`, `vector`, `cons`, `car`, `cdr`, `nth`, `append`, and `length`
 - type, null, identity, and structural equality predicates
 - basic arithmetic and numeric comparisons
-- `symbol-name`, `intern`, `concat`, and explicit `error`
+- `symbol-name`, `intern`, `gensym`, `concat`, and explicit `error`
 
 Backquote handles nested quotation depth and collection splicing. Unsupported
 host functions fail explicitly instead of escaping into JavaScript or Emacs.
 This makes macros reproducible from their arguments and source in both
 generations.
+
+The expander owns one deterministic generated-name allocator per module.
+Explicit `gensym`, trailing-`$` symbols in active quasiquote templates, source
+collision avoidance, and caller-capture rules are specified in
+[0065-deterministic-macro-generated-names.md](0065-deterministic-macro-generated-names.md).
 
 The portable subset is intentionally smaller than Emacs Lisp. A macro cannot
 depend on buffers, files, environment variables, process state, or an unlisted
@@ -108,6 +113,8 @@ expander, and analyzer, then compares:
 - required, optional, rest, and body parameter behavior
 - quotation, splicing, list construction, local computation, and conditions
 - recursive macro calls and generated top-level declarations
+- explicit and automatic generated symbols, collision avoidance, and capture
+  boundaries
 - quoted and syntax-specific expansion boundaries
 - definition, nesting, execution, and depth-limit diagnostics
 - all ten bootstrap compiler modules, including `emitter.eli` and

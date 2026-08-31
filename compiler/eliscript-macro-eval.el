@@ -8,6 +8,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'subr-x)
 (require 'eliscript-diagnostic)
 
 (define-error 'eliscript-macro-eval-error
@@ -22,7 +23,13 @@
 (cl-defstruct (eliscript-macro-eval--scope
                (:constructor eliscript-macro-eval--scope-create))
   parent
-  values)
+  values
+  context)
+
+(cl-defstruct (eliscript-macro-eval--context
+               (:constructor eliscript-macro-eval--context-create))
+  counter
+  reserved-names)
 
 (defconst eliscript-macro-eval--missing (make-symbol "missing")
   "Sentinel that distinguishes an absent value from source `undefined'.")
@@ -103,10 +110,73 @@
      operator (eliscript-macro-eval--display value)))
   value)
 
-(defun eliscript-macro-eval--make-scope (&optional parent)
-  "Return an empty evaluator scope with optional PARENT."
+(defun eliscript-macro-eval--make-context (&optional reserved-names)
+  "Return a deterministic generated-name context using RESERVED-NAMES."
+  (eliscript-macro-eval--context-create
+   :counter 0
+   :reserved-names
+   (or reserved-names (make-hash-table :test #'equal))))
+
+(defun eliscript-macro-eval--make-scope (&optional parent context)
+  "Return an empty evaluator scope with optional PARENT and CONTEXT."
   (eliscript-macro-eval--scope-create
-   :parent parent :values (make-hash-table :test #'eq)))
+   :parent parent
+   :values (make-hash-table :test #'eq)
+   :context (or context
+                (and parent (eliscript-macro-eval--scope-context parent))
+                (eliscript-macro-eval--make-context))))
+
+(defun eliscript-macro-eval--reserve-name (context name)
+  "Reserve source symbol NAME in generated-name CONTEXT."
+  (puthash name t (eliscript-macro-eval--context-reserved-names context))
+  name)
+
+(defun eliscript-macro-eval--gensym-prefix (value)
+  "Return a validated generated-name prefix represented by VALUE."
+  (let ((prefix
+         (cond
+          ((stringp value) value)
+          ((eliscript-macro-eval--symbol-p value) (symbol-name value))
+          (t
+           (eliscript-macro-eval--fail
+            "gensym prefix must be a symbol or string")))))
+    (when (or (string-empty-p prefix)
+              (not (string-match-p
+                    "\\`[A-Za-z_$][A-Za-z0-9_$?!*+=<>-]*\\'" prefix))
+              (string-prefix-p "__eliscript_" prefix))
+      (eliscript-macro-eval--fail
+       "invalid gensym prefix: %s" prefix))
+    prefix))
+
+(defun eliscript-macro-eval--allocate-name (scope prefix-value)
+  "Allocate a unique symbol in SCOPE using PREFIX-VALUE."
+  (let* ((context (eliscript-macro-eval--scope-context scope))
+         (prefix (eliscript-macro-eval--gensym-prefix prefix-value))
+         (reserved (eliscript-macro-eval--context-reserved-names context))
+         candidate)
+    (while
+        (progn
+          (setf (eliscript-macro-eval--context-counter context)
+                (1+ (eliscript-macro-eval--context-counter context)))
+          (setq candidate
+                (format "%s$G%d"
+                        prefix
+                        (eliscript-macro-eval--context-counter context)))
+          (gethash candidate reserved)))
+    (eliscript-macro-eval--reserve-name context candidate)
+    (intern candidate)))
+
+(defun eliscript-macro-eval--auto-gensym (symbol scope names)
+  "Return the generated symbol for template SYMBOL in SCOPE and NAMES."
+  (let ((existing (gethash symbol names eliscript-macro-eval--missing)))
+    (if (not (eq existing eliscript-macro-eval--missing))
+        existing
+      (let* ((name (symbol-name symbol))
+             (generated
+              (eliscript-macro-eval--allocate-name
+               scope (substring name 0 -1))))
+        (puthash symbol generated names)
+        generated))))
 
 (defun eliscript-macro-eval--scope-bind (scope name value)
   "Bind NAME to VALUE in SCOPE and return VALUE."
@@ -154,8 +224,9 @@
        (eliscript-macro-eval--operator-p
         form eliscript-macro-eval--splice-symbol)))
 
-(defun eliscript-macro-eval--quasiquote-items (items scope depth)
-  "Evaluate quasiquoted ITEMS in SCOPE at nesting DEPTH."
+(defun eliscript-macro-eval--quasiquote-items
+    (items scope depth auto-gensyms)
+  "Evaluate quasiquoted ITEMS in SCOPE at DEPTH using AUTO-GENSYMS."
   (let (result)
     (dolist (item items (nreverse result))
       (if (eliscript-macro-eval--splice-p item depth)
@@ -169,15 +240,18 @@
                  "cannot splice %s" (eliscript-macro-eval--display value)))
               (dolist (part parts)
                 (push part result))))
-        (push (eliscript-macro-eval--quasiquote item scope depth) result)))))
+        (push (eliscript-macro-eval--quasiquote
+               item scope depth auto-gensyms)
+              result)))))
 
-(defun eliscript-macro-eval--quasiquote (form scope depth)
-  "Evaluate quasiquoted FORM in SCOPE at nesting DEPTH."
+(defun eliscript-macro-eval--quasiquote
+    (form scope depth auto-gensyms)
+  "Evaluate quasiquoted FORM in SCOPE at DEPTH using AUTO-GENSYMS."
   (cond
    ((vectorp form)
     (apply #'vector
            (eliscript-macro-eval--quasiquote-items
-            (append form nil) scope depth)))
+            (append form nil) scope depth auto-gensyms)))
    ((and (= depth 1)
          (eliscript-macro-eval--operator-p
           form eliscript-macro-eval--unquote-symbol))
@@ -193,14 +267,21 @@
     (unless (= (length form) 2)
       (eliscript-macro-eval--fail "` expects one value"))
     (list (car form)
-          (eliscript-macro-eval--quasiquote (cadr form) scope (1+ depth))))
+          (eliscript-macro-eval--quasiquote
+           (cadr form) scope (1+ depth) auto-gensyms)))
    ((and (> depth 1)
          (eliscript-macro-eval--operator-p
           form eliscript-macro-eval--unquote-symbol))
     (list (car form)
-          (eliscript-macro-eval--quasiquote (cadr form) scope (1- depth))))
+          (eliscript-macro-eval--quasiquote
+           (cadr form) scope (1- depth) auto-gensyms)))
    ((eliscript-macro-eval--list-p form)
-    (eliscript-macro-eval--quasiquote-items form scope depth))
+    (eliscript-macro-eval--quasiquote-items
+     form scope depth auto-gensyms))
+   ((and (= depth 1)
+         (eliscript-macro-eval--symbol-p form)
+         (string-suffix-p "$" (symbol-name form)))
+    (eliscript-macro-eval--auto-gensym form scope auto-gensyms))
    (t form)))
 
 (defun eliscript-macro-eval--eval-sequence (forms scope)
@@ -508,7 +589,8 @@
         (progn
           (unless (= (length arguments) 1)
             (eliscript-macro-eval--fail "` expects 1 argument"))
-          (eliscript-macro-eval--quasiquote (car arguments) scope 1))
+          (eliscript-macro-eval--quasiquote
+           (car arguments) scope 1 (make-hash-table :test #'eq)))
       (pcase operator
 	('quote
 	 (unless (= (length arguments) 1)
@@ -554,6 +636,15 @@
 	 (eliscript-macro-eval--fail
           "%s" (eliscript-macro-eval--value-string
 		(eliscript-macro-eval--eval (car arguments) scope))))
+	('gensym
+	 (unless (<= (length arguments) 1)
+           (eliscript-macro-eval--fail
+            "gensym expects 0..1 arguments"))
+	 (eliscript-macro-eval--allocate-name
+	  scope
+	  (if arguments
+	      (eliscript-macro-eval--eval (car arguments) scope)
+	    "G")))
 	(_
 	 (let* ((values (eliscript-macro-eval--eval-args arguments scope))
 		(list-result
@@ -582,7 +673,10 @@
             ((eq operator 'intern)
              (unless (and (= (length values) 1) (stringp (car values)))
                (eliscript-macro-eval--fail "intern expects a string"))
-             (intern (car values)))
+             (let ((name (car values)))
+               (eliscript-macro-eval--reserve-name
+                (eliscript-macro-eval--scope-context scope) name)
+               (intern name)))
             ((memq operator '(concat str))
              (mapconcat #'eliscript-macro-eval--value-string values ""))
             (t
@@ -648,15 +742,16 @@
      :optional (nreverse optional)
      :rest rest)))
 
-(defun eliscript-macro-eval-run (name parameters body arguments)
-  "Evaluate macro NAME with PARAMETERS, BODY, and raw ARGUMENTS."
+(defun eliscript-macro-eval-run
+    (name parameters body arguments &optional context)
+  "Evaluate macro NAME with PARAMETERS, BODY, raw ARGUMENTS, and CONTEXT."
   (let* ((required (eliscript-macro-eval-parameters-required parameters))
          (optional (eliscript-macro-eval-parameters-optional parameters))
          (rest (eliscript-macro-eval-parameters-rest parameters))
          (minimum (length required))
          (maximum (+ minimum (length optional)))
          (count (length arguments))
-         (scope (eliscript-macro-eval--make-scope))
+         (scope (eliscript-macro-eval--make-scope nil context))
          (index 0))
     (when (< count minimum)
       (eliscript-macro-eval--fail

@@ -51,6 +51,41 @@
       "source": "(defmacro define-indexed (prefix index)\n  (let* ((next (1+ index))\n         (name (intern (concat prefix \"-value\"))))\n    `(defconst ,name ,next)))\n(define-indexed \"item\" 2)\n(export item-value)"
     },
     {
+      "name": "automatic-generated-name-skips-source-collisions",
+      "filename": "auto-gensym-collision.eli",
+      "source": "(defmacro once (form)\n  `(let ((value$ ,form)) value$))\n(defun captured (value$G1)\n  (once (+ value$G1 1)))\n(export captured)"
+    },
+    {
+      "name": "automatic-generated-name-is-reused-per-template",
+      "filename": "auto-gensym-reuse.eli",
+      "source": "(defmacro duplicate-once (form)\n  `(let ((result$ ,form)) [result$ result$]))\n(defun duplicate (value) (duplicate-once value))\n(export duplicate)"
+    },
+    {
+      "name": "automatic-generated-names-are-unique-across-calls",
+      "filename": "auto-gensym-calls.eli",
+      "source": "(defmacro once (form)\n  `(let ((value$ ,form)) value$))\n(defun first-value () (once 1))\n(defun second-value () (once 2))\n(export first-value second-value)"
+    },
+    {
+      "name": "explicit-generated-names-accept-string-and-symbol-prefixes",
+      "filename": "explicit-gensym.eli",
+      "source": "(defmacro safe-pair (left right)\n  (let ((left-name (gensym \"slot\"))\n        (right-name (gensym 'slot)))\n    `(let ((,left-name ,left)\n           (,right-name ,right))\n       [,left-name ,right-name])))\n(defun pair () (safe-pair 1 2))\n(export pair)"
+    },
+    {
+      "name": "explicit-generated-name-default-prefix",
+      "filename": "default-gensym.eli",
+      "source": "(defmacro generated-name ()\n  (let ((name (gensym))) `(list ',name)))\n(defconst generated (generated-name))\n(export generated)"
+    },
+    {
+      "name": "intern-reserves-generated-name-candidates",
+      "filename": "gensym-intern.eli",
+      "source": "(defmacro generated-after-intern ()\n  (let ((reserved (intern \"slot$G1\"))\n        (name (gensym \"slot\")))\n    `(list ',reserved ',name)))\n(defconst generated (generated-after-intern))\n(export generated)"
+    },
+    {
+      "name": "quoted-markers-and-deliberate-capture",
+      "filename": "macro-capture.eli",
+      "source": "(defmacro capture-target (value) `(setq target ,value))\n(defun update (target) (capture-target (+ target 1)))\n(defconst marker 'value$)\n(export update marker)"
+    },
+    {
       "name": "conditional-macro",
       "filename": "conditional.eli",
       "source": "(defmacro choose (test yes no) (if (null test) no yes))\n(defconst answer (choose nil 1 2))\n(export answer)"
@@ -203,6 +238,30 @@
       "filename": "arity.eli",
       "source": "(defmacro pair (left right) `(list ,left ,right))\n(pair 1)",
       "error": "arity.eli:2:1: macro pair failed: wrong number of arguments for pair"
+    },
+    {
+      "name": "gensym-prefix-type",
+      "filename": "gensym-type.eli",
+      "source": "(defmacro broken () (gensym 1))\n(broken)",
+      "error": "gensym-type.eli:2:1: macro broken failed: gensym prefix must be a symbol or string"
+    },
+    {
+      "name": "gensym-arity",
+      "filename": "gensym-arity.eli",
+      "source": "(defmacro broken () (gensym \"left\" \"right\"))\n(broken)",
+      "error": "gensym-arity.eli:2:1: macro broken failed: gensym expects 0..1 arguments"
+    },
+    {
+      "name": "gensym-invalid-prefix",
+      "filename": "gensym-prefix.eli",
+      "source": "(defmacro broken () (gensym \"not/portable\"))\n(broken)",
+      "error": "gensym-prefix.eli:2:1: macro broken failed: invalid gensym prefix: not/portable"
+    },
+    {
+      "name": "gensym-reserved-prefix",
+      "filename": "gensym-reserved.eli",
+      "source": "(defmacro broken () (gensym \"__eliscript_private\"))\n(broken)",
+      "error": "gensym-reserved.eli:2:1: macro broken failed: invalid gensym prefix: __eliscript_private"
     },
     {
       "name": "incomplete-rest-parameter",

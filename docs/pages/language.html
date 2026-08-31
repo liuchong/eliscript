@@ -118,12 +118,12 @@
 
           <section id="macros">
             <h2>Compile-time macros</h2>
-            <pre><code>(defmacro twice (value)
-  `(+ ,value ,value))
+            <pre><code>(defmacro once (form)
+  `(let ((value$ ,form)) value$))
 
-(defun double (value)
-  (twice value))</code></pre>
-            <p><code>defmacro</code> definitions are processed in source order and removed before emission. Backquote, comma, <code>&amp;rest</code>, and <code>&amp;body</code> are supported, and every expanded form is checked by the lexical analyzer.</p>
+(defun load-once (value)
+  (once (+ value 1)))</code></pre>
+            <p><code>defmacro</code> definitions are processed in source order and removed before emission. Backquote, comma, <code>&amp;rest</code>, and <code>&amp;body</code> are supported. <code>gensym</code> and trailing-<code>$</code> template symbols create deterministic private bindings, while ordinary template symbols deliberately resolve at the call site. Every expanded form is checked by the lexical analyzer.</p>
             <div class="callout callout-coral"><p>Both compiler generations interpret the same deterministic macro subset. Unlisted host functions, editor state, files, environment variables, and processes are unavailable unless a future explicit compiler capability exposes them.</p></div>
           </section>
 

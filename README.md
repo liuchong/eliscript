@@ -38,11 +38,13 @@ The current M8 work provides:
   values, with Lisp-named Eliscript modules under `stdlib/core/`
 - stack-safe `loop`/`recur` for functions and lexical binding loops, including
   tail-position diagnostics, simultaneous pattern rebinding, and async support
+- deterministic macro-generated symbols through `gensym` and trailing `$`
+  template names, with explicit caller-capture and quote boundaries
 - structural-sharing and cross-host evidence through million-value workloads
 
-The next language boundary is macro-generated-name hygiene and portable
-protocol/core-algorithm definitions, followed by measured object/text
-migration, literal migration, host conversion, and the Emacs value bridge.
+The next language boundary is portable protocol/core-algorithm definitions,
+followed by measured object/text migration, literal migration, host conversion,
+metadata, and the Emacs value bridge.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in
@@ -122,7 +124,8 @@ The implemented language includes:
 
 - lexical functions, closures, optional and rest parameters, and nested vector
   binding patterns
-- compile-time macros with deterministic expansion
+- compile-time macros with deterministic expansion, generated symbols, and
+  explicit capture rules
 - expression-valued control flow, exceptions, async functions, and `await`
 - stack-safe function and binding iteration through tail-position `recur`
 - explicit IR lowering, structured diagnostics, and Source Map v3 output
