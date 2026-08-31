@@ -33,15 +33,15 @@ compiler modules rather than a generated tree with a convenient shape.
 
 The reviewed macOS arm64 report covers:
 
-- 246,708 bytes of maintained compiler source
+- 246,920 bytes of maintained compiler source
 - 12 programs, including one explicit requirement exercise
-- 23,168 IR nodes
+- 23,192 IR nodes
 - 9 alternating timing samples after warmup
 - exact optimized/reference agreement for every program
 
-The reviewed median is 350.294875 ms for the one-pass collector and
-536.059542 ms for the reference predicates over 80 repeated corpus scans, a
-1.530309x speedup. The decision threshold was fixed at 1.25x before recording
+The reviewed median is 243.023666 ms for the one-pass collector and
+392.398834 ms for the reference predicates over 80 repeated corpus scans, a
+1.614653x speedup. The decision threshold was fixed at 1.25x before recording
 the report. This local report supports the implementation choice; it is not a
 universal host-performance promise.
 

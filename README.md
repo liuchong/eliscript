@@ -69,6 +69,8 @@ The current M8 work provides:
 - canonical `#{...}` and `(hash-set ...)` persistent Set expressions with
   value-semantic duplicate collapse and quoted constructor syntax
 - structural-sharing and cross-host evidence through million-value workloads
+- profile-guided self-hosted compiler improvements with source-bound reports,
+  including direct binary comparison emission and complete-compiler benchmarks
 
 First-class immutable Keyword and Symbol values now have optimized and
 portable representations that share equality, hashing, Map keys, and Set

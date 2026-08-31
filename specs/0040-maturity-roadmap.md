@@ -677,21 +677,21 @@ The first profile-guided P4 compiler slice now lands in
 the self-hosted emitter collects five conditional runtime requirements in one
 IR traversal, the previous five recursive scans remain an executable semantic
 reference, and a source-bound benchmark records exact agreement plus a reviewed
-1.530309x local median speedup. Application frameworks and bundlers do not
+1.614653x local median speedup. Application frameworks and bundlers do not
 participate in this core evidence.
 Specification
 [0097-profile-guided-ir-node-kind-decisions.md](0097-profile-guided-ir-node-kind-decisions.md)
 then replaces the common linear IR node-kind scan with a module-private native
 index, freezes the registry, retains the array scan as an executable reference,
-and records exact agreement plus a reviewed 8.751834x local median speedup over
-23,148 real compiler IR nodes. Application frameworks, Vite adapters, site
+and records exact agreement plus a reviewed 11.062758x local median speedup over
+23,172 real compiler IR nodes. Application frameworks, Vite adapters, site
 generators, and publishing tools remain outside this language-core slice and
 its acceptance evidence.
 Specification
 [0098-profile-guided-emitter-indentation.md](0098-profile-guided-emitter-indentation.md)
 then replaces character-by-character indentation with source-map-aware line
 segments and one final join, retains the previous loop as an executable
-reference, and records exact text/mark agreement plus a reviewed 19.524978x
+reference, and records exact text/mark agreement plus a reviewed 13.890932x
 local median speedup. The same whole-compiler profile moves indentation out of
 the dominant paths. Application frameworks and publishing adapters remain
 outside this compiler evidence.
@@ -701,9 +701,20 @@ then uses the emitter's ordered-mark invariant for constant-time start checks
 and one-step immutable prepend. A compiler-private host specialization is
 called directly at normal emission sites while the previous complete scan and
 iterative copy remain an executable Eliscript reference. The reviewed real
-artifact corpus records exact agreement plus a 3.013590x local median speedup;
+artifact corpus records exact agreement plus a current 2.323711x local median
+speedup after the general comparison-emission optimization;
 follow-up whole-compiler sampling removes location from the dominant entries.
 Application frameworks and site tooling receive no core roadmap credit.
+Specification
+[0100-profile-guided-binary-comparison-emission.md](0100-profile-guided-binary-comparison-emission.md)
+then specializes exactly binary numeric comparisons as direct ECMAScript
+infix expressions while preserving eager argument capture for n-ary forms.
+An exact historical-baseline replay over all eleven compiler modules records a
+1.325767x complete-compiler median speedup and reduces generated JavaScript
+from 406,979 to 306,947 bytes. A broader constant-dispatch experiment was
+rejected because its complete-compiler result regressed. Application
+frameworks, Vite, bundlers, publishing, and site tooling remain application
+validation only and receive no language-core evidence or maturity credit.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

@@ -752,22 +752,26 @@
 
   (defun emit-comparison (name nodes operator)
     (require-arity name nodes 2 nil)
-    (let ((parameters (temporary-names nodes))
-          (comparisons (js-array))
-          (index 0))
-      (while (< index (1- (get parameters :length)))
-        (js-call comparisons :push
-          (str (js-nth index parameters) " " operator " "
-               (js-nth (1+ index) parameters)))
-        (setq index (1+ index)))
-      (combine
-        (js-array "(("
-         (js-call parameters :join ", ")
-         ") => ("
-         (js-call comparisons :join " && ")
-         "))("
-         (emit-arguments nodes)
-         ")"))))
+    (if (= (get nodes :length) 2)
+        (combine
+          (js-array "(" (emit-expression (js-nth 0 nodes)) " " operator " "
+           (emit-expression (js-nth 1 nodes)) ")"))
+      (let ((parameters (temporary-names nodes))
+            (comparisons (js-array))
+            (index 0))
+        (while (< index (1- (get parameters :length)))
+          (js-call comparisons :push
+            (str (js-nth index parameters) " " operator " "
+                 (js-nth (1+ index) parameters)))
+          (setq index (1+ index)))
+        (combine
+          (js-array "(("
+           (js-call parameters :join ", ")
+           ") => ("
+           (js-call comparisons :join " && ")
+           "))("
+           (emit-arguments nodes)
+           ")")))))
 
   (defun emit-distinct (name nodes)
     (require-arity name nodes 2 nil)

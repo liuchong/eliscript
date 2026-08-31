@@ -613,6 +613,27 @@
     (should (string-match-p "__eliscript_truthy" or-output))
     (should-not (equal and-output or-output))))
 
+(ert-deftest eliscript-specializes-binary-comparisons ()
+  (dolist (case '((= "===") (< "<") (<= "<=") (> ">") (>= ">=")))
+    (let* ((operator (nth 0 case))
+           (javascript-operator (nth 1 case))
+           (binary (eliscript-emitter-emit-expression
+                    (list operator '(left) '(right))))
+           (n-ary (eliscript-emitter-emit-expression
+                   (list operator '(first) '(second) '(third)))))
+      (should (equal binary
+                     (format "(left() %s right())" javascript-operator)))
+      (should-not (string-match-p "=>" binary))
+      (should (string-match-p "=>" n-ary))
+      (should (string-match-p "first()" n-ary))
+      (should (string-match-p "second()" n-ary))
+      (should (string-match-p "third()" n-ary))))
+  (let ((source
+         "(defun compare (left right third) [(= left right) (< left right third)])"))
+    (should
+     (equal (eliscript-compile-string source "comparison.eli")
+            (eliscript-tests--legacy-compile-string source "comparison.eli")))))
+
 (ert-deftest eliscript-emits-esm-imports-and-exports ()
   (let ((output
          (eliscript-compile-string

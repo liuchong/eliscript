@@ -1165,6 +1165,19 @@
         { "kind": "bun-test", "file": "tests/compiler-locate.test.mjs", "contains": "committed compiler location report matches measured sources" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "compiler.binary-comparison-emission",
+      "title": "Profile-guided binary comparison emission",
+      "status": "accepted",
+      "spec": "0100",
+      "contracts": ["Emits exactly binary numeric comparisons as direct ECMAScript infix expressions", "Preserves left-to-right one-evaluation binary operand semantics", "Retains eager evaluation of every argument for comparisons with three or more operands", "Records a source-bound alternating complete-compiler speedup against the exact pre-specialization revision", "Keeps application frameworks, UI libraries, Vite, bundlers, blog and site generators, publishing, Pages hosting, and development servers outside core goals, implementation, evidence, and maturity credit"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-specializes-binary-comparisons" },
+        { "kind": "bun-test", "file": "tests/compiler-binary-comparison.test.mjs", "contains": "binary comparison emission preserves strict argument evaluation" },
+        { "kind": "bun-test", "file": "tests/compiler-binary-comparison.test.mjs", "contains": "committed binary comparison report matches measured sources" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

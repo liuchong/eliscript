@@ -4,16 +4,16 @@ const __eliscript_truthy = (value) => value !== false && value != null;
 
 const greeting = "hello";
 function factorial(n) {
-  return (__eliscript_truthy(((__eliscript_value_1, __eliscript_value_2) => (__eliscript_value_1 <= __eliscript_value_2))(n, 1)) ? 1 : (n * factorial((n - 1))));
+  return (__eliscript_truthy((n <= 1)) ? 1 : (n * factorial((n - 1))));
 }
 function classify(n) {
-  return (__eliscript_truthy(((__eliscript_value_3, __eliscript_value_4) => (__eliscript_value_3 < __eliscript_value_4))(n, 0)) ? "negative" : (__eliscript_truthy(((__eliscript_value_5, __eliscript_value_6) => (__eliscript_value_5 === __eliscript_value_6))(n, 0)) ? "zero" : "positive"));
+  return (__eliscript_truthy((n < 0)) ? "negative" : (__eliscript_truthy((n === 0)) ? "zero" : "positive"));
 }
 function sum_to(n) {
   return ((total, current) => {
     return (() => {
       (() => {
-        while (__eliscript_truthy(((__eliscript_value_7, __eliscript_value_8) => (__eliscript_value_7 > __eliscript_value_8))(current, 0))) {
+        while (__eliscript_truthy((current > 0))) {
           ((total = (total + current)), (current = (current - 1)));
         }
         return null;

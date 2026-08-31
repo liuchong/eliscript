@@ -1,0 +1,105 @@
+{
+  "format": "eliscript-compiler-binary-comparison-benchmark",
+  "version": 1,
+  "generatedAt": "2026-08-31T22:09:06.733Z",
+  "sourceDigest": {
+    "algorithm": "sha256",
+    "files": [
+      "bootstrap/compiler/symbol.eli",
+      "bootstrap/compiler/syntax.eli",
+      "bootstrap/compiler/reader.eli",
+      "bootstrap/compiler/expander.eli",
+      "bootstrap/compiler/transient-analysis.eli",
+      "bootstrap/compiler/analyzer.eli",
+      "bootstrap/compiler/ir.eli",
+      "bootstrap/compiler/lower.eli",
+      "bootstrap/compiler/source-map.eli",
+      "bootstrap/compiler/emitter.eli",
+      "bootstrap/compiler/compiler.eli",
+      "compiler/eliscript-emitter.el",
+      "compiler/eliscript-ir-emitter.el",
+      "tools/compiler/binary-comparison-benchmark.mjs"
+    ],
+    "value": "1dbf728fb8611fe4b4fedf26802916b28e7482454c2d73b3753034ccc4d8e099"
+  },
+  "host": {
+    "runtime": "bun",
+    "runtimeVersion": "1.4.0",
+    "engine": "JavaScriptCore",
+    "platform": "darwin",
+    "architecture": "arm64",
+    "operatingSystem": "Darwin 25.6.0"
+  },
+  "baseline": {
+    "revision": "a123937b275d89e833434e84064e4e120cf5495b",
+    "root": "eliscript-baseline-a123937"
+  },
+  "corpus": {
+    "files": [
+      "bootstrap/compiler/symbol.eli",
+      "bootstrap/compiler/syntax.eli",
+      "bootstrap/compiler/reader.eli",
+      "bootstrap/compiler/expander.eli",
+      "bootstrap/compiler/transient-analysis.eli",
+      "bootstrap/compiler/analyzer.eli",
+      "bootstrap/compiler/ir.eli",
+      "bootstrap/compiler/lower.eli",
+      "bootstrap/compiler/source-map.eli",
+      "bootstrap/compiler/emitter.eli",
+      "bootstrap/compiler/compiler.eli"
+    ],
+    "sourceBytes": 246920
+  },
+  "parameters": {
+    "warmupRounds": 2,
+    "timingRounds": 6,
+    "timingSamples": 11
+  },
+  "validation": {
+    "compiledModules": 11,
+    "validSourceMaps": 11,
+    "baselineBytes": 406979,
+    "optimizedBytes": 306947,
+    "baselineChecksum": 4678062,
+    "optimizedChecksum": 4071930
+  },
+  "measurements": {
+    "baseline": {
+      "samplesMs": [
+        613.9294999999998,
+        619.2931670000003,
+        599.789166,
+        596.5682919999999,
+        630.0343750000002,
+        597.2103339999994,
+        590.9948330000007,
+        608.4537499999988,
+        591.2726249999996,
+        618.3218340000003,
+        610.5976250000003
+      ],
+      "medianMs": 608.4537499999988
+    },
+    "optimized": {
+      "samplesMs": [
+        487.673542,
+        466.16716699999984,
+        458.9446250000001,
+        458.40745800000013,
+        497.4436249999999,
+        450.086542,
+        454.4114159999999,
+        453.27629199999865,
+        461.4213749999999,
+        453.10399999999936,
+        499.7092080000002
+      ],
+      "medianMs": 458.9446250000001
+    },
+    "speedup": 1.3257672426166853
+  },
+  "decision": {
+    "minimumSpeedup": 1.15,
+    "passed": true
+  }
+}

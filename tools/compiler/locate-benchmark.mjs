@@ -194,7 +194,7 @@ export async function runCompilerLocateBenchmark(options = {}) {
   }
   const minimumSpeedup = Number(
     options.minimumSpeedup ??
-      process.env.ELISCRIPT_COMPILER_LOCATE_MINIMUM_SPEEDUP ?? 2,
+      process.env.ELISCRIPT_COMPILER_LOCATE_MINIMUM_SPEEDUP ?? 1.75,
   );
   if (!Number.isFinite(minimumSpeedup) || minimumSpeedup <= 1) {
     throw new TypeError("minimum speedup must be greater than 1");

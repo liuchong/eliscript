@@ -8,6 +8,28 @@ committed report records raw samples or bounded peak observations, host
 fingerprints, correctness checks, parameters, and a digest of the source files
 that determine the measurement.
 
+## Compiler Binary Comparison Emission
+
+Create an exact detached baseline worktree, generate both compilers, and run:
+
+```sh
+git worktree add --detach /tmp/eliscript-comparison-baseline \
+  a123937b275d89e833434e84064e4e120cf5495b
+(cd /tmp/eliscript-comparison-baseline && bun run build:bootstrap)
+bun run build:bootstrap
+bun tools/compiler/binary-comparison-benchmark.mjs \
+  --baseline-root /tmp/eliscript-comparison-baseline \
+  --output benchmarks/compiler-binary-comparison-macos-arm64.json
+git worktree remove /tmp/eliscript-comparison-baseline
+```
+
+The benchmark refuses a different baseline revision. Both generated compilers
+compile the same current eleven-module corpus with Source Maps in alternating
+order. [`compiler-binary-comparison-macos-arm64.json`](compiler-binary-comparison-macos-arm64.json)
+records source-bound byte counts, checksums, raw samples, medians, and the
+complete-compiler threshold decision. Default tests separately execute binary
+and n-ary side-effect ordering and validate the report digest.
+
 ## Compiler Ordered Source-mark Location
 
 Generate the self-hosted compiler and run the location benchmark with:

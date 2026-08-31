@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 98 specifications.
+The registry currently contains 100 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 68 |
+| Accepted design | 70 |
 | Stable design | 29 |
 | Implementation in progress | 3 |
-| Implemented | 95 |
+| Implemented | 97 |
 
 Compatibility Baseline 1 separately classifies 29 specifications as stable,
-66 as provisional, and 3 as planning. That baseline is derived from registry
+68 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -74,7 +74,10 @@ source-bound compiler profile, a one-pass runtime requirement scan checked
 against the retained five-pass reference implementation, and constant-time IR
 node-kind decisions checked against the retained linear reference.
 Source-map-aware emitter indentation now also uses line-segment assembly while
-retaining the original character loop as an executable reference.
+retaining the original character loop as an executable reference. Ordered
+source-mark location and direct binary comparison emission now remove two more
+generated hot paths while preserving independent semantic and historical
+baselines.
 
 ## Reading Paths
 
@@ -144,6 +147,8 @@ number.
 36. [0096: Profile-guided Compiler Runtime Requirement Scan](0096-profile-guided-compiler-runtime-scan.md)
 37. [0097: Profile-guided Constant-time IR Node-kind Decisions](0097-profile-guided-ir-node-kind-decisions.md)
 38. [0098: Profile-guided Source-map-aware Emitter Indentation](0098-profile-guided-emitter-indentation.md)
+39. [0099: Profile-guided Ordered Source-mark Location](0099-profile-guided-source-mark-location.md)
+40. [0100: Profile-guided Binary Comparison Emission](0100-profile-guided-binary-comparison-emission.md)
 
 ### React and Publishing
 
@@ -309,6 +314,7 @@ The schemas and change workflow are defined by specifications
 | 0097 | [Profile-guided Constant-time IR Node-kind Decisions](0097-profile-guided-ir-node-kind-decisions.md) | Accepted | Implemented |
 | 0098 | [Profile-guided Source-map-aware Emitter Indentation](0098-profile-guided-emitter-indentation.md) | Accepted | Implemented |
 | 0099 | [Profile-guided Ordered Source-mark Location](0099-profile-guided-source-mark-location.md) | Accepted | Implemented |
+| 0100 | [Profile-guided Binary Comparison Emission](0100-profile-guided-binary-comparison-emission.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

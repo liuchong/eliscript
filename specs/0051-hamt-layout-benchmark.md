@@ -194,8 +194,8 @@ The macOS arm64 baseline in
 `benchmarks/hamt-layout-macos-arm64.json` produces:
 
 - at 16 branches, no host selects Array for the mixed workload; median Array
-  mixed cost is about 1.73 times Bitmap and precise retained heap is about
-  1.57 times Bitmap
+  mixed cost is about 1.81 times Bitmap and precise retained heap is about
+  1.55 times Bitmap
 - at 24 branches, no host selects Array; median Array mixed cost is about 1.37
   times Bitmap and retained heap is about 1.22 times Bitmap
 - at 32 branches, Array wins on at least two hosts; median mixed cost is about

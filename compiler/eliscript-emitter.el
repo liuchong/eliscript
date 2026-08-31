@@ -662,18 +662,23 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
 (defun eliscript-emitter--emit-comparison (name arguments operator)
   "Emit one-evaluation n-ary comparison NAME using OPERATOR."
   (eliscript-emitter--require-arity name arguments 2)
-  (let ((parameters (mapcar (lambda (_argument)
-                              (eliscript-emitter--fresh-name))
-                            arguments))
-        comparisons)
-    (cl-loop for left on parameters
-             while (cdr left)
-             do (push (format "%s %s %s" (car left) operator (cadr left))
-                      comparisons))
-    (format "((%s) => (%s))(%s)"
-            (string-join parameters ", ")
-            (string-join (nreverse comparisons) " && ")
-            (eliscript-emitter--emit-arguments arguments))))
+  (if (= (length arguments) 2)
+      (format "(%s %s %s)"
+              (eliscript-emitter-emit-expression (nth 0 arguments))
+              operator
+              (eliscript-emitter-emit-expression (nth 1 arguments)))
+    (let ((parameters (mapcar (lambda (_argument)
+                                (eliscript-emitter--fresh-name))
+                              arguments))
+          comparisons)
+      (cl-loop for left on parameters
+               while (cdr left)
+               do (push (format "%s %s %s" (car left) operator (cadr left))
+                        comparisons))
+      (format "((%s) => (%s))(%s)"
+              (string-join parameters ", ")
+              (string-join (nreverse comparisons) " && ")
+              (eliscript-emitter--emit-arguments arguments)))))
 
 (defun eliscript-emitter--emit-distinct (name arguments)
   "Emit a one-evaluation pairwise distinct comparison for NAME ARGUMENTS."

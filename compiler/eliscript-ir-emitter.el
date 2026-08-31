@@ -684,17 +684,22 @@
 (defun eliscript-ir-emitter--emit-comparison (name nodes operator)
   "Emit one-evaluation n-ary comparison NAME over NODES using OPERATOR."
   (eliscript-emitter--require-arity name nodes 2)
-  (let ((parameters
-         (mapcar (lambda (_node) (eliscript-emitter--fresh-name)) nodes))
-        comparisons)
-    (cl-loop for left on parameters
-             while (cdr left)
-             do (push (format "%s %s %s" (car left) operator (cadr left))
-                      comparisons))
-    (format "((%s) => (%s))(%s)"
-            (string-join parameters ", ")
-            (string-join (nreverse comparisons) " && ")
-            (eliscript-ir-emitter--emit-arguments nodes))))
+  (if (= (length nodes) 2)
+      (format "(%s %s %s)"
+              (eliscript-ir-emitter-emit-expression (nth 0 nodes))
+              operator
+              (eliscript-ir-emitter-emit-expression (nth 1 nodes)))
+    (let ((parameters
+           (mapcar (lambda (_node) (eliscript-emitter--fresh-name)) nodes))
+          comparisons)
+      (cl-loop for left on parameters
+               while (cdr left)
+               do (push (format "%s %s %s" (car left) operator (cadr left))
+                        comparisons))
+      (format "((%s) => (%s))(%s)"
+              (string-join parameters ", ")
+              (string-join (nreverse comparisons) " && ")
+              (eliscript-ir-emitter--emit-arguments nodes)))))
 
 (defun eliscript-ir-emitter--emit-distinct (name nodes)
   "Emit a one-evaluation pairwise distinct comparison for NAME and NODES."

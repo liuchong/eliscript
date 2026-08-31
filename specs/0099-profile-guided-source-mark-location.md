@@ -107,15 +107,19 @@ Before timing, all 33 optimized/reference results must contain byte-identical
 text and structurally equal ordered marks. The reviewed macOS arm64 report
 records:
 
-- 246,708 bytes of maintained compiler source
+- 246,920 bytes of maintained compiler source
 - 11 compiler programs and 22 generated artifact fragments
 - 11 shifted non-zero-start cases, for 33 total cases
-- 812,106 generated text bytes and 41,191 Source Map marks
+- 612,618 generated text bytes and 41,233 Source Map marks
 - 9 alternating samples after warmup, with 500 corpus passes per sample
 
-The reviewed median is 27.209667 ms for ordered production location and
-81.998792 ms for the retained scan-and-copy reference, a 3.013590x local
-speedup. The decision threshold was fixed at 2x before recording the report.
+The current reviewed median is 28.919333 ms for ordered production location and
+67.200166 ms for the retained scan-and-copy reference, a 2.323711x local
+speedup. The maintenance threshold is 1.75x. It was recalibrated from the
+original 2x threshold after specification 0100 independently removed binary
+comparison closures from both production and reference generated code. The
+original acceptance report recorded 3.013590x; the lower threshold does not
+claim that historical run as current evidence.
 This local result supports the implementation choice; it is not a universal
 host-performance promise.
 
@@ -160,7 +164,7 @@ reference, and measured gain.
   dominant entries and leaves the private helper below 1% self time.
 - **SML-07:** The reviewed report contains source and host fingerprints, raw
   samples, medians, corpus counts, checksum, threshold, and passing decision.
-- **SML-08:** The reviewed local median speedup is at least 2x over the retained
+- **SML-08:** The current reviewed local median speedup is at least 1.75x over the retained
   reference.
 - **SML-09:** Default tests reject digest drift, malformed or incomplete
   reports, failed equivalence, and failed threshold decisions.
