@@ -116,6 +116,7 @@ number.
 24. [0078: Persistent Collection Core Exit Audit](0078-persistent-collection-core-exit-audit.md)
 25. [0079: Eliscript-authored Protocol Dispatch Policy](0079-eliscript-protocol-dispatch-policy.md)
 26. [0080: Canonical Generated Protocol Runtime](0080-canonical-generated-protocol-runtime.md)
+27. [0081: Protocol-driven Text and Keyed Object Algorithms](0081-protocol-driven-text-object.md)
 
 ### React and Publishing
 
@@ -262,6 +263,7 @@ The schemas and change workflow are defined by specifications
 | 0078 | [Persistent Collection Core Exit Audit](0078-persistent-collection-core-exit-audit.md) | Accepted | Implemented |
 | 0079 | [Eliscript-authored Protocol Dispatch Policy](0079-eliscript-protocol-dispatch-policy.md) | Accepted | Implemented |
 | 0080 | [Canonical Generated Protocol Runtime](0080-canonical-generated-protocol-runtime.md) | Accepted | Implemented |
+| 0081 | [Protocol-driven Text and Keyed Object Algorithms](0081-protocol-driven-text-object.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

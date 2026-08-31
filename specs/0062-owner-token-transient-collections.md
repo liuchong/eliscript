@@ -196,5 +196,11 @@ continue in
 Their Eliscript-authored modules and the language-level protocol, collection,
 transducer, and transient surface continue in
 [0066-eliscript-authored-core-protocol-algorithms.md](0066-eliscript-authored-core-protocol-algorithms.md).
-Portable dispatch internals, object/text migration, compiler hot paths, and
-static transient escape analysis remain open.
+Portable dispatch policy and protocol-runtime generation continue in
+[0079-portable-protocol-declarations.md](0079-portable-protocol-declarations.md)
+and
+[0080-eliscript-authored-protocol-runtime.md](0080-eliscript-authored-protocol-runtime.md).
+Protocol-driven object/text migration continues in
+[0081-protocol-driven-text-object.md](0081-protocol-driven-text-object.md).
+Compiler hot paths, persistent collection literal migration, transport-safe
+protocol representation, and static transient escape analysis remain open.

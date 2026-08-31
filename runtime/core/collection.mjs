@@ -76,6 +76,18 @@ function setConj(values, value) {
   return result;
 }
 
+function objectAssoc(values, key, value) {
+  if (typeof key !== "string") {
+    throw new TypeError("plain object association keys must be strings");
+  }
+  return { ...values, [key]: value };
+}
+
+function objectConj(values, entry) {
+  const [key, value] = readCollectionEntry(entry);
+  return objectAssoc(values, key, value);
+}
+
 function arraySequence(values) {
   return values.length === 0
     ? null
@@ -101,6 +113,69 @@ function setSequence(values) {
     ? null
     : createSequenceView(() => values[Symbol.iterator](), () => values.size);
 }
+
+function stringSequence(value) {
+  return value.length === 0
+    ? null
+    : createSequenceView(
+      () => (function* codeUnits() {
+        for (let index = 0; index < value.length; index += 1) {
+          yield value[index];
+        }
+      })(),
+      () => value.length,
+    );
+}
+
+function objectSequence(value) {
+  const keys = Object.keys(value);
+  return keys.length === 0
+    ? null
+    : createSequenceView(
+      () => (function* entries() {
+        for (const key of Object.keys(value)) {
+          yield Object.freeze([key, value[key]]);
+        }
+      })(),
+      () => Object.keys(value).length,
+    );
+}
+
+extendProtocolCategory(I_COUNTED, "string", {
+  count: (value) => value.length,
+});
+extendProtocolCategory(I_EMPTYABLE, "string", { empty: () => "" });
+extendProtocolCategory(I_LOOKUP, "string", {
+  get: (value, index, notFound = null) => indexedValue(value, index, notFound),
+});
+extendProtocolCategory(I_INDEXED, "string", { nth: indexedValue });
+extendProtocolCategory(I_SEQABLE, "string", { seq: stringSequence });
+extendProtocolCategory(I_REDUCE, "string", {
+  reduce: (value, reducer, ...initial) =>
+    reduceIterable(stringSequence(value) ?? [], reducer, ...initial),
+});
+
+extendProtocolType(I_COUNTED, Object, {
+  count: (value) => Object.keys(value).length,
+});
+extendProtocolType(I_EMPTYABLE, Object, { empty: () => ({}) });
+extendProtocolType(I_CONJ, Object, { conj: objectConj });
+extendProtocolType(I_LOOKUP, Object, {
+  get: (value, key, notFound = null) =>
+    typeof key === "string" && Object.hasOwn(value, key)
+      ? value[key]
+      : notFound,
+});
+extendProtocolType(I_ASSOCIATIVE, Object, {
+  assoc: objectAssoc,
+  contains: (value, key) =>
+    typeof key === "string" && Object.hasOwn(value, key),
+});
+extendProtocolType(I_SEQABLE, Object, { seq: objectSequence });
+extendProtocolType(I_REDUCE, Object, {
+  reduce: (value, reducer, ...initial) =>
+    reduceIterable(objectSequence(value) ?? [], reducer, ...initial),
+});
 
 extendProtocolType(I_COUNTED, Array, { count: (values) => values.length });
 extendProtocolType(I_EMPTYABLE, Array, { empty: () => [] });

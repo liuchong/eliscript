@@ -116,6 +116,7 @@ test("empty preserves logical collection categories and canonical persistent val
   const nativeArray = [1, 2];
   const nativeMap = new Map([["value", 1]]);
   const nativeSet = new Set(["value"]);
+  const nativeObject = { value: 1 };
 
   expect(empty(vector)).toBe(EMPTY_VECTOR);
   expect(empty(map)).toBe(EMPTY_MAP);
@@ -127,10 +128,13 @@ test("empty preserves logical collection categories and canonical persistent val
   expect(empty(nativeMap)).not.toBe(nativeMap);
   expect(empty(nativeSet)).toEqual(new Set());
   expect(empty(nativeSet)).not.toBe(nativeSet);
+  expect(empty("value")).toBe("");
+  expect(empty(nativeObject)).toEqual({});
+  expect(empty(nativeObject)).not.toBe(nativeObject);
   expect(nativeArray).toEqual([1, 2]);
   expect(nativeMap).toEqual(new Map([["value", 1]]));
   expect(nativeSet).toEqual(new Set(["value"]));
-  expect(() => empty({})).toThrow(ProtocolDispatchError);
+  expect(nativeObject).toEqual({ value: 1 });
 });
 
 test("conj builds persistent and native collections without mutating inputs", () => {
@@ -140,6 +144,7 @@ test("conj builds persistent and native collections without mutating inputs", ()
   const nativeArray = [1];
   const nativeMap = new Map([["old", 1]]);
   const nativeSet = new Set(["old"]);
+  const nativeObject = { old: 1 };
 
   expect([...conj(vector, 2, 3)]).toEqual([1, 2, 3]);
   expect([...vector]).toEqual([1]);
@@ -158,6 +163,8 @@ test("conj builds persistent and native collections without mutating inputs", ()
   expect(nativeMap).toEqual(new Map([["old", 1]]));
   expect(conj(nativeSet, "next")).toEqual(new Set(["old", "next"]));
   expect(nativeSet).toEqual(new Set(["old"]));
+  expect(conj(nativeObject, ["next", 2])).toEqual({ old: 1, next: 2 });
+  expect(nativeObject).toEqual({ old: 1 });
 
   let pulls = 0;
   let closed = false;
@@ -187,6 +194,7 @@ test("assoc and contains preserve key semantics and validate complete updates", 
   const set = persistentHashSet("member");
   const nativeArray = ["left", "right"];
   const nativeMap = new Map([["present", undefined]]);
+  const nativeObject = { present: undefined };
 
   expect([...assoc(vector, 1, "changed", 2, "appended")])
     .toEqual(["left", "changed", "appended"]);
@@ -209,6 +217,18 @@ test("assoc and contains preserve key semantics and validate complete updates", 
     .toEqual(new Map([["present", undefined], ["next", 2]]));
   expect(contains(nativeMap, "present")).toBe(true);
   expect(nativeMap).toEqual(new Map([["present", undefined]]));
+  const changedObject = assoc(nativeObject, "next", 2, "__proto__", 3);
+  expect(changedObject).toMatchObject({ present: undefined, next: 2 });
+  expect(Object.hasOwn(changedObject, "__proto__")).toBe(true);
+  expect(changedObject.__proto__).toBe(3);
+  expect(Object.getPrototypeOf(changedObject)).toBe(Object.prototype);
+  expect(contains(nativeObject, "present")).toBe(true);
+  expect(contains(nativeObject, "toString")).toBe(false);
+  expect(contains(nativeObject, Symbol("present"))).toBe(false);
+  expect(() => assoc(nativeObject, Symbol("next"), 2)).toThrow(
+    "plain object association keys must be strings",
+  );
+  expect(nativeObject).toEqual({ present: undefined });
   expect(() => assoc(vector, 0, "changed", 1)).toThrow(
     "assoc requires a collection followed by one or more key/value pairs",
   );
@@ -230,22 +250,27 @@ test("generic count, lookup, and indexed access cover persistent and native valu
   const set = persistentHashSet(undefined, "member");
   const nativeMap = new Map([["present", undefined]]);
   const nativeSet = new Set([undefined, "member"]);
+  const nativeObject = { present: undefined, value: 7 };
 
   expect([
     count(vector), count(map), count(set),
     count([1, 2, 3]), count(nativeMap), count(nativeSet), count(null),
-  ]).toEqual([2, 1, 2, 3, 1, 2, 0]);
+    count("A😀"), count(nativeObject),
+  ]).toEqual([2, 1, 2, 3, 1, 2, 0, 3, 2]);
   expect(get(vector, 0, "missing")).toBeUndefined();
   expect(get(vector, 7, "missing")).toBe("missing");
   expect(get(map, "present", "missing")).toBeUndefined();
   expect(get(nativeMap, "present", "missing")).toBeUndefined();
   expect(get(set, undefined, "missing")).toBeUndefined();
   expect(get(nativeSet, "absent", "missing")).toBe("missing");
+  expect(get("A😀", 1)).toBe("\ud83d");
+  expect(get(nativeObject, "present", "missing")).toBeUndefined();
+  expect(get(nativeObject, "toString", "missing")).toBe("missing");
   expect(nth(vector, 1)).toBe("value");
   expect(nth([3, 5, 8], 2)).toBe(8);
   expect(nth([], 0, "missing")).toBe("missing");
   expect(() => nth(vector, 8)).toThrow(RangeError);
-  expect(() => count({ length: 3 })).toThrow(ProtocolDispatchError);
+  expect(count({ length: 3 })).toBe(1);
 
   class InvalidCount {}
   extendProtocolType(ICounted, InvalidCount, { count: () => -1 });
@@ -260,6 +285,10 @@ test("seq returns replayable immutable logical views and immutable map entries",
   const native = [4, 5];
   const vectorView = seq(vector);
   const nativeView = seq(native);
+  const stringView = seq("A😀");
+  const objectView = seq({ left: 1, right: undefined });
+  const mutableObject = { left: 1 };
+  const mutableObjectView = seq(mutableObject);
 
   expect(vectorView).not.toBe(vector);
   expect(Object.isFrozen(vectorView)).toBe(true);
@@ -280,6 +309,13 @@ test("seq returns replayable immutable logical views and immutable map entries",
   native.push(6);
   expect([...nativeView]).toEqual([4, 5, 6]);
   expect(count(nativeView)).toBe(3);
+  expect([...stringView]).toEqual(["A", "\ud83d", "\ude00"]);
+  expect(count(stringView)).toBe(3);
+  expect([...objectView]).toEqual([["left", 1], ["right", undefined]]);
+  expect([...objectView].every(Object.isFrozen)).toBe(true);
+  mutableObject.right = 2;
+  expect([...mutableObjectView]).toEqual([["left", 1], ["right", 2]]);
+  expect(count(mutableObjectView)).toBe(2);
   expect(() => new (vectorView.constructor)()).toThrow(
     "SequenceView values must be created by seq",
   );
@@ -294,6 +330,12 @@ test("reduce follows logical sequence elements and supports explicit early termi
   expect(reduce(vector, (left, right) => left + right, 10)).toBe(30);
   expect(reduce(map, (total, entry) => total + entry[1], 0)).toBe(8);
   expect(reduce(set, (total, value) => total + value, 0)).toBe(12);
+  expect(reduce("A😀", (result, unit) => result + unit, "")).toBe("A😀");
+  expect(reduce(
+    { left: 3, right: 5 },
+    (total, entry) => total + entry[1],
+    0,
+  )).toBe(8);
   expect(reduce(new Map([["x", 7]]), (_total, entry) => {
     expect(Object.isFrozen(entry)).toBe(true);
     return entry[1];
@@ -399,6 +441,7 @@ test("native adapters are exact, realm-explicit, and prototype preserving", asyn
   const arrayPrototypeKeys = Reflect.ownKeys(Array.prototype);
   const mapPrototypeKeys = Reflect.ownKeys(Map.prototype);
   const setPrototypeKeys = Reflect.ownKeys(Set.prototype);
+  const objectPrototypeKeys = Reflect.ownKeys(Object.prototype);
   const remote = runInNewContext("[3, 5, 8]");
 
   expect(() => count(remote)).toThrow(ProtocolDispatchError);
@@ -414,6 +457,14 @@ test("native adapters are exact, realm-explicit, and prototype preserving", asyn
   expect(Reflect.ownKeys(Array.prototype)).toEqual(arrayPrototypeKeys);
   expect(Reflect.ownKeys(Map.prototype)).toEqual(mapPrototypeKeys);
   expect(Reflect.ownKeys(Set.prototype)).toEqual(setPrototypeKeys);
+  expect(Reflect.ownKeys(Object.prototype)).toEqual(objectPrototypeKeys);
+
+  class RecordLike {
+    constructor() {
+      this.value = 1;
+    }
+  }
+  expect(() => count(new RecordLike())).toThrow(ProtocolDispatchError);
 
   const fixture = fileURLToPath(
     new URL("./fixtures/collection-adapter-isolation.mjs", import.meta.url),

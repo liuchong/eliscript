@@ -41,7 +41,8 @@ For Eliscript:
 - JavaScript is the runtime platform and ESM is the module contract.
 - JavaScript functions remain callable and Eliscript functions remain ordinary
   callable JavaScript values at explicit interop boundaries.
-- Browser, React, Node.js, and Bun APIs are consumed rather than reimplemented.
+- Browser, Node.js, Bun, and optional UI-library APIs are consumed rather than
+  reimplemented.
 - Emacs remains the editor and interactive host; compiled JavaScript is an
   optional compute engine.
 
@@ -400,7 +401,7 @@ core/result      explicit success/failure data for library boundaries
 core/json        JSON encoding, decoding, and conversion diagnostics
 state/atom       explicit changing identity over immutable values
 interop/js       native constructors, predicates, and conversion
-platform/react   props, children, and event boundary adapters
+application/ui   replaceable props, children, and event boundary adapters
 platform/worker  capabilities and value-codec helpers
 ```
 
@@ -486,9 +487,10 @@ The boundary must remain low-friction:
 - property and method interop never invokes persistent collection lookup by
   accident
 
-React props and children are converted at the element boundary using focused
-adapters so application code can retain persistent values without passing
-unexpected wrappers to third-party components.
+UI-library props and children may be converted at application boundaries using
+focused adapters so application code can retain persistent values without
+passing unexpected wrappers to third-party components. These adapters are
+application evidence, not part of persistent-value semantics.
 
 Specification 0073 implements this core boundary for Array, plain object, Map,
 and Set. It adds `js-map`, `js-set`, their predicates, `to-js-object`,
@@ -854,15 +856,20 @@ with private host-reflection capabilities and byte-identical seed/self-hosted
 output. Its generated artifact becomes the canonical production runtime in
 [0080-canonical-generated-protocol-runtime.md](0080-canonical-generated-protocol-runtime.md),
 while the JavaScript facade retains only compatibility names and the host
-error type. Text/object migration and a transport-safe protocol representation
-remain open.
+error type. Protocol-driven String/Object adapters and generated text/keyed
+algorithms now land in
+[0081-protocol-driven-text-object.md](0081-protocol-driven-text-object.md),
+closing the remaining P2 algorithm migration with external-capability and
+transient-construction evidence. A transport-safe protocol representation
+remains open.
 
 ### P3: Language Integration and Migration
 
 1. Add persistent literal IR and emission.
 2. Add explicit native container constructors and predicates.
 3. Add shallow/deep conversion with cycle diagnostics.
-4. Migrate compiler, standard library, examples, React adapters, and tests.
+4. Migrate compiler, standard library, examples, application adapters, and
+   tests.
 5. Freeze the new literal behavior in the compatibility corpus.
 
 **Exit:** no maintained project depends accidentally on mutable vector or map
@@ -970,13 +977,14 @@ on the declared reference machine across 30 warm runs.
 ### PD-07: Host Interop
 
 Shallow and deep conversions preserve all supported values, reject cycles with
-an exact path, and never mutate their source. React and JavaScript package
-fixtures consume converted native values without persistent implementation
-details leaking across the boundary.
+an exact path, and never mutate their source. Replaceable UI-library and
+JavaScript package fixtures consume converted native values without persistent
+implementation details leaking across the boundary.
 
-Specification 0073 supplies the core conversion semantics and React fixture.
-This gate remains open until the maintained JavaScript package fixture and full
-supported compatibility matrix also pass.
+Specification 0073 supplies the core conversion semantics and one React-based
+application fixture. That fixture is non-normative and replaceable. This gate
+remains open until the maintained JavaScript package fixture and full supported
+compatibility matrix also pass.
 
 ### PD-08: Emacs Codec
 

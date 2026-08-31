@@ -102,8 +102,10 @@ The new modules are Eliscript-authored but are not eligible for `--portable`
 closure extraction because they use JavaScript runtime values and host
 reflection. Specification 0079 completes protocol dispatch policy without
 misclassifying Symbol slots, constructors, WeakMap state, or exceptions as
-JSON-portable values. Persistent literals, text/object migration, and static
-transient escape analysis remain later work.
+JSON-portable values. Specification 0081 completes the protocol-driven
+text/object algorithm migration. Persistent collection literals, compiler
+direct-call specialization, transport-safe protocol representation, and
+static transient escape analysis remain later work.
 
 ## Acceptance Criteria
 

@@ -902,6 +902,19 @@
         { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "public surface checker follows aliased runtime re-exports" },
         { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "canonical data text prints scalar and identifier values" }
       ]
+    },
+    {
+      "id": "stdlib.protocol-driven-text-object",
+      "title": "Protocol-driven generated text and keyed object algorithms",
+      "status": "accepted",
+      "spec": "0081",
+      "contracts": ["Adds UTF-16 String and exact ordinary-Object collection adapters without prototype mutation", "Authors text and keyed algorithms in Eliscript over collection protocols and transducers", "Preserves own string keys, undefined, value-semantic keys, immutable inputs, and safe __proto__ association", "Matches seed, self-hosted, committed, Bun, and Node artifacts with measured transient Map construction"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "generic count, lookup, and indexed access cover persistent and native values" },
+        { "kind": "bun-test", "file": "tests/core-text-object.test.mjs", "contains": "external protocol values reuse text and keyed algorithms" },
+        { "kind": "bun-test", "file": "tests/core-text-object.test.mjs", "contains": "core text/object production artifacts are fixed-point and cross-host" },
+        { "kind": "bun-test", "file": "tests/core-text-object.test.mjs", "contains": "core object transforms use transient persistent-map construction" }
+      ]
     }
   ]
 }

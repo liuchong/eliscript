@@ -1,0 +1,89 @@
+(module eliscript.core.object
+  (import "../../runtime/core/collection.mjs" :as Collection)
+  (import "../../runtime/core/transducer.mjs" :as Transducer)
+  (import "../../runtime/core/truth.mjs" isTruthy)
+  (import "../../runtime/core/value.mjs" equalValues)
+  (import "../../runtime/core/vector.mjs" EMPTY_VECTOR)
+
+  (defun entry-key (entry)
+    (Collection/nth entry 0))
+
+  (defun entry-value (entry)
+    (Collection/nth entry 1))
+
+  (defun keys (object)
+    (Transducer/into
+      EMPTY_VECTOR
+      (Transducer/mapping entry-key)
+      object))
+
+  (defun has? (object key)
+    (Collection/contains object key))
+
+  (defun assoc (object key value &rest key-values)
+    (apply Collection/assoc
+           (cons object (cons key (cons value key-values)))))
+
+  (defun key-in? (key key-list)
+    (Collection/reduce
+      key-list
+      (lambda (matched current)
+        (if (equalValues key current)
+            (Collection/reduced t)
+          matched))
+      false))
+
+  (defun dissoc (object key)
+    (if (not (has? object key))
+        object
+      (Transducer/into
+        object
+        (Transducer/filtering
+          (lambda (entry) (not (equalValues key (entry-key entry)))))
+        object)))
+
+  (defun merge (left right)
+    (Collection/reduce
+      right
+      (lambda (result entry)
+        (Collection/assoc result (entry-key entry) (entry-value entry)))
+      left))
+
+  (defun map-values (function object)
+    (Transducer/into
+      object
+      (Transducer/mapping
+        (lambda (entry)
+          [(entry-key entry) (funcall function (entry-value entry))]))
+      object))
+
+  (defun filter-values (predicate object)
+    (Transducer/into
+      object
+      (Transducer/filtering
+        (lambda (entry)
+          (isTruthy (funcall predicate (entry-value entry)))))
+      object))
+
+  (defun pick (object wanted-keys)
+    (Transducer/into
+      object
+      (Transducer/composeTransducers
+        (Transducer/filtering (lambda (key) (has? object key)))
+        (Transducer/mapping
+          (lambda (key) [key (Collection/get object key)])))
+      wanted-keys))
+
+  (defun omit (object omitted-keys)
+    (Transducer/into
+      object
+      (Transducer/filtering
+        (lambda (entry) (not (key-in? (entry-key entry) omitted-keys))))
+      object))
+
+  (defun update (object key function)
+    (Collection/assoc
+      object key (funcall function (Collection/get object key))))
+
+  (export assoc dissoc filter-values has? key-in? keys map-values merge omit
+          pick update))

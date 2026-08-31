@@ -15,7 +15,8 @@ This specification turns the generic protocol mechanism into the first shared
 collection capability layer. It defines `ICounted`, `ILookup`, `IIndexed`,
 `ISeqable`, and `IReduce`; installs direct Symbol methods on persistent Vector,
 Map, and Set values; and supplies external adapters for native JavaScript
-Array, Map, and Set values without modifying their prototypes.
+Array, Map, Set, String, and exact ordinary Object values without modifying
+their prototypes.
 
 `seq` introduces an immutable, replayable logical traversal view. Generic
 `reduce` dispatches to collection-native traversal, treats Map entries as
@@ -47,9 +48,10 @@ passing the public protocol object to the extension functions from
 implementation returning a negative, fractional, infinite, or unsafe value is
 invalid and fails at the generic boundary.
 
-Persistent Vector, Map, and Set values answer in O(1). Native Array, Map, and
-Set values read their current `length` or `size`. `null` has count zero;
-`undefined` remains distinct and has no implicit collection behavior.
+Persistent Vector, Map, and Set values answer in O(1). Native Array, String,
+Map, and Set values read their current `length` or `size`; ordinary Object
+counts own enumerable string keys. `null` has count zero; `undefined` remains
+distinct and has no implicit collection behavior.
 
 ### ILookup
 
@@ -57,18 +59,19 @@ Set values read their current `length` or `size`. `null` has count zero;
 decide whether a key is present. Stored `undefined` is therefore distinct from
 absence.
 
-- Vector and Array accept in-range non-negative integer indexes.
+- Vector, Array, and String accept in-range non-negative integer indexes.
 - Map returns the value associated with an equal key under that Map's own key
   semantics.
 - Set returns the queried member when present.
+- ordinary Object resolves only own enumerable string keys.
 - an absent or unsupported key returns `notFound`.
 
 ### IIndexed
 
 `nth(collection, index)` provides indexed access and throws `RangeError` for a
 missing or invalid index. `nth(collection, index, notFound)` returns the
-provided fallback instead. Vector and native Array implement this capability;
-Map and Set deliberately do not.
+provided fallback instead. Vector, native Array, and String implement this
+capability; Map, Set, and Object deliberately do not.
 
 ### ISeqable
 
@@ -82,8 +85,9 @@ views close over immutable roots. Native container views deliberately observe
 later host mutation; callers use a persistent conversion when they require a
 snapshot.
 
-Vector yields values in index order. Map yields frozen two-element
-`[key, value]` entries. Set yields members. `null` yields no sequence.
+Vector yields values in index order. String yields UTF-16 code units. Map and
+ordinary Object yield frozen two-element `[key, value]` entries. Set yields
+members. `null` yields no sequence.
 
 ### IReduce
 
@@ -134,18 +138,18 @@ O(1), and reduction is O(n) with O(1) reducer state apart from user results.
 ## Native Host Adapters
 
 Importing `runtime/core/collection.mjs` registers exact-type adapters for the
-current realm's Array, Map, and Set constructors. Registration writes only to
-protocol-owned tables. It does not add Symbols or string properties to any
-built-in prototype.
+current realm's Array, Map, Set, and Object constructors plus a primitive
+String category adapter. Registration writes only to protocol-owned tables.
+It does not add Symbols or string properties to any built-in prototype.
 
 Exact registration is intentionally realm-specific. A value from another
 realm does not accidentally inherit a local adapter. A host integration may
 explicitly register that realm's constructor through `extendProtocolType`.
 Named cross-realm adapters for broader host families remain future work.
 
-Strings, typed arrays, DOM collections, async iterables, and arbitrary
-iterables are not guessed into this contract. Their element and mutation
-semantics require explicit follow-up decisions.
+Typed arrays, DOM collections, async iterables, and arbitrary iterables are not
+guessed into this contract. String and ordinary Object behavior is specified
+by [0081-protocol-driven-text-object.md](0081-protocol-driven-text-object.md).
 
 ## External Collection Types
 
@@ -167,14 +171,20 @@ current Eliscript literal emission or the older array-backed
 support in portable Eliscript and dual-compiler evidence, so it remains a
 separate P2 construction step.
 
-Open P2 capabilities are:
-
-- transient protocols; `IEmptyable`, `IConj`, and `IAssociative` continue in
-  [0060-collection-construction-protocols.md](0060-collection-construction-protocols.md)
-- generic map/filter/take/drop algorithms over `IReduce`
-- transducers, `transduce`, and transient-backed `into`
-- portable Eliscript protocol declarations and direct-call specialization
-- named host adapters and persistent host conversion
+Subsequent P2 slices now provide construction protocols, owner-token
+transients, generic algorithms, transducers, Eliscript-authored protocol
+surfaces, portable dispatch policy, native conversion, and String/Object host
+adapters through specifications
+[0060](0060-collection-construction-protocols.md),
+[0062](0062-owner-token-transient-collections.md),
+[0063](0063-protocol-driven-core-algorithms.md),
+[0066](0066-eliscript-authored-core-protocol-algorithms.md),
+[0073](0073-native-javascript-container-interop.md),
+[0079](0079-portable-protocol-declarations.md),
+[0080](0080-eliscript-authored-protocol-runtime.md), and
+[0081](0081-protocol-driven-text-object.md). Persistent collection literal
+migration, compiler specialization, and a transport-safe protocol
+representation remain later compiler work.
 
 ## Acceptance Criteria
 
@@ -191,8 +201,9 @@ Open P2 capabilities are:
   key/value entries rather than value-only callbacks.
 - **CCP-06:** Reduction supports explicit and implicit initial values and stops
   at the exact reducer call returning `reduced`.
-- **CCP-07:** Native adapters leave Array, Map, and Set prototypes byte-for-byte
-  unchanged and do not match foreign realms accidentally.
+- **CCP-07:** Native adapters leave Array, Map, Set, String, and Object
+  prototypes byte-for-byte unchanged and do not match foreign realms
+  accidentally.
 - **CCP-08:** One external immutable type implements the complete capability
   set through extension tables and a standard sequence view.
 - **CCP-09:** Bun and Node.js produce identical capability reports, and an

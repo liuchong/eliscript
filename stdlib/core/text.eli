@@ -1,0 +1,103 @@
+(module eliscript.core.text
+  (import "../../runtime/core/collection.mjs" :as Collection)
+
+  (defun empty? (text)
+    (= (Collection/count text) 0))
+
+  (defun slice (start end text)
+    (let ((result "")
+          (index (if (< start 0) 0 start))
+          (limit
+           (if (> end (Collection/count text))
+               (Collection/count text)
+             end)))
+      (while (< index limit)
+        (setq result (str result (Collection/nth text index))
+              index (1+ index)))
+      result))
+
+  (defun starts-at? (prefix offset text)
+    (let ((matched
+           (and (>= offset 0)
+                (<= (+ offset (Collection/count prefix))
+                    (Collection/count text))))
+          (index 0))
+      (while (and matched (< index (Collection/count prefix)))
+        (unless (= (Collection/nth prefix index)
+                   (Collection/nth text (+ offset index)))
+          (setq matched false))
+        (setq index (1+ index)))
+      matched))
+
+  (defun starts-with? (prefix text)
+    (starts-at? prefix 0 text))
+
+  (defun ends-with? (suffix text)
+    (starts-at? suffix
+                (- (Collection/count text) (Collection/count suffix))
+                text))
+
+  (defun contains? (needle text)
+    (let ((found false)
+          (offset 0)
+          (last-offset
+           (- (Collection/count text) (Collection/count needle))))
+      (while (and (not found) (<= offset last-offset))
+        (when (starts-at? needle offset text)
+          (setq found t))
+        (setq offset (1+ offset)))
+      found))
+
+  (defun strip-prefix (prefix text)
+    (if (starts-with? prefix text)
+        (slice (Collection/count prefix) (Collection/count text) text)
+      text))
+
+  (defun strip-suffix (suffix text)
+    (if (ends-with? suffix text)
+        (slice 0 (- (Collection/count text) (Collection/count suffix)) text)
+      text))
+
+  (defun whitespace? (character)
+    (or (= character " ")
+        (= character "\t")
+        (= character "\n")
+        (= character "\r")))
+
+  (defun trim (text)
+    (let ((start 0)
+          (end (1- (Collection/count text))))
+      (while (and (<= start end)
+                  (whitespace? (Collection/nth text start)))
+        (setq start (1+ start)))
+      (while (and (>= end start)
+                  (whitespace? (Collection/nth text end)))
+        (setq end (1- end)))
+      (slice start (1+ end) text)))
+
+  (defun blank? (text)
+    (empty? (trim text)))
+
+  (defun join (separator values)
+    (get
+      (Collection/reduce
+        values
+        (lambda (state value)
+          (object
+            :first false
+            :text (str (get state :text)
+                       (if (get state :first) "" separator)
+                       value)))
+        (object :first t :text ""))
+      :text))
+
+  (defun repeat (count text)
+    (let ((result "")
+          (index 0))
+      (while (< index count)
+        (setq result (str result text)
+              index (1+ index)))
+      result))
+
+  (export blank? contains? empty? ends-with? join repeat slice starts-at?
+          starts-with? strip-prefix strip-suffix trim whitespace?))

@@ -1,0 +1,15 @@
+export {
+  blank_QMARK_ as blank,
+  contains_QMARK_ as contains,
+  empty_QMARK_ as empty,
+  ends_with_QMARK_ as endsWith,
+  join,
+  repeat,
+  slice,
+  starts_at_QMARK_ as startsAt,
+  starts_with_QMARK_ as startsWith,
+  strip_prefix as stripPrefix,
+  strip_suffix as stripSuffix,
+  trim,
+  whitespace_QMARK_ as whitespace,
+} from "./text-impl.mjs";

@@ -38,11 +38,11 @@ Eliscript already has the difficult vertical foundations:
   Map v3 output
 - a compiler written in Eliscript that reaches a byte-identical bootstrap
   fixed point
-- direct JavaScript interop, asynchronous functions, exceptions, vector
-  binding patterns, and React element lowering
+- direct JavaScript interop, asynchronous functions, exceptions, and vector
+  binding patterns, plus application-layer browser UI validation
 - optional application-level bundler integration that consumes public
   compiler output without entering the language core
-- deterministic Org publishing into a custom React application
+- deterministic Org publishing into a custom browser application
 - multi-file project builds, project graph manifests, incremental cache
   decisions, and phase timing reports
 - statically validated portable functions and a resilient Emacs-to-JavaScript
@@ -77,9 +77,8 @@ The long-term objective is:
 
 > Eliscript is a stable, self-hosted, Emacs-first functional Lisp language and
 > toolchain with persistent immutable values, direct host interop, and
-> protocols for producing standard ECMAScript modules, React interfaces,
-> programmable publishing systems, and portable high-performance Emacs
-> workloads.
+> protocols for producing standard ECMAScript modules, programmable
+> publishing systems, and portable high-performance Emacs workloads.
 
 A user should be able to start from a clean machine, write a multi-module
 Eliscript project, use JavaScript packages directly, receive source-level
@@ -125,9 +124,11 @@ management are coherent parts of the project rather than private setup.
 
 ### 5. Proven Runtime Integration
 
-Generated output is ordinary ESM. Browser, React, Org publishing, command-line
-programs, and portable Emacs workloads are proven by maintained applications,
-not only isolated compiler fixtures.
+Generated output is ordinary ESM. Browser applications, programmable
+publishing, command-line programs, and portable Emacs workloads are proven by
+maintained applications, not only isolated compiler fixtures. A proving
+application may use a replaceable UI library or bundler, but neither is part
+of the language contract.
 
 ### 6. Sustainable Engineering
 
@@ -146,8 +147,8 @@ The following boundaries remain fixed through the maturity roadmap:
 - The compiler, runtime, and standard library do not depend on Vite or any
   bundler-specific API. Application adapters may consume only public ESM, CLI,
   or host-neutral compiler boundaries.
-- React remains a library target; Eliscript does not own a reconciler or a web
-  application framework.
+- UI frameworks remain replaceable application/library targets; Eliscript
+  does not own a reconciler or a web application framework.
 - Org publishing remains an adapter over the compiler, not a mandatory part of
   the language core.
 - Portable acceleration handles explicit serializable computation, not
@@ -174,7 +175,8 @@ Clojure on the JVM and ClojureScript on JavaScript:
 - preserve an interactive development loop
 
 Eliscript applies these principles to its own constraints. JavaScript ESM,
-promises, browsers, React, Bun, and Node remain explicit platform facilities.
+promises, browsers, Bun, Node, and optional UI libraries remain explicit host
+facilities.
 Emacs retains editor identity and interaction while delegating coarse-grained
 portable computation. The concrete vector trie, HAMT, transient, transducer,
 interop, value-codec, and Emacs reinvestment design is specified in
@@ -292,7 +294,7 @@ Libraries are divided into three stability groups:
 
 - `core`: portable value and collection operations required by ordinary
   programs and the compiler
-- `platform`: explicit browser, React, worker, or host adapter facilities
+- `platform`: explicit browser, worker, UI-library, or host adapter facilities
 - `experimental`: useful APIs that are not yet in the compatibility contract
 
 Compiler intrinsics are added only when a library implementation cannot
@@ -328,7 +330,7 @@ Tests are organized by the claim they prove:
 - runtime tests against supported JavaScript hosts
 - project tests for graph, cache, path, and configuration behavior
 - integration tests for Emacs and worker workflows, plus application-level
-  React, Org, and optional bundler proofs
+  browser, Org, UI-library, and optional bundler proofs
 - property and fuzz tests for readers, expanders, analyzers, and configuration
 - scale, performance, and soak suites outside the fast development loop
 
@@ -552,7 +554,11 @@ Protocol policy then moves into maintained Eliscript in
 [0079-eliscript-protocol-dispatch-policy.md](0079-eliscript-protocol-dispatch-policy.md),
 and [0080-canonical-generated-protocol-runtime.md](0080-canonical-generated-protocol-runtime.md)
 makes that compiled output the canonical production runtime behind a
-policy-free JavaScript compatibility facade. Stack-safe function and binding
+policy-free JavaScript compatibility facade. Protocol-driven text and keyed
+object algorithms then close the remaining P2 migration in
+[0081-protocol-driven-text-object.md](0081-protocol-driven-text-object.md),
+including generated production artifacts and transient persistent-Map
+construction. Stack-safe function and binding
 iteration now lands in
 [0064-stack-safe-loop-recur.md](0064-stack-safe-loop-recur.md), with exact tail
 positions, nearest-target analysis, simultaneous pattern rebinding,
@@ -570,8 +576,16 @@ runtime APIs, equality/hash exclusion, and seed/self-hosted Bun/Node evidence.
 P1 construction steps 1-5 and their all-host exit gate now have complete
 implementation evidence through
 [0078-persistent-collection-core-exit-audit.md](0078-persistent-collection-core-exit-audit.md).
-Declared macro dependencies, object/text migration, portable dispatch policy,
-and static escape analysis remain open. Canonical printing/reading for
+Declared macro dependencies, portable dispatch policy, generated protocol
+runtime, and protocol-driven object/text algorithms now land in
+[0055-declared-macro-dependencies.md](0055-declared-macro-dependencies.md),
+[0079-portable-protocol-declarations.md](0079-portable-protocol-declarations.md),
+[0080-eliscript-authored-protocol-runtime.md](0080-eliscript-authored-protocol-runtime.md),
+and
+[0081-protocol-driven-text-object.md](0081-protocol-driven-text-object.md).
+Persistent collection literal migration, compiler specialization,
+transport-safe protocol representation, and static escape analysis remain
+open. Canonical printing/reading for
 the optimized runtime family now lands in
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md);
 portable Keyword/Symbol values and List/collection data text now land in
@@ -584,7 +598,7 @@ same-Atom reentrancy rejection. The explicit JavaScript container boundary now
 lands in
 [0073-native-javascript-container-interop.md](0073-native-javascript-container-interop.md),
 with shallow-by-default conversion, bounded deep graph traversal, sharing and
-cycle semantics, and React props evidence. Efficient portable opaque-object,
+cycle semantics, and UI props evidence. Efficient portable opaque-object,
 function, and native-Symbol identity hashing now lands in
 [0074-process-local-host-identity-hashing.md](0074-process-local-host-identity-hashing.md),
 removing the previous type-wide HAMT collision group. The first explicit M11
@@ -679,7 +693,7 @@ intrinsics.
 - collection protocols, transient builders, and composable transducers
 - documented module and export index
 - explicit browser and worker capability packages
-- a thin React package above the element compiler contract
+- documented, replaceable application-adapter boundaries above standard ESM
 - dependency-prunable portable closures for all core modules
 
 **Construction steps:**
@@ -693,7 +707,8 @@ intrinsics.
 5. Add only operations exercised by the compiler or maintained applications.
 6. Specify JSON and persistent/native conversion behavior at the JavaScript
    boundary.
-7. Move higher React conveniences into library macros and functions.
+7. Keep framework conveniences in optional application or platform packages
+   that depend only on public ESM and interop contracts.
 8. Test every core export individually, through source import, through the
    project builder, and through portable closure selection where eligible.
 9. Generate API reference data from explicit module metadata rather than
@@ -761,8 +776,9 @@ the formal maturity audit.
 
 The three required applications are:
 
-1. a multi-page Org-authored React publishing site with production build,
-   source maps, assets, and browser interaction
+1. a multi-page Org-authored browser publishing site with deterministic
+   production output, source maps, assets, and browser interaction; its UI
+   library and bundler are replaceable application choices
 2. a multi-module command-line or data-processing application using JavaScript
    package interop and the core standard library
 3. an Emacs integration that delegates two coarse-grained portable workloads
@@ -976,7 +992,7 @@ after a worker restart without losing protocol integrity.
 
 **AC-14 MUST - Source-level debugging evidence**
 
-Compiler, runtime, React event, async rejection, and worker failures in the
+Compiler, runtime, browser event, async rejection, and worker failures in the
 acceptance fixtures all identify the correct `.eli` file and source span. No
 required workflow exposes only a generated `.mjs` stack location.
 
@@ -997,11 +1013,13 @@ All three required reference applications build from public interfaces, pass
 behavioral tests, retain source maps, and contain no private compiler patches,
 copied generated compiler source, or undocumented build step.
 
-**AC-17 MUST - React and publishing proof**
+**AC-17 MUST - Browser publishing application proof**
 
 The publishing application renders multiple Org articles, navigation, assets,
-interactive React state, production output, deterministic content metadata,
-and mapped failures. A no-content change produces identical output.
+interactive application state, deterministic production output and content
+metadata, and mapped failures. It consumes only public language and compiler
+interfaces. No specific UI library or bundler is part of this criterion, and
+a no-content change produces identical output.
 
 ### F. Emacs Acceleration
 
@@ -1057,7 +1075,7 @@ the acceptance manifest.
 **AC-24 MUST - Clean-machine onboarding**
 
 A new user following only repository documentation can install prerequisites,
-build the compiler, compile and run a basic program, build the React example,
+build the compiler, compile and run a basic program, build the browser example,
 and run the full test suite in 15 minutes of active steps, excluding dependency
 download time. Every prerequisite and command is documented.
 
@@ -1065,7 +1083,8 @@ download time. Every prerequisite and command is documented.
 
 The repository contains current getting-started, language reference, macro,
 interop, project configuration, compiler architecture, Emacs mode, REPL,
-React, Org publishing, worker, troubleshooting, and contribution documents.
+browser application integration, Org publishing, optional framework adapters,
+worker, troubleshooting, and contribution documents.
 Links and executable snippets pass automated checks.
 
 **AC-26 MUST - Acceptance audit**

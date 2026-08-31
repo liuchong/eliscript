@@ -5,12 +5,13 @@
 
 This directory contains portable Eliscript functions and macros plus focused
 runtime-backed `core/` modules for semantics that need optimized host support.
-React and publishing support should be libraries here or in focused packages,
-not special cases embedded throughout the compiler.
+UI-library and publishing support should be focused application packages, not
+special cases embedded throughout the compiler or core standard library.
 
-The compiler owns only React element construction and the automatic JSX
-runtime contract. Higher-level component helpers belong here so React remains
-a library target instead of a second component framework.
+Existing JSX/React lowering is retained for application compatibility and
+verification. It does not define core language semantics, core library design,
+or the project maturity target; framework helpers belong in replaceable
+application packages.
 
 ## Bit
 
@@ -371,7 +372,8 @@ supports mixed portable/runtime List, Vector, Map, Set, native Array, Map,
 Set, and plain-object graphs. It preserves repeated source identity, rejects
 cycles with exact paths, rejects accessors without executing them, and refuses
 Map/Set conversions that would silently collapse value-equal keys or members.
-`to-js-object` is the focused React props and JavaScript options adapter.
+`to-js-object` is the focused UI props and JavaScript options adapter. A
+particular framework may consume it, but no framework defines its semantics.
 Exact semantics and cross-compiler/cross-host evidence are specified in
 [0073](../specs/0073-native-javascript-container-interop.md).
 

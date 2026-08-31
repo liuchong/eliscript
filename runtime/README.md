@@ -104,11 +104,12 @@ error type that cannot be expressed as an ordinary portable value.
 `core/collection.mjs` defines the generic collection capability layer:
 `ICounted`, `IEmptyable`, `IConj`, `ILookup`, `IAssociative`, `IIndexed`,
 `ISeqable`, and `IReduce`. Persistent Vector, Map, and Set values use direct
-Symbol slots; native Array, Map, and Set values use exact-type extension tables
-without prototype changes. Sequence views are frozen and replayable, Map
-elements are frozen entries, reduced values provide early termination, and
-construction operations preserve persistent inputs or return immutable native
-copies.
+Symbol slots; native Array, Map, Set, and ordinary Object values use exact-type
+extension tables, while primitive String uses an explicit host category.
+Adapters do not modify prototypes. Sequence views are frozen and replayable,
+keyed elements are frozen entries, reduced values provide early termination,
+and construction operations preserve persistent inputs or return immutable
+native copies.
 
 ### Transducers
 
@@ -141,10 +142,16 @@ grouping, counting, and frequencies with persistent Map results and transient
 final construction. Native and persistent collections, null, and external
 protocol extensions all use the same algorithm path.
 
-`stdlib/core/protocol.eli`, `stdlib/core/seq.eli`, and
-`stdlib/core/data.eli` provide the maintained Lisp-named Eliscript
-implementations. A transport-safe protocol representation for portable worker
-values remains later work.
+`core/text-impl.mjs` and `core/object-impl.mjs` are generated from
+`stdlib/core/text.eli` and `stdlib/core/object.eli`. Their public modules are
+camel-case re-export facades. Text indexing uses UTF-16 code units throughout;
+keyed transformations use protocols and transducer-backed `into`, selecting
+transient construction for persistent Map targets without type branches.
+
+`stdlib/core/protocol.eli`, `stdlib/core/seq.eli`, `stdlib/core/data.eli`,
+`stdlib/core/text.eli`, and `stdlib/core/object.eli` provide the maintained
+Lisp-named Eliscript implementations. A transport-safe protocol representation
+for portable worker values remains later work.
 
 ### Worker Host
 

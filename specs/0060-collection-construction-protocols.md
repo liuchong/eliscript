@@ -13,8 +13,9 @@ This specification completes the non-transient collection protocol foundation
 with `IEmptyable`, `IConj`, and `IAssociative`. Generic `empty`, `conj`,
 `assoc`, and `contains` operations now construct and update persistent Vector,
 Map, and Set values through direct Symbol methods. Exact-type native Array,
-Map, and Set adapters provide immutable-copy behavior without prototype
-modification.
+Map, Set, and ordinary Object adapters provide immutable-copy behavior without
+prototype modification; primitive String supplies only its meaningful empty
+construction.
 
 Together with 0059, the runtime can now consume and construct collections
 without representation checks in user-facing functions. This is the target
@@ -41,7 +42,9 @@ category:
 - persistent Vector returns the canonical `EMPTY_VECTOR`
 - persistent Map returns the canonical `EMPTY_MAP`
 - persistent Set returns the canonical `EMPTY_SET`
-- native Array, Map, and Set return fresh empty native containers
+- native Array, Map, Set, and ordinary Object return fresh empty native
+  containers
+- native String returns `""`
 - `null` returns `null`
 
 Canonical persistent empties maximize sharing and preserve value category.
@@ -64,6 +67,7 @@ Element semantics are representation-specific but explicit:
 - native Array appends into a fresh Array
 - native Set adds into a fresh Set
 - native Map copies the Map and associates the entry
+- ordinary Object accepts a string-keyed entry and returns a fresh Object
 
 Persistent Map and Set no-op updates retain object identity when their existing
 value or member already satisfies the update. Native adapters always return a
@@ -101,6 +105,8 @@ result is an invalid implementation and fails at the generic boundary.
   distinguishable from absence.
 - Set implements `contains` membership but deliberately has no `assoc`
   operation.
+- ordinary Object associates only own string keys, distinguishes stored
+  `undefined`, rejects Symbol association, and treats inherited keys as absent.
 
 Protocols permit operation-level partial extension, so Set can truthfully
 implement `IAssociative/contains` without pretending that keyed association is
@@ -140,7 +146,8 @@ dynamically.
 ## Native Host Adapters
 
 Importing `runtime/core/collection.mjs` registers the current realm's Array,
-Map, and Set constructors. Registration changes only private protocol tables.
+Map, Set, and Object constructors plus the primitive String category.
+Registration changes only private protocol tables.
 Import-time tests compare every built-in prototype key before and after module
 loading and verify that none of the protocol Symbols became own properties.
 
@@ -174,13 +181,19 @@ and `stdlib/sequence.eli` still use their current representations until the
 portable compiler and standard library can invoke protocols with seed and
 self-hosted parity.
 
-Open P2 work now consists of:
-
-- generic algorithms rebuilt over reduce and construction protocols
-- transducers, `transduce`, and transient-backed `into`
-- transient owner-token protocols and invalidation
-- portable Eliscript protocol declarations and compiler specialization
-- explicit persistent/native conversion and named host adapters
+Subsequent P2 slices now provide generic algorithms, transducers,
+transient-backed `into`, owner-token invalidation, Eliscript-authored protocol
+surfaces, portable dispatch policy, explicit native conversion, and named
+String/Object host adapters through specifications
+[0062](0062-owner-token-transient-collections.md),
+[0063](0063-protocol-driven-core-algorithms.md),
+[0066](0066-eliscript-authored-core-protocol-algorithms.md),
+[0073](0073-native-javascript-container-interop.md),
+[0079](0079-portable-protocol-declarations.md),
+[0080](0080-eliscript-authored-protocol-runtime.md), and
+[0081](0081-protocol-driven-text-object.md). Persistent collection literal
+migration, compiler specialization, and static transient escape analysis
+remain later work.
 
 ## Acceptance Criteria
 

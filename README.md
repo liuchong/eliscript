@@ -8,8 +8,8 @@
 # Eliscript
 
 Eliscript is an Emacs Lisp-flavored language that compiles to modern
-JavaScript and React. The seed compiler runs in plain Emacs, emits standard
-ECMAScript modules, and bootstraps a compiler written in Eliscript itself.
+JavaScript. The seed compiler runs in plain Emacs, emits standard ECMAScript
+modules, and bootstraps a compiler written in Eliscript itself.
 
 [Website](docs/index.html) | [Specifications](specs/README.md) |
 [1.0 roadmap](specs/0040-maturity-roadmap.md) |
@@ -51,6 +51,8 @@ The current M8 work provides:
 - protocol, collection, transducer, and transient APIs exposed through
   Lisp-named Eliscript modules, with sequence and keyed-data algorithm bodies
   maintained in `stdlib/core/`
+- generated protocol-driven text and keyed-object algorithms over String,
+  ordinary Object, persistent/native Map, and external capability types
 - stack-safe `loop`/`recur` for functions and lexical binding loops, including
   tail-position diagnostics, simultaneous pattern rebinding, and async support
 - deterministic macro-generated symbols through `gensym` and trailing `$`
@@ -67,16 +69,19 @@ cross-family byte parity over their common subset. Atom state references now
 separate changing application identity from immutable values while preserving
 deterministic transition and watch behavior. Explicit native-container interop
 now provides shallow-by-default conversion, deep graph conversion with sharing
-preservation, structured cycle diagnostics, and a focused React props adapter.
+preservation, structured cycle diagnostics, and a focused UI/JavaScript object
+adapter.
 Portable Result values now provide explicit success/failure data without a new
 host class or identity boundary. Portable JSON now parses strict text directly
 into persistent values and emits deterministic string-key order with Result
 errors, cycle detection, and resource bounds. Portable numeric functions now
 make Number, NaN, infinity, safe-integer, signed division, and checked-overflow
 semantics explicit without host Math calls. The persistent collection core now
-passes its complete cross-host million-value exit audit. The next language
-boundary is portable protocol dispatch policy, followed by measured
-object/text migration, literal migration, and the Emacs value bridge.
+passes its complete cross-host million-value exit audit. Protocol dispatch and
+text/object algorithms are now maintained in Eliscript and checked against
+generated production artifacts. The next language boundary is persistent
+literal migration and the Emacs value bridge, while transport-safe protocol
+representation remains open.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in
@@ -214,7 +219,7 @@ The implemented language includes:
 - expression-valued control flow, exceptions, async functions, and `await`
 - stack-safe function and binding iteration through tail-position `recur`
 - explicit IR lowering, structured diagnostics, and Source Map v3 output
-- ESM modules, JavaScript interop, React elements, and fragments
+- ESM modules, JavaScript interop, and application-level element syntax
 - statically checked portable functions and dependency-pruned builds
 - persistent collections, value semantics, and open collection protocols
 - first-class immutable Keyword and Symbol values with qualified names
@@ -382,22 +387,24 @@ arm64 with the pinned minimum Bun version in every matrix cell.
 - A self-hosted compiler maintained in Eliscript.
 - Deterministic, readable, source-mapped ESM output.
 - Persistent immutable values and protocol-oriented collection algorithms.
-- Direct JavaScript, browser, React, and package ecosystem interoperation.
+- Direct JavaScript, browser, and package ecosystem interoperation.
 - First-class Emacs editing and measurable JavaScript acceleration.
 
 ### Application Evidence
 
-React, Org publishing, and optional bundler adapters are maintained as
-application-level proving grounds. They consume public compiler and ESM
-boundaries; they do not define language semantics, compiler architecture,
-runtime behavior, or standard-library dependencies.
+React, Org publishing, and optional bundler adapters are maintained only as
+replaceable application-level proving grounds. They consume public compiler
+and ESM boundaries; they do not define language semantics, compiler
+architecture, runtime behavior, standard-library dependencies, core goals, or
+1.0 language maturity.
 
 ### Non-goals
 
 - Full compatibility with Emacs Lisp or its dynamic runtime.
 - Compiling arbitrary Emacs packages for the browser.
 - Reimplementing Emacs in JavaScript.
-- Replacing React, ESM, or host package systems with proprietary equivalents.
+- Replacing ESM, UI libraries, or host package systems with proprietary
+  equivalents.
 - Hiding JavaScript semantics where explicit interoperation is clearer.
 
 The mandatory 1.0 acceptance criteria are defined in
