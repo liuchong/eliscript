@@ -806,6 +806,17 @@
         { "kind": "bun-test", "file": "tests/atom.test.mjs", "contains": "Eliscript Atom preserves ordered single-transition state semantics" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "stdlib.javascript-container-interop",
+      "title": "Native JavaScript container interop",
+      "status": "accepted",
+      "spec": "0073",
+      "contracts": ["Keeps native and persistent container boundaries explicit with shallow conversion by default", "Deeply converts mixed supported graphs while preserving sharing and rejecting cycles or value-semantic collapse", "Rejects accessors, Symbol keys, opaque values, and resource-limit violations with structured exact-path errors", "Matches self-hosted artifacts and Bun/Node execution including a React props boundary"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/interop-js.test.mjs", "contains": "Eliscript JS interop preserves explicit host and persistent boundaries" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

@@ -280,6 +280,30 @@ part of canonical data text or portable worker values. Exact semantics and
 cross-compiler/cross-host evidence are specified in
 [0072](../specs/0072-atomic-state-references.md).
 
+## JavaScript Container Interop
+
+`interop/js.eli` defines the explicit boundary between immutable persistent
+values and native mutable JavaScript containers:
+
+```elisp
+(import "../../stdlib/interop/js.eli"
+        from-js js-array js-object to-js to-js-object)
+
+(let* ((source (js-object "items" (js-array "left" "right")))
+       (state (from-js source (js* "({deep: true})")))
+       (props (to-js-object state (js* "({deep: true})"))))
+  props)
+```
+
+`to-js` and `from-js` are shallow by default. Deep conversion is explicit and
+supports mixed portable/runtime List, Vector, Map, Set, native Array, Map,
+Set, and plain-object graphs. It preserves repeated source identity, rejects
+cycles with exact paths, rejects accessors without executing them, and refuses
+Map/Set conversions that would silently collapse value-equal keys or members.
+`to-js-object` is the focused React props and JavaScript options adapter.
+Exact semantics and cross-compiler/cross-host evidence are specified in
+[0073](../specs/0073-native-javascript-container-interop.md).
+
 ## Protocol-driven Core
 
 `core/seq.eli` and `core/data.eli` expose the current protocol-driven runtime

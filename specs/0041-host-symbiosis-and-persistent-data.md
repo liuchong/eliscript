@@ -471,6 +471,12 @@ React props and children are converted at the element boundary using focused
 adapters so application code can retain persistent values without passing
 unexpected wrappers to third-party components.
 
+Specification 0073 implements this core boundary for Array, plain object, Map,
+and Set. It adds `js-map`, `js-set`, their predicates, `to-js-object`,
+cross-realm recognition, sharing preservation, duplicate value-semantics
+checks, and bounded structured diagnostics. Final PD-07 acceptance still
+requires the maintained package fixture and complete supported host matrix.
+
 ## State and Identity
 
 Persistent values model immutable facts. Time-varying identity is represented
@@ -935,6 +941,10 @@ Shallow and deep conversions preserve all supported values, reject cycles with
 an exact path, and never mutate their source. React and JavaScript package
 fixtures consume converted native values without persistent implementation
 details leaking across the boundary.
+
+Specification 0073 supplies the core conversion semantics and React fixture.
+This gate remains open until the maintained JavaScript package fixture and full
+supported compatibility matrix also pass.
 
 ### PD-08: Emacs Codec
 

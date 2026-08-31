@@ -173,6 +173,14 @@ commit-time watch snapshots, nested transition ordering, equal-key watch
 replacement, forged identities, failure recovery, 20,000 generated operations,
 and 100,000 stack-safe swaps.
 
+The JavaScript interop suite compiles the Eliscript-authored native-container
+boundary and its persistent dependencies with both compiler generations,
+compares every artifact and Source Map byte-for-byte, and executes both outputs
+under Bun and Node. It covers cross-realm predicates, shallow and deep
+conversion, sharing and cycles, accessors and Symbol keys, duplicate
+value-semantic Map/Set entries, resource limits, a React server-rendered props
+fixture, 2,000 generated nested graphs, and a 100,000-value snapshot.
+
 The protocol suite exercises immutable protocol definitions, direct Symbol
 slots, exact prototype extensions, stable host categories, explicit defaults,
 atomic validation, and structured missing diagnostics. It proves that

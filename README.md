@@ -34,6 +34,8 @@ The current M8 work provides:
   Bun/Node round trips
 - synchronous Atom state references with validators, commit-ordered watches,
   nested transition queuing, and explicit reentrancy rejection
+- explicit shallow and deep conversion between persistent values and native
+  JavaScript Array, plain object, Map, and Set containers
 - open runtime protocols with direct and externally registered methods
 - generic collection lookup, traversal, reduction, construction, association,
   and key-presence operations
@@ -58,10 +60,12 @@ collection internals. Optimized runtime values and portable List/Vector/Map/Set
 values now have matching canonical data-text implementations, including
 cross-family byte parity over their common subset. Atom state references now
 separate changing application identity from immutable values while preserving
-deterministic transition and watch behavior. The next language boundary is the
-complete P1 exit audit, followed by portable protocol dispatch policy, measured
-object/text migration, literal migration, host conversion, and the Emacs value
-bridge.
+deterministic transition and watch behavior. Explicit native-container interop
+now provides shallow-by-default conversion, deep graph conversion with sharing
+preservation, structured cycle diagnostics, and a focused React props adapter.
+The next language boundary is the complete P1 exit audit, followed by portable
+protocol dispatch policy, measured object/text migration, literal migration,
+and the Emacs value bridge.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in
@@ -159,6 +163,18 @@ Changing identity is explicit through Atom rather than collection mutation:
   (deref counter))
 ```
 
+Persistent values cross into ordinary JavaScript only through explicit
+adapters:
+
+```elisp
+(import "../../stdlib/interop/js.eli" from-js to-js to-js-object)
+
+(let* ((state (from-js (js* "({items: ['left', 'right']})")
+                       (js* "({deep: true})")))
+       (props (to-js-object state (js* "({deep: true})"))))
+  props)
+```
+
 Runtime-backed core values use the same Lisp-facing module style:
 
 ```elisp
@@ -194,6 +210,7 @@ The implemented language includes:
 - immutable metadata on Symbols and persistent collections
 - canonical readable text for optimized and portable persistent values
 - synchronous Atom state with validators and ordered watch notifications
+- native JavaScript container conversion with shallow/deep graph semantics
 
 Eliscript deliberately differs from Emacs Lisp. It uses ECMAScript numbers,
 distinguishes `false` from `nil`, has lexical scope, and does not attempt to run

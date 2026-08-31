@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 72 specifications.
+The registry currently contains 73 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 43 |
+| Accepted design | 44 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 69 |
+| Implemented | 70 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-41 as provisional, and 3 as planning. That baseline is derived from registry
+42 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -50,9 +50,10 @@ sequence/data algorithms, stack-safe recurrence, deterministic macro-generated
 names, Lisp-named protocol/collection/transducer/transient modules, and
 Eliscript-maintained core algorithm bodies, first-class immutable Keyword and
 Symbol values, root-shared immutable metadata, portable identifier values, and
-canonical runtime plus portable List/collection data text, and synchronous
-Atom state references implemented.
-Portable dispatch internals, literal migration, host conversion, static transient
+canonical runtime plus portable List/collection data text, synchronous Atom
+state references, and explicit native JavaScript container conversion
+implemented.
+Portable dispatch internals, literal migration, static transient
 escape analysis, and the Emacs value bridge remain ahead.
 
 ## Reading Paths
@@ -103,6 +104,7 @@ number.
 16. [0070: Portable Keyword and Symbol Values](0070-portable-identifier-values.md)
 17. [0071: Canonical Portable Data Text](0071-canonical-portable-data-text.md)
 18. [0072: Atomic State References](0072-atomic-state-references.md)
+19. [0073: Native JavaScript Container Interop](0073-native-javascript-container-interop.md)
 
 ### React and Publishing
 
@@ -241,6 +243,7 @@ The schemas and change workflow are defined by specifications
 | 0070 | [Portable Keyword and Symbol Values](0070-portable-identifier-values.md) | Accepted | Implemented |
 | 0071 | [Canonical Portable Data Text](0071-canonical-portable-data-text.md) | Accepted | Implemented |
 | 0072 | [Atomic State References](0072-atomic-state-references.md) | Accepted | Implemented |
+| 0073 | [Native JavaScript Container Interop](0073-native-javascript-container-interop.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

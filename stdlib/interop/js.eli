@@ -1,0 +1,616 @@
+(module eliscript.interop.js
+  (import-portable "../persistent-list.eli"
+                   persistent-list?
+                   persistent-list-from-array
+                   persistent-list-to-array)
+  (import-portable "../persistent-vector.eli"
+                   persistent-vector?
+                   persistent-vector-count
+                   persistent-vector-from-array
+                   persistent-vector-nth)
+  (import-portable "../persistent-map.eli"
+                   persistent-map?
+                   persistent-map-assoc
+                   persistent-map-has?
+                   persistent-map-reduce)
+  (import-portable "../persistent-set.eli"
+                   persistent-set?
+                   persistent-set-conj
+                   persistent-set-has?
+                   persistent-set-reduce)
+  (import-portable "../value.eli" empty-value-map empty-value-set)
+  (import "../../runtime/core/vector.mjs" :as RuntimeVector)
+  (import "../../runtime/core/map.mjs" :as RuntimeMap)
+  (import "../../runtime/core/set.mjs" :as RuntimeSet)
+
+  (defconst interop-array-predicate (js* "Array.isArray"))
+  (defconst interop-map-predicate
+    (js* "(() => { const sentinel = Object.freeze({}); return (value) => { try { Map.prototype.has.call(value, sentinel); return true; } catch { return false; } }; })()"))
+  (defconst interop-set-predicate
+    (js* "(() => { const sentinel = Object.freeze({}); return (value) => { try { Set.prototype.has.call(value, sentinel); return true; } catch { return false; } }; })()"))
+  (defconst interop-object-predicate
+    (js* "(value) => { if (value === null || typeof value !== \"object\") return false; try { const prototype = Object.getPrototypeOf(value); return prototype === null || Object.getPrototypeOf(prototype) === null; } catch { return false; } }"))
+  (defconst interop-safe-integer-predicate (js* "Number.isSafeInteger"))
+  (defconst interop-map-factory (js* "() => new Map()"))
+  (defconst interop-set-factory (js* "() => new Set()"))
+  (defconst interop-object-factory (js* "() => ({})"))
+  (defconst interop-weak-map-factory (js* "() => new WeakMap()"))
+  (defconst interop-map-entries
+    (js* "(value) => Array.from(Map.prototype.entries.call(value))"))
+  (defconst interop-set-values
+    (js* "(value) => Array.from(Set.prototype.values.call(value))"))
+  (defconst interop-iterable-values (js* "(value) => Array.from(value)"))
+  (defconst interop-json-string (js* "JSON.stringify"))
+  (defconst interop-enumerable-own-keys
+    (js* "(value) => Reflect.ownKeys(value).filter((key) => Object.prototype.propertyIsEnumerable.call(value, key))"))
+  (defconst interop-own-data-property
+    (js* "(value, key) => { const descriptor = Object.getOwnPropertyDescriptor(value, key); return descriptor !== undefined && Object.prototype.hasOwnProperty.call(descriptor, \"value\") ? { ok: true, value: descriptor.value } : { ok: false, value: undefined }; }"))
+  (defconst interop-define-property
+    (js* "(target, key, value) => { Object.defineProperty(target, key, { value, enumerable: true, configurable: true, writable: true }); return target; }"))
+  (defconst interop-map-set
+    (js* "(target, key, value) => { Map.prototype.set.call(target, key, value); return target; }"))
+  (defconst interop-set-add
+    (js* "(target, value) => { Set.prototype.add.call(target, value); return target; }"))
+
+  (defun interop-fail (code message path &optional origin)
+    (throw
+     (object :kind "eliscript/interop-error"
+             :code code
+             :message message
+             :path path
+             :origin origin)))
+
+  (defun array? (value)
+    (funcall interop-array-predicate value))
+
+  (defun object? (value)
+    (funcall interop-object-predicate value))
+
+  (defun js-map? (value)
+    (funcall interop-map-predicate value))
+
+  (defun js-set? (value)
+    (funcall interop-set-predicate value))
+
+  (defun js-array (&rest values) values)
+
+  (defun js-object (&rest key-values)
+    (when (/= (mod (length key-values) 2) 0)
+      (interop-fail
+       "ELI-INTEROP-INVALID-ENTRY"
+       "js-object requires an even number of key/value arguments"
+       "$"))
+    (let ((result (funcall interop-object-factory))
+          (index 0))
+      (while (< index (length key-values))
+        (let ((key (nth index key-values)))
+          (when (not (= (value-type key) "string"))
+            (interop-fail
+             "ELI-INTEROP-INVALID-KEY"
+             "js-object keys must be strings"
+             (str "$[" index "]")))
+          (funcall interop-define-property
+                   result key (nth (1+ index) key-values)))
+        (setq index (+ index 2)))
+      result))
+
+  (defun js-map (&rest entries)
+    (let ((result (funcall interop-map-factory))
+          (index 0))
+      (while (< index (length entries))
+        (let ((entry (nth index entries)))
+          (when (not (and (array? entry) (= (length entry) 2)))
+            (interop-fail
+             "ELI-INTEROP-INVALID-ENTRY"
+             "js-map entries must be two-value native arrays"
+             (str "$[" index "]")))
+          (funcall interop-map-set result (nth 0 entry) (nth 1 entry)))
+        (setq index (1+ index)))
+      result))
+
+  (defun js-set (&rest values)
+    (let ((result (funcall interop-set-factory))
+          (index 0))
+      (while (< index (length values))
+        (funcall interop-set-add result (nth index values))
+        (setq index (1+ index)))
+      result))
+
+  (defun interop-option-value (options key fallback)
+    (if (not (object-has? options key))
+        fallback
+      (let ((property (funcall interop-own-data-property options key)))
+        (when (not (get property "ok" false))
+          (interop-fail
+           "ELI-INTEROP-ACCESSOR"
+           "interop option accessors are not evaluated"
+           (interop-object-path "$" key)))
+        (get property "value" nil))))
+
+  (defun interop-options (options)
+    (if (nullish? options)
+        (object :deep false :max-depth 256 :max-values 1000000)
+      (progn
+        (when (not (object? options))
+          (interop-fail
+           "ELI-INTEROP-INVALID-OPTIONS"
+           "interop options must be a plain object or nil"
+           "$"))
+        (let ((keys (funcall interop-enumerable-own-keys options))
+              (index 0))
+          (while (< index (length keys))
+            (let ((key (nth index keys)))
+              (when (not (or (= key "deep")
+                             (= key "maxDepth")
+                             (= key "maxValues")))
+                (interop-fail
+                 "ELI-INTEROP-INVALID-OPTIONS"
+                 (if (= (value-type key) "string")
+                     (str "unknown interop option: " key)
+                   "unknown interop Symbol option")
+                 "$")))
+            (setq index (1+ index))))
+        (let ((deep (interop-option-value options "deep" false))
+              (max-depth (interop-option-value options "maxDepth" 256))
+              (max-values (interop-option-value options "maxValues" 1000000)))
+        (when (not (= (value-type deep) "boolean"))
+          (interop-fail
+           "ELI-INTEROP-INVALID-OPTIONS"
+           "deep must be a boolean"
+           "$"))
+        (when (not (and (funcall interop-safe-integer-predicate max-depth)
+                        (>= max-depth 0)))
+          (interop-fail
+           "ELI-INTEROP-INVALID-OPTIONS"
+           "maxDepth must be a non-negative safe integer"
+           "$"))
+        (when (not (and (funcall interop-safe-integer-predicate max-values)
+                        (> max-values 0)))
+          (interop-fail
+           "ELI-INTEROP-INVALID-OPTIONS"
+           "maxValues must be a positive safe integer"
+           "$"))
+          (object :deep deep
+                  :max-depth max-depth
+                  :max-values max-values)))))
+
+  (defun interop-context (options direction)
+    (let ((normalized (interop-options options)))
+      (object :deep (get normalized "deep" false)
+              :max-depth (get normalized "max-depth" 256)
+              :max-values (get normalized "max-values" 1000000)
+              :count 0
+              :direction direction
+              :memo (funcall interop-weak-map-factory)
+              :active (funcall interop-weak-map-factory))))
+
+  (defun interop-step (context path depth)
+    (when (> depth (get context "max-depth" 256))
+      (interop-fail
+       "ELI-INTEROP-DEPTH-LIMIT"
+       "deep conversion exceeded maxDepth"
+       path))
+    (let ((count (1+ (get context "count" 0))))
+      (put context "count" count)
+      (when (> count (get context "max-values" 1000000))
+        (interop-fail
+         "ELI-INTEROP-VALUE-LIMIT"
+         "deep conversion exceeded maxValues"
+         path))))
+
+  (defun interop-scalar? (value)
+    (let ((type (value-type value)))
+      (or (= type "null")
+          (= type "undefined")
+          (= type "boolean")
+          (= type "number")
+          (= type "bigint")
+          (= type "string")
+          (= type "keyword")
+          (= type "symbol"))))
+
+  (defun interop-kind (value)
+    (cond
+     ((persistent-list? value) "portable-list")
+     ((persistent-vector? value) "portable-vector")
+     ((persistent-map? value) "portable-map")
+     ((persistent-set? value) "portable-set")
+     ((RuntimeVector/isPersistentVector value) "runtime-vector")
+     ((RuntimeMap/isPersistentHashMap value) "runtime-map")
+     ((RuntimeSet/isPersistentHashSet value) "runtime-set")
+     ((array? value) "host-array")
+     ((js-map? value) "host-map")
+     ((js-set? value) "host-set")
+     ((object? value) "host-object")
+     (t nil)))
+
+  (defun interop-persistent-kind? (kind)
+    (or (= kind "portable-list")
+        (= kind "portable-vector")
+        (= kind "portable-map")
+        (= kind "portable-set")
+        (= kind "runtime-vector")
+        (= kind "runtime-map")
+        (= kind "runtime-set")))
+
+  (defun interop-index-path (path index)
+    (str path "[" index "]"))
+
+  (defun interop-map-key-path (path index)
+    (str path "<key:" index ">"))
+
+  (defun interop-map-value-path (path index)
+    (str path "<value:" index ">"))
+
+  (defun interop-set-path (path index)
+    (str path "<set:" index ">"))
+
+  (defun interop-object-path (path key)
+    (str path "[" (funcall interop-json-string key) "]"))
+
+  (defun interop-convert-container (source context path convert)
+    (let ((memo (get context "memo" nil))
+          (active (get context "active" nil)))
+      (when (js-call active :has source)
+        (interop-fail
+         "ELI-INTEROP-CYCLE"
+         "deep conversion encountered a cycle"
+         path
+         (js-call active :get source)))
+      (if (js-call memo :has source)
+          (js-call memo :get source)
+        (progn
+          (js-call active :set source path)
+          (try
+            (let ((result (funcall convert)))
+              (js-call memo :set source result)
+              result)
+            (finally (js-call active :delete source)))))))
+
+  (defun interop-sequence-source (source kind)
+    (cond
+     ((= kind "portable-list")
+      (persistent-list-to-array source))
+     ((= kind "portable-vector")
+      (let ((values [])
+            (index 0))
+        (while (< index (persistent-vector-count source))
+          (js-call values :push (persistent-vector-nth source index nil))
+          (setq index (1+ index)))
+        values))
+     ((= kind "runtime-vector")
+      (funcall interop-iterable-values source))
+     (t source)))
+
+  (defun interop-map-source (source kind context path)
+    (cond
+     ((= kind "portable-map")
+      (persistent-map-reduce
+       (lambda (entries key value)
+         (js-call entries :push [key value])
+         entries)
+       []
+       source))
+     ((= kind "runtime-map")
+      (funcall interop-iterable-values source))
+     ((= kind "host-map")
+      (funcall interop-map-entries source))
+     (t
+      (let ((keys (funcall interop-enumerable-own-keys source))
+            (entries [])
+            (index 0))
+        (while (< index (length keys))
+          (let* ((key (nth index keys))
+                 (_valid-key
+                  (when (not (= (value-type key) "string"))
+                    (interop-fail
+                     "ELI-INTEROP-INVALID-KEY"
+                     "plain object keys must be strings"
+                     path)))
+                 (key-path (interop-object-path path key))
+                 (property
+                  (funcall interop-own-data-property source key)))
+            (when (not (get property "ok" false))
+              (interop-fail
+               "ELI-INTEROP-ACCESSOR"
+               "plain object accessors are not converted"
+               key-path))
+            (js-call entries :push [key (get property "value" nil)]))
+          (setq index (1+ index)))
+        entries))))
+
+  (defun interop-set-source (source kind)
+    (cond
+     ((= kind "portable-set")
+      (persistent-set-reduce
+       (lambda (values value)
+         (js-call values :push value)
+         values)
+       []
+       source))
+     ((= kind "runtime-set")
+      (funcall interop-iterable-values source))
+     (t (funcall interop-set-values source))))
+
+  (defun interop-child-to-js (value context path depth)
+    (if (get context "deep" false)
+        (interop-to-js-node value context path depth)
+      value))
+
+  (defun interop-child-from-js (value context path depth)
+    (if (get context "deep" false)
+        (interop-from-js-node value context path depth)
+      value))
+
+  (defun interop-to-js-sequence (source kind context path depth)
+    (let ((source-values (interop-sequence-source source kind))
+          (result [])
+          (index 0))
+      (while (< index (length source-values))
+        (js-call
+         result
+         :push
+         (interop-child-to-js
+          (nth index source-values)
+          context
+          (interop-index-path path index)
+          (1+ depth)))
+        (setq index (1+ index)))
+      result))
+
+  (defun interop-to-js-map (source kind context path depth)
+    (let ((entries (interop-map-source source kind context path))
+          (result (funcall interop-map-factory))
+          (index 0))
+      (while (< index (length entries))
+        (let ((entry (nth index entries)))
+          (funcall
+           interop-map-set
+           result
+           (interop-child-to-js
+            (nth 0 entry) context
+            (interop-map-key-path path index) (1+ depth))
+           (interop-child-to-js
+            (nth 1 entry) context
+            (interop-map-value-path path index) (1+ depth))))
+        (setq index (1+ index)))
+      result))
+
+  (defun interop-to-js-set (source kind context path depth)
+    (let ((values (interop-set-source source kind))
+          (result (funcall interop-set-factory))
+          (index 0))
+      (while (< index (length values))
+        (funcall
+         interop-set-add
+         result
+         (interop-child-to-js
+          (nth index values) context
+          (interop-set-path path index) (1+ depth)))
+        (setq index (1+ index)))
+      result))
+
+  (defun interop-to-js-plain-object (source context path depth)
+    (let ((entries (interop-map-source source "host-object" context path))
+          (result (funcall interop-object-factory))
+          (index 0))
+      (while (< index (length entries))
+        (let* ((entry (nth index entries))
+               (key (nth 0 entry)))
+          (funcall
+           interop-define-property
+           result key
+           (interop-child-to-js
+            (nth 1 entry) context
+            (interop-object-path path key) (1+ depth))))
+        (setq index (1+ index)))
+      result))
+
+  (defun interop-to-js-node (value context path depth)
+    (interop-step context path depth)
+    (if (interop-scalar? value)
+        value
+      (let ((kind (interop-kind value)))
+        (if (nil? kind)
+            (if (get context "deep" false)
+                (interop-fail
+                 "ELI-INTEROP-UNSUPPORTED"
+                 (str "unsupported deep to-js value: " (value-type value))
+                 path)
+              value)
+          (if (and (not (get context "deep" false))
+                   (or (= kind "host-array")
+                       (= kind "host-map")
+                       (= kind "host-set")
+                       (= kind "host-object")))
+              value
+            (interop-convert-container
+             value context path
+             (lambda ()
+               (cond
+                ((or (= kind "portable-list")
+                     (= kind "portable-vector")
+                     (= kind "runtime-vector")
+                     (= kind "host-array"))
+                 (interop-to-js-sequence value kind context path depth))
+                ((or (= kind "portable-map")
+                     (= kind "runtime-map")
+                     (= kind "host-map"))
+                 (interop-to-js-map value kind context path depth))
+                ((or (= kind "portable-set")
+                     (= kind "runtime-set")
+                     (= kind "host-set"))
+                 (interop-to-js-set value kind context path depth))
+                (t
+                 (interop-to-js-plain-object
+                  value context path depth))))))))))
+
+  (defun interop-from-js-sequence (source kind context path depth)
+    (let ((source-values (interop-sequence-source source kind))
+          (values [])
+          (index 0))
+      (while (< index (length source-values))
+        (js-call
+         values
+         :push
+         (interop-child-from-js
+          (nth index source-values) context
+          (interop-index-path path index) (1+ depth)))
+        (setq index (1+ index)))
+      (cond
+       ((= kind "portable-list") (persistent-list-from-array values))
+       ((= kind "portable-vector") (persistent-vector-from-array values))
+       (t (apply RuntimeVector/persistentVector values)))))
+
+  (defun interop-from-js-map (source kind context path depth)
+    (let ((entries (interop-map-source source kind context path))
+          (portable (= kind "portable-map"))
+          (result
+           (if (= kind "portable-map")
+               (empty-value-map)
+             RuntimeMap/EMPTY_MAP))
+          (index 0))
+      (while (< index (length entries))
+        (let* ((entry (nth index entries))
+               (key-path
+                (if (= kind "host-object")
+                    (interop-object-path path (nth 0 entry))
+                  (interop-map-key-path path index)))
+               (value-path
+                (if (= kind "host-object")
+                    (interop-object-path path (nth 0 entry))
+                  (interop-map-value-path path index)))
+               (key
+                (interop-child-from-js
+                 (nth 0 entry) context
+                 key-path (1+ depth)))
+               (item-value
+                (interop-child-from-js
+                 (nth 1 entry) context
+                 value-path (1+ depth)))
+               (present
+                (if portable
+                    (persistent-map-has? result key)
+                  (js-call result :has key))))
+          (when present
+            (interop-fail
+             "ELI-INTEROP-DUPLICATE"
+             "converted Map contains duplicate value-equal keys"
+             key-path))
+          (setq result
+                (if portable
+                    (persistent-map-assoc result key item-value)
+                  (js-call result :assoc key item-value))))
+        (setq index (1+ index)))
+      result))
+
+  (defun interop-from-js-set (source kind context path depth)
+    (let ((values (interop-set-source source kind))
+          (portable (= kind "portable-set"))
+          (result
+           (if (= kind "portable-set")
+               (empty-value-set)
+             RuntimeSet/EMPTY_SET))
+          (index 0))
+      (while (< index (length values))
+        (let* ((value
+                (interop-child-from-js
+                 (nth index values) context
+                 (interop-set-path path index) (1+ depth)))
+               (present
+                (if portable
+                    (persistent-set-has? result value)
+                  (js-call result :has value))))
+          (when present
+            (interop-fail
+             "ELI-INTEROP-DUPLICATE"
+             "converted Set contains duplicate value-equal members"
+             (interop-set-path path index)))
+          (setq result
+                (if portable
+                    (persistent-set-conj result value)
+                  (js-call result :conj value))))
+        (setq index (1+ index)))
+      result))
+
+  (defun interop-from-js-node (value context path depth)
+    (interop-step context path depth)
+    (if (interop-scalar? value)
+        value
+      (let ((kind (interop-kind value)))
+        (if (nil? kind)
+            (if (get context "deep" false)
+                (interop-fail
+                 "ELI-INTEROP-UNSUPPORTED"
+                 (str "unsupported deep from-js value: " (value-type value))
+                 path)
+              value)
+          (if (and (not (get context "deep" false))
+                   (interop-persistent-kind? kind))
+              value
+            (interop-convert-container
+             value context path
+             (lambda ()
+               (cond
+                ((or (= kind "portable-list")
+                     (= kind "portable-vector")
+                     (= kind "runtime-vector")
+                     (= kind "host-array"))
+                 (interop-from-js-sequence value kind context path depth))
+                ((or (= kind "portable-map")
+                     (= kind "runtime-map")
+                     (= kind "host-map")
+                     (= kind "host-object"))
+                 (interop-from-js-map value kind context path depth))
+                (t
+                 (interop-from-js-set
+                  value kind context path depth))))))))))
+
+  (defun interop-to-js-object-map (source kind context path depth)
+    (let ((entries (interop-map-source source kind context path))
+          (result (funcall interop-object-factory))
+          (index 0))
+      (while (< index (length entries))
+        (let* ((entry (nth index entries))
+               (key (nth 0 entry)))
+          (when (not (= (value-type key) "string"))
+            (interop-fail
+             "ELI-INTEROP-INVALID-KEY"
+             "to-js-object requires string Map keys"
+             (interop-map-key-path path index)))
+          (funcall
+           interop-define-property
+           result key
+           (interop-child-to-js
+            (nth 1 entry) context
+            (interop-object-path path key) (1+ depth))))
+        (setq index (1+ index)))
+      result))
+
+  (defun to-js (value &optional options)
+    (interop-to-js-node value (interop-context options "to-js") "$" 0))
+
+  (defun to-js-object (value &optional options)
+    (let* ((context (interop-context options "to-js-object"))
+           (kind (interop-kind value)))
+      (interop-step context "$" 0)
+      (when (not (or (= kind "portable-map")
+                     (= kind "runtime-map")
+                     (= kind "host-map")
+                     (= kind "host-object")))
+        (interop-fail
+         "ELI-INTEROP-UNSUPPORTED"
+         "to-js-object requires a persistent Map, native Map, or plain object"
+         "$"))
+      (interop-convert-container
+       value context "$"
+       (lambda ()
+         (if (= kind "host-object")
+             (interop-to-js-plain-object value context "$" 0)
+           (interop-to-js-object-map value kind context "$" 0))))))
+
+  (defun from-js (value &optional options)
+    (interop-from-js-node value (interop-context options "from-js") "$" 0))
+
+  (export array? from-js js-array js-map js-map? js-object js-set js-set?
+          object? to-js to-js-object))

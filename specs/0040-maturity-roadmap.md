@@ -564,7 +564,15 @@ the optimized runtime family now lands in
 portable Keyword/Symbol values and List/collection data text now land in
 [0070-portable-identifier-values.md](0070-portable-identifier-values.md) and
 [0071-canonical-portable-data-text.md](0071-canonical-portable-data-text.md).
-The complete P1 all-host exit audit remains open before literal migration.
+Synchronous state identity now lands in
+[0072-atomic-state-references.md](0072-atomic-state-references.md), with
+validators, ordered watch snapshots, nested transition queuing, and explicit
+same-Atom reentrancy rejection. The explicit JavaScript container boundary now
+lands in
+[0073-native-javascript-container-interop.md](0073-native-javascript-container-interop.md),
+with shallow-by-default conversion, bounded deep graph traversal, sharing and
+cycle semantics, and React props evidence. The complete P1 all-host exit audit
+remains open before literal migration.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 
