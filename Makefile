@@ -19,6 +19,7 @@ test: check-contracts
 		tests/bootstrap-ir.test.mjs tests/bootstrap-emitter.test.mjs \
 		tests/compiler-runtime-scan.test.mjs \
 		tests/compiler-ir-kind.test.mjs \
+		tests/compiler-indent.test.mjs \
 		tests/bootstrap-compiler.test.mjs tests/loop-recur.test.mjs \
 		tests/macro-generated-names.test.mjs \
 		tests/worker-runtime.test.mjs \

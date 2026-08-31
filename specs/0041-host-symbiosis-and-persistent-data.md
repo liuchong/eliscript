@@ -954,16 +954,24 @@ loop escape with seed/self-hosted agreement. Specification
 [0096-profile-guided-compiler-runtime-scan.md](0096-profile-guided-compiler-runtime-scan.md)
 adds the first source-bound compiler profile, replaces five recursive emitter
 runtime-link scans with one production traversal, retains the five predicates
-as an executable reference, and records a reviewed 1.537107x local median
+as an executable reference, and records a reviewed 1.518058x local median
 speedup.
 Specification
 [0097-profile-guided-ir-node-kind-decisions.md](0097-profile-guided-ir-node-kind-decisions.md)
 adds a frozen node-kind registry and module-private native membership index for
 production IR validation, retains the linear scan as an executable reference,
-and records exact agreement plus a reviewed 9.263952x local median speedup over
+and records exact agreement plus a reviewed 8.890869x local median speedup over
 the maintained compiler corpus. The native index is compiler-internal host
 symbiosis, not a language collection or standard-library dependency. Broader
 compiler hot-path review remains required before P4 exits.
+Specification
+[0098-profile-guided-emitter-indentation.md](0098-profile-guided-emitter-indentation.md)
+replaces repeated character string growth with LF-delimited source slices,
+translates Source Map marks through one monotonic cursor, retains the original
+character loop as an executable reference, and records a reviewed 20.860462x
+local median speedup. Follow-up whole-compiler sampling moves indentation out
+of the dominant paths. Broader compiler and standard-library hot-path review
+remains required before P4 exits.
 
 ### P5: Emacs Value Bridge
 

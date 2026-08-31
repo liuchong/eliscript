@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 97 specifications.
+The registry currently contains 98 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 67 |
+| Accepted design | 68 |
 | Stable design | 29 |
 | Implementation in progress | 3 |
-| Implemented | 94 |
+| Implemented | 95 |
 
 Compatibility Baseline 1 separately classifies 29 specifications as stable,
-65 as provisional, and 3 as planning. That baseline is derived from registry
+66 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -73,6 +73,8 @@ stabilizes the explicit `js-array`/`js-object` host boundary. P4 now also has a
 source-bound compiler profile, a one-pass runtime requirement scan checked
 against the retained five-pass reference implementation, and constant-time IR
 node-kind decisions checked against the retained linear reference.
+Source-map-aware emitter indentation now also uses line-segment assembly while
+retaining the original character loop as an executable reference.
 
 ## Reading Paths
 
@@ -141,6 +143,7 @@ number.
 35. [0092: Persistent Set Source Syntax](0092-persistent-set-source-syntax.md)
 36. [0096: Profile-guided Compiler Runtime Requirement Scan](0096-profile-guided-compiler-runtime-scan.md)
 37. [0097: Profile-guided Constant-time IR Node-kind Decisions](0097-profile-guided-ir-node-kind-decisions.md)
+38. [0098: Profile-guided Source-map-aware Emitter Indentation](0098-profile-guided-emitter-indentation.md)
 
 ### React and Publishing
 
@@ -304,6 +307,7 @@ The schemas and change workflow are defined by specifications
 | 0095 | [Stable Persistent Value and Explicit Host Container Boundary](0095-stable-persistent-host-container-boundary.md) | Stable | Implemented |
 | 0096 | [Profile-guided Compiler Runtime Requirement Scan](0096-profile-guided-compiler-runtime-scan.md) | Accepted | Implemented |
 | 0097 | [Profile-guided Constant-time IR Node-kind Decisions](0097-profile-guided-ir-node-kind-decisions.md) | Accepted | Implemented |
+| 0098 | [Profile-guided Source-map-aware Emitter Indentation](0098-profile-guided-emitter-indentation.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

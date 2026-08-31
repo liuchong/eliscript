@@ -61,7 +61,7 @@
         (setq index (1+ index)))
       (combine joined)))
 
-  (defun indent (fragment)
+  (defun reference-indent (fragment)
     (let* ((input (as-fragment fragment))
            (source (get input :text))
            (source-marks (get input :marks))
@@ -85,6 +85,46 @@
           (setq line-start (= code 10))
           (setq index (1+ index))))
       (make-fragment text marks)))
+
+  (defun indent (fragment)
+    (let* ((input (as-fragment fragment))
+           (source (get input :text))
+           (source-marks (get input :marks))
+           (text-parts (js-array))
+           (marks (js-array))
+           (source-length (get source :length))
+           (output-length 0)
+           (source-index 0)
+           (mark-index 0)
+           (mark-count (get source-marks :length)))
+      (while (< source-index source-length)
+        (let* ((newline-index (js-call source :indexOf "\n" source-index))
+               (segment-end
+                (if (= newline-index -1)
+                    source-length
+                  (1+ newline-index)))
+               (indented (not (= (js-call source :charCodeAt source-index) 10))))
+          (when indented
+            (js-call text-parts :push "  ")
+            (setq output-length (+ output-length 2)))
+          (while (and (< mark-index mark-count)
+                      (>= (get (js-nth mark-index source-marks) :offset)
+                          source-index)
+                      (< (get (js-nth mark-index source-marks) :offset)
+                         segment-end))
+            (let ((mark (js-nth mark-index source-marks)))
+              (js-call marks :push
+                (js-object
+                  :offset (+ output-length
+                             (- (get mark :offset) source-index))
+                  :span (get mark :span))))
+            (setq mark-index (1+ mark-index)))
+          (js-call text-parts :push
+            (js-call source :slice source-index segment-end))
+          (setq output-length
+            (+ output-length (- segment-end source-index)))
+          (setq source-index segment-end)))
+      (make-fragment (js-call text-parts :join "") marks)))
 
   (defun locate (node output)
     (let* ((fragment (as-fragment output))
@@ -1553,8 +1593,11 @@
           generated-name))))
 
   (export
+    indent
+    reference-indent
     emit-expression
     emit-top-level
+    emit-module-artifact
     emit-module
     emit-module-with-source-map
     runtime-requirements

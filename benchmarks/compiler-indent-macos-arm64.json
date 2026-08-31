@@ -1,7 +1,7 @@
 {
-  "format": "eliscript-compiler-runtime-scan-benchmark",
+  "format": "eliscript-compiler-indent-benchmark",
   "version": 1,
-  "generatedAt": "2026-08-31T21:02:21.360Z",
+  "generatedAt": "2026-08-31T21:02:02.487Z",
   "sourceDigest": {
     "algorithm": "sha256",
     "files": [
@@ -16,9 +16,9 @@
       "bootstrap/compiler/source-map.eli",
       "bootstrap/compiler/emitter.eli",
       "bootstrap/compiler/compiler.eli",
-      "tools/compiler/runtime-scan-benchmark.mjs"
+      "tools/compiler/indent-benchmark.mjs"
     ],
-    "value": "d65e5c4e781476e3a59efb2e7bf028957f52b038c9a6ede7c3034a11bd0f31ec"
+    "value": "975ddd24ea4ee05f5ce951b10d50776d7183266badb3cacd622d2d4b28845b27"
   },
   "host": {
     "runtime": "bun",
@@ -43,52 +43,55 @@
       "bootstrap/compiler/compiler.eli"
     ],
     "sourceBytes": 245992,
-    "programs": 12,
-    "irNodes": 23128
+    "programs": 11,
+    "fragments": 22,
+    "boundaryFragments": 10,
+    "generatedBytes": 405983,
+    "marks": 20577
   },
   "parameters": {
-    "warmupIterations": 20,
-    "timingIterations": 80,
+    "warmupIterations": 5,
+    "timingIterations": 20,
     "timingSamples": 9
   },
   "validation": {
     "equivalent": true,
-    "programs": 12,
-    "checksum": 31
+    "fragments": 32,
+    "checksum": 770152396
   },
   "measurements": {
     "optimized": {
       "samplesMs": [
-        285.583708,
-        304.26816699999995,
-        315.07833300000016,
-        330.5027500000001,
-        334.5820410000001,
-        352.4319579999992,
-        361.54925000000003,
-        367.81337500000063,
-        375.0167499999998
+        13.933999999999997,
+        13.126582999999982,
+        13.883832999999981,
+        13.823167000000012,
+        12.869541000000027,
+        13.687166999999818,
+        13.138582999999926,
+        12.830375000000004,
+        12.4953330000003
       ],
-      "medianMs": 334.5820410000001
+      "medianMs": 13.138582999999926
     },
     "reference": {
       "samplesMs": [
-        429.686375,
-        445.9882499999999,
-        465.27537500000017,
-        478.4022500000001,
-        507.9147920000005,
-        513.4992080000002,
-        541.4217499999995,
-        535.695917,
-        540.9316670000007
+        285.63037499999996,
+        271.937084,
+        268.0244590000001,
+        276.06008399999996,
+        272.52879200000007,
+        275.961,
+        274.1969590000001,
+        273.455833,
+        274.076916
       ],
-      "medianMs": 507.9147920000005
+      "medianMs": 274.076916
     },
-    "speedup": 1.518057545712683
+    "speedup": 20.86046234970708
   },
   "decision": {
-    "minimumSpeedup": 1.25,
+    "minimumSpeedup": 10,
     "passed": true
   }
 }

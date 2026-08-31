@@ -1141,6 +1141,18 @@
         { "kind": "bun-test", "file": "tests/compiler-ir-kind.test.mjs", "contains": "committed compiler IR kind report matches measured sources" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "compiler.source-map-aware-indentation",
+      "title": "Profile-guided source-map-aware emitter indentation",
+      "status": "accepted",
+      "spec": "0098",
+      "contracts": ["Builds indented output from LF-delimited source slices and one final join", "Preserves exact text plus ordered and duplicate Source Map mark offsets", "Retains the original character and repeated-string-growth implementation as an independent semantic reference", "Requires exact optimized/reference agreement over maintained self-hosted compiler output and explicit line boundaries", "Keeps application frameworks, UI libraries, Vite, bundlers, site generators, and publishing outside core implementation and evidence"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/compiler-indent.test.mjs", "contains": "chunked compiler indentation matches its character reference" },
+        { "kind": "bun-test", "file": "tests/compiler-indent.test.mjs", "contains": "committed compiler indentation report matches measured sources" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

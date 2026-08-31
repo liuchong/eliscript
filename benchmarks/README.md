@@ -8,6 +8,30 @@ committed report records raw samples or bounded peak observations, host
 fingerprints, correctness checks, parameters, and a digest of the source files
 that determine the measurement.
 
+## Compiler Source-map-aware Indentation
+
+Generate the self-hosted compiler and run the indentation benchmark with:
+
+```sh
+bun run build:bootstrap
+bun run benchmark:compiler-indent
+```
+
+The benchmark compiles every maintained self-hosted compiler module, partitions
+the real generated JavaScript into declaration blocks, and compares the
+production line-segment builder with the retained character-by-character
+reference. It requires byte-identical text and exact Source Map mark offsets
+over the full corpus and explicit line-boundary cases before recording timing.
+
+```sh
+bun tools/compiler/indent-benchmark.mjs \
+  --output benchmarks/compiler-indent-macos-arm64.json
+```
+
+[`compiler-indent-macos-arm64.json`](compiler-indent-macos-arm64.json) records
+the source-bound evidence. Default tests verify its digest, equivalence result,
+corpus counts, raw samples, and threshold decision without rerunning timing.
+
 ## Compiler IR Node-kind Decisions
 
 Generate the self-hosted compiler and run the IR node-kind benchmark with:
