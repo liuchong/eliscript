@@ -148,6 +148,10 @@ The following boundaries remain fixed through the maturity roadmap:
   or host-neutral compiler boundaries.
 - UI frameworks remain replaceable application/library targets; Eliscript
   does not own a reconciler or a web application framework.
+- Existing React-specific forms, IR nodes, and Vite adapters are compatibility-
+  tracked application extensions, not core language evidence. Before 1.0 they
+  must be removable or replaceable without changing the core conformance
+  corpus, bootstrap fixed point, runtime, or standard library.
 - Org publishing remains an adapter over the compiler, not a mandatory part of
   the language core.
 - Vite, React, blog generators, site generators, Pages hosting, and other
@@ -443,8 +447,8 @@ surfaces unless it follows the stable compatibility-change process.
 
 ### M8: Language Contract Closure (8-12 weeks)
 
-**Objective:** Finish the small language needed for real applications, then
-freeze the core surface against accidental changes.
+**Objective:** Finish the small, general-purpose hosted language contract,
+then freeze the core surface against accidental changes.
 
 **Deliverables:**
 
@@ -475,8 +479,8 @@ freeze the core surface against accidental changes.
 8. Run all stable fixtures through execution, not emission comparison alone.
 
 **Exit gate:** The stable language reference has no unresolved semantic
-question required by the maintained applications, and seed/self-hosted results
-match across the complete stable corpus.
+question in the complete core corpus, and seed/self-hosted results match across
+that corpus. Application frameworks cannot add requirements to this gate.
 
 **M8 status:** Underway since 2026-08-28. The first provisional slice is the
 32-way persistent vector trie in
@@ -677,21 +681,21 @@ The first profile-guided P4 compiler slice now lands in
 the self-hosted emitter collects five conditional runtime requirements in one
 IR traversal, the previous five recursive scans remain an executable semantic
 reference, and a source-bound benchmark records exact agreement plus a reviewed
-1.683525x local median speedup. Application frameworks and bundlers do not
+1.708280x local median speedup. Application frameworks and bundlers do not
 participate in this core evidence.
 Specification
 [0097-profile-guided-ir-node-kind-decisions.md](0097-profile-guided-ir-node-kind-decisions.md)
 then replaces the common linear IR node-kind scan with a module-private native
 index, freezes the registry, retains the array scan as an executable reference,
-and records exact agreement plus a reviewed 10.963980x local median speedup over
-23,192 real compiler IR nodes. Application frameworks, Vite adapters, site
+and records exact agreement plus a reviewed 10.767920x local median speedup over
+23,216 real compiler IR nodes. Application frameworks, Vite adapters, site
 generators, and publishing tools remain outside this language-core slice and
 its acceptance evidence.
 Specification
 [0098-profile-guided-emitter-indentation.md](0098-profile-guided-emitter-indentation.md)
 then replaces character-by-character indentation with source-map-aware line
 segments and one final join, retains the previous loop as an executable
-reference, and records exact text/mark agreement plus a reviewed 14.848510x
+reference, and records exact text/mark agreement plus a reviewed 13.948266x
 local median speedup. The same whole-compiler profile moves indentation out of
 the dominant paths. Application frameworks and publishing adapters remain
 outside this compiler evidence.
@@ -701,7 +705,7 @@ then uses the emitter's ordered-mark invariant for constant-time start checks
 and one-step immutable prepend. A compiler-private host specialization is
 called directly at normal emission sites while the previous complete scan and
 iterative copy remain an executable Eliscript reference. The reviewed real
-artifact corpus records exact agreement plus a current 2.337552x local median
+artifact corpus records exact agreement plus a current 2.376061x local median
 speedup after the general comparison-emission optimization;
 follow-up whole-compiler sampling removes location from the dominant entries.
 Application frameworks and site tooling receive no core roadmap credit.
@@ -710,8 +714,8 @@ Specification
 then specializes exactly binary numeric comparisons as direct ECMAScript
 infix expressions while preserving eager argument capture for n-ary forms.
 An exact historical-baseline replay over all eleven compiler modules records a
-1.501172x complete-compiler median speedup and reduces generated JavaScript
-from 407,675 to 307,643 bytes. A broader constant-dispatch experiment was
+1.646111x complete-compiler median speedup and reduces generated JavaScript
+from 409,281 to 309,249 bytes. A broader constant-dispatch experiment was
 rejected because its complete-compiler result regressed. Application
 frameworks, Vite, bundlers, publishing, and site tooling remain application
 validation only and receive no language-core evidence or maturity credit.
@@ -719,11 +723,19 @@ Specification
 [0101-profile-guided-reader-character-classification.md](0101-profile-guided-reader-character-classification.md)
 then replaces generated whitespace and delimiter `or` closure chains with two
 bounded compiler-private predicates while retaining the Eliscript algorithms
-as executable references. The reviewed real-source trace records a 5.377091x
+as executable references. The reviewed real-source trace records a 5.298507x
 predicate median speedup, and the exact historical-baseline replay records a
-1.131204x complete-compiler median speedup with byte-identical ESM and Source
+1.236266x complete-compiler median speedup with byte-identical ESM and Source
 Maps. Application frameworks and build tools remain absent from the core
 implementation, corpus, decision, and roadmap credit.
+Specification
+[0102-profile-guided-source-map-cursors.md](0102-profile-guided-source-map-cursors.md)
+then replaces complete generated/source position scans with ordered private
+cursors while retaining both Eliscript scans as executable references. The
+reviewed 20,658-mark compiler corpus records a 4.479467x combined cursor median
+speedup and a 1.153237x complete-compiler median speedup against the exact
+pre-specialization revision. ESM and Source Maps remain byte-identical, and no
+application framework or build tool participates in the evidence.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 
@@ -792,9 +804,9 @@ build, and debug a project from Emacs using documented project commands.
 
 ### M11: Standard and Platform Libraries (8-12 weeks)
 
-**Objective:** Supply a coherent small library surface sufficient for the
-reference applications without turning convenience functions into compiler
-intrinsics.
+**Objective:** Supply a coherent small library surface justified by language
+semantics, compiler needs, portable workloads, and reusable host boundaries
+without turning application conveniences into compiler intrinsics.
 
 **Deliverables:**
 
@@ -814,7 +826,8 @@ intrinsics.
    extensible JavaScript dispatch.
 3. Implement owner-token transient builders and transducer-based pipelines.
 4. Classify exports as core, platform, or experimental.
-5. Add only operations exercised by the compiler or maintained applications.
+5. Add only operations exercised by the compiler, core conformance corpus, or
+   maintained portable workloads.
 6. Specify JSON and persistent/native conversion behavior at the JavaScript
    boundary.
 7. Keep framework conveniences in optional application or platform packages
@@ -824,9 +837,8 @@ intrinsics.
 9. Generate API reference data from explicit module metadata rather than
    scraping implementation text.
 
-**Exit gate:** The maintained applications contain no private replacement for
-a generally required core operation, and every stable export has behavioral
-and portability evidence.
+**Exit gate:** Every stable export has behavioral and portability evidence and
+is justified independently of any framework, publishing tool, or site.
 
 **M11 early implementation:** Portable Result records and combinators now land
 in [0075-portable-result-values.md](0075-portable-result-values.md), and the
@@ -871,44 +883,52 @@ input, large projects, long-lived use, and hostile project boundaries.
 **Exit gate:** All quantitative reliability and performance requirements in
 the final acceptance matrix pass without an unexplained waiver.
 
-### M13: Real-World Proving and Acceptance (6-10 weeks)
+### M13: Core Acceptance and Application Validation (6-10 weeks)
 
-**Objective:** Prove the complete system through maintained use, then perform
-the formal maturity audit.
+**Objective:** Perform the formal language-core maturity audit, then exercise
+the public boundaries through separately reported application validation.
 
 **Deliverables:**
 
-- three maintained reference applications
+- a complete core acceptance corpus and report
 - one clean-machine onboarding exercise
 - one compatibility migration rehearsal
 - complete architecture, language, tools, library, and troubleshooting docs
 - machine-readable and human-readable 1.0 acceptance reports
 
-The three required applications are:
+The non-blocking application validation set may include:
 
 1. a multi-page Org-authored browser publishing site with deterministic
    production output, source maps, assets, and browser interaction; its UI
    library and bundler are replaceable application choices
 2. a multi-module command-line or data-processing application using JavaScript
    package interop and the core standard library
-3. an Emacs integration that delegates two coarse-grained portable workloads
-   to the worker and safely applies results in the editor
+3. an Emacs integration that delegates coarse-grained portable workloads to
+   the worker and safely applies results in the editor
+
+These applications are practical consumer checks, not language-core
+deliverables. Their framework, publishing, hosting, or bundling results do not
+contribute to core milestone completion or the 1.0 acceptance decision. The
+Emacs acceleration contract is accepted independently by AC-18 and AC-19.
 
 **Construction steps:**
 
-1. Build every application only through public commands and documented APIs.
-2. Keep them in continuous tests and use them during ordinary development.
-3. Record all missing APIs and remove application-local compiler workarounds.
-4. Follow the getting-started guide on a clean supported environment and fix
+1. Run the complete core acceptance corpus through public commands and
+   documented APIs.
+2. Follow the getting-started guide on a clean supported environment and fix
    every undocumented prerequisite.
-5. Rebuild a corpus written against the frozen compatibility baseline and
+3. Rebuild a corpus written against the frozen compatibility baseline and
    document any intentional migration.
-6. Run the complete acceptance matrix and retain exact environment metadata.
-7. Resolve every mandatory failure and rerun the whole matrix from a clean
+4. Run the complete acceptance matrix and retain exact environment metadata.
+5. Resolve every mandatory failure and rerun the whole matrix from a clean
    checkout.
+6. Run application validations separately through public output boundaries;
+   record failures as consumer feedback without converting a framework or site
+   requirement into a core criterion.
 
-**Exit gate:** Every mandatory acceptance criterion below passes in one clean,
-traceable acceptance run.
+**Exit gate:** Every mandatory core acceptance criterion below passes in one
+clean, traceable acceptance run. Application validation status is reported but
+cannot block or satisfy this gate.
 
 ## Construction Protocol
 
@@ -1047,15 +1067,16 @@ complete shared conformance corpus.
 **AC-06 MUST - Self-hosted authority**
 
 Single-file builds, project builds, portable builds, project reports, and the
-three reference applications can all use the self-hosted compiler. No normal
-user workflow requires a compiler feature available only in the seed.
+complete core conformance corpus can all use the self-hosted compiler. No
+language-core workflow requires a compiler feature available only in the seed.
 
 **AC-07 MUST - Repeated determinism**
 
-Twenty clean builds of the compiler and each reference application from the
-same declared inputs produce identical identity-bearing artifacts. Timing,
+Twenty clean builds of the compiler and complete core acceptance corpus from
+the same declared inputs produce identical identity-bearing artifacts. Timing,
 temporary paths, and cache observations are excluded from artifact identity by
-schema rather than text filtering.
+schema rather than text filtering. Application builds may repeat this check as
+non-blocking validation.
 
 ### C. Project Toolchain
 
@@ -1074,11 +1095,10 @@ equivalent to a clean rebuild.
 
 **AC-10 MUST - Host portability**
 
-The stable conformance corpus and command-line reference application execute on
-the supported Bun version and Node.js LTS. Browser reference applications run
-from standards-based ESM through a pinned but replaceable application
-toolchain, without tool-specific emitted syntax or a compiler dependency on
-that toolchain.
+The stable conformance corpus and core command-line fixtures execute on the
+supported Bun version and Node.js LTS. Generated standards-based ESM contains
+no tool-specific syntax and the compiler has no dependency on an application
+toolchain. Browser execution may validate that boundary separately.
 
 ### D. Developer Experience
 
@@ -1106,7 +1126,7 @@ Compiler, runtime, browser event, async rejection, and worker failures in the
 acceptance fixtures all identify the correct `.eli` file and source span. No
 required workflow exposes only a generated `.mjs` stack location.
 
-### E. Libraries and Applications
+### E. Libraries and Non-blocking Applications
 
 **AC-15 MUST - Stable library contract**
 
@@ -1117,19 +1137,21 @@ collection implementation also passes PD-01 through PD-07 from 0041, including
 structural bounds, collision behavior, transient safety, and allocation-free
 composed transformation evidence.
 
-**AC-16 MUST - Maintained application proof**
+**AC-16 SHOULD - Maintained application validation**
 
-All three required reference applications build from public interfaces, pass
+Maintained reference applications should build from public interfaces, pass
 behavioral tests, retain source maps, and contain no private compiler patches,
-copied generated compiler source, or undocumented build step.
+copied generated compiler source, or undocumented build step. This criterion
+is reported separately and neither supplies nor blocks core maturity credit.
 
-**AC-17 MUST - Browser publishing application proof**
+**AC-17 SHOULD - Browser publishing application validation**
 
 The publishing application renders multiple Org articles, navigation, assets,
 interactive application state, deterministic production output and content
 metadata, and mapped failures. It consumes only public language and compiler
 interfaces. No specific UI library or bundler is part of this criterion, and
-a no-content change produces identical output.
+a no-content change produces identical output. This is a replaceable practical
+validation only; it is not part of the language-core acceptance gate.
 
 ### F. Emacs Acceleration
 
@@ -1185,17 +1207,19 @@ the acceptance manifest.
 **AC-24 MUST - Clean-machine onboarding**
 
 A new user following only repository documentation can install prerequisites,
-build the compiler, compile and run a basic program, build the browser example,
-and run the full test suite in 15 minutes of active steps, excluding dependency
-download time. Every prerequisite and command is documented.
+build the compiler, compile and run a basic program, and run the core test suite
+in 15 minutes of active steps, excluding dependency download time. Every core
+prerequisite and command is documented. Application examples have separate,
+non-blocking onboarding instructions.
 
 **AC-25 MUST - Complete documentation set**
 
 The repository contains current getting-started, language reference, macro,
 interop, project configuration, compiler architecture, Emacs mode, REPL,
-browser application integration, Org publishing, optional framework adapters,
-worker, troubleshooting, and contribution documents.
-Links and executable snippets pass automated checks.
+worker, troubleshooting, and contribution documents. Optional application,
+publishing, and framework-adapter documentation is maintained outside the core
+documentation gate. Links and executable snippets in the required set pass
+automated checks.
 
 **AC-26 MUST - Acceptance audit**
 
@@ -1203,24 +1227,29 @@ The acceptance directory contains:
 
 - `manifest.json` with commit identity, platform, tool versions, criterion
   results, artifact digests, and test commands
-- `report.md` explaining the evidence for AC-01 through AC-26 and PD-01
-  through PD-11
+- `report.md` explaining the evidence for every MUST criterion, PD-01 through
+  PD-11, and the separately labeled status of SHOULD application validations
 - machine-readable test, fuzz, benchmark, scale, and soak summaries
 - zero unresolved severity-1 or severity-2 correctness, data-loss, security,
   bootstrap, or compatibility defects
 
-The final goal is reached only when AC-01 through AC-26 and PD-01 through
-PD-11 all read `pass` in the same manifest and the repository is clean after
-reproducing that result.
+The final goal is reached only when every MUST criterion and PD-01 through
+PD-11 read `pass` in the same manifest and the repository is clean after
+reproducing that result. AC-16 and AC-17 are non-blocking SHOULD results and
+cannot compensate for or prevent that outcome.
 
 ## Definition of Final Success
 
-The long-term objective is achieved when Eliscript can credibly be used to
-maintain itself and the three required real applications under the stable
-contract, with efficient persistent values, reproducible builds, first-class
-Emacs tools, standard JavaScript output, measurable acceleration returned to
-real Emacs workflows, and a complete passing AC-01-through-AC-26 and
-PD-01-through-PD-11 acceptance report.
+The long-term objective is achieved when Eliscript can maintain its compiler,
+runtime, standard library, core tooling, and conformance corpus under the
+stable contract, with efficient persistent values, reproducible builds,
+first-class Emacs tools, standard JavaScript output, measurable acceleration
+returned to real Emacs workflows, and a complete passing report for every MUST
+criterion and PD-01 through PD-11.
+
+Application validations demonstrate practical usefulness after and alongside
+that result. Vite, React, publishing, blog and site generation, Pages hosting,
+and equivalent replaceable tools remain consumers and never become core goals.
 
 Anything less remains progress toward maturity, even when individual
 milestones are complete.

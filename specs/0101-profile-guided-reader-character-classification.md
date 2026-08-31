@@ -63,9 +63,9 @@ predicate pairs over all Unicode code points and explicit host boundaries.
 Timing alternates reference and optimized predicates, then baseline and
 optimized complete compilers, to reduce order bias.
 
-The reviewed macOS arm64 report records 247,669 real-source decisions, a
-5.377091x predicate median speedup, 15 timing samples, 8 complete corpus rounds
-per compiler sample, and a 1.131204x complete-compiler median speedup against a
+The reviewed macOS arm64 report records 249,327 real-source decisions, a
+5.298507x predicate median speedup, 15 timing samples, 8 complete corpus rounds
+per compiler sample, and a 1.236266x complete-compiler median speedup against a
 predeclared threshold of 1.08x. The report is source-bound by SHA-256 and
 records raw samples, medians, checksums, host identity, corpus size, and the
 final decision. Default tests validate the report without using wall-clock

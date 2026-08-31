@@ -107,14 +107,14 @@ Before timing, all 33 optimized/reference results must contain byte-identical
 text and structurally equal ordered marks. The reviewed macOS arm64 report
 records:
 
-- 247,668 bytes of maintained compiler source
+- 249,326 bytes of maintained compiler source
 - 11 compiler programs and 22 generated artifact fragments
 - 11 shifted non-zero-start cases, for 33 total cases
-- 614,010 generated text bytes and 41,265 Source Map marks
+- 617,222 generated text bytes and 41,305 Source Map marks
 - 9 alternating samples after warmup, with 500 corpus passes per sample
 
-The current reviewed median is 28.868000 ms for ordered production location and
-67.480458 ms for the retained scan-and-copy reference, a 2.337552x local
+The current reviewed median is 28.575167 ms for ordered production location and
+67.896333 ms for the retained scan-and-copy reference, a 2.376061x local
 speedup. The maintenance threshold is 1.75x. It was recalibrated from the
 original 2x threshold after specification 0100 independently removed binary
 comparison closures from both production and reference generated code. The

@@ -71,7 +71,7 @@ The current M8 work provides:
 - structural-sharing and cross-host evidence through million-value workloads
 - profile-guided self-hosted compiler improvements with source-bound reports,
   including direct binary comparisons, bounded reader character decisions,
-  and complete-compiler benchmarks
+  ordered Source Map cursors, and complete-compiler benchmarks
 
 First-class immutable Keyword and Symbol values now have optimized and
 portable representations that share equality, hashing, Map keys, and Set

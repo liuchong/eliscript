@@ -8,6 +8,28 @@ committed report records raw samples or bounded peak observations, host
 fingerprints, correctness checks, parameters, and a digest of the source files
 that determine the measurement.
 
+## Compiler Ordered Source Map Cursors
+
+Create the exact pre-specialization baseline, generate both compilers, and run:
+
+```sh
+git worktree add --detach /tmp/eliscript-source-map-cursor-baseline \
+  a6013833226af047622aceca42d687b6e33e3701
+(cd /tmp/eliscript-source-map-cursor-baseline && bun run build:bootstrap)
+bun run build:bootstrap
+bun tools/compiler/source-map-cursor-benchmark.mjs \
+  --baseline-root /tmp/eliscript-source-map-cursor-baseline \
+  --output benchmarks/compiler-source-map-cursor-macos-arm64.json
+git worktree remove /tmp/eliscript-source-map-cursor-baseline
+```
+
+The benchmark refuses another baseline. It compares ordered generated-mark and
+source-location cursors with retained complete-scan Eliscript references over
+all eleven compiler artifacts and explicit Source Map boundaries. Both
+compilers must then emit byte-identical ESM and Source Maps for the same current
+sources before alternating timing begins. The committed report records both
+the cursor-pipeline and complete-compiler decisions.
+
 ## Compiler Reader Character Classification
 
 Create the exact pre-specialization baseline, generate both compilers, and run:

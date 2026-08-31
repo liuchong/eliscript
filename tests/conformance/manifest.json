@@ -1190,6 +1190,18 @@
         { "kind": "bun-test", "file": "tests/compiler-reader-character.test.mjs", "contains": "committed reader character report matches measured sources" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "compiler.source-map-cursors",
+      "title": "Profile-guided ordered Source Map cursors",
+      "status": "accepted",
+      "spec": "0102",
+      "contracts": ["Uses monotonic generated-mark and sorted source-location cursors", "Retains complete-scan Eliscript implementations as independent semantic references", "Preserves duplicate, trailing-offset, empty-source, newline, tab, and non-BMP behavior", "Requires byte-identical complete-compiler ESM and Source Maps before alternating timing", "Keeps application frameworks, UI libraries, Vite, bundlers, blog and site generators, publishing, Pages hosting, and development servers outside core goals, implementation, evidence, and maturity credit"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/compiler-source-map-cursor.test.mjs", "contains": "ordered Source Map cursors match their complete scan references" },
+        { "kind": "bun-test", "file": "tests/compiler-source-map-cursor.test.mjs", "contains": "committed Source Map cursor report matches measured sources" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

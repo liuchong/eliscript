@@ -23,6 +23,7 @@ test: check-contracts
 		tests/compiler-locate.test.mjs \
 		tests/compiler-binary-comparison.test.mjs \
 		tests/compiler-reader-character.test.mjs \
+		tests/compiler-source-map-cursor.test.mjs \
 		tests/bootstrap-compiler.test.mjs tests/loop-recur.test.mjs \
 		tests/macro-generated-names.test.mjs \
 		tests/worker-runtime.test.mjs \

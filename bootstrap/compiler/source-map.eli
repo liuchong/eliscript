@@ -3,6 +3,10 @@
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
   (defconst fail
     (js* "(message) => { throw new Error(message); }"))
+  (defconst native-source-locations
+    (js* "(source, marks) => { const wanted = new Set(); const locations = new Map(); for (const mark of marks) { const span = (mark ?? [])[2] ?? null; const start = span.start; if (start !== undefined) wanted.add(start); } const starts = [...wanted].filter((start) => Number.isSafeInteger(start) && start >= 0).sort((left, right) => left - right); let index = 0; let offset = 0; let line = 0; let column = 0; for (const start of starts) { while (offset < start && index < source.length) { const code = source.codePointAt(index); const width = code > 65535 ? 2 : 1; if (code === 10) { line += 1; column = 0; } else { column += width; } index += width; offset += 1; } if (offset === start && (index < source.length || source.length === 0)) locations.set(offset, [line, column]); } return locations; }"))
+  (defconst native-collect-generated-marks
+    (js* "(generated, marks) => { const result = []; let index = 0; let line = 0; let column = 0; for (const mark of marks) { const target = mark.offset; while (index < target && index < generated.length) { if (generated.charCodeAt(index) === 10) { line += 1; column = 0; } else { column += 1; } index += 1; } if (index === target && index < generated.length) result.push([line, column, mark.span]); } return result; }"))
 
   (defun signed-vlq (value)
     (if (< value 0)
@@ -19,7 +23,7 @@
       (js-call characters :push (js-call base64 :charAt remaining))
       (js-call characters :join "")))
 
-  (defun collect-generated-marks (generated marks)
+  (defun reference-collect-generated-marks (generated marks)
     (let ((index 0)
           (mark-index 0)
           (line 0)
@@ -39,7 +43,10 @@
         (setq index (1+ index)))
       result))
 
-  (defun source-locations (source marks)
+  (defun collect-generated-marks (generated marks)
+    (funcall native-collect-generated-marks generated marks))
+
+  (defun reference-source-locations (source marks)
     (let ((wanted (new (js* "Map")))
           (locations (new (js* "Map"))))
       (js-call marks :forEach
@@ -67,6 +74,9 @@
           (when (= index (get source :length))
             (setq index (1+ index)))))
       locations))
+
+  (defun source-locations (source marks)
+    (funcall native-source-locations source marks))
 
   (defun original-location (span locations)
     (let ((start (get span :start)))
@@ -146,4 +156,10 @@
       (put document :mappings mappings)
       (str (JSON/stringify document) "\n")))
 
-  (export encode-vlq create-source-map))
+  (export
+    encode-vlq
+    collect-generated-marks
+    reference-collect-generated-marks
+    source-locations
+    reference-source-locations
+    create-source-map))

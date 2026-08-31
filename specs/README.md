@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 101 specifications.
+The registry currently contains 102 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 71 |
+| Accepted design | 72 |
 | Stable design | 29 |
 | Implementation in progress | 3 |
-| Implemented | 98 |
+| Implemented | 99 |
 
 Compatibility Baseline 1 separately classifies 29 specifications as stable,
-69 as provisional, and 3 as planning. That baseline is derived from registry
+70 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -75,9 +75,10 @@ against the retained five-pass reference implementation, and constant-time IR
 node-kind decisions checked against the retained linear reference.
 Source-map-aware emitter indentation now also uses line-segment assembly while
 retaining the original character loop as an executable reference. Ordered
-source-mark location, direct binary comparison emission, and bounded reader
-character classification now remove three more generated hot paths while
-preserving independent semantic and historical baselines.
+source-mark location, direct binary comparison emission, bounded reader
+character classification, and ordered Source Map cursors now remove four more
+generated hot paths while preserving independent semantic and historical
+baselines.
 
 ## Reading Paths
 
@@ -150,6 +151,7 @@ number.
 39. [0099: Profile-guided Ordered Source-mark Location](0099-profile-guided-source-mark-location.md)
 40. [0100: Profile-guided Binary Comparison Emission](0100-profile-guided-binary-comparison-emission.md)
 41. [0101: Profile-guided Reader Character Classification](0101-profile-guided-reader-character-classification.md)
+42. [0102: Profile-guided Ordered Source Map Cursors](0102-profile-guided-source-map-cursors.md)
 
 ### Application Validation (Non-core)
 
@@ -320,6 +322,7 @@ The schemas and change workflow are defined by specifications
 | 0099 | [Profile-guided Ordered Source-mark Location](0099-profile-guided-source-mark-location.md) | Accepted | Implemented |
 | 0100 | [Profile-guided Binary Comparison Emission](0100-profile-guided-binary-comparison-emission.md) | Accepted | Implemented |
 | 0101 | [Profile-guided Reader Character Classification](0101-profile-guided-reader-character-classification.md) | Accepted | Implemented |
+| 0102 | [Profile-guided Ordered Source Map Cursors](0102-profile-guided-source-map-cursors.md) | Accepted | Implemented |
 
 ## Adding a Specification
 
