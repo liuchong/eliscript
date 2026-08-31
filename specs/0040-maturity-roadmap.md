@@ -556,9 +556,9 @@ and Map/Set key behavior. Immutable metadata now lands in
 [0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md),
 including root-only wrappers, persistent/transient propagation, portable and
 runtime APIs, equality/hash exclusion, and seed/self-hosted Bun/Node evidence.
-P1 construction steps 1-5 now have implementation evidence. Declared macro dependencies,
-object/text migration, portable dispatch policy, static escape analysis,
-efficient host identity hashing remain open. Canonical printing/reading for
+P1 construction steps 1-5 now have implementation evidence. Declared macro
+dependencies, object/text migration, portable dispatch policy, and static
+escape analysis remain open. Canonical printing/reading for
 the optimized runtime family now lands in
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md);
 portable Keyword/Symbol values and List/collection data text now land in
@@ -571,8 +571,11 @@ same-Atom reentrancy rejection. The explicit JavaScript container boundary now
 lands in
 [0073-native-javascript-container-interop.md](0073-native-javascript-container-interop.md),
 with shallow-by-default conversion, bounded deep graph traversal, sharing and
-cycle semantics, and React props evidence. The complete P1 all-host exit audit
-remains open before literal migration.
+cycle semantics, and React props evidence. Efficient portable opaque-object,
+function, and native-Symbol identity hashing now lands in
+[0074-process-local-host-identity-hashing.md](0074-process-local-host-identity-hashing.md),
+removing the previous type-wide HAMT collision group. The complete P1 all-host
+exit audit remains open before literal migration.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

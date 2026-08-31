@@ -1023,7 +1023,8 @@
 (ert-deftest eliscript-emits-portable-value-inspection-operations ()
   (let* ((source
           "(defun inspect-value (value text index)
-  [(value-type value) (string-code-unit-at text index)
+  [(value-type value) (host-identity-token value)
+   (string-code-unit-at text index)
    (string-from-code-unit 65) (string-to-number \"1.5\")
    (string-to-bigint \"42\") (number-float64-words value)])")
          (filename "value-inspection.eli")
@@ -1031,7 +1032,8 @@
          (portable-output
           (eliscript-compile-portable-string
            "(defportable inspect-value (value text index)
-  [(value-type value) (string-code-unit-at text index)
+  [(value-type value) (host-identity-token value)
+   (string-code-unit-at text index)
    (string-from-code-unit 65) (string-to-number \"1.5\")
    (string-to-bigint \"42\") (number-float64-words value)])"
            '(inspect-value)
@@ -1061,6 +1063,20 @@
         generated))
       (should
        (string-match-p
+        (regexp-quote
+         "const __eliscript_host_identity_token = (() =>")
+        generated))
+      (should
+       (string-match-p
+        (regexp-quote "const objects = new WeakMap()") generated))
+      (should
+       (string-match-p
+        (regexp-quote "const symbols = new Map()") generated))
+      (should
+       (string-match-p
+        (regexp-quote "__eliscript_host_identity_token(value)") generated))
+      (should
+       (string-match-p
         (regexp-quote "(text).charCodeAt(index)") generated))
       (should
        (string-match-p (regexp-quote "String.fromCharCode(65)") generated))
@@ -1079,6 +1095,8 @@
   (dolist (source
            '("(value-type)"
              "(value-type 1 2)"
+             "(host-identity-token)"
+             "(host-identity-token (object) (object))"
              "(string-code-unit-at \"a\")"
              "(string-code-unit-at \"a\" 0 1)"
              "(string-from-code-unit)"

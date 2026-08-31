@@ -128,7 +128,9 @@ then executes both outputs under Bun and Node. Frozen scalar and collection
 hashes, default Map/Set policies, insertion-order independence, a real hash
 collision, opaque host identity, and nested `undefined` are checked directly.
 Two thousand generated cross-family cases enforce equality/hash invariants,
-and one-million-value traversals prove iterative bounded-stack behavior.
+20,000 opaque objects prove stable distinct process-local hashes and efficient
+Map/Set identity-key lookup, and one-million-value traversals prove iterative
+bounded-stack behavior.
 Identifier fixtures additionally freeze qualified and unqualified
 Keyword/Symbol hashes, category separation, and reconstructed Map/Set lookup.
 

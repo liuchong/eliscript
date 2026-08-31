@@ -37,7 +37,7 @@
     + * - / % mod = /= not= < <= > >= 1+ 1-
     int32 uint32 imul32 bit-and bit-or bit-xor bit-not
     bit-shift-left bit-shift-right unsigned-bit-shift-right
-    value-type string-code-unit-at string-from-code-unit
+    value-type host-identity-token string-code-unit-at string-from-code-unit
     string-to-number string-to-bigint number-float64-words
     eq equal null nil? undefined? nullish?
     list vector array car cdr cons nth aref length

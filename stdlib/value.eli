@@ -120,6 +120,13 @@
     (and (= (get left :namespace) (get right :namespace))
          (= (get left :name) (get right :name))))
 
+  (defportable value-logical-identifier? (value)
+    (let ((namespace (get value :namespace nil))
+          (name (get value :name nil)))
+      (and (= (value-type name) "string")
+           (or (nil? namespace)
+               (= (value-type namespace) "string")))))
+
   (defportable value-map-equal? (left right)
     (and (= (persistent-map-count left) (persistent-map-count right))
          (persistent-map-reduce
@@ -151,7 +158,9 @@
            ((= left-type "number")
             (and (not (= left left)) (not (= right right))))
            ((or (= left-type "keyword") (= left-type "symbol"))
-            (value-identifier-equal? left right))
+            (and (value-logical-identifier? left)
+                 (value-logical-identifier? right)
+                 (value-identifier-equal? left right)))
            ((persistent-list? left)
             (and (persistent-list? right)
                  (value-list-equal? left right)))
@@ -262,10 +271,10 @@
         product)
        count)))
 
-  (defportable value-hash-host (type)
+  (defportable value-hash-host (value)
     (value-finish-hash
      value-host-tag
-     (value-hash-string-with-tag type value-string-tag)))
+     (uint32 (host-identity-token value))))
 
   (defportable value-hash (value)
     (let ((type (value-type value)))
@@ -280,16 +289,20 @@
        ((= type "string")
         (value-hash-string-with-tag value value-string-tag))
        ((= type "keyword")
-        (value-identifier-hash value value-keyword-tag))
+        (if (value-logical-identifier? value)
+            (value-identifier-hash value value-keyword-tag)
+          (value-hash-host value)))
        ((= type "symbol")
-        (value-identifier-hash value value-symbol-tag))
+        (if (value-logical-identifier? value)
+            (value-identifier-hash value value-symbol-tag)
+          (value-hash-host value)))
        ((persistent-list? value) (value-list-hash value))
        ((persistent-vector? value) (value-vector-hash value))
        ((persistent-map? value) (value-map-hash value))
        ((persistent-set? value) (value-set-hash value))
        ((= type "bigint")
         (value-hash-string-with-tag (str value) value-host-tag))
-       (t (value-hash-host type)))))
+       (t (value-hash-host value)))))
 
   (defportable empty-value-map ()
     (empty-persistent-map value-hash value-equal? value-equal?))

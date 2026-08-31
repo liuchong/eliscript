@@ -817,6 +817,18 @@
         { "kind": "bun-test", "file": "tests/interop-js.test.mjs", "contains": "Eliscript JS interop preserves explicit host and persistent boundaries" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "stdlib.efficient-host-identity-hashing",
+      "title": "Efficient process-local host identity hashing",
+      "status": "accepted",
+      "spec": "0074",
+      "contracts": ["Assigns stable module-local tokens to opaque JavaScript identities", "Keeps object/function token storage weak and native Symbol identity explicit", "Preserves deterministic hashes for scalar, identifier, and persistent value families", "Avoids type-wide HAMT collision groups under seed/self-hosted Bun and Node execution"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-portable-value-inspection-operations" },
+        { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics compile and agree across hosts" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

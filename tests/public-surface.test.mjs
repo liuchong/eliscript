@@ -29,7 +29,7 @@ async function validationErrors(surface) {
 test("repository public surface matches every tracked implementation", async () => {
   expect(await checkPublicSurface({ root: ROOT })).toEqual({
     schemaVersion: 1,
-    language: { groups: 11, entries: 168 },
+    language: { groups: 12, entries: 169 },
     ir: { nodeKinds: 53 },
     commands: { commands: 5, options: 20 },
     schemas: { total: 6 },

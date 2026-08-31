@@ -7,6 +7,9 @@ import {
 const [modulePath] = process.argv.slice(2);
 const moduleUrl = pathToFileURL(modulePath);
 const valueModule = await import(moduleUrl.href);
+const identityTokenModule = await import(
+  new URL("./host-identity-token.mjs", moduleUrl).href,
+);
 const identifierModule = await import(new URL("./identifier.eli", moduleUrl).href);
 const listModule = await import(new URL("./persistent-list.eli", moduleUrl).href);
 const vectorModule = await import(new URL("./persistent-vector.eli", moduleUrl).href);
@@ -19,6 +22,7 @@ const {
   value_map_from_entries: valueMapFromEntries,
   value_set_from_array: valueSetFromArray,
 } = valueModule;
+const { identity_token: identityToken } = identityTokenModule;
 const {
   keyword: portableKeyword,
   keyword_QMARK_: portableKeywordPredicate,
@@ -83,6 +87,46 @@ const reversedSet = valueSetFromArray([
 ]);
 const leftHost = { value: 1 };
 const rightHost = { value: 1 };
+const hostFunction = () => "host";
+const leftNativeSymbol = Symbol("identity");
+const rightNativeSymbol = Symbol("identity");
+const leftHostHash = valueHash(leftHost);
+const rightHostHash = valueHash(rightHost);
+const hostFunctionHash = valueHash(hostFunction);
+const leftNativeSymbolHash = valueHash(leftNativeSymbol);
+const rightNativeSymbolHash = valueHash(rightNativeSymbol);
+const identityKeys = [];
+const identityEntries = [];
+const identityHashes = new Set();
+let identityHashesStable = true;
+for (let index = 0; index < 20_000; index += 1) {
+  const key = Object.freeze({ index });
+  const hash = valueHash(key);
+  identityKeys.push(key);
+  identityEntries.push([key, index]);
+  identityHashes.add(hash);
+  if (valueHash(key) !== hash) identityHashesStable = false;
+}
+const identityMap = valueMapFromEntries(identityEntries);
+const identitySet = valueSetFromArray(identityKeys);
+const nativeSymbolMap = valueMapFromEntries([
+  [leftNativeSymbol, "left"],
+  [rightNativeSymbol, "right"],
+]);
+const tokenLeftObject = {};
+const tokenRightObject = {};
+const tokenFunction = () => null;
+const tokenLeftSymbol = Symbol("token");
+const tokenRightSymbol = Symbol("token");
+const tokenLeftObjectValue = identityToken(tokenLeftObject);
+const tokenFunctionValue = identityToken(tokenFunction);
+const tokenLeftSymbolValue = identityToken(tokenLeftSymbol);
+let invalidTokenScalar;
+try {
+  identityToken(1);
+} catch (error) {
+  invalidTokenScalar = { name: error.name, message: error.message };
+}
 const vectorLookup = persistentMapGet(
   orderedMap,
   persistentVectorFromArray(["key"]),
@@ -154,7 +198,12 @@ console.log(JSON.stringify({
     setHashesEqual: valueHash(orderedSet) === valueHash(reversedSet),
     hostIdentity: valueEqual(leftHost, leftHost),
     hostDistinct: valueEqual(leftHost, rightHost),
-    hostFallbackHash: valueHash(leftHost) === valueHash(rightHost),
+    hostDistinctHashes: leftHostHash !== rightHostHash,
+    hostFunctionStable: hostFunctionHash === valueHash(hostFunction),
+    nativeSymbolStable: leftNativeSymbolHash === valueHash(leftNativeSymbol),
+    nativeSymbolsDistinct: leftNativeSymbolHash !== rightNativeSymbolHash,
+    nativeSymbolIdentityEqual: valueEqual(leftNativeSymbol, leftNativeSymbol),
+    nativeSymbolValuesDistinct: !valueEqual(leftNativeSymbol, rightNativeSymbol),
     symbolsEqual: valueEqual(
       symbolTitle,
       eliscriptSymbol("article", "title"),
@@ -224,5 +273,33 @@ console.log(JSON.stringify({
       "missing",
     ),
     portableIdentifierSetCount: persistentSetCount(portableIdentifierSet),
+    nativeSymbolMapCount: persistentMapCount(nativeSymbolMap),
+    nativeSymbolLeft: persistentMapGet(
+      nativeSymbolMap,
+      leftNativeSymbol,
+      "missing",
+    ),
+    nativeSymbolRight: persistentMapGet(
+      nativeSymbolMap,
+      rightNativeSymbol,
+      "missing",
+    ),
+  },
+  hostIdentityScale: {
+    count: identityKeys.length,
+    uniqueHashes: identityHashes.size,
+    stable: identityHashesStable,
+    mapCount: persistentMapCount(identityMap),
+    mapLast: persistentMapGet(identityMap, identityKeys.at(-1), "missing"),
+    setCount: persistentSetCount(identitySet),
+    setLast: persistentSetHas(identitySet, identityKeys.at(-1)),
+  },
+  identityToken: {
+    objectStable: tokenLeftObjectValue === identityToken(tokenLeftObject),
+    objectsDistinct: tokenLeftObjectValue !== identityToken(tokenRightObject),
+    functionStable: tokenFunctionValue === identityToken(tokenFunction),
+    symbolStable: tokenLeftSymbolValue === identityToken(tokenLeftSymbol),
+    symbolsDistinct: tokenLeftSymbolValue !== identityToken(tokenRightSymbol),
+    invalidScalar: invalidTokenScalar,
   },
 }));

@@ -22,7 +22,7 @@ constructors whose hash and equality policies are selected by the language
 rather than injected by every caller.
 
 The implementation is both runtime library and compiler-development proof. It
-uses only portable Eliscript modules and three narrowly specified value
+uses only portable Eliscript modules and four narrowly specified value
 inspection primitives. Seed and self-hosted compilers emit byte-identical ESM
 and Source Maps for the complete dependency graph, and Bun and Node.js execute
 the same frozen and generated semantics.
@@ -33,12 +33,14 @@ Emacs value-codec work.
 
 ## Portable Inspection Primitives
 
-Three exact-arity forms expose the minimum host facts needed by a portable
+Four exact-arity forms expose the minimum host facts needed by a portable
 value implementation:
 
 - `value-type(value)` returns `"null"` for JavaScript `null`, recognizes the
   own logical brand of Keyword and Symbol values as `"keyword"` or `"symbol"`,
   and otherwise returns the JavaScript `typeof` string
+- `host-identity-token(value)` assigns a stable module-local token to an opaque
+  object, function, or native Symbol as specified by 0074
 - `string-code-unit-at(text, index)` returns the UTF-16 code unit at `index`
 - `number-float64-words(value)` returns the IEEE-754 binary64 low and high
   unsigned 32-bit words as a two-element native vector
@@ -65,7 +67,8 @@ The provisional `stdlib/value.eli` module exports:
 
 The low-level `persistent-map.eli` and `persistent-set.eli` constructors that
 accept explicit policies remain available. They are required for specialized
-key domains and for host identity keys until identity hashing is implemented.
+key domains. Ordinary host identity keys use the process-local mechanism
+specified by 0074.
 
 ## Equality Contract
 
@@ -92,8 +95,10 @@ remain opaque and are never traversed.
 
 ## Hash Contract
 
-`value-hash` returns an unsigned deterministic 32-bit integer. Equal supported
-values always produce equal hashes.
+`value-hash` returns an unsigned 32-bit integer. Equal supported values always
+produce equal hashes. Scalar, identifier, and persistent collection hashes are
+deterministic; opaque host identity hashes are process-local as specified by
+0074.
 
 Scalar hashing uses the frozen tags, mixing, avalanche, UTF-16 string walk,
 and float64 word rules established by 0048. Vector, Map, and Set hashes match
@@ -156,19 +161,17 @@ are correctness and bounded-stack gates, not fixed wall-clock benchmarks.
 
 ## Host and Numeric Limits
 
-Opaque host objects and functions use strict identity equality. The portable
-core currently assigns a deterministic fallback hash by host type rather than
-maintaining a process-local identity table. This preserves the
-equal-implies-equal-hash invariant but may place many identity keys in one
-collision group and degrade their Map/Set operations to O(n).
+Opaque host objects and functions use strict identity equality and the
+module-local weak identity table specified by 0074. Native JavaScript Symbols
+use the matching Symbol identity table. These hashes are efficient within one
+collection policy but intentionally not reproducible across module instances
+or process starts.
 
-Applications that require efficient opaque identity keys must use the
-low-level injected-policy constructors until a host identity-hash primitive
-or protocol adapter is accepted. BigInt is hashed from its string form, but
-exact cross-runtime parity for BigInt and Symbol is not yet frozen. Symbols
-here means native JavaScript Symbols. First-class Eliscript Keyword and Symbol
-values are supported by the logical type and hash contract in 0067; other
-user-defined value types remain outside the ordinary supported key set.
+BigInt is hashed from its string form. First-class Eliscript Keyword and Symbol
+values retain deterministic logical hashes from 0067; they never use the host
+identity table. Other user-defined value types remain outside the ordinary
+supported value-semantic key set and use opaque identity unless a later
+protocol extension defines their value contract.
 
 The portable `.eli` implementation dispatches directly over the four core
 persistent representations. The JavaScript reference runtime now uses the
@@ -200,11 +203,12 @@ bridge and the measured end-to-end proof.
 
 ## Compatibility
 
-This module, its six exports, the three inspection forms, collection tags,
+This module, its six exports, the four inspection forms, collection tags,
 hash constants, and current dispatch set are provisional during M8. The
 Keyword/Symbol extension is specified by 0067. Frozen
 scalar, Vector, Map, and Set hash outputs agree with 0048-0050; List hashes are
-newly frozen here.
+newly frozen here. Process-local opaque identity hashing extends this contract
+through [0074](0074-process-local-host-identity-hashing.md).
 
 No literal changes in this slice. Native JavaScript arrays, objects, Maps, and
 Sets retain their current behavior. Persistent literal migration remains P3
@@ -222,7 +226,7 @@ hash-identical.
   Maps for `value.eli` and its complete portable dependency graph.
 - **EVP-02:** Bun and Node.js agree on frozen scalar, List, Vector, Map, Set,
   nested, insertion-order, collision, and host-identity fixtures.
-- **EVP-03:** The three inspection forms accept only their specified arities
+- **EVP-03:** The value inspection forms accept only their specified arities
   and emit the specified JavaScript mechanisms through both compiler paths.
 - **EVP-04:** At least 2,000 generated cross-family values satisfy reflexivity,
   symmetry, unequal-category behavior, and equal-implies-equal-hash.

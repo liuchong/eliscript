@@ -767,6 +767,10 @@
        (format
         "((__eliscript_value) => { if (__eliscript_value === null) return \"null\"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== \"object\" && __eliscript_host_type !== \"function\") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for(\"eliscript.value.type\")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, \"value\") && (__eliscript_type.value === \"keyword\" || __eliscript_type.value === \"symbol\")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, \"kind\"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, \"value\")) { if (__eliscript_kind.value === \"eliscript/keyword\") return \"keyword\"; if (__eliscript_kind.value === \"eliscript/symbol\") return \"symbol\"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(%s)"
         (eliscript-ir-emitter-emit-expression (car nodes))))
+      ('host-identity-token
+       (eliscript-ir-emitter--require-arity node 1 1)
+       (format "__eliscript_host_identity_token(%s)"
+               (eliscript-ir-emitter-emit-expression (car nodes))))
       ('string-code-unit-at
        (eliscript-ir-emitter--require-arity node 2 2)
        (format "(%s).charCodeAt(%s)"
@@ -1200,6 +1204,7 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
     (eliscript-emitter--fail "expected an IR program: %S" program))
   (let ((eliscript-emitter--temporary-counter 0)
         uses-react-runtime
+        uses-host-identity-token
         portable-functions
         exported-bindings)
     (eliscript-ir-walk
@@ -1208,6 +1213,9 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
        (when (memq (eliscript-ir-node-kind node)
                    '(react-element react-fragment))
          (setq uses-react-runtime t))
+       (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
+                  (eq (eliscript-ir-node-value node) 'host-identity-token))
+         (setq uses-host-identity-token t))
        (when (and (eq (eliscript-ir-node-kind node) 'function-declaration)
                   (eliscript-ir-property node :portable))
          (push node portable-functions))
@@ -1221,7 +1229,11 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
          (format "import * as %s from \"react/jsx-runtime\";\n"
                  eliscript-ir-emitter--react-runtime-binding)
        "")
-     "const __eliscript_truthy = (value) => value !== false && value != null;\n\n"
+     "const __eliscript_truthy = (value) => value !== false && value != null;\n"
+     (if uses-host-identity-token
+         eliscript-emitter--host-identity-token-helper
+       "")
+     "\n"
      (mapconcat #'eliscript-ir-emitter-emit-top-level
                 (eliscript-ir-program-body program)
                 "\n\n")

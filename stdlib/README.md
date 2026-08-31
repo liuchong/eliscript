@@ -146,11 +146,12 @@ functions:
 
 Map and Set equality and hashes are independent of insertion order; List and
 Vector remain distinct ordered value families. Nested `undefined` is preserved
-instead of collapsing to `nil`. Opaque JavaScript objects still use identity
-equality and a collision-heavy portable fallback hash, so identity-keyed hot
-paths should keep using low-level injected constructors. Exact provisional
-semantics and evidence are in
-[specs/0057-portable-value-semantics.md](../specs/0057-portable-value-semantics.md).
+instead of collapsing to `nil`. Opaque JavaScript objects, functions, and
+native Symbols use process-local identity hashes backed by weak object/function
+storage, so ordinary identity-keyed Maps and Sets retain expected HAMT depth.
+Exact provisional semantics and evidence are in
+[0057](../specs/0057-portable-value-semantics.md) and
+[0074](../specs/0074-process-local-host-identity-hashing.md).
 
 ## Identifier Values
 

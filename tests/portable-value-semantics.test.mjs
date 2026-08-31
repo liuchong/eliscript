@@ -20,6 +20,10 @@ const sources = [
   "value",
 ];
 const valueSource = resolve(stdlibDirectory, "value.eli");
+const identityTokenSource = resolve(
+  projectDirectory,
+  "tests/fixtures/host-identity-token.eli",
+);
 const generatedValueModule = resolve(
   projectDirectory,
   "dist/stdlib/value.mjs",
@@ -107,6 +111,13 @@ test("Eliscript-authored value semantics compile and agree across hosts", async 
         resolve(stdlibDirectory, `${name}.eli`),
       ]);
     }
+    await runSuccessful([
+      compiler,
+      "--source-map",
+      "--output",
+      resolve(seedDirectory, "host-identity-token.mjs"),
+      identityTokenSource,
+    ]);
     await runSuccessful([bootstrapBuilder], {
       ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
     });
@@ -122,6 +133,15 @@ test("Eliscript-authored value semantics compile and agree across hosts", async 
         ELISCRIPT_BOOTSTRAP_MODULE_DIR: bootstrapDirectory,
       });
     }
+    await runSuccessful([
+      portableCompiler,
+      "--source-map",
+      "--output",
+      resolve(selfHostedDirectory, "host-identity-token.mjs"),
+      identityTokenSource,
+    ], {
+      ELISCRIPT_BOOTSTRAP_MODULE_DIR: bootstrapDirectory,
+    });
 
     for (const name of sources) {
       const extension = name === "value" ? "mjs" : "eli";
@@ -131,6 +151,17 @@ test("Eliscript-authored value semantics compile and agree across hosts", async 
       expect(await Bun.file(`${selfHosted}.map`).text())
         .toBe(await Bun.file(`${seed}.map`).text());
     }
+    const seedIdentityToken = resolve(seedDirectory, "host-identity-token.mjs");
+    const selfHostedIdentityToken = resolve(
+      selfHostedDirectory,
+      "host-identity-token.mjs",
+    );
+    expect(await Bun.file(selfHostedIdentityToken).text())
+      .toBe(await Bun.file(seedIdentityToken).text());
+    expect(await Bun.file(`${selfHostedIdentityToken}.map`).text())
+      .toBe(await Bun.file(`${seedIdentityToken}.map`).text());
+    expect(await Bun.file(resolve(seedDirectory, "persistent-vector.eli")).text())
+      .not.toContain("__eliscript_host_identity_token");
 
     const reports = [];
     for (const outputDirectory of [seedDirectory, selfHostedDirectory]) {
@@ -197,7 +228,12 @@ test("Eliscript-authored value semantics compile and agree across hosts", async 
         setHashesEqual: true,
         hostIdentity: true,
         hostDistinct: false,
-        hostFallbackHash: true,
+        hostDistinctHashes: true,
+        hostFunctionStable: true,
+        nativeSymbolStable: true,
+        nativeSymbolsDistinct: true,
+        nativeSymbolIdentityEqual: true,
+        nativeSymbolValuesDistinct: true,
         symbolsEqual: true,
         identifierCategoriesDistinct: true,
         portableKeywordEqual: true,
@@ -227,6 +263,29 @@ test("Eliscript-authored value semantics compile and agree across hosts", async 
         portableKeywordValue: "keyword",
         portableSymbolValue: "symbol",
         portableIdentifierSetCount: 2,
+        nativeSymbolMapCount: 2,
+        nativeSymbolLeft: "left",
+        nativeSymbolRight: "right",
+      },
+      hostIdentityScale: {
+        count: 20_000,
+        uniqueHashes: 20_000,
+        stable: true,
+        mapCount: 20_000,
+        mapLast: 19_999,
+        setCount: 20_000,
+        setLast: true,
+      },
+      identityToken: {
+        objectStable: true,
+        objectsDistinct: true,
+        functionStable: true,
+        symbolStable: true,
+        symbolsDistinct: true,
+        invalidScalar: {
+          name: "TypeError",
+          message: "host-identity-token expects an object, function, or symbol",
+        },
       },
     });
 

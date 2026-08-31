@@ -12,6 +12,8 @@
   (import "./source-map.mjs" create-source-map)
 
   (defconst react-runtime-binding "__eliscript_react_jsx_runtime")
+  (defconst host-identity-token-helper
+    "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n")
   (defconst fail
     (js* "(message) => { throw new Error(message); }"))
   (defvar temporary-counter 0)
@@ -799,6 +801,11 @@
          (combine
            ["((__eliscript_value) => { if (__eliscript_value === null) return \"null\"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== \"object\" && __eliscript_host_type !== \"function\") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for(\"eliscript.value.type\")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, \"value\") && (__eliscript_type.value === \"keyword\" || __eliscript_type.value === \"symbol\")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, \"kind\"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, \"value\")) { if (__eliscript_kind.value === \"eliscript/keyword\") return \"keyword\"; if (__eliscript_kind.value === \"eliscript/symbol\") return \"symbol\"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })("
             (emit-expression (nth 0 nodes)) ")"]))
+        ((= name "host-identity-token")
+         (require-node-arity node 1 1)
+         (combine
+           ["__eliscript_host_identity_token("
+            (emit-expression (nth 0 nodes)) ")"]))
         ((= name "string-code-unit-at")
          (require-node-arity node 2 2)
          (combine
@@ -1208,11 +1215,30 @@
               (setq found t))))
         found)))
 
+  (defun node-uses-host-identity-token-p (node)
+    (if (and (= (ir-kind node) "intrinsic")
+             (= (ir-value node) "host-identity-token"))
+        t
+      (let ((found false))
+        (js-call (children node) :forEach
+          (lambda (child)
+            (when (node-uses-host-identity-token-p child)
+              (setq found t))))
+        found)))
+
   (defun program-uses-react-p (program)
     (let ((found false))
       (js-call (program-body program) :forEach
         (lambda (node)
           (when (node-uses-react-p node)
+            (setq found t))))
+      found))
+
+  (defun program-uses-host-identity-token-p (program)
+    (let ((found false))
+      (js-call (program-body program) :forEach
+        (lambda (node)
+          (when (node-uses-host-identity-token-p node)
             (setq found t))))
       found))
 
@@ -1273,7 +1299,11 @@
              (str "import * as " react-runtime-binding
                   " from \"react/jsx-runtime\";\n")
            "")
-         "const __eliscript_truthy = (value) => value !== false && value != null;\n\n"
+         "const __eliscript_truthy = (value) => value !== false && value != null;\n"
+         (if (program-uses-host-identity-token-p program)
+             host-identity-token-helper
+           "")
+         "\n"
          body
          (emit-portable-manifest program)
          "\n"])))

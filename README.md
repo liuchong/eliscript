@@ -27,6 +27,8 @@ The current M8 work provides:
 - immutable persistent List, Vector, Map, and Set implementations written in
   portable Eliscript
 - deterministic value equality and hashing across persistent collections
+- process-local weak identity hashing for efficient opaque JavaScript
+  object/function keys and explicit native Symbol identity
 - immutable persistent-Map metadata with root-only structural sharing,
   propagation through persistent/transient updates, and equality/hash exclusion
 - canonical readable data text for both optimized runtime values and portable
