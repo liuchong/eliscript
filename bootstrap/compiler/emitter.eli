@@ -1278,29 +1278,37 @@
               (setq found t))))
         found)))
 
-  (defun node-uses-literal-runtime-p (node)
-    (let ((kind (ir-kind node))
-          (nodes (children node)))
+  (defun node-directly-uses-literal-runtime-p (node)
+    (let ((kind (ir-kind node)))
+      (or (= kind "persistent-list-literal")
+          (= kind "persistent-vector-literal")
+          (= kind "persistent-map-literal")
+          (= kind "persistent-set-literal")
+          (and (= kind "quoted-literal")
+               (quoted-uses-literal-runtime-p (ir-value node)))
+          (and (= kind "literal")
+               (= (literal-kind node) "keyword")))))
+
+  (defun literal-runtime-static-key-index (node)
+    (let ((kind (ir-kind node)))
       (cond
-        ((or (= kind "persistent-list-literal")
-             (= kind "persistent-vector-literal")
-             (= kind "persistent-map-literal")
-             (= kind "persistent-set-literal")) t)
-        ((= kind "quoted-literal")
-         (quoted-uses-literal-runtime-p (ir-value node)))
-        ((and (= kind "literal") (= (literal-kind node) "keyword")) t)
         ((or (= kind "property-read")
              (= kind "property-write")
-             (= kind "method-call"))
-         (children-use-literal-runtime-p nodes 1))
-        ((= kind "react-element")
-         (children-use-literal-runtime-p nodes 0))
+             (= kind "method-call")) 1)
+        ((= kind "react-element") 0)
         ((and (= kind "intrinsic")
               (or (= (ir-value node) "aref")
                   (= (ir-value node) "object-has?")
-                  (= (ir-value node) "object-assoc")))
-         (children-use-literal-runtime-p nodes 1))
-        (t (children-use-literal-runtime-p nodes nil)))))
+                  (= (ir-value node) "object-assoc"))) 1)
+        (t nil))))
+
+  (defun node-uses-literal-runtime-p (node)
+    (let ((nodes (children node)))
+      (cond
+        ((node-directly-uses-literal-runtime-p node) t)
+        (t
+         (children-use-literal-runtime-p
+           nodes (literal-runtime-static-key-index node))))))
 
   (defun children-use-literal-runtime-p (nodes static-key-index)
     (let ((found false)
@@ -1380,6 +1388,75 @@
             (setq found t))))
       found))
 
+  (defun reference-runtime-requirements (program)
+    (js-object
+      :react (program-uses-react-p program)
+      :hostIdentityToken (program-uses-host-identity-token-p program)
+      :literal (program-uses-literal-runtime-p program)
+      :collection (program-uses-collection-runtime-p program)
+      :list (program-uses-list-runtime-p program)))
+
+  (defun static-literal-key-p (node index static-key-index)
+    (and static-key-index
+         (= index static-key-index)
+         (= (ir-kind node) "literal")
+         (= (literal-kind node) "keyword")))
+
+  (defun collect-runtime-requirements
+      (node requirements suppress-literal)
+    (let* ((kind (ir-kind node))
+           (value (ir-value node))
+           (nodes (children node))
+           (static-key-index (literal-runtime-static-key-index node))
+          (index 0))
+      (cond
+        ((or (= kind "react-element") (= kind "react-fragment"))
+         (put requirements :react t))
+        ((and (not suppress-literal)
+              (or (= kind "persistent-list-literal")
+                  (= kind "persistent-vector-literal")
+                  (= kind "persistent-map-literal")
+                  (= kind "persistent-set-literal")))
+         (put requirements :literal t))
+        ((and (not suppress-literal)
+              (= kind "quoted-literal")
+              (quoted-uses-literal-runtime-p value))
+         (put requirements :literal t))
+        ((and (not suppress-literal)
+              (= kind "literal")
+              (= (literal-kind node) "keyword"))
+         (put requirements :literal t))
+        ((= kind "intrinsic")
+         (cond
+           ((= value "host-identity-token")
+            (put requirements :hostIdentityToken t))
+           ((or (= value "nth") (= value "length"))
+            (put requirements :collection t))
+           ((or (= value "car") (= value "cdr") (= value "cons"))
+            (put requirements :list t)))))
+      (while (< index (get nodes :length))
+        (let ((child (js-nth index nodes)))
+          (collect-runtime-requirements
+            child
+            requirements
+            (or suppress-literal
+                (static-literal-key-p child index static-key-index))))
+        (setq index (1+ index))))
+    requirements)
+
+  (defun runtime-requirements (program)
+    (let ((requirements
+           (js-object
+             :react false
+             :hostIdentityToken false
+             :literal false
+             :collection false
+             :list false)))
+      (js-call (program-body program) :forEach
+        (lambda (node)
+          (collect-runtime-requirements node requirements false)))
+      requirements))
+
   (defun collect-portable-metadata (node portable exported)
     (when (and (= (ir-kind node) "function-declaration")
                (ir-property node "portable"))
@@ -1426,28 +1503,29 @@
 
   (defun emit-module-artifact (program)
     (setq temporary-counter 0)
-    (let ((body
-           (join-fragments
-             (js-call (program-body program) :map
-               (lambda (node) (emit-top-level node)))
-             "\n\n")))
+    (let ((requirements (runtime-requirements program))
+          (body
+            (join-fragments
+              (js-call (program-body program) :map
+                (lambda (node) (emit-top-level node)))
+              "\n\n")))
       (combine
         (js-array "// Generated by Eliscript. Do not edit.\n"
-         (if (program-uses-react-p program)
+         (if (get requirements :react)
              (str "import * as " react-runtime-binding
                   " from \"react/jsx-runtime\";\n")
            "")
-         (if (program-uses-literal-runtime-p program)
+         (if (get requirements :literal)
              literal-runtime-import
            "")
-         (if (program-uses-collection-runtime-p program)
+         (if (get requirements :collection)
              collection-runtime-import
            "")
-         (if (program-uses-list-runtime-p program)
+         (if (get requirements :list)
              list-runtime-import
            "")
          "const __eliscript_truthy = (value) => value !== false && value != null;\n"
-         (if (program-uses-host-identity-token-p program)
+         (if (get requirements :hostIdentityToken)
              host-identity-token-helper
            "")
          "\n"
@@ -1478,4 +1556,6 @@
     emit-expression
     emit-top-level
     emit-module
-    emit-module-with-source-map))
+    emit-module-with-source-map
+    runtime-requirements
+    reference-runtime-requirements))

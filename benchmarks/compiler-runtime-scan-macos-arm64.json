@@ -1,0 +1,94 @@
+{
+  "format": "eliscript-compiler-runtime-scan-benchmark",
+  "version": 1,
+  "generatedAt": "2026-08-31T20:17:08.187Z",
+  "sourceDigest": {
+    "algorithm": "sha256",
+    "files": [
+      "bootstrap/compiler/symbol.eli",
+      "bootstrap/compiler/syntax.eli",
+      "bootstrap/compiler/reader.eli",
+      "bootstrap/compiler/expander.eli",
+      "bootstrap/compiler/transient-analysis.eli",
+      "bootstrap/compiler/analyzer.eli",
+      "bootstrap/compiler/ir.eli",
+      "bootstrap/compiler/lower.eli",
+      "bootstrap/compiler/source-map.eli",
+      "bootstrap/compiler/emitter.eli",
+      "bootstrap/compiler/compiler.eli",
+      "tools/compiler/runtime-scan-benchmark.mjs"
+    ],
+    "value": "cdfed0427970f62f71a2dedb0b05cc4027bcc7dc4baeebcafb2d3adf55d7d0b9"
+  },
+  "host": {
+    "runtime": "bun",
+    "runtimeVersion": "1.4.0",
+    "engine": "JavaScriptCore",
+    "platform": "darwin",
+    "architecture": "arm64",
+    "operatingSystem": "Darwin 25.6.0"
+  },
+  "corpus": {
+    "files": [
+      "bootstrap/compiler/symbol.eli",
+      "bootstrap/compiler/syntax.eli",
+      "bootstrap/compiler/reader.eli",
+      "bootstrap/compiler/expander.eli",
+      "bootstrap/compiler/transient-analysis.eli",
+      "bootstrap/compiler/analyzer.eli",
+      "bootstrap/compiler/ir.eli",
+      "bootstrap/compiler/lower.eli",
+      "bootstrap/compiler/source-map.eli",
+      "bootstrap/compiler/emitter.eli",
+      "bootstrap/compiler/compiler.eli"
+    ],
+    "sourceBytes": 243710,
+    "programs": 12,
+    "irNodes": 22952
+  },
+  "parameters": {
+    "warmupIterations": 20,
+    "timingIterations": 80,
+    "timingSamples": 9
+  },
+  "validation": {
+    "equivalent": true,
+    "programs": 12,
+    "checksum": 31
+  },
+  "measurements": {
+    "optimized": {
+      "samplesMs": [
+        287.324167,
+        316.9640830000001,
+        319.1735000000001,
+        332.4348749999999,
+        342.4959590000003,
+        355.0110420000001,
+        360.5935419999996,
+        406.4462910000002,
+        387.18025000000034
+      ],
+      "medianMs": 342.4959590000003
+    },
+    "reference": {
+      "samplesMs": [
+        432.132292,
+        451.18337499999996,
+        475.032917,
+        543.5921250000001,
+        524.2779580000006,
+        546.465459,
+        541.3020420000003,
+        557.8394170000001,
+        562.3150420000002
+      ],
+      "medianMs": 541.3020420000003
+    },
+    "speedup": 1.5804625653992015
+  },
+  "decision": {
+    "minimumSpeedup": 1.25,
+    "passed": true
+  }
+}

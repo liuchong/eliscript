@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 92 specifications.
+The registry currently contains 96 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 63 |
-| Stable design | 28 |
+| Accepted design | 66 |
+| Stable design | 29 |
 | Implementation in progress | 3 |
-| Implemented | 89 |
+| Implemented | 93 |
 
-Compatibility Baseline 1 separately classifies 28 specifications as stable,
-61 as provisional, and 3 as planning. That baseline is derived from registry
+Compatibility Baseline 1 separately classifies 29 specifications as stable,
+64 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -69,7 +69,9 @@ identity. Static transient ownership analysis now rejects lifecycle escape,
 and ordinary List construction plus `car`/`cdr`/`cons` now use the canonical
 persistent List while `js-cons` preserves explicit host-array prepend. The P3
 compatibility freeze now removes the provisional `array`/`object` aliases and
-stabilizes the explicit `js-array`/`js-object` host boundary.
+stabilizes the explicit `js-array`/`js-object` host boundary. P4 now also has a
+source-bound compiler profile and a one-pass runtime requirement scan checked
+against the retained five-pass reference implementation.
 
 ## Reading Paths
 
@@ -136,6 +138,7 @@ number.
 33. [0087: First-class Quoted Persistent Data](0087-first-class-quoted-persistent-data.md)
 34. [0091: Transport-safe Protocol Definitions](0091-transport-safe-protocol-definitions.md)
 35. [0092: Persistent Set Source Syntax](0092-persistent-set-source-syntax.md)
+36. [0096: Profile-guided Compiler Runtime Requirement Scan](0096-profile-guided-compiler-runtime-scan.md)
 
 ### React and Publishing
 
@@ -297,6 +300,7 @@ The schemas and change workflow are defined by specifications
 | 0093 | [Static Transient Ownership Analysis](0093-static-transient-ownership-analysis.md) | Accepted | Implemented |
 | 0094 | [Persistent List Language Semantics and Explicit Host Cons](0094-persistent-list-language-semantics.md) | Accepted | Implemented |
 | 0095 | [Stable Persistent Value and Explicit Host Container Boundary](0095-stable-persistent-host-container-boundary.md) | Stable | Implemented |
+| 0096 | [Profile-guided Compiler Runtime Requirement Scan](0096-profile-guided-compiler-runtime-scan.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

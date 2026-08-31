@@ -950,8 +950,12 @@ now applies transients to indexing and final grouped/count Map construction.
 Specification
 [0093-static-transient-ownership-analysis.md](0093-static-transient-ownership-analysis.md)
 now rejects async, module, closure, call, container, assignment, and repeated
-loop escape with seed/self-hosted agreement. Compiler hot-path profiles and
-portable reference implementation review remain required.
+loop escape with seed/self-hosted agreement. Specification
+[0096-profile-guided-compiler-runtime-scan.md](0096-profile-guided-compiler-runtime-scan.md)
+adds the first source-bound compiler profile, replaces five recursive emitter
+runtime-link scans with one production traversal, retains the five predicates
+as an executable reference, and records a reviewed 1.580463x local median
+speedup. Broader compiler hot-path review remains required before P4 exits.
 
 ### P5: Emacs Value Bridge
 

@@ -668,6 +668,13 @@ numeric foundation now lands in
 [0077-portable-numeric-foundation.md](0077-portable-numeric-foundation.md):
 Number classification, safe-integer checked arithmetic, signed integer
 division, and iterative GCD/LCM without host Math dependencies.
+The first profile-guided P4 compiler slice now lands in
+[0096-profile-guided-compiler-runtime-scan.md](0096-profile-guided-compiler-runtime-scan.md):
+the self-hosted emitter collects five conditional runtime requirements in one
+IR traversal, the previous five recursive scans remain an executable semantic
+reference, and a source-bound benchmark records exact agreement plus a reviewed
+1.580463x local median speedup. Application frameworks and bundlers do not
+participate in this core evidence.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

@@ -8,6 +8,32 @@ committed report records raw samples or bounded peak observations, host
 fingerprints, correctness checks, parameters, and a digest of the source files
 that determine the measurement.
 
+## Compiler Runtime Requirement Scan
+
+Run the self-hosted compiler scan benchmark after generating the bootstrap
+compiler:
+
+```sh
+bun run build:bootstrap
+bun run benchmark:compiler-runtime-scan
+```
+
+The benchmark compiles all maintained self-hosted compiler modules into IR,
+then compares the production one-pass runtime requirement scan with the
+retained five-pass reference implementation. It requires exact requirement
+agreement before recording timings. Refresh the reviewed local report only
+after the implementation and source digest have been reviewed:
+
+```sh
+bun tools/compiler/runtime-scan-benchmark.mjs \
+  --output benchmarks/compiler-runtime-scan-macos-arm64.json
+```
+
+[`compiler-runtime-scan-macos-arm64.json`](compiler-runtime-scan-macos-arm64.json)
+records the current source-bound evidence. Default tests verify its digest,
+equivalence result, corpus size, raw samples, and threshold decision; wall-clock
+timings are not rerun as a normal test gate.
+
 ## Worker Value-stream Memory
 
 Run the small real-process probe with:
