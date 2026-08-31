@@ -736,6 +736,15 @@ reviewed 20,658-mark compiler corpus records a 4.479467x combined cursor median
 speedup and a 1.153237x complete-compiler median speedup against the exact
 pre-specialization revision. ESM and Source Maps remain byte-identical, and no
 application framework or build tool participates in the evidence.
+Specification
+[0103-transient-bulk-builder-performance.md](0103-transient-bulk-builder-performance.md)
+then binds the complete core runtime to alternating persistent/transient
+builder measurements. Over identical preconstructed inputs, owner-token
+`into` records 12.329933x Vector, 17.486689x Map, and 17.937565x Set median
+speedups, identical values and hashes, one completion each, and persistent-node
+allocation ratios below one third. A fresh compiler profile also rejects a
+1.042127x complete-compiler Source Map encoding candidate rather than adding
+low-impact native complexity. This closes P4 without application evidence.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

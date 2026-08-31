@@ -8,6 +8,22 @@ committed report records raw samples or bounded peak observations, host
 fingerprints, correctness checks, parameters, and a digest of the source files
 that determine the measurement.
 
+## Transient Bulk Builders
+
+Run the source-bound Vector, Map, and Set comparison with:
+
+```sh
+bun run benchmark:transient-builders -- \
+  --output benchmarks/transient-builder-macos-arm64.json
+```
+
+The persistent references apply one immutable update per preconstructed input.
+Production calls public `into`, which selects owner-token transient mutation
+through protocols and calls `persistent!` once. Complete value equality and
+hashing, allocation counters, and source identity are checked outside the
+timed region. Eleven samples alternate path order after two warmups. Default
+tests validate the committed report without rerunning wall-clock timings.
+
 ## Compiler Ordered Source Map Cursors
 
 Create the exact pre-specialization baseline, generate both compilers, and run:

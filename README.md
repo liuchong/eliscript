@@ -52,7 +52,8 @@ The current M8 work provides:
 - reusable mapping, filtering, removing, taking, and dropping transducers with
   protocol-driven `transduce` and `into`
 - owner-token transient Vector, Map, and Set builders with deterministic
-  completion invalidation and transient-backed persistent `into`
+  completion invalidation and transient-backed persistent `into`, with
+  source-bound 12.329933x/17.486689x/17.937565x Vector/Map/Set builder evidence
 - protocol, collection, transducer, and transient APIs exposed through
   Lisp-named Eliscript modules, with sequence and keyed-data algorithm bodies
   maintained in `stdlib/core/`
@@ -72,6 +73,8 @@ The current M8 work provides:
 - profile-guided self-hosted compiler improvements with source-bound reports,
   including direct binary comparisons, bounded reader character decisions,
   ordered Source Map cursors, and complete-compiler benchmarks
+- a completed P4 transient/hot-path phase with retained semantic references,
+  rejected low-impact candidates, and no application-tool maturity credit
 
 First-class immutable Keyword and Symbol values now have optimized and
 portable representations that share equality, hashing, Map keys, and Set

@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 102 specifications.
+The registry currently contains 103 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 72 |
+| Accepted design | 73 |
 | Stable design | 29 |
 | Implementation in progress | 3 |
-| Implemented | 99 |
+| Implemented | 100 |
 
 Compatibility Baseline 1 separately classifies 29 specifications as stable,
-70 as provisional, and 3 as planning. That baseline is derived from registry
+71 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -78,7 +78,9 @@ retaining the original character loop as an executable reference. Ordered
 source-mark location, direct binary comparison emission, bounded reader
 character classification, and ordered Source Map cursors now remove four more
 generated hot paths while preserving independent semantic and historical
-baselines.
+baselines. P4 now closes with source-bound transient bulk-builder evidence:
+Vector, Map, and Set are value-equivalent to repeated persistent construction
+while recording 12.329933x, 17.486689x, and 17.937565x median speedups.
 
 ## Reading Paths
 
@@ -152,6 +154,7 @@ number.
 40. [0100: Profile-guided Binary Comparison Emission](0100-profile-guided-binary-comparison-emission.md)
 41. [0101: Profile-guided Reader Character Classification](0101-profile-guided-reader-character-classification.md)
 42. [0102: Profile-guided Ordered Source Map Cursors](0102-profile-guided-source-map-cursors.md)
+43. [0103: Transient Bulk Builder Performance](0103-transient-bulk-builder-performance.md)
 
 ### Application Validation (Non-core)
 
@@ -323,6 +326,7 @@ The schemas and change workflow are defined by specifications
 | 0100 | [Profile-guided Binary Comparison Emission](0100-profile-guided-binary-comparison-emission.md) | Accepted | Implemented |
 | 0101 | [Profile-guided Reader Character Classification](0101-profile-guided-reader-character-classification.md) | Accepted | Implemented |
 | 0102 | [Profile-guided Ordered Source Map Cursors](0102-profile-guided-source-map-cursors.md) | Accepted | Implemented |
+| 0103 | [Transient Bulk Builder Performance](0103-transient-bulk-builder-performance.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

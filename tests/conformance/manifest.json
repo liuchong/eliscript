@@ -1202,6 +1202,17 @@
         { "kind": "bun-test", "file": "tests/compiler-source-map-cursor.test.mjs", "contains": "committed Source Map cursor report matches measured sources" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "stdlib.transient-builder-performance",
+      "title": "Source-bound transient bulk builder performance",
+      "status": "accepted",
+      "spec": "0103",
+      "contracts": ["Compares public persistent operations with public into over identical preconstructed inputs", "Requires complete value equality, identical hashing, and exact observations", "Requires one persistent completion and at most one-third persistent node allocation", "Records alternating Vector, Map, and Set samples with at least 1.5x median speedup", "Keeps application frameworks, UI libraries, bundlers, publishing, sites, and hosting outside P4 evidence"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/transient-builder-benchmark.test.mjs", "contains": "committed transient builder report matches core runtime sources" },
+        { "kind": "bun-test", "file": "tests/transient-builder-benchmark.test.mjs", "contains": "transient builder report validator rejects incomplete evidence" }
+      ]
     }
   ]
 }

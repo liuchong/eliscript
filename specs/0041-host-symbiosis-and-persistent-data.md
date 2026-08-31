@@ -944,9 +944,9 @@ boundary to stable. The P3 exit is satisfied.
 5. Retain portable readable implementations as correctness references.
 
 **Exit:** bulk builders improve measured runtime without changing persistent
-semantics or observable application output.
+semantics or observable language/runtime output.
 
-**Status:** Underway since 2026-08-29. Specification
+**Status:** Completed on 2026-09-01. Specification
 [0062-owner-token-transient-collections.md](0062-owner-token-transient-collections.md)
 implements owner-token Vector, Map, and Set runtime nodes, completion
 invalidation, message/serialization rejection, transient-backed `into`,
@@ -1019,7 +1019,20 @@ remain independent executable references. The reviewed report records exact
 agreement over 20,658 artifact marks and explicit boundaries, a 4.479467x
 cursor-pipeline median speedup, and a 1.153237x complete-compiler median
 speedup with byte-identical ESM and Source Maps. Application tooling receives
-no P4 credit, and broader compiler/standard-library review remains open.
+no P4 credit.
+Specification
+[0103-transient-bulk-builder-performance.md](0103-transient-bulk-builder-performance.md)
+completes the standard-library review with source-bound, alternating
+construction evidence. Public transient-backed `into` is value- and
+hash-equivalent to repeated persistent construction while recording
+12.329933x Vector, 17.486689x Map, and 17.937565x Set median speedups. Persistent
+node allocation falls to 0.269549, 0.087107, and 0.087107 of the references,
+with one completion call each. A post-0102 compiler profile identifies Source
+Map VLQ encoding as the largest residual cluster, but a fused candidate reaches
+only 1.042127x whole-compiler speedup and is rejected below the 1.08 review
+floor. All five P4 construction requirements and the measured exit gate are
+therefore satisfied without adding the rejected code or using application
+evidence.
 
 ### P5: Emacs Value Bridge
 

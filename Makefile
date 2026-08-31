@@ -14,6 +14,7 @@ test: check-contracts
 		tests/conformance.test.mjs tests/public-surface.test.mjs \
 		tests/ci-contract.test.mjs \
 		tests/collection-layout-benchmark.test.mjs \
+		tests/transient-builder-benchmark.test.mjs \
 		tests/bootstrap-symbol.test.mjs tests/bootstrap-reader.test.mjs \
 		tests/bootstrap-expander.test.mjs tests/bootstrap-analyzer.test.mjs \
 		tests/bootstrap-ir.test.mjs tests/bootstrap-emitter.test.mjs \
