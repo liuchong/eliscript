@@ -176,6 +176,29 @@ first non-Ok item without recursive stack growth. See
 [0075](../specs/0075-portable-result-values.md) for the complete 15-operation
 surface and portability contract.
 
+## JSON Values
+
+`json.eli` implements strict JSON parsing and deterministic encoding entirely
+as portable Eliscript. Parsed arrays become persistent Vectors and objects
+become value-semantic persistent Maps:
+
+```elisp
+(import "../../stdlib/json.eli" parse-json stringify-json)
+(import "../../stdlib/result.eli" and-then ok result-payload)
+
+(and-then stringify-json
+          (parse-json "{\"items\":[1,2,3],\"ready\":true}"))
+```
+
+Both operations return Result values. The encoder accepts only nil, booleans,
+finite numbers, strings, persistent Vectors, and string-keyed persistent Maps;
+native containers and other Eliscript value families require an explicit
+boundary conversion. Object keys are sorted, duplicate input keys are
+rejected, UTF-16 strings are escaped deterministically, and length, depth, and
+value-count limits are configurable. See
+[0076](../specs/0076-portable-json-values.md) for the seven-operation surface,
+error codes, limits, and portability contract.
+
 ## Identifier Values
 
 `core/identifier.eli` exposes optimized immutable, qualified Keyword and

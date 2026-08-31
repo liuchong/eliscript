@@ -841,6 +841,18 @@
         { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "repository public surface matches every tracked implementation" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "stdlib.portable-json-values",
+      "title": "Strict portable persistent JSON codec",
+      "status": "accepted",
+      "spec": "0076",
+      "contracts": ["Parses strict JSON directly into portable scalar, persistent Vector, and value-semantic Map values", "Encodes the exact portable JSON domain with deterministic string-key order and explicit unsupported-value errors", "Rejects duplicates, cycles, malformed input, and resource-limit violations through value-semantic Result errors", "Matches self-hosted artifacts and Bun/Node execution with dependency pruning and generated round trips"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/portable-json.test.mjs", "contains": "portable JSON values are strict, canonical, bounded, and self-hosted" },
+        { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "repository public surface matches every tracked implementation" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

@@ -409,6 +409,13 @@ The first `core/result` implementation now lands in
 ordinary value-semantic persistent Maps, and collection/traversal combinators
 remain dependency-prunable portable Eliscript rather than a host class.
 
+The first `core/json` implementation now lands in
+[0076-portable-json-values.md](0076-portable-json-values.md). It parses strict
+JSON directly into persistent Vector/Map values and deterministically encodes
+the exact portable JSON subset. Duplicate keys, unsupported values, cycles,
+and resource violations return value-semantic Result errors; native container
+conversion remains an explicit `interop/js` operation.
+
 Public functions target protocols wherever that produces a real abstraction.
 Representation-specific functions remain in their owning modules. A function
 is not generalized merely to increase API count.

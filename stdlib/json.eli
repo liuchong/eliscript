@@ -1,0 +1,870 @@
+(module eliscript.json
+  (import-portable "./persistent-map.eli"
+                   empty-persistent-map
+                   persistent-map-assoc
+                   persistent-map-count
+                   persistent-map-get
+                   persistent-map-has?
+                   persistent-map-to-entries
+                   persistent-map?)
+  (import-portable "./persistent-vector.eli"
+                   empty-persistent-vector
+                   persistent-vector-conj
+                   persistent-vector-count
+                   persistent-vector-from-array
+                   persistent-vector-nth
+                   persistent-vector?)
+  (import-portable "./result.eli" err ok)
+  (import-portable "./value.eli" empty-value-map value-map-from-entries)
+
+  (defconst json-default-max-depth 256)
+  (defconst json-default-max-length 16777216)
+  (defconst json-default-max-values 1000000)
+  (defconst json-hard-max-depth 512)
+  (defconst json-hard-max-length 67108864)
+  (defconst json-hard-max-values 10000000)
+  (defconst json-error-kind "eliscript/json-error")
+
+  (defportable json-finite-number? (value)
+    (and (= (value-type value) "number")
+         (= value value)
+         (= (- value value) 0)))
+
+  (defportable json-safe-integer? (value)
+    (and (json-finite-number? value)
+         (= (mod value 1) 0)
+         (<= (- 9007199254740991) value)
+         (<= value 9007199254740991)))
+
+  (defportable json-option-integer?
+      (value minimum maximum)
+    (and (json-safe-integer? value)
+         (<= minimum value)
+         (<= value maximum)))
+
+  (defportable json-option-value (options key fallback)
+    (if (object-has? options key)
+        (get options key nil)
+      fallback))
+
+  (defportable json-options (options)
+    (if (nullish? options)
+        (object :maxDepth json-default-max-depth
+                :maxLength json-default-max-length
+                :maxValues json-default-max-values)
+      (if (not (= (value-type options) "object"))
+          nil
+        (let ((keys (object-keys options))
+              (valid t)
+              (index 0))
+          (while (and valid (< index (length keys)))
+            (let ((key (nth index keys)))
+              (unless (or (= key "maxDepth")
+                          (= key "maxLength")
+                          (= key "maxValues"))
+                (setq valid false)))
+            (setq index (1+ index)))
+          (if (not valid)
+              nil
+            (let ((max-depth
+                   (json-option-value
+                    options "maxDepth" json-default-max-depth))
+                  (max-length
+                   (json-option-value
+                    options "maxLength" json-default-max-length))
+                  (max-values
+                   (json-option-value
+                    options "maxValues" json-default-max-values)))
+              (if (and
+                   (json-option-integer?
+                    max-depth 0 json-hard-max-depth)
+                   (json-option-integer?
+                    max-length 1 json-hard-max-length)
+                   (json-option-integer?
+                    max-values 1 json-hard-max-values))
+                  (object :maxDepth max-depth
+                          :maxLength max-length
+                          :maxValues max-values)
+                nil)))))))
+
+  (defportable json-error
+      (code message offset path)
+    (value-map-from-entries
+     [["kind" json-error-kind]
+      ["code" code]
+      ["message" message]
+      ["offset" offset]
+      ["path" path]]))
+
+  (defportable json-error? (value)
+    (and (persistent-map? value)
+         (= (persistent-map-count value) 5)
+         (= (persistent-map-get value "kind" nil) json-error-kind)
+         (= (value-type (persistent-map-get value "code" nil)) "string")
+         (= (value-type (persistent-map-get value "message" nil)) "string")
+         (= (value-type (persistent-map-get value "path" nil)) "string")
+         (persistent-map-has? value "offset")
+         (let ((offset (persistent-map-get value "offset" nil)))
+           (or (nil? offset)
+               (and (json-safe-integer? offset) (>= offset 0))))))
+
+  (defportable json-error-code (error)
+    (if (json-error? error)
+        (persistent-map-get error "code" nil)
+      nil))
+
+  (defportable json-error-message (error)
+    (if (json-error? error)
+        (persistent-map-get error "message" nil)
+      nil))
+
+  (defportable json-error-offset (error)
+    (if (json-error? error)
+        (persistent-map-get error "offset" nil)
+      nil))
+
+  (defportable json-error-path (error)
+    (if (json-error? error)
+        (persistent-map-get error "path" nil)
+      nil))
+
+  (defportable json-step-success (value index count)
+    (object :ok t :value value :index index :count count))
+
+  (defportable json-step-failure
+      (code message offset path count)
+    (object :ok false
+            :error (json-error code message offset path)
+            :index offset
+            :count count))
+
+  (defportable json-step-ok? (result)
+    (get result "ok" false))
+
+  (defportable json-step-error (result)
+    (get result "error" nil))
+
+  (defportable json-min (left right)
+    (if (< left right) left right))
+
+  (defportable json-slice (start end text)
+    (let ((result "")
+          (index start))
+      (while (< index end)
+        (setq result (str result (nth index text))
+              index (1+ index)))
+      result))
+
+  (defportable json-whitespace? (character)
+    (or (= character " ")
+        (= character "\t")
+        (= character "\n")
+        (= character "\r")))
+
+  (defportable json-skip-whitespace (source start)
+    (let ((index start))
+      (while (and (< index (length source))
+                  (json-whitespace? (nth index source)))
+        (setq index (1+ index)))
+      index))
+
+  (defportable json-digit? (character)
+    (and (not (nil? character))
+         (>= character "0")
+         (<= character "9")))
+
+  (defportable json-nonzero-digit? (character)
+    (and (json-digit? character) (/= character "0")))
+
+  (defportable json-hex-value (character)
+    (cond
+     ((and (>= character "0") (<= character "9"))
+      (- (string-code-unit-at character 0) 48))
+     ((and (>= character "a") (<= character "f"))
+      (- (string-code-unit-at character 0) 87))
+     ((and (>= character "A") (<= character "F"))
+      (- (string-code-unit-at character 0) 55))
+     (t -1)))
+
+  (defportable json-hex-digit (value)
+    (nth value "0123456789abcdef"))
+
+  (defportable json-hex4 (value)
+    (str (json-hex-digit (bit-and
+                          (unsigned-bit-shift-right value 12) 15))
+         (json-hex-digit (bit-and
+                          (unsigned-bit-shift-right value 8) 15))
+         (json-hex-digit (bit-and
+                          (unsigned-bit-shift-right value 4) 15))
+         (json-hex-digit (bit-and value 15))))
+
+  (defportable json-encode-string (value)
+    (let ((result "\"")
+          (index 0))
+      (while (< index (length value))
+        (let ((character (nth index value))
+              (code (string-code-unit-at value index)))
+          (cond
+           ((= character "\"") (setq result (str result "\\\"")))
+           ((= character "\\") (setq result (str result "\\\\")))
+           ((= code 8) (setq result (str result "\\b")))
+           ((= code 9) (setq result (str result "\\t")))
+           ((= code 10) (setq result (str result "\\n")))
+           ((= code 12) (setq result (str result "\\f")))
+           ((= code 13) (setq result (str result "\\r")))
+           ((or (< code 32)
+                (and (>= code 55296) (<= code 57343)))
+            (setq result (str result "\\u" (json-hex4 code))))
+           (t (setq result (str result character)))))
+        (setq index (1+ index)))
+      (str result "\"")))
+
+  (defportable json-path-index (path index)
+    (str path "[" index "]"))
+
+  (defportable json-path-key (path key)
+    (str path "[" (json-encode-string key) "]"))
+
+  (defportable json-read-string (source start count path)
+    (let ((index (1+ start))
+          (result "")
+          (done false)
+          (failure nil))
+      (while (and (not done) (nil? failure) (< index (length source)))
+        (let ((character (nth index source))
+              (code (string-code-unit-at source index)))
+          (cond
+           ((= character "\"")
+            (setq done t index (1+ index)))
+           ((< code 32)
+            (setq failure
+                  (json-step-failure
+                   "ELI-JSON-SYNTAX"
+                   "unescaped control character in string"
+                   index path count)))
+           ((= character "\\")
+            (if (>= (1+ index) (length source))
+                (setq failure
+                      (json-step-failure
+                       "ELI-JSON-SYNTAX"
+                       "unexpected end of string"
+                       start path count))
+              (let ((escape (nth (1+ index) source)))
+                (cond
+                 ((= escape "\"")
+                  (setq result (str result "\"") index (+ index 2)))
+                 ((= escape "\\")
+                  (setq result (str result "\\") index (+ index 2)))
+                 ((= escape "/")
+                  (setq result (str result "/") index (+ index 2)))
+                 ((= escape "b")
+                  (setq result (str result (string-from-code-unit 8))
+                        index (+ index 2)))
+                 ((= escape "f")
+                  (setq result (str result (string-from-code-unit 12))
+                        index (+ index 2)))
+                 ((= escape "n")
+                  (setq result (str result "\n") index (+ index 2)))
+                 ((= escape "r")
+                  (setq result (str result "\r") index (+ index 2)))
+                 ((= escape "t")
+                  (setq result (str result "\t") index (+ index 2)))
+                 ((= escape "u")
+                  (if (> (+ index 6) (length source))
+                      (setq failure
+                            (json-step-failure
+                             "ELI-JSON-SYNTAX"
+                             "incomplete Unicode escape"
+                             index path count))
+                    (let ((digit-index (+ index 2))
+                          (limit (+ index 6))
+                          (value 0)
+                          (valid t))
+                      (while (and valid (< digit-index limit))
+                        (let ((digit
+                               (json-hex-value
+                                (nth digit-index source))))
+                          (if (< digit 0)
+                              (setq valid false)
+                            (setq value (+ (* value 16) digit)
+                                  digit-index (1+ digit-index)))))
+                      (if (not valid)
+                          (setq failure
+                                (json-step-failure
+                                 "ELI-JSON-SYNTAX"
+                                 "invalid Unicode escape"
+                                 index path count))
+                        (setq result
+                              (str result (string-from-code-unit value))
+                              index limit)))))
+                 (t
+                  (setq failure
+                        (json-step-failure
+                         "ELI-JSON-SYNTAX"
+                         "invalid string escape"
+                         index path count)))))))
+           (t
+            (setq result (str result character)
+                  index (1+ index))))))
+      (cond
+       ((not (nil? failure)) failure)
+       ((not done)
+        (json-step-failure
+         "ELI-JSON-SYNTAX" "unexpected end of string"
+         start path count))
+       (t (json-step-success result index count)))))
+
+  (defportable json-read-number (source start count path)
+    (let ((index start)
+          (failure nil))
+      (when (= (nth index source) "-")
+        (setq index (1+ index)))
+      (cond
+       ((>= index (length source))
+        (setq failure
+              (json-step-failure
+               "ELI-JSON-SYNTAX" "incomplete number"
+               start path count)))
+       ((= (nth index source) "0")
+        (setq index (1+ index))
+        (when (json-digit? (nth index source))
+          (setq failure
+                (json-step-failure
+                 "ELI-JSON-SYNTAX" "number has a leading zero"
+                 index path count))))
+       ((json-nonzero-digit? (nth index source))
+        (while (json-digit? (nth index source))
+          (setq index (1+ index))))
+       (t
+        (setq failure
+              (json-step-failure
+               "ELI-JSON-SYNTAX" "invalid number"
+               index path count))))
+      (when (and (nil? failure) (= (nth index source) "."))
+        (setq index (1+ index))
+        (if (not (json-digit? (nth index source)))
+            (setq failure
+                  (json-step-failure
+                   "ELI-JSON-SYNTAX"
+                   "fraction requires at least one digit"
+                   index path count))
+          (while (json-digit? (nth index source))
+            (setq index (1+ index)))))
+      (when (and (nil? failure)
+                 (or (= (nth index source) "e")
+                     (= (nth index source) "E")))
+        (setq index (1+ index))
+        (when (or (= (nth index source) "+")
+                  (= (nth index source) "-"))
+          (setq index (1+ index)))
+        (if (not (json-digit? (nth index source)))
+            (setq failure
+                  (json-step-failure
+                   "ELI-JSON-SYNTAX"
+                   "exponent requires at least one digit"
+                   index path count))
+          (while (json-digit? (nth index source))
+            (setq index (1+ index)))))
+      (if (not (nil? failure))
+          failure
+        (let ((value
+               (string-to-number (json-slice start index source))))
+          (if (not (json-finite-number? value))
+              (json-step-failure
+               "ELI-JSON-NUMBER"
+               "number is outside the finite IEEE-754 range"
+               start path count)
+            (json-step-success value index count))))))
+
+  (defportable json-literal-matches? (source start literal)
+    (let ((index 0)
+          (matches t))
+      (while (and matches (< index (length literal)))
+        (unless (= (nth (+ start index) source)
+                   (nth index literal))
+          (setq matches false))
+        (setq index (1+ index)))
+      matches))
+
+  (defportable json-read-literal
+      (source start count path literal value)
+    (if (json-literal-matches? source start literal)
+        (json-step-success value (+ start (length literal)) count)
+      (json-step-failure
+       "ELI-JSON-SYNTAX" (str "expected " literal)
+       start path count)))
+
+  (defportable json-read-array
+      (source options depth count start path)
+    (let ((index (json-skip-whitespace source (1+ start)))
+          (result (empty-persistent-vector))
+          (current-count count)
+          (item-index 0)
+          (done false)
+          (failure nil))
+      (if (= (nth index source) "]")
+          (json-step-success result (1+ index) current-count)
+        (progn
+          (while (and (not done) (nil? failure))
+            (let ((item
+                   (json-read-node
+                    source options (1+ depth) current-count index
+                    (json-path-index path item-index))))
+              (if (not (json-step-ok? item))
+                  (setq failure item)
+                (progn
+                  (setq result
+                        (persistent-vector-conj
+                         result (get item "value" nil))
+                        current-count (get item "count" current-count)
+                        index
+                        (json-skip-whitespace
+                         source (get item "index" index)))
+                  (cond
+                   ((= (nth index source) "]")
+                    (setq done t index (1+ index)))
+                   ((= (nth index source) ",")
+                    (setq index
+                          (json-skip-whitespace source (1+ index))
+                          item-index (1+ item-index))
+                    (when (= (nth index source) "]")
+                      (setq failure
+                            (json-step-failure
+                             "ELI-JSON-SYNTAX"
+                             "array has a trailing comma"
+                             index path current-count))))
+                   (t
+                    (setq failure
+                          (json-step-failure
+                           "ELI-JSON-SYNTAX"
+                           "expected ',' or ']' after array item"
+                           index path current-count))))))))
+          (if (nil? failure)
+              (json-step-success result index current-count)
+            failure)))))
+
+  (defportable json-read-object
+      (source options depth count start path)
+    (let ((index (json-skip-whitespace source (1+ start)))
+          (result (empty-value-map))
+          (current-count count)
+          (done false)
+          (failure nil))
+      (if (= (nth index source) "}")
+          (json-step-success result (1+ index) current-count)
+        (progn
+          (while (and (not done) (nil? failure))
+            (if (/= (nth index source) "\"")
+                (setq failure
+                      (json-step-failure
+                       "ELI-JSON-SYNTAX"
+                       "object key must be a string"
+                       index path current-count))
+              (let ((key-result
+                     (json-read-string
+                      source index current-count path)))
+                (if (not (json-step-ok? key-result))
+                    (setq failure key-result)
+                  (let* ((key (get key-result "value" nil))
+                         (key-path (json-path-key path key))
+                         (colon-index
+                          (json-skip-whitespace
+                           source (get key-result "index" index))))
+                    (if (/= (nth colon-index source) ":")
+                        (setq failure
+                              (json-step-failure
+                               "ELI-JSON-SYNTAX"
+                               "object key requires ':'"
+                               colon-index key-path current-count))
+                      (if (persistent-map-has? result key)
+                          (setq failure
+                                (json-step-failure
+                                 "ELI-JSON-DUPLICATE"
+                                 "duplicate object key"
+                                 index key-path current-count))
+                        (let* ((value-index
+                                (json-skip-whitespace
+                                 source (1+ colon-index)))
+                               (value-result
+                                (json-read-node
+                                 source options (1+ depth)
+                                 current-count value-index key-path)))
+                          (if (not (json-step-ok? value-result))
+                              (setq failure value-result)
+                            (progn
+                              (setq result
+                                    (persistent-map-assoc
+                                     result key
+                                     (get value-result "value" nil))
+                                    current-count
+                                    (get value-result "count" current-count)
+                                    index
+                                    (json-skip-whitespace
+                                     source
+                                     (get value-result "index" value-index)))
+                              (cond
+                               ((= (nth index source) "}")
+                                (setq done t index (1+ index)))
+                               ((= (nth index source) ",")
+                                (setq index
+                                      (json-skip-whitespace
+                                       source (1+ index)))
+                                (when (= (nth index source) "}")
+                                  (setq failure
+                                        (json-step-failure
+                                         "ELI-JSON-SYNTAX"
+                                         "object has a trailing comma"
+                                         index path current-count))))
+                               (t
+                                (setq failure
+                                      (json-step-failure
+                                       "ELI-JSON-SYNTAX"
+                                       "expected ',' or '}' after object value"
+                                       index path current-count))))))))))))))
+          (if (nil? failure)
+              (json-step-success result index current-count)
+            failure)))))
+
+  (defportable json-read-node
+      (source options depth count start path)
+    (let ((index (json-skip-whitespace source start)))
+      (cond
+       ((> depth (get options "maxDepth" json-default-max-depth))
+        (json-step-failure
+         "ELI-JSON-DEPTH"
+         (str "JSON exceeds maxDepth "
+              (get options "maxDepth" json-default-max-depth))
+         index path count))
+       ((>= count (get options "maxValues" json-default-max-values))
+        (json-step-failure
+         "ELI-JSON-VALUES"
+         (str "JSON exceeds maxValues "
+              (get options "maxValues" json-default-max-values))
+         index path count))
+       ((>= index (length source))
+        (json-step-failure
+         "ELI-JSON-SYNTAX" "unexpected end of input"
+         index path count))
+       (t
+        (let ((next-count (1+ count))
+              (character (nth index source)))
+          (cond
+           ((= character "\"")
+            (json-read-string source index next-count path))
+           ((= character "[")
+            (json-read-array
+             source options depth next-count index path))
+           ((= character "{")
+            (json-read-object
+             source options depth next-count index path))
+           ((or (= character "-") (json-digit? character))
+            (json-read-number source index next-count path))
+           ((= character "t")
+            (json-read-literal
+             source index next-count path "true" t))
+           ((= character "f")
+            (json-read-literal
+             source index next-count path "false" false))
+           ((= character "n")
+            (json-read-literal
+             source index next-count path "null" nil))
+           (t
+            (json-step-failure
+             "ELI-JSON-SYNTAX" "unexpected JSON token"
+             index path next-count))))))))
+
+  (defportable parse-json (source &optional options)
+    (let ((normalized (json-options options)))
+      (cond
+       ((not (= (value-type source) "string"))
+        (err
+         (json-error
+          "ELI-JSON-TYPE" "JSON source must be a string" 0 "$")))
+       ((nil? normalized)
+        (err
+         (json-error
+          "ELI-JSON-OPTIONS" "invalid JSON options" 0 "$")))
+       ((> (length source)
+           (get normalized "maxLength" json-default-max-length))
+        (err
+         (json-error
+          "ELI-JSON-LENGTH"
+          (str "JSON source exceeds maxLength "
+               (get normalized "maxLength" json-default-max-length))
+          0 "$")))
+       (t
+        (let ((result (json-read-node source normalized 0 0 0 "$")))
+          (if (not (json-step-ok? result))
+              (err (json-step-error result))
+            (let ((index
+                   (json-skip-whitespace
+                    source (get result "index" 0))))
+              (if (/= index (length source))
+                  (err
+                   (json-error
+                    "ELI-JSON-SYNTAX"
+                    "trailing data after JSON value"
+                    index "$"))
+                (ok (get result "value" nil))))))))))
+
+  (defportable json-identity-hash (value)
+    (uint32 (host-identity-token value)))
+
+  (defportable json-identical? (left right)
+    (eq left right))
+
+  (defportable json-empty-active-map ()
+    (empty-persistent-map
+     json-identity-hash json-identical? json-identical?))
+
+  (defportable json-encode-success (text count)
+    (object :ok t :text text :count count))
+
+  (defportable json-encode-failure
+      (code message path count)
+    (object :ok false
+            :error (json-error code message nil path)
+            :count count))
+
+  (defportable json-encode-text (text options path count)
+    (if (> (length text)
+           (get options "maxLength" json-default-max-length))
+        (json-encode-failure
+         "ELI-JSON-LENGTH"
+         (str "JSON output exceeds maxLength "
+              (get options "maxLength" json-default-max-length))
+         path count)
+      (json-encode-success text count)))
+
+  (defportable json-entry-key (entry)
+    (nth 0 entry))
+
+  (defportable json-sort-entry-pass (entries width)
+    (let ((result (empty-persistent-vector))
+          (count (persistent-vector-count entries))
+          (start 0))
+      (while (< start count)
+        (let ((left start)
+              (middle (json-min (+ start width) count))
+              (right (json-min (+ start (* width 2)) count))
+              (left-index start)
+              (right-index (json-min (+ start width) count)))
+          (while (or (< left-index middle) (< right-index right))
+            (cond
+             ((>= left-index middle)
+              (setq result
+                    (persistent-vector-conj
+                     result
+                     (persistent-vector-nth
+                      entries right-index nil))
+                    right-index (1+ right-index)))
+             ((>= right-index right)
+              (setq result
+                    (persistent-vector-conj
+                     result
+                     (persistent-vector-nth
+                      entries left-index nil))
+                    left-index (1+ left-index)))
+             (t
+              (let ((left-entry
+                     (persistent-vector-nth entries left-index nil))
+                    (right-entry
+                     (persistent-vector-nth entries right-index nil)))
+                (if (<= (json-entry-key left-entry)
+                        (json-entry-key right-entry))
+                    (setq result
+                          (persistent-vector-conj result left-entry)
+                          left-index (1+ left-index))
+                  (setq result
+                        (persistent-vector-conj result right-entry)
+                        right-index (1+ right-index)))))))
+          (setq start right)))
+      result))
+
+  (defportable json-sort-entries (entries)
+    (let ((result entries)
+          (width 1)
+          (count (persistent-vector-count entries)))
+      (while (< width count)
+        (setq result (json-sort-entry-pass result width)
+              width (* width 2)))
+      result))
+
+  (defportable json-encode-vector
+      (value options depth count path active)
+    (if (persistent-map-has? active value)
+        (json-encode-failure
+         "ELI-JSON-CYCLE"
+         (str "cyclic JSON value refers to "
+              (persistent-map-get active value "$"))
+         path count)
+      (let ((next-active (persistent-map-assoc active value path))
+            (text "[")
+            (current-count count)
+            (index 0)
+            (failure nil))
+        (while (and (nil? failure)
+                    (< index (persistent-vector-count value)))
+          (let ((encoded
+                 (json-encode-node
+                  (persistent-vector-nth value index nil)
+                  options (1+ depth) current-count
+                  (json-path-index path index) next-active)))
+            (if (not (get encoded "ok" false))
+                (setq failure encoded)
+              (progn
+                (setq text
+                      (str text
+                           (if (> index 0) "," "")
+                           (get encoded "text" ""))
+                      current-count
+                      (get encoded "count" current-count))
+                (when (> (length text)
+                         (get options "maxLength"
+                              json-default-max-length))
+                  (setq failure
+                        (json-encode-failure
+                         "ELI-JSON-LENGTH"
+                         (str "JSON output exceeds maxLength "
+                              (get options "maxLength"
+                                   json-default-max-length))
+                         path current-count))))))
+          (setq index (1+ index)))
+        (if (nil? failure)
+            (json-encode-text
+             (str text "]") options path current-count)
+          failure))))
+
+  (defportable json-encode-map
+      (value options depth count path active)
+    (if (persistent-map-has? active value)
+        (json-encode-failure
+         "ELI-JSON-CYCLE"
+         (str "cyclic JSON value refers to "
+              (persistent-map-get active value "$"))
+         path count)
+      (let* ((next-active (persistent-map-assoc active value path))
+             (raw-entries
+              (persistent-vector-from-array
+               (persistent-map-to-entries value)))
+             (entry-count (persistent-vector-count raw-entries))
+             (valid t)
+             (validation-index 0)
+             (failure nil))
+        (while (and valid (< validation-index entry-count))
+          (let ((entry
+                 (persistent-vector-nth
+                  raw-entries validation-index nil)))
+            (when (/= (value-type (json-entry-key entry)) "string")
+              (setq valid false
+                    failure
+                    (json-encode-failure
+                     "ELI-JSON-KEY"
+                     "JSON object keys must be strings"
+                     (str path "<key:" validation-index ">")
+                     count)))
+          (setq validation-index (1+ validation-index))))
+        (if (not valid)
+            failure
+          (let ((entries (json-sort-entries raw-entries))
+                (text "{")
+                (current-count count)
+                (index 0))
+            (while (and (nil? failure) (< index entry-count))
+              (let* ((entry
+                      (persistent-vector-nth entries index nil))
+                     (key (nth 0 entry))
+                     (key-path (json-path-key path key))
+                     (encoded
+                      (json-encode-node
+                       (nth 1 entry) options (1+ depth)
+                       current-count key-path next-active)))
+                (if (not (get encoded "ok" false))
+                    (setq failure encoded)
+                  (progn
+                    (setq text
+                          (str text
+                               (if (> index 0) "," "")
+                               (json-encode-string key)
+                               ":"
+                               (get encoded "text" ""))
+                          current-count
+                          (get encoded "count" current-count))
+                    (when (> (length text)
+                             (get options "maxLength"
+                                  json-default-max-length))
+                      (setq failure
+                            (json-encode-failure
+                             "ELI-JSON-LENGTH"
+                             (str "JSON output exceeds maxLength "
+                                  (get options "maxLength"
+                                       json-default-max-length))
+                             path current-count))))))
+              (setq index (1+ index)))
+            (if (nil? failure)
+                (json-encode-text
+                 (str text "}") options path current-count)
+              failure))))))
+
+  (defportable json-encode-node
+      (value options depth count path active)
+    (cond
+     ((> depth (get options "maxDepth" json-default-max-depth))
+      (json-encode-failure
+       "ELI-JSON-DEPTH"
+       (str "JSON exceeds maxDepth "
+            (get options "maxDepth" json-default-max-depth))
+       path count))
+     ((>= count (get options "maxValues" json-default-max-values))
+      (json-encode-failure
+       "ELI-JSON-VALUES"
+       (str "JSON exceeds maxValues "
+            (get options "maxValues" json-default-max-values))
+       path count))
+     (t
+      (let ((next-count (1+ count))
+            (type (value-type value)))
+        (cond
+         ((= type "null")
+          (json-encode-text "null" options path next-count))
+         ((= type "boolean")
+          (json-encode-text
+           (if value "true" "false") options path next-count))
+         ((= type "number")
+          (if (json-finite-number? value)
+              (json-encode-text
+               (str value) options path next-count)
+            (json-encode-failure
+             "ELI-JSON-NUMBER"
+             "JSON numbers must be finite"
+             path next-count)))
+         ((= type "string")
+          (json-encode-text
+           (json-encode-string value) options path next-count))
+         ((persistent-vector? value)
+          (json-encode-vector
+           value options depth next-count path active))
+         ((persistent-map? value)
+          (json-encode-map
+           value options depth next-count path active))
+         (t
+          (json-encode-failure
+           "ELI-JSON-UNSUPPORTED"
+           (str "unsupported JSON value type: " type)
+           path next-count)))))))
+
+  (defportable stringify-json (value &optional options)
+    (let ((normalized (json-options options)))
+      (if (nil? normalized)
+          (err
+           (json-error
+            "ELI-JSON-OPTIONS" "invalid JSON options" nil "$"))
+        (let ((result
+               (json-encode-node
+                value normalized 0 0 "$" (json-empty-active-map))))
+          (if (get result "ok" false)
+              (ok (get result "text" ""))
+            (err (json-step-error result)))))))
+
+  (export json-error-code json-error-message json-error-offset
+          json-error-path json-error? parse-json stringify-json))

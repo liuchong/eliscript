@@ -68,9 +68,11 @@ deterministic transition and watch behavior. Explicit native-container interop
 now provides shallow-by-default conversion, deep graph conversion with sharing
 preservation, structured cycle diagnostics, and a focused React props adapter.
 Portable Result values now provide explicit success/failure data without a new
-host class or identity boundary. The next language boundary is the complete P1
-exit audit, followed by portable protocol dispatch policy, measured object/text
-migration, literal migration, and the Emacs value bridge.
+host class or identity boundary. Portable JSON now parses strict text directly
+into persistent values and emits deterministic string-key order with Result
+errors, cycle detection, and resource bounds. The next language boundary is
+the complete P1 exit audit, followed by portable protocol dispatch policy,
+measured object/text migration, literal migration, and the Emacs value bridge.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in

@@ -142,6 +142,14 @@ exact callback counts, reconstructed Map-key lookup, 2,000 generated
 equality/hash pairs, a 50,000-item traversal, exact first-error short circuit,
 and declaration-level portable dependency pruning.
 
+The portable JSON suite compiles `json.eli` and its complete persistent value
+dependency graph with both compiler generations, compares every ESM and Source
+Map byte-for-byte, and runs both outputs under Bun and Node. It verifies strict
+grammar rejection, duplicate-key paths, UTF-16 escapes, deterministic Map-key
+ordering, unsupported values, non-finite numbers, shared graphs and cycles,
+three resource limits, 2,000 generated value round trips, a 20,000-item scale
+case, and declaration-level parser-only dependency pruning.
+
 The identifier runtime suite verifies constructor validation, Keyword
 interning, non-interned Symbol value equality, freezing, explicit serialization
 failure, hostile host-object handling, and runtime persistent Map/Set behavior.

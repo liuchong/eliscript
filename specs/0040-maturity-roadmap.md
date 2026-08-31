@@ -579,7 +579,11 @@ exit audit remains open before literal migration. The first explicit M11
 library value now lands early in
 [0075-portable-result-values.md](0075-portable-result-values.md): inspectable
 Ok/Err persistent records, exact branch combinators, dependency-pruned portable
-closures, and stack-safe persistent-Vector traversal.
+closures, and stack-safe persistent-Vector traversal. The first portable JSON
+boundary now lands in
+[0076-portable-json-values.md](0076-portable-json-values.md): strict parsing
+directly into persistent values, deterministic string-key encoding, exact
+Result diagnostics, cycle detection, and explicit resource limits.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 
@@ -683,9 +687,11 @@ a generally required core operation, and every stable export has behavioral
 and portability evidence.
 
 **M11 early implementation:** Portable Result records and combinators now land
-in [0075-portable-result-values.md](0075-portable-result-values.md). Naming and
-behavior remain provisional until the complete M11 core-library audit; numeric,
-JSON, platform, and API-metadata work remains open.
+in [0075-portable-result-values.md](0075-portable-result-values.md), and the
+strict persistent JSON boundary lands in
+[0076-portable-json-values.md](0076-portable-json-values.md). Naming and
+behavior remain provisional until the complete M11 core-library audit;
+numeric, platform, and API-metadata work remains open.
 
 ### M12: Reliability, Security, and Performance (8-12 weeks)
 
