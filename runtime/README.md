@@ -39,10 +39,21 @@ and now backs square-bracket value expressions. Internal
 node shape, allocation, visit, and sharing observations are isolated in
 `testing/vector.mjs`; applications must not depend on those test adapters.
 
+### Persistent List
+
+`core/list.mjs` is the canonical optimized Persistent List runtime. Its frozen
+singly linked nodes provide constant-time front construction, complete suffix
+sharing, cached counts, iterative traversal, collection protocols, value
+semantics, and immutable metadata. It deliberately does not advertise indexed
+collection capability: its convenience `nth` method is linear-time. Internal
+allocation and sharing observations live in `testing/list.mjs` and are not
+application APIs.
+
 ### Value Semantics
 
 `core/value.mjs` defines provisional coercion-free value equality and unsigned
-32-bit hashing. Portable scalar and persistent-vector hashes are deterministic;
+32-bit hashing. Portable scalar, List, and persistent-vector hashes are
+deterministic;
 opaque JavaScript objects retain process-local identity semantics. Persistent
 hashes are cached privately. `testing/value.mjs` exposes cache and identity
 counters only for conformance tests.
@@ -62,8 +73,8 @@ specified.
 
 `core/metadata.mjs` defines open `IMeta` and `IWithMeta` protocols plus
 `meta`, `withMeta`, `varyMeta`, and capability inspection. Eliscript Symbols
-and persistent Vector, Map, and Set values attach either `null` or a persistent
-Map by replacing only their frozen root wrapper. Equality and hashing ignore
+and persistent List, Vector, Map, and Set values attach either `null` or a
+persistent Map by replacing only their frozen root wrapper. Equality and hashing ignore
 metadata; collection updates, `empty`, and transient round trips preserve it;
 logical host conversions emit only collection contents. Keywords remain
 unannotated because their global interning cannot carry per-use state.
@@ -75,15 +86,15 @@ Exact semantics and evidence are specified in
 
 `core/data-text.mjs` supplies the open `IPrint` protocol and canonical
 `printValue`, `readValue`, and `readValues` operations. Scalar edges,
-identifiers, persistent Vector/Map/Set values, and metadata round-trip through
+identifiers, persistent List/Vector/Map/Set values, and metadata round-trip through
 readable Lisp-shaped text. Map entries and Set members sort by canonical text,
 unsafe identifiers use explicit tags, and duplicate or malformed input fails
 with a located `DataTextError`. Depth, UTF-16 length, and value-count limits
 bound both directions.
 
-This is deliberately separate from executable source reading, the portable
-List/collection implementation, and the future versioned Emacs transport
-codec. Portable data text is now implemented in `stdlib/data-text.eli`. Exact
+This is deliberately separate from executable source reading and the future
+versioned Emacs transport codec. Portable data text is implemented independently
+in `stdlib/data-text.eli` over the same common grammar. Exact
 semantics are specified in [0069](../specs/0069-canonical-runtime-data-text.md)
 and [0071](../specs/0071-canonical-portable-data-text.md).
 
@@ -115,7 +126,7 @@ error type that cannot be expressed as an ordinary portable value.
 
 `core/collection.mjs` defines the generic collection capability layer:
 `ICounted`, `IEmptyable`, `IConj`, `ILookup`, `IAssociative`, `IIndexed`,
-`ISeqable`, and `IReduce`. Persistent Vector, Map, and Set values use direct
+`ISeqable`, and `IReduce`. Persistent List, Vector, Map, and Set values use direct
 Symbol slots; native Array, Map, Set, and ordinary Object values use exact-type
 extension tables, while primitive String uses an explicit host category.
 Adapters do not modify prototypes. Sequence views are frozen and replayable,

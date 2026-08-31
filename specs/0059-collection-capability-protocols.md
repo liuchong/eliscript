@@ -124,6 +124,7 @@ inventing a second termination channel.
 Persistent types install direct Symbol-keyed protocol methods:
 
 - Vector: all five capabilities
+- List: `ICounted`, `ISeqable`, `IReduce`
 - Map: `ICounted`, `ILookup`, `ISeqable`, `IReduce`
 - Set: `ICounted`, `ILookup`, `ISeqable`, `IReduce`
 
@@ -184,7 +185,10 @@ adapters through specifications
 [0080](0080-canonical-generated-protocol-runtime.md), and
 [0081](0081-protocol-driven-text-object.md). Persistent collection literal
 migration, compiler specialization, and a transport-safe protocol
-representation remain later compiler work.
+representation remain later compiler work. Specification
+[0086](0086-optimized-runtime-persistent-list.md) adds the optimized runtime
+List implementation; its `IEmptyable` and `IConj` methods follow the 0060
+construction contract, while indexed access remains deliberately absent.
 
 ## Acceptance Criteria
 

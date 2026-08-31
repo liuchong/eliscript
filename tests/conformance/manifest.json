@@ -973,6 +973,22 @@
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "square literals, persistent constructors, and host containers are distinct" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "runtime.optimized-persistent-list",
+      "title": "Optimized runtime persistent List and canonical data text",
+      "status": "accepted",
+      "spec": "0086",
+      "contracts": ["Provides a frozen singly linked List with constant-time front construction and complete suffix sharing", "Implements collection, value, hashing, and metadata protocols while remaining distinct from Vector", "Matches the Eliscript-authored List hash contract and reads and writes canonical parenthesized data text", "Traverses one million nodes iteratively and agrees under Bun and Node without application dependencies"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/persistent-list.test.mjs", "contains": "persistent list preserves order and constant-time front operations" },
+        { "kind": "bun-test", "file": "tests/persistent-list.test.mjs", "contains": "persistent list implements collection, value, and metadata protocols" },
+        { "kind": "bun-test", "file": "tests/persistent-list.test.mjs", "contains": "persistent list allocates one front node and shares its complete suffix" },
+        { "kind": "bun-test", "file": "tests/persistent-list.test.mjs", "contains": "persistent list traverses one million nodes without stack growth" },
+        { "kind": "bun-test", "file": "tests/persistent-list.test.mjs", "contains": "persistent list behavior and data text agree under Bun and Node" },
+        { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "collections print in deterministic logical order" },
+        { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "optimized and portable persistent Lists share frozen hash semantics" }
+      ]
     }
   ]
 }

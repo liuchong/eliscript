@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { persistentList as runtimePersistentList } from "../runtime/core/list.mjs";
+import { hashValue as runtimeHashValue } from "../runtime/core/value.mjs";
+
 const projectDirectory = resolve(import.meta.dir, "..");
 const stdlibDirectory = resolve(projectDirectory, "stdlib");
 const compiler = resolve(projectDirectory, "bin/eliscript");
@@ -355,6 +358,25 @@ test("portable persistent collections preserve nested undefined values", async (
   expect(valueHash(vector)).toBe(
     valueHash(persistentVectorFromArray([undefined, null, false])),
   );
+}, 30_000);
+
+test("optimized and portable persistent Lists share frozen hash semantics", async () => {
+  const modules = await generatedModules("runtime-list");
+  const { value_hash: valueHash } = modules.value;
+  const { persistent_list_from_array: persistentListFromArray } =
+    modules["persistent-list"];
+  const portable = persistentListFromArray([
+    1,
+    "two",
+    persistentListFromArray([3, 4]),
+  ]);
+  const runtime = runtimePersistentList(
+    1,
+    "two",
+    runtimePersistentList(3, 4),
+  );
+
+  expect(runtimeHashValue(runtime)).toBe(valueHash(portable));
 }, 30_000);
 
 test("Eliscript-authored value semantics preserve generated cross-family invariants", async () => {

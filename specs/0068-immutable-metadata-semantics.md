@@ -49,10 +49,11 @@ The optimized runtime supports:
 - persistent Sets
 
 The portable standard library supports persistent Lists, Vectors, Maps, and
-Sets. The runtime has no separate List class in this milestone. Keywords do
-not support metadata because they are globally interned: attaching per-value
-state would make an annotation mutate the meaning of every equal Keyword.
-Symbols are non-interned value objects and therefore may carry metadata.
+Sets. Specification 0086 extends the optimized runtime with a separate
+Persistent List using the same root-wrapper metadata rule. Keywords do not
+support metadata because they are globally interned: attaching per-value state
+would make an annotation mutate the meaning of every equal Keyword. Symbols
+are non-interned value objects and therefore may carry metadata.
 
 Host scalars, native containers, functions, Keywords, and arbitrary branded
 objects do not acquire metadata implicitly.
@@ -158,7 +159,7 @@ semantics in both implementations.
 
 - **MET-01:** Runtime `IMeta` and `IWithMeta` are frozen protocols exposed
   through Lisp-named and JavaScript APIs.
-- **MET-02:** Symbols and runtime persistent Vector, Map, and Set values support
+- **MET-02:** Symbols and runtime persistent List, Vector, Map, and Set values support
   immutable metadata; Keywords and arbitrary host values do not.
 - **MET-03:** Portable persistent List, Vector, Map, and Set values support the
   same root metadata model through `stdlib/metadata.eli`.

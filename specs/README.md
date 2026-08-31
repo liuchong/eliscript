@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 85 specifications.
+The registry currently contains 86 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 56 |
+| Accepted design | 57 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 82 |
+| Implemented | 83 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-54 as provisional, and 3 as planning. That baseline is derived from registry
+55 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -50,7 +50,9 @@ sequence/data algorithms, stack-safe recurrence, deterministic macro-generated
 names, Lisp-named protocol/collection/transducer/transient modules, and
 Eliscript-maintained core algorithm bodies, first-class immutable Keyword and
 Symbol values, root-shared immutable metadata, portable identifier values, and
-canonical runtime plus portable List/collection data text, synchronous Atom
+canonical runtime plus portable List/collection data text, including an
+optimized singly linked runtime List with parenthesized canonical text,
+synchronous Atom
 state references, explicit native JavaScript container conversion, and
 process-local host identity hashing for efficient opaque Map/Set keys, and
 portable value-semantic Result records and combinators, plus a strict portable
@@ -123,6 +125,7 @@ number.
 29. [0083: Default Persistent Vector Literals and Explicit Host Access](0083-default-persistent-vector-literals.md)
 30. [0084: Persistent Map Source Syntax](0084-persistent-map-source-syntax.md)
 31. [0085: First-class Source Keyword Values](0085-first-class-source-keywords.md)
+32. [0086: Optimized Runtime Persistent List and Canonical Data Text](0086-optimized-runtime-persistent-list.md)
 
 ### React and Publishing
 
@@ -274,6 +277,7 @@ The schemas and change workflow are defined by specifications
 | 0083 | [Default Persistent Vector Literals and Explicit Host Access](0083-default-persistent-vector-literals.md) | Accepted | Implemented |
 | 0084 | [Persistent Map Source Syntax](0084-persistent-map-source-syntax.md) | Accepted | Implemented |
 | 0085 | [First-class Source Keyword Values](0085-first-class-source-keywords.md) | Accepted | Implemented |
+| 0086 | [Optimized Runtime Persistent List and Canonical Data Text](0086-optimized-runtime-persistent-list.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

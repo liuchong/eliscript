@@ -12,6 +12,7 @@ import {
   eliscriptSymbol,
   keyword,
 } from "../runtime/core/identifier.mjs";
+import { persistentList } from "../runtime/core/list.mjs";
 import { persistentHashMap } from "../runtime/core/map.mjs";
 import { meta, withMeta } from "../runtime/core/metadata.mjs";
 import { extendProtocolType } from "../runtime/core/protocol.mjs";
@@ -101,16 +102,16 @@ test("canonical data text prints scalar and identifier values", () => {
 
 test("collections print in deterministic logical order", () => {
   const value = persistentHashMap(
-    [keyword("z"), persistentHashSet(3, 1, 2)],
+    [keyword("z"), persistentHashSet(3, persistentList(1, 2), 2)],
     [keyword("a"), persistentVector("x", eliscriptSymbol("article/title"))],
   );
   const reordered = persistentHashMap(
     [keyword("a"), persistentVector("x", eliscriptSymbol("article/title"))],
-    [keyword("z"), persistentHashSet(2, 3, 1)],
+    [keyword("z"), persistentHashSet(2, 3, persistentList(1, 2))],
   );
 
   expect(printValue(value)).toBe(
-    '{:a ["x" article/title] :z #{1 2 3}}',
+    '{:a ["x" article/title] :z #{(1 2) 2 3}}',
   );
   expect(printValue(reordered)).toBe(printValue(value));
   roundTrip(value);
@@ -144,11 +145,12 @@ test("metadata and unsafe identifiers have lossless explicit forms", () => {
 test("reader accepts ignored separators and reads multiple values", () => {
   expect(readValue("; header\n[1, 2 ; item\n 3]").toArray())
     .toEqual([1, 2, 3]);
-  const values = readValues("1 :two\n[3]");
+  const values = readValues("1 :two\n(3 [4])");
   expect(Object.isFrozen(values)).toBe(true);
   expect(values[0]).toBe(1);
   expect(String(values[1])).toBe(":two");
-  expect(values[2].toArray()).toEqual([3]);
+  expect(values[2].toArray()).toEqual([3, persistentVector(4)]);
+  expect(equalValues(values[2].nth(1), persistentVector(4))).toBe(true);
 });
 
 test("IPrint is open while unregistered host containers stay explicit", () => {
@@ -183,7 +185,7 @@ test("reader rejects malformed, duplicate, and unsupported data", () => {
     ["^[] [1]", "metadata prefix requires a persistent map"],
     ["^{} :keyword", "value does not support metadata"],
     ["#unknown 1", "unknown dispatch #unknown"],
-    ["(1 2)", "runtime data text does not yet support lists"],
+    ["(1 2", "unexpected end of list"],
     ["[1] trailing", "trailing data after value"],
   ]) {
     try {
@@ -229,12 +231,14 @@ test("generated nested values retain equality and canonical text", () => {
   let value = persistentVector();
   for (let index = 0; index < 2_000; index += 1) {
     const leaf = persistentVector(index, `value-${index % 17}`);
-    if (index % 4 === 0) {
+    if (index % 5 === 0) {
       value = value.conj(persistentHashMap([keyword("index"), index], [leaf, true]));
-    } else if (index % 4 === 1) {
+    } else if (index % 5 === 1) {
       value = value.conj(persistentHashSet(index, leaf));
-    } else if (index % 4 === 2) {
+    } else if (index % 5 === 2) {
       value = value.conj(eliscriptSymbol("generated", `value-${index}`));
+    } else if (index % 5 === 3) {
+      value = value.conj(persistentList(index, leaf));
     } else {
       value = value.conj(leaf);
     }
@@ -249,7 +253,8 @@ test("canonical data text agrees under Bun and Node", async () => {
   ]);
   expect(nodeReport).toEqual(bunReport);
   expect(bunReport).toEqual({
-    text: '^{:source "host"} {:map {:a 1 :b 2} :set #{1 2 3} :vector [1 two]}',
+    text: '^{:source "host"} {:list (1 :two) :map {:a 1 :b 2} ' +
+      ':set #{1 2 3} :vector [1 two]}',
     stable: true,
     equal: true,
     source: "host",

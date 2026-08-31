@@ -16,10 +16,11 @@ canonical spelling; `read-value` reconstructs an equal value; printing the
 reconstructed value produces byte-identical text.
 
 The format covers nullish and numeric scalar edges, strings, Keyword and Symbol
-values, persistent Vector/Map/Set values, and immutable metadata. It is
+values, persistent List/Vector/Map/Set values, and immutable metadata. It is
 separate from the compiler source reader, generated JavaScript serialization,
-the future versioned Emacs value codec, and the portable List/collection text
-implementation defined by 0071.
+the future versioned Emacs value codec, and the portable collection text
+implementation defined by 0071. Specification 0086 extends the original
+runtime grammar with the optimized List category.
 
 ## Public Surface
 
@@ -36,7 +37,7 @@ DataTextError IPrint print-value read-value read-values
 ```
 
 `IPrint` is an open single-operation protocol. Core scalar categories use host
-category extensions; Keyword, Symbol, Vector, Map, and Set use exact runtime
+category extensions; Keyword, Symbol, List, Vector, Map, and Set use exact runtime
 type extensions. External types may implement printing through the existing
 protocol extension API, but only the core grammar below is guaranteed to be
 readable and round-trippable.
@@ -56,6 +57,7 @@ The canonical spellings are:
 | string | JSON string syntax |
 | Keyword | `:name` or `:namespace/name` |
 | Symbol | `name` or `namespace/name` |
+| List | `(value ...)` |
 | Vector | `[value ...]` |
 | Map | `{key value ...}` |
 | Set | `#{value ...}` |
@@ -82,7 +84,7 @@ unambiguous and otherwise chooses the tagged form.
 
 ## Deterministic Collection Order
 
-Vector order is logical indexed order. Map and Set insertion/trie traversal
+List and Vector order is logical sequence order. Map and Set insertion/trie traversal
 order is never observable in canonical text:
 
 - each Map key and value is printed once
@@ -109,8 +111,10 @@ annotated root, not JavaScript object identity.
 
 `readValue` reads exactly one value and rejects trailing data. `readValues`
 reads zero or more values and returns one frozen native result array. Persistent
-collections are constructed through owner-token transient builders, so parsing
-does not create every intermediate persistent root.
+Vector, Map, and Set values are constructed through owner-token transient
+builders, so parsing does not create every intermediate persistent root. List
+values use bounded native accumulation followed by iterative linked
+construction in reverse order.
 
 Malformed input throws `DataTextError`, a `SyntaxError` subtype with:
 
@@ -145,8 +149,8 @@ throws `RangeError`.
 ## Scope and Compatibility
 
 This provisional M8 module covers the optimized runtime family only. It does
-not read List syntax or portable Eliscript collection representations,
-native JavaScript Array/Object/Map/Set values, local JavaScript Symbols, cyclic
+not read portable Eliscript collection representations, native JavaScript
+Array/Object/Map/Set values, local JavaScript Symbols, cyclic
 host objects, executable forms, reader macros, or arbitrary tagged literals.
 The matching portable grammar, including Lists, is implemented separately by
 0071.
@@ -158,7 +162,7 @@ format as an unframed wire protocol.
 
 ## Acceptance Criteria
 
-- **CDT-01:** Scalar, Keyword, Symbol, Vector, Map, Set, and metadata values
+- **CDT-01:** Scalar, Keyword, Symbol, List, Vector, Map, Set, and metadata values
   have one documented canonical text form.
 - **CDT-02:** Printing then reading every supported value produces an equal
   value and byte-identical reprinted text.
@@ -168,13 +172,15 @@ format as an unframed wire protocol.
   explicit tags without weakening identifier validation.
 - **CDT-05:** Metadata prefixes preserve metadata Maps while equality and hash
   semantics remain unchanged.
-- **CDT-06:** Duplicate keys/members, odd Maps, unsupported Lists/tags/values,
+- **CDT-06:** Duplicate keys/members, odd Maps, unterminated Lists,
+  unsupported tags/values,
   malformed strings, delimiters, and trailing data fail deterministically.
 - **CDT-07:** Errors include stable code and UTF-16 offset plus one-based line
   and code-point column.
 - **CDT-08:** Depth, input/output length, and value-count limits terminate
   printer and reader work predictably.
-- **CDT-09:** Map, Set, and Vector reading uses transient final construction.
+- **CDT-09:** Map, Set, and Vector reading uses transient final construction;
+  List reading uses bounded iterative construction.
 - **CDT-10:** At least 2,000 generated nested values satisfy equality and
   canonical-text fixed-point properties.
 - **CDT-11:** Bun and Node produce identical canonical reports.
@@ -186,7 +192,7 @@ format as an unframed wire protocol.
 
 ## Next Boundary
 
-0070 and 0071 complete the portable identifier and List/collection side plus
-common-subset byte parity. Run the complete 0041 P1 exit audit before changing
-source literal emission; the compiler reader remains independent until that
-migration has its own compatibility and application evidence.
+0070 and 0071 complete the portable identifier and collection side; 0086 adds
+runtime List byte parity across the common value subset. The compiler source
+reader remains independent. Quoted persistent-data migration must separately
+prove compiler syntax identity and compatibility evidence.

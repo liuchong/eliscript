@@ -27,6 +27,9 @@ The current M8 work provides:
 
 - immutable persistent List, Vector, Map, and Set implementations written in
   portable Eliscript
+- an optimized frozen singly linked runtime List with constant-time front
+  construction, complete suffix sharing, protocols, metadata, and canonical
+  parenthesized data text
 - deterministic value equality and hashing across persistent collections
 - portable value-semantic Ok/Err records with branch combinators and
   stack-safe persistent-Vector traversal
@@ -65,9 +68,10 @@ First-class immutable Keyword and Symbol values now have optimized and
 portable representations that share equality, hashing, Map keys, and Set
 membership. Symbols and persistent collections can carry immutable
 persistent-Map metadata without changing their value identity or copying
-collection internals. Optimized runtime values and portable List/Vector/Map/Set
-values now have matching canonical data-text implementations, including
-cross-family byte parity over their common subset. Atom state references now
+collection internals. Optimized runtime List/Vector/Map/Set values and portable
+List/Vector/Map/Set values now have matching canonical data-text
+implementations, including cross-family byte parity over their common subset.
+Atom state references now
 separate changing application identity from immutable values while preserving
 deterministic transition and watch behavior. Explicit native-container interop
 now provides shallow-by-default conversion, deep graph conversion with sharing
@@ -88,8 +92,9 @@ make host-container construction and access explicit, while language-level
 `nth` and `length` use collection protocols. First-class source Keyword
 expressions now construct canonical immutable runtime values while
 Keyword-shaped host property keys retain explicit string-key behavior. Quoted
-persistent data and the Emacs value bridge remain open; transport-safe protocol
-representation is not yet implemented.
+persistent data can now target the canonical optimized List representation,
+but its compiler migration and the Emacs value bridge remain open;
+transport-safe protocol representation is not yet implemented.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in

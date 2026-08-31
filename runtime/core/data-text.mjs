@@ -12,6 +12,7 @@ import {
   PersistentHashMap,
   isPersistentHashMap,
 } from "./map.mjs";
+import { PersistentList } from "./list.mjs";
 import { meta, withMeta } from "./metadata.mjs";
 import {
   defineProtocol,
@@ -135,6 +136,10 @@ function printVector(value, context) {
   return `[${[...value].map((item) => context.print(item)).join(" ")}]`;
 }
 
+function printList(value, context) {
+  return `(${[...value].map((item) => context.print(item)).join(" ")})`;
+}
+
 function printMap(value, context) {
   const entries = [...value].map(([key, item]) => ({
     key: context.print(key),
@@ -165,6 +170,7 @@ extendProtocolCategory(IPrint, "string", {
 });
 extendProtocolType(IPrint, Keyword, { print: printKeyword });
 extendProtocolType(IPrint, EliscriptSymbol, { print: printSymbol });
+extendProtocolType(IPrint, PersistentList, { print: printList });
 extendProtocolType(IPrint, PersistentVector, { print: printVector });
 extendProtocolType(IPrint, PersistentHashMap, { print: printMap });
 extendProtocolType(IPrint, PersistentHashSet, { print: printSet });
@@ -316,6 +322,22 @@ class Reader {
     }
   }
 
+  list(depth, start) {
+    this.advance();
+    const values = [];
+    while (true) {
+      this.skipIgnored();
+      if (this.peek() === ")") {
+        this.advance();
+        return PersistentList.from(values);
+      }
+      if (this.peek() === undefined) {
+        this.fail("unexpected end of list", start);
+      }
+      values.push(this.value(depth + 1));
+    }
+  }
+
   map(depth, start) {
     this.advance();
     const editable = transient(EMPTY_MAP);
@@ -446,15 +468,13 @@ class Reader {
     const character = this.peek();
     if (character === undefined) this.fail("unexpected end of input", start);
     if (character === "\"") return this.string(start);
+    if (character === "(") return this.list(depth, start);
     if (character === "[") return this.vector(depth, start);
     if (character === "{") return this.map(depth, start);
     if (character === "#") return this.dispatch(depth, start);
     if (character === "^") return this.metadata(depth, start);
     if ("]})".includes(character)) {
       this.fail(`unexpected closing delimiter ${character}`, start);
-    }
-    if (character === "(") {
-      this.fail("runtime data text does not yet support lists", start);
     }
     return this.atom(start);
   }

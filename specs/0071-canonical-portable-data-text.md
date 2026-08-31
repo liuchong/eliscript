@@ -20,7 +20,8 @@ Vector, Map, and Set values, and immutable collection metadata. Printing and
 reading are part of a portable dependency closure and produce the same bytes
 as the optimized runtime implementation over their common value subset.
 
-List values add one grammar form absent from 0069:
+List values originally added one grammar form absent from 0069; specification
+0086 now implements the same form in the optimized runtime:
 
 ```text
 (value ...)
@@ -151,7 +152,7 @@ when a limit is exceeded.
 - **PDT-07:** At least 2,000 generated nested persistent values satisfy value
   equality and canonical fixed-point properties.
 - **PDT-08:** The runtime and portable printers emit identical bytes over an
-  annotated common Vector/Map/Set/identifier subset.
+  annotated common List/Vector/Map/Set/identifier subset.
 - **PDT-09:** All nine source modules and Source Maps match byte-for-byte under
   seed and self-hosted compilation.
 - **PDT-10:** Bun and Node produce identical reports for both compiler
@@ -164,8 +165,9 @@ when a limit is exceeded.
 
 ## Next Boundary
 
-P1 construction is now represented across implementation, value semantics,
-metadata, properties, and canonical text. The complete P1 exit audit remains
-open. Literal migration must separately prove compiler syntax identity,
-explicit native-host constructors, macro behavior, application compatibility,
-and rollback boundaries before Vector/Map/Set source literals change meaning.
+P1 construction is represented across implementation, value semantics,
+metadata, properties, and canonical text, and its exit audit is complete.
+Vector and Map source literals have migrated provisionally; optimized List
+text now exists through 0086. Quoted persistent-data migration must separately
+prove compiler syntax identity, macro behavior, compatibility, and rollback
+boundaries.

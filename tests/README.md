@@ -192,7 +192,7 @@ Node. The core-library fixture also compiles and calls the Lisp-named runtime
 metadata surface.
 
 The canonical data-text suite freezes scalar/identifier spellings,
-insertion-order-independent Map/Set output, metadata prefixes, unsafe
+parenthesized List order, insertion-order-independent Map/Set output, metadata prefixes, unsafe
 identifier tags, comments and separators, malformed and duplicate diagnostics,
 and explicit depth/length/value limits. Two thousand generated nested values
 must satisfy value equality and byte-identical reprinting; one shared fixture
@@ -270,6 +270,12 @@ and Bun/Node execute
 the same generated API report.
 
 ## JavaScript Runtime Collections
+
+Persistent-list tests cover logical construction order, constant-time front
+updates, exact suffix sharing, collection/value/metadata protocols, List versus
+Vector identity, persistent-Map key behavior, portable hash parity, and
+canonical parenthesized data text. Iterative construction and reduction are
+also exercised over one million nodes, with matching Bun and Node reports.
 
 Persistent-vector tests exercise the provisional M8 runtime independently of
 literal compilation. They compare generated operations with a simple mutable

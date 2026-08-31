@@ -891,8 +891,12 @@ adds canonical brace Map expressions and seed/self-hosted reader, macro, IR,
 diagnostic, and cross-host evidence. Specification
 [0085-first-class-source-keywords.md](0085-first-class-source-keywords.md)
 adds canonical source Keyword values while preserving static host-property
-keys. Quoted persistent data, the worker codec, and the complete compatibility
-freeze remain open; the P3 exit is not yet satisfied.
+keys. Specification
+[0086-optimized-runtime-persistent-list.md](0086-optimized-runtime-persistent-list.md)
+adds the canonical optimized List representation and parenthesized data text
+needed before quote can stop emitting mutable Arrays. Quoted persistent-data
+compiler migration, the worker codec, and the complete compatibility freeze
+remain open; the P3 exit is not yet satisfied.
 
 ### P4: Transients and Hot-Path Optimization
 
