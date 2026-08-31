@@ -27,6 +27,8 @@ The current M8 work provides:
 - immutable persistent List, Vector, Map, and Set implementations written in
   portable Eliscript
 - deterministic value equality and hashing across persistent collections
+- portable value-semantic Ok/Err records with branch combinators and
+  stack-safe persistent-Vector traversal
 - process-local weak identity hashing for efficient opaque JavaScript
   object/function keys and explicit native Symbol identity
 - immutable persistent-Map metadata with root-only structural sharing,
@@ -65,9 +67,10 @@ separate changing application identity from immutable values while preserving
 deterministic transition and watch behavior. Explicit native-container interop
 now provides shallow-by-default conversion, deep graph conversion with sharing
 preservation, structured cycle diagnostics, and a focused React props adapter.
-The next language boundary is the complete P1 exit audit, followed by portable
-protocol dispatch policy, measured object/text migration, literal migration,
-and the Emacs value bridge.
+Portable Result values now provide explicit success/failure data without a new
+host class or identity boundary. The next language boundary is the complete P1
+exit audit, followed by portable protocol dispatch policy, measured object/text
+migration, literal migration, and the Emacs value bridge.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in

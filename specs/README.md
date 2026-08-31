@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 74 specifications.
+The registry currently contains 75 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 45 |
+| Accepted design | 46 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 71 |
+| Implemented | 72 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-43 as provisional, and 3 as planning. That baseline is derived from registry
+44 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -52,8 +52,8 @@ Eliscript-maintained core algorithm bodies, first-class immutable Keyword and
 Symbol values, root-shared immutable metadata, portable identifier values, and
 canonical runtime plus portable List/collection data text, synchronous Atom
 state references, explicit native JavaScript container conversion, and
-process-local host identity hashing for efficient opaque Map/Set keys
-implemented.
+process-local host identity hashing for efficient opaque Map/Set keys, and
+portable value-semantic Result records and combinators implemented.
 Portable dispatch internals, literal migration, static transient
 escape analysis, and the Emacs value bridge remain ahead.
 
@@ -107,6 +107,7 @@ number.
 18. [0072: Atomic State References](0072-atomic-state-references.md)
 19. [0073: Native JavaScript Container Interop](0073-native-javascript-container-interop.md)
 20. [0074: Process-local Host Identity Hashing](0074-process-local-host-identity-hashing.md)
+21. [0075: Portable Result Values](0075-portable-result-values.md)
 
 ### React and Publishing
 
@@ -247,6 +248,7 @@ The schemas and change workflow are defined by specifications
 | 0072 | [Atomic State References](0072-atomic-state-references.md) | Accepted | Implemented |
 | 0073 | [Native JavaScript Container Interop](0073-native-javascript-container-interop.md) | Accepted | Implemented |
 | 0074 | [Process-local Host Identity Hashing](0074-process-local-host-identity-hashing.md) | Accepted | Implemented |
+| 0075 | [Portable Result Values](0075-portable-result-values.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

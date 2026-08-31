@@ -134,6 +134,14 @@ bounded-stack behavior.
 Identifier fixtures additionally freeze qualified and unqualified
 Keyword/Symbol hashes, category separation, and reconstructed Map/Set lookup.
 
+The portable Result suite compiles `result.eli` and its complete persistent
+value dependency graph with both compiler generations, compares every ESM and
+Source Map byte-for-byte, and runs both outputs under Bun and Node. It verifies
+15 public operations, false/nil/undefined payloads, inactive-branch identity,
+exact callback counts, reconstructed Map-key lookup, 2,000 generated
+equality/hash pairs, a 50,000-item traversal, exact first-error short circuit,
+and declaration-level portable dependency pruning.
+
 The identifier runtime suite verifies constructor validation, Keyword
 interning, non-interned Symbol value equality, freezing, explicit serialization
 failure, hostile host-object handling, and runtime persistent Map/Set behavior.

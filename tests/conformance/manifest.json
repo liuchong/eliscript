@@ -829,6 +829,18 @@
         { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics compile and agree across hosts" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "stdlib.portable-result-values",
+      "title": "Portable value-semantic Result records and combinators",
+      "status": "accepted",
+      "spec": "0075",
+      "contracts": ["Represents Ok and Err as exact value-semantic persistent records", "Preserves false, nil, undefined, branch identity, and exact callback counts", "Collects and traverses persistent Vectors with first-error short circuit", "Matches self-hosted artifacts and Bun/Node execution with dependency pruning"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/portable-result.test.mjs", "contains": "portable Result values are byte-identical and short-circuit at scale" },
+        { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "repository public surface matches every tracked implementation" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

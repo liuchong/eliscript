@@ -404,6 +404,11 @@ platform/react   props, children, and event boundary adapters
 platform/worker  capabilities and value-codec helpers
 ```
 
+The first `core/result` implementation now lands in
+[0075-portable-result-values.md](0075-portable-result-values.md). Ok and Err are
+ordinary value-semantic persistent Maps, and collection/traversal combinators
+remain dependency-prunable portable Eliscript rather than a host class.
+
 Public functions target protocols wherever that produces a real abstraction.
 Representation-specific functions remain in their owning modules. A function
 is not generalized merely to increase API count.

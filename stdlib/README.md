@@ -153,6 +153,29 @@ Exact provisional semantics and evidence are in
 [0057](../specs/0057-portable-value-semantics.md) and
 [0074](../specs/0074-process-local-host-identity-hashing.md).
 
+## Result Values
+
+`result.eli` exports portable, value-semantic Ok and Err records plus branch
+and persistent-Vector combinators:
+
+```elisp
+(import "../../stdlib/result.eli"
+        and-then err map-ok ok result-payload traverse-results)
+
+(and-then
+ (lambda (value) (if (> value 0) (ok (* value 2)) (err "not positive")))
+ (map-ok 1+ (ok 20)))
+```
+
+Results are exact three-field persistent Maps, not JavaScript classes. Equal
+payloads produce equal Results and hashes, reconstructed Results work as Map
+keys, and false, nil, and undefined remain valid payloads. Inactive branch
+combinators preserve the exact input identity. `collect-results` and
+`traverse-results` return persistent Vectors, preserve order, and stop at the
+first non-Ok item without recursive stack growth. See
+[0075](../specs/0075-portable-result-values.md) for the complete 15-operation
+surface and portability contract.
+
 ## Identifier Values
 
 `core/identifier.eli` exposes optimized immutable, qualified Keyword and

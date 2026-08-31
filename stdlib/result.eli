@@ -1,0 +1,141 @@
+(module eliscript.result
+  (import-portable "./persistent-map.eli"
+                   persistent-map-count
+                   persistent-map-get
+                   persistent-map-has?
+                   persistent-map?)
+  (import-portable "./persistent-vector.eli"
+                   empty-persistent-vector
+                   persistent-vector-conj
+                   persistent-vector-count
+                   persistent-vector-nth
+                   persistent-vector?)
+  (import-portable "./value.eli" value-map-from-entries)
+
+  (defconst result-kind-key "kind")
+  (defconst result-status-key "status")
+  (defconst result-payload-key "payload")
+  (defconst result-kind "eliscript/result")
+  (defconst result-ok-status "ok")
+  (defconst result-error-status "error")
+
+  (defportable result-make (status payload)
+    (value-map-from-entries
+     [[result-kind-key result-kind]
+      [result-status-key status]
+      [result-payload-key payload]]))
+
+  (defportable ok (value)
+    (result-make result-ok-status value))
+
+  (defportable err (error)
+    (result-make result-error-status error))
+
+  (defportable result? (value)
+    (and (persistent-map? value)
+         (= (persistent-map-count value) 3)
+         (persistent-map-has? value result-kind-key)
+         (= (persistent-map-get value result-kind-key nil) result-kind)
+         (persistent-map-has? value result-status-key)
+         (persistent-map-has? value result-payload-key)
+         (let ((status
+                (persistent-map-get value result-status-key nil)))
+           (or (= status result-ok-status)
+               (= status result-error-status)))))
+
+  (defportable ok? (result)
+    (and (result? result)
+         (= (persistent-map-get result result-status-key nil)
+            result-ok-status)))
+
+  (defportable err? (result)
+    (and (result? result)
+         (= (persistent-map-get result result-status-key nil)
+            result-error-status)))
+
+  (defportable result-payload (result)
+    (if (result? result)
+        (persistent-map-get result result-payload-key nil)
+      nil))
+
+  (defportable map-ok (function result)
+    (if (ok? result)
+        (ok (funcall function (result-payload result)))
+      result))
+
+  (defportable map-err (function result)
+    (if (err? result)
+        (err (funcall function (result-payload result)))
+      result))
+
+  (defportable and-then (function result)
+    (if (ok? result)
+        (funcall function (result-payload result))
+      result))
+
+  (defportable or-else (function result)
+    (if (err? result)
+        (funcall function (result-payload result))
+      result))
+
+  (defportable fold (ok-function error-function result)
+    (if (ok? result)
+        (funcall ok-function (result-payload result))
+      (if (err? result)
+          (funcall error-function (result-payload result))
+        nil)))
+
+  (defportable unwrap-or (fallback result)
+    (if (ok? result) (result-payload result) fallback))
+
+  (defportable unwrap-or-else (function result)
+    (if (ok? result)
+        (result-payload result)
+      (if (err? result)
+          (funcall function (result-payload result))
+        (funcall function nil))))
+
+  (defportable collect-results (results)
+    (if (not (persistent-vector? results))
+      nil
+      (let ((values (empty-persistent-vector))
+            (failure nil)
+            (failed false)
+            (index 0))
+        (while (and (not failed)
+                    (< index (persistent-vector-count results)))
+          (let ((result (persistent-vector-nth results index nil)))
+            (if (ok? result)
+                (setq values
+                      (persistent-vector-conj
+                       values (result-payload result)))
+              (setq failure result
+                    failed t)))
+          (setq index (1+ index)))
+        (if failed failure (ok values)))))
+
+  (defportable traverse-results (function values)
+    (if (not (persistent-vector? values))
+      nil
+      (let ((results (empty-persistent-vector))
+            (failure nil)
+            (failed false)
+            (index 0))
+        (while (and (not failed)
+                    (< index (persistent-vector-count values)))
+          (let ((result
+                 (funcall
+                  function
+                  (persistent-vector-nth values index nil))))
+            (if (ok? result)
+                (setq results
+                      (persistent-vector-conj
+                       results (result-payload result)))
+              (setq failure result
+                    failed t)))
+          (setq index (1+ index)))
+        (if failed failure (ok results)))))
+
+  (export and-then collect-results err err? fold map-err map-ok ok ok?
+          or-else result-payload result? traverse-results unwrap-or
+          unwrap-or-else))
