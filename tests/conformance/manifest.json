@@ -923,7 +923,7 @@
       "spec": "0082",
       "contracts": ["Links persistent Vector and Map constructors through one standard ESM runtime ABI", "Separates persistent constructor IR from provisional array and host object IR", "Provides explicit js-array and js-object forms without framework or bundler dependencies", "Matches seed/self-hosted ESM and Source Maps plus Bun and Node value reports"],
       "evidence": [
-        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "square literals, persistent constructors, and host containers are distinct" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "persistent literals and quoted data preserve language value categories" },
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "hash-map rejects incomplete pairs in both compilers" },
         { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
@@ -937,7 +937,7 @@
       "contracts": ["Makes square-bracket value expressions canonical persistent Vectors while preserving binding patterns", "Keeps native Arrays and their indexed access explicit through js-array, js-nth, and js-length", "Dispatches language nth and length through public collection protocols", "Preserves seed/self-hosted fixed point and excludes frameworks and bundlers from core evidence"],
       "evidence": [
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-separates-persistent-vectors-from-host-arrays" },
-        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "square literals, persistent constructors, and host containers are distinct" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "persistent literals and quoted data preserve language value categories" },
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "explicit host-only modules do not link the persistent runtime" },
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "portable closures reject persistent constructors and collection literals" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
@@ -954,7 +954,7 @@
         { "kind": "bun-test", "file": "tests/bootstrap-reader.test.mjs", "contains": "bootstrapped reader matches normalized seed syntax and diagnostics" },
         { "kind": "bun-test", "file": "tests/bootstrap-expander.test.mjs", "contains": "bootstrapped expander matches seed syntax, spans, and diagnostics" },
         { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" },
-        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "square literals, persistent constructors, and host containers are distinct" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "persistent literals and quoted data preserve language value categories" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
     },
@@ -970,7 +970,7 @@
         { "kind": "bun-test", "file": "tests/bootstrap-expander.test.mjs", "contains": "bootstrapped expander matches seed syntax, spans, and diagnostics" },
         { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" },
         { "kind": "bun-test", "file": "tests/bootstrap-emitter.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" },
-        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "square literals, persistent constructors, and host containers are distinct" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "persistent literals and quoted data preserve language value categories" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
     },
@@ -988,6 +988,23 @@
         { "kind": "bun-test", "file": "tests/persistent-list.test.mjs", "contains": "persistent list behavior and data text agree under Bun and Node" },
         { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "collections print in deterministic logical order" },
         { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "optimized and portable persistent Lists share frozen hash semantics" }
+      ]
+    },
+    {
+      "id": "language.first-class-quoted-persistent-data",
+      "title": "First-class quoted persistent data",
+      "status": "accepted",
+      "spec": "0087",
+      "contracts": ["Constructs quoted Lists, Vectors, Symbols, and Keywords as canonical immutable language values", "Preserves scalar quote categories and quoted brace forms as non-evaluated constructor syntax", "Rejects persistent quoted values from portable closures while retaining transport-safe scalar quote", "Matches seed and self-hosted compilers without application framework dependencies"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-literals-and-data" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-expander-preserves-quoted-data" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "persistent literals and quoted data preserve language value categories" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "portable closures reject persistent constructors and collection literals" },
+        { "kind": "bun-test", "file": "tests/macro-generated-names.test.mjs", "contains": "macro-generated names are deterministic and capture-safe" },
+        { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" },
+        { "kind": "bun-test", "file": "tests/bootstrap-emitter.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
     }
   ]

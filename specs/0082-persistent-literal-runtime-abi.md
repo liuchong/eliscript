@@ -46,8 +46,10 @@ representation. Specification 0085 adds `keyword` to this ABI without changing
 the Vector or Map contracts.
 
 The compiler inserts one named ESM import only when a module constructs a
-persistent literal or evaluated Keyword value. Modules using only scalar,
-quoted syntax, or explicit host values do not acquire a runtime dependency.
+persistent literal, identifier value, or persistent quoted datum. Modules
+using only scalars, transport-safe scalar quote, or explicit host values do not
+acquire a runtime dependency. Specification 0087 extends this ABI with `list`
+and `symbol` constructors.
 
 ## Source Forms and IR
 
@@ -93,10 +95,9 @@ Specifications 0083 and 0084 complete default Vector and Map expression
 syntax, maintained-source annotation, protocol collection access, and
 compatibility recording. The following work remains explicit:
 
-1. integrate quoted collection values with the canonical data reader
-2. integrate persistent values with the Emacs transport codec
-3. audit legacy list and native-container compatibility forms
-4. promote the complete literal boundary after the remaining migration
+1. integrate persistent values with the Emacs transport codec
+2. audit legacy list and native-container compatibility forms
+3. promote the complete literal boundary after the remaining migration
 
 ## Acceptance Criteria
 

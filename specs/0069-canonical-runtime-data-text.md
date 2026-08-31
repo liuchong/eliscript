@@ -194,5 +194,5 @@ format as an unframed wire protocol.
 
 0070 and 0071 complete the portable identifier and collection side; 0086 adds
 runtime List byte parity across the common value subset. The compiler source
-reader remains independent. Quoted persistent-data migration must separately
-prove compiler syntax identity and compatibility evidence.
+reader remains independent, while 0087 now constructs quoted persistent data
+through the literal runtime and proves compiler identity and compatibility.

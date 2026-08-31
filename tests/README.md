@@ -85,8 +85,9 @@ It also compares seed and self-hosted `defportable` closure builds.
 literals, source Keyword values, and explicit persistent constructors through
 both compilers, compares ESM and Source Maps byte-for-byte, and executes the
 output under Bun and Node. It proves nested persistent Maps, duplicate-key
-semantics, Keyword interning and value-semantic Map lookup, macro and quote
-boundaries, explicit native Array/Object construction and host access, generic
+semantics, Keyword interning and value-semantic Map lookup, first-class quoted
+List/Vector/Symbol/Keyword data and canonical text, explicit native Array/Object
+construction and host access, generic
 protocol `nth` and `length`, exact context-sensitive imports, portable
 rejection, and matching malformed literal diagnostics.
 

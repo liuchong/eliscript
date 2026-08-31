@@ -90,10 +90,9 @@ Macros may return or generate Keyword expressions. Expanded evaluated code
 constructs the same canonical runtime Keyword and retains the macro call-site
 source location.
 
-Quoted Keywords remain syntax data in this slice. `':ready` emits the existing
-portable quoted representation `":ready"`; it does not evaluate or link the
-Keyword runtime by itself. First-class quoted persistent data remains part of
-the later canonical source/data reader integration.
+Specification 0087 now materializes quoted Keywords as canonical Keyword
+values inside persistent quoted data. Quote still suppresses evaluation and
+macro expansion; it no longer erases the Keyword category into a string.
 
 ## Portable Boundary
 
@@ -110,8 +109,9 @@ Eliscript-authored identifier constructor defined by specification 0070.
 ## Import and Bootstrap Discipline
 
 The compiler emits one sorted literal-runtime import when a module contains an
-evaluated Keyword, persistent Vector, or persistent Map constructor. Static
-host-key tokens and quoted Keywords alone do not trigger that import.
+evaluated or quoted Keyword, persistent List/Vector quote, or persistent
+Vector/Map constructor. Static host-key tokens alone do not trigger that
+import.
 
 Seed and self-hosted compilers must agree on reader trees, macro expansion,
 complete IR, ESM, Source Maps, diagnostics, and import selection. The
@@ -125,17 +125,16 @@ previously evaluated to strings without the leading colon. Code that requires
 a native string value must now write a string literal explicitly. Static host
 property and tag syntax retains its prior behavior.
 
-The explicit runtime `keyword` constructors remain valid. Source Symbols,
-quoted Symbols, automatic namespace aliases, namespaced Map notation, and
-quoted persistent values are separate contracts.
+The explicit runtime `keyword` constructors remain valid. Quoted identifiers
+are defined by 0087. Automatic namespace aliases and namespaced Map notation
+remain separate contracts.
 
 ## Remaining P3 Work
 
-1. integrate quoted persistent values with the canonical data reader
-2. implement transport-safe persistent values in the Emacs worker codec
-3. audit legacy List and native-container compatibility forms
-4. complete application and package migration evidence
-5. promote the literal and host-container family after compatibility review
+1. implement transport-safe persistent values in the Emacs worker codec
+2. audit legacy List and native-container compatibility forms
+3. complete application and package migration evidence
+4. promote the literal and host-container family after compatibility review
 
 ## Acceptance Criteria
 
@@ -150,17 +149,17 @@ quoted persistent values are separate contracts.
 - **SKL-05:** Seed and self-hosted IR retain an explicit Keyword category and
   emit byte-identical constructor calls.
 - **SKL-06:** Literal-runtime imports are sorted, emitted once, and absent from
-  host-marker-only and quote-only modules.
+  host-marker-only modules.
 - **SKL-07:** Static object keys, property keys, method names, and application
   tags preserve native string semantics.
 - **SKL-08:** Computed expression positions preserve normal Keyword value
   semantics rather than applying host-key coercion.
 - **SKL-09:** Macro-generated evaluated Keywords construct runtime values with
   matching seed/self-hosted expansion and source locations.
-- **SKL-10:** Quoted Keywords retain syntax-data representation without
-  constructing a runtime Keyword.
-- **SKL-11:** Portable closures reject evaluated source Keywords while
-  accepting Keyword-shaped static host keys.
+- **SKL-10:** Quoted Keywords retain their syntax category as canonical Keyword
+  values under the 0087 persistent quote contract.
+- **SKL-11:** Portable closures reject evaluated and quoted source Keywords
+  while accepting Keyword-shaped static host keys.
 - **SKL-12:** Bun and Node produce identical Keyword identity, name, string,
   and persistent Map reports.
 - **SKL-13:** ESM, Source Maps, diagnostics, complete IR, and the compiler

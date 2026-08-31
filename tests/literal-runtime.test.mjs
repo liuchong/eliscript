@@ -58,7 +58,7 @@ async function execute(host, modulePath) {
   return JSON.parse(result.stdout);
 }
 
-test("square literals, persistent constructors, and host containers are distinct", async () => {
+test("persistent literals and quoted data preserve language value categories", async () => {
   const directory = await mkdtemp(resolve(ROOT, ".eliscript-literals-"));
   const bootstrap = resolve(directory, "bootstrap");
   const seedOutput = resolve(directory, "seed/module.mjs");
@@ -84,6 +84,8 @@ test("square literals, persistent constructors, and host containers are distinct
     expect(javascript).toContain("__eliscript_vector(");
     expect(javascript).toContain("__eliscript_hash_map(");
     expect(javascript).toContain("__eliscript_keyword(");
+    expect(javascript).toContain("__eliscript_list(");
+    expect(javascript).toContain("__eliscript_symbol(");
     expect(javascript).not.toContain("vite");
     expect(javascript).not.toContain("react");
 
@@ -126,7 +128,23 @@ test("square literals, persistent constructors, and host containers are distinct
         stringKeyMiss: null,
         macroValue: true,
         macroQualifiedName: "macro/value",
-        quotedSyntax: ":quoted/value",
+        quotedSyntax: {
+          value: true,
+          qualifiedName: "quoted/value",
+        },
+      },
+      quoted: {
+        persistentList: true,
+        count: 5,
+        symbol: true,
+        symbolName: "alpha",
+        keyword: true,
+        vector: true,
+        vectorValues: [1, null],
+        emptyList: true,
+        falseSymbol: true,
+        text: '(alpha :beta [1 undefined] () #eliscript/symbol [nil "false"])',
+        mapSyntax: "(hash-map :ready true)",
       },
       host: {
         array: true,
@@ -181,9 +199,7 @@ test("explicit host-only modules do not link the persistent runtime", async () =
       "(defconst ready (get options :ready))\n" +
       "(defconst present (object-has? options :ready))\n" +
       "(defconst copied (object-assoc options :count 3))\n" +
-      "(defconst quoted '(vector 1))\n" +
-      "(defconst quoted-keyword ':ready)\n" +
-      "(export values first count options ready present copied quoted quoted-keyword)\n",
+      "(export values first count options ready present copied)\n",
   );
 
   try {
@@ -199,12 +215,13 @@ test("explicit host-only modules do not link the persistent runtime", async () =
     expect(seed).not.toContain("eliscript/runtime/literals");
     expect(seed).not.toContain("runtime/core/collection.mjs");
     expect(seed).not.toContain("__eliscript_keyword");
+    expect(seed).not.toContain("__eliscript_list");
+    expect(seed).not.toContain("__eliscript_symbol");
     expect(seed).toContain("const values = [1, 2]");
     expect(seed).toContain("const first = ((((values) ?? [])[0]) ?? null)");
     expect(seed).toContain("const count = ((values) ?? []).length");
     expect(seed).toContain('const options = ({"ready": true})');
     expect(seed).toContain('const ready = (options)["ready"]');
-    expect(seed).toContain('const quoted_keyword = ":ready"');
     expect(seed).toContain(
       'Object.prototype.hasOwnProperty.call((options) ?? {}, "ready")',
     );
@@ -228,6 +245,11 @@ test("portable closures reject persistent constructors and collection literals",
       "(hash-map :ready t)",
       "{:ready t}",
       ":ready",
+      "'(1 2)",
+      "'symbol",
+      "':ready",
+      "'[1 2]",
+      "'nil",
     ]) {
       await Bun.write(
         source,
@@ -247,6 +269,22 @@ test("portable closures reject persistent constructors and collection literals",
         expect(result.stderr).toContain("persistent runtime values");
       }
     }
+
+    await Bun.write(
+      source,
+      "(defportable build () '42)\n(export build)\n",
+    );
+    const scalarSeed = await run([SEED, "--portable", "build", source]);
+    const scalarSelf = await run([
+      SELF_HOSTED,
+      "--portable",
+      "build",
+      source,
+    ], {
+      ELISCRIPT_BOOTSTRAP_MODULE_DIR: bootstrap,
+    });
+    expect(scalarSelf.stdout).toBe(scalarSeed.stdout);
+    expect(scalarSeed.stdout).not.toContain("eliscript/runtime/literals");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -18,6 +18,8 @@
      :ready t})
   (defconst macro-keyword (generated-keyword))
   (defconst quoted-keyword ':quoted/value)
+  (defconst quoted-data '(alpha :beta [1 undefined] nil false))
+  (defconst quoted-map '{:ready t})
   (defconst array-value (js-array 1 2 3))
   (defconst object-value
     (js-object :name "host" :count 2))
@@ -28,6 +30,6 @@
 
   (export
     vector-value map-value map-literal keyword-value keyword-map
-    macro-keyword quoted-keyword
+    macro-keyword quoted-keyword quoted-data quoted-map
     array-value object-value
     vector-first vector-count array-second array-count))

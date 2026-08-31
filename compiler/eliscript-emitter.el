@@ -18,7 +18,7 @@
   "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n"
   "Generated module helper for process-local opaque host identities.")
 (defconst eliscript-emitter--literal-runtime-import
-  "import { hashMap as __eliscript_hash_map, keyword as __eliscript_keyword, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n"
+  "import { hashMap as __eliscript_hash_map, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n"
   "Generated import for canonical language literal construction.")
 (defconst eliscript-emitter--collection-runtime-import
   "import { count as __eliscript_count, nth as __eliscript_nth } from \"eliscript/runtime/core/collection.mjs\";\n"
@@ -744,22 +744,39 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
           (eliscript-emitter--emit-arguments (nthcdr 2 arguments))))
 
 (defun eliscript-emitter--emit-quoted (value)
-  "Emit quoted Eliscript VALUE as plain ECMAScript data."
+  "Emit quoted Eliscript VALUE as canonical persistent data."
   (cond
-   ((null value) "[]")
+   ((null value) "__eliscript_list()")
    ((eq value t) "true")
+   ((eq value 'undefined) "undefined")
    ((numberp value) (number-to-string value))
    ((stringp value) (eliscript-emitter--json-string value))
-   ((symbolp value) (eliscript-emitter--json-string (symbol-name value)))
+   ((keywordp value)
+    (format "__eliscript_keyword(%s)"
+            (eliscript-emitter--json-string
+             (substring (symbol-name value) 1))))
+   ((symbolp value)
+    (format "__eliscript_symbol(%s)"
+            (eliscript-emitter--json-string (symbol-name value))))
    ((vectorp value)
-    (format "[%s]"
+    (format "__eliscript_vector(%s)"
             (mapconcat #'eliscript-emitter--emit-quoted (append value nil) ", ")))
    ((consp value)
     (unless (proper-list-p value)
       (eliscript-emitter--fail "dotted quoted lists are not supported yet"))
-    (format "[%s]"
+    (format "__eliscript_list(%s)"
             (mapconcat #'eliscript-emitter--emit-quoted value ", ")))
    (t (eliscript-emitter--fail "cannot quote value: %S" value))))
+
+(defun eliscript-emitter--quoted-uses-literal-runtime-p (value)
+  "Return non-nil when quoted VALUE constructs a persistent runtime value."
+  (cond
+   ((null value) t)
+   ((or (eq value t) (eq value 'undefined)
+        (numberp value) (stringp value)) nil)
+   ((or (keywordp value) (symbolp value)
+        (vectorp value) (consp value)) t)
+   (t nil)))
 
 (defun eliscript-emitter--emit-call (form)
   "Emit list FORM as an expression."
@@ -1210,7 +1227,9 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
           (let ((operator (car form))
                 (arguments (cdr form)))
             (cond
-             ((eq operator 'quote) nil)
+             ((eq operator 'quote)
+              (eliscript-emitter--quoted-uses-literal-runtime-p
+               (car arguments)))
              ((memq operator '(import import-portable)) nil)
              ((memq operator '(vector hash-map)) t)
              ((memq operator '(object js-object)) (walk-object arguments))

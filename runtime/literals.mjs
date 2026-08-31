@@ -1,7 +1,12 @@
+import { persistentList } from "./core/list.mjs";
 import { persistentHashMap } from "./core/map.mjs";
 import { persistentVector } from "./core/vector.mjs";
 
-export { keyword } from "./core/identifier.mjs";
+export { eliscriptSymbol as symbol, keyword } from "./core/identifier.mjs";
+
+export function list(...values) {
+  return persistentList(...values);
+}
 
 export function vector(...values) {
   return persistentVector(...values);

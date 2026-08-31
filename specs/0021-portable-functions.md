@@ -29,13 +29,16 @@ A portable function may depend transitively on:
 - parameters and lexical bindings
 - another `defportable` declaration
 - an immutable `defconst` whose own initializer satisfies this boundary
-- literals, quoted data, arrays, objects, control flow, arithmetic, comparison,
-  list/array operations, property reads, and string conversion
+- scalar literals, transport-safe scalar quote, explicit host arrays/objects,
+  control flow, arithmetic, comparison, list/array operations, property reads,
+  and string conversion
 - local assignment and loops whose mutated bindings are lexical to the
   portable function
 
 The initial subset rejects:
 
+- persistent List/Vector/Symbol/Keyword quote until the versioned value codec
+  is implemented
 - ordinary `defun`/`defn` dependencies
 - mutable top-level `defvar` state
 - ordinary imported bindings and qualified JavaScript references

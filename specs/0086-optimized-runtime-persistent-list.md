@@ -133,12 +133,12 @@ would add lifecycle complexity without improving the core operation.
 ## Compatibility Boundary
 
 This is an additive provisional runtime surface. Existing portable List APIs
-and optimized Vector, Map, and Set representations keep their contracts. This
-slice does not change source quote semantics, compiler literal IR, or worker
-transport encoding.
+and optimized Vector, Map, and Set representations keep their contracts.
+Specification 0087 now uses this representation for source quote; worker
+transport encoding remains separate work.
 
-The next P3 slice may use this runtime value for quoted List data and the
-persistent literal ABI. A versioned worker value codec remains separate work.
+The persistent literal ABI now uses this runtime value for quoted List data
+through 0087. A versioned worker value codec remains separate work.
 
 ## Acceptance Criteria
 

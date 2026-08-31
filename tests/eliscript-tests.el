@@ -144,6 +144,18 @@
   (should (equal (eliscript-emitter-emit-expression 'false) "false"))
   (should (equal (eliscript-emitter-emit-expression [1 "two" :three])
                  "__eliscript_vector(1, \"two\", __eliscript_keyword(\"three\"))"))
+  (should (equal (eliscript-emitter-emit-expression '(quote nil))
+                 "__eliscript_list()"))
+  (should
+   (equal
+    (eliscript-emitter-emit-expression
+     '(quote (alpha :beta [1 undefined])))
+    (concat "__eliscript_list(__eliscript_symbol(\"alpha\"), "
+            "__eliscript_keyword(\"beta\"), "
+            "__eliscript_vector(1, undefined))")))
+  (should-error
+   (eliscript-emitter-emit-expression '(quote (1 . 2)))
+   :type 'eliscript-compile-error)
   (should (equal (eliscript-emitter-emit-expression
                  '(object :name "Ada" :active t))
                  "({\"name\": \"Ada\", \"active\": true})")))
@@ -877,7 +889,8 @@
           "(defmacro twice (value) `(+ ,value ,value))
 (defconst syntax '(twice 1))")))
     (should (string-match-p
-             (regexp-quote "const syntax = [\"twice\", 1];")
+             (regexp-quote
+              "const syntax = __eliscript_list(__eliscript_symbol(\"twice\"), 1);")
              output))))
 
 (ert-deftest eliscript-expander-isolates-compilations ()

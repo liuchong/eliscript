@@ -168,6 +168,5 @@ when a limit is exceeded.
 P1 construction is represented across implementation, value semantics,
 metadata, properties, and canonical text, and its exit audit is complete.
 Vector and Map source literals have migrated provisionally; optimized List
-text now exists through 0086. Quoted persistent-data migration must separately
-prove compiler syntax identity, macro behavior, compatibility, and rollback
-boundaries.
+text exists through 0086, and quoted persistent data now uses those categories
+through 0087. Worker transport remains a separate versioned codec boundary.

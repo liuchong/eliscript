@@ -13,7 +13,7 @@
 
   (defconst react-runtime-binding "__eliscript_react_jsx_runtime")
   (defconst literal-runtime-import
-    "import { hashMap as __eliscript_hash_map, keyword as __eliscript_keyword, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n")
+    "import { hashMap as __eliscript_hash_map, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n")
   (defconst collection-runtime-import
     "import { count as __eliscript_count, nth as __eliscript_nth } from \"eliscript/runtime/core/collection.mjs\";\n")
   (defconst host-identity-token-helper
@@ -959,25 +959,48 @@
   (defun emit-quoted (value)
     (let ((kind (datum-kind value)))
       (cond
-        ((null value) (text-fragment "[]"))
+        ((null value) (text-fragment "__eliscript_list()"))
         ((eq value t) (text-fragment "true"))
-        ((eq value false) (text-fragment (json-string "false")))
+        ((eq value false)
+         (text-fragment "__eliscript_symbol(\"false\")"))
         ((= (js* "typeof value") "number") (text-fragment (str value)))
         ((= (js* "typeof value") "string")
          (text-fragment (json-string value)))
-        ((= kind "undefined") (text-fragment (json-string "undefined")))
-        ((= kind "symbol") (text-fragment (json-string (get value :name))))
-        ((= kind "keyword")
-         (text-fragment (json-string (str ":" (get value :name)))))
-        ((or (= kind "list") (= kind "vector"))
+        ((= kind "undefined") (text-fragment "undefined"))
+        ((= kind "symbol")
          (combine
-           (js-array "["
+           (js-array "__eliscript_symbol("
+            (text-fragment (json-string (get value :name))) ")")))
+        ((= kind "keyword")
+         (combine
+           (js-array "__eliscript_keyword("
+            (text-fragment (json-string (get value :name))) ")")))
+        ((= kind "list")
+         (combine
+           (js-array "__eliscript_list("
             (join-fragments
               (js-call (get value :items) :map
                 (lambda (item) (emit-quoted item)))
               ", ")
-            "]")))
+            ")")))
+        ((= kind "vector")
+         (combine
+           (js-array "__eliscript_vector("
+            (join-fragments
+              (js-call (get value :items) :map
+                (lambda (item) (emit-quoted item)))
+              ", ")
+            ")")))
         (t (fail "cannot emit quoted IR datum")))))
+
+  (defun quoted-uses-literal-runtime-p (value)
+    (let ((kind (datum-kind value)))
+      (or (null value)
+          (= value false)
+          (= kind "symbol")
+          (= kind "keyword")
+          (= kind "list")
+          (= kind "vector"))))
 
   (defun emit-property-key (node)
     (locate
@@ -1250,6 +1273,8 @@
       (cond
         ((or (= kind "persistent-vector-literal")
              (= kind "persistent-map-literal")) t)
+        ((= kind "quoted-literal")
+         (quoted-uses-literal-runtime-p (ir-value node)))
         ((and (= kind "literal") (= (literal-kind node) "keyword")) t)
         ((or (= kind "property-read")
              (= kind "property-write")

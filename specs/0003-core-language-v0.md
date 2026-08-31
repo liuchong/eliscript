@@ -57,10 +57,12 @@ the output path yet.
 | evaluated keywords | canonical immutable Keyword values |
 | vector expressions | persistent Vectors |
 | brace Map expressions | persistent Maps |
-| quoted proper lists | arrays |
+| quoted proper lists | persistent Lists |
+| quoted vectors | persistent Vectors |
+| quoted symbols and keywords | canonical immutable identifier values |
 | `(js-object key value ...)` | plain object literals |
 
-Quoted symbols currently become strings. Dotted lists are rejected.
+Dotted quoted lists are rejected.
 Keyword-shaped tokens in static JavaScript property, method, JSX tag, and
 import-marker positions remain strings; this is an explicit host-syntax
 boundary rather than the value semantics of evaluated Keywords.

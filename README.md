@@ -62,6 +62,8 @@ The current M8 work provides:
   template names, with explicit caller-capture and quote boundaries
 - first-class unqualified and qualified source Keyword values with canonical
   interning, hashing, persistent-Map keys, and explicit host-property syntax
+- first-class quoted persistent List/Vector data and Symbol/Keyword values,
+  with quoted brace forms retained as non-evaluated constructor syntax
 - structural-sharing and cross-host evidence through million-value workloads
 
 First-class immutable Keyword and Symbol values now have optimized and
@@ -91,9 +93,9 @@ standard ESM literal ABI. `js-array`, `js-object`, `js-nth`, and `js-length`
 make host-container construction and access explicit, while language-level
 `nth` and `length` use collection protocols. First-class source Keyword
 expressions now construct canonical immutable runtime values while
-Keyword-shaped host property keys retain explicit string-key behavior. Quoted
-persistent data can now target the canonical optimized List representation,
-but its compiler migration and the Emacs value bridge remain open;
+Keyword-shaped host property keys retain explicit string-key behavior. Quote
+now constructs canonical persistent List/Vector and identifier values instead
+of mutable Arrays and strings. The Emacs value bridge remains open;
 transport-safe protocol representation is not yet implemented.
 
 The authoritative project state lives in the

@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 86 specifications.
+The registry currently contains 87 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 57 |
+| Accepted design | 58 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 83 |
+| Implemented | 84 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
-55 as provisional, and 3 as planning. That baseline is derived from registry
+56 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -60,9 +60,9 @@ persistent JSON codec and a portable Number/safe-integer foundation
 implemented. The P1 persistent collection core now passes its complete
 Bun/Node million-value exit audit, and P3 now has canonical persistent Vector
 and Map expression syntax plus first-class source Keyword values with explicit
-native host-property boundaries. Quoted persistent data, transport-safe
-values, static transient escape analysis, and the Emacs value bridge remain
-ahead.
+native host-property boundaries, and quote now preserves persistent List/
+Vector and first-class identifier categories. Transport-safe values, static
+transient escape analysis, and the Emacs value bridge remain ahead.
 
 ## Reading Paths
 
@@ -126,6 +126,7 @@ number.
 30. [0084: Persistent Map Source Syntax](0084-persistent-map-source-syntax.md)
 31. [0085: First-class Source Keyword Values](0085-first-class-source-keywords.md)
 32. [0086: Optimized Runtime Persistent List and Canonical Data Text](0086-optimized-runtime-persistent-list.md)
+33. [0087: First-class Quoted Persistent Data](0087-first-class-quoted-persistent-data.md)
 
 ### React and Publishing
 
@@ -278,6 +279,7 @@ The schemas and change workflow are defined by specifications
 | 0084 | [Persistent Map Source Syntax](0084-persistent-map-source-syntax.md) | Accepted | Implemented |
 | 0085 | [First-class Source Keyword Values](0085-first-class-source-keywords.md) | Accepted | Implemented |
 | 0086 | [Optimized Runtime Persistent List and Canonical Data Text](0086-optimized-runtime-persistent-list.md) | Accepted | Implemented |
+| 0087 | [First-class Quoted Persistent Data](0087-first-class-quoted-persistent-data.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

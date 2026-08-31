@@ -304,6 +304,16 @@
    do (eliscript-portable--expression
        argument scope declarations dependencies)))
 
+(defun eliscript-portable--quoted-runtime-value-p (value)
+  "Return non-nil when quoted VALUE requires a persistent runtime value."
+  (cond
+   ((null value) t)
+   ((or (eq value t) (eq value 'undefined)
+        (numberp value) (stringp value)) nil)
+   ((or (keywordp value) (symbolp value)
+        (vectorp value) (consp value)) t)
+   (t nil)))
+
 (defun eliscript-portable--call (form scope declarations dependencies)
   "Validate portable call FORM."
   (let* ((items (eliscript-portable--value form))
@@ -318,7 +328,12 @@
        "portable function %s cannot use %s (%s)"
        eliscript-portable--entry operator (cdr forbidden)))
     (pcase operator
-      ('quote nil)
+      ('quote
+       (when (eliscript-portable--quoted-runtime-value-p
+              (eliscript-portable--value (car arguments)))
+         (eliscript-portable--fail
+          "portable function %s cannot use quoted persistent data (persistent runtime values)"
+          eliscript-portable--entry)))
       ((or 'lambda 'fn)
        (eliscript-portable--function
         arguments scope declarations dependencies))

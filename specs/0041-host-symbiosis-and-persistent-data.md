@@ -717,8 +717,8 @@ cross-family generated evidence. Keyword/Symbol values, metadata, and portable
 printer/reader integration now complete the remaining P1 construction steps,
 and [0078-persistent-collection-core-exit-audit.md](0078-persistent-collection-core-exit-audit.md)
 closes the complete cross-host gate. Default Vector and Map expression syntax
-is implemented by 0083 and 0084; quoted-data and transport integration remain
-P3 work.
+is implemented by 0083 and 0084, and first-class quoted persistent data is
+implemented by 0087. Transport integration remains P3 work.
 The reusable dispatch mechanism now begins in
 [0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md): frozen
 protocol objects own direct Symbol slots and private exact-type/category/default
@@ -894,9 +894,11 @@ adds canonical source Keyword values while preserving static host-property
 keys. Specification
 [0086-optimized-runtime-persistent-list.md](0086-optimized-runtime-persistent-list.md)
 adds the canonical optimized List representation and parenthesized data text
-needed before quote can stop emitting mutable Arrays. Quoted persistent-data
-compiler migration, the worker codec, and the complete compatibility freeze
-remain open; the P3 exit is not yet satisfied.
+needed before quote can stop emitting mutable Arrays. Specification
+[0087-first-class-quoted-persistent-data.md](0087-first-class-quoted-persistent-data.md)
+then migrates quote to persistent List/Vector and first-class identifier
+values, with scalar and portable boundaries. The worker codec and complete
+compatibility freeze remain open; the P3 exit is not yet satisfied.
 
 ### P4: Transients and Hot-Path Optimization
 

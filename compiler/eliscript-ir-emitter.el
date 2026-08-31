@@ -22,7 +22,7 @@
   "Internal namespace binding for the automatic React JSX runtime.")
 
 (defconst eliscript-ir-emitter--literal-runtime-import
-  "import { hashMap as __eliscript_hash_map, keyword as __eliscript_keyword, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n"
+  "import { hashMap as __eliscript_hash_map, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n"
   "Generated import for canonical language literal construction.")
 
 (defconst eliscript-ir-emitter--collection-runtime-import
@@ -1250,6 +1250,9 @@ JavaScript property or tag string rather than an Eliscript value."
         (children (eliscript-ir-emitter--children node)))
     (cond
      ((memq kind '(persistent-vector-literal persistent-map-literal)) t)
+     ((eq kind 'quoted-literal)
+      (eliscript-emitter--quoted-uses-literal-runtime-p
+       (eliscript-ir-node-value node)))
      ((eliscript-ir-emitter--keyword-literal-p node) t)
      ((memq kind '(property-read property-write method-call))
       (eliscript-ir-emitter--children-use-literal-runtime-p children 1))

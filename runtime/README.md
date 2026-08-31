@@ -22,13 +22,14 @@ runtime for element construction.
 ### Literal Runtime ABI
 
 `literals.mjs` is the package-owned standard ESM link for generated persistent
-constructors. It exports `vector`, `hashMap`, and `keyword`, delegating directly
-to the canonical persistent Vector, HAMT Map, and interned Keyword
-implementations. The compiler imports it only when evaluated source constructs
-one of those runtime values. Static JavaScript property keys and quoted syntax
-data do not link it by themselves. It has no application framework, bundler,
-server, or publishing dependency. Explicit `js-array` and `js-object` forms
-bypass this ABI and emit native containers directly; `js-nth` and `js-length`
+constructors. It exports `list`, `vector`, `hashMap`, `keyword`, and `symbol`,
+delegating directly to the canonical persistent collection and identifier
+implementations. The compiler imports it only when evaluated source or quoted
+data constructs one of those runtime values. Static JavaScript property keys
+and scalar-only quote do not link it by themselves. It has no application
+framework, bundler, server, or publishing dependency. Explicit `js-array` and
+`js-object` forms bypass this ABI and emit native containers directly;
+`js-nth` and `js-length`
 likewise bypass collection protocol dispatch.
 
 ### Persistent Vector

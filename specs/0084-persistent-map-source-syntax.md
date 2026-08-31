@@ -94,11 +94,11 @@ Brace expressions participate in macro expansion through their canonical
 `hash-map` syntax. Macros may generate a Map expression with quasiquote and
 unquote, and seed/self-hosted expansion must agree.
 
-Quoted brace forms remain constructor syntax data in this slice. For example,
-`'{:ready t}` is represented as quoted `(hash-map :ready t)` syntax rather
-than an evaluated persistent Map. First-class quoted persistent values are
-reserved for canonical data-reader integration; this boundary prevents the
-reader from conflating executable source with runtime data.
+Quoted brace forms remain constructor syntax data. Specification 0087 now
+materializes that syntax as a Persistent List containing first-class Symbol
+and Keyword values. For example, `'{:ready t}` becomes canonical quoted
+`(hash-map :ready true)` data rather than an evaluated persistent Map. This
+prevents the reader from conflating executable source with runtime data.
 
 ## Portable and Bootstrap Boundary
 
@@ -121,10 +121,9 @@ the complete persistent literal and quoted-data family is promoted.
 
 ## Remaining P3 Work
 
-1. integrate quoted persistent values with the canonical data reader
-2. implement transport-safe persistent values in the Emacs worker codec
-3. audit legacy List and host-container compatibility forms
-4. promote the complete literal and host-container contract after migration
+1. implement transport-safe persistent values in the Emacs worker codec
+2. audit legacy List and host-container compatibility forms
+3. promote the complete literal and host-container contract after migration
 
 ## Acceptance Criteria
 
@@ -144,8 +143,8 @@ the complete persistent literal and quoted-data family is promoted.
   not acquire brace syntax.
 - **MSL-09:** Macros can generate brace Map expressions with matching seed and
   self-hosted expansions.
-- **MSL-10:** Quoted brace expressions retain canonical constructor syntax
-  data rather than evaluating a Map.
+- **MSL-10:** Quoted brace expressions retain canonical persistent constructor
+  syntax data rather than evaluating a Map.
 - **MSL-11:** Portable closures reject both Map spellings with matching
   diagnostics.
 - **MSL-12:** Seed/self-hosted ESM, Source Maps, diagnostics, reader trees,

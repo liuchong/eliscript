@@ -606,9 +606,12 @@ host-property boundaries, and conditional runtime linking. Specification
 [0086-optimized-runtime-persistent-list.md](0086-optimized-runtime-persistent-list.md)
 adds the optimized singly linked List, exact suffix sharing, collection/value/
 metadata protocols, portable hash parity, million-node evidence, and
-parenthesized canonical data text. It is the runtime prerequisite for quoted
-List data. Quoted persistent-data compiler migration, transport-safe protocol
-representation, and static escape analysis remain open. Canonical
+parenthesized canonical data text. First-class persistent List/Vector/Symbol/
+Keyword quote then lands in
+[0087-first-class-quoted-persistent-data.md](0087-first-class-quoted-persistent-data.md),
+including literal ABI, canonical text, portable rejection, macro-generated
+Symbol, and fixed-point evidence. Transport-safe protocol representation and
+static escape analysis remain open. Canonical
 printing/reading for the optimized runtime family now lands in
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md);
 portable Keyword/Symbol values and List/collection data text now land in

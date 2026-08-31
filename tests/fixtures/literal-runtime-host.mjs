@@ -4,10 +4,13 @@ import {
   isPersistentHashMap,
 } from "../../runtime/core/map.mjs";
 import {
+  isEliscriptSymbol,
   isKeyword,
   keyword,
   qualifiedIdentifierName,
 } from "../../runtime/core/identifier.mjs";
+import { isPersistentList } from "../../runtime/core/list.mjs";
+import { printValue } from "../../runtime/core/data-text.mjs";
 import {
   isPersistentVector,
   persistentVector,
@@ -26,6 +29,8 @@ const literalMapResult = generated.map_literal.get(mapKey);
 const nestedMap = generated.map_literal.get("nested");
 const readyKeyword = keyword("ready");
 const qualifiedKeyword = keyword("article/title");
+const quotedData = generated.quoted_data;
+const quotedValues = [...quotedData];
 
 console.log(JSON.stringify({
   vector: {
@@ -65,7 +70,23 @@ console.log(JSON.stringify({
     stringKeyMiss: generated.keyword_map.get("article/title") ?? null,
     macroValue: isKeyword(generated.macro_keyword),
     macroQualifiedName: qualifiedIdentifierName(generated.macro_keyword),
-    quotedSyntax: generated.quoted_keyword,
+    quotedSyntax: {
+      value: isKeyword(generated.quoted_keyword),
+      qualifiedName: qualifiedIdentifierName(generated.quoted_keyword),
+    },
+  },
+  quoted: {
+    persistentList: isPersistentList(quotedData),
+    count: quotedData.count,
+    symbol: isEliscriptSymbol(quotedValues[0]),
+    symbolName: qualifiedIdentifierName(quotedValues[0]),
+    keyword: isKeyword(quotedValues[1]),
+    vector: isPersistentVector(quotedValues[2]),
+    vectorValues: [...quotedValues[2]],
+    emptyList: isPersistentList(quotedValues[3]) && quotedValues[3].isEmpty,
+    falseSymbol: isEliscriptSymbol(quotedValues[4]),
+    text: printValue(quotedData),
+    mapSyntax: printValue(generated.quoted_map),
   },
   host: {
     array: Array.isArray(generated.array_value),

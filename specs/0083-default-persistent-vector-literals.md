@@ -45,11 +45,12 @@ They lower to `array-binding-pattern` and emit JavaScript destructuring. A
 binding pattern is not a value constructor and must not cause a persistent
 runtime import by itself.
 
-Quoted vectors remain syntax data in this slice. Their existing JSON-safe
-representation is retained for deterministic macro expansion, diagnostics,
-and bootstrap transport. First-class quoted persistent data is part of the
-later reader/data-literal integration. Evaluated Keyword values are specified
-separately by 0085, and Map expression syntax by 0084.
+Quoted vectors remain syntax data rather than evaluated expressions.
+Specification 0087 now materializes that data as a Persistent Vector with
+recursive persistent List/Vector and identifier categories. Deterministic
+macro expansion, diagnostics, and bootstrap IR transport remain unchanged.
+Evaluated Keyword values are specified by 0085, and Map expression syntax by
+0084.
 
 ## Explicit Host Containers
 
@@ -122,10 +123,9 @@ distinction before the persistent literal family is promoted to stable.
 
 The following integration work remains after this slice:
 
-1. integrate quoted collection values with the canonical data reader
-2. implement transport-safe persistent values in the Emacs worker codec
-3. audit legacy `car`, `cdr`, `cons`, `list`, and `array` compatibility forms
-4. promote the complete literal and host-container contract after migration
+1. implement transport-safe persistent values in the Emacs worker codec
+2. audit legacy `car`, `cdr`, `cons`, `list`, and `array` compatibility forms
+3. promote the complete literal and host-container contract after migration
 
 ## Acceptance Criteria
 
