@@ -18,7 +18,7 @@
       matched))
 
   (defportable dissoc (object key)
-    (let ((result (object))
+    (let ((result (js-object))
           (source-keys (keys object))
           (index 0))
       (while (< index (js-length source-keys))
@@ -30,7 +30,7 @@
       result))
 
   (defportable merge (left right)
-    (let ((result (object))
+    (let ((result (js-object))
           (left-keys (keys left))
           (right-keys (keys right))
           (index 0))
@@ -46,7 +46,7 @@
       result))
 
   (defportable map-values (function object)
-    (let ((result (object))
+    (let ((result (js-object))
           (source-keys (keys object))
           (index 0))
       (while (< index (js-length source-keys))
@@ -57,7 +57,7 @@
       result))
 
   (defportable filter-values (predicate object)
-    (let ((result (object))
+    (let ((result (js-object))
           (source-keys (keys object))
           (index 0))
       (while (< index (js-length source-keys))
@@ -69,7 +69,7 @@
       result))
 
   (defportable pick (object wanted-keys)
-    (let ((result (object))
+    (let ((result (js-object))
           (index 0))
       (while (< index (js-length wanted-keys))
         (let ((key (js-nth index wanted-keys)))
@@ -79,7 +79,7 @@
       result))
 
   (defportable omit (object omitted-keys)
-    (let ((result (object))
+    (let ((result (js-object))
           (source-keys (keys object))
           (index 0))
       (while (< index (js-length source-keys))

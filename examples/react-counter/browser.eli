@@ -14,31 +14,31 @@
 
 (js-call root :render
     (jsx StrictMode nil
-      (jsx :main (object :className "demo-shell")
-        (jsx :header (object :className "demo-header")
-          (jsx :span (object :className "logo-light")
+      (jsx :main (js-object :className "demo-shell")
+        (jsx :header (js-object :className "demo-header")
+          (jsx :span (js-object :className "logo-light")
             (jsx :img
-              (object :className "demo-logo"
+              (js-object :className "demo-logo"
                       :src logo-url
                       :alt "Eliscript")))
-          (jsx :span (object :className "wordmark") "Eliscript")
+          (jsx :span (js-object :className "wordmark") "Eliscript")
           (jsx :a
-            (object :className "source-link"
+            (js-object :className "source-link"
                     :href "https://github.com/liuchong/eliscript")
             "Source"))
-        (jsx :section (object :className "intro")
-          (jsx :p (object :className "eyebrow") "ELISCRIPT / REACT")
+        (jsx :section (js-object :className "intro")
+          (jsx :p (js-object :className "eyebrow") "ELISCRIPT / REACT")
           (jsx :h1 nil "A Lisp component, alive in the browser.")
-          (jsx :p (object :className "lede")
+          (jsx :p (js-object :className "lede")
             "Compiled by Emacs, mounted by Vite, rendered by React."))
         (jsx Counter
-          (object :title "Interactive counter")
-          (jsx :p (object :className "status")
+          (js-object :title "Interactive counter")
+          (jsx :p (js-object :className "status")
             "Edit the .eli source and Vite will refresh this module."))
-        (jsx :footer (object :className "demo-footer")
+        (jsx :footer (js-object :className "demo-footer")
           (map
             (lambda (label)
-              (jsx :span (object :key label) label))
+              (jsx :span (js-object :key label) label))
             (js-array
               "Automatic JSX runtime"
               "Source Map v3"

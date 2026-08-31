@@ -47,18 +47,18 @@
     (cond
       ((= (node-kind node) "literal")
        (if (= (node-value node) false)
-           (object :kind "symbol" :name "false")
+           (js-object :kind "symbol" :name "false")
          (node-value node)))
-      ((= (node-kind node) "undefined") (object :kind "undefined"))
+      ((= (node-kind node) "undefined") (js-object :kind "undefined"))
       ((= (node-kind node) "symbol")
-       (object :kind "symbol" :name (node-name node)))
+       (js-object :kind "symbol" :name (node-name node)))
       ((= (node-kind node) "keyword")
-       (object :kind "keyword" :name (node-name node)))
+       (js-object :kind "keyword" :name (node-name node)))
       ((or (= (node-kind node) "list") (= (node-kind node) "vector"))
        (let ((items (js-array)))
          (js-call (node-items node) :forEach
            (lambda (item) (js-call items :push (syntax-datum item))))
-         (object :kind (node-kind node) :items items)))
+         (js-object :kind (node-kind node) :items items)))
       (t
        (fail (str "cannot encode quoted syntax kind: " (node-kind node))))))
 
@@ -78,11 +78,11 @@
       ((= (node-kind form) "undefined")
        (make-node
          "literal" (node-span form) nil (js-array)
-         (object :literalKind "undefined")))
+         (js-object :literalKind "undefined")))
       ((= (node-kind form) "keyword")
        (make-node
          "literal" (node-span form) (node-name form) (js-array)
-         (object :literalKind "keyword")))
+         (js-object :literalKind "keyword")))
       (t
        (make-node
          "literal" (node-span form) (node-value form) (js-array) nil))))
@@ -110,7 +110,7 @@
                   (lower-binding-target element))))))
          (make-node
            "array-binding-pattern" (node-span pattern) nil children
-           (if rest (object :rest t) nil))))
+           (if rest (js-object :rest t) nil))))
       (t (fail "cannot lower invalid binding pattern"))))
 
   (defun lower-parameter-nodes (parameters)
@@ -131,13 +131,13 @@
                        (node-span parameter)
                        nil
                        (js-array (lower-binding-target parameter))
-                       (object :parameterKind mode :pattern t)))
+                       (js-object :parameterKind mode :pattern t)))
                  (js-call result :push
                    (make-node
                      "parameter-binding"
                      (node-span parameter)
                      name
-                     (js-array) (object :parameterKind mode))))
+                     (js-array) (js-object :parameterKind mode))))
                (when (= mode "rest") (setq mode "done")))))))
       result))
 
@@ -145,12 +145,12 @@
     (if (symbol-node-p binding)
         (make-node
           "lexical-binding" (node-span binding) (node-name binding) (js-array)
-          (object :style "symbol"))
+          (js-object :style "symbol"))
       (if (vector-node-p binding)
           (make-node
             "lexical-binding" (node-span binding) nil
             (js-array (lower-binding-target binding))
-            (object :style "symbol" :pattern t))
+            (js-object :style "symbol" :pattern t))
         (let* ((items (list-items binding))
                (target (js-nth 0 items))
                (children (js-array)))
@@ -162,7 +162,7 @@
                     (lower-expression (js-nth 1 items))))
                 (make-node
                   "lexical-binding" (node-span binding) nil children
-                  (object :style "list" :pattern t)))
+                  (js-object :style "list" :pattern t)))
             (progn
               (when (> (get items :length) 1)
                 (js-call children :push
@@ -170,7 +170,7 @@
               (make-node
                 "lexical-binding" (node-span binding)
                 (node-name target) children
-                (object :style "list"))))))))
+                (js-object :style "list"))))))))
 
   (defun lower-call-node (kind form operator args)
     (make-node
@@ -213,14 +213,14 @@
                   (node-span key)
                   (literal-object-key key)
                   (js-array (lower-expression value))
-                  (object :computed false)))
+                  (js-object :computed false)))
             (js-call properties :push
               (make-node
                 "object-property"
                 (node-span key)
                 nil
                 (js-array (lower-expression key) (lower-expression value))
-                (object :computed t)))))
+                (js-object :computed t)))))
         (setq index (+ index 2)))
       (make-node "object-literal" (node-span form) nil properties nil)))
 
@@ -247,7 +247,7 @@
                        (make-node
                          "catch-binding" (node-span binding) nil
                          (js-array (lower-binding-target binding))
-                         (object :pattern t)))
+                         (js-object :pattern t)))
                    (js-call children :push
                      (make-node
                        "catch-binding" (node-span binding)
@@ -268,7 +268,7 @@
         (append-nodes children clauses)
         (make-node
           "try-expression" (node-span form) nil children
-          (object :bodyCount (get body :length))))))
+          (js-object :bodyCount (get body :length))))))
 
   (defun lower-cond (form args)
     (let ((clauses (js-array)))
@@ -293,7 +293,7 @@
       (append-nodes children (lower-sequence (js-call args :slice 1)))
       (make-node
         "lexical-bindings" (node-span form) nil children
-        (object
+        (js-object
           :sequential (= operator "let*")
           :bindingCount (get bindings :length)))))
 
@@ -308,7 +308,7 @@
       (setq recur-targets previous-targets)
       (make-node
         kind (node-span form) value children
-        (object
+        (js-object
           :parameterCount (get parameter-nodes :length)
           :async (if asynchronous t false)))))
 
@@ -376,11 +376,11 @@
               (setq recur-targets previous-targets)
               (make-node
                 "binding-loop" (node-span form) nil children
-                (object :bindingCount (get bindings :length)))))
+                (js-object :bindingCount (get bindings :length)))))
            ((= operator "recur")
             (make-node
               "recur" (node-span form) nil (lower-sequence args)
-              (object :targetKind (js-nth 0 recur-targets))))
+              (js-object :targetKind (js-nth 0 recur-targets))))
            ((or (= operator "setq") (= operator "set!"))
             (lower-assignments form operator args))
            ((= operator "while")
@@ -403,21 +403,21 @@
             (make-node
               "persistent-list-literal" (node-span form) nil
               (lower-sequence args) nil))
-           ((or (= operator "array") (= operator "js-array"))
+           ((= operator "js-array")
             (make-node
               "array-literal" (node-span form) nil
               (lower-sequence args) nil))
            ((= operator "jsx")
             (make-node
               "react-element" (node-span form) nil (lower-sequence args)
-              (object :childCount (- (get args :length) 2))))
+              (js-object :childCount (- (get args :length) 2))))
            ((= operator "fragment")
             (make-node
               "react-fragment" (node-span form) nil (lower-sequence args)
-              (object :childCount (get args :length))))
+              (js-object :childCount (get args :length))))
            ((js-call intrinsics :includes operator)
             (lower-call-node "intrinsic" form operator args))
-           ((or (= operator "object") (= operator "js-object"))
+           ((= operator "js-object")
             (lower-object form args))
            ((= operator "get")
             (lower-call-node "property-read" form "get" args))
@@ -474,7 +474,7 @@
           (setq index (1+ index))))
       (make-node
         "import-declaration" (node-span form) source children
-        (if portable (object :portable t) nil))))
+        (if portable (js-object :portable t) nil))))
 
   (defun lower-top-level (form)
     (if (not (= (node-kind form) "list"))
@@ -504,7 +504,7 @@
              (make-node
                "variable-declaration" (node-span form)
                (node-name (js-nth 0 args)) children
-               (object
+               (js-object
                  :sourceOperator operator
                  :mutable (= operator "defvar")))))
           ((or (= operator "defun") (= operator "defn")
@@ -515,7 +515,7 @@
                     (js-nth 1 args) (js-call args :slice 2)
                     (= operator "defasync"))))
              (put node :properties
-               (object
+               (js-object
                  :parameterCount
                    (get (get node :properties) :parameterCount)
                  :sourceOperator operator

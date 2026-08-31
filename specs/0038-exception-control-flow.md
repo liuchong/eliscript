@@ -17,7 +17,7 @@ raw `js*` escape:
     (let ((response (await (fetch url))))
       (await (js-call response :json)))
     (catch error
-      (object :ok false :message (get error :message "unknown")))
+      (js-object :ok false :message (get error :message "unknown")))
     (finally
       (print "request finished"))))
 ```

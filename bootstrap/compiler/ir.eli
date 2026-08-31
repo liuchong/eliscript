@@ -27,7 +27,7 @@
       (fail "IR program body must be an array"))
     (unless (js-call body :every node-p)
       (fail "IR program body must contain only IR nodes"))
-    (object :filename filename :body body))
+    (js-object :filename filename :body body))
 
   (defun node-p (value)
     (and value
@@ -42,7 +42,7 @@
     (unless (js-call children :every node-p)
       (fail "IR node children must all be IR nodes"))
     (let ((node
-           (object
+           (js-object
              :kind kind
              :span span
              :value value

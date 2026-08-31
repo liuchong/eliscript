@@ -67,9 +67,9 @@ A nullish tail is treated as an empty host Array.
 
 `js-cons` joins `js-array`, `js-nth`, and `js-length` as an explicitly
 host-oriented primitive. It does not link the persistent literal runtime or
-the List runtime by itself. The provisional `array` and `object` aliases remain
-subject to the final P3 compatibility freeze and are not promoted by this
-specification.
+the List runtime by itself. Specification 0095 subsequently removes the
+provisional `array` and `object` aliases and promotes the complete persistent
+value and explicit host-container boundary.
 
 ## Compiler and Runtime ABI
 
@@ -123,9 +123,9 @@ This is an intentional provisional semantic change. Source that relied on
 should use collection protocols rather than List-specific operations.
 
 Specification 0093 closes static transient ownership analysis. This
-specification closes the remaining legacy List-operation audit. The final P3
-gate is the compatibility review and promotion or removal of provisional host
-container aliases; P3 is therefore not yet declared complete here.
+specification closes the remaining legacy List-operation audit. Specification
+0095 then removes the provisional host-container aliases and completes the P3
+compatibility promotion.
 
 ## Acceptance Criteria
 

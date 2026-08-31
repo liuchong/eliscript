@@ -49,7 +49,7 @@
 
   (defportable json-options (options)
     (if (nullish? options)
-        (object :maxDepth json-default-max-depth
+        (js-object :maxDepth json-default-max-depth
                 :maxLength json-default-max-length
                 :maxValues json-default-max-values)
       (if (not (= (value-type options) "object"))
@@ -82,7 +82,7 @@
                     max-length 1 json-hard-max-length)
                    (json-option-integer?
                     max-values 1 json-hard-max-values))
-                  (object :maxDepth max-depth
+                  (js-object :maxDepth max-depth
                           :maxLength max-length
                           :maxValues max-values)
                 nil)))))))
@@ -129,11 +129,11 @@
       nil))
 
   (defportable json-step-success (value index count)
-    (object :ok t :value value :index index :count count))
+    (js-object :ok t :value value :index index :count count))
 
   (defportable json-step-failure
       (code message offset path count)
-    (object :ok false
+    (js-object :ok false
             :error (json-error code message offset path)
             :index offset
             :count count))
@@ -618,11 +618,11 @@
      json-identity-hash json-identical? json-identical?))
 
   (defportable json-encode-success (text count)
-    (object :ok t :text text :count count))
+    (js-object :ok t :text text :count count))
 
   (defportable json-encode-failure
       (code message path count)
-    (object :ok false
+    (js-object :ok false
             :error (json-error code message nil path)
             :count count))
 

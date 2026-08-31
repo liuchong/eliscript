@@ -111,7 +111,9 @@ codec traversal. A source-bound 256 MiB real-process round trip now verifies
 budgets, completing the P5 value-bridge gate. Protocol-definition transport
 now uses a strict versioned data descriptor with fresh local identities,
 completing P2. The persistent Vector/Map/Set literal family is now complete;
-static transient escape analysis and the P3 compatibility freeze remain open.
+static transient ownership analysis is enforced, and the P3 compatibility
+freeze now removes the provisional `array`/`object` aliases in favor of the
+stable explicit `js-array`/`js-object` boundary.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in
@@ -252,7 +254,8 @@ The implemented language includes:
 - ESM modules, JavaScript interop, and application-level element syntax
 - statically checked portable functions and dependency-pruned builds
 - persistent collections, value semantics, and open collection protocols
-- persistent Vector and Map literals with explicit native container forms
+- persistent List, Vector, Map, and Set construction with explicit native
+  container forms
 - first-class immutable Keyword and Symbol values with qualified names
 - immutable metadata on Symbols and persistent collections
 - canonical readable text for optimized and portable persistent values

@@ -15,7 +15,7 @@
 
   (defun atom-fail (code message)
     (throw
-     (object :kind "eliscript/atom-error"
+     (js-object :kind "eliscript/atom-error"
              :code code
              :message message)))
 
@@ -140,14 +140,14 @@
                   (setq notifications
                         (persistent-vector-conj
                          notifications
-                         (object :old-value old-value
+                         (js-object :old-value old-value
                                  :new-value candidate
                                  :watches watches)))
                   (funcall drain-notifications))
                 candidate)))
 
       (setq reference
-            (object
+            (js-object
              :kind "eliscript/atom"
              :read (lambda () current)
              :reset (lambda (candidate) (funcall commit candidate))

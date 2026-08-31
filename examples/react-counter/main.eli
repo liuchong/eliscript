@@ -7,11 +7,11 @@
            (set-count (js-nth 1 state)))
       (jsx StrictMode nil
         (jsx :section
-          (object :className "counter" :data-count count)
+          (js-object :className "counter" :data-count count)
           (jsx :h1 nil (get props :title "Counter"))
           (fragment
             (jsx :button
-              (object
+              (js-object
                 :type "button"
                 :onClick (lambda () (set-count (1+ count))))
               "Increment")

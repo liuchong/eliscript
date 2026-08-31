@@ -52,10 +52,10 @@
       (t (js-array))))
 
   (defun make-scope (parent)
-    (object :parent parent :names (new (js* "Map"))))
+    (js-object :parent parent :names (new (js* "Map"))))
 
   (defun make-binding (node &optional operation namespace)
-    (object
+    (js-object
       :name (node-name node)
       :operation operation
       :namespace namespace
@@ -122,7 +122,7 @@
                      (operation (and family
                                      (transient-operation family member-name))))
                 (and operation
-                     (object :name name :operation operation)))))))))
+                     (js-object :name name :operation operation)))))))))
 
   (defun copy-state (context)
     (let ((result (new (js* "Map"))))
@@ -247,12 +247,12 @@
   (defun binding-pair (binding)
     (let ((items (list-items binding)))
       (if (and (not (eq items undefined)) (> (get items :length) 0))
-          (object :target (js-nth 0 items) :initializer (js-nth 1 items))
-        (object :target binding :initializer nil))))
+          (js-object :target (js-nth 0 items) :initializer (js-nth 1 items))
+        (js-object :target binding :initializer nil))))
 
   (defun new-resource (binding span context)
     (let ((resource
-           (object
+           (js-object
              :name (get binding :name)
              :functionId (get context :functionId)
              :span span)))
@@ -759,7 +759,7 @@
   (defun analyze-transients (forms filename)
     (unless (trusted-core-source-p filename)
       (let* ((context
-              (object
+              (js-object
                 :filename filename
                 :state (new (js* "Map"))
                 :functionId 0

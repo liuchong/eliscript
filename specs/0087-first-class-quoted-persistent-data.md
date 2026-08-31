@@ -155,5 +155,5 @@ runtime-value migration.
 
 The versioned persistent-value codec is implemented by 0088, static transient
 ownership analysis by 0093, and ordinary List construction/operations by
-0094. Only the final provisional host-alias compatibility review and promotion
-remain in the P3 gate.
+0094. Specification 0095 removes the provisional host aliases and completes
+the stable P3 value and host-container boundary.

@@ -13,7 +13,7 @@
      "bit-shift-left" "bit-shift-right" "unsigned-bit-shift-right"
      "value-type" "host-identity-token" "string-code-unit-at" "string-from-code-unit"
      "string-to-number" "string-to-bigint" "number-float64-words"
-     "list" "vector" "hash-map" "hash-set" "array" "js-array" "car"
+     "list" "vector" "hash-map" "hash-set" "js-array" "car"
      "cdr" "cons" "js-cons" "nth" "js-nth" "aref" "length" "js-length"
      "new" "print" "str"
      "object-keys" "object-has?" "object-assoc" "funcall" "apply"))
@@ -32,7 +32,7 @@
                     (and span (get span :filename))
                     "<input>")))
       (fail
-        (object
+        (js-object
           :format "eliscript-diagnostic"
           :version 1
           :code "ELI-A0001"
@@ -40,15 +40,15 @@
           :phase "analysis"
           :message message
           :location
-          (object
+          (js-object
             :file file
             :start
-            (object
+            (js-object
               :offset (if span (get span :start) 0)
               :line (if span (get span :line) 1)
               :column (if span (get span :column) 1))
             :end
-            (object
+            (js-object
               :offset (if span (get span :end) 0)
               :line (if span (get span :endLine) 1)
               :column (if span (get span :endColumn) 1)))))))
@@ -169,7 +169,7 @@
                  context (node-span parameter)
                  "function &rest parameter must be a symbol"))
              (js-call parsed :push
-               (object :kind "rest" :node parameter :bindings (js-array parameter)))
+               (js-object :kind "rest" :node parameter :bindings (js-array parameter)))
              (setq mode "done"))
             ((= mode "done")
              (analyzer-fail
@@ -177,7 +177,7 @@
                "invalid function parameter list"))
             ((binding-pattern-p parameter)
              (js-call parsed :push
-               (object
+               (js-object
                  :kind mode
                  :node parameter
                  :bindings (binding-nodes parameter context))))
@@ -224,7 +224,7 @@
       (t "<unsupported>")))
 
   (defun make-scope (parent &optional function-context)
-    (object
+    (js-object
       :parent parent
       :names (new (js* "Map"))
       :outputs (new (js* "Map"))
@@ -271,7 +271,7 @@
           (str "binding " name " emits " output-name
                ", which collides with " (get existing-output :name))))
       (let ((binding
-             (object
+             (js-object
                :name name
                :outputName output-name
                :kind kind
@@ -390,7 +390,7 @@
               (tail-position (get context :tailPosition))
               (recur-barrier (get context :recurBarrier)))
           (put context :recurTargets
-            (js-array (object :kind "function"
+            (js-array (js-object :kind "function"
                      :arity (get parameter-items :length))))
           (put context :tailPosition t)
           (put context :recurBarrier false)
@@ -431,7 +431,7 @@
             (recur-barrier (get context :recurBarrier))
             (targets (js-array)))
         (js-call targets :push
-          (object :kind "loop" :arity (get parsed :length)))
+          (js-object :kind "loop" :arity (get parsed :length)))
         (js-call recur-targets :forEach
           (lambda (target) (js-call targets :push target)))
         (put context :recurTargets targets)
@@ -676,7 +676,7 @@
         ((= operator "fragment")
          (analyze-non-tail-sequence args scope context))
         ((= operator "quote") nil)
-        ((or (= operator "object") (= operator "js-object"))
+        ((= operator "js-object")
          (analyze-object args scope context form-span operator))
         ((= operator "hash-map")
          (when (= (% (get args :length) 2) 1)
@@ -902,15 +902,15 @@
               (cond
                 ((= operator "defconst")
                  (js-call declarations :set (node-name (js-nth 0 args))
-                   (object :kind "constant" :form form
+                   (js-object :kind "constant" :form form
                            :initializer (js-nth 1 args))))
                 ((= operator "defvar")
                  (js-call declarations :set (node-name (js-nth 0 args))
-                   (object :kind "variable" :form form)))
+                   (js-object :kind "variable" :form form)))
                 ((or (= operator "defun") (= operator "defn")
                      (= operator "defportable") (= operator "defasync"))
                  (js-call declarations :set (node-name (js-nth 0 args))
-                   (object
+                   (js-object
                      :kind (if (= operator "defportable")
                                "portable" "function")
                      :form form
@@ -924,7 +924,7 @@
                    :forEach
                    (lambda (name)
                      (js-call declarations :set (node-name name)
-                       (object
+                       (js-object
                          :kind (if (= operator "import-portable")
                                    "portable-import" "import")
                          :form form))))))))))
@@ -1113,7 +1113,7 @@
         ((or (= operator "setq") (= operator "set!"))
          (portable-assignment
            args scope declarations dependencies entry context))
-        ((or (= operator "object") (= operator "js-object"))
+        ((= operator "js-object")
          (portable-object
            args scope declarations dependencies entry context))
         ((or (= operator "get")
@@ -1180,7 +1180,7 @@
       forms))
 
   (defun select-portable-module (forms entries filename)
-    (let* ((context (object :filename filename))
+    (let* ((context (js-object :filename filename))
            (flattened (flatten-modules forms context))
            (declarations (portable-declarations flattened context))
            (pending (js-array))
@@ -1232,7 +1232,7 @@
 
   (defun analyze-module (forms filename)
     (let* ((context
-            (object
+            (js-object
               :filename filename
               :tailPosition false
               :recurTargets (js-array)

@@ -54,7 +54,7 @@
 
   (defun interop-fail (code message path &optional origin)
     (throw
-     (object :kind "eliscript/interop-error"
+     (js-object :kind "eliscript/interop-error"
              :code code
              :message message
              :path path
@@ -129,7 +129,7 @@
 
   (defun interop-options (options)
     (if (nullish? options)
-        (object :deep false :max-depth 256 :max-values 1000000)
+        (js-object :deep false :max-depth 256 :max-values 1000000)
       (progn
         (when (not (object? options))
           (interop-fail
@@ -170,13 +170,13 @@
            "ELI-INTEROP-INVALID-OPTIONS"
            "maxValues must be a positive safe integer"
            "$"))
-          (object :deep deep
+          (js-object :deep deep
                   :max-depth max-depth
                   :max-values max-values)))))
 
   (defun interop-context (options direction)
     (let ((normalized (interop-options options)))
-      (object :deep (get normalized "deep" false)
+      (js-object :deep (get normalized "deep" false)
               :max-depth (get normalized "max-depth" 256)
               :max-values (get normalized "max-values" 1000000)
               :count 0

@@ -192,8 +192,9 @@ String/Object host adapters through specifications
 [0079](0079-eliscript-protocol-dispatch-policy.md),
 [0080](0080-canonical-generated-protocol-runtime.md), and
 [0081](0081-protocol-driven-text-object.md). Persistent collection literal
-migration, compiler specialization, and static transient escape analysis
-remain later work.
+migration and static transient ownership analysis are now completed by the
+0082-through-0095 language series and specification 0093. Further compiler
+specialization remains profile-driven work.
 
 ## Acceptance Criteria
 

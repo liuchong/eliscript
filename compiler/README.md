@@ -62,6 +62,8 @@ before analysis. Language-level `nth` and `length` link the
 collection protocol runtime, while `js-nth` and `js-length` retain direct host
 access without that dependency. `car`, `cdr`, and `cons` link the canonical
 persistent List operations; they no longer imply native Array behavior.
+The former `array` and `object` constructor aliases are not compiler forms;
+without an ordinary user binding they are diagnosed as unbound symbols.
 
 ## Application Lowering
 

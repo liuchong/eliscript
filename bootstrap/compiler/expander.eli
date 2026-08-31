@@ -26,7 +26,7 @@
                     (and span (get span :filename))
                     "<input>")))
       (raise-diagnostic
-        (object
+        (js-object
           :format "eliscript-diagnostic"
           :version 1
           :code "ELI-X0001"
@@ -34,15 +34,15 @@
           :phase "expansion"
           :message message
           :location
-          (object
+          (js-object
             :file file
             :start
-            (object
+            (js-object
               :offset (if span (get span :start) 0)
               :line (if span (get span :line) 1)
               :column (if span (get span :column) 1))
             :end
-            (object
+            (js-object
               :offset (if span (get span :end) 0)
               :line (if span (get span :endLine) 1)
               :column (if span (get span :endColumn) 1)))))))
@@ -144,7 +144,7 @@
            (= (node-name (js-nth 0 items)) name))))
 
   (defun make-eval-scope (parent &optional context)
-    (object
+    (js-object
       :parent parent
       :values (new (js* "Map"))
       :context (or context (and parent (get parent :context)))))
@@ -159,7 +159,7 @@
       (while (and current (eq found undefined))
         (let ((values (get current :values)))
           (when (js-call values :has name)
-            (setq found (object :scope current :value (js-call values :get name)))))
+            (setq found (js-object :scope current :value (js-call values :get name)))))
         (setq current (get current :parent)))
       found))
 
@@ -310,7 +310,7 @@
   (defun parse-eval-binding (binding)
     (cond
       ((symbol-node-p binding)
-       (object :name (node-name binding) :value undefined))
+       (js-object :name (node-name binding) :value undefined))
       (t
        (let ((items (list-items binding)))
          (unless (and (not (eq items undefined))
@@ -319,7 +319,7 @@
                       (symbol-node-p (js-nth 0 items)))
            (raise-error
              (str "invalid macro let binding: " (node-display binding))))
-         (object
+         (js-object
            :name (node-name (js-nth 0 items))
            :value (js-nth 1 items))))))
 
@@ -350,7 +350,7 @@
                           (literal-node nil nil)
                         (eval-form value-form scope))))
                 (js-call parsed-bindings :push
-                  (object :name (get parsed :name) :value value)))))
+                  (js-object :name (get parsed :name) :value value)))))
           (js-call parsed-bindings :forEach
             (lambda (binding)
               (scope-bind child (get binding :name) (get binding :value))))))
@@ -802,7 +802,7 @@
           (setq index (1+ index)))
         (when (= mode "rest")
           (expander-fail context span "invalid macro parameter list"))
-        (object :required required :optional optional :rest rest-name))))
+        (js-object :required required :optional optional :rest rest-name))))
 
   (defun register-macro (form environment context)
     (let* ((items (node-items form))
@@ -822,7 +822,7 @@
             (expander-fail
               context span (str "duplicate macro definition: " name)))
           (js-call environment :set name
-            (object
+            (js-object
               :name name
               :parameters (parse-parameters parameters context span)
               :body (js-call args :slice 2)))))))
@@ -1070,7 +1070,7 @@
                      (js-call expanded :push
                        (expand-try-clause
                          clause environment depth context)))))
-                ((= operator "object")
+                ((= operator "js-object")
                  (js-call (expand-alternating
                             args environment depth context t t)
                    :forEach
@@ -1196,7 +1196,7 @@
         forms
         (new (js* "Map"))
         0
-        (object
+        (js-object
           :filename filename
           :gensymCounter 0
           :reservedNames reserved-names))))

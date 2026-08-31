@@ -13,7 +13,7 @@
     (js* "/^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$/"))
 
   (defun make-state (source filename)
-    (object
+    (js-object
       :source source
       :filename filename
       :index 0
@@ -22,7 +22,7 @@
       :column 1))
 
   (defun mark (state)
-    (object
+    (js-object
       :index (get state :index)
       :offset (get state :offset)
       :line (get state :line)
@@ -40,7 +40,7 @@
 
   (defun fail-at (state position message)
     (fail
-      (object
+      (js-object
         :format "eliscript-diagnostic"
         :version 1
         :code "ELI-R0001"
@@ -48,15 +48,15 @@
         :phase "reader"
         :message message
         :location
-        (object
+        (js-object
           :file (or (get state :filename) "<input>")
           :start
-          (object
+          (js-object
             :offset (get position :offset)
             :line (get position :line)
             :column (get position :column))
           :end
-          (object
+          (js-object
             :offset (get position :offset)
             :line (get position :line)
             :column (get position :column))))))

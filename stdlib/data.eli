@@ -3,7 +3,7 @@
   (import-portable "./object.eli" has?)
 
   (defportable index-by (key-function values)
-    (let ((result (object))
+    (let ((result (js-object))
           (index 0))
       (while (< index (js-length values))
         (let* ((value (js-nth index values))
@@ -13,7 +13,7 @@
       result))
 
   (defportable group-by (key-function values)
-    (let ((result (object))
+    (let ((result (js-object))
           (index 0))
       (while (< index (js-length values))
         (let* ((value (js-nth index values))
@@ -29,7 +29,7 @@
       result))
 
   (defportable count-by (key-function values)
-    (let ((result (object))
+    (let ((result (js-object))
           (index 0))
       (while (< index (js-length values))
         (let* ((value (js-nth index values))

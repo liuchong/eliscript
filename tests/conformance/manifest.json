@@ -921,7 +921,7 @@
       "title": "Persistent literal runtime ABI and explicit host containers",
       "status": "accepted",
       "spec": "0082",
-      "contracts": ["Links persistent Vector and Map constructors through one standard ESM runtime ABI", "Separates persistent constructor IR from provisional array and host object IR", "Provides explicit js-array and js-object forms without framework or bundler dependencies", "Matches seed/self-hosted ESM and Source Maps plus Bun and Node value reports"],
+      "contracts": ["Links persistent Vector and Map constructors through one standard ESM runtime ABI", "Separates persistent constructor IR from explicit host array and object IR", "Provides explicit js-array and js-object forms without framework or bundler dependencies", "Matches seed/self-hosted ESM and Source Maps plus Bun and Node value reports"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "persistent literals and quoted data preserve language value categories" },
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "hash-map rejects incomplete pairs in both compilers" },
@@ -1101,6 +1101,20 @@
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-lowers-list-construction-to-persistent-ir" },
         { "kind": "bun-test", "file": "tests/persistent-list.test.mjs", "contains": "language List operations accept only persistent Lists and nil" },
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "persistent literals and quoted data preserve language value categories" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
+    },
+    {
+      "id": "language.persistent-host-container-boundary",
+      "title": "Stable persistent value and explicit host container boundary",
+      "status": "stable",
+      "spec": "0095",
+      "contracts": ["Keeps List, Vector, Map, and Set construction in canonical persistent value categories", "Makes js-array, js-object, and js-cons the only builtin native container constructors", "Removes array and object as builtin aliases while leaving the names ordinarily bindable", "Migrates every maintained Eliscript source to explicit host constructors", "Keeps application frameworks, Vite, bundlers, site generators, and publishing outside core implementation and evidence"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-rejects-retired-host-container-aliases" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "maintained Eliscript sources use explicit host constructors" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "explicit host-only modules do not link the persistent runtime" },
+        { "kind": "bun-test", "file": "tests/bootstrap-analyzer.test.mjs", "contains": "bootstrapped analyzer matches seed acceptance and diagnostics" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
     }

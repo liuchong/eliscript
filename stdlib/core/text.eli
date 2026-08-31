@@ -83,12 +83,12 @@
       (Collection/reduce
         values
         (lambda (state value)
-          (object
+          (js-object
             :first false
             :text (str (get state :text)
                        (if (get state :first) "" separator)
                        value)))
-        (object :first t :text ""))
+        (js-object :first t :text ""))
       :text))
 
   (defun repeat (count text)

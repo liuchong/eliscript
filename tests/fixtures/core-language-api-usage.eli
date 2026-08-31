@@ -26,10 +26,10 @@
   (extend-protocol-category
     IDescribe
     "number"
-    (object :describe (lambda (value) (str "number:" value))))
+    (js-object :describe (lambda (value) (str "number:" value))))
   (extend-protocol-default
     IDescribe
-    (object :describe (lambda (_value) "default")))
+    (js-object :describe (lambda (_value) "default")))
 
   (defconst vector-builder (transient EMPTY_VECTOR))
   (conj! vector-builder 1 2 3)
@@ -52,7 +52,7 @@
   (defconst title-keyword (keyword "article/title"))
   (defconst title-symbol (symbol "article" "title"))
 
-  (defconst observed (array))
+  (defconst observed (js-array))
   (defconst bounded-sum
     (reduce
       [1 2 3 4]
@@ -72,7 +72,7 @@
       [1 2 3 4]))
 
   (defconst report
-    (object
+    (js-object
       :number-description (funcall describe 7)
       :default-description (funcall describe "text")
       :number-category (protocol-host-category 7)

@@ -55,9 +55,9 @@ Evaluated Keyword values are specified by 0085, and Map expression syntax by
 ## Explicit Host Containers
 
 `(js-array value...)` constructs a native mutable JavaScript Array and lowers
-to `array-literal`. The provisional `array` alias has the same behavior.
-`array-literal` round-trips canonically as `(js-array ...)`; it no longer
-represents square-bracket value syntax.
+to `array-literal`. `array-literal` round-trips canonically as `(js-array ...)`;
+it no longer represents square-bracket value syntax. Specification 0095 removes
+the provisional `array` alias and freezes this explicit spelling.
 
 Host array or string access is explicit:
 
@@ -119,12 +119,12 @@ square brackets being a native Array must replace the value expression with
 Binding syntax is unchanged. The compatibility corpus freezes the new
 distinction before the persistent literal family is promoted to stable.
 
-## Remaining P3 Work
+## P3 Completion
 
-Specifications 0093 and 0094 now close static transient ownership analysis and
-the `car`/`cdr`/`cons`/`list` compatibility migration. The final review of the
-provisional native `array`/`object` aliases and promotion of the complete
-literal/host-container contract remain open.
+Specifications 0093 and 0094 close static transient ownership analysis and the
+`car`/`cdr`/`cons`/`list` compatibility migration. Specification 0095 removes
+the provisional native `array`/`object` aliases and promotes the complete
+literal/host-container contract to stable.
 
 ## Acceptance Criteria
 

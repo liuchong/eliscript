@@ -157,7 +157,7 @@
    (eliscript-emitter-emit-expression '(quote (1 . 2)))
    :type 'eliscript-compile-error)
   (should (equal (eliscript-emitter-emit-expression
-                 '(object :name "Ada" :active t))
+                 '(js-object :name "Ada" :active t))
                  "({\"name\": \"Ada\", \"active\": true})")))
 
 (ert-deftest eliscript-emits-first-class-keyword-values ()
@@ -648,7 +648,7 @@
 (ert-deftest eliscript-rejects-invalid-arity ()
   (should-error (eliscript-emitter-emit-expression '(if t))
                 :type 'eliscript-compile-error)
-  (should-error (eliscript-emitter-emit-expression '(object :name))
+  (should-error (eliscript-emitter-emit-expression '(js-object :name))
                 :type 'eliscript-compile-error)
   (dolist (form '((object-keys)
                   (object-has? value)
@@ -667,6 +667,17 @@
                  "__eliscript_cons(1, null)"))
   (should (equal (eliscript-emitter-emit-expression '(js-cons 1 nil))
                  "[1, ...((null) ?? [])]")))
+
+(ert-deftest eliscript-rejects-retired-host-container-aliases ()
+  (dolist (entry '(("(array 1 2)" . "unbound symbol: array")
+                   ("(object :ready t)" . "unbound symbol: object")))
+    (let ((error-data
+           (should-error
+            (eliscript-compile-string (car entry) "host-alias.eli")
+            :type 'eliscript-analyze-error)))
+      (should (string-match-p
+               (regexp-quote (cdr entry))
+               (error-message-string error-data))))))
 
 (ert-deftest eliscript-lowers-list-construction-to-persistent-ir ()
   (let* ((source
@@ -1228,7 +1239,7 @@
 (defun optional-branch (value) (let* () (if value value)))
 (defun exercise (value values)
   (let* ((next (1+ value))
-         (record (object :next next (+ value 1) value)))
+         (record (js-object :next next (+ value 1) value)))
     (progn
       (setq state next)
       (set! state (if (and value next) next state))
@@ -1397,7 +1408,7 @@
            '("(value-type)"
              "(value-type 1 2)"
              "(host-identity-token)"
-             "(host-identity-token (object) (object))"
+             "(host-identity-token (js-object) (js-object))"
              "(string-code-unit-at \"a\")"
              "(string-code-unit-at \"a\" 0 1)"
              "(string-from-code-unit)"
@@ -1539,9 +1550,9 @@
          (count (nth 0 state))
          (set-count (nth 1 state)))
     (jsx StrictMode nil
-      (jsx :section (object :className \"counter\")
+      (jsx :section (js-object :className \"counter\")
         (jsx :button
-          (object :onClick (lambda () (set-count (1+ count))))
+          (js-object :onClick (lambda () (set-count (1+ count))))
           \"Increment\")
         (fragment
           (when (> count 0) (jsx :strong nil count))
@@ -1574,7 +1585,7 @@
   (let ((output
          (eliscript-compile-string
           "(defun item (slug)
-  (jsx :li (object :key slug :className \"entry\") slug))"
+  (jsx :li (js-object :key slug :className \"entry\") slug))"
           "react-key.eli")))
     (should (string-match-p
              (regexp-quote

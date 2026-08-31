@@ -4,9 +4,9 @@
   (import "../../stdlib/object.eli" assoc merge pick)
 
   (defconst values (range 1 8))
-  (defconst profile (object :language "Eliscript" :host "Emacs"))
+  (defconst profile (js-object :language "Eliscript" :host "Emacs"))
   (defconst result
-    (object
+    (js-object
      :values values
      :squares (map (lambda (value) (* value value)) values)
      :even (filter (lambda (value) (= (% value 2) 0)) values)
@@ -15,7 +15,7 @@
      :slug (strip-prefix "#" "#eliscript")
      :title (trim "  Emacs + JavaScript \n")
      :profile (assoc profile "runtime" "JavaScript")
-     :selected (pick (merge profile (object :runtime "JavaScript"))
+     :selected (pick (merge profile (js-object :runtime "JavaScript"))
                      (js-array "language" "runtime"))))
 
   (print (JSON/stringify result))

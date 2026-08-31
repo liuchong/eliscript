@@ -6,7 +6,7 @@
           assocBang persistentBang transient)
   (import "../../runtime/core/vector.mjs" EMPTY_VECTOR)
 
-  (defconst missing-value (object))
+  (defconst missing-value (js-object))
 
   (defun require-function (value label)
     (if (= (value-type value) "function")
@@ -17,8 +17,8 @@
       (key-function collection create-bucket update-bucket)
     (require-function key-function "data key function")
     (let ((bucket-index EMPTY_MAP)
-          (keys (array))
-          (buckets (array)))
+          (keys (js-array))
+          (buckets (js-array)))
       (reduce
         collection
         (lambda (result value)
@@ -33,7 +33,7 @@
               (funcall update-bucket buckets index value))
             result))
         nil)
-      (object :keys keys :buckets buckets)))
+      (js-object :keys keys :buckets buckets)))
 
   (defun persistent-map-from-buckets (keys buckets finish-bucket)
     (let ((result (transient EMPTY_MAP))
@@ -62,7 +62,7 @@
             (collect-buckets
               key-function
               collection
-              (lambda (value) (array value))
+              (lambda (value) (js-array value))
               (lambda (buckets index value)
                 (js-call (js-nth index buckets) :push value))))
            (keys (get grouped :keys))

@@ -61,7 +61,7 @@
 
   (defportable data-text-options (options)
     (if (nil? options)
-        (object :maxDepth data-text-default-max-depth
+        (js-object :maxDepth data-text-default-max-depth
                 :maxLength data-text-default-max-length
                 :maxValues data-text-default-max-values)
       (if (not (= (value-type options) "object"))
@@ -75,13 +75,13 @@
           (if (and (data-text-option? max-depth)
                    (data-text-option? max-length)
                    (data-text-option? max-values))
-              (object :maxDepth max-depth
+              (js-object :maxDepth max-depth
                       :maxLength max-length
                       :maxValues max-values)
             nil)))))
 
   (defportable data-text-success (value count index)
-    (object :ok t :payload (js-array value) :count count :index index))
+    (js-object :ok t :payload (js-array value) :count count :index index))
 
   (defportable data-text-result-value (result)
     (aref (get result "payload" (js-array nil)) 0))
@@ -101,16 +101,16 @@
                      (<= (string-code-unit-at source (1+ index)) 57343))
                 (setq index (+ index 2) column (1+ column))
               (setq index (1+ index) column (1+ column))))))
-      (object :line line :column column)))
+      (js-object :line line :column column)))
 
   (defportable data-text-failure (source offset message count)
     (let ((position (data-text-position source offset)))
-      (object
+      (js-object
        :ok false
        :count count
        :index offset
        :error
-       (object :code "ELI-DATA-TEXT"
+       (js-object :code "ELI-DATA-TEXT"
                :message
                (str message " at "
                     (get position "line" 1) ":"
@@ -121,10 +121,10 @@
                :sourceLength (js-length source)))))
 
   (defportable data-text-print-failure (message count)
-    (object :ok false
+    (js-object :ok false
             :count count
             :index 0
-            :error (object :code "ELI-DATA-TEXT" :message message)))
+            :error (js-object :code "ELI-DATA-TEXT" :message message)))
 
   (defportable data-text-digit? (character)
     (and (>= character "0") (<= character "9")))
@@ -386,7 +386,7 @@
                 (when (get printed "ok" false)
                   (setq items
                         (js-cons
-                         (object :text (data-text-result-value printed))
+                         (js-object :text (data-text-result-value printed))
                          items))))
               (setq node (persistent-list-rest node nil))))
         (let ((index 0)
@@ -402,7 +402,7 @@
               (when (get printed "ok" false)
                 (setq items
                       (js-cons
-                       (object :text (data-text-result-value printed))
+                       (js-object :text (data-text-result-value printed))
                        items))))
             (setq index (1+ index)))))
       (if (not (get state "ok" false))
@@ -436,18 +436,18 @@
                                (data-text-result-value key-result))
                               (value-text
                                (data-text-result-value value-result)))
-                          (object
+                          (js-object
                            :ok t
                            :payload (js-array "")
                            :count (get value-result "count" count)
                            :index 0
                            :items
                            (js-cons
-                            (object :sortKey key-text
+                            (js-object :sortKey key-text
                                     :sortValue value-text
                                     :text (str key-text " " value-text))
                             (get current "items" (js-array)))))))))))
-            (object :ok t :payload (js-array "") :count count :index 0 :items (js-array))
+            (js-object :ok t :payload (js-array "") :count count :index 0 :items (js-array))
             value)))
       (if (not (get state "ok" false))
           state
@@ -472,17 +472,17 @@
                   (if (not (get printed "ok" false))
                       printed
                     (let ((text (data-text-result-value printed)))
-                      (object
+                      (js-object
                        :ok t
                        :payload (js-array "")
                        :count (get printed "count" count)
                        :index 0
                        :items
-                       (js-cons (object :sortKey text
+                       (js-cons (js-object :sortKey text
                                      :sortValue ""
                                      :text text)
                              (get current "items" (js-array)))))))))
-            (object :ok t :payload (js-array "") :count count :index 0 :items (js-array))
+            (js-object :ok t :payload (js-array "") :count count :index 0 :items (js-array))
             value)))
       (if (not (get state "ok" false))
           state

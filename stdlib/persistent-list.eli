@@ -3,7 +3,7 @@
   (defconst persistent-list-max-count 2147483647)
 
   (defportable make-empty-persistent-list (metadata)
-    (object :kind persistent-list-kind
+    (js-object :kind persistent-list-kind
             :count 0
             :empty t
             :value nil
@@ -11,7 +11,7 @@
             :metadata metadata))
 
   (defportable make-persistent-list-node (value rest metadata)
-    (object :kind persistent-list-kind
+    (js-object :kind persistent-list-kind
             :count (1+ (get rest "count" 0))
             :empty false
             :value value

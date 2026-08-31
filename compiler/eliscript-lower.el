@@ -292,7 +292,7 @@
            (eliscript-lower--node
             'persistent-list-literal form nil
             (mapcar #'eliscript-lower-expression arguments)))
-          ((or 'array 'js-array)
+          ('js-array
            (eliscript-lower--node
             'array-literal form nil
             (mapcar #'eliscript-lower-expression arguments)))
@@ -308,7 +308,7 @@
             (list :child-count (length arguments))))
           ((pred (lambda (name) (memq name eliscript-lower--intrinsics)))
            (eliscript-lower--call-node 'intrinsic form operator arguments))
-          ((or 'object 'js-object)
+          ('js-object
            (eliscript-lower--object form arguments))
           ('get
            (eliscript-lower--call-node 'property-read form 'get arguments))

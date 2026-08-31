@@ -285,7 +285,7 @@
      (error "Assignment pairs are emitted through their parent node"))
     ('object-literal
      (cons
-      'object
+      'js-object
       (apply
        #'append
        (mapcar

@@ -269,6 +269,31 @@ test("explicit host-only modules do not link the persistent runtime", async () =
   }
 }, 60_000);
 
+test("maintained Eliscript sources use explicit host constructors", async () => {
+  const roots = ["bootstrap", "stdlib", "examples", "tests/fixtures"];
+  const retired = /\((?:array|object)(?=[\s)])/g;
+  const violations = [];
+  for (const sourceRoot of roots) {
+    const glob = new Bun.Glob("**/*.eli");
+    for await (const relative of glob.scan({
+      cwd: resolve(ROOT, sourceRoot),
+      onlyFiles: true,
+    })) {
+      const file = resolve(ROOT, sourceRoot, relative);
+      const source = await Bun.file(file).text();
+      for (const match of source.matchAll(retired)) {
+        const lineStart = source.lastIndexOf("\n", match.index) + 1;
+        const prefix = source.slice(lineStart, match.index);
+        if (/\(def(?:un|n|portable|async|component)\s+[^\s()]+\s*$/.test(prefix)) {
+          continue;
+        }
+        violations.push(`${sourceRoot}/${relative}:${match.index}`);
+      }
+    }
+  }
+  expect(violations).toEqual([]);
+});
+
 test("portable closures produce persistent values for the versioned worker codec", async () => {
   const directory = await mkdtemp(resolve(ROOT, ".eliscript-portable-values-"));
   const bootstrap = resolve(directory, "bootstrap");

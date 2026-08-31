@@ -18,7 +18,7 @@ Eliscript library code.
 ```elisp
 (import "../../stdlib/object.eli" assoc merge pick)
 
-(assoc (object :name "Eliscript") :runtime "JavaScript")
+(assoc (js-object :name "Eliscript") :runtime "JavaScript")
 ```
 
 The module works through ordinary ESM imports, Vite source imports, closure-only

@@ -838,7 +838,7 @@
        (eliscript-ir-emitter--require-arity node 1 1)
        (format "(%s == null)"
                (eliscript-ir-emitter-emit-expression (car nodes))))
-      ((or 'array 'js-array)
+      ('js-array
        (format "[%s]" (eliscript-ir-emitter--emit-arguments nodes)))
       ('car
        (eliscript-ir-emitter--require-arity node 1 1)

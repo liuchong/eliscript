@@ -40,7 +40,7 @@
       (array-reverse result)))
 
   (defportable make-vector-node (slots)
-    (object :slots slots))
+    (js-object :slots slots))
 
   (defportable empty-vector-node ()
     (make-vector-node (js-array)))
@@ -49,7 +49,7 @@
     (get node "slots" (js-array)))
 
   (defportable make-persistent-vector (count shift root tail metadata)
-    (object :kind persistent-vector-kind
+    (js-object :kind persistent-vector-kind
             :count count
             :shift shift
             :root root

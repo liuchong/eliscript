@@ -284,7 +284,7 @@
                        (eliscript-expander--expand-try-clause
                         clause environment depth))
                      arguments)))
-             ('object
+             ('js-object
               (cons operator-form
                     (eliscript-expander--expand-object
                      arguments environment depth)))

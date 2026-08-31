@@ -135,11 +135,12 @@ UI framework, a bundler, a development server, a publishing system, or a site
 generator. Such tools may consume generated modules only as application-level
 utility validation; they cannot define, alter, or certify Set semantics.
 
-## Remaining P3 Work
+## P3 Completion
 
 Specifications 0093 and 0094 now close static transient ownership analysis and
-legacy List-operation migration. Final provisional host-alias review and
-promotion of the complete literal/host-container contract remain open.
+legacy List-operation migration. Specification 0095 removes the provisional
+host aliases and promotes the complete literal/host-container contract to
+stable.
 
 ## Acceptance Criteria
 

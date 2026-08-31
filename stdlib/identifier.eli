@@ -95,14 +95,14 @@
               (if (and (or (nil? namespace)
                            (identifier-valid-part? namespace))
                        (identifier-valid-part? name))
-                  (object :existing value
+                  (js-object :existing value
                           :namespace namespace
                           :name name)
                 nil))
           (let ((parts (identifier-split-qualified value)))
             (if (nil? parts)
                 nil
-              (object :existing nil
+              (js-object :existing nil
                       :namespace (js-nth 0 parts)
                       :name (js-nth 1 parts)))))))
      ((= (js-length arguments) 2)
@@ -111,7 +111,7 @@
         (if (and (or (nil? namespace)
                      (identifier-valid-part? namespace))
                  (identifier-valid-part? name))
-            (object :existing nil :namespace namespace :name name)
+            (js-object :existing nil :namespace namespace :name name)
           nil)))
      (t nil)))
 
@@ -121,7 +121,7 @@
       (let ((existing (get normalized "existing" nil)))
         (if (not (nil? existing))
             existing
-          (object :kind kind
+          (js-object :kind kind
                   :namespace (get normalized "namespace" nil)
                   :name (get normalized "name" nil))))))
 

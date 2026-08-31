@@ -118,11 +118,12 @@ source remains valid. Brace expressions were previously invalid Eliscript, so
 no valid Map expression changes meaning. The feature remains provisional until
 the complete persistent literal and quoted-data family is promoted.
 
-## Remaining P3 Work
+## P3 Completion
 
 Specifications 0093 and 0094 now close static transient ownership analysis and
-legacy List-operation migration. Final provisional host-alias review and
-promotion of the complete literal/host-container contract remain open.
+legacy List-operation migration. Specification 0095 removes the provisional
+host aliases and promotes the complete literal/host-container contract to
+stable.
 
 ## Acceptance Criteria
 

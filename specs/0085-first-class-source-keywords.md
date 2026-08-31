@@ -129,12 +129,12 @@ The explicit runtime `keyword` constructors remain valid. Quoted identifiers
 are defined by 0087. Automatic namespace aliases and namespaced Map notation
 remain separate contracts.
 
-## Remaining P3 Work
+## P3 Completion
 
 Specifications 0093 and 0094 now close static transient ownership analysis and
-legacy List-operation migration. The remaining work is the final provisional
-host-alias compatibility review and promotion of the literal/host-container
-family; application clients are not core acceptance evidence.
+legacy List-operation migration. Specification 0095 removes the provisional
+host aliases and promotes the literal/host-container family to stable;
+application clients are not core acceptance evidence.
 
 ## Acceptance Criteria
 

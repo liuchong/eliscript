@@ -56,9 +56,8 @@ Eliscript already has the difficult vertical foundations:
 This proves that the architecture is viable. It does not yet establish a
 mature user contract. The main remaining gaps are:
 
-- core collection literal and value semantics remain provisional until M8
-- provisional mutable JavaScript arrays and objects still stand in for
-  language-level vector and map values
+- the persistent value and explicit host-container boundary is stable, while
+  the broader M8 language and standard-library exit audit remains incomplete
 - incomplete module interop and core data semantics
 - compiler capabilities still split between the seed and self-hosted paths
 - no canonical project configuration file
@@ -635,6 +634,11 @@ Persistent List language construction and operations now land in
 [0094-persistent-list-language-semantics.md](0094-persistent-list-language-semantics.md),
 which gives `(list ...)`, `car`, `cdr`, and `cons` canonical persistent
 semantics while preserving native prepend as explicit `js-cons`.
+Specification
+[0095-stable-persistent-host-container-boundary.md](0095-stable-persistent-host-container-boundary.md)
+removes the provisional `array`/`object` aliases, migrates all maintained
+sources to explicit host construction, and promotes the consolidated value
+boundary to stable. The P3 exit is satisfied.
 Canonical
 printing/reading for the optimized runtime family now lands in
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md);

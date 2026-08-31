@@ -13,12 +13,12 @@
     {
       "name": "imports-and-special-forms",
       "filename": "forms.eli",
-      "source": "(import \"react\" :default React useState)\n(defun view (ready items)\n  (cond\n    (ready (jsx :main (object :className \"ready\") items))\n    (t (fragment \"waiting\" (get React :version)))))\n(export React useState view)"
+      "source": "(import \"react\" :default React useState)\n(defun view (ready items)\n  (cond\n    (ready (jsx :main (js-object :className \"ready\") items))\n    (t (fragment \"waiting\" (get React :version)))))\n(export React useState view)"
     },
     {
       "name": "expression-surface",
       "filename": "surface.eli",
-      "source": "(defun exercise (target key)\n  (let ((plain 1))\n    (vector\n      (lambda (value) (put target key value))\n      (get target key false)\n      (js-call target :run plain)\n      (object key plain)\n      (quote missing)\n      (js* \"globalThis\"))))\n(export exercise)"
+      "source": "(defun exercise (target key)\n  (let ((plain 1))\n    (vector\n      (lambda (value) (put target key value))\n      (get target key false)\n      (js-call target :run plain)\n      (js-object key plain)\n      (quote missing)\n      (js* \"globalThis\"))))\n(export exercise)"
     },
     {
       "name": "object-primitives",
@@ -29,6 +29,11 @@
       "name": "portable-nullish-predicates",
       "filename": "nullish.eli",
       "source": "(defportable classify (value)\n  (js-array (nil? value) (undefined? value) (nullish? value) (null value)))"
+    },
+    {
+      "name": "retired-alias-names-remain-bindable",
+      "filename": "alias-bindings.eli",
+      "source": "(defun array (value) value)\n(defun object (value) value)\n(defun exercise () (js-array (array 1) (object 2)))\n(export array object exercise)"
     },
     {
       "name": "optional-and-rest-parameters",
@@ -441,8 +446,20 @@
     {
       "name": "invalid-object-arity",
       "filename": "object.eli",
-      "source": "(object :ready)",
-      "error": "object.eli:1:1: object expects key/value pairs"
+      "source": "(js-object :ready)",
+      "error": "object.eli:1:1: js-object expects key/value pairs"
+    },
+    {
+      "name": "retired-array-alias",
+      "filename": "array-alias.eli",
+      "source": "(array 1 2)",
+      "error": "array-alias.eli:1:2: unbound symbol: array"
+    },
+    {
+      "name": "retired-object-alias",
+      "filename": "object-alias.eli",
+      "source": "(object :ready t)",
+      "error": "object-alias.eli:1:2: unbound symbol: object"
     },
     {
       "name": "invalid-jsx-arity",

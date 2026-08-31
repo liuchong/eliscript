@@ -7,7 +7,7 @@
   (import "../../runtime/core/truth.mjs" isTruthy)
   (import "../../runtime/core/vector.mjs" EMPTY_VECTOR)
 
-  (defconst not-found (object))
+  (defconst not-found (js-object))
 
   (defun require-function (value label)
     (if (= (value-type value) "function")
@@ -21,7 +21,7 @@
              (lambda (result value)
                (js-call result :push value)
                result)
-             (array))))
+             (js-array))))
       (js-call values :reverse)
       (into EMPTY_VECTOR values)))
 
@@ -78,7 +78,7 @@
              collection
              (lambda (missing value)
                (if (isTruthy (funcall predicate value))
-                   (reduced (object :value value))
+                   (reduced (js-object :value value))
                  missing))
              not-found)))
       (if (eq result not-found) not-found-value (get result :value))))

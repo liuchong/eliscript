@@ -91,23 +91,23 @@
     (persistent-map-bit-count (bit-and bitmap (1- bit))))
 
   (defportable persistent-map-make-entry (hash key value)
-    (object :kind persistent-map-entry-kind
+    (js-object :kind persistent-map-entry-kind
             :hash hash
             :key key
             :value value))
 
   (defportable persistent-map-make-bitmap-node (bitmap items)
-    (object :kind persistent-map-bitmap-kind
+    (js-object :kind persistent-map-bitmap-kind
             :bitmap (uint32 bitmap)
             :items items))
 
   (defportable persistent-map-make-array-node (count children)
-    (object :kind persistent-map-array-kind
+    (js-object :kind persistent-map-array-kind
             :count count
             :children children))
 
   (defportable persistent-map-make-collision-node (hash entries)
-    (object :kind persistent-map-collision-kind
+    (js-object :kind persistent-map-collision-kind
             :hash hash
             :entries entries))
 
@@ -118,10 +118,10 @@
     (= (persistent-map-item-kind item) persistent-map-entry-kind))
 
   (defportable persistent-map-make-result (item added changed)
-    (object :item item :added added :changed changed))
+    (js-object :item item :added added :changed changed))
 
   (defportable persistent-map-make-removal (item removed)
-    (object :item item :removed removed))
+    (js-object :item item :removed removed))
 
   (defportable persistent-map-same-entry?
       (entry hash key key-equal-function)
@@ -538,7 +538,7 @@
                                   value (get entry "value"))))
                         (setq index (1+ index)))))
                   (setq finished t)))))))
-      (object :found found :value value)))
+      (js-object :found found :value value)))
 
   (defportable persistent-map-reduce-item (function initial item)
     (let ((kind (persistent-map-item-kind item)))
@@ -566,7 +566,7 @@
 
   (defportable persistent-map-make
       (count root hash-function key-equal-function value-equal-function metadata)
-    (object :kind persistent-map-kind
+    (js-object :kind persistent-map-kind
             :count count
             :root root
             :hash-function hash-function
@@ -604,7 +604,7 @@
   (defportable persistent-map-find (map key)
     (let ((root (get map "root" nil)))
       (if (nil? root)
-          (object :found false :value nil)
+          (js-object :found false :value nil)
         (persistent-map-find-item
          root
          0

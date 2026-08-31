@@ -66,14 +66,14 @@ the ABI `hashSet` constructor.
 
 `(js-array value...)` constructs a native mutable JavaScript Array.
 `(js-object key value...)` constructs a native ordinary JavaScript Object,
-retaining literal and computed property-key behavior. The older `array` and
-`object` forms remain provisional aliases during source migration; new host
-dependent code should use the explicit `js-` names.
+retaining literal and computed property-key behavior. Specification 0095 later
+removes the provisional `array` and `object` aliases and makes the explicit
+`js-` spellings stable.
 
 At this specification boundary, `array-literal` represented the provisional
 square-bracket expression. Specification 0083 reassigns square-bracket values
 to `persistent-vector-literal`; `array-literal` now represents only explicit
-`js-array`/`array` construction. Binding patterns remain
+`js-array` construction. Binding patterns remain
 `array-binding-pattern` and are independent of value construction.
 
 ## Bootstrap and Portable Boundaries
@@ -95,17 +95,17 @@ on UI frameworks, bundlers, development servers, publishing systems, or a
 particular JavaScript host. Application tools may consume generated modules,
 but cannot alter literal semantics or runtime resolution.
 
-## Remaining P3 Migration
+## P3 Completion
 
 This specification completes P3 construction prerequisites, not the P3 exit.
 Specifications 0083 and 0084 complete default Vector and Map expression
 syntax, maintained-source annotation, protocol collection access, and
 compatibility recording. The following work remains explicit:
 
-Specifications 0093 and 0094 now close static transient ownership analysis and
-the legacy List-operation audit. The remaining P3 work is the final review of
-the provisional `array`/`object` aliases and promotion of the complete literal
-and host-container boundary.
+Specifications 0093 and 0094 close static transient ownership analysis and the
+legacy List-operation audit. Specification 0095 removes the provisional
+`array`/`object` aliases and promotes the complete persistent literal and
+explicit host-container boundary to stable, satisfying the P3 exit.
 
 ## Acceptance Criteria
 

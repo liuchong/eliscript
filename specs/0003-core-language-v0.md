@@ -60,6 +60,7 @@ the output path yet.
 | quoted proper lists | persistent Lists |
 | quoted vectors | persistent Vectors |
 | quoted symbols and keywords | canonical immutable identifier values |
+| `(js-array value ...)` | native mutable Array |
 | `(js-object key value ...)` | plain object literals |
 
 Dotted quoted lists are rejected.
@@ -144,18 +145,23 @@ The initial arithmetic and comparison forms are:
 
 The initial collection forms are:
 
-- `list`, persistent `vector`/`hash-map`, and native `array`/`js-array`
-- `car`, `cdr`, `cons`, protocol-driven `nth`/`length`, and host `aref`/`js-nth`/`js-length`
-- `object`, `get`, and `put`
+- persistent `list`/`vector`/`hash-map`/`hash-set`
+- explicit host `js-array`/`js-object`/`js-cons`
+- `car`, `cdr`, `cons`, protocol-driven `nth`/`length`, and host
+  `aref`/`js-nth`/`js-length`
+- `get` and `put`
 - `object-keys`, `object-has?`, and `object-assoc`
 
 Square-bracket expressions and `(vector ...)` construct canonical persistent
 Vectors. Brace expressions and `(hash-map ...)` construct canonical persistent
-Maps. `list`, `array`, and `js-array` retain the provisional ECMAScript Array
-representation. `nth` and `length` dispatch through collection protocols;
-`js-nth` and `js-length` are explicit native access. `equal` currently uses
-strict identity equality in the language intrinsic; structural equality is
-available through the persistent value runtime.
+Maps. `(list ...)` constructs canonical persistent Lists, and Set syntax plus
+`(hash-set ...)` constructs canonical persistent Sets. Native container
+construction is available only through the explicit `js-` forms; the former
+`array` and `object` aliases are ordinary unbound names unless declared by the
+program. `nth` and `length` dispatch through collection protocols; `js-nth`
+and `js-length` are explicit native access. `equal` currently uses strict
+identity equality in the language intrinsic; structural equality is available
+through the persistent value runtime.
 
 Higher-order, non-mutating sequence operations are implemented as Eliscript
 library code rather than special forms. See
@@ -220,8 +226,8 @@ in one scope that map to the same output identifier.
 
 - lexical scope is mandatory
 - numbers follow ECMAScript behavior rather than Emacs integer semantics
-- list values currently use arrays rather than cons cells; Vector expressions
-  use the persistent Vector runtime
+- Lists, Vectors, Maps, and Sets use persistent runtime values rather than
+  native JavaScript containers
 - `false` is distinct from `nil`
 - JavaScript modules and objects are first-class interop concepts
 - browser and JavaScript host APIs are explicit

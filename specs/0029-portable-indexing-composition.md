@@ -28,7 +28,7 @@ then adds the frequency of each query term. It returns the same serializable
 record as before:
 
 ```elisp
-(object :id id :matches matches :terms (length terms))
+(js-object :id id :matches matches :terms (length terms))
 ```
 
 Query terms are processed in order. Duplicate query terms intentionally add

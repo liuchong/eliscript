@@ -27,7 +27,7 @@ An element has a type, a props expression, and zero or more children:
 
 ```elisp
 (jsx :button
-  (object :type "button" :onClick handle-click)
+  (js-object :type "button" :onClick handle-click)
   "Increment")
 ```
 

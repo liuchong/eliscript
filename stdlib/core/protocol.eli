@@ -114,7 +114,7 @@
           (protocol-fail (str "unsupported protocol definition format " format)))
         (when (/= version protocol-definition-version)
           (protocol-fail (str "unsupported protocol definition version " version)))
-        (object :name (normalize-name name "protocol name")
+        (js-object :name (normalize-name name "protocol name")
                 :operations (normalize-protocol-operations operations)))))
 
   (defun operation-record (protocol operation)
@@ -265,7 +265,7 @@
                                 (aref invocation 0)
                                 (js-call invocation :slice 1))))
                    (record
-                    (object :name operation :slot slot :method method)))
+                    (js-object :name operation :slot slot :method method)))
               (js-call records :set operation record)
               (funcall protocol-define-enumerable
                        operation-table operation method)))
@@ -273,7 +273,7 @@
 
         (setq protocol
               (funcall protocol-freeze
-                       (object :name protocol-name
+                       (js-object :name protocol-name
                                :operations
                                (funcall protocol-freeze operation-table))))
         (setq index 0)
@@ -288,7 +288,7 @@
           (setq index (1+ index)))
 
         (js-call protocol-states :set protocol
-                 (object :operations records
+                 (js-object :operations records
                          :types (funcall protocol-map)
                          :categories (funcall protocol-map)
                          :defaults
@@ -302,7 +302,7 @@
            (js-call (object-keys (get protocol :operations)) :slice)))
       (funcall protocol-freeze operations)
       (funcall protocol-freeze
-               (object :format protocol-definition-format
+               (js-object :format protocol-definition-format
                        :version protocol-definition-version
                        :name (get protocol :name)
                        :operations operations))))

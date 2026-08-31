@@ -166,7 +166,7 @@ use JavaScript identity unless an explicit adapter says otherwise.
 
 ### Literal Direction
 
-Before the stable 1.0 language contract is frozen:
+The stable value and host-container direction is:
 
 - list data remains persistent list data
 - vector literals become persistent vectors
@@ -175,10 +175,12 @@ Before the stable 1.0 language contract is frozen:
 - explicit constructors create native JavaScript arrays and objects for
   interop
 
-Specification 0083 completes the provisional vector-as-array change and records
-the new default in the compatibility corpus. The compiler and maintained
-sources now use explicit host constructors wherever native array identity or
-mutation is required. Map and Set literal integration remains unfinished.
+Specifications 0083, 0084, 0092, and 0094 complete the persistent
+Vector/Map/Set/List source model. Specification 0095 removes the provisional
+`array`/`object` constructor aliases and freezes `js-array`, `js-object`, and
+`js-cons` as the explicit host boundary. The compiler and maintained sources
+use explicit host constructors wherever native identity or mutation is
+required.
 
 Conversion is never implicit at a JavaScript call boundary. `to-js` and
 `from-js` perform declared shallow or deep conversion. Deep conversion rejects
@@ -920,9 +922,11 @@ and worker-codec evidence. Specification
 [0094-persistent-list-language-semantics.md](0094-persistent-list-language-semantics.md)
 then closes accidental native-Array behavior in `list`, `car`, `cdr`, and
 `cons`, introduces dedicated persistent List IR, and gives host prepend the
-explicit `js-cons` spelling. The final provisional `array`/`object` alias
-review and compatibility promotion remain open; the P3 exit is not yet
-satisfied.
+explicit `js-cons` spelling. Specification
+[0095-stable-persistent-host-container-boundary.md](0095-stable-persistent-host-container-boundary.md)
+removes the provisional `array`/`object` aliases, verifies every maintained
+source uses explicit host constructors, and promotes the consolidated
+boundary to stable. The P3 exit is satisfied.
 
 ### P4: Transients and Hot-Path Optimization
 

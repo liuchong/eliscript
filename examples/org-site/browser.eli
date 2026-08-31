@@ -28,7 +28,7 @@
               (progn
                 (set-selected (article-from-location))
                 (js-call browser-window :scrollTo
-                  (assoc (object :top 0) "behavior" "auto")))))
+                  (assoc (js-object :top 0) "behavior" "auto")))))
            (effect
             (useEffect
               (lambda ()
@@ -38,19 +38,19 @@
                   (js-call browser-window :removeEventListener
                     "hashchange" sync-selection)))
               (js-array))))
-      (jsx :main (object :className "site-shell")
-        (jsx :header (object :className "site-header")
-          (jsx :a (object :className "brand" :href "#")
-            (jsx :span (object :className "logo-light")
+      (jsx :main (js-object :className "site-shell")
+        (jsx :header (js-object :className "site-header")
+          (jsx :a (js-object :className "brand" :href "#")
+            (jsx :span (js-object :className "logo-light")
               (jsx :img
-                (object :className "brand-logo"
+                (js-object :className "brand-logo"
                         :src logo-url
                         :alt "Eliscript")))
-            (jsx :span (object :className "brand-name") "Eliscript"))
-          (jsx :span (object :className "edition") "ORG EDITION / 2026"))
-        (jsx :div (object :className "publication")
-          (jsx :aside (object :className "article-index")
-            (jsx :p (object :className "index-label") "PUBLISHED NOTES")
+            (jsx :span (js-object :className "brand-name") "Eliscript"))
+          (jsx :span (js-object :className "edition") "ORG EDITION / 2026"))
+        (jsx :div (js-object :className "publication")
+          (jsx :aside (js-object :className "article-index")
+            (jsx :p (js-object :className "index-label") "PUBLISHED NOTES")
             (jsx :ol nil
               (map
                 (lambda (article)
@@ -58,39 +58,39 @@
                          (active
                           (and selected
                                (= slug (get selected :slug)))))
-                    (jsx :li (object :key slug)
+                    (jsx :li (js-object :key slug)
                       (jsx :a
-                        (object :href (str "#" slug)
+                        (js-object :href (str "#" slug)
                                 :className (if active "active" ""))
                         (jsx :time
-                          (object :dateTime (get article :date))
+                          (js-object :dateTime (get article :date))
                           (get article :date))
                       (jsx :span nil (get article :title))))))
                 articles))
-            (jsx :p (object :className "index-note")
+            (jsx :p (js-object :className "index-note")
               (str (get articles :length) " articles, authored in Org Mode.")))
           (if selected
-              (jsx :article (object :className "article")
-                (jsx :header (object :className "article-header")
-                  (jsx :div (object :className "article-meta")
+              (jsx :article (js-object :className "article")
+                (jsx :header (js-object :className "article-header")
+                  (jsx :div (js-object :className "article-meta")
                     (jsx :time
-                      (object :dateTime (get selected :date))
+                      (js-object :dateTime (get selected :date))
                       (get selected :date))
                     (map
                       (lambda (tag)
-                        (jsx :span (object :key tag :className "tag") tag))
+                        (jsx :span (js-object :key tag :className "tag") tag))
                       (get selected :tags)))
                   (jsx :h1 nil (get selected :title))
-                  (jsx :p (object :className "description")
+                  (jsx :p (js-object :className "description")
                     (get selected :description)))
                 (jsx :div
-                  (object
+                  (js-object
                     :className "article-body"
                     :dangerouslySetInnerHTML
-                    (object :__html (get selected :html)))))
-            (jsx :p (object :className "empty-state")
+                    (js-object :__html (get selected :html)))))
+            (jsx :p (js-object :className "empty-state")
               "No published articles.")))
-        (jsx :footer (object :className "site-footer")
+        (jsx :footer (js-object :className "site-footer")
           (jsx :span nil "Org Mode source")
           (jsx :span nil "Pure Emacs export")
           (jsx :span nil "Eliscript + React")))))

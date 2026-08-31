@@ -968,7 +968,7 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
       ('list
        (format "__eliscript_list(%s)"
                (eliscript-emitter--emit-arguments arguments)))
-      ((or 'array 'js-array)
+      ('js-array
        (format "[%s]" (eliscript-emitter--emit-arguments arguments)))
       ('car
        (eliscript-emitter--require-arity "car" arguments 1 1)
@@ -1026,7 +1026,7 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
                (eliscript-emitter-emit-expression (nth 0 arguments))
                (eliscript-emitter--emit-property-key (nth 1 arguments))
                (eliscript-emitter-emit-expression (nth 2 arguments))))
-      ((or 'object 'js-object)
+      ('js-object
        (eliscript-emitter--emit-object arguments))
       ('get (eliscript-emitter--emit-get arguments))
       ('put
@@ -1246,7 +1246,7 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
                (car arguments)))
              ((memq operator '(import import-portable)) nil)
              ((memq operator '(list vector hash-map hash-set)) t)
-             ((memq operator '(object js-object)) (walk-object arguments))
+             ((eq operator 'js-object) (walk-object arguments))
              ((memq operator '(get put js-call aref object-has? object-assoc))
               (walk-static-key-call arguments 1))
              ((eq operator 'jsx)
