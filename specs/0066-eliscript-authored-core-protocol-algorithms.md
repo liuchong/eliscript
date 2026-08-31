@@ -97,8 +97,8 @@ library remains unchanged.
 
 The new modules are Eliscript-authored but are not yet eligible for
 `--portable` closure extraction because they import JavaScript runtime modules.
-Protocol dispatch internals, persistent literals, keyword and symbol values,
-metadata, printing, reading, explicit host conversion, text/object migration,
+Protocol dispatch internals, persistent literals, metadata, printing, reading,
+explicit host conversion, text/object migration,
 and static transient escape analysis remain later work.
 
 ## Acceptance Criteria
@@ -131,6 +131,6 @@ and static transient escape analysis remain later work.
 
 Move protocol definition and dispatch policy into portable Eliscript only when
 the replacement preserves direct slots, open external extension, exact host
-categories, and measured dispatch cost. Before persistent literal migration,
-complete keyword/symbol values, metadata, deterministic printing and reading,
-and explicit native-container conversion.
+categories, and measured dispatch cost. Keyword/Symbol values now land in
+0067; before persistent literal migration, complete metadata, deterministic
+printing and reading, and explicit native-container conversion.

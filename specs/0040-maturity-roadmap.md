@@ -547,9 +547,12 @@ seed/self-hosted fixed-point evidence, and million-step Bun/Node execution.
 Deterministic generated symbols and explicit capture rules now land in
 [0065-deterministic-macro-generated-names.md](0065-deterministic-macro-generated-names.md),
 including module-wide collision avoidance and Bun/Node execution evidence.
-Declared macro dependencies, object/text migration, portable dispatch policy,
-static escape analysis, efficient host identity hashing, keyword/symbol values,
-metadata, printing, and reading remain open.
+First-class Keyword and Symbol values now land in
+[0067-first-class-keyword-symbol-values.md](0067-first-class-keyword-symbol-values.md),
+including immutable qualified values, deterministic runtime/portable hashes,
+and Map/Set key behavior. Declared macro dependencies, object/text migration,
+portable dispatch policy, static escape analysis, efficient host identity
+hashing, metadata, printing, and reading remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

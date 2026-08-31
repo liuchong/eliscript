@@ -859,7 +859,7 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
       ('value-type
        (eliscript-emitter--require-arity "value-type" arguments 1 1)
        (format
-        "((__eliscript_value) => __eliscript_value === null ? \"null\" : typeof __eliscript_value)(%s)"
+        "((__eliscript_value) => { if (__eliscript_value === null) return \"null\"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== \"object\" && __eliscript_host_type !== \"function\") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for(\"eliscript.value.type\")); return __eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, \"value\") && (__eliscript_type.value === \"keyword\" || __eliscript_type.value === \"symbol\") ? __eliscript_type.value : __eliscript_host_type; } catch { return __eliscript_host_type; } })(%s)"
         (eliscript-emitter-emit-expression (car arguments))))
       ('string-code-unit-at
        (eliscript-emitter--require-arity

@@ -36,8 +36,9 @@ Emacs value-codec work.
 Three exact-arity forms expose the minimum host facts needed by a portable
 value implementation:
 
-- `value-type(value)` returns `"null"` for JavaScript `null` and otherwise the
-  JavaScript `typeof` string
+- `value-type(value)` returns `"null"` for JavaScript `null`, recognizes the
+  own logical brand of Keyword and Symbol values as `"keyword"` or `"symbol"`,
+  and otherwise returns the JavaScript `typeof` string
 - `string-code-unit-at(text, index)` returns the UTF-16 code unit at `index`
 - `number-float64-words(value)` returns the IEEE-754 binary64 low and high
   unsigned 32-bit words as a two-element native vector
@@ -73,6 +74,8 @@ does not coerce between runtime types.
 
 - `null` and `undefined` are distinct values
 - booleans, numbers, and strings compare within their own scalar category
+- Keywords and Eliscript Symbols compare namespace and name within distinct
+  categories
 - positive and negative zero compare equal
 - every NaN compares equal to every NaN
 - Lists compare ordered members and remain distinct from Vectors
@@ -163,7 +166,9 @@ Applications that require efficient opaque identity keys must use the
 low-level injected-policy constructors until a host identity-hash primitive
 or protocol adapter is accepted. BigInt is hashed from its string form, but
 exact cross-runtime parity for BigInt and Symbol is not yet frozen. Symbols
-and user-defined value types remain outside the ordinary supported key set.
+here means native JavaScript Symbols. First-class Eliscript Keyword and Symbol
+values are supported by the logical type and hash contract in 0067; other
+user-defined value types remain outside the ordinary supported key set.
 
 The portable `.eli` implementation dispatches directly over the four core
 persistent representations. The JavaScript reference runtime now uses the
@@ -196,7 +201,8 @@ bridge and the measured end-to-end proof.
 ## Compatibility
 
 This module, its six exports, the three inspection forms, collection tags,
-hash constants, and current dispatch set are provisional during M8. Frozen
+hash constants, and current dispatch set are provisional during M8. The
+Keyword/Symbol extension is specified by 0067. Frozen
 scalar, Vector, Map, and Set hash outputs agree with 0048-0050; List hashes are
 newly frozen here.
 

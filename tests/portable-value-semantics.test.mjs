@@ -175,6 +175,12 @@ test("Eliscript-authored value semantics compile and agree across hosts", async 
         map: 3_379_452_415,
         set: 3_887_479_341,
       },
+      identifiers: {
+        keyword: 889_022_832,
+        unqualifiedKeyword: 1_981_314_640,
+        symbol: 1_771_029_623,
+        unqualifiedSymbol: 3_731_567_423,
+      },
       invariants: {
         nanEqual: true,
         zerosEqual: true,
@@ -189,6 +195,8 @@ test("Eliscript-authored value semantics compile and agree across hosts", async 
         hostIdentity: true,
         hostDistinct: false,
         hostFallbackHash: true,
+        symbolsEqual: true,
+        identifierCategoriesDistinct: true,
       },
       collision: {
         leftHash: 2_357_254_775,
@@ -203,6 +211,10 @@ test("Eliscript-authored value semantics compile and agree across hosts", async 
         vectorValueHash: 2_519_951_401,
         setCount: 3,
         equalVectorMember: true,
+        keywordValue: "keyword",
+        symbolValue: "symbol",
+        identifierSetCount: 2,
+        equalSymbolMember: true,
       },
     });
 

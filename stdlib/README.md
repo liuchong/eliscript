@@ -3,9 +3,10 @@
 [Project README](../README.md) | [Runtime](../runtime/README.md) |
 [Specifications](../specs/README.md)
 
-This directory contains portable Eliscript functions and macros. React and
-publishing support should be libraries here or in focused packages, not special
-cases embedded throughout the compiler.
+This directory contains portable Eliscript functions and macros plus focused
+runtime-backed `core/` modules for semantics that need optimized host support.
+React and publishing support should be libraries here or in focused packages,
+not special cases embedded throughout the compiler.
 
 The compiler owns only React element construction and the automatic JSX
 runtime contract. Higher-level component helpers belong here so React remains
@@ -150,6 +151,29 @@ equality and a collision-heavy portable fallback hash, so identity-keyed hot
 paths should keep using low-level injected constructors. Exact provisional
 semantics and evidence are in
 [specs/0057-portable-value-semantics.md](../specs/0057-portable-value-semantics.md).
+
+## Identifier Values
+
+`core/identifier.eli` exposes immutable, qualified Keyword and Symbol values:
+
+```elisp
+(import "../../stdlib/core/identifier.eli"
+        identifier-name keyword keyword? qualified-name symbol symbol?)
+
+(let ((key (keyword "article/title"))
+      (name (symbol "article" "title")))
+  [(keyword? key)
+   (symbol? name)
+   (identifier-name key)
+   (qualified-name name)])
+```
+
+Keywords are interned; Symbols are non-interned values with namespace/name
+equality. Both use deterministic hashes and work as runtime and portable value
+Map keys or Set members. JSON serialization is deliberately rejected until a
+versioned value codec exists. Source literals remain unchanged in this slice.
+Exact semantics are specified in
+[specs/0067-first-class-keyword-symbol-values.md](../specs/0067-first-class-keyword-symbol-values.md).
 
 ## Protocol-driven Core
 

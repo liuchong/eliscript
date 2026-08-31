@@ -1,0 +1,32 @@
+(module eliscript.core.identifier
+  (import "../../runtime/core/identifier.mjs" :as Runtime)
+
+  (defconst Keyword Runtime/Keyword)
+  (defconst EliscriptSymbol Runtime/EliscriptSymbol)
+
+  (defun keyword (&rest arguments)
+    (apply Runtime/keyword arguments))
+
+  (defun keyword? (value)
+    (Runtime/isKeyword value))
+
+  (defun symbol (&rest arguments)
+    (apply Runtime/eliscriptSymbol arguments))
+
+  (defun symbol? (value)
+    (Runtime/isEliscriptSymbol value))
+
+  (defun identifier? (value)
+    (Runtime/isIdentifier value))
+
+  (defun identifier-name (value)
+    (Runtime/identifierName value))
+
+  (defun identifier-namespace (value)
+    (Runtime/identifierNamespace value))
+
+  (defun qualified-name (value)
+    (Runtime/qualifiedIdentifierName value))
+
+  (export EliscriptSymbol Keyword identifier-name identifier-namespace
+          identifier? keyword keyword? qualified-name symbol symbol?))

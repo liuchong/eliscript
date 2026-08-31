@@ -224,6 +224,7 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
   const directory = await mkdtemp(resolve(tmpdir(), "eliscript-core-stdlib-"));
   const runtimeLink = resolve(directory, "runtime");
   const protocolModule = resolve(directory, "stdlib/core/protocol.mjs");
+  const identifierModule = resolve(directory, "stdlib/core/identifier.mjs");
   const collectionModule = resolve(directory, "stdlib/core/collection.mjs");
   const transientModule = resolve(directory, "stdlib/core/transient.mjs");
   const transducerModule = resolve(directory, "stdlib/core/transducer.mjs");
@@ -234,6 +235,7 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
   try {
     await symlink(resolve(ROOT, "runtime"), runtimeLink, "dir");
     await compile(resolve(ROOT, "stdlib/core/protocol.eli"), protocolModule);
+    await compile(resolve(ROOT, "stdlib/core/identifier.eli"), identifierModule);
     await compile(resolve(ROOT, "stdlib/core/collection.eli"), collectionModule);
     await compile(resolve(ROOT, "stdlib/core/transient.eli"), transientModule);
     await compile(resolve(ROOT, "stdlib/core/transducer.eli"), transducerModule);
@@ -289,6 +291,13 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
       "observed": [1, 2, 3],
       "reduced-state": true,
       "unreduced-value": 9,
+      "keyword-string": ":article/title",
+      "symbol-name": "article/title",
+      "identifier-name": "title",
+      "identifier-namespace": "article",
+      "keyword-state": true,
+      "symbol-state": true,
+      "identifier-state": true,
     });
     expect([...api.report["vector-appended"]]).toEqual([1, 2, 3, 4]);
     expect([...api.report["vector-empty"]]).toEqual([]);
@@ -347,14 +356,18 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     const nodeCheck = [
       `const api = await import(${JSON.stringify(pathToFileURL(apiUsageModule).href)});`,
       `const seq = await import(${JSON.stringify(pathToFileURL(seqModule).href)});`,
+      `const identifier = await import(${JSON.stringify(pathToFileURL(identifierModule).href)});`,
       "if (api.report['number-description'] !== 'number:7') process.exit(1);",
       "if (JSON.stringify([...api.report['vector-appended']]) !== '[1,2,3,4]') process.exit(1);",
       "if (JSON.stringify([...seq.map((value) => value * 3, [1,2,3])]) !== '[3,6,9]') process.exit(1);",
+      "if (String(identifier.keyword('article/title')) !== ':article/title') process.exit(1);",
     ].join("");
     await runSuccessful(["node", "--input-type=module", "--eval", nodeCheck]);
 
     const protocolMap = await Bun.file(`${protocolModule}.map`).json();
     expect(protocolMap.sourcesContent[0]).toContain("(defun define-protocol");
+    const identifierMap = await Bun.file(`${identifierModule}.map`).json();
+    expect(identifierMap.sourcesContent[0]).toContain("(defun keyword");
     const collectionMap = await Bun.file(`${collectionModule}.map`).json();
     expect(collectionMap.sourcesContent[0]).toContain("(defun reduce");
     const transientMap = await Bun.file(`${transientModule}.map`).json();

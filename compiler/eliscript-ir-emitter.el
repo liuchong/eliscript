@@ -765,7 +765,7 @@
       ('value-type
        (eliscript-ir-emitter--require-arity node 1 1)
        (format
-        "((__eliscript_value) => __eliscript_value === null ? \"null\" : typeof __eliscript_value)(%s)"
+        "((__eliscript_value) => { if (__eliscript_value === null) return \"null\"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== \"object\" && __eliscript_host_type !== \"function\") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for(\"eliscript.value.type\")); return __eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, \"value\") && (__eliscript_type.value === \"keyword\" || __eliscript_type.value === \"symbol\") ? __eliscript_type.value : __eliscript_host_type; } catch { return __eliscript_host_type; } })(%s)"
         (eliscript-ir-emitter-emit-expression (car nodes))))
       ('string-code-unit-at
        (eliscript-ir-emitter--require-arity node 2 2)

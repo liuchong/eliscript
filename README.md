@@ -43,10 +43,11 @@ The current M8 work provides:
   template names, with explicit caller-capture and quote boundaries
 - structural-sharing and cross-host evidence through million-value workloads
 
-The next language boundary is portable protocol dispatch policy without losing
-the optimized direct-slot runtime, followed by keyword/symbol values, metadata,
-printing and reading, measured object/text migration, literal migration, host
-conversion, and the Emacs value bridge.
+First-class immutable Keyword and Symbol values now participate in runtime and
+portable equality, hashing, Map keys, and Set membership. The next language
+boundary is metadata plus deterministic printing/reading, followed by portable
+protocol dispatch policy, measured object/text migration, literal migration,
+host conversion, and the Emacs value bridge.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in
@@ -122,6 +123,16 @@ Portable source modules can be imported directly:
  nil)
 ```
 
+Runtime-backed core values use the same Lisp-facing module style:
+
+```elisp
+(import "../../stdlib/core/identifier.eli"
+        keyword symbol qualified-name)
+
+[(keyword "article/title")
+ (qualified-name (symbol "article" "title"))]
+```
+
 The implemented language includes:
 
 - lexical functions, closures, optional and rest parameters, and nested vector
@@ -134,6 +145,7 @@ The implemented language includes:
 - ESM modules, JavaScript interop, React elements, and fragments
 - statically checked portable functions and dependency-pruned builds
 - persistent collections, value semantics, and open collection protocols
+- first-class immutable Keyword and Symbol values with qualified names
 
 Eliscript deliberately differs from Emacs Lisp. It uses ECMAScript numbers,
 distinguishes `false` from `nil`, has lexical scope, and does not attempt to run

@@ -2,6 +2,10 @@ import {
   equalValues,
   hashValue,
 } from "../../runtime/core/value.mjs";
+import {
+  eliscriptSymbol,
+  keyword,
+} from "../../runtime/core/identifier.mjs";
 import { persistentVector } from "../../runtime/core/vector.mjs";
 import { persistentHashMap } from "../../runtime/core/map.mjs";
 import { persistentHashSet } from "../../runtime/core/set.mjs";
@@ -70,6 +74,12 @@ console.log(JSON.stringify({
     negativeBigInt: hashValue(-12345678901234567890n),
     globalSymbol: hashValue(Symbol.for("eliscript/value")),
   },
+  identifiers: {
+    keyword: hashValue(keyword("article/title")),
+    unqualifiedKeyword: hashValue(keyword("title")),
+    symbol: hashValue(eliscriptSymbol("article/title")),
+    unqualifiedSymbol: hashValue(eliscriptSymbol("title")),
+  },
   vectors: {
     empty: hashValue(persistentVector()),
     flat: hashValue(persistentVector(1, 2, 3, 4)),
@@ -96,5 +106,13 @@ console.log(JSON.stringify({
     mapHashesEqual: hashValue(orderedMap) === hashValue(reversedMap),
     setsEqual: equalValues(orderedSet, reversedSet),
     setHashesEqual: hashValue(orderedSet) === hashValue(reversedSet),
+    symbolsEqual: equalValues(
+      eliscriptSymbol("article/title"),
+      eliscriptSymbol("article", "title"),
+    ),
+    identifierCategoriesDistinct: !equalValues(
+      keyword("article/title"),
+      eliscriptSymbol("article/title"),
+    ),
   },
 }));

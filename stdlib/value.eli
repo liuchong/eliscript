@@ -34,6 +34,9 @@
   (defconst value-map-tag 1821285621)
   (defconst value-map-entry-tag 982610667)
   (defconst value-set-tag 1374139181)
+  (defconst value-keyword-tag 795685287)
+  (defconst value-symbol-tag 1908952723)
+  (defconst value-unqualified-hash 1251063421)
 
   (defconst value-false-hash 423263297)
   (defconst value-true-hash 1911856395)
@@ -113,6 +116,10 @@
                 index (1+ index)))
         result)))
 
+  (defportable value-identifier-equal? (left right)
+    (and (= (get left :namespace) (get right :namespace))
+         (= (get left :name) (get right :name))))
+
   (defportable value-map-equal? (left right)
     (and (= (persistent-map-count left) (persistent-map-count right))
          (persistent-map-reduce
@@ -143,6 +150,8 @@
           (cond
            ((= left-type "number")
             (and (not (= left left)) (not (= right right))))
+           ((or (= left-type "keyword") (= left-type "symbol"))
+            (value-identifier-equal? left right))
            ((persistent-list? left)
             (and (persistent-list? right)
                  (value-list-equal? left right)))
@@ -180,6 +189,19 @@
                (value-hash (persistent-vector-nth value index nil)))
               index (1+ index)))
       (value-finish-hash hash index)))
+
+  (defportable value-identifier-hash (value tag)
+    (value-finish-hash
+     (value-mix-hash
+      (value-mix-hash
+       tag
+       (if (= (get value :namespace) nil)
+           value-unqualified-hash
+         (value-hash-string-with-tag
+          (get value :namespace)
+          value-string-tag)))
+      (value-hash-string-with-tag (get value :name) value-string-tag))
+     2))
 
   (defportable value-map-entry-hash (key value)
     (value-finish-hash
@@ -257,6 +279,10 @@
        ((= type "number") (value-hash-number value))
        ((= type "string")
         (value-hash-string-with-tag value value-string-tag))
+       ((= type "keyword")
+        (value-identifier-hash value value-keyword-tag))
+       ((= type "symbol")
+        (value-identifier-hash value value-symbol-tag))
        ((persistent-list? value) (value-list-hash value))
        ((persistent-vector? value) (value-vector-hash value))
        ((persistent-map? value) (value-map-hash value))

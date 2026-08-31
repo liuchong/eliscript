@@ -1040,7 +1040,12 @@
       (should
        (string-match-p
         (regexp-quote
-         "__eliscript_value === null ? \"null\" : typeof __eliscript_value")
+         "Symbol.for(\"eliscript.value.type\")")
+        generated))
+      (should
+       (string-match-p
+        (regexp-quote
+         "__eliscript_type.value === \"keyword\" || __eliscript_type.value === \"symbol\"")
         generated))
       (should
        (string-match-p

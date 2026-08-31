@@ -731,6 +731,19 @@
         { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "language.keyword-symbol-values",
+      "title": "First-class Keyword and Symbol values",
+      "status": "accepted",
+      "spec": "0067",
+      "contracts": ["Defines immutable qualified and unqualified Keyword and Symbol values", "Preserves distinct categories with deterministic value equality and hashing", "Uses reconstructed identifiers as runtime and portable Map keys and Set members", "Matches seed and self-hosted artifacts under Bun and Node"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/identifier.test.mjs", "contains": "keywords are immutable, interned qualified identifiers" },
+        { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics compile and agree across hosts" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

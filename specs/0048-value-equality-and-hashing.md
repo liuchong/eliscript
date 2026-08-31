@@ -221,11 +221,10 @@ and Set but do not complete 0041 value semantics.
 
 Remaining work includes:
 
-- persistent list equality/hash implementation
-- keyword and Eliscript symbol runtime values
+- metadata-aware equality/hash policy
 - metadata exclusion tests
 - language-form and literal migration
-- public protocol dispatch and extension
+- portable protocol dispatch policy
 - hostile-input and decode-boundary security limits
 
 The P0 equality/hash fixture requirement is satisfied for currently
@@ -233,5 +232,6 @@ implemented runtime values. Persistent Map HAMT support is specified by
 [0049-persistent-hash-map-prototype.md](0049-persistent-hash-map-prototype.md),
 and Set support by
 [0050-persistent-hash-set-prototype.md](0050-persistent-hash-set-prototype.md).
-The full P0 exit gate still requires integer bit-operation support and
-cross-engine node-layout measurements.
+Portable collection semantics and first-class identifiers are now specified
+by [0057-portable-value-semantics.md](0057-portable-value-semantics.md) and
+[0067-first-class-keyword-symbol-values.md](0067-first-class-keyword-symbol-values.md).

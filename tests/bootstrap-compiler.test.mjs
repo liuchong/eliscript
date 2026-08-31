@@ -193,6 +193,11 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "function define_protocol(name, operations)",
         "function extend_protocol_type(protocol, constructor, implementations)",
       ]],
+      ["stdlib/core/identifier.eli", [
+        "function keyword(...arguments$)",
+        "function symbol(...arguments$)",
+        "function qualified_name(value)",
+      ]],
       ["stdlib/core/collection.eli", [
         "function collection_count(collection)",
         "function reduce(collection, reducer, ...initial)",

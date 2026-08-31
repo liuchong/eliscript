@@ -6,6 +6,9 @@
   (import "./stdlib/core/collection.mjs"
           collection-count collection-nth collection-seq conj contains? empty
           lookup reduce reduced reduced? unreduced)
+  (import "./stdlib/core/identifier.mjs"
+          identifier-name identifier-namespace identifier? keyword keyword?
+          qualified-name symbol symbol?)
   (import "./stdlib/core/transient.mjs"
           assoc! conj! persistent! transient)
   (import "./stdlib/core/transducer.mjs"
@@ -31,6 +34,9 @@
   (defconst map-builder (transient EMPTY_MAP))
   (assoc! map-builder "left" 10 "right" 20)
   (defconst map-value (persistent! map-builder))
+
+  (defconst title-keyword (keyword "article/title"))
+  (defconst title-symbol (symbol "article" "title"))
 
   (defconst observed (array))
   (defconst bounded-sum
@@ -73,6 +79,13 @@
       :observed observed
       :transformed transformed
       :reduced-state (reduced? (reduced 1))
-      :unreduced-value (unreduced (reduced 9))))
+      :unreduced-value (unreduced (reduced 9))
+      :keyword-string (str title-keyword)
+      :symbol-name (qualified-name title-symbol)
+      :identifier-name (identifier-name title-keyword)
+      :identifier-namespace (identifier-namespace title-symbol)
+      :keyword-state (keyword? title-keyword)
+      :symbol-state (symbol? title-symbol)
+      :identifier-state (identifier? title-keyword)))
 
   (export map-builder report vector-builder))

@@ -129,6 +129,15 @@ hashes, default Map/Set policies, insertion-order independence, a real hash
 collision, opaque host identity, and nested `undefined` are checked directly.
 Two thousand generated cross-family cases enforce equality/hash invariants,
 and one-million-value traversals prove iterative bounded-stack behavior.
+Identifier fixtures additionally freeze qualified and unqualified
+Keyword/Symbol hashes, category separation, and reconstructed Map/Set lookup.
+
+The identifier runtime suite verifies constructor validation, Keyword
+interning, non-interned Symbol value equality, freezing, explicit serialization
+failure, hostile host-object handling, and runtime persistent Map/Set behavior.
+The core-library execution fixture compiles the Lisp-named identifier module
+and executes its public constructors, predicates, and accessors under Bun and
+Node.
 
 The protocol suite exercises immutable protocol definitions, direct Symbol
 slots, exact prototype extensions, stable host categories, explicit defaults,
@@ -169,10 +178,11 @@ sequence transforms, searches, grouping, indexing, counting, and frequencies
 without concrete source checks. It freezes Eliscript truth behavior, exact
 reduced-value termination, persistent result families, equal persistent keys,
 fresh transducer state, and a transient HAMT allocation ratio. It then compiles
-and executes the Lisp-named protocol, collection, transducer, transient,
-sequence, and data modules with source maps. The sequence/data maps contain the
-maintained Eliscript algorithm bodies, seed and self-hosted compiler artifacts
-match, strict binding references agree with declarations, and Bun/Node execute
+and executes the Lisp-named protocol, identifier, collection, transducer,
+transient, sequence, and data modules with source maps. The sequence/data maps
+contain the maintained Eliscript algorithm bodies; seed and self-hosted
+compiler artifacts match, strict binding references agree with declarations,
+and Bun/Node execute
 the same generated API report.
 
 ## JavaScript Runtime Collections

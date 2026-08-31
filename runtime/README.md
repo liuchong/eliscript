@@ -35,6 +35,17 @@ opaque JavaScript objects retain process-local identity semantics. Persistent
 hashes are cached privately. `testing/value.mjs` exposes cache and identity
 counters only for conformance tests.
 
+### Identifier Values
+
+`core/identifier.mjs` defines immutable Keyword and Eliscript Symbol values
+with optional namespaces. Keywords are interned; Symbols use field-based value
+equality without interning. Both implement `IEquiv` and `IHash`, use distinct
+deterministic category tags, and participate directly in persistent Map and
+Set operations. A non-enumerable global logical-type brand lets portable
+Eliscript value algorithms recognize the same categories without depending on
+the runtime classes. Serialization fails explicitly until the value codec is
+specified.
+
 ### Persistent Map
 
 `core/map.mjs` builds on that key contract with a provisional persistent HAMT.
@@ -95,9 +106,9 @@ grouping, counting, and frequencies with persistent Map results and transient
 final construction. Native and persistent collections, null, and external
 protocol extensions all use the same algorithm path.
 
-`stdlib/core/seq.eli` and `stdlib/core/data.eli` provide the corresponding
-Lisp-named Eliscript imports. They are runtime-backed source facades; portable
-protocol definitions and language-authored implementations remain later work.
+`stdlib/core/seq.eli` and `stdlib/core/data.eli` provide the maintained
+Lisp-named Eliscript implementations. Portable protocol dispatch internals
+remain later work.
 
 ### Worker Host
 

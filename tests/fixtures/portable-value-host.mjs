@@ -1,4 +1,8 @@
 import { pathToFileURL } from "node:url";
+import {
+  eliscriptSymbol,
+  keyword,
+} from "../../runtime/core/identifier.mjs";
 
 const [modulePath] = process.argv.slice(2);
 const moduleUrl = pathToFileURL(modulePath);
@@ -74,6 +78,17 @@ const vectorLookup = persistentMapGet(
   persistentVectorFromArray(["key"]),
   "missing",
 );
+const keywordTitle = keyword("article/title");
+const symbolTitle = eliscriptSymbol("article/title");
+const identifierMap = valueMapFromEntries([
+  [keywordTitle, "keyword"],
+  [symbolTitle, "symbol"],
+]);
+const identifierSet = valueSetFromArray([
+  symbolTitle,
+  eliscriptSymbol("article", "title"),
+  keywordTitle,
+]);
 
 console.log(JSON.stringify({
   scalars: {
@@ -100,6 +115,12 @@ console.log(JSON.stringify({
     map: valueHash(orderedMap),
     set: valueHash(orderedSet),
   },
+  identifiers: {
+    keyword: valueHash(keywordTitle),
+    unqualifiedKeyword: valueHash(keyword("title")),
+    symbol: valueHash(symbolTitle),
+    unqualifiedSymbol: valueHash(eliscriptSymbol("title")),
+  },
   invariants: {
     nanEqual: valueEqual(Number.NaN, Number.NaN),
     zerosEqual: valueEqual(0, -0),
@@ -114,6 +135,11 @@ console.log(JSON.stringify({
     hostIdentity: valueEqual(leftHost, leftHost),
     hostDistinct: valueEqual(leftHost, rightHost),
     hostFallbackHash: valueHash(leftHost) === valueHash(rightHost),
+    symbolsEqual: valueEqual(
+      symbolTitle,
+      eliscriptSymbol("article", "title"),
+    ),
+    identifierCategoriesDistinct: !valueEqual(keywordTitle, symbolTitle),
   },
   collision: {
     leftHash: valueHash("key-50691"),
@@ -130,6 +156,21 @@ console.log(JSON.stringify({
     equalVectorMember: persistentSetHas(
       orderedSet,
       persistentVectorFromArray(["key"]),
+    ),
+    keywordValue: persistentMapGet(
+      identifierMap,
+      keyword("article", "title"),
+      "missing",
+    ),
+    symbolValue: persistentMapGet(
+      identifierMap,
+      eliscriptSymbol("article", "title"),
+      "missing",
+    ),
+    identifierSetCount: persistentSetCount(identifierSet),
+    equalSymbolMember: persistentSetHas(
+      identifierSet,
+      eliscriptSymbol("article", "title"),
     ),
   },
 }));

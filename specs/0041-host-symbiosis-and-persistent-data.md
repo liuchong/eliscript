@@ -676,8 +676,9 @@ HAMT. The shared portable policy in
 [0057-portable-value-semantics.md](0057-portable-value-semantics.md) then adds
 recursive equality and hashing for every core collection family, default
 Map/Set constructors, nullish preservation, collision discipline, and
-cross-family generated evidence. Keyword/symbol values, metadata,
-printer/reader integration, literal migration, and portable transient
+cross-family generated evidence. Keyword/Symbol values now land in
+[0067-first-class-keyword-symbol-values.md](0067-first-class-keyword-symbol-values.md);
+metadata, printer/reader integration, literal migration, and portable transient
 implementation remain open P1-P4 work.
 The reusable dispatch mechanism now begins in
 [0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md): frozen
