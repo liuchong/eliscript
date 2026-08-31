@@ -1,6 +1,15 @@
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
+import { keyword } from "../runtime/core/identifier.mjs";
+import { isPersistentList } from "../runtime/core/list.mjs";
+import { isPersistentHashMap } from "../runtime/core/map.mjs";
+import { equalValues } from "../runtime/core/value.mjs";
+import { isPersistentVector, persistentVector } from "../runtime/core/vector.mjs";
+import {
+  decodeWorkerValue,
+  encodeWorkerValue,
+} from "../runtime/worker-value-codec.mjs";
 
 const ROOT = resolve(import.meta.dir, "..");
 const SOURCE = resolve(ROOT, "tests/fixtures/literal-runtime.eli");
@@ -231,60 +240,76 @@ test("explicit host-only modules do not link the persistent runtime", async () =
   }
 }, 60_000);
 
-test("portable closures reject persistent constructors and collection literals", async () => {
+test("portable closures produce persistent values for the versioned worker codec", async () => {
   const directory = await mkdtemp(resolve(ROOT, ".eliscript-portable-values-"));
   const bootstrap = resolve(directory, "bootstrap");
   const source = resolve(directory, "portable.eli");
+  const invalid = resolve(directory, "invalid.eli");
+  const seedOutput = resolve(directory, "seed/module.mjs");
+  const selfOutput = resolve(directory, "self/module.mjs");
   try {
     await run([BUILD_BOOTSTRAP], {
       ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrap,
     });
-    for (const expression of [
-      "(vector 1 2)",
-      "[1 2]",
-      "(hash-map :ready t)",
-      "{:ready t}",
-      ":ready",
-      "'(1 2)",
-      "'symbol",
-      "':ready",
-      "'[1 2]",
-      "'nil",
-    ]) {
-      await Bun.write(
-        source,
-        `(defportable build () ${expression})\n(export build)\n`,
-      );
-      const seed = await run([SEED, "--portable", "build", source], {}, true);
-      const selfHosted = await run([
-        SELF_HOSTED,
-        "--portable",
-        "build",
-        source,
-      ], {
-        ELISCRIPT_BOOTSTRAP_MODULE_DIR: bootstrap,
-      }, true);
-      for (const result of [seed, selfHosted]) {
-        expect(result.exitCode).not.toBe(0);
-        expect(result.stderr).toContain("persistent runtime values");
-      }
-    }
-
     await Bun.write(
       source,
-      "(defportable build () '42)\n(export build)\n",
+      "(defportable build (argument)\n" +
+        "  {:argument argument\n" +
+        "   :keyword :ready\n" +
+        "   :vector [1 undefined]\n" +
+        "   :map {:nested [2]}\n" +
+        "   :quote '(alpha :beta [3] nil)})\n" +
+        "(export build)\n",
     );
-    const scalarSeed = await run([SEED, "--portable", "build", source]);
-    const scalarSelf = await run([
+    await compile(SEED, seedOutput, {}, source, ["--portable", "build"]);
+    await compile(SELF_HOSTED, selfOutput, {
+      ELISCRIPT_BOOTSTRAP_MODULE_DIR: bootstrap,
+    }, source, ["--portable", "build"]);
+
+    expect(await readFile(selfOutput, "utf8"))
+      .toBe(await readFile(seedOutput, "utf8"));
+    expect(await readFile(`${selfOutput}.map`, "utf8"))
+      .toBe(await readFile(`${seedOutput}.map`, "utf8"));
+    expect(await readFile(seedOutput, "utf8"))
+      .toContain("eliscript/runtime/literals");
+
+    const seedModule = await import(seedOutput);
+    const selfModule = await import(selfOutput);
+    const argument = persistentVector(8, 9);
+    const seedValue = seedModule.build(argument);
+    const selfValue = selfModule.build(argument);
+    const transported = decodeWorkerValue(encodeWorkerValue(seedValue));
+    expect(isPersistentHashMap(seedValue)).toBe(true);
+    expect(equalValues(seedValue, selfValue)).toBe(true);
+    expect(equalValues(seedValue, transported)).toBe(true);
+    expect(equalValues(seedValue.get(keyword("argument")), argument)).toBe(true);
+    expect(seedValue.get(keyword("keyword"))).toBe(keyword("ready"));
+    expect(isPersistentVector(seedValue.get(keyword("vector")))).toBe(true);
+    expect(isPersistentHashMap(seedValue.get(keyword("map")))).toBe(true);
+    expect(isPersistentList(seedValue.get(keyword("quote")))).toBe(true);
+
+    await Bun.write(
+      invalid,
+      "(defportable build () [missing])\n(export build)\n",
+    );
+    const invalidSeed = await run(
+      [SEED, "--portable", "build", invalid],
+      {},
+      true,
+    );
+    const invalidSelf = await run([
       SELF_HOSTED,
       "--portable",
       "build",
-      source,
+      invalid,
     ], {
       ELISCRIPT_BOOTSTRAP_MODULE_DIR: bootstrap,
-    });
-    expect(scalarSelf.stdout).toBe(scalarSeed.stdout);
-    expect(scalarSeed.stdout).not.toContain("eliscript/runtime/literals");
+    }, true);
+    for (const result of [invalidSeed, invalidSelf]) {
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("unbound");
+      expect(result.stderr).toContain("missing");
+    }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

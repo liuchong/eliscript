@@ -11,6 +11,7 @@
 (require 'subr-x)
 (require 'url-parse)
 (require 'url-util)
+(require 'eliscript-value-codec)
 
 (define-error 'eliscript-worker-error "Eliscript worker error")
 (define-error 'eliscript-worker-protocol-error "Eliscript worker protocol error"
@@ -53,6 +54,7 @@
   callback
   progress
   metrics
+  value-encoding
   timer
   done
   value
@@ -157,6 +159,28 @@
       (eliscript-worker--finish-request
        worker id nil `((code . ,code) (message . ,message)) nil))))
 
+(defun eliscript-worker--message-value (worker message)
+  "Decode protocol MESSAGE value according to its request on WORKER."
+  (let* ((id (alist-get 'id message))
+         (request (gethash id (eliscript-worker-pending worker)))
+         (expected (and request
+                        (eliscript-worker-request-value-encoding request)))
+         (actual (alist-get 'valueEncoding message)))
+    (cond
+     (expected
+      (unless (equal actual expected)
+        (signal 'eliscript-worker-protocol-error
+                (list
+                 (format "worker response value encoding mismatch: %S"
+                         actual))))
+      (eliscript-worker-value-decode (alist-get 'value message)))
+     (actual
+      (signal 'eliscript-worker-protocol-error
+              (list
+               (format "unexpected worker response value encoding: %S"
+                       actual))))
+     (t (alist-get 'value message)))))
+
 (defun eliscript-worker--handle-message (worker message)
   "Apply one parsed protocol MESSAGE to WORKER."
   (let ((version (alist-get 'version message))
@@ -172,7 +196,8 @@
      ((equal type "response")
       (if (eq (alist-get 'ok message) t)
           (eliscript-worker--finish-request
-           worker (alist-get 'id message) (alist-get 'value message) nil
+           worker (alist-get 'id message)
+           (eliscript-worker--message-value worker message) nil
            (alist-get 'timing message))
         (eliscript-worker--finish-request
          worker (alist-get 'id message) nil (alist-get 'error message)
@@ -184,7 +209,8 @@
                             (eliscript-worker-request-progress request))))
         (when progress
           (condition-case callback-error
-              (funcall progress (alist-get 'value message))
+              (funcall progress
+                       (eliscript-worker--message-value worker message))
             (error
              (message "Eliscript worker progress callback failed: %s"
                       (error-message-string callback-error)))))))
@@ -432,7 +458,7 @@ PROJECT-MANIFEST, when non-nil, supplies the whole generated graph version."
 (cl-defun eliscript-worker-call
     (worker module export arguments callback
             &key operation module-version project-manifest
-            progress metrics timeout-ms)
+            progress metrics timeout-ms value-codec)
   "Call EXPORT from MODULE on WORKER with ARGUMENTS.
 
 When OPERATION is non-nil, resolve its source name through the generated
@@ -440,6 +466,8 @@ portable manifest instead of calling EXPORT. CALLBACK receives (VALUE ERROR).
 PROJECT-MANIFEST names an `eliscript-project.json' file whose digest identifies
 the complete generated module graph and whose source maps cover dependencies.
 PROGRESS receives each progress value.
+When VALUE-CODEC is non-nil, persistent Eliscript values use the negotiated
+versioned worker codec instead of the legacy JSON representation.
 TIMEOUT-MS is enforced remotely, with local worker termination after a grace
 period when synchronous code prevents cooperative cancellation. Return request
 id."
@@ -447,12 +475,19 @@ id."
   (when (and timeout-ms
              (or (not (integerp timeout-ms)) (<= timeout-ms 0)))
     (signal 'wrong-type-argument (list 'positive-integer-p timeout-ms)))
+  (when (and value-codec
+             (not (member "value-codec-v1"
+                          (eliscript-worker-capabilities worker))))
+    (signal 'eliscript-worker-protocol-error
+            (list "worker does not support value-codec-v1")))
   (let* ((id (number-to-string (cl-incf (eliscript-worker-next-id worker))))
          (request
           (eliscript-worker-request--create
            :callback callback
            :progress progress
-           :metrics metrics))
+           :metrics metrics
+           :value-encoding (and value-codec
+                                eliscript-worker-value-encoding)))
          (module-name
           (if (string-prefix-p "file:" module)
               module
@@ -479,7 +514,9 @@ id."
             (type . "request")
             (id . ,id)
             (module . ,module-name)
-            (arguments . ,(vconcat arguments)))
+            (arguments . ,(if value-codec
+                              (eliscript-worker-values-encode arguments)
+                            (vconcat arguments))))
           (if operation
               `((operation . ,operation))
             `((export . ,export)))
@@ -487,6 +524,8 @@ id."
                `((moduleVersion . ,resolved-module-version)))
           (and project-manifest-name
                `((projectManifest . ,project-manifest-name)))
+          (and value-codec
+               `((valueEncoding . ,eliscript-worker-value-encoding)))
           (and timeout-ms `((timeoutMs . ,timeout-ms)))))
       (error
        (remhash id (eliscript-worker-pending worker))
@@ -497,7 +536,8 @@ id."
 
 (cl-defun eliscript-worker-call-portable
     (worker module operation arguments callback
-            &key module-version project-manifest progress metrics timeout-ms)
+            &key module-version project-manifest progress metrics timeout-ms
+            value-codec)
   "Call portable OPERATION from MODULE on WORKER with ARGUMENTS."
   (eliscript-worker-call
    worker module nil arguments callback
@@ -506,7 +546,8 @@ id."
    :project-manifest project-manifest
    :progress progress
    :metrics metrics
-   :timeout-ms timeout-ms))
+   :timeout-ms timeout-ms
+   :value-codec value-codec))
 
 (defun eliscript-worker-cancel (worker id)
   "Request cancellation of pending request ID on WORKER."
@@ -521,7 +562,7 @@ id."
 (cl-defun eliscript-worker-call-sync
     (worker module export arguments
             &key operation module-version project-manifest
-            progress metrics timeout-ms)
+            progress metrics timeout-ms value-codec)
   "Synchronously call EXPORT from MODULE on WORKER with ARGUMENTS."
   (let (done value error-object)
     (eliscript-worker-call
@@ -535,7 +576,8 @@ id."
      :operation operation
      :module-version module-version
      :project-manifest project-manifest
-     :timeout-ms timeout-ms)
+     :timeout-ms timeout-ms
+     :value-codec value-codec)
     (while (and (not done) (eliscript-worker-live-p worker))
       (accept-process-output (eliscript-worker-process worker) 0.05))
     (unless done
@@ -551,7 +593,8 @@ id."
 
 (cl-defun eliscript-worker-call-portable-sync
     (worker module operation arguments
-            &key module-version project-manifest progress metrics timeout-ms)
+            &key module-version project-manifest progress metrics timeout-ms
+            value-codec)
   "Synchronously call portable OPERATION from MODULE on WORKER."
   (eliscript-worker-call-sync
    worker module nil arguments
@@ -560,7 +603,8 @@ id."
    :project-manifest project-manifest
    :progress progress
    :metrics metrics
-   :timeout-ms timeout-ms))
+   :timeout-ms timeout-ms
+   :value-codec value-codec))
 
 (defun eliscript-worker-stop (worker &optional force)
   "Stop WORKER, using immediate termination when FORCE is non-nil."

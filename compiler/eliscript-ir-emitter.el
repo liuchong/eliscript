@@ -22,7 +22,7 @@
   "Internal namespace binding for the automatic React JSX runtime.")
 
 (defconst eliscript-ir-emitter--literal-runtime-import
-  "import { hashMap as __eliscript_hash_map, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals\";\n"
+  "import { hashMap as __eliscript_hash_map, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n"
   "Generated import for canonical language literal construction.")
 
 (defconst eliscript-ir-emitter--collection-runtime-import

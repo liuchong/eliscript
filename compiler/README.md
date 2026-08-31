@@ -47,7 +47,7 @@ rebinding.
 ## Persistent Literal Linking
 
 `persistent-vector-literal`, `persistent-map-literal`, and evaluated Keyword
-literals emit calls through the package-owned `eliscript/runtime/literals` ESM
+literals emit calls through the package-owned `eliscript/runtime/literals.mjs` ESM
 ABI. The import is inserted once and only when one of those runtime values is
 constructed. Square-bracket expressions, brace Map expressions, `(vector
 ...)`, `(hash-map ...)`, and source `:keywords` use that path; `js-array` and

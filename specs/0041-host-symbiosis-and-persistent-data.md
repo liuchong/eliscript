@@ -718,7 +718,10 @@ printer/reader integration now complete the remaining P1 construction steps,
 and [0078-persistent-collection-core-exit-audit.md](0078-persistent-collection-core-exit-audit.md)
 closes the complete cross-host gate. Default Vector and Map expression syntax
 is implemented by 0083 and 0084, and first-class quoted persistent data is
-implemented by 0087. Transport integration remains P3 work.
+implemented by 0087. The first transport integration slice now lands in 0088:
+an opt-in versioned worker codec carries persistent values and metadata through
+explicit Emacs records while legacy JSON mode remains unchanged. Streaming,
+chunking, and protocol-definition transport remain later bridge work.
 The reusable dispatch mechanism now begins in
 [0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md): frozen
 protocol objects own direct Symbol slots and private exact-type/category/default
@@ -897,8 +900,11 @@ adds the canonical optimized List representation and parenthesized data text
 needed before quote can stop emitting mutable Arrays. Specification
 [0087-first-class-quoted-persistent-data.md](0087-first-class-quoted-persistent-data.md)
 then migrates quote to persistent List/Vector and first-class identifier
-values, with scalar and portable boundaries. The worker codec and complete
-compatibility freeze remain open; the P3 exit is not yet satisfied.
+values, with scalar and portable boundaries. Specification
+[0088-emacs-worker-value-codec.md](0088-emacs-worker-value-codec.md) then
+enables persistent values in portable closures, adds explicit Emacs records,
+and resolves package-owned runtime imports for temporary worker modules. The
+complete compatibility freeze remains open; the P3 exit is not yet satisfied.
 
 ### P4: Transients and Hot-Path Optimization
 
@@ -932,6 +938,12 @@ and portable reference implementations remain required.
 
 **Exit:** all persistent values cross the worker boundary predictably, and
 large inputs remain bounded in memory.
+
+**Status:** Underway since 2026-09-01. Specification 0088 implements the
+versioned non-streaming codec, deterministic validation, request/progress/
+response negotiation, Emacs records, exact scalar categories, resource
+limits, and temporary-module runtime resolution. Streaming, chunking, and
+transport cancellation during codec traversal remain open before the P5 exit.
 
 ### P6: Accelerated Emacs API
 

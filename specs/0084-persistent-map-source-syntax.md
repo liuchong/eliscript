@@ -21,7 +21,7 @@ Maps:
 
 The reader desugars this syntax to the existing `(hash-map ...)` constructor,
 which lowers to `persistent-map-literal` and links the canonical
-`eliscript/runtime/literals` ABI. This adds no second Map representation and
+`eliscript/runtime/literals.mjs` ABI. This adds no second Map representation and
 does not change the optimized HAMT implementation or its value semantics.
 
 This specification is a core language and compiler contract. UI frameworks,
@@ -102,10 +102,9 @@ prevents the reader from conflating executable source with runtime data.
 
 ## Portable and Bootstrap Boundary
 
-Portable closures reject brace Map literals and `(hash-map ...)` until the
-persistent-value worker codec is specified and implemented. Both spellings
-must produce the same persistent-runtime-value diagnostic in seed and
-self-hosted compilers.
+Portable closures accept brace Map literals and `(hash-map ...)`. Both
+spellings produce the same persistent value semantics in seed and self-hosted
+compilers and cross the worker boundary through the explicit 0088 codec.
 
 The self-hosted reader implements braces directly and emits the same located
 syntax tree as the seed reader. Reader fixtures, macro fixtures, IR fixtures,
@@ -121,8 +120,8 @@ the complete persistent literal and quoted-data family is promoted.
 
 ## Remaining P3 Work
 
-1. implement transport-safe persistent values in the Emacs worker codec
-2. audit legacy List and host-container compatibility forms
+1. audit legacy List and host-container compatibility forms
+2. add static transient escape analysis
 3. promote the complete literal and host-container contract after migration
 
 ## Acceptance Criteria
@@ -145,8 +144,8 @@ the complete persistent literal and quoted-data family is promoted.
   self-hosted expansions.
 - **MSL-10:** Quoted brace expressions retain canonical persistent constructor
   syntax data rather than evaluating a Map.
-- **MSL-11:** Portable closures reject both Map spellings with matching
-  diagnostics.
+- **MSL-11:** Portable closures accept both Map spellings with matching
+  seed/self-hosted output and worker-codec behavior.
 - **MSL-12:** Seed/self-hosted ESM, Source Maps, diagnostics, reader trees,
   macro expansions, and IR trees remain equal.
 - **MSL-13:** The three-generation compiler fixed point remains reproducible

@@ -144,8 +144,8 @@ retain the behavior defined by 0048.
   Keyword/Symbol hashes and category invariants.
 - **KSV-08:** Seed and self-hosted compilers emit byte-identical `value-type`,
   `stdlib/value.eli`, and `stdlib/core/identifier.eli` artifacts.
-- **KSV-09:** JSON serialization fails explicitly until a versioned codec is
-  accepted.
+- **KSV-09:** Ordinary JSON serialization fails explicitly, while the accepted
+  0088 codec transports the identifier category without coercion.
 - **KSV-10:** Public-surface, compatibility, conformance, documentation, CLI,
   full default-test, and strict byte-compilation checks remain green. No
   application framework is a prerequisite for identifier semantics.

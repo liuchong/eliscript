@@ -19,7 +19,7 @@
 
   (defconst portable-forbidden-operators
     (js-array "js*" "print" "put" "js-call" "new" "async" "await" "throw" "try"
-     "vector" "hash-map" "jsx" "fragment"))
+     "jsx" "fragment"))
 
   (defconst fail
     (js* "(diagnostic) => { const p = diagnostic.location.start; const error = new Error(`${diagnostic.location.file}:${p.line}:${p.column}: ${diagnostic.message}`); error.eliscriptDiagnostic = diagnostic; throw error; }"))
@@ -1072,16 +1072,6 @@
               argument scope declarations dependencies entry context)))
         (setq index (1+ index)))))
 
-  (defun quoted-runtime-value-node-p (node)
-    (let ((kind (node-kind node)))
-      (cond
-        ((= kind "literal")
-         (or (null (node-value node)) (= (node-value node) false)))
-        ((= kind "undefined") false)
-        ((or (= kind "symbol") (= kind "keyword")
-             (= kind "list") (= kind "vector")) t)
-        (t false))))
-
   (defun portable-call
       (form scope declarations dependencies entry context)
     (let* ((items (node-items form))
@@ -1103,17 +1093,10 @@
                  ((= operator "await") "asynchronous suspension")
                  ((or (= operator "throw") (= operator "try"))
                   "exception control flow")
-                 ((or (= operator "vector") (= operator "hash-map"))
-                  "persistent runtime values")
-                 (t "React runtime access"))
+                (t "React runtime access"))
                ")")))
       (cond
-        ((= operator "quote")
-         (when (quoted-runtime-value-node-p (js-nth 0 args))
-           (analyzer-fail
-             context (node-span form)
-             (str "portable function " entry
-                  " cannot use quoted persistent data (persistent runtime values)"))))
+        ((= operator "quote") nil)
         ((or (= operator "lambda") (= operator "fn"))
          (portable-function-expression
            args scope declarations dependencies entry context))
@@ -1151,19 +1134,13 @@
       (cond
         ((or (= (node-kind form) "literal")
              (= (node-kind form) "undefined")) nil)
-        ((= (node-kind form) "keyword")
-         (analyzer-fail
-           context (node-span form)
-           (str "portable function " entry
-                " cannot use keyword literal (persistent runtime values)")))
+        ((= (node-kind form) "keyword") nil)
         ((= (node-kind form) "symbol")
          (portable-reference
            form scope declarations dependencies entry context))
         ((= (node-kind form) "vector")
-         (analyzer-fail
-           context (node-span form)
-           (str "portable function " entry
-                " cannot use vector literal (persistent runtime values)")))
+         (portable-sequence
+           (node-items form) scope declarations dependencies entry context))
         ((= (node-kind form) "list")
          (portable-call
            form scope declarations dependencies entry context)))))

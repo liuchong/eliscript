@@ -28,15 +28,15 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 87 specifications.
+The registry currently contains 88 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 58 |
+| Accepted design | 59 |
 | Stable design | 28 |
 | Implementation in progress | 3 |
-| Implemented | 84 |
+| Implemented | 85 |
 
 Compatibility Baseline 1 separately classifies 28 specifications as stable,
 56 as provisional, and 3 as planning. That baseline is derived from registry
@@ -280,6 +280,7 @@ The schemas and change workflow are defined by specifications
 | 0085 | [First-class Source Keyword Values](0085-first-class-source-keywords.md) | Accepted | Implemented |
 | 0086 | [Optimized Runtime Persistent List and Canonical Data Text](0086-optimized-runtime-persistent-list.md) | Accepted | Implemented |
 | 0087 | [First-class Quoted Persistent Data](0087-first-class-quoted-persistent-data.md) | Accepted | Implemented |
+| 0088 | [Versioned Emacs Worker Persistent Value Codec](0088-emacs-worker-value-codec.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

@@ -26,6 +26,116 @@
       (accept-process-output (eliscript-worker-process worker) 0.02))
     (funcall predicate)))
 
+(ert-deftest eliscript-emacs-value-codec-preserves-language-categories ()
+  (let* ((metadata
+          (eliscript-value-map
+           (vector (cons (eliscript-value-keyword "source") "emacs"))))
+         (value
+          (eliscript-value-list
+           (vector
+            (eliscript-value-keyword "ready" "app")
+            (eliscript-value-symbol "item" "model" metadata)
+            (eliscript-value-vector
+             (vector eliscript-worker-value-undefined -0.0 0.0e+NaN))
+            (eliscript-value-set (vector "beta" "alpha"))
+            (eliscript-value-object
+             (vector (cons "ready" :false))))
+           metadata))
+         (wire (eliscript-worker-value-encode value))
+         (decoded (eliscript-worker-value-decode wire))
+         (vector-value
+          (aref (eliscript-value-list-values decoded) 2)))
+    (should (eliscript-value-list-p decoded))
+    (should (equal (eliscript-value-list-metadata decoded) metadata))
+    (should (equal (aref (eliscript-value-list-values decoded) 0)
+                   (eliscript-value-keyword "ready" "app")))
+    (should (equal (eliscript-value-symbol-metadata
+                    (aref (eliscript-value-list-values decoded) 1))
+                   metadata))
+    (should (eq (aref (eliscript-value-vector-values vector-value) 0)
+                eliscript-worker-value-undefined))
+    (should (< (copysign
+                1.0
+                (aref (eliscript-value-vector-values vector-value) 1))
+               0.0))
+    (should (isnan
+             (aref (eliscript-value-vector-values vector-value) 2)))
+    (should (equal (eliscript-worker-value-encode decoded) wire))
+    (should (equal
+             (eliscript-worker-value-encode
+              (eliscript-value-set (vector "😀" "\uE000")))
+             ["set" ["\uE000" "😀"] nil]))
+    (let ((cycle (vector nil)))
+      (aset cycle 0 cycle)
+      (should-error (eliscript-worker-value-encode cycle)
+                    :type 'eliscript-value-codec-error))
+    (should-error
+     (eliscript-worker-value-decode ["array" [1 2 3]]
+                                    '((max-collection-length . 2)))
+     :type 'eliscript-value-codec-error)))
+
+(ert-deftest eliscript-emacs-client-negotiates-persistent-value-codec ()
+  (let* ((directory (make-temp-file "eliscript-value-codec-worker-" t))
+         (source (expand-file-name "codec.eli" directory))
+         (module (expand-file-name "codec.mjs" directory))
+         worker)
+    (unwind-protect
+        (progn
+          (with-temp-file source
+            (insert
+             "(defportable echo (value) value)\n"
+             "(defportable value ()\n"
+             "  {:ready t\n"
+             "   :items '(item :ready [undefined 2])})\n"
+             "(export echo value)\n"))
+          (eliscript-compile-portable-file-with-source-map
+           source '(echo value) module)
+          (setq worker (eliscript-worker-start))
+          (should (member "value-codec-v1"
+                          (eliscript-worker-capabilities worker)))
+          (let* ((argument
+                  (eliscript-value-map
+                   (vector
+                    (cons
+                     (eliscript-value-keyword "items")
+                     (eliscript-value-vector
+                      (vector 1 eliscript-worker-value-undefined 3))))))
+                 (result
+                  (eliscript-worker-call-portable-sync
+                   worker module "echo" (list argument)
+                   :value-codec t
+                   :timeout-ms 2000)))
+            (should (equal result argument)))
+          (let* ((result
+                  (eliscript-worker-call-portable-sync
+                   worker module "value" nil
+                   :value-codec t
+                   :timeout-ms 2000))
+                 (entries (eliscript-value-map-entries result))
+                 (items
+                  (cdr
+                   (cl-find-if
+                    (lambda (entry)
+                      (equal (car entry)
+                             (eliscript-value-keyword "items")))
+                    entries)))
+                 (values (eliscript-value-list-values items))
+                 (vector-value (aref values 2)))
+            (should (eliscript-value-map-p result))
+            (should (eliscript-value-list-p items))
+            (should (eliscript-value-symbol-p (aref values 0)))
+            (should (equal (aref values 1)
+                           (eliscript-value-keyword "ready")))
+            (should (eliscript-value-vector-p vector-value))
+            (should (eq (aref
+                         (eliscript-value-vector-values vector-value) 0)
+                        eliscript-worker-value-undefined))
+            (should (= (aref
+                        (eliscript-value-vector-values vector-value) 1)
+                       2))))
+      (when worker (eliscript-worker-stop worker t))
+      (delete-directory directory t))))
+
 (ert-deftest eliscript-emacs-client-runs-and-cancels-worker-requests ()
   (let* ((directory (make-temp-file "eliscript-worker-test-" t))
          (fixture

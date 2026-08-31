@@ -202,5 +202,6 @@ and
 [0080-canonical-generated-protocol-runtime.md](0080-canonical-generated-protocol-runtime.md).
 Protocol-driven object/text migration continues in
 [0081-protocol-driven-text-object.md](0081-protocol-driven-text-object.md).
-Compiler hot paths, persistent collection literal migration, transport-safe
-protocol representation, and static transient escape analysis remain open.
+Persistent collection literal migration and the first worker value codec now
+land through 0088. Compiler hot paths, transport of protocol definitions, and
+static transient escape analysis remain open.

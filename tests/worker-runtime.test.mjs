@@ -2,6 +2,16 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { keyword } from "../runtime/core/identifier.mjs";
+import { persistentList } from "../runtime/core/list.mjs";
+import { persistentHashMap } from "../runtime/core/map.mjs";
+import { persistentVector } from "../runtime/core/vector.mjs";
+import { equalValues } from "../runtime/core/value.mjs";
+import {
+  decodeWorkerValue,
+  encodeWorkerValue,
+  workerValueEncoding,
+} from "../runtime/worker-value-codec.mjs";
 
 const projectDirectory = resolve(import.meta.dir, "..");
 const compilerPath = resolve(projectDirectory, "bin/eliscript");
@@ -124,6 +134,152 @@ function scoreValues(values, rounds) {
   }
   return total;
 }
+
+test("worker negotiates the persistent value codec without changing JSON mode", async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), "eliscript-codec-worker-"));
+  const modulePath = resolve(directory, "codec.mjs");
+  const escapePath = resolve(directory, "escape.mjs");
+  let client;
+  try {
+    await writeFile(modulePath, [
+      "import { keyword, eliscriptSymbol } from 'eliscript/runtime/core/identifier.mjs';",
+      "import { list as persistentList } from 'eliscript/runtime/literals.mjs';",
+      "import { persistentHashMap } from 'eliscript/runtime/core/map.mjs';",
+      "import { withMeta } from 'eliscript/runtime/core/metadata.mjs';",
+      "import { persistentVector } from 'eliscript/runtime/core/vector.mjs';",
+      "export function echo(value, context) { context.progress(value); return value; }",
+      "export function value() {",
+      "  const metadata = persistentHashMap([keyword('source'), 'worker']);",
+      "  return withMeta(persistentList(keyword('ready'), eliscriptSymbol('item'), persistentVector(undefined, -0)), metadata);",
+      "}",
+      "export function unsupported() { return 1n; }",
+      "",
+    ].join("\n"));
+    await writeFile(
+      escapePath,
+      "import value from 'eliscript/runtime/../package.json';\n" +
+        "export function run() { return value; }\n",
+    );
+
+    client = createWorkerClient();
+    const ready = await client.next((message) => message.type === "ready");
+    expect(ready.capabilities).toContain("value-codec-v1");
+    expect(ready.capabilities).toContain("runtime-resolution");
+
+    const argument = persistentHashMap(
+      [keyword("items"), persistentVector(1, undefined, 3)],
+    );
+    client.send({
+      version: 1,
+      type: "request",
+      id: "codec-echo",
+      module: modulePath,
+      export: "echo",
+      valueEncoding: workerValueEncoding,
+      arguments: [encodeWorkerValue(argument)],
+    });
+    const progress = await client.next(
+      (message) => message.id === "codec-echo" && message.type === "progress",
+    );
+    const response = await client.next(
+      (message) => message.id === "codec-echo" && message.type === "response",
+    );
+    expect(progress.valueEncoding).toBe(workerValueEncoding);
+    expect(response.valueEncoding).toBe(workerValueEncoding);
+    expect(equalValues(decodeWorkerValue(progress.value), argument)).toBe(true);
+    expect(equalValues(decodeWorkerValue(response.value), argument)).toBe(true);
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "codec-result",
+      module: modulePath,
+      export: "value",
+      valueEncoding: workerValueEncoding,
+      arguments: [],
+    });
+    const codecResult = decodeWorkerValue((await client.next(
+      (message) => message.id === "codec-result",
+    )).value);
+    expect(equalValues(
+      codecResult,
+      persistentList(keyword("ready"), codecResult.nth(1), persistentVector(undefined, -0)),
+    )).toBe(true);
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "legacy-result",
+      module: modulePath,
+      export: "value",
+      arguments: [],
+    });
+    expect(await client.next((message) => message.id === "legacy-result"))
+      .toMatchObject({ ok: true, value: {} });
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "unsupported-encoding",
+      module: modulePath,
+      export: "echo",
+      valueEncoding: "future-value-codec",
+      arguments: [],
+    });
+    expect(await client.next(
+      (message) => message.id === "unsupported-encoding",
+    )).toMatchObject({ ok: false, error: { code: "invalid-request" } });
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "invalid-value",
+      module: modulePath,
+      export: "echo",
+      valueEncoding: workerValueEncoding,
+      arguments: [["unknown"]],
+    });
+    expect(await client.next((message) => message.id === "invalid-value"))
+      .toMatchObject({
+        ok: false,
+        error: { code: "value-decoding-invalid" },
+      });
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "unsupported-value",
+      module: modulePath,
+      export: "unsupported",
+      valueEncoding: workerValueEncoding,
+      arguments: [],
+    });
+    expect(await client.next((message) => message.id === "unsupported-value"))
+      .toMatchObject({
+        ok: false,
+        error: { code: "value-encoding-unsupported" },
+      });
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "runtime-escape",
+      module: escapePath,
+      export: "run",
+      arguments: [],
+    });
+    const escape = await client.next(
+      (message) => message.id === "runtime-escape",
+    );
+    expect(escape).toMatchObject({ ok: false });
+    expect(escape.error.message).toContain(
+      "worker runtime import escapes package runtime",
+    );
+  } finally {
+    if (client) await client.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("long-lived worker implements the versioned NDJSON protocol", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "eliscript-worker-"));

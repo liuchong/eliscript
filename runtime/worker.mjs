@@ -2,11 +2,42 @@
 
 import { createHash } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  decodeWorkerValues,
+  encodeWorkerValue,
+  workerValueEncoding,
+} from "./worker-value-codec.mjs";
 
 export const protocolVersion = 1;
+const runtimeDirectory = dirname(fileURLToPath(import.meta.url));
+const runtimeSpecifierPrefix = "eliscript/runtime/";
+
+function installRuntimeResolver() {
+  Bun.plugin({
+    name: "eliscript-worker-runtime",
+    setup(build) {
+      build.onResolve(
+        { filter: /^eliscript\/runtime\// },
+        ({ path: specifier }) => {
+          const suffix = specifier.slice(runtimeSpecifierPrefix.length);
+          const target = resolve(runtimeDirectory, suffix);
+          const local = relative(runtimeDirectory, target);
+          if (suffix.length === 0 || isAbsolute(local) ||
+              local === ".." || local.startsWith(`..${sep}`)) {
+            throw new Error(`worker runtime import escapes package runtime: ${specifier}`);
+          }
+          return { namespace: "file", path: target };
+        },
+      );
+    },
+  });
+}
+
+installRuntimeResolver();
+
 export const capabilities = [
   "request",
   "progress",
@@ -17,6 +48,8 @@ export const capabilities = [
   "module-version",
   "project-manifest",
   "portable-manifest",
+  "runtime-resolution",
+  "value-codec-v1",
 ];
 
 const maximumLineBytes = 16 * 1024 * 1024;
@@ -458,6 +491,12 @@ function validateRequest(message) {
   if (!Array.isArray(message.arguments)) {
     throw new Error("request arguments must be an array");
   }
+  if (message.valueEncoding !== undefined &&
+      message.valueEncoding !== workerValueEncoding) {
+    throw new Error(
+      `request valueEncoding must be ${workerValueEncoding}`,
+    );
+  }
   if (message.moduleVersion !== undefined &&
       (typeof message.moduleVersion !== "string" ||
        message.moduleVersion.length === 0 || message.moduleVersion.length > 512)) {
@@ -539,28 +578,38 @@ async function executeRequest(message) {
         : "missing-portable";
       throw error;
     }
+    const usesValueCodec = message.valueEncoding === workerValueEncoding;
+    const arguments_ = usesValueCodec
+      ? decodeWorkerValues(message.arguments)
+      : message.arguments;
     const context = {
       signal: entry.controller.signal,
       progress(value) {
         if (entry.controller.signal.aborted) return;
-        writeMessage({
+        const response = {
           version: protocolVersion,
           type: "progress",
           id: message.id,
-          value: jsonValue(value, "progress value"),
-        });
+          value: usesValueCodec
+            ? encodeWorkerValue(value)
+            : jsonValue(value, "progress value"),
+        };
+        if (usesValueCodec) response.valueEncoding = workerValueEncoding;
+        writeMessage(response);
       },
     };
     executionStartedAt = performance.now();
     const operationPromise = Promise.resolve(
-      operation(...message.arguments, context),
+      operation(...arguments_, context),
     );
     const value = await Promise.race([operationPromise, abortPromise(entry)]);
     executionMs = performance.now() - executionStartedAt;
     const serializationStartedAt = performance.now();
-    const serializedValue = jsonValue(value, "response value");
+    const serializedValue = usesValueCodec
+      ? encodeWorkerValue(value)
+      : jsonValue(value, "response value");
     serializationMs = performance.now() - serializationStartedAt;
-    writeMessage({
+    const response = {
       version: protocolVersion,
       type: "response",
       id: message.id,
@@ -576,7 +625,9 @@ async function executeRequest(message) {
         serializationMs,
         workerMs: performance.now() - startedAt,
       },
-    });
+    };
+    if (usesValueCodec) response.valueEncoding = workerValueEncoding;
+    writeMessage(response);
   } catch (error) {
     if (executionStartedAt !== undefined && executionMs === 0) {
       executionMs = performance.now() - executionStartedAt;

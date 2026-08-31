@@ -95,8 +95,12 @@ make host-container construction and access explicit, while language-level
 expressions now construct canonical immutable runtime values while
 Keyword-shaped host property keys retain explicit string-key behavior. Quote
 now constructs canonical persistent List/Vector and identifier values instead
-of mutable Arrays and strings. The Emacs value bridge remains open;
-transport-safe protocol representation is not yet implemented.
+of mutable Arrays and strings. The first Emacs value-bridge slice now adds an
+opt-in versioned worker codec for persistent values, metadata, exact nullish
+and numeric categories, deterministic native containers, and portable
+closures generated outside the package tree. Streaming/chunked transport,
+protocol-definition transport, and static transient escape analysis remain
+open.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in

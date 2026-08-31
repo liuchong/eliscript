@@ -939,7 +939,7 @@
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-separates-persistent-vectors-from-host-arrays" },
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "persistent literals and quoted data preserve language value categories" },
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "explicit host-only modules do not link the persistent runtime" },
-        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "portable closures reject persistent constructors and collection literals" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "portable closures produce persistent values for the versioned worker codec" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
     },
@@ -1000,10 +1000,26 @@
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-literals-and-data" },
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-expander-preserves-quoted-data" },
         { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "persistent literals and quoted data preserve language value categories" },
-        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "portable closures reject persistent constructors and collection literals" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "portable closures produce persistent values for the versioned worker codec" },
         { "kind": "bun-test", "file": "tests/macro-generated-names.test.mjs", "contains": "macro-generated names are deterministic and capture-safe" },
         { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" },
         { "kind": "bun-test", "file": "tests/bootstrap-emitter.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
+    },
+    {
+      "id": "worker.persistent-value-codec-v1",
+      "title": "Versioned Emacs worker persistent value codec",
+      "status": "accepted",
+      "spec": "0088",
+      "contracts": ["Negotiates an opt-in value encoding without changing protocol v1 JSON defaults", "Round trips persistent List, Vector, Map, Set, Keyword, Symbol, metadata, undefined, special numbers, native Arrays, and native Objects", "Rejects unsupported, cyclic, duplicate, malformed, and resource-exhausting values with structured errors", "Allows seed and self-hosted portable closures to construct persistent values for explicit worker transport"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/worker-value-codec.test.mjs", "contains": "worker value codec preserves persistent categories and metadata" },
+        { "kind": "bun-test", "file": "tests/worker-value-codec.test.mjs", "contains": "worker value codec rejects unsupported, cyclic, duplicate, and oversized values" },
+        { "kind": "bun-test", "file": "tests/worker-runtime.test.mjs", "contains": "worker negotiates the persistent value codec without changing JSON mode" },
+        { "kind": "bun-test", "file": "tests/literal-runtime.test.mjs", "contains": "portable closures produce persistent values for the versioned worker codec" },
+        { "kind": "ert", "file": "tests/eliscript-worker-tests.el", "contains": "eliscript-emacs-value-codec-preserves-language-categories" },
+        { "kind": "ert", "file": "tests/eliscript-worker-tests.el", "contains": "eliscript-emacs-client-negotiates-persistent-value-codec" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
     }

@@ -54,7 +54,7 @@ Both emit exactly:
 __eliscript_keyword("namespace/name")
 ```
 
-The binding is imported from `eliscript/runtime/literals`. That ABI re-exports
+The binding is imported from `eliscript/runtime/literals.mjs`. That ABI re-exports
 the canonical runtime `keyword` constructor and does not define another
 identifier representation. Repeated equal source Keywords are interned,
 frozen, value-equal, hash-equal, and valid persistent Map or Set keys.
@@ -97,14 +97,14 @@ macro expansion; it no longer erases the Keyword category into a string.
 ## Portable Boundary
 
 Optimized source Keyword values are not JSON-compatible and fail explicit JSON
-serialization. Portable closures therefore reject an evaluated Keyword
-literal with the same persistent-runtime-value category used for persistent
-Vector and Map literals until the versioned worker value codec is implemented.
+serialization. Portable closures accept evaluated and quoted Keyword values;
+callers select the 0088 worker codec when those values cross the process
+boundary.
 
 Keyword-shaped native property keys remain portable because they compile to
-strings and cross the worker boundary as ordinary host-object keys. Portable
-code that needs a transportable language Keyword continues to use the
-Eliscript-authored identifier constructor defined by specification 0070.
+strings and cross the worker boundary as ordinary host-object keys. The
+Eliscript-authored identifier constructor from specification 0070 and source
+Keyword syntax now share the same transport category.
 
 ## Import and Bootstrap Discipline
 
@@ -131,8 +131,8 @@ remain separate contracts.
 
 ## Remaining P3 Work
 
-1. implement transport-safe persistent values in the Emacs worker codec
-2. audit legacy List and native-container compatibility forms
+1. audit legacy List and native-container compatibility forms
+2. add static transient escape analysis
 3. complete application and package migration evidence
 4. promote the literal and host-container family after compatibility review
 
@@ -158,8 +158,8 @@ remain separate contracts.
   matching seed/self-hosted expansion and source locations.
 - **SKL-10:** Quoted Keywords retain their syntax category as canonical Keyword
   values under the 0087 persistent quote contract.
-- **SKL-11:** Portable closures reject evaluated and quoted source Keywords
-  while accepting Keyword-shaped static host keys.
+- **SKL-11:** Portable closures accept evaluated and quoted source Keywords
+  while Keyword-shaped static host keys retain native string behavior.
 - **SKL-12:** Bun and Node produce identical Keyword identity, name, string,
   and persistent Map reports.
 - **SKL-13:** ESM, Source Maps, diagnostics, complete IR, and the compiler

@@ -67,8 +67,8 @@ equality without interning. Both implement `IEquiv` and `IHash`, use distinct
 deterministic category tags, and participate directly in persistent Map and
 Set operations. A non-enumerable global logical-type brand lets portable
 Eliscript value algorithms recognize the same categories without depending on
-the runtime classes. Serialization fails explicitly until the value codec is
-specified.
+the runtime classes. The versioned Emacs worker value codec preserves both
+identifier categories across the process boundary.
 
 ### Metadata
 
@@ -174,8 +174,8 @@ transient construction for persistent Map targets without type branches.
 
 `stdlib/core/protocol.eli`, `stdlib/core/seq.eli`, `stdlib/core/data.eli`,
 `stdlib/core/text.eli`, and `stdlib/core/object.eli` provide the maintained
-Lisp-named Eliscript implementations. A transport-safe protocol representation
-for portable worker values remains later work.
+Lisp-named Eliscript implementations. Protocol definitions and extension
+tables remain process-local and are not serialized by the worker value codec.
 
 ### Worker Host
 
@@ -185,4 +185,9 @@ requests, and supports progress, cooperative cancellation, timeouts, structured
 errors, module caching, and shutdown. Protocol stdout is isolated from module
 logs, which are redirected to stderr. Requests may address a raw generated ESM
 export or resolve a `defportable` source name through the module's frozen
-`__eliscript_portable__` manifest.
+`__eliscript_portable__` manifest. `worker-value-codec.mjs` adds the explicit
+`eliscript-value-v1` encoding for persistent values, identifiers, metadata,
+special numeric/nullish values, and explicit native containers. The worker
+also confines generated `eliscript/runtime/` imports to this package runtime,
+so temporary portable builds do not depend on their output directory for
+runtime resolution.

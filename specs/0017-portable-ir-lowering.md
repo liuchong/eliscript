@@ -54,9 +54,9 @@ The portable lowerer implements all 55 public IR kinds from specification
 functions and lexical bindings, all control forms, assignments, intrinsics,
 native and persistent collection constructors, JavaScript interop, objects,
 and application-level React elements and fragments. Portable closure analysis
-rejects persistent collection and evaluated Keyword values until their worker
-codec is implemented. Static host-property Keyword markers remain strings and
-do not cross that value boundary.
+accepts persistent collection, evaluated Keyword, and quoted persistent values
+now that 0088 defines their explicit worker codec. Static host-property Keyword
+markers remain strings and do not cross that value boundary.
 
 Lowering only consumes syntax that has passed macro expansion and lexical
 analysis. It preserves operator distinctions and source order, performs no

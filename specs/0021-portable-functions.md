@@ -29,16 +29,14 @@ A portable function may depend transitively on:
 - parameters and lexical bindings
 - another `defportable` declaration
 - an immutable `defconst` whose own initializer satisfies this boundary
-- scalar literals, transport-safe scalar quote, explicit host arrays/objects,
-  control flow, arithmetic, comparison, list/array operations, property reads,
-  and string conversion
+- scalar and persistent literals, persistent quoted data, explicit host
+  arrays/objects, control flow, arithmetic, comparison, list/array operations,
+  property reads, and string conversion
 - local assignment and loops whose mutated bindings are lexical to the
   portable function
 
-The initial subset rejects:
+The subset rejects:
 
-- persistent List/Vector/Symbol/Keyword quote until the versioned value codec
-  is implemented
 - ordinary `defun`/`defn` dependencies
 - mutable top-level `defvar` state
 - ordinary imported bindings and qualified JavaScript references
@@ -51,8 +49,9 @@ visited once. Diagnostics identify the portable declaration, forbidden
 dependency or form, and source location.
 
 The checker establishes host independence, not a complete data type proof.
-Arguments and results must still satisfy protocol v1 JSON serialization at
-runtime.
+Legacy calls require protocol-v1 JSON-compatible arguments and results.
+Callers selecting the versioned codec from specification 0088 may carry
+persistent List, Vector, Map, Set, Keyword, Symbol, and metadata values.
 
 ## Closure Compilation
 

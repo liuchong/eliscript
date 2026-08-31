@@ -115,6 +115,12 @@ JSON arrays cross the Emacs boundary as vectors, objects as alists, JSON false
 as `:false`, and JSON null as nil. This is the initial transport representation,
 not a promise of transparent Emacs object serialization.
 
+Specification [0088-emacs-worker-value-codec.md](0088-emacs-worker-value-codec.md)
+adds an opt-in `eliscript-value-v1` encoding without changing protocol version
+1 or this default. Requests that select it receive explicit Emacs records for
+persistent values and repeat the encoding identifier on progress and success
+messages.
+
 ## Timing Contract
 
 Each worker response reports durations in milliseconds:

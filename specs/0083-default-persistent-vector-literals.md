@@ -31,7 +31,7 @@ In expression position:
 ```
 
 lowers to `persistent-vector-literal` and links the constructor from
-`eliscript/runtime/literals`. Nested square-bracket expressions are persistent
+`eliscript/runtime/literals.mjs`. Nested square-bracket expressions are persistent
 Vectors independently. The explicit `(vector ...)` form remains an equivalent
 constructor.
 
@@ -99,10 +99,10 @@ silently redirected through collection protocols.
 
 ## Portable and Bootstrap Boundary
 
-Portable closures reject square-bracket value expressions, `(vector ...)`,
-and `(hash-map ...)` until the persistent-value worker codec is specified and
-implemented. The diagnostic identifies persistent runtime values. Binding
-patterns and explicit host arrays remain portable.
+Portable closures accept square-bracket value expressions, `(vector ...)`, and
+`(hash-map ...)`. Calls that transport their values select the explicit 0088
+worker codec. Binding patterns and explicit host arrays remain portable under
+both the codec and legacy JSON modes.
 
 All maintained self-hosted compiler sources use explicit host containers and
 access operations for syntax trees, IR nodes, source-map segments, emission
@@ -123,8 +123,8 @@ distinction before the persistent literal family is promoted to stable.
 
 The following integration work remains after this slice:
 
-1. implement transport-safe persistent values in the Emacs worker codec
-2. audit legacy `car`, `cdr`, `cons`, `list`, and `array` compatibility forms
+1. audit legacy `car`, `cdr`, `cons`, `list`, and `array` compatibility forms
+2. add static transient escape analysis
 3. promote the complete literal and host-container contract after migration
 
 ## Acceptance Criteria
@@ -143,8 +143,8 @@ The following integration work remains after this slice:
   runtime and work for both persistent Vectors and native arrays.
 - **PVL-07:** `js-nth` and `js-length` preserve explicit host behavior and do
   not import the collection runtime.
-- **PVL-08:** Portable analysis rejects square-bracket value expressions with
-  matching seed and self-hosted diagnostics while accepting host forms.
+- **PVL-08:** Portable analysis accepts square-bracket value expressions,
+  recursively validates their contents, and matches in seed/self-hosted output.
 - **PVL-09:** Maintained bootstrap and portable standard-library sources
   contain no implicit square-bracket work-buffer values.
 - **PVL-10:** Seed and self-hosted ESM, Source Maps, diagnostics, and complete

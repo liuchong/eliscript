@@ -70,7 +70,7 @@ an already materialized Map value.
 
 ## Runtime ABI
 
-`eliscript/runtime/literals` adds two package-owned constructor exports:
+`eliscript/runtime/literals.mjs` adds two package-owned constructor exports:
 
 ```text
 list symbol
@@ -97,10 +97,10 @@ output must remain a byte-identical fixed point.
 
 ## Portable Worker Boundary
 
-Quoted data that constructs a List, Vector, Symbol, or Keyword is a persistent
-runtime value and is rejected inside `defportable` until the versioned worker
-value codec exists. Seed and self-hosted analyzers produce the same structured
-diagnostic category.
+Quoted data that constructs a List, Vector, Symbol, or Keyword is accepted
+inside `defportable`. Seed and self-hosted analyzers produce byte-identical
+runtime constructor calls, and callers use the explicit 0088 worker codec when
+those values cross the process boundary.
 
 Quoted Number, string, `t`, and `undefined` values remain portable because
 their runtime representation is already transport-safe and requires no
@@ -138,8 +138,8 @@ runtime-value migration.
   absent from scalar-quote-only and explicit-host-only modules.
 - **QPD-09:** Macro-generated Symbols retain deterministic spelling and capture
   behavior after becoming runtime Symbol values.
-- **QPD-10:** Persistent quoted data is rejected from portable closures while
-  transport-safe scalar quote remains accepted.
+- **QPD-10:** Persistent and scalar quoted data are accepted in portable
+  closures with matching seed/self-hosted output and codec behavior.
 - **QPD-11:** Dotted quoted Lists continue to fail deterministically.
 - **QPD-12:** Public-surface, compatibility, and conformance registries track
   both new literal-runtime exports and executable evidence.
@@ -153,6 +153,6 @@ runtime-value migration.
 
 ## Next Boundary
 
-The remaining P3 transport task is a versioned persistent-value codec for the
-Emacs worker. Static transient escape analysis and the complete provisional
-compatibility freeze remain separate later gates.
+The versioned persistent-value codec is implemented by 0088. Static transient
+escape analysis and the complete provisional compatibility freeze remain
+separate later gates.

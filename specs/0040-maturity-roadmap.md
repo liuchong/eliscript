@@ -609,9 +609,13 @@ metadata protocols, portable hash parity, million-node evidence, and
 parenthesized canonical data text. First-class persistent List/Vector/Symbol/
 Keyword quote then lands in
 [0087-first-class-quoted-persistent-data.md](0087-first-class-quoted-persistent-data.md),
-including literal ABI, canonical text, portable rejection, macro-generated
-Symbol, and fixed-point evidence. Transport-safe protocol representation and
-static escape analysis remain open. Canonical
+including literal ABI, canonical text, portable construction, macro-generated
+Symbol, and fixed-point evidence. The opt-in Emacs worker value codec in
+[0088-emacs-worker-value-codec.md](0088-emacs-worker-value-codec.md) now
+preserves all persistent categories, metadata, exact special scalars, and
+explicit native containers across temporary generated modules. Transport of
+protocol definitions, streaming/chunked values, and static escape analysis
+remain open. Canonical
 printing/reading for the optimized runtime family now lands in
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md);
 portable Keyword/Symbol values and List/collection data text now land in

@@ -135,10 +135,10 @@ would add lifecycle complexity without improving the core operation.
 This is an additive provisional runtime surface. Existing portable List APIs
 and optimized Vector, Map, and Set representations keep their contracts.
 Specification 0087 now uses this representation for source quote; worker
-transport encoding remains separate work.
+transport encoding is provided by 0088.
 
 The persistent literal ABI now uses this runtime value for quoted List data
-through 0087. A versioned worker value codec remains separate work.
+through 0087, and 0088 transports the value without changing its category.
 
 ## Acceptance Criteria
 

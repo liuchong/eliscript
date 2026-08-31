@@ -26,7 +26,7 @@ persistent Vectors and annotates host-dependent maintained sources explicitly.
 Generated modules import persistent constructors from exactly:
 
 ```text
-eliscript/runtime/literals
+eliscript/runtime/literals.mjs
 ```
 
 The package export resolves to `runtime/literals.mjs`. Its public surface is:
@@ -76,10 +76,11 @@ The Emacs Lisp seed and Eliscript-authored compiler implement the same IR,
 analysis, lowering, import discovery, emission, diagnostics, and Source Map
 behavior. Three-generation compiler fixed-point evidence remains mandatory.
 
-Portable worker closures reject `(vector ...)`, square-bracket Vector values,
-and `(hash-map ...)` for now. Their optimized runtime values are not
-JSON-compatible, and transport-safe protocol/value encoding remains a separate
-requirement. Explicit native arrays remain portable.
+Portable worker closures may construct `(vector ...)`, square-bracket Vector
+values, `(hash-map ...)`, source Keywords, and persistent quoted data. Calls
+that carry those values select the explicit worker value codec from 0088;
+legacy JSON calls remain limited to JSON-compatible results. Explicit native
+arrays remain portable in either mode.
 
 ## Architecture Boundary
 
@@ -95,8 +96,8 @@ Specifications 0083 and 0084 complete default Vector and Map expression
 syntax, maintained-source annotation, protocol collection access, and
 compatibility recording. The following work remains explicit:
 
-1. integrate persistent values with the Emacs transport codec
-2. audit legacy list and native-container compatibility forms
+1. audit legacy list and native-container compatibility forms
+2. add static transient escape analysis
 3. promote the complete literal boundary after the remaining migration
 
 ## Acceptance Criteria
