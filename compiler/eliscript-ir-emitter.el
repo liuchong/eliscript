@@ -193,7 +193,224 @@
                (eliscript-ir-emitter--emit-parameter parameter))
              parameters ", ")
             (eliscript-emitter--indent
-             (eliscript-ir-emitter--emit-returning-body body)))))
+             (eliscript-ir-emitter--emit-function-body parameters body)))))
+
+(defun eliscript-ir-emitter--contains-recur-target-p (value target-kind)
+  "Return non-nil when VALUE recurs to TARGET-KIND in this function."
+  (cond
+   ((eliscript-ir-node-p value)
+    (let ((kind (eliscript-ir-node-kind value)))
+      (cond
+       ((eq kind 'recur)
+        (eq (eliscript-ir-property value :target-kind) target-kind))
+       ((eq kind 'function-expression) nil)
+       (t
+        (cl-some
+         (lambda (child)
+           (eliscript-ir-emitter--contains-recur-target-p child target-kind))
+         (eliscript-ir-emitter--children value))))))
+   ((consp value)
+    (cl-some
+     (lambda (child)
+       (eliscript-ir-emitter--contains-recur-target-p child target-kind))
+     value))
+   (t nil)))
+
+(defun eliscript-ir-emitter--emit-rebinding-target (binding temporary)
+  "Assign TEMPORARY to mutable BINDING, including a destructuring target."
+  (let ((target (eliscript-ir-emitter--emit-binding-target binding)))
+    (if (eliscript-ir-property binding :pattern)
+        (format "(%s = %s);" target temporary)
+      (format "%s = %s;" target temporary))))
+
+(defun eliscript-ir-emitter--emit-recur-tail (node target)
+  "Emit tail-position recur NODE for TARGET."
+  (unless (eq (eliscript-ir-property node :target-kind)
+              (plist-get target :kind))
+    (eliscript-emitter--fail "recur target does not match its enclosing loop"))
+  (let* ((arguments (eliscript-ir-emitter--children node))
+         (bindings (plist-get target :bindings))
+         (temporaries
+          (mapcar (lambda (_argument) (eliscript-emitter--fresh-name))
+                  arguments))
+         parts)
+    (cl-mapc
+     (lambda (temporary argument)
+       (push
+        (format "const %s = %s;"
+                temporary
+                (eliscript-ir-emitter-emit-expression argument))
+        parts))
+     temporaries arguments)
+    (cl-mapc
+     (lambda (binding temporary)
+       (push
+        (eliscript-ir-emitter--emit-rebinding-target binding temporary)
+        parts))
+     bindings temporaries)
+    (push (format "continue %s;" (plist-get target :label)) parts)
+    (eliscript-ir-emitter--locate
+     node (string-join (nreverse parts) "\n"))))
+
+(defun eliscript-ir-emitter--emit-tail-body (nodes target)
+  "Emit NODES so their final value returns or recurs to TARGET."
+  (if (null nodes)
+      "return null;"
+    (let ((initial (butlast nodes))
+          (final (car (last nodes))))
+      (string-join
+       (append
+        (mapcar
+         (lambda (node)
+           (concat (eliscript-ir-emitter-emit-expression node) ";"))
+         initial)
+        (list (eliscript-ir-emitter--emit-tail-node final target)))
+       "\n"))))
+
+(defun eliscript-ir-emitter--emit-tail-cond (clauses target)
+  "Emit conditional CLAUSES in recur-aware tail position for TARGET."
+  (if (null clauses)
+      "return null;"
+    (let* ((clause (car clauses))
+           (children (eliscript-ir-emitter--children clause))
+           (test (car children))
+           (body (cdr children)))
+      (eliscript-ir-emitter--locate
+       clause
+       (if (and (eq (eliscript-ir-node-kind test) 'literal)
+                (eq (eliscript-ir-node-value test) t))
+           (eliscript-ir-emitter--emit-tail-body body target)
+         (format "if (__eliscript_truthy(%s)) {\n%s\n} else {\n%s\n}"
+                 (eliscript-ir-emitter-emit-expression test)
+                 (eliscript-emitter--indent
+                  (eliscript-ir-emitter--emit-tail-body body target))
+                 (eliscript-emitter--indent
+                  (eliscript-ir-emitter--emit-tail-cond
+                   (cdr clauses) target))))))))
+
+(defun eliscript-ir-emitter--emit-tail-let (node target)
+  "Emit lexical binding NODE in recur-aware tail position for TARGET."
+  (pcase-let* ((`(,bindings ,body)
+                (eliscript-ir-emitter--split-counted-children
+                 node :binding-count))
+               (sequential (eliscript-ir-property node :sequential))
+               (parts nil))
+    (if sequential
+        (dolist (binding bindings)
+          (push
+           (format "let %s = %s;"
+                   (eliscript-ir-emitter--emit-binding-target binding)
+                   (let ((initializer
+                          (eliscript-ir-emitter--binding-initializer binding)))
+                     (if initializer
+                         (eliscript-ir-emitter-emit-expression initializer)
+                       (if (eliscript-ir-property binding :pattern)
+                           "[]" "null"))))
+           parts))
+      (let ((temporaries
+             (mapcar (lambda (_binding) (eliscript-emitter--fresh-name))
+                     bindings)))
+        (cl-mapc
+         (lambda (binding temporary)
+           (let ((initializer
+                  (eliscript-ir-emitter--binding-initializer binding)))
+             (push
+              (format "const %s = %s;"
+                      temporary
+                      (if initializer
+                          (eliscript-ir-emitter-emit-expression initializer)
+                        (if (eliscript-ir-property binding :pattern)
+                            "[]" "null")))
+              parts)))
+         bindings temporaries)
+        (cl-mapc
+         (lambda (binding temporary)
+           (push
+            (format "let %s = %s;"
+                    (eliscript-ir-emitter--emit-binding-target binding)
+                    temporary)
+            parts))
+         bindings temporaries)))
+    (push (eliscript-ir-emitter--emit-tail-body body target) parts)
+    (eliscript-ir-emitter--locate
+     node
+     (concat "{\n"
+             (eliscript-emitter--indent (string-join (nreverse parts) "\n"))
+             "\n}"))))
+
+(defun eliscript-ir-emitter--emit-tail-short-circuit (nodes kind target)
+  "Emit recur-aware short-circuit NODES of KIND for TARGET."
+  (cond
+   ((null nodes) (format "return %s;" (if (eq kind 'and) "true" "null")))
+   ((null (cdr nodes))
+    (eliscript-ir-emitter--emit-tail-node (car nodes) target))
+   (t
+    (let ((temporary (eliscript-emitter--fresh-name)))
+      (format
+       "const %s = %s;\nif (__eliscript_truthy(%s)) {\n%s\n} else {\n%s\n}"
+       temporary
+       (eliscript-ir-emitter-emit-expression (car nodes))
+       temporary
+       (eliscript-emitter--indent
+        (if (eq kind 'and)
+            (eliscript-ir-emitter--emit-tail-short-circuit
+             (cdr nodes) kind target)
+          (format "return %s;" temporary)))
+       (eliscript-emitter--indent
+        (if (eq kind 'and)
+            (format "return %s;" temporary)
+          (eliscript-ir-emitter--emit-tail-short-circuit
+           (cdr nodes) kind target))))))))
+
+(defun eliscript-ir-emitter--emit-tail-node (node target)
+  "Emit NODE in a tail position controlled by TARGET."
+  (let ((kind (eliscript-ir-node-kind node))
+        (children (eliscript-ir-emitter--children node)))
+    (pcase kind
+      ('recur (eliscript-ir-emitter--emit-recur-tail node target))
+      ('conditional
+       (format "if (__eliscript_truthy(%s)) {\n%s\n} else {\n%s\n}"
+               (eliscript-ir-emitter-emit-expression (nth 0 children))
+               (eliscript-emitter--indent
+                (eliscript-ir-emitter--emit-tail-node
+                 (nth 1 children) target))
+               (eliscript-emitter--indent
+                (if (nth 2 children)
+                    (eliscript-ir-emitter--emit-tail-node
+                     (nth 2 children) target)
+                  "return null;"))))
+      ('conditional-sugar
+       (let ((positive (eq (eliscript-ir-node-value node) 'when)))
+         (format "if (%s__eliscript_truthy(%s)) {\n%s\n} else {\n  return null;\n}"
+                 (if positive "" "!")
+                 (eliscript-ir-emitter-emit-expression (car children))
+                 (eliscript-emitter--indent
+                  (eliscript-ir-emitter--emit-tail-body
+                   (cdr children) target)))))
+      ('conditional-chain
+       (eliscript-ir-emitter--emit-tail-cond children target))
+      ('sequence
+       (eliscript-ir-emitter--emit-tail-body children target))
+      ('lexical-bindings
+       (eliscript-ir-emitter--emit-tail-let node target))
+      ('short-circuit
+       (eliscript-ir-emitter--emit-tail-short-circuit
+        children (eliscript-ir-node-value node) target))
+      (_
+       (concat "return "
+               (eliscript-ir-emitter-emit-expression node)
+               ";")))))
+
+(defun eliscript-ir-emitter--emit-function-body (parameters body)
+  "Emit function BODY with recur-aware PARAMETER rebinding when required."
+  (if (not (eliscript-ir-emitter--contains-recur-target-p body 'function))
+      (eliscript-ir-emitter--emit-returning-body body)
+    (let* ((label (eliscript-emitter--fresh-name))
+           (target (list :kind 'function :bindings parameters :label label)))
+      (format "%s: while (true) {\n%s\n}"
+              label
+              (eliscript-emitter--indent
+               (eliscript-ir-emitter--emit-tail-body body target))))))
 
 (defun eliscript-ir-emitter--emit-if (nodes)
   "Emit conditional child NODES."
@@ -386,6 +603,32 @@
        "\n}\nreturn null;"))
      ""
      (eliscript-ir-emitter--contains-await-p children))))
+
+(defun eliscript-ir-emitter--emit-binding-loop (node)
+  "Emit recur-capable lexical binding loop NODE."
+  (pcase-let* ((`(,bindings ,body)
+                (eliscript-ir-emitter--split-counted-children
+                 node :binding-count))
+               (label (eliscript-emitter--fresh-name))
+               (target (list :kind 'loop :bindings bindings :label label))
+               (parameters
+                (mapconcat
+                 #'eliscript-ir-emitter--emit-binding-target bindings ", "))
+               (initializers
+                (mapconcat
+                 (lambda (binding)
+                   (eliscript-ir-emitter-emit-expression
+                    (eliscript-ir-emitter--binding-initializer binding)))
+                 bindings ", ")))
+    (eliscript-ir-emitter--emit-iife
+     parameters
+     (eliscript-emitter--indent
+      (format "%s: while (true) {\n%s\n}"
+              label
+              (eliscript-emitter--indent
+               (eliscript-ir-emitter--emit-tail-body body target))))
+     initializers
+     (eliscript-ir-emitter--contains-await-p body))))
 
 (defun eliscript-ir-emitter--emit-short-circuit (nodes kind)
   "Emit Lisp-style short-circuit NODES for KIND."
@@ -795,6 +1038,10 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
       ('lexical-bindings (eliscript-ir-emitter--emit-let node))
       ('assignment (eliscript-ir-emitter--emit-assignment node))
       ('loop (eliscript-ir-emitter--emit-loop node))
+      ('binding-loop (eliscript-ir-emitter--emit-binding-loop node))
+      ('recur
+       (eliscript-emitter--fail
+        "recur is only valid in an analyzed tail position"))
       ('short-circuit
        (eliscript-ir-emitter--emit-short-circuit
         children (eliscript-ir-node-value node)))
@@ -916,9 +1163,10 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
                  (mapconcat
                   (lambda (parameter)
                     (eliscript-ir-emitter--emit-parameter parameter))
-                  parameters ", ")
+                 parameters ", ")
                  (eliscript-emitter--indent
-                  (eliscript-ir-emitter--emit-returning-body body)))))
+                  (eliscript-ir-emitter--emit-function-body
+                   parameters body)))))
       ('export-declaration
        (format "export {%s};"
                (mapconcat

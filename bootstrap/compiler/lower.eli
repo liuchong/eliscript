@@ -15,6 +15,7 @@
 
   (defconst fail
     (js* "(message) => { throw new Error(message); }"))
+  (defvar recur-targets [])
 
   (defun symbol-node-p (node)
     (and node (= (node-kind node) "symbol")))
@@ -298,9 +299,12 @@
   (defun lower-function
       (kind form value parameters body &optional asynchronous)
     (let ((parameter-nodes (lower-parameter-nodes parameters))
-          (children []))
+          (children [])
+          (previous-targets recur-targets))
+      (setq recur-targets ["function"])
       (append-nodes children parameter-nodes)
       (append-nodes children (lower-sequence body))
+      (setq recur-targets previous-targets)
       (make-node
         kind (node-span form) value children
         (object
@@ -354,6 +358,28 @@
             (lower-call-node "sequence" form operator args))
            ((or (= operator "let") (= operator "let*"))
             (lower-let form operator args))
+           ((= operator "loop")
+            (let ((bindings [])
+                  (children [])
+                  (previous-targets recur-targets)
+                  (targets ["loop"]))
+              (js-call (list-items (nth 0 args)) :forEach
+                (lambda (binding)
+                  (js-call bindings :push (lower-binding binding))))
+              (js-call previous-targets :forEach
+                (lambda (target) (js-call targets :push target)))
+              (setq recur-targets targets)
+              (append-nodes children bindings)
+              (append-nodes children
+                (lower-sequence (js-call args :slice 1)))
+              (setq recur-targets previous-targets)
+              (make-node
+                "binding-loop" (node-span form) nil children
+                (object :bindingCount (get bindings :length)))))
+           ((= operator "recur")
+            (make-node
+              "recur" (node-span form) nil (lower-sequence args)
+              (object :targetKind (nth 0 recur-targets))))
            ((or (= operator "setq") (= operator "set!"))
             (lower-assignments form operator args))
            ((= operator "while")
@@ -494,6 +520,7 @@
 
   (defun lower-module (forms filename)
     (let ((body []))
+      (setq recur-targets [])
       (js-call forms :forEach
         (lambda (form) (js-call body :push (lower-top-level form))))
       (make-program filename body)))

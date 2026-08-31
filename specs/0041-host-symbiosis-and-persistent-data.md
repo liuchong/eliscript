@@ -699,6 +699,10 @@ Owner-token runtime builders and transient-backed `into` follow in
 [0062-owner-token-transient-collections.md](0062-owner-token-transient-collections.md).
 Protocol-driven sequence and keyed-data algorithms continue in
 [0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md).
+Stack-safe portable iteration is now available through
+[0064-stack-safe-loop-recur.md](0064-stack-safe-loop-recur.md), so future
+portable protocol and algorithm definitions no longer need JavaScript stack
+recursion for iterative control.
 Portable protocol/algorithm definitions and static transient escape analysis
 stay open.
 

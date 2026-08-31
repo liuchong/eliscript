@@ -32,7 +32,8 @@
     throw-expression try-expression catch-clause catch-binding finally-clause
     conditional conditional-sugar
     conditional-chain conditional-clause sequence lexical-bindings
-    lexical-binding assignment assignment-pair loop short-circuit intrinsic
+    lexical-binding assignment assignment-pair loop binding-loop recur
+    short-circuit intrinsic
     object-literal object-property property-read property-write method-call
     constructor-call raw-javascript print string-concat invoke apply-call call
     react-element react-fragment)
@@ -237,6 +238,20 @@
                       (cl-subseq children 0 binding-count))
               (mapcar #'eliscript-ir-node-to-form
                       (nthcdr binding-count children))))))
+    ('binding-loop
+     (let* ((children (eliscript-ir-node-children node))
+            (binding-count (eliscript-ir-property node :binding-count)))
+       (cons
+        'loop
+        (cons
+         (mapcar #'eliscript-ir--binding-to-form
+                 (cl-subseq children 0 binding-count))
+         (mapcar #'eliscript-ir-node-to-form
+                 (nthcdr binding-count children))))))
+    ('recur
+     (cons 'recur
+           (mapcar #'eliscript-ir-node-to-form
+                   (eliscript-ir-node-children node))))
     ('lexical-binding (eliscript-ir--binding-to-form node))
     ('assignment
      (cons (eliscript-ir-node-value node)

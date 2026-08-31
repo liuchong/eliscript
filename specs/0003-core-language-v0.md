@@ -115,6 +115,11 @@ The compiler implements `if`, `when`, `unless`, `cond`, `progn`, `do`, `while`,
 `and`, and `or`. These forms are expressions and produce values. `while`
 returns `null`; `and` and `or` short-circuit and return operand values.
 
+Stack-safe `loop` and `recur` are added by
+[0064-stack-safe-loop-recur.md](0064-stack-safe-loop-recur.md). `recur` is an
+explicit compiler-recognized tail transfer; ordinary function calls retain
+ordinary JavaScript call semantics.
+
 `try` is also an expression. It accepts an optional lexical `catch` clause and
 an optional `finally` clause, with at least one required. `throw` raises exactly
 one evaluated value. The normal try or catch result is preserved through

@@ -41,6 +41,11 @@
       "source": "(defasync resolve-value (value &optional transform)\n  (let ((resolved (await value)))\n    (if transform (await (funcall transform resolved)) resolved)))\n(defconst delayed-double (async (value) (* (await value) 2)))"
     },
     {
+      "name": "stack-safe-loop-and-recur",
+      "filename": "recur.eli",
+      "source": "(defun triangular (n acc)\n  (if (= n 0) acc (recur (1- n) (+ acc n))))\n(defconst swapped\n  (loop ((left 1) (right 2) (steps 1))\n    (if (= steps 0) [left right]\n      (recur right left (1- steps)))))"
+    },
+    {
       "name": "exception-control-flow",
       "filename": "exceptions.eli",
       "source": "(defun recover (value)\n  (try\n    (if value value (throw \"missing\"))\n    (catch error (str \"caught:\" error))\n    (finally (print \"done\"))))\n(defasync settle (promise)\n  (try (await promise)\n    (catch error error)\n    (finally (await promise))))"
@@ -112,6 +117,54 @@
     }
   ],
   "invalid": [
+    {
+      "name": "recur-outside-target",
+      "filename": "recur-outside.eli",
+      "source": "(recur 1)",
+      "error": "recur-outside.eli:1:1: recur is only valid inside a function or loop"
+    },
+    {
+      "name": "parallel-loop-initializer-scope",
+      "filename": "loop-parallel.eli",
+      "source": "(loop ((x 1) (y x)) y)",
+      "error": "loop-parallel.eli:1:17: unbound symbol: x"
+    },
+    {
+      "name": "recur-not-tail-position",
+      "filename": "recur-nontail.eli",
+      "source": "(defun broken (n) (+ 1 (recur n)))",
+      "error": "recur-nontail.eli:1:24: recur is only valid in tail position"
+    },
+    {
+      "name": "recur-function-arity",
+      "filename": "recur-function-arity.eli",
+      "source": "(defun broken (n acc) (recur n))",
+      "error": "recur-function-arity.eli:1:23: recur expects 2 arguments for the current function, got 1"
+    },
+    {
+      "name": "recur-loop-arity",
+      "filename": "recur-loop-arity.eli",
+      "source": "(loop ((x 0) (y 1)) (recur x))",
+      "error": "recur-loop-arity.eli:1:21: recur expects 2 arguments for the current loop, got 1"
+    },
+    {
+      "name": "recur-crosses-try",
+      "filename": "recur-try.eli",
+      "source": "(defun broken (n) (try (recur n) (finally nil)))",
+      "error": "recur-try.eli:1:24: recur cannot cross a try boundary"
+    },
+    {
+      "name": "loop-binding-without-initializer",
+      "filename": "loop-binding.eli",
+      "source": "(loop ((x)) x)",
+      "error": "loop-binding.eli:1:8: loop bindings require exactly one initializer: (x)"
+    },
+    {
+      "name": "nested-function-resets-recur-target",
+      "filename": "recur-nested-function.eli",
+      "source": "(defun outer (x y) (lambda (n) (recur n y)))",
+      "error": "recur-nested-function.eli:1:32: recur expects 1 arguments for the current function, got 2"
+    },
     {
       "name": "unbound-symbol",
       "filename": "unbound.eli",

@@ -535,8 +535,13 @@ gates. Protocol-driven sequence and keyed-data algorithms then land in
 [0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md),
 with persistent results, Eliscript truth semantics, exact early termination,
 runtime-backed source facades, and transient indexing evidence. Portable
-protocol/algorithm definitions, object/text migration, static escape analysis,
-efficient host identity hashing, metadata, printing, and reading remain open.
+protocol/algorithm definitions remain open. Stack-safe function and binding
+iteration now lands in
+[0064-stack-safe-loop-recur.md](0064-stack-safe-loop-recur.md), with exact tail
+positions, nearest-target analysis, simultaneous pattern rebinding,
+seed/self-hosted fixed-point evidence, and million-step Bun/Node execution.
+Macro hygiene, object/text migration, static escape analysis, efficient host
+identity hashing, metadata, printing, and reading remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

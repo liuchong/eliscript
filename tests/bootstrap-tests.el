@@ -275,6 +275,11 @@
       ('lexical-bindings
        `((sequential . ,(if (eliscript-ir-property node :sequential) t :false))
          (bindingCount . ,(eliscript-ir-property node :binding-count))))
+      ('binding-loop
+       `((bindingCount . ,(eliscript-ir-property node :binding-count))))
+      ('recur
+       `((targetKind . ,(symbol-name
+                         (eliscript-ir-property node :target-kind)))))
       ('try-expression
        `((bodyCount . ,(eliscript-ir-property node :body-count))))
       ('lexical-binding

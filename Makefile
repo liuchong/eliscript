@@ -17,7 +17,8 @@ test: check-contracts
 		tests/bootstrap-symbol.test.mjs tests/bootstrap-reader.test.mjs \
 		tests/bootstrap-expander.test.mjs tests/bootstrap-analyzer.test.mjs \
 		tests/bootstrap-ir.test.mjs tests/bootstrap-emitter.test.mjs \
-		tests/bootstrap-compiler.test.mjs tests/worker-runtime.test.mjs \
+		tests/bootstrap-compiler.test.mjs tests/loop-recur.test.mjs \
+		tests/worker-runtime.test.mjs \
 		tests/worker-benchmark.test.mjs tests/stdlib-sequence.test.mjs \
 		tests/stdlib-text.test.mjs tests/stdlib-object.test.mjs \
 		tests/stdlib-bit.test.mjs \

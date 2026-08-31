@@ -927,6 +927,36 @@
      (equal (eliscript-compile-string source filename)
             (eliscript-tests--legacy-compile-string source filename)))))
 
+(ert-deftest eliscript-loop-recur-matches-compatibility-backend ()
+  (let ((source
+         "(defun countdown (remaining count)
+  (if (= remaining 0) count
+    (recur (1- remaining) (1+ count))))
+(defconst swapped
+  (loop ((left 1) (right 2) (steps 1))
+    (if (= steps 0) [left right]
+      (recur right left (1- steps)))))")
+        (filename "loop-recur-parity.eli"))
+    (should
+     (equal (eliscript-compile-string source filename)
+            (eliscript-tests--legacy-compile-string source filename)))))
+
+(ert-deftest eliscript-loop-recur-round-trips-through-ir-forms ()
+  (let* ((source
+          "(loop ((left 1) (right 2))
+  (if left (recur right left) [left right]))")
+         (forms
+          (eliscript-analyze-module
+           (eliscript-expand-module
+            (eliscript-read-located-string source "loop-ir.eli")
+            "loop-ir.eli")
+           "loop-ir.eli"))
+         (program (eliscript-lower-module forms "loop-ir.eli")))
+    (should
+     (equal (eliscript-ir-program-to-forms program)
+            '((loop ((left 1) (right 2))
+                (if left (recur right left) [left right])))))))
+
 (ert-deftest eliscript-emits-portable-32-bit-operations ()
   (let* ((source
           "(defun bits (value distance)

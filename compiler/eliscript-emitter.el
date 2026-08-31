@@ -223,7 +223,245 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
             (if asynchronous "async " "")
             (mapconcat #'eliscript-emitter--emit-parameter parameters ", ")
             (eliscript-emitter--indent
-             (eliscript-emitter--emit-returning-body body)))))
+             (eliscript-emitter--emit-function-body parameters body)))))
+
+(defun eliscript-emitter--contains-function-recur-p (form)
+  "Return non-nil when FORM recurs to its current function."
+  (cond
+   ((vectorp form)
+    (cl-some #'eliscript-emitter--contains-function-recur-p
+             (append form nil)))
+   ((consp form)
+    (let ((operator (car form)))
+      (cond
+       ((eq operator 'recur) t)
+       ((memq operator '(lambda fn async loop)) nil)
+       (t
+        (cl-some #'eliscript-emitter--contains-function-recur-p form)))))
+   (t nil)))
+
+(defun eliscript-emitter--emit-rebinding-target (binding temporary)
+  "Assign TEMPORARY to mutable BINDING, including a vector pattern."
+  (let ((target (eliscript-emitter--emit-binding-target binding)))
+    (if (eliscript-emitter--binding-pattern-p binding)
+        (format "(%s = %s);" target temporary)
+      (format "%s = %s;" target temporary))))
+
+(defun eliscript-emitter--emit-recur-tail (arguments target)
+  "Emit tail recur ARGUMENTS for TARGET."
+  (let ((bindings (plist-get target :bindings)))
+    (unless (= (length arguments) (length bindings))
+      (eliscript-emitter--fail
+       "recur expects %d arguments, got %d"
+       (length bindings) (length arguments)))
+    (let ((temporaries
+           (mapcar (lambda (_argument) (eliscript-emitter--fresh-name))
+                   arguments))
+          parts)
+      (cl-mapc
+       (lambda (temporary argument)
+         (push (format "const %s = %s;"
+                       temporary
+                       (eliscript-emitter-emit-expression argument))
+               parts))
+       temporaries arguments)
+      (cl-mapc
+       (lambda (binding temporary)
+         (push (eliscript-emitter--emit-rebinding-target binding temporary)
+               parts))
+       bindings temporaries)
+      (push (format "continue %s;" (plist-get target :label)) parts)
+      (string-join (nreverse parts) "\n"))))
+
+(defun eliscript-emitter--emit-tail-body (forms target)
+  "Emit FORMS so their final value returns or recurs to TARGET."
+  (if (null forms)
+      "return null;"
+    (string-join
+     (append
+      (mapcar
+       (lambda (form)
+         (concat (eliscript-emitter-emit-expression form) ";"))
+       (butlast forms))
+      (list (eliscript-emitter--emit-tail-form (car (last forms)) target)))
+     "\n")))
+
+(defun eliscript-emitter--emit-tail-cond (clauses target)
+  "Emit conditional CLAUSES in recur-aware tail position for TARGET."
+  (if (null clauses)
+      "return null;"
+    (let ((clause (car clauses)))
+      (unless (and (listp clause) clause)
+        (eliscript-emitter--fail "cond clause must be a non-empty list"))
+      (let ((test (car clause))
+            (body (cdr clause)))
+        (if (eq test t)
+            (eliscript-emitter--emit-tail-body body target)
+          (format "if (__eliscript_truthy(%s)) {\n%s\n} else {\n%s\n}"
+                  (eliscript-emitter-emit-expression test)
+                  (eliscript-emitter--indent
+                   (eliscript-emitter--emit-tail-body body target))
+                  (eliscript-emitter--indent
+                   (eliscript-emitter--emit-tail-cond
+                    (cdr clauses) target))))))))
+
+(defun eliscript-emitter--emit-tail-let (arguments sequential target)
+  "Emit lexical ARGUMENTS in tail position for TARGET."
+  (eliscript-emitter--require-arity (if sequential "let*" "let") arguments 1)
+  (let ((bindings (car arguments))
+        (body (cdr arguments))
+        parts)
+    (unless (listp bindings)
+      (eliscript-emitter--fail "let bindings must be a list"))
+    (let ((parsed (mapcar #'eliscript-emitter--parse-binding bindings)))
+      (if sequential
+          (dolist (binding parsed)
+            (let ((target-form (car binding))
+                  (initializer (cadr binding)))
+              (push
+               (format "let %s = %s;"
+                       (eliscript-emitter--emit-binding-target target-form)
+                       (if initializer
+                           (eliscript-emitter-emit-expression initializer)
+                         (if (eliscript-emitter--binding-pattern-p target-form)
+                             "[]" "null")))
+               parts)))
+        (let ((temporaries
+               (mapcar (lambda (_binding) (eliscript-emitter--fresh-name))
+                       parsed)))
+          (cl-mapc
+           (lambda (binding temporary)
+             (let ((target-form (car binding))
+                   (initializer (cadr binding)))
+               (push
+                (format "const %s = %s;"
+                        temporary
+                        (if initializer
+                            (eliscript-emitter-emit-expression initializer)
+                          (if (eliscript-emitter--binding-pattern-p target-form)
+                              "[]" "null")))
+                parts)))
+           parsed temporaries)
+          (cl-mapc
+           (lambda (binding temporary)
+             (push
+              (format "let %s = %s;"
+                      (eliscript-emitter--emit-binding-target (car binding))
+                      temporary)
+              parts))
+           parsed temporaries)))
+      (push (eliscript-emitter--emit-tail-body body target) parts)
+      (format "{\n%s\n}"
+              (eliscript-emitter--indent
+               (string-join (nreverse parts) "\n"))))))
+
+(defun eliscript-emitter--emit-tail-short-circuit (arguments kind target)
+  "Emit recur-aware short-circuit ARGUMENTS of KIND for TARGET."
+  (cond
+   ((null arguments)
+    (format "return %s;" (if (eq kind 'and) "true" "null")))
+   ((null (cdr arguments))
+    (eliscript-emitter--emit-tail-form (car arguments) target))
+   (t
+    (let ((temporary (eliscript-emitter--fresh-name)))
+      (format
+       "const %s = %s;\nif (__eliscript_truthy(%s)) {\n%s\n} else {\n%s\n}"
+       temporary
+       (eliscript-emitter-emit-expression (car arguments))
+       temporary
+       (eliscript-emitter--indent
+        (if (eq kind 'and)
+            (eliscript-emitter--emit-tail-short-circuit
+             (cdr arguments) kind target)
+          (format "return %s;" temporary)))
+       (eliscript-emitter--indent
+        (if (eq kind 'and)
+            (format "return %s;" temporary)
+          (eliscript-emitter--emit-tail-short-circuit
+           (cdr arguments) kind target))))))))
+
+(defun eliscript-emitter--emit-tail-form (form target)
+  "Emit FORM in a tail position controlled by TARGET."
+  (if (not (consp form))
+      (format "return %s;" (eliscript-emitter-emit-expression form))
+    (let ((operator (car form))
+          (arguments (cdr form)))
+      (pcase operator
+        ('recur (eliscript-emitter--emit-recur-tail arguments target))
+        ('if
+         (eliscript-emitter--require-arity "if" arguments 2 3)
+         (format "if (__eliscript_truthy(%s)) {\n%s\n} else {\n%s\n}"
+                 (eliscript-emitter-emit-expression (nth 0 arguments))
+                 (eliscript-emitter--indent
+                  (eliscript-emitter--emit-tail-form
+                   (nth 1 arguments) target))
+                 (eliscript-emitter--indent
+                  (if (nth 2 arguments)
+                      (eliscript-emitter--emit-tail-form
+                       (nth 2 arguments) target)
+                    "return null;"))))
+        ((or 'when 'unless)
+         (eliscript-emitter--require-arity (symbol-name operator) arguments 1)
+         (format "if (%s__eliscript_truthy(%s)) {\n%s\n} else {\n  return null;\n}"
+                 (if (eq operator 'when) "" "!")
+                 (eliscript-emitter-emit-expression (car arguments))
+                 (eliscript-emitter--indent
+                  (eliscript-emitter--emit-tail-body
+                   (cdr arguments) target))))
+        ('cond (eliscript-emitter--emit-tail-cond arguments target))
+        ((or 'progn 'do)
+         (eliscript-emitter--emit-tail-body arguments target))
+        ('let (eliscript-emitter--emit-tail-let arguments nil target))
+        ('let* (eliscript-emitter--emit-tail-let arguments t target))
+        ('and
+         (eliscript-emitter--emit-tail-short-circuit arguments 'and target))
+        ('or
+         (eliscript-emitter--emit-tail-short-circuit arguments 'or target))
+        (_ (format "return %s;"
+                   (eliscript-emitter-emit-expression form)))))))
+
+(defun eliscript-emitter--emit-function-body (parameters body)
+  "Emit function BODY with recur-aware PARAMETER rebinding when required."
+  (if (not (eliscript-emitter--contains-function-recur-p body))
+      (eliscript-emitter--emit-returning-body body)
+    (let* ((label (eliscript-emitter--fresh-name))
+           (target
+            (list :bindings
+                  (mapcar #'eliscript-parameter-form parameters)
+                  :label label)))
+      (format "%s: while (true) {\n%s\n}"
+              label
+              (eliscript-emitter--indent
+               (eliscript-emitter--emit-tail-body body target))))))
+
+(defun eliscript-emitter--emit-binding-loop (arguments)
+  "Emit recur-capable lexical binding loop ARGUMENTS."
+  (eliscript-emitter--require-arity "loop" arguments 1)
+  (let ((bindings (car arguments))
+        (body (cdr arguments)))
+    (unless (listp bindings)
+      (eliscript-emitter--fail "loop bindings must be a list"))
+    (let (targets initializers)
+      (dolist (binding bindings)
+        (unless (and (listp binding) (= (length binding) 2)
+                     (or (symbolp (car binding)) (vectorp (car binding))))
+          (eliscript-emitter--fail
+           "loop binding must contain a target and initializer: %S" binding))
+        (push (car binding) targets)
+        (push (cadr binding) initializers))
+      (setq targets (nreverse targets)
+            initializers (nreverse initializers))
+      (let* ((label (eliscript-emitter--fresh-name))
+             (target (list :bindings targets :label label)))
+        (eliscript-emitter--emit-iife
+         (mapconcat #'eliscript-emitter--emit-binding-target targets ", ")
+         (eliscript-emitter--indent
+          (format "%s: while (true) {\n%s\n}"
+                  label
+                  (eliscript-emitter--indent
+                   (eliscript-emitter--emit-tail-body body target))))
+         (mapconcat #'eliscript-emitter-emit-expression initializers ", ")
+         (eliscript-emitter--contains-await-p body))))))
 
 (defun eliscript-emitter--emit-parameter (parameter)
   "Emit parsed function PARAMETER."
@@ -554,6 +792,9 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
                (eliscript-emitter--binding-name (car arguments))
                (eliscript-emitter-emit-expression (cadr arguments))))
       ('while (eliscript-emitter--emit-while arguments))
+      ('loop (eliscript-emitter--emit-binding-loop arguments))
+      ('recur
+       (eliscript-emitter--fail "recur is only valid in tail position"))
       ('and (eliscript-emitter--emit-short-circuit arguments 'and))
       ('or (eliscript-emitter--emit-short-circuit arguments 'or))
       ('not
@@ -846,22 +1087,23 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
         ((or 'defun 'defn 'defasync)
          (eliscript-emitter--require-arity (symbol-name operator) arguments 2)
          (let ((name (nth 0 arguments))
-               (parameters (nth 1 arguments))
+               (parameter-forms (nth 1 arguments))
                (body (nthcdr 2 arguments)))
            (unless (symbolp name)
              (eliscript-emitter--fail "function name must be a symbol"))
-           (format "%sfunction %s(%s) {\n%s\n}"
-                   (if (eq operator 'defasync) "async " "")
-                   (eliscript-emitter--binding-name name)
-                   (mapconcat
-                    #'eliscript-emitter--emit-parameter
-                    (eliscript-parameters-parse
-                     parameters
-                     (lambda (_form message)
-                       (eliscript-emitter--fail "%s" message)))
-                    ", ")
-                   (eliscript-emitter--indent
-                    (eliscript-emitter--emit-returning-body body)))))
+           (let ((parameters
+                  (eliscript-parameters-parse
+                   parameter-forms
+                   (lambda (_form message)
+                     (eliscript-emitter--fail "%s" message)))))
+             (format "%sfunction %s(%s) {\n%s\n}"
+                     (if (eq operator 'defasync) "async " "")
+                     (eliscript-emitter--binding-name name)
+                     (mapconcat
+                      #'eliscript-emitter--emit-parameter parameters ", ")
+                     (eliscript-emitter--indent
+                      (eliscript-emitter--emit-function-body
+                       parameters body))))))
         ('export
          (eliscript-emitter--require-arity "export" arguments 1)
          (format "export {%s};"

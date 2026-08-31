@@ -26,6 +26,11 @@
       "source": "(defasync resolve-value (value &optional transform)\n  (let ((resolved (await value)))\n    (if transform (await (funcall transform resolved)) resolved)))\n(defconst delayed-double\n  (async (value) (* (await value) 2)))\n(export resolve-value delayed-double)"
     },
     {
+      "name": "stack-safe-loop-and-recur",
+      "filename": "recur.eli",
+      "source": "(defun triangular (n acc)\n  (if (= n 0) acc (recur (1- n) (+ acc n))))\n(defconst swapped\n  (loop ((left 1) (right 2) (steps 1))\n    (if (= steps 0) [left right]\n      (recur right left (1- steps)))))\n(export triangular swapped)"
+    },
+    {
       "name": "exception-control-flow",
       "filename": "exceptions.eli",
       "source": "(defun recover (value)\n  (try\n    (if value value (throw \"missing\"))\n    (catch error (str \"caught:\" error))\n    (finally (print \"done\"))))\n(defasync settle (promise)\n  (try (await promise)\n    (catch error error)\n    (finally (await promise))))\n(export recover settle)"

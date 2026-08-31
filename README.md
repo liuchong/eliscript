@@ -36,11 +36,13 @@ The current M8 work provides:
   completion invalidation and transient-backed persistent `into`
 - protocol-driven sequence and keyed-data algorithms returning persistent
   values, with Lisp-named Eliscript modules under `stdlib/core/`
+- stack-safe `loop`/`recur` for functions and lexical binding loops, including
+  tail-position diagnostics, simultaneous pattern rebinding, and async support
 - structural-sharing and cross-host evidence through million-value workloads
 
-The next language boundary is portable protocol and core-algorithm definitions,
-followed by measured object/text migration, literal migration, host conversion,
-and the Emacs value bridge.
+The next language boundary is macro-generated-name hygiene and portable
+protocol/core-algorithm definitions, followed by measured object/text
+migration, literal migration, host conversion, and the Emacs value bridge.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in
@@ -90,12 +92,12 @@ explicit JavaScript host boundary:
 
 ```elisp
 (module example.basic
-  (defun factorial (n)
+  (defun factorial (n accumulator)
     (if (<= n 1)
-        1
-      (* n (factorial (1- n)))))
+        accumulator
+      (recur (1- n) (* accumulator n))))
 
-  (print (factorial 5))
+  (print (factorial 5 1))
   (export factorial))
 ```
 
@@ -122,6 +124,7 @@ The implemented language includes:
   binding patterns
 - compile-time macros with deterministic expansion
 - expression-valued control flow, exceptions, async functions, and `await`
+- stack-safe function and binding iteration through tail-position `recur`
 - explicit IR lowering, structured diagnostics, and Source Map v3 output
 - ESM modules, JavaScript interop, React elements, and fragments
 - statically checked portable functions and dependency-pruned builds

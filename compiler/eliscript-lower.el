@@ -22,6 +22,8 @@
     object-keys object-has? object-assoc)
   "Operators represented by the generic intrinsic IR node.")
 
+(defvar eliscript-lower--recur-targets nil)
+
 (defun eliscript-lower--node (kind form &optional value children properties)
   "Create a KIND node for located FORM with VALUE, CHILDREN, and PROPERTIES."
   (eliscript-ir-make-node
@@ -206,12 +208,13 @@
           ((or 'lambda 'fn 'async)
            (let ((parameters
                   (eliscript-lower--parameter-nodes (car arguments))))
-             (eliscript-lower--node
-              'function-expression form nil
-              (append parameters
-                      (mapcar #'eliscript-lower-expression (cdr arguments)))
-              (list :parameter-count (length parameters)
-                    :async (eq operator 'async)))))
+             (let ((eliscript-lower--recur-targets '(function)))
+               (eliscript-lower--node
+                'function-expression form nil
+                (append parameters
+                        (mapcar #'eliscript-lower-expression (cdr arguments)))
+                (list :parameter-count (length parameters)
+                      :async (eq operator 'async))))))
           ('await
            (eliscript-lower--node
             'await-expression form nil
@@ -248,6 +251,23 @@
                       (mapcar #'eliscript-lower-expression (cdr arguments)))
               (list :sequential (eq operator 'let*)
                     :binding-count (length bindings)))))
+          ('loop
+           (let ((bindings
+                  (mapcar #'eliscript-lower--binding-node
+                          (eliscript-form-value (car arguments)))))
+             (let ((eliscript-lower--recur-targets
+                    (cons 'loop eliscript-lower--recur-targets)))
+               (eliscript-lower--node
+                'binding-loop form nil
+                (append bindings
+                        (mapcar #'eliscript-lower-expression
+                                (cdr arguments)))
+                (list :binding-count (length bindings))))))
+          ('recur
+           (eliscript-lower--node
+            'recur form nil
+            (mapcar #'eliscript-lower-expression arguments)
+            (list :target-kind (car eliscript-lower--recur-targets))))
           ((or 'setq 'set!)
            (eliscript-lower--assignments form operator arguments))
           ('while
@@ -350,16 +370,17 @@ Mark the resulting declaration PORTABLE when it came from `import-portable'."
           ((or 'defun 'defn 'defportable 'defasync)
            (let ((parameters
                   (eliscript-lower--parameter-nodes (nth 1 arguments))))
-             (eliscript-lower--node
-              'function-declaration form
-              (eliscript-form-value (nth 0 arguments))
-              (append parameters
-                      (mapcar #'eliscript-lower-expression
-                              (nthcdr 2 arguments)))
-              (list :parameter-count (length parameters)
-                    :source-operator operator
-                    :portable (eq operator 'defportable)
-                    :async (eq operator 'defasync)))))
+             (let ((eliscript-lower--recur-targets '(function)))
+               (eliscript-lower--node
+                'function-declaration form
+                (eliscript-form-value (nth 0 arguments))
+                (append parameters
+                        (mapcar #'eliscript-lower-expression
+                                (nthcdr 2 arguments)))
+                (list :parameter-count (length parameters)
+                      :source-operator operator
+                      :portable (eq operator 'defportable)
+                      :async (eq operator 'defasync))))))
           ('export
            (eliscript-lower--node
             'export-declaration form nil
@@ -378,8 +399,9 @@ Mark the resulting declaration PORTABLE when it came from `import-portable'."
 
 (defun eliscript-lower-module (forms &optional filename)
   "Lower analyzed module FORMS from FILENAME to an IR program."
-  (eliscript-ir-make-program
-   filename (mapcar #'eliscript-lower-top-level forms)))
+  (let ((eliscript-lower--recur-targets nil))
+    (eliscript-ir-make-program
+     filename (mapcar #'eliscript-lower-top-level forms))))
 
 (provide 'eliscript-lower)
 

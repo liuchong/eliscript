@@ -262,8 +262,202 @@
              (lambda (parameter) (emit-parameter parameter)))
            ", ")
          ") => {\n"
-         (indent (emit-returning-body body))
+         (indent (emit-function-body parameters body))
          "\n}"])))
+
+  (defun contains-recur-target-p (value target-kind)
+    (cond
+      ((node-p value)
+       (let ((kind (ir-kind value)))
+         (cond
+           ((= kind "recur")
+            (= (ir-property value "targetKind") target-kind))
+           ((= kind "function-expression") false)
+           (t
+            (js-call (children value) :some
+              (lambda (child)
+                (contains-recur-target-p child target-kind)))))))
+      ((js* "Array.isArray(value)")
+       (js-call value :some
+         (lambda (child)
+           (contains-recur-target-p child target-kind))))
+      (t false)))
+
+  (defun emit-rebinding-target (binding temporary)
+    (let ((target (emit-binding-target binding)))
+      (if (ir-property binding "pattern")
+          (combine ["(" target " = " temporary ");"])
+        (combine [target " = " temporary ";"]))))
+
+  (defun emit-recur-tail (node target)
+    (unless (= (ir-property node "targetKind") (get target :kind))
+      (fail "recur target does not match its enclosing loop"))
+    (let ((args (children node))
+          (bindings (get target :bindings))
+          (temporaries [])
+          (parts [])
+          (index 0))
+      (while (< index (get args :length))
+        (let ((temporary (fresh-name)))
+          (js-call temporaries :push temporary)
+          (js-call parts :push
+            (combine
+              ["const " temporary " = "
+               (emit-expression (nth index args)) ";"])))
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (< index (get bindings :length))
+        (js-call parts :push
+          (emit-rebinding-target
+            (nth index bindings) (nth index temporaries)))
+        (setq index (1+ index)))
+      (js-call parts :push
+        (combine ["continue " (get target :label) ";"]))
+      (locate node (join-fragments parts "\n"))))
+
+  (defun emit-tail-body (nodes target)
+    (if (= (get nodes :length) 0)
+        (text-fragment "return null;")
+      (let ((parts [])
+            (index 0)
+            (last-index (1- (get nodes :length))))
+        (while (< index last-index)
+          (js-call parts :push
+            (combine [(emit-expression (nth index nodes)) ";"]))
+          (setq index (1+ index)))
+        (js-call parts :push
+          (emit-tail-node (nth last-index nodes) target))
+        (join-fragments parts "\n"))))
+
+  (defun emit-tail-cond (clauses target)
+    (if (= (get clauses :length) 0)
+        (text-fragment "return null;")
+      (let* ((clause (nth 0 clauses))
+             (nodes (children clause))
+             (test (nth 0 nodes))
+             (body (js-call nodes :slice 1)))
+        (locate
+          clause
+          (if (and (= (ir-kind test) "literal")
+                   (eq (ir-value test) t))
+              (emit-tail-body body target)
+            (combine
+              ["if (__eliscript_truthy(" (emit-expression test)
+               ")) {\n" (indent (emit-tail-body body target))
+               "\n} else {\n"
+               (indent
+                 (emit-tail-cond (js-call clauses :slice 1) target))
+               "\n}"]))))))
+
+  (defun emit-tail-let (node target)
+    (let* ((parts (split-counted-children node "bindingCount"))
+           (bindings (nth 0 parts))
+           (body (nth 1 parts))
+           (sequential (ir-property node "sequential"))
+           (statements [])
+           (temporaries [])
+           (index 0))
+      (if sequential
+          (while (< index (get bindings :length))
+            (let* ((binding (nth index bindings))
+                   (initializer (binding-initializer binding)))
+              (js-call statements :push
+                (combine
+                  ["let " (emit-binding-target binding) " = "
+                   (if initializer
+                       (emit-expression initializer)
+                     (if (ir-property binding "pattern") "[]" "null"))
+                   ";"])))
+            (setq index (1+ index)))
+        (progn
+          (while (< index (get bindings :length))
+            (let* ((binding (nth index bindings))
+                   (initializer (binding-initializer binding))
+                   (temporary (fresh-name)))
+              (js-call temporaries :push temporary)
+              (js-call statements :push
+                (combine
+                  ["const " temporary " = "
+                   (if initializer
+                       (emit-expression initializer)
+                     (if (ir-property binding "pattern") "[]" "null"))
+                   ";"])))
+            (setq index (1+ index)))
+          (setq index 0)
+          (while (< index (get bindings :length))
+            (js-call statements :push
+              (combine
+                ["let " (emit-binding-target (nth index bindings)) " = "
+                 (nth index temporaries) ";"]))
+            (setq index (1+ index)))))
+      (js-call statements :push (emit-tail-body body target))
+      (locate
+        node
+        (combine
+          ["{\n" (indent (join-fragments statements "\n")) "\n}"]))))
+
+  (defun emit-tail-short-circuit (nodes kind target)
+    (cond
+      ((= (get nodes :length) 0)
+       (text-fragment (if (= kind "and") "return true;" "return null;")))
+      ((= (get nodes :length) 1)
+       (emit-tail-node (nth 0 nodes) target))
+      (t
+       (let* ((temporary (fresh-name))
+              (first (emit-expression (nth 0 nodes)))
+              (rest (js-call nodes :slice 1))
+              (truthy
+               (if (= kind "and")
+                   (emit-tail-short-circuit rest kind target)
+                 (combine ["return " temporary ";"])))
+              (falsey
+               (if (= kind "and")
+                   (combine ["return " temporary ";"])
+                 (emit-tail-short-circuit rest kind target))))
+         (combine
+           ["const " temporary " = " first ";\n"
+            "if (__eliscript_truthy(" temporary ")) {\n"
+            (indent truthy) "\n} else {\n" (indent falsey) "\n}"])))))
+
+  (defun emit-tail-node (node target)
+    (let ((kind (ir-kind node))
+          (nodes (children node)))
+      (cond
+        ((= kind "recur") (emit-recur-tail node target))
+        ((= kind "conditional")
+         (combine
+           ["if (__eliscript_truthy(" (emit-expression (nth 0 nodes))
+            ")) {\n" (indent (emit-tail-node (nth 1 nodes) target))
+            "\n} else {\n"
+            (indent
+              (if (> (get nodes :length) 2)
+                  (emit-tail-node (nth 2 nodes) target)
+                (text-fragment "return null;")))
+            "\n}"]))
+        ((= kind "conditional-sugar")
+         (combine
+           ["if (" (if (= (ir-value node) "when") "" "!")
+            "__eliscript_truthy(" (emit-expression (nth 0 nodes))
+            ")) {\n"
+            (indent (emit-tail-body (js-call nodes :slice 1) target))
+            "\n} else {\n  return null;\n}"]))
+        ((= kind "conditional-chain") (emit-tail-cond nodes target))
+        ((= kind "sequence") (emit-tail-body nodes target))
+        ((= kind "lexical-bindings") (emit-tail-let node target))
+        ((= kind "short-circuit")
+         (emit-tail-short-circuit nodes (ir-value node) target))
+        (t (combine ["return " (emit-expression node) ";"])))))
+
+  (defun emit-function-body (parameters body)
+    (if (not (contains-recur-target-p body "function"))
+        (emit-returning-body body)
+      (let* ((label (fresh-name))
+             (target
+              (object
+                :kind "function" :bindings parameters :label label)))
+        (combine
+          [label ": while (true) {\n"
+           (indent (emit-tail-body body target)) "\n}"]))))
 
   (defun emit-if (nodes)
     (combine
@@ -433,6 +627,33 @@
              "\n}\nreturn null;"]))
         ""
         (contains-await-p nodes))))
+
+  (defun emit-binding-loop (node)
+    (let* ((parts (split-counted-children node "bindingCount"))
+           (bindings (nth 0 parts))
+           (body (nth 1 parts))
+           (label (fresh-name))
+           (target
+            (object :kind "loop" :bindings bindings :label label))
+           (parameters
+            (join-fragments
+              (js-call bindings :map
+                (lambda (binding) (emit-binding-target binding)))
+              ", "))
+           (initializers
+            (join-fragments
+              (js-call bindings :map
+                (lambda (binding)
+                  (emit-expression (binding-initializer binding))))
+              ", ")))
+      (emit-iife
+        parameters
+        (indent
+          (combine
+            [label ": while (true) {\n"
+             (indent (emit-tail-body body target)) "\n}"]))
+        initializers
+        (contains-await-p body))))
 
   (defun emit-short-circuit (nodes kind)
     (cond
@@ -832,6 +1053,9 @@
           ((= kind "lexical-bindings") (emit-let node))
           ((= kind "assignment") (emit-assignment node))
           ((= kind "loop") (emit-loop node))
+          ((= kind "binding-loop") (emit-binding-loop node))
+          ((= kind "recur")
+           (fail "recur is only valid in an analyzed tail position"))
           ((= kind "short-circuit") (emit-short-circuit nodes (ir-value node)))
           ((= kind "intrinsic") (emit-intrinsic node))
           ((= kind "object-literal") (emit-object node))
@@ -945,7 +1169,7 @@
                     (lambda (parameter) (emit-parameter parameter)))
                   ", ")
                 ") {\n"
-                (indent (emit-returning-body body))
+                  (indent (emit-function-body parameters body))
                 "\n}"])))
           ((= kind "export-declaration")
            (combine

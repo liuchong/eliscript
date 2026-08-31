@@ -61,7 +61,7 @@ current bootstrap sources, including `analyzer.eli` itself.
 
 The IR fixture runs the complete generated front end and lowerer, then compares
 the resulting program with a normalized seed oracle. It covers every one of
-the 51 public IR node kinds, JSON-safe quoted data and literal tags,
+the 53 public IR node kinds, JSON-safe quoted data and literal tags,
 kind-specific properties, complete nested source spans, macro call origins,
 and all ten bootstrap compiler modules.
 
@@ -76,6 +76,12 @@ Generation 2 with Generation 1, and Generation 3 with Generation 2. It compares
 all ten ESM and Source Map artifacts byte-for-byte, checks the portable CLI
 against seed output, and verifies mapped file output and located diagnostics.
 It also compares seed and self-hosted `defportable` closure builds.
+
+The loop/recur suite compares seed and self-hosted JavaScript plus Source Maps
+byte-for-byte, then executes the same module under Bun and Node. It covers one
+million function recurrences, one million binding-loop recurrences,
+simultaneous swaps, vector-pattern rebinding, nested targets, conditional and
+short-circuit tails, and awaited recurrence without JavaScript stack growth.
 
 ## Standard Library and Portable Collections
 

@@ -694,6 +694,19 @@
         { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core facades compile and execute against runtime protocols" },
         { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "protocol standard-library algorithms agree under Bun and Node" }
       ]
+    },
+    {
+      "id": "language.stack-safe-loop-recur",
+      "title": "Stack-safe loop and recur",
+      "status": "accepted",
+      "spec": "0064",
+      "contracts": ["Targets the nearest loop or function only from tail position", "Evaluates recurrence arguments once before simultaneous rebinding", "Lowers explicit binding-loop and recur IR with deterministic emission", "Executes million-step recurrence without JavaScript stack growth"],
+      "evidence": [
+        { "kind": "fixture", "file": "tests/fixtures/bootstrap-analyzer.json", "contains": "stack-safe-loop-and-recur" },
+        { "kind": "fixture", "file": "tests/fixtures/bootstrap-ir.json", "contains": "stack-safe-loop-and-recur" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-loop-recur-matches-compatibility-backend" },
+        { "kind": "bun-test", "file": "tests/loop-recur.test.mjs", "contains": "loop/recur is stack-safe and identical after self-hosting" }
+      ]
     }
   ]
 }

@@ -38,6 +38,12 @@ emission, and optional Source Map v3 output. The public compiler never
 reconstructs reader-shaped forms after lowering. Public entry points support
 both interactive Emacs use and clean batch builds.
 
+The analyzer also tracks recur targets, tail positions, physical function
+parameter slots, and exception boundaries. Lowering preserves binding loops
+and recurrence as distinct IR nodes; the emitter turns valid targets into
+deterministic labeled JavaScript loops with simultaneous temporary-backed
+rebinding.
+
 ## React Lowering
 
 React `jsx` and `fragment` forms lower to dedicated IR nodes. Modules that use

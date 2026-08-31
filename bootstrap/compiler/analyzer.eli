@@ -4,7 +4,8 @@
     node-kind node-span node-value node-name node-items)
 
   (defconst builtin-operators
-    ["if" "when" "unless" "progn" "do" "while" "and" "or" "not"
+    ["if" "when" "unless" "progn" "do" "while" "loop" "recur"
+     "and" "or" "not"
      "+" "*" "-" "/" "%" "mod" "=" "/=" "not=" "<" "<=" ">" ">="
      "1+" "1-" "eq" "equal" "null" "nil?" "undefined?" "nullish?"
      "int32" "uint32" "imul32" "bit-and" "bit-or" "bit-xor" "bit-not"
@@ -301,8 +302,26 @@
         (js-call name :includes "/")))
 
   (defun analyze-sequence (forms scope context)
-    (js-call forms :forEach
-      (lambda (form) (analyze-expression form scope context))))
+    (let ((tail-position (get context :tailPosition))
+          (index 0))
+      (while (< index (get forms :length))
+        (put context :tailPosition
+          (and tail-position (= index (1- (get forms :length)))))
+        (analyze-expression (nth index forms) scope context)
+        (setq index (1+ index)))
+      (put context :tailPosition tail-position)))
+
+  (defun analyze-non-tail (form scope context)
+    (let ((tail-position (get context :tailPosition)))
+      (put context :tailPosition false)
+      (analyze-expression form scope context)
+      (put context :tailPosition tail-position)))
+
+  (defun analyze-non-tail-sequence (forms scope context)
+    (let ((tail-position (get context :tailPosition)))
+      (put context :tailPosition false)
+      (analyze-sequence forms scope context)
+      (put context :tailPosition tail-position)))
 
   (defun binding-pair (binding context)
     (cond
@@ -338,7 +357,7 @@
           (js-call bindings :forEach
             (lambda (binding)
               (let ((pair (binding-pair binding context)))
-                (analyze-expression (nth 1 pair) child context)
+                (analyze-non-tail (nth 1 pair) child context)
                 (declare-pattern
                   child (nth 0 pair) "local" t context))))
         (let ((parsed
@@ -346,7 +365,7 @@
                  (lambda (binding) (binding-pair binding context)))))
           (js-call parsed :forEach
             (lambda (pair)
-              (analyze-expression (nth 1 pair) scope context)))
+              (analyze-non-tail (nth 1 pair) scope context)))
           (js-call parsed :forEach
             (lambda (pair)
               (declare-pattern
@@ -364,7 +383,82 @@
               (lambda (binding)
                 (declare-binding
                   child binding "parameter" t context)))))
-        (analyze-sequence body child context))))
+        (let ((recur-targets (get context :recurTargets))
+              (tail-position (get context :tailPosition))
+              (recur-barrier (get context :recurBarrier)))
+          (put context :recurTargets
+            [(object :kind "function"
+                     :arity (get parameter-items :length))])
+          (put context :tailPosition t)
+          (put context :recurBarrier false)
+          (analyze-sequence body child context)
+          (put context :recurTargets recur-targets)
+          (put context :tailPosition tail-position)
+          (put context :recurBarrier recur-barrier)))))
+
+  (defun analyze-loop (args scope context form-span)
+    (when (= (get args :length) 0)
+      (analyzer-fail context form-span "loop requires a binding list"))
+    (let* ((bindings-form (nth 0 args))
+           (bindings (list-items bindings-form))
+           (body (js-call args :slice 1))
+           (child (make-scope scope))
+           (parsed []))
+      (when (eq bindings undefined)
+        (analyzer-fail
+          context (node-span bindings-form) "loop bindings must be a list"))
+      (js-call bindings :forEach
+        (lambda (binding)
+          (let ((items (list-items binding)))
+            (unless (and (not (eq items undefined))
+                         (= (get items :length) 2))
+              (analyzer-fail
+                context (node-span binding)
+                (str "loop bindings require exactly one initializer: "
+                     (node-display binding))))
+            (js-call parsed :push (binding-pair binding context)))))
+      (js-call parsed :forEach
+        (lambda (pair)
+          (analyze-non-tail (nth 1 pair) scope context)))
+      (js-call parsed :forEach
+        (lambda (pair)
+          (declare-pattern child (nth 0 pair) "loop" t context)))
+      (let ((recur-targets (get context :recurTargets))
+            (tail-position (get context :tailPosition))
+            (recur-barrier (get context :recurBarrier))
+            (targets []))
+        (js-call targets :push
+          (object :kind "loop" :arity (get parsed :length)))
+        (js-call recur-targets :forEach
+          (lambda (target) (js-call targets :push target)))
+        (put context :recurTargets targets)
+        (put context :tailPosition t)
+        (put context :recurBarrier false)
+        (analyze-sequence body child context)
+        (put context :recurTargets recur-targets)
+        (put context :tailPosition tail-position)
+        (put context :recurBarrier recur-barrier))))
+
+  (defun analyze-recur (args scope context form-span)
+    (let* ((targets (get context :recurTargets))
+           (target (and (> (get targets :length) 0) (nth 0 targets))))
+      (unless target
+        (analyzer-fail
+          context form-span
+          "recur is only valid inside a function or loop"))
+      (when (get context :recurBarrier)
+        (analyzer-fail
+          context form-span "recur cannot cross a try boundary"))
+      (unless (get context :tailPosition)
+        (analyzer-fail
+          context form-span "recur is only valid in tail position"))
+      (unless (= (get args :length) (get target :arity))
+        (analyzer-fail
+          context form-span
+          (str "recur expects " (get target :arity)
+               " arguments for the current " (get target :kind)
+               ", got " (get args :length))))
+      (analyze-non-tail-sequence args scope context)))
 
   (defun analyze-assignment
       (args scope form-name context form-span)
@@ -388,7 +482,7 @@
                 context (node-span name-node)
                 (str "cannot assign to immutable binding: "
                      (node-name name-node)))))
-          (analyze-expression value scope context))
+          (analyze-non-tail value scope context))
         (setq index (+ index 2)))))
 
   (defun analyze-object (args scope context form-span)
@@ -401,8 +495,8 @@
           (unless (or (keyword-node-p key)
                       (string-node-p key)
                       (symbol-node-p key))
-            (analyze-expression key scope context))
-          (analyze-expression value scope context))
+            (analyze-non-tail key scope context))
+          (analyze-non-tail value scope context))
         (setq index (+ index 2)))))
 
   (defun analyze-property-call
@@ -418,11 +512,11 @@
       ((= operator "js-call")
        (when (< (get args :length) 2)
          (analyzer-fail context form-span "js-call expects 2+ arguments"))))
-    (analyze-expression (nth 0 args) scope context)
+    (analyze-non-tail (nth 0 args) scope context)
     (let ((key (nth 1 args)))
       (unless (or (keyword-node-p key) (string-node-p key))
-        (analyze-expression key scope context)))
-    (analyze-sequence (js-call args :slice 2) scope context))
+        (analyze-non-tail key scope context)))
+    (analyze-non-tail-sequence (js-call args :slice 2) scope context))
 
   (defun analyze-cond (clauses scope context)
     (js-call clauses :forEach
@@ -432,7 +526,7 @@
             (analyzer-fail
               context (node-span clause)
               (str "invalid cond clause: " (node-display clause))))
-          (analyze-expression (nth 0 items) scope context)
+          (analyze-non-tail (nth 0 items) scope context)
           (analyze-sequence (js-call items :slice 1) scope context)))))
 
   (defun clause-operator (form)
@@ -443,9 +537,11 @@
            (node-name (nth 0 items)))))
 
   (defun analyze-try (args scope context form-span)
-    (let ((clauses-started false)
+    (let ((recur-barrier (get context :recurBarrier))
+          (clauses-started false)
           (catch-seen false)
           (finally-seen false))
+      (put context :recurBarrier t)
       (js-call args :forEach
         (lambda (argument)
           (let ((operator (clause-operator argument)))
@@ -485,7 +581,8 @@
               (t (analyze-expression argument scope context))))))
       (unless (or catch-seen finally-seen)
         (analyzer-fail
-          context form-span "try requires a catch or finally clause"))))
+          context form-span "try requires a catch or finally clause"))
+      (put context :recurBarrier recur-barrier)))
 
   (defun analyze-jsx (args scope context form-span)
     (when (< (get args :length) 2)
@@ -494,8 +591,8 @@
         "jsx expects a type, props, and optional children"))
     (let ((type (nth 0 args)))
       (unless (or (keyword-node-p type) (string-node-p type))
-        (analyze-expression type scope context)))
-    (analyze-sequence (js-call args :slice 1) scope context))
+        (analyze-non-tail type scope context)))
+    (analyze-non-tail-sequence (js-call args :slice 1) scope context))
 
   (defun analyze-call (form scope context)
     (let* ((items (node-items form))
@@ -525,11 +622,11 @@
            (analyzer-fail
              context form-span
              "await is only valid inside an async function"))
-         (analyze-expression (nth 0 args) scope context))
+         (analyze-non-tail (nth 0 args) scope context))
         ((= operator "throw")
          (unless (= (get args :length) 1)
            (analyzer-fail context form-span "throw expects 1 argument"))
-         (analyze-expression (nth 0 args) scope context))
+         (analyze-non-tail (nth 0 args) scope context))
         ((= operator "try")
          (analyze-try args scope context form-span))
         ((or (= operator "catch") (= operator "finally"))
@@ -540,6 +637,10 @@
          (analyze-let args scope false context form-span))
         ((= operator "let*")
          (analyze-let args scope t context form-span))
+        ((= operator "loop")
+         (analyze-loop args scope context form-span))
+        ((= operator "recur")
+         (analyze-recur args scope context form-span))
         ((= operator "setq")
          (analyze-assignment args scope "setq" context form-span))
         ((= operator "set!")
@@ -547,10 +648,29 @@
            (analyzer-fail context form-span "set! expects 2 arguments"))
          (analyze-assignment args scope "set!" context form-span))
         ((= operator "cond") (analyze-cond args scope context))
+        ((= operator "if")
+         (unless (and (>= (get args :length) 2)
+                      (<= (get args :length) 3))
+           (analyzer-fail context form-span "if expects 2..3 arguments"))
+         (analyze-non-tail (nth 0 args) scope context)
+         (analyze-sequence (js-call args :slice 1) scope context))
+        ((or (= operator "when") (= operator "unless"))
+         (when (= (get args :length) 0)
+           (analyzer-fail
+             context form-span (str operator " expects 1+ arguments")))
+         (analyze-non-tail (nth 0 args) scope context)
+         (analyze-sequence (js-call args :slice 1) scope context))
+        ((or (= operator "progn") (= operator "do")
+             (= operator "and") (= operator "or"))
+         (analyze-sequence args scope context))
+        ((= operator "while")
+         (when (= (get args :length) 0)
+           (analyzer-fail context form-span "while expects 1+ arguments"))
+         (analyze-non-tail-sequence args scope context))
         ((= operator "jsx")
          (analyze-jsx args scope context form-span))
         ((= operator "fragment")
-         (analyze-sequence args scope context))
+         (analyze-non-tail-sequence args scope context))
         ((= operator "quote") nil)
         ((= operator "object")
          (analyze-object args scope context form-span))
@@ -559,7 +679,7 @@
            operator args scope context form-span))
         ((= operator "js*") nil)
         ((js-call builtin-operators :includes operator)
-         (analyze-sequence args scope context))
+         (analyze-non-tail-sequence args scope context))
         ((js-call
           ["defun" "defn" "defportable" "defasync" "defcomponent"
             "defvar" "defconst"
@@ -569,8 +689,8 @@
            context form-span
            (str operator " is only valid at module top level")))
         (t
-         (analyze-expression operator-node scope context)
-         (analyze-sequence args scope context)))))
+         (analyze-non-tail operator-node scope context)
+         (analyze-non-tail-sequence args scope context)))))
 
   (defun analyze-expression (form scope context)
     (when form
@@ -584,7 +704,7 @@
                (guarded-reference-name name context (node-span form))
              (require-binding scope form context))))
         ((= (node-kind form) "vector")
-         (analyze-sequence (node-items form) scope context))
+         (analyze-non-tail-sequence (node-items form) scope context))
         ((= (node-kind form) "list")
          (analyze-call form scope context))
         (t
@@ -886,6 +1006,23 @@
         (js-call args :slice 1)
         child declarations dependencies entry context)))
 
+  (defun portable-loop-expression
+      (args scope declarations dependencies entry context)
+    (let ((bindings (list-items (nth 0 args)))
+          (child (copy-portable-scope scope)))
+      (js-call bindings :forEach
+        (lambda (binding)
+          (let ((items (list-items binding)))
+            (portable-expression
+              (nth 1 items) scope declarations dependencies entry context))))
+      (js-call bindings :forEach
+        (lambda (binding)
+          (add-portable-pattern
+            (nth 0 (list-items binding)) child context)))
+      (portable-sequence
+        (js-call args :slice 1)
+        child declarations dependencies entry context)))
+
   (defun portable-assignment
       (args scope declarations dependencies entry context)
     (let ((index 0))
@@ -950,6 +1087,9 @@
         ((= operator "let*")
          (portable-let-expression
            args scope t declarations dependencies entry context))
+        ((= operator "loop")
+         (portable-loop-expression
+           args scope declarations dependencies entry context))
         ((or (= operator "setq") (= operator "set!"))
          (portable-assignment
            args scope declarations dependencies entry context))
@@ -1065,7 +1205,12 @@
                          (js-call selected :has (node-name imported))))))))))))
 
   (defun analyze-module (forms filename)
-    (let* ((context (object :filename filename))
+    (let* ((context
+            (object
+              :filename filename
+              :tailPosition false
+              :recurTargets []
+              :recurBarrier false))
            (flattened (flatten-modules forms context))
            (scope (make-scope nil)))
       (predeclare-top-level flattened scope context)
