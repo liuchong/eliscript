@@ -9,6 +9,8 @@
   (import "./stdlib/core/identifier.mjs"
           identifier-name identifier-namespace identifier? keyword keyword?
           qualified-name symbol symbol?)
+  (import "./stdlib/core/data-text.mjs"
+          print-value read-value)
   (import "./stdlib/core/metadata.mjs"
           meta supports-metadata? vary-meta with-meta)
   (import "./stdlib/core/transient.mjs"
@@ -44,6 +46,8 @@
       (lambda (current key value) (assoc current key value))
       "left"
       30))
+  (defconst printed-annotated-vector (print-value annotated-vector))
+  (defconst read-annotated-vector (read-value printed-annotated-vector))
 
   (defconst title-keyword (keyword "article/title"))
   (defconst title-symbol (symbol "article" "title"))
@@ -90,6 +94,8 @@
       :metadata-left (lookup (meta annotated-vector) "left")
       :metadata-varied-left (lookup (meta varied-vector) "left")
       :metadata-preserved (= (meta (conj annotated-vector 4)) map-value)
+      :printed-annotated-vector printed-annotated-vector
+      :read-metadata-left (lookup (meta read-annotated-vector) "left")
       :bounded-sum bounded-sum
       :observed observed
       :transformed transformed

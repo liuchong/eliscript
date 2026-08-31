@@ -29,6 +29,8 @@ The current M8 work provides:
 - deterministic value equality and hashing across persistent collections
 - immutable persistent-Map metadata with root-only structural sharing,
   propagation through persistent/transient updates, and equality/hash exclusion
+- canonical readable runtime data text with deterministic Map/Set ordering,
+  metadata prefixes, explicit limits, and Bun/Node round trips
 - open runtime protocols with direct and externally registered methods
 - generic collection lookup, traversal, reduction, construction, association,
   and key-presence operations
@@ -48,10 +50,12 @@ The current M8 work provides:
 First-class immutable Keyword and Symbol values now participate in runtime and
 portable equality, hashing, Map keys, and Set membership. Symbols and
 persistent collections can carry immutable persistent-Map metadata without
-changing their value identity or copying collection internals. The next
-language boundary is deterministic printing/reading, followed by portable
-protocol dispatch policy, measured object/text migration, literal migration,
-host conversion, and the Emacs value bridge.
+changing their value identity or copying collection internals. Optimized
+runtime values now also have canonical readable `print-value`/`read-value`
+round trips. The next language boundary is the matching portable List and
+collection data-text implementation, followed by portable protocol dispatch
+policy, measured object/text migration, literal migration, host conversion,
+and the Emacs value bridge.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in
@@ -134,13 +138,16 @@ Runtime-backed core values use the same Lisp-facing module style:
         keyword symbol qualified-name)
 (import "../../stdlib/core/metadata.eli"
         meta with-meta)
+(import "../../stdlib/core/data-text.eli"
+        print-value read-value)
 (import "../../runtime/core/map.mjs" persistentHashMap)
 
 (let* ((name (symbol "article" "title"))
        (annotated (with-meta name (persistentHashMap ["source" "tour"]))))
   [(keyword "article/title")
    (qualified-name name)
-   (meta annotated)])
+   (meta annotated)
+   (read-value (print-value annotated))])
 ```
 
 The implemented language includes:
@@ -157,6 +164,7 @@ The implemented language includes:
 - persistent collections, value semantics, and open collection protocols
 - first-class immutable Keyword and Symbol values with qualified names
 - immutable metadata on Symbols and persistent collections
+- canonical readable text for optimized runtime values
 
 Eliscript deliberately differs from Emacs Lisp. It uses ECMAScript numbers,
 distinguishes `false` from `nil`, has lexical scope, and does not attempt to run

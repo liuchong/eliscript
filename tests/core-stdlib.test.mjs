@@ -225,6 +225,7 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
   const runtimeLink = resolve(directory, "runtime");
   const protocolModule = resolve(directory, "stdlib/core/protocol.mjs");
   const identifierModule = resolve(directory, "stdlib/core/identifier.mjs");
+  const dataTextModule = resolve(directory, "stdlib/core/data-text.mjs");
   const metadataModule = resolve(directory, "stdlib/core/metadata.mjs");
   const collectionModule = resolve(directory, "stdlib/core/collection.mjs");
   const transientModule = resolve(directory, "stdlib/core/transient.mjs");
@@ -237,6 +238,7 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     await symlink(resolve(ROOT, "runtime"), runtimeLink, "dir");
     await compile(resolve(ROOT, "stdlib/core/protocol.eli"), protocolModule);
     await compile(resolve(ROOT, "stdlib/core/identifier.eli"), identifierModule);
+    await compile(resolve(ROOT, "stdlib/core/data-text.eli"), dataTextModule);
     await compile(resolve(ROOT, "stdlib/core/metadata.eli"), metadataModule);
     await compile(resolve(ROOT, "stdlib/core/collection.eli"), collectionModule);
     await compile(resolve(ROOT, "stdlib/core/transient.eli"), transientModule);
@@ -294,6 +296,8 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
       "metadata-left": 10,
       "metadata-varied-left": 30,
       "metadata-preserved": true,
+      "printed-annotated-vector": '^{"left" 10 "right" 20} [1 2 3]',
+      "read-metadata-left": 10,
       "bounded-sum": 6,
       "observed": [1, 2, 3],
       "reduced-state": true,
@@ -377,6 +381,8 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect(protocolMap.sourcesContent[0]).toContain("(defun define-protocol");
     const identifierMap = await Bun.file(`${identifierModule}.map`).json();
     expect(identifierMap.sourcesContent[0]).toContain("(defun keyword");
+    const dataTextMap = await Bun.file(`${dataTextModule}.map`).json();
+    expect(dataTextMap.sourcesContent[0]).toContain("(defun print-value");
     const metadataMap = await Bun.file(`${metadataModule}.map`).json();
     expect(metadataMap.sourcesContent[0]).toContain("(defun with-meta");
     const collectionMap = await Bun.file(`${collectionModule}.map`).json();

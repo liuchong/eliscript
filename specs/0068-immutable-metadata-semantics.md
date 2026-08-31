@@ -181,7 +181,8 @@ semantics in both implementations.
 
 ## Next Slice
 
-Define one canonical deterministic printer and reader round trip for scalar,
-identifier, persistent collection, and metadata forms. Only after that syntax
-contract is executable should source literals migrate from native JavaScript
-containers to persistent Eliscript values.
+Canonical runtime printer/reader round trips are now defined by
+[0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md).
+Implement the matching portable List/collection model next. Only after that
+cross-family syntax contract is executable should source literals migrate from
+native JavaScript containers to persistent Eliscript values.

@@ -29,6 +29,7 @@ test: check-contracts
 		tests/portable-persistent-vector.test.mjs \
 		tests/portable-value-semantics.test.mjs tests/portable-metadata.test.mjs \
 		tests/identifier.test.mjs tests/metadata.test.mjs \
+		tests/data-text.test.mjs \
 		tests/protocol.test.mjs tests/collection-protocol.test.mjs \
 		tests/transducer.test.mjs tests/transient.test.mjs \
 		tests/core-stdlib.test.mjs \

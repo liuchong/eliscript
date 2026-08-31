@@ -59,6 +59,21 @@ unannotated because their global interning cannot carry per-use state.
 Exact semantics and evidence are specified in
 [specs/0068-immutable-metadata-semantics.md](../specs/0068-immutable-metadata-semantics.md).
 
+### Canonical Data Text
+
+`core/data-text.mjs` supplies the open `IPrint` protocol and canonical
+`printValue`, `readValue`, and `readValues` operations. Scalar edges,
+identifiers, persistent Vector/Map/Set values, and metadata round-trip through
+readable Lisp-shaped text. Map entries and Set members sort by canonical text,
+unsafe identifiers use explicit tags, and duplicate or malformed input fails
+with a located `DataTextError`. Depth, UTF-16 length, and value-count limits
+bound both directions.
+
+This is deliberately separate from executable source reading and the future
+versioned Emacs transport codec. Portable List/collection data text remains the
+next P1 slice. Exact semantics are specified in
+[specs/0069-canonical-runtime-data-text.md](../specs/0069-canonical-runtime-data-text.md).
+
 ### Persistent Map
 
 `core/map.mjs` builds on that key contract with a provisional persistent HAMT.

@@ -149,6 +149,14 @@ Source Map artifact byte-for-byte, and executes both generations under Bun and
 Node. The core-library fixture also compiles and calls the Lisp-named runtime
 metadata surface.
 
+The canonical data-text suite freezes scalar/identifier spellings,
+insertion-order-independent Map/Set output, metadata prefixes, unsafe
+identifier tags, comments and separators, malformed and duplicate diagnostics,
+and explicit depth/length/value limits. Two thousand generated nested values
+must satisfy value equality and byte-identical reprinting; one shared fixture
+then proves Bun/Node equivalence. The core-library fixture compiles and executes
+the Lisp-named printer/reader module through both compiler generations.
+
 The protocol suite exercises immutable protocol definitions, direct Symbol
 slots, exact prototype extensions, stable host categories, explicit defaults,
 atomic validation, and structured missing diagnostics. It proves that

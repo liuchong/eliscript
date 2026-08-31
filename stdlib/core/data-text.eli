@@ -1,0 +1,16 @@
+(module eliscript.core.data-text
+  (import "../../runtime/core/data-text.mjs" :as Runtime)
+
+  (defconst DataTextError Runtime/DataTextError)
+  (defconst IPrint Runtime/IPrint)
+
+  (defun print-value (value &optional options)
+    (Runtime/printValue value options))
+
+  (defun read-value (source &optional options)
+    (Runtime/readValue source options))
+
+  (defun read-values (source &optional options)
+    (Runtime/readValues source options))
+
+  (export DataTextError IPrint print-value read-value read-values))

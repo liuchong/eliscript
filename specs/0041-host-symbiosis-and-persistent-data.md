@@ -754,8 +754,13 @@ host-identity limits. Immutable root metadata in
 [0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md)
 completes construction step 3 across optimized Symbols/collections and all
 four portable collection families, including structural sharing, propagation,
-transient round trips, and equality/hash exclusion. Printing, reading, and the
-complete all-host P1 exit audit remain required.
+transient round trips, and equality/hash exclusion. Canonical text for the
+optimized runtime family now begins step 4 in
+[0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md),
+including deterministic Map/Set order, metadata, located malformed-input
+errors, resource limits, generated round trips, and Bun/Node evidence. Portable
+List/collection data text and the complete all-host P1 exit audit remain
+required.
 
 ### P2: Protocols and Algorithms
 

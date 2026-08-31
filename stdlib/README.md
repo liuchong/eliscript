@@ -203,6 +203,28 @@ hashing. The portable collection modules also export representation-level
 are specified in
 [specs/0068-immutable-metadata-semantics.md](../specs/0068-immutable-metadata-semantics.md).
 
+## Canonical Runtime Data Text
+
+`core/data-text.eli` exposes the optimized runtime printer and reader through
+Lisp-named functions:
+
+```elisp
+(import "../../stdlib/core/data-text.eli"
+        print-value read-value read-values)
+
+(read-value
+ (print-value
+  (read-value "^{:source \"example\"} {:values [1 2 3]}")))
+```
+
+The format covers scalar edges, Keyword/Symbol values, persistent Vector, Map,
+Set, and metadata values. Map and Set output is deterministic, malformed and
+duplicate data is rejected with source positions, and explicit limits bound
+depth, text length, and value count. Portable List and portable collection
+representations are intentionally not claimed by this module; their matching
+implementation is the next standard-library slice. See
+[specs/0069-canonical-runtime-data-text.md](../specs/0069-canonical-runtime-data-text.md).
+
 ## Protocol-driven Core
 
 `core/seq.eli` and `core/data.eli` expose the current protocol-driven runtime

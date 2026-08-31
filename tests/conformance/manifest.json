@@ -757,6 +757,19 @@
         { "kind": "bun-test", "file": "tests/portable-metadata.test.mjs", "contains": "Eliscript-authored metadata is byte-identical and portable" },
         { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" }
       ]
+    },
+    {
+      "id": "language.canonical-runtime-data-text",
+      "title": "Canonical runtime data text",
+      "status": "accepted",
+      "spec": "0069",
+      "contracts": ["Prints scalar, identifier, persistent collection, and metadata values canonically", "Reads canonical text into equal runtime values with deterministic errors", "Sorts Map and Set text independently of trie traversal order", "Enforces explicit depth, length, and value-count limits across Bun and Node"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "collections print in deterministic logical order" },
+        { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "reader rejects malformed, duplicate, and unsupported data" },
+        { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "generated nested values retain equality and canonical text" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" }
+      ]
     }
   ]
 }

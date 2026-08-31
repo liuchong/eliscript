@@ -556,7 +556,11 @@ including root-only wrappers, persistent/transient propagation, portable and
 runtime APIs, equality/hash exclusion, and seed/self-hosted Bun/Node evidence.
 P1 construction steps 1-3 are complete. Declared macro dependencies,
 object/text migration, portable dispatch policy, static escape analysis,
-efficient host identity hashing, printing, and reading remain open.
+efficient host identity hashing remain open. Canonical printing/reading for
+the optimized runtime family now lands in
+[0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md);
+portable List/collection data text and the complete P1 cross-family audit
+remain open.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

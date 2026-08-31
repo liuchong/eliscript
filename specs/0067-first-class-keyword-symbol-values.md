@@ -118,10 +118,12 @@ reader syntax, keyword property keys, JSX tag handling, quoted forms, or
 compiler binding Symbols.
 
 Immutable Symbol metadata is now specified by 0068; Keywords remain
-unannotated because they are interned. Canonical printing/reading,
-serialization codecs, automatic literal emission, namespace aliases, and
-Emacs boundary conversion remain separate work. Native JavaScript `Symbol`
-values retain the behavior defined by 0048.
+unannotated because they are interned. Canonical optimized-runtime
+printing/reading is specified by 0069, including tagged escape forms for
+otherwise ambiguous names. Portable data text, serialization codecs, automatic
+literal emission, namespace aliases, and Emacs boundary conversion remain
+separate work. Native JavaScript `Symbol` values retain the behavior defined
+by 0048.
 
 ## Acceptance Criteria
 
@@ -150,7 +152,7 @@ values retain the behavior defined by 0048.
 
 Immutable metadata is implemented by
 [0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).
-Define one canonical printer/reader round trip next, before changing literal
-emission. Literal migration must preserve explicit native JavaScript property
-keys and JSX tag semantics rather than treating every current keyword-shaped
-token alike.
+The optimized-runtime printer/reader round trip now exists in 0069. Complete
+the portable collection/List side before changing literal emission. Literal
+migration must preserve explicit native JavaScript property keys and JSX tag
+semantics rather than treating every current keyword-shaped token alike.
