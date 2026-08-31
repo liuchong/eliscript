@@ -32,15 +32,15 @@ test("repository public surface matches every tracked implementation", async () 
     language: { groups: 12, entries: 174 },
     ir: { nodeKinds: 55 },
     commands: { commands: 5, options: 20 },
-    schemas: { total: 7 },
+    schemas: { total: 8 },
     adapters: { adapters: 4, exports: 17 },
-    runtimeModules: { modules: 28, exports: 204, public: 19, internal: 9 },
+    runtimeModules: { modules: 29, exports: 211, public: 20, internal: 9 },
     standardLibrary: { modules: 29, exports: 302 },
     emacs: {
-      functions: 102,
-      records: 31,
-      publicRecords: 19,
-      internalRecords: 12,
+      functions: 110,
+      records: 35,
+      publicRecords: 21,
+      internalRecords: 14,
     },
   });
 });

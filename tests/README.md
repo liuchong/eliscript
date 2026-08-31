@@ -39,6 +39,14 @@ Eliscript source maps. Org publishing tests cover metadata, deterministic HTML,
 draft and duplicate handling, the watched Vite content module, direct ESM
 execution, and the production Org site bundle.
 
+Worker tests separately exercise the versioned persistent-value codec and its
+chunked framing. Bun unit tests cover every value category, malformed events,
+limits, Unicode text, and cancellation; protocol tests cover acknowledgements,
+progress, responses, sequence errors, and upload cancellation; ERT starts a
+real Bun worker and verifies incremental Emacs encoding and decoding. These
+tests are core integration evidence and do not use application frameworks or
+bundlers.
+
 ## Bootstrap and Compiler
 
 Bootstrap tests use shared JSON conformance fixtures. ERT runs the Emacs Lisp

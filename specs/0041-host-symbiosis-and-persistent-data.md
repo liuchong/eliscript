@@ -940,10 +940,13 @@ and portable reference implementations remain required.
 large inputs remain bounded in memory.
 
 **Status:** Underway since 2026-09-01. Specification 0088 implements the
-versioned non-streaming codec, deterministic validation, request/progress/
-response negotiation, Emacs records, exact scalar categories, resource
-limits, and temporary-module runtime resolution. Streaming, chunking, and
-transport cancellation during codec traversal remain open before the P5 exit.
+versioned non-streaming codec, deterministic validation, Emacs records, exact
+scalar categories, and temporary-module runtime resolution. Specification
+[0089-chunked-emacs-worker-values.md](0089-chunked-emacs-worker-values.md)
+implements incremental Emacs and JavaScript codecs, bounded chunks, explicit
+input and output backpressure, progress and result streams, and cancellation
+during upload and traversal. The maintained 256 MiB process probe and measured
+memory budget required by PD-08 remain open before the P5 exit.
 
 ### P6: Accelerated Emacs API
 

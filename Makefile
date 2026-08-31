@@ -21,6 +21,7 @@ test: check-contracts
 		tests/macro-generated-names.test.mjs \
 		tests/worker-runtime.test.mjs \
 		tests/worker-value-codec.test.mjs \
+		tests/worker-value-stream.test.mjs \
 		tests/worker-benchmark.test.mjs tests/stdlib-sequence.test.mjs \
 		tests/stdlib-text.test.mjs tests/stdlib-object.test.mjs \
 		tests/stdlib-bit.test.mjs \

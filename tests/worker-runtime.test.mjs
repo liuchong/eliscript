@@ -12,6 +12,11 @@ import {
   encodeWorkerValue,
   workerValueEncoding,
 } from "../runtime/worker-value-codec.mjs";
+import {
+  WorkerValueStreamDecoder,
+  encodeWorkerValueChunks,
+  workerValueFraming,
+} from "../runtime/worker-value-stream.mjs";
 
 const projectDirectory = resolve(import.meta.dir, "..");
 const compilerPath = resolve(projectDirectory, "bin/eliscript");
@@ -135,6 +140,69 @@ function scoreValues(values, rounds) {
   return total;
 }
 
+async function sendChunkedRequest(client, id, fields, arguments_) {
+  client.send({
+    version: 1,
+    type: "request",
+    id,
+    valueEncoding: workerValueEncoding,
+    valueFraming: workerValueFraming,
+    ...fields,
+  });
+  expect(await client.next(
+    (message) => message.id === id && message.type === "value-ack",
+  )).toMatchObject({ sequence: -1, channel: "arguments", final: false });
+  const chunks = [];
+  for await (const events of encodeWorkerValueChunks(arguments_, {
+    maxChunkBytes: 512,
+    maxEventsPerChunk: 5,
+    maxTextPartUnits: 7,
+  })) {
+    chunks.push(events);
+  }
+  for (let sequence = 0; sequence < chunks.length; sequence += 1) {
+    const final = sequence === chunks.length - 1;
+    client.send({
+      version: 1,
+      type: "value-chunk",
+      id,
+      channel: "arguments",
+      sequence,
+      final,
+      valueEncoding: workerValueEncoding,
+      valueFraming: workerValueFraming,
+      events: chunks[sequence],
+    });
+    expect(await client.next(
+      (message) => message.id === id && message.type === "value-ack" &&
+        message.sequence === sequence,
+    )).toMatchObject({ sequence, final });
+  }
+}
+
+async function receiveChunkedValue(client, id, channel) {
+  const decoder = new WorkerValueStreamDecoder();
+  let sequence = 0;
+  let stream;
+  while (true) {
+    const message = await client.next((candidate) =>
+      candidate.id === id && candidate.type === "value-chunk" &&
+      candidate.channel === channel &&
+      (stream === undefined || candidate.stream === stream));
+    if (stream === undefined) stream = message.stream;
+    expect(message).toMatchObject({
+      sequence,
+      valueEncoding: workerValueEncoding,
+      valueFraming: workerValueFraming,
+    });
+    decoder.write(message.events);
+    sequence += 1;
+    if (message.final) {
+      return { value: decoder.finish(), message };
+    }
+  }
+}
+
 test("worker negotiates the persistent value codec without changing JSON mode", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "eliscript-codec-worker-"));
   const modulePath = resolve(directory, "codec.mjs");
@@ -164,6 +232,7 @@ test("worker negotiates the persistent value codec without changing JSON mode", 
     client = createWorkerClient();
     const ready = await client.next((message) => message.type === "ready");
     expect(ready.capabilities).toContain("value-codec-v1");
+    expect(ready.capabilities).toContain("value-chunks-v1");
     expect(ready.capabilities).toContain("runtime-resolution");
 
     const argument = persistentHashMap(
@@ -188,6 +257,79 @@ test("worker negotiates the persistent value codec without changing JSON mode", 
     expect(response.valueEncoding).toBe(workerValueEncoding);
     expect(equalValues(decodeWorkerValue(progress.value), argument)).toBe(true);
     expect(equalValues(decodeWorkerValue(response.value), argument)).toBe(true);
+
+    await sendChunkedRequest(
+      client,
+      "chunked-echo",
+      { module: modulePath, export: "echo" },
+      [argument],
+    );
+    const chunkedProgress = await receiveChunkedValue(
+      client,
+      "chunked-echo",
+      "progress",
+    );
+    const chunkedResponse = await receiveChunkedValue(
+      client,
+      "chunked-echo",
+      "response",
+    );
+    expect(equalValues(chunkedProgress.value, argument)).toBe(true);
+    expect(equalValues(chunkedResponse.value, argument)).toBe(true);
+    expect(chunkedResponse.message.timing).toMatchObject({
+      executionMs: expect.any(Number),
+      serializationMs: expect.any(Number),
+      workerMs: expect.any(Number),
+    });
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "chunk-order",
+      module: modulePath,
+      export: "echo",
+      valueEncoding: workerValueEncoding,
+      valueFraming: workerValueFraming,
+    });
+    await client.next(
+      (message) => message.id === "chunk-order" && message.type === "value-ack",
+    );
+    client.send({
+      version: 1,
+      type: "value-chunk",
+      id: "chunk-order",
+      channel: "arguments",
+      sequence: 1,
+      final: true,
+      valueEncoding: workerValueEncoding,
+      valueFraming: workerValueFraming,
+      events: [["open", "array", 0]],
+    });
+    expect(await client.next((message) => message.id === "chunk-order"))
+      .toMatchObject({
+        ok: false,
+        error: { code: "invalid-value-chunk" },
+      });
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "chunk-cancel",
+      module: modulePath,
+      export: "echo",
+      valueEncoding: workerValueEncoding,
+      valueFraming: workerValueFraming,
+    });
+    await client.next(
+      (message) => message.id === "chunk-cancel" && message.type === "value-ack",
+    );
+    client.send({ version: 1, type: "cancel", id: "chunk-cancel" });
+    expect(await client.next(
+      (message) => message.id === "chunk-cancel" && message.type === "cancel",
+    )).toMatchObject({ accepted: true });
+    expect(await client.next(
+      (message) => message.id === "chunk-cancel" && message.type === "response",
+    )).toMatchObject({ ok: false, error: { code: "cancelled" } });
 
     client.send({
       version: 1,

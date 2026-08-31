@@ -36,6 +36,24 @@ Local module changes also trigger a generation restart, while unchanged
 modules remain cached. Runtime errors expose mapped `.eli` locations through
 `eliscript-worker-error-location` and `eliscript-worker-format-error`.
 
+## Persistent Value Transport
+
+Pass `:value-codec t` to preserve Eliscript List, Vector, Map, Set, Keyword,
+Symbol, metadata, undefined, special Number, native Array, and native Object
+categories. Add `:value-chunks t` for incremental bounded transport; chunking
+implies the value codec and is available on synchronous, asynchronous, and
+portable calls.
+
+`eliscript-value-stream.el` exposes pull-based event and chunk encoders plus an
+incremental decoder. Ordinary worker callers should use `:value-chunks t`
+instead of constructing protocol frames. The client waits for each argument
+acknowledgement, validates every progress and response sequence, and discards
+partial values after cancellation or failure.
+
+The value bridge is language and Emacs integration infrastructure. It does not
+depend on a UI library, application framework, bundler, development server, or
+publishing adapter.
+
 `eliscript-index.el` is the representative high-level integration. It compiles
 the portable kernel in `examples/emacs-index/`, owns its temporary module and
 worker, and scores tokenized documents concurrently:

@@ -5,6 +5,7 @@
 (require 'ert)
 (require 'eliscript)
 (require 'eliscript-worker)
+(require 'eliscript-value-stream)
 (require 'eliscript-index)
 
 (defun eliscript-worker-tests--score-values (values rounds)
@@ -74,10 +75,77 @@
                                     '((max-collection-length . 2)))
      :type 'eliscript-value-codec-error)))
 
+(ert-deftest eliscript-emacs-value-stream-is-incremental-and-bounded ()
+  (let* ((limits '((max-chunk-bytes . 256)
+                   (max-events-per-chunk . 5)
+                   (max-text-part-units . 3)))
+         (metadata
+          (eliscript-value-map
+           (vector (cons (eliscript-value-keyword "source") "emacs"))))
+         (value
+          (eliscript-value-list
+           (vector
+            (eliscript-value-keyword "ready" "app")
+            (eliscript-value-symbol "item" "model" metadata)
+            (eliscript-value-vector
+             (vector eliscript-worker-value-undefined -0.0 0.0e+NaN))
+            (eliscript-value-set (vector "beta" "alpha"))
+            (eliscript-value-object (vector (cons "ready" :false)))
+            (concat (make-string 1000 ?a) "😀done"))
+           metadata))
+         (encoder (eliscript-worker-value-stream-encoder value limits))
+         (decoder (eliscript-worker-value-stream-decoder limits))
+         chunk
+         (chunk-count 0))
+    (while (setq chunk
+                 (eliscript-worker-value-stream-next-chunk encoder))
+      (cl-incf chunk-count)
+      (should (<= (length chunk) 5))
+      (should
+       (<= (string-bytes
+            (encode-coding-string
+             (json-serialize chunk :null-object nil :false-object :false)
+             'utf-8-unix t))
+           256))
+      (eliscript-worker-value-stream-write decoder chunk))
+    (should (> chunk-count 1))
+    (should (equal (eliscript-worker-value-stream-finish decoder) value))
+
+    (let ((cycle (vector nil)))
+      (aset cycle 0 cycle)
+      (let ((cycle-encoder
+             (eliscript-worker-value-stream-encoder cycle)))
+        (should-error
+         (while (eliscript-worker-value-stream-next-chunk cycle-encoder))
+         :type 'eliscript-value-stream-error)))
+
+    (let ((truncated (eliscript-worker-value-stream-decoder)))
+      (eliscript-worker-value-stream-write
+       truncated [["text" 4] ["text-part" "ab"]])
+      (should-error (eliscript-worker-value-stream-finish truncated)
+                    :type 'eliscript-value-stream-error))
+
+    (let ((wide (eliscript-worker-value-stream-decoder
+                 '((max-chunk-bytes . 32)))))
+      (should-error
+       (eliscript-worker-value-stream-write
+        wide [["text" 20] ["text-part" "xxxxxxxxxxxxxxxxxxxx"]])
+       :type 'eliscript-value-stream-error))
+
+    (let ((duplicate (eliscript-worker-value-stream-decoder)))
+      (should-error
+       (eliscript-worker-value-stream-write
+        duplicate
+        [["open" "object" 2]
+         ["text" 1] ["text-part" "x"] ["value" 1]
+         ["text" 1] ["text-part" "x"] ["value" 2]])
+       :type 'eliscript-value-stream-error))))
+
 (ert-deftest eliscript-emacs-client-negotiates-persistent-value-codec ()
   (let* ((directory (make-temp-file "eliscript-value-codec-worker-" t))
          (source (expand-file-name "codec.eli" directory))
          (module (expand-file-name "codec.mjs" directory))
+         (progress-module (expand-file-name "progress.mjs" directory))
          worker)
     (unwind-protect
         (progn
@@ -90,8 +158,16 @@
              "(export echo value)\n"))
           (eliscript-compile-portable-file-with-source-map
            source '(echo value) module)
+          (with-temp-file progress-module
+            (insert
+             "export async function echo(value, context) {\n"
+             "  await context.progress(value);\n"
+             "  return value;\n"
+             "}\n"))
           (setq worker (eliscript-worker-start))
           (should (member "value-codec-v1"
+                          (eliscript-worker-capabilities worker)))
+          (should (member "value-chunks-v1"
                           (eliscript-worker-capabilities worker)))
           (let* ((argument
                   (eliscript-value-map
@@ -106,6 +182,37 @@
                    :value-codec t
                    :timeout-ms 2000)))
             (should (equal result argument)))
+          (let* ((text (concat (make-string 600000 ?a) "😀done"))
+                 (argument
+                  (eliscript-value-vector
+                   (vector text (eliscript-value-keyword "large"))))
+                 progress
+                 timing
+                 (result
+                  (eliscript-worker-call-sync
+                   worker progress-module "echo" (list argument)
+                   :value-chunks t
+                   :progress (lambda (value) (setq progress value))
+                   :metrics (lambda (value) (setq timing value))
+                   :timeout-ms 5000)))
+            (should (equal result argument))
+            (should (equal progress argument))
+            (should (numberp (alist-get 'serializationMs timing))))
+          (let (done request-error)
+            (let ((id
+                   (eliscript-worker-call
+                    worker progress-module "echo"
+                    (list (make-string 600000 ?z))
+                    (lambda (_value error-object)
+                      (setq request-error error-object
+                            done t))
+                    :value-chunks t
+                    :timeout-ms 5000)))
+              (should (eliscript-worker-cancel worker id))
+              (should
+               (eliscript-worker-tests--wait
+                worker (lambda () done) 2.0))
+              (should (equal (alist-get 'code request-error) "cancelled"))))
           (let* ((result
                   (eliscript-worker-call-portable-sync
                    worker module "value" nil

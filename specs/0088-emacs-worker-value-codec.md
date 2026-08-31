@@ -164,6 +164,9 @@ using JSON-compatible values.
 
 ## Next Boundary
 
+Specification
+[0089-chunked-emacs-worker-values.md](0089-chunked-emacs-worker-values.md)
+adds bounded incremental framing, backpressure, and upload-stage cancellation.
 Static transient escape analysis remains open. The codec does not transport
 transient collections, Atoms, functions, protocol definitions, or arbitrary
 host identities. Promotion of the provisional persistent literal and worker

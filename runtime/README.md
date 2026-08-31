@@ -187,7 +187,11 @@ logs, which are redirected to stderr. Requests may address a raw generated ESM
 export or resolve a `defportable` source name through the module's frozen
 `__eliscript_portable__` manifest. `worker-value-codec.mjs` adds the explicit
 `eliscript-value-v1` encoding for persistent values, identifiers, metadata,
-special numeric/nullish values, and explicit native containers. The worker
-also confines generated `eliscript/runtime/` imports to this package runtime,
-so temporary portable builds do not depend on their output directory for
-runtime resolution.
+special numeric/nullish values, and explicit native containers.
+`worker-value-stream.mjs` adds `eliscript-value-chunks-v1`: an incremental
+event grammar with bounded batches, persistent transient builders, traversal
+limits, UTF-16-safe text parts, and cancellation checks. The worker applies
+one-chunk acknowledgements to request input and stdout drain backpressure to
+progress and response output. It also confines generated
+`eliscript/runtime/` imports to this package runtime, so temporary portable
+builds do not depend on their output directory for runtime resolution.

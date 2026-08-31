@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { createHash } from "node:crypto";
+import { once } from "node:events";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
@@ -10,6 +11,12 @@ import {
   encodeWorkerValue,
   workerValueEncoding,
 } from "./worker-value-codec.mjs";
+import {
+  WorkerValueStreamDecoder,
+  encodeWorkerValueChunks,
+  workerValueFraming,
+  workerValueStreamLimits,
+} from "./worker-value-stream.mjs";
 
 export const protocolVersion = 1;
 const runtimeDirectory = dirname(fileURLToPath(import.meta.url));
@@ -50,9 +57,12 @@ export const capabilities = [
   "portable-manifest",
   "runtime-resolution",
   "value-codec-v1",
+  "value-chunks-v1",
 ];
 
 const maximumLineBytes = 16 * 1024 * 1024;
+const maximumValueChunkLineBytes = workerValueStreamLimits.maxChunkBytes + 4096;
+const maximumValueStreamBytes = 768 * 1024 * 1024;
 const moduleCache = new Map();
 const pending = new Map();
 const protocolOutput = process.stdout;
@@ -120,6 +130,7 @@ function mappedFrames(frames, sourceMaps) {
 function errorPayload(code, message, error, sourceMaps) {
   const payload = { code, message };
   if (error?.name) payload.name = error.name;
+  if (error?.path) payload.path = error.path;
   if (error?.stack) {
     payload.stack = error.stack;
     const frames = mappedFrames(stackFrames(error.stack), sourceMaps);
@@ -132,7 +143,7 @@ function errorPayload(code, message, error, sourceMaps) {
   return payload;
 }
 
-function writeMessage(message) {
+function encodeMessage(message) {
   let encoded;
   try {
     encoded = JSON.stringify(message);
@@ -147,7 +158,17 @@ function writeMessage(message) {
       ),
     });
   }
-  protocolOutput.write(`${encoded}\n`);
+  return `${encoded}\n`;
+}
+
+function writeMessage(message) {
+  protocolOutput.write(encodeMessage(message));
+}
+
+async function writeMessageAsync(message) {
+  if (!protocolOutput.write(encodeMessage(message))) {
+    await once(protocolOutput, "drain");
+  }
 }
 
 function jsonValue(value, label) {
@@ -488,7 +509,20 @@ function validateRequest(message) {
       "request must contain exactly one non-empty export or operation",
     );
   }
-  if (!Array.isArray(message.arguments)) {
+  const usesValueChunks = message.valueFraming === workerValueFraming;
+  if (message.valueFraming !== undefined && !usesValueChunks) {
+    throw new Error(`request valueFraming must be ${workerValueFraming}`);
+  }
+  if (usesValueChunks) {
+    if (message.valueEncoding !== workerValueEncoding) {
+      throw new Error(
+        `chunked requests require valueEncoding ${workerValueEncoding}`,
+      );
+    }
+    if (message.arguments !== undefined) {
+      throw new Error("chunked requests must stream arguments after the request header");
+    }
+  } else if (!Array.isArray(message.arguments)) {
     throw new Error("request arguments must be an array");
   }
   if (message.valueEncoding !== undefined &&
@@ -514,6 +548,43 @@ function validateRequest(message) {
   }
 }
 
+function closeEntry(id, entry) {
+  if (entry.timer !== undefined) clearTimeout(entry.timer);
+  if (pending.get(id) === entry) pending.delete(id);
+}
+
+function receivingError(entry, code, message, error = undefined) {
+  requestError(entry.message.id, code, message, error);
+  closeEntry(entry.message.id, entry);
+}
+
+function createEntry(message, phase) {
+  const entry = {
+    controller: new AbortController(),
+    abortCode: "cancelled",
+    timer: undefined,
+    phase,
+    message,
+    startedAt: performance.now(),
+    progressIndex: 0,
+    progressQueue: Promise.resolve(),
+    progressError: undefined,
+  };
+  pending.set(message.id, entry);
+  if (message.timeoutMs !== undefined) {
+    entry.timer = setTimeout(() => {
+      entry.abortCode = "timeout";
+      entry.controller.abort();
+      if (entry.phase === "receiving") {
+        const error = new Error("request timed out while receiving value chunks");
+        error.code = "timeout";
+        receivingError(entry, "timeout", error.message, error);
+      }
+    }, message.timeoutMs);
+  }
+  return entry;
+}
+
 function abortPromise(entry) {
   return new Promise((_, reject) => {
     entry.controller.signal.addEventListener("abort", () => {
@@ -526,8 +597,59 @@ function abortPromise(entry) {
   });
 }
 
-async function executeRequest(message) {
-  const startedAt = performance.now();
+async function writeValueStream({
+  id,
+  channel,
+  stream,
+  value,
+  signal,
+  finalFields,
+}) {
+  const iterator = encodeWorkerValueChunks(value, { signal })[Symbol.asyncIterator]();
+  let sequence = 0;
+  let current = await iterator.next();
+  if (current.done) {
+    throw new Error("value stream encoder produced no events");
+  }
+  while (!current.done) {
+    const next = await iterator.next();
+    const final = next.done;
+    const message = {
+      version: protocolVersion,
+      type: "value-chunk",
+      id,
+      channel,
+      sequence,
+      final,
+      valueEncoding: workerValueEncoding,
+      valueFraming: workerValueFraming,
+      events: current.value,
+    };
+    if (stream !== undefined) message.stream = stream;
+    if (final && finalFields) Object.assign(message, finalFields());
+    await writeMessageAsync(message);
+    current = next;
+    sequence += 1;
+  }
+}
+
+function queueProgress(entry, value) {
+  const stream = String(++entry.progressIndex);
+  const task = entry.progressQueue.then(() => writeValueStream({
+    id: entry.message.id,
+    channel: "progress",
+    stream,
+    value,
+    signal: entry.controller.signal,
+  }));
+  entry.progressQueue = task.catch((error) => {
+    if (entry.progressError === undefined) entry.progressError = error;
+  });
+  return task;
+}
+
+async function executeRequest(message, entry, streamedArguments = undefined) {
+  const startedAt = entry.startedAt;
   let moduleLoadMs = 0;
   let executionMs = 0;
   let serializationMs = 0;
@@ -535,18 +657,7 @@ async function executeRequest(message) {
   let moduleVersion;
   let sourceMaps = [];
   let executionStartedAt;
-  const entry = {
-    controller: new AbortController(),
-    abortCode: "cancelled",
-    timer: undefined,
-  };
-  pending.set(message.id, entry);
-  if (message.timeoutMs !== undefined) {
-    entry.timer = setTimeout(() => {
-      entry.abortCode = "timeout";
-      entry.controller.abort();
-    }, message.timeoutMs);
-  }
+  entry.phase = "executing";
 
   try {
     const moduleLoadStartedAt = performance.now();
@@ -579,13 +690,17 @@ async function executeRequest(message) {
       throw error;
     }
     const usesValueCodec = message.valueEncoding === workerValueEncoding;
-    const arguments_ = usesValueCodec
-      ? decodeWorkerValues(message.arguments)
-      : message.arguments;
+    const usesValueChunks = message.valueFraming === workerValueFraming;
+    const arguments_ = streamedArguments !== undefined
+      ? streamedArguments
+      : usesValueCodec
+        ? decodeWorkerValues(message.arguments)
+        : message.arguments;
     const context = {
       signal: entry.controller.signal,
       progress(value) {
         if (entry.controller.signal.aborted) return;
+        if (usesValueChunks) return queueProgress(entry, value);
         const response = {
           version: protocolVersion,
           type: "progress",
@@ -604,7 +719,33 @@ async function executeRequest(message) {
     );
     const value = await Promise.race([operationPromise, abortPromise(entry)]);
     executionMs = performance.now() - executionStartedAt;
+    await entry.progressQueue;
+    if (entry.progressError !== undefined) throw entry.progressError;
     const serializationStartedAt = performance.now();
+    if (usesValueChunks) {
+      await writeValueStream({
+        id: message.id,
+        channel: "response",
+        value,
+        signal: entry.controller.signal,
+        finalFields() {
+          serializationMs = performance.now() - serializationStartedAt;
+          return {
+            timing: {
+              moduleLoadMs,
+              moduleCacheHit,
+              moduleVersion,
+              sourceMapLoaded: sourceMaps.length > 0,
+              sourceMapCount: sourceMaps.length,
+              executionMs,
+              serializationMs,
+              workerMs: performance.now() - startedAt,
+            },
+          };
+        },
+      });
+      return;
+    }
     const serializedValue = usesValueCodec
       ? encodeWorkerValue(value)
       : jsonValue(value, "response value");
@@ -632,8 +773,9 @@ async function executeRequest(message) {
     if (executionStartedAt !== undefined && executionMs === 0) {
       executionMs = performance.now() - executionStartedAt;
     }
-    const code = error.code ??
-      (entry.controller.signal.aborted ? entry.abortCode : "runtime");
+    const code = entry.controller.signal.aborted
+      ? entry.abortCode
+      : error.code ?? "runtime";
     requestError(
       message.id,
       code,
@@ -652,8 +794,110 @@ async function executeRequest(message) {
       sourceMaps,
     );
   } finally {
-    if (entry.timer !== undefined) clearTimeout(entry.timer);
-    pending.delete(message.id);
+    closeEntry(message.id, entry);
+  }
+}
+
+function valueAck(id, sequence, final = false) {
+  writeMessage({
+    version: protocolVersion,
+    type: "value-ack",
+    id,
+    channel: "arguments",
+    sequence,
+    final,
+    valueEncoding: workerValueEncoding,
+    valueFraming: workerValueFraming,
+  });
+}
+
+function startRequest(message) {
+  validateRequest(message);
+  if (pending.has(message.id)) {
+    throw new Error(`request id is already pending: ${message.id}`);
+  }
+  if (message.valueFraming === workerValueFraming) {
+    const entry = createEntry(message, "receiving");
+    entry.decoder = new WorkerValueStreamDecoder({
+      signal: entry.controller.signal,
+    });
+    entry.sequence = 0;
+    entry.framedBytes = 0;
+    valueAck(message.id, -1);
+    return;
+  }
+  const entry = createEntry(message, "executing");
+  void executeRequest(message, entry);
+}
+
+function receiveValueChunk(message, lineBytes) {
+  if (typeof message.id !== "string" || message.id.length === 0) {
+    protocolError("invalid-message", "value chunk id must be a non-empty string");
+    return;
+  }
+  const entry = pending.get(message.id);
+  if (!entry || entry.phase !== "receiving") {
+    protocolError(
+      "invalid-message",
+      `no request is receiving value chunks for id ${message.id}`,
+      message.id,
+    );
+    return;
+  }
+  try {
+    if (lineBytes > maximumValueChunkLineBytes) {
+      throw new Error(
+        `value chunk exceeds ${maximumValueChunkLineBytes} framed bytes`,
+      );
+    }
+    if (message.channel !== "arguments") {
+      throw new Error("incoming value chunk channel must be arguments");
+    }
+    if (message.valueEncoding !== workerValueEncoding ||
+        message.valueFraming !== workerValueFraming) {
+      throw new Error("incoming value chunk encoding or framing mismatch");
+    }
+    if (!Number.isSafeInteger(message.sequence) || message.sequence < 0 ||
+        message.sequence !== entry.sequence) {
+      throw new Error(
+        `value chunk sequence ${String(message.sequence)} does not match ${entry.sequence}`,
+      );
+    }
+    if (typeof message.final !== "boolean") {
+      throw new Error("value chunk final must be a boolean");
+    }
+    if (!Array.isArray(message.events)) {
+      throw new Error("value chunk events must be an array");
+    }
+    entry.framedBytes += lineBytes;
+    if (entry.framedBytes > maximumValueStreamBytes) {
+      throw new Error(
+        `value stream exceeds ${maximumValueStreamBytes} framed bytes`,
+      );
+    }
+    entry.decoder.write(message.events);
+    const sequence = entry.sequence;
+    entry.sequence += 1;
+    if (!message.final) {
+      valueAck(message.id, sequence);
+      return;
+    }
+    const arguments_ = entry.decoder.finish();
+    if (!Array.isArray(arguments_)) {
+      throw new Error("chunked request root must decode to an argument array");
+    }
+    entry.decoder = undefined;
+    entry.phase = "executing";
+    valueAck(message.id, sequence, true);
+    void executeRequest(entry.message, entry, arguments_);
+  } catch (error) {
+    entry.controller.abort();
+    receivingError(
+      entry,
+      error.code ?? "invalid-value-chunk",
+      error.message,
+      error,
+    );
   }
 }
 
@@ -674,6 +918,11 @@ function cancelRequest(message) {
     id: message.id,
     accepted,
   });
+  if (entry?.phase === "receiving") {
+    const error = new Error("request cancelled while receiving value chunks");
+    error.code = "cancelled";
+    receivingError(entry, "cancelled", error.message, error);
+  }
 }
 
 function shutdown(lines) {
@@ -691,7 +940,7 @@ function shutdown(lines) {
   setTimeout(() => process.exit(0), 0);
 }
 
-function handleMessage(message, lines) {
+function handleMessage(message, lines, lineBytes) {
   if (!message || typeof message !== "object" || Array.isArray(message)) {
     protocolError("invalid-message", "protocol message must be an object");
     return;
@@ -706,14 +955,12 @@ function handleMessage(message, lines) {
   }
   if (message.type === "request") {
     try {
-      validateRequest(message);
-      if (pending.has(message.id)) {
-        throw new Error(`request id is already pending: ${message.id}`);
-      }
-      void executeRequest(message);
+      startRequest(message);
     } catch (error) {
       requestError(message.id, "invalid-request", error.message, error);
     }
+  } else if (message.type === "value-chunk") {
+    receiveValueChunk(message, lineBytes);
   } else if (message.type === "cancel") {
     cancelRequest(message);
   } else if (message.type === "shutdown") {
@@ -743,13 +990,14 @@ export async function runWorker() {
     }
   });
   for await (const line of lines) {
-    if (Buffer.byteLength(line, "utf8") > maximumLineBytes) {
+    const lineBytes = Buffer.byteLength(line, "utf8");
+    if (lineBytes > maximumLineBytes) {
       protocolError("line-too-large", "protocol line exceeds 16 MiB");
       continue;
     }
     if (line.trim().length === 0) continue;
     try {
-      handleMessage(JSON.parse(line), lines);
+      handleMessage(JSON.parse(line), lines, lineBytes);
     } catch (error) {
       protocolError("invalid-json", `invalid JSON: ${error.message}`);
     }

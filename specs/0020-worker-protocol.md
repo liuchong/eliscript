@@ -121,6 +121,13 @@ adds an opt-in `eliscript-value-v1` encoding without changing protocol version
 persistent values and repeat the encoding identifier on progress and success
 messages.
 
+Specification
+[0089-chunked-emacs-worker-values.md](0089-chunked-emacs-worker-values.md)
+adds an opt-in `eliscript-value-chunks-v1` framing. It sends bounded value-event
+batches in protocol messages, acknowledges one argument chunk at a time, and
+streams progress and success values while awaiting stdout backpressure. The
+legacy JSON and non-streaming codec paths remain unchanged.
+
 ## Timing Contract
 
 Each worker response reports durations in milliseconds:

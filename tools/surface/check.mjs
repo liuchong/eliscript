@@ -172,7 +172,7 @@ async function validateCommands(root, commands, cache, errors) {
 
 function extractJsExports(source) {
   const declarations = [...source.matchAll(
-    /^export\s+(?:async\s+)?(?:function|const|class)\s+([A-Za-z_$][\w$]*)/gmu,
+    /^export\s+(?:async\s+)?(?:function\s*\*?|const|class)\s+([A-Za-z_$][\w$]*)/gmu,
   )].map((match) => match[1]);
   const lists = [...source.matchAll(
     /^export\s*\{([^}]*)\}\s*(?:from\s*["'][^"']+["'])?\s*;?/gmu,

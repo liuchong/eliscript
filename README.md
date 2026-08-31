@@ -98,7 +98,10 @@ now constructs canonical persistent List/Vector and identifier values instead
 of mutable Arrays and strings. The first Emacs value-bridge slice now adds an
 opt-in versioned worker codec for persistent values, metadata, exact nullish
 and numeric categories, deterministic native containers, and portable
-closures generated outside the package tree. Streaming/chunked transport,
+closures generated outside the package tree. The worker bridge now also
+supports bounded value-event chunks, one-chunk request backpressure,
+incremental progress and result streams, and cancellation during upload and
+codec traversal. The maintained 256 MiB memory-budget probe,
 protocol-definition transport, and static transient escape analysis remain
 open.
 

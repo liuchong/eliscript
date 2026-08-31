@@ -1022,6 +1022,22 @@
         { "kind": "ert", "file": "tests/eliscript-worker-tests.el", "contains": "eliscript-emacs-client-negotiates-persistent-value-codec" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "worker.chunked-persistent-value-stream-v1",
+      "title": "Chunked Emacs worker persistent value streams",
+      "status": "accepted",
+      "spec": "0089",
+      "contracts": ["Negotiates bounded event chunks without changing protocol v1 or legacy value calls", "Applies one-chunk request acknowledgements and stdout output backpressure", "Round trips every persistent and host value category through progress and result streams", "Rejects malformed, duplicate, truncated, oversized, and cancelled streams without delivering partial values", "Keeps application frameworks and bundlers outside core implementation and evidence"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/worker-value-stream.test.mjs", "contains": "chunked value stream preserves every persistent and host category" },
+        { "kind": "bun-test", "file": "tests/worker-value-stream.test.mjs", "contains": "chunked value stream bounds frames and splits long Unicode text" },
+        { "kind": "bun-test", "file": "tests/worker-value-stream.test.mjs", "contains": "stream decoder rejects malformed, duplicate, truncated, and oversized input" },
+        { "kind": "bun-test", "file": "tests/worker-value-stream.test.mjs", "contains": "stream encoder rejects cycles, unsupported values, limits, and cancellation" },
+        { "kind": "bun-test", "file": "tests/worker-runtime.test.mjs", "contains": "value-chunks-v1" },
+        { "kind": "ert", "file": "tests/eliscript-worker-tests.el", "contains": "eliscript-emacs-value-stream-is-incremental-and-bounded" },
+        { "kind": "ert", "file": "tests/eliscript-worker-tests.el", "contains": "eliscript-emacs-client-negotiates-persistent-value-codec" }
+      ]
     }
   ]
 }

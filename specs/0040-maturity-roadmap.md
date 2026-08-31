@@ -613,9 +613,12 @@ including literal ABI, canonical text, portable construction, macro-generated
 Symbol, and fixed-point evidence. The opt-in Emacs worker value codec in
 [0088-emacs-worker-value-codec.md](0088-emacs-worker-value-codec.md) now
 preserves all persistent categories, metadata, exact special scalars, and
-explicit native containers across temporary generated modules. Transport of
-protocol definitions, streaming/chunked values, and static escape analysis
-remain open. Canonical
+explicit native containers across temporary generated modules. Specification
+[0089-chunked-emacs-worker-values.md](0089-chunked-emacs-worker-values.md)
+adds incremental codec traversal, bounded framing, backpressure, streamed
+progress and results, and upload-stage cancellation. The PD-08 256 MiB
+memory-budget probe, transport of protocol definitions, and static escape
+analysis remain open. Canonical
 printing/reading for the optimized runtime family now lands in
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md);
 portable Keyword/Symbol values and List/collection data text now land in
