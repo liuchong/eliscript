@@ -150,6 +150,10 @@ The following boundaries remain fixed through the maturity roadmap:
   does not own a reconciler or a web application framework.
 - Org publishing remains an adapter over the compiler, not a mandatory part of
   the language core.
+- Vite, React, blog generators, site generators, Pages hosting, and other
+  application conveniences may validate public language output, but they do
+  not define core goals, core dependencies, standard-library scope, milestone
+  completion, or final maturity acceptance.
 - Portable acceleration handles explicit serializable computation, not
   transparent migration of arbitrary editor state.
 - A custom package registry is not required for 1.0. Local `.eli` modules and
@@ -673,24 +677,33 @@ The first profile-guided P4 compiler slice now lands in
 the self-hosted emitter collects five conditional runtime requirements in one
 IR traversal, the previous five recursive scans remain an executable semantic
 reference, and a source-bound benchmark records exact agreement plus a reviewed
-1.518058x local median speedup. Application frameworks and bundlers do not
+1.530309x local median speedup. Application frameworks and bundlers do not
 participate in this core evidence.
 Specification
 [0097-profile-guided-ir-node-kind-decisions.md](0097-profile-guided-ir-node-kind-decisions.md)
 then replaces the common linear IR node-kind scan with a module-private native
 index, freezes the registry, retains the array scan as an executable reference,
-and records exact agreement plus a reviewed 8.890869x local median speedup over
-23,108 real compiler IR nodes. Application frameworks, Vite adapters, site
+and records exact agreement plus a reviewed 8.751834x local median speedup over
+23,148 real compiler IR nodes. Application frameworks, Vite adapters, site
 generators, and publishing tools remain outside this language-core slice and
 its acceptance evidence.
 Specification
 [0098-profile-guided-emitter-indentation.md](0098-profile-guided-emitter-indentation.md)
 then replaces character-by-character indentation with source-map-aware line
 segments and one final join, retains the previous loop as an executable
-reference, and records exact text/mark agreement plus a reviewed 20.860462x
+reference, and records exact text/mark agreement plus a reviewed 19.524978x
 local median speedup. The same whole-compiler profile moves indentation out of
 the dominant paths. Application frameworks and publishing adapters remain
 outside this compiler evidence.
+Specification
+[0099-profile-guided-source-mark-location.md](0099-profile-guided-source-mark-location.md)
+then uses the emitter's ordered-mark invariant for constant-time start checks
+and one-step immutable prepend. A compiler-private host specialization is
+called directly at normal emission sites while the previous complete scan and
+iterative copy remain an executable Eliscript reference. The reviewed real
+artifact corpus records exact agreement plus a 3.013590x local median speedup;
+follow-up whole-compiler sampling removes location from the dominant entries.
+Application frameworks and site tooling receive no core roadmap credit.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

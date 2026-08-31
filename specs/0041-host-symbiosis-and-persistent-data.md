@@ -46,6 +46,12 @@ For Eliscript:
 - Emacs remains the editor and interactive host; compiled JavaScript is an
   optional compute engine.
 
+Application frameworks and build tools are consumers at this boundary. Vite,
+React, blog or site generators, Pages hosting, and publishing adapters may
+prove that ordinary generated ESM is useful, but cannot become language-core
+dependencies, core objectives, standard-library requirements, or P4
+acceptance evidence.
+
 ### The Compiler Family Has Asymmetric Roles
 
 ClojureScript demonstrates that a language can begin with a compiler hosted in
@@ -954,13 +960,13 @@ loop escape with seed/self-hosted agreement. Specification
 [0096-profile-guided-compiler-runtime-scan.md](0096-profile-guided-compiler-runtime-scan.md)
 adds the first source-bound compiler profile, replaces five recursive emitter
 runtime-link scans with one production traversal, retains the five predicates
-as an executable reference, and records a reviewed 1.518058x local median
+as an executable reference, and records a reviewed 1.530309x local median
 speedup.
 Specification
 [0097-profile-guided-ir-node-kind-decisions.md](0097-profile-guided-ir-node-kind-decisions.md)
 adds a frozen node-kind registry and module-private native membership index for
 production IR validation, retains the linear scan as an executable reference,
-and records exact agreement plus a reviewed 8.890869x local median speedup over
+and records exact agreement plus a reviewed 8.751834x local median speedup over
 the maintained compiler corpus. The native index is compiler-internal host
 symbiosis, not a language collection or standard-library dependency. Broader
 compiler hot-path review remains required before P4 exits.
@@ -968,10 +974,21 @@ Specification
 [0098-profile-guided-emitter-indentation.md](0098-profile-guided-emitter-indentation.md)
 replaces repeated character string growth with LF-delimited source slices,
 translates Source Map marks through one monotonic cursor, retains the original
-character loop as an executable reference, and records a reviewed 20.860462x
+character loop as an executable reference, and records a reviewed 19.524978x
 local median speedup. Follow-up whole-compiler sampling moves indentation out
 of the dominant paths. Broader compiler and standard-library hot-path review
 remains required before P4 exits.
+Specification
+[0099-profile-guided-source-mark-location.md](0099-profile-guided-source-mark-location.md)
+uses the emitter's ordered-mark invariant for constant-time start checks and
+one-step immutable prepend. Normal emission calls a module-private host
+specialization directly, while the previous complete scan and iterative copy
+remain an executable Eliscript reference. The reviewed real-artifact corpus
+records exact agreement plus a 3.013590x local median speedup, and follow-up
+whole-compiler sampling moves location out of the dominant entries. This is a
+compiler-internal host optimization, not a general collection primitive or an
+application-tool dependency. Broader compiler and standard-library hot-path
+review remains required before P4 exits.
 
 ### P5: Emacs Value Bridge
 

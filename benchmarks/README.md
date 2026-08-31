@@ -8,6 +8,30 @@ committed report records raw samples or bounded peak observations, host
 fingerprints, correctness checks, parameters, and a digest of the source files
 that determine the measurement.
 
+## Compiler Ordered Source-mark Location
+
+Generate the self-hosted compiler and run the location benchmark with:
+
+```sh
+bun run build:bootstrap
+bun run benchmark:compiler-locate
+```
+
+The benchmark uses real nodes, generated declaration fragments, and ordered
+Source Map marks from every maintained self-hosted compiler module. It compares
+the production first-mark check and one-step prepend with the retained full
+array scan and copy reference, including real shifted-prefix fragments.
+
+```sh
+bun tools/compiler/locate-benchmark.mjs \
+  --output benchmarks/compiler-locate-macos-arm64.json
+```
+
+[`compiler-locate-macos-arm64.json`](compiler-locate-macos-arm64.json) records
+the source-bound evidence. Default tests verify exact result equivalence,
+identity and immutability boundaries, report digest, corpus shape, raw samples,
+and threshold decision without rerunning timing.
+
 ## Compiler Source-map-aware Indentation
 
 Generate the self-hosted compiler and run the indentation benchmark with:

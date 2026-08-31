@@ -20,6 +20,7 @@ test: check-contracts
 		tests/compiler-runtime-scan.test.mjs \
 		tests/compiler-ir-kind.test.mjs \
 		tests/compiler-indent.test.mjs \
+		tests/compiler-locate.test.mjs \
 		tests/bootstrap-compiler.test.mjs tests/loop-recur.test.mjs \
 		tests/macro-generated-names.test.mjs \
 		tests/worker-runtime.test.mjs \

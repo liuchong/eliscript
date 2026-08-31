@@ -308,6 +308,7 @@ The schemas and change workflow are defined by specifications
 | 0096 | [Profile-guided Compiler Runtime Requirement Scan](0096-profile-guided-compiler-runtime-scan.md) | Accepted | Implemented |
 | 0097 | [Profile-guided Constant-time IR Node-kind Decisions](0097-profile-guided-ir-node-kind-decisions.md) | Accepted | Implemented |
 | 0098 | [Profile-guided Source-map-aware Emitter Indentation](0098-profile-guided-emitter-indentation.md) | Accepted | Implemented |
+| 0099 | [Profile-guided Ordered Source-mark Location](0099-profile-guided-source-mark-location.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

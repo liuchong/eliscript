@@ -22,6 +22,8 @@
     "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n")
   (defconst fail
     (js* "(message) => { throw new Error(message); }"))
+  (defconst native-locate
+    (js* "(span, output) => { const fragment = typeof output === \"string\" ? { text: output, marks: [] } : output; const marks = fragment.marks; if (fragment.text.length === 0 || span == null || span === false || (marks.length > 0 && marks[0].offset === 0)) return fragment; return { text: fragment.text, marks: [{ offset: 0, span }, ...marks] }; }"))
   (defvar temporary-counter 0)
 
   (defun make-fragment (text marks)
@@ -126,7 +128,7 @@
           (setq source-index segment-end)))
       (make-fragment (js-call text-parts :join "") marks)))
 
-  (defun locate (node output)
+  (defun reference-locate (node output)
     (let* ((fragment (as-fragment output))
            (marks (get fragment :marks))
            (has-start
@@ -141,6 +143,9 @@
           (js-call marks :forEach
             (lambda (mark) (js-call located :push mark)))
           (make-fragment (get fragment :text) located)))))
+
+  (defun locate (node output)
+    (native-locate (ir-span node) output))
 
   (defun fresh-name ()
     (setq temporary-counter (1+ temporary-counter))
@@ -176,7 +181,7 @@
       maximum))
 
   (defun emit-binding-name (node)
-    (locate node (binding-name (ir-value node))))
+    (native-locate (ir-span node) (binding-name (ir-value node))))
 
   (defun emit-array-binding-pattern (node)
     (let* ((nodes (children node))
@@ -195,8 +200,8 @@
               (last-hole "")
               (t (emit-binding-pattern-node child))))
           (setq index (1+ index))))
-      (locate
-        node
+      (native-locate
+        (ir-span node)
         (combine
           (js-array "[" (join-fragments parts ", ")
            (if (and last-hole (not rest)) "," "") "]")))))
@@ -361,7 +366,7 @@
         (setq index (1+ index)))
       (js-call parts :push
         (combine (js-array "continue " (get target :label) ";")))
-      (locate node (join-fragments parts "\n"))))
+      (native-locate (ir-span node) (join-fragments parts "\n"))))
 
   (defun emit-tail-body (nodes target)
     (if (= (get nodes :length) 0)
@@ -384,8 +389,8 @@
              (nodes (children clause))
              (test (js-nth 0 nodes))
              (body (js-call nodes :slice 1)))
-        (locate
-          clause
+        (native-locate
+          (ir-span clause)
           (if (and (= (ir-kind test) "literal")
                    (eq (ir-value test) t))
               (emit-tail-body body target)
@@ -439,8 +444,8 @@
                  (js-nth index temporaries) ";")))
             (setq index (1+ index)))))
       (js-call statements :push (emit-tail-body body target))
-      (locate
-        node
+      (native-locate
+        (ir-span node)
         (combine
           (js-array "{\n" (indent (join-fragments statements "\n")) "\n}")))))
 
@@ -536,8 +541,8 @@
              (nodes (children clause))
              (test (js-nth 0 nodes))
              (body (js-call nodes :slice 1)))
-        (locate
-          clause
+        (native-locate
+          (ir-span clause)
           (if (and (= (ir-kind test) "literal") (= (ir-value test) t))
               (emit-do body)
             (combine
@@ -559,16 +564,16 @@
     (let* ((nodes (children node))
            (binding (js-nth 0 nodes))
            (body (js-call nodes :slice 1)))
-      (locate
-        node
+      (native-locate
+        (ir-span node)
         (combine
           (js-array " catch (" (emit-binding-target binding) ") {\n"
            (indent (emit-returning-body body))
            "\n}")))))
 
   (defun emit-finally (node)
-    (locate
-      node
+    (native-locate
+      (ir-span node)
       (combine
         (js-array " finally {\n"
          (indent (emit-statement-body (children node)))
@@ -643,8 +648,8 @@
       (js-call (children node) :forEach
         (lambda (pair)
           (js-call assignments :push
-            (locate
-              pair
+            (native-locate
+              (ir-span pair)
               (combine
                 (js-array "("
                  (emit-binding-name pair)
@@ -962,8 +967,8 @@
         (lambda (property)
           (let ((nodes (children property)))
             (js-call result :push
-              (locate
-                property
+              (native-locate
+                (ir-span property)
                 (if (ir-property property "computed")
                     (combine
                       (js-array "[" (emit-expression (js-nth 0 nodes)) "]: "
@@ -1050,8 +1055,8 @@
           (= kind "vector"))))
 
   (defun emit-property-key (node)
-    (locate
-      node
+    (native-locate
+      (ir-span node)
       (if (and (= (ir-kind node) "literal")
                (or (= (literal-kind node) "keyword")
                    (= (js* "typeof node.value") "string")))
@@ -1137,8 +1142,8 @@
       (fail "expected an IR expression node"))
     (let ((kind (ir-kind node))
           (nodes (children node)))
-      (locate
-        node
+      (native-locate
+        (ir-span node)
         (cond
           ((= kind "literal") (emit-literal node))
           ((= kind "reference") (text-fragment (reference-name (ir-value node))))
@@ -1251,8 +1256,8 @@
       (fail "expected a top-level IR node"))
     (let ((kind (ir-kind node))
           (nodes (children node)))
-      (locate
-        node
+      (native-locate
+        (ir-span node)
         (cond
           ((= kind "module-declaration")
            (join-fragments
@@ -1595,6 +1600,8 @@
   (export
     indent
     reference-indent
+    locate
+    reference-locate
     emit-expression
     emit-top-level
     emit-module-artifact

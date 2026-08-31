@@ -1153,6 +1153,18 @@
         { "kind": "bun-test", "file": "tests/compiler-indent.test.mjs", "contains": "committed compiler indentation report matches measured sources" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "compiler.ordered-source-mark-location",
+      "title": "Profile-guided ordered source-mark location",
+      "status": "accepted",
+      "spec": "0099",
+      "contracts": ["Uses ordered marks for a constant-time offset-zero child check", "Prepends one parent mark without mutating the original fragment or mark array", "Retains the previous complete scan and iterative copy as an independent Eliscript reference", "Requires exact optimized/reference agreement over real compiler fragments and shifted non-zero-start cases", "Keeps application frameworks, UI libraries, Vite, bundlers, blog and site generators, publishing, Pages hosting, and development servers outside core goals, implementation, evidence, and maturity credit"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/compiler-locate.test.mjs", "contains": "ordered compiler mark location matches its scan and copy reference" },
+        { "kind": "bun-test", "file": "tests/compiler-locate.test.mjs", "contains": "committed compiler location report matches measured sources" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }
