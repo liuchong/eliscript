@@ -879,6 +879,17 @@
         { "kind": "bun-test", "file": "tests/portable-metadata.test.mjs", "contains": "Eliscript-authored metadata is byte-identical and portable" },
         { "kind": "bun-test", "file": "tests/portable-data-text.test.mjs", "contains": "portable canonical data text is byte-identical and host-independent" }
       ]
+    },
+    {
+      "id": "stdlib.eliscript-protocol-dispatch-policy",
+      "title": "Eliscript-authored open protocol dispatch policy",
+      "status": "accepted",
+      "spec": "0079",
+      "contracts": ["Authors protocol definition, registration, dispatch, and implementation queries in Eliscript", "Preserves direct, exact-prototype, host-category, default, and structured missing behavior", "Validates extensions atomically without invoking accessors or modifying host prototypes", "Matches seed and self-hosted artifacts plus million-dispatch Bun and Node reports"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/eliscript-protocol.test.mjs", "contains": "Eliscript-authored protocol policy preserves open dispatch semantics" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" }
+      ]
     }
   ]
 }

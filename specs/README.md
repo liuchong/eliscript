@@ -258,6 +258,7 @@ The schemas and change workflow are defined by specifications
 | 0076 | [Portable JSON Values](0076-portable-json-values.md) | Accepted | Implemented |
 | 0077 | [Portable Numeric Foundation](0077-portable-numeric-foundation.md) | Accepted | Implemented |
 | 0078 | [Persistent Collection Core Exit Audit](0078-persistent-collection-core-exit-audit.md) | Accepted | Implemented |
+| 0079 | [Eliscript-authored Protocol Dispatch Policy](0079-eliscript-protocol-dispatch-policy.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

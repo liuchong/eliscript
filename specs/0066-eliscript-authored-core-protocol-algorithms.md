@@ -17,18 +17,20 @@ collection operations, transducers, transient builders, sequence algorithms,
 and keyed-data algorithms from `stdlib/core/` without importing camel-cased
 JavaScript APIs directly.
 
-The boundary is deliberate. Protocol objects, Symbol slots, exact-type tables,
-host-category tables, default dispatch, persistent collection nodes, and
-owner-token mutation remain an optimized JavaScript runtime substrate. The
-Eliscript modules own the public Lisp spelling and maintained algorithm bodies;
-they do not duplicate representation-sensitive dispatch machinery.
+At this specification's original acceptance boundary, protocol objects,
+Symbol slots, exact-type tables, host-category tables, and default dispatch
+remained an optimized JavaScript runtime substrate. Specification 0079 later
+moves that policy into Eliscript while retaining private host-reflection
+capabilities. Persistent collection nodes and owner-token mutation remain the
+representation-sensitive optimized substrate.
 
 ## Standard-library Modules
 
 Four new Eliscript API modules expose the runtime substrate:
 
-- `stdlib/core/protocol.eli` defines protocol construction, extension,
-  operation lookup, host-category inspection, and implementation queries.
+- `stdlib/core/protocol.eli` exposes protocol construction, extension,
+  operation lookup, host-category inspection, and implementation queries; its
+  dispatch implementation is completed by specification 0079.
 - `stdlib/core/collection.eli` exports the nine collection capabilities and
   generic count, empty, construction, lookup, membership, indexed access,
   sequence, reduction, and reduced-value operations.
@@ -37,9 +39,10 @@ Four new Eliscript API modules expose the runtime substrate:
 - `stdlib/core/transient.eli` exports editable capabilities and `transient`,
   `conj!`, `assoc!`, `dissoc!`, and `persistent!`.
 
-These modules are thin language-level adapters by design. They centralize
-Lisp naming, argument conventions, source maps, and future migration points
-while retaining the measured runtime implementation.
+The collection, transducer, and transient modules remain thin language-level
+adapters by design. They centralize Lisp naming, argument conventions, source
+maps, and future migration points while retaining measured representation
+implementations. The protocol module now additionally owns its policy.
 
 ## Eliscript-authored Algorithms
 
@@ -95,11 +98,12 @@ This M8 surface is provisional. Existing public JavaScript runtime modules
 remain supported, and the earlier portable Array/Object-oriented standard
 library remains unchanged.
 
-The new modules are Eliscript-authored but are not yet eligible for
-`--portable` closure extraction because they import JavaScript runtime modules.
-Protocol dispatch internals, persistent literals, metadata, printing, reading,
-explicit host conversion, text/object migration,
-and static transient escape analysis remain later work.
+The new modules are Eliscript-authored but are not eligible for `--portable`
+closure extraction because they use JavaScript runtime values and host
+reflection. Specification 0079 completes protocol dispatch policy without
+misclassifying Symbol slots, constructors, WeakMap state, or exceptions as
+JSON-portable values. Persistent literals, text/object migration, and static
+transient escape analysis remain later work.
 
 ## Acceptance Criteria
 
@@ -127,10 +131,12 @@ and static transient escape analysis remain later work.
   transducer, transient, standard-library, contract, CLI, Vite, and strict
   byte-compilation suites remain green.
 
-## Next Slice
+## Follow-up
 
-Move protocol definition and dispatch policy into portable Eliscript only when
-the replacement preserves direct slots, open external extension, exact host
-categories, and measured dispatch cost. Keyword/Symbol values now land in
-0067; before persistent literal migration, complete metadata, deterministic
-printing and reading, and explicit native-container conversion.
+Specification
+[0079-eliscript-protocol-dispatch-policy.md](0079-eliscript-protocol-dispatch-policy.md)
+moves protocol definition and dispatch policy into maintained Eliscript while
+preserving direct slots, open external extension, exact host categories, and
+measured dispatch work. It deliberately remains outside `defportable` closure
+selection because Symbol slots, constructors, WeakMap registries, and host
+exceptions do not cross the JSON-compatible worker boundary.

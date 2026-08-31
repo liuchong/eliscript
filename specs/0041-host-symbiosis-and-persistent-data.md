@@ -848,7 +848,11 @@ search termination and transient-backed indexing. The next source-level slice
 in [0066-eliscript-authored-core-protocol-algorithms.md](0066-eliscript-authored-core-protocol-algorithms.md)
 adds Lisp-named protocol, collection, transducer, and transient modules and
 moves the maintained sequence/data algorithm bodies into `.eli`.
-Text/object migration and portable dispatch internals remain open.
+Protocol definition, extension, and dispatch policy now continue in
+[0079-eliscript-protocol-dispatch-policy.md](0079-eliscript-protocol-dispatch-policy.md),
+with private host-reflection capabilities and byte-identical seed/self-hosted
+output. Text/object migration and a transport-safe protocol representation
+remain open.
 
 ### P3: Language Integration and Migration
 

@@ -35,7 +35,8 @@ test: check-contracts
 		tests/interop-js.test.mjs \
 		tests/identifier.test.mjs tests/metadata.test.mjs \
 		tests/data-text.test.mjs \
-		tests/protocol.test.mjs tests/collection-protocol.test.mjs \
+		tests/protocol.test.mjs tests/eliscript-protocol.test.mjs \
+		tests/collection-protocol.test.mjs \
 		tests/transducer.test.mjs tests/transient.test.mjs \
 		tests/core-stdlib.test.mjs \
 		tests/persistent-vector.test.mjs tests/value-semantics.test.mjs \
