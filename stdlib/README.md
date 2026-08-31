@@ -253,6 +253,33 @@ sort. Located errors and default depth, length, and value-count limits match
 the runtime format. See
 [specs/0071-canonical-portable-data-text.md](../specs/0071-canonical-portable-data-text.md).
 
+## Atom State
+
+`state/atom.eli` separates changing identity from immutable persistent values:
+
+```elisp
+(import "../../stdlib/state/atom.eli"
+        add-watch atom deref reset! swap!)
+
+(let ((counter (atom 0)))
+  (add-watch counter "log"
+             (lambda (_key _reference old-value new-value)
+               (print old-value new-value)))
+  (swap! counter (lambda (value amount) (+ value amount)) 2)
+  (reset! counter 10)
+  (deref counter))
+```
+
+Validators run before installation. Watches receive committed old/new pairs
+after installation, and nested watch updates are queued so one transition's
+complete watch snapshot runs before the next transition. Validator and swap
+callbacks cannot recursively change the same Atom, preventing stale outer
+writes. Atom failures use structured codes; user callback exceptions retain
+their original identity. Atoms are host identities and are deliberately not
+part of canonical data text or portable worker values. Exact semantics and
+cross-compiler/cross-host evidence are specified in
+[0072](../specs/0072-atomic-state-references.md).
+
 ## Protocol-driven Core
 
 `core/seq.eli` and `core/data.eli` expose the current protocol-driven runtime

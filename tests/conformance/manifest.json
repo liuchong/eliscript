@@ -795,6 +795,17 @@
         { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "generated nested values retain equality and canonical text" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
       ]
+    },
+    {
+      "id": "stdlib.atomic-state-references",
+      "title": "Atomic state references",
+      "status": "accepted",
+      "spec": "0072",
+      "contracts": ["Separates changing identity from immutable values", "Validates exactly one synchronous transition before commit", "Queues nested watch notifications in commit order", "Matches self-hosted artifacts and Bun/Node execution"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/atom.test.mjs", "contains": "Eliscript Atom preserves ordered single-transition state semantics" },
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+      ]
     }
   ]
 }

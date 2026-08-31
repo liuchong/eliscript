@@ -490,6 +490,16 @@ Atoms are useful for application and REPL state, but ordinary functions should
 prefer values. Software transactional memory, agents, and transparent
 distributed state are outside the 1.0 scope.
 
+**Status:** Implemented provisionally by
+[0072-atomic-state-references.md](0072-atomic-state-references.md). The
+Eliscript-authored module provides synchronous `atom`, `deref`, `reset!`, and
+`swap!`, pre-commit validators, commit-time watch snapshots, queued nested
+notifications, same-Atom transition reentrancy rejection, structured library
+errors, and callback-error recovery. Generated state histories and 100,000
+sequential swaps agree across seed/self-hosted artifacts and Bun/Node. This is
+direct PD-11 implementation evidence; the unified final acceptance manifest
+and full supported environment matrix remain open.
+
 ## Reinvestment into Emacs
 
 ### Goal

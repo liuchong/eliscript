@@ -165,6 +165,14 @@ artifacts, runs Bun and Node reports, preserves List category and nested
 round trips, and compares runtime/portable bytes over their common value
 subset.
 
+The Atom suite compiles the Eliscript-authored state module and its persistent
+Map/Vector dependency graph with both compiler generations, compares every
+artifact and Source Map byte-for-byte, and executes both outputs under Bun and
+Node. It covers validation and callback exceptions, same-Atom reentrancy,
+commit-time watch snapshots, nested transition ordering, equal-key watch
+replacement, forged identities, failure recovery, 20,000 generated operations,
+and 100,000 stack-safe swaps.
+
 The protocol suite exercises immutable protocol definitions, direct Symbol
 slots, exact prototype extensions, stable host categories, explicit defaults,
 atomic validation, and structured missing diagnostics. It proves that

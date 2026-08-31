@@ -32,6 +32,8 @@ The current M8 work provides:
 - canonical readable data text for both optimized runtime values and portable
   List/Vector/Map/Set values, with deterministic order, metadata, limits, and
   Bun/Node round trips
+- synchronous Atom state references with validators, commit-ordered watches,
+  nested transition queuing, and explicit reentrancy rejection
 - open runtime protocols with direct and externally registered methods
 - generic collection lookup, traversal, reduction, construction, association,
   and key-presence operations
@@ -54,10 +56,12 @@ membership. Symbols and persistent collections can carry immutable
 persistent-Map metadata without changing their value identity or copying
 collection internals. Optimized runtime values and portable List/Vector/Map/Set
 values now have matching canonical data-text implementations, including
-cross-family byte parity over their common subset. The next language boundary
-is the complete P1 exit audit, followed by portable protocol dispatch policy,
-measured object/text migration, literal migration, host conversion, and the
-Emacs value bridge.
+cross-family byte parity over their common subset. Atom state references now
+separate changing application identity from immutable values while preserving
+deterministic transition and watch behavior. The next language boundary is the
+complete P1 exit audit, followed by portable protocol dispatch policy, measured
+object/text migration, literal migration, host conversion, and the Emacs value
+bridge.
 
 The authoritative project state lives in the
 [specification registry](specs/README.md), not in an accumulating changelog in
@@ -145,6 +149,16 @@ Portable identifiers and data text stay inside the same selected closure:
   (persistent-list-from-array [(keyword "article/title") 1 2])))
 ```
 
+Changing identity is explicit through Atom rather than collection mutation:
+
+```elisp
+(import "../../stdlib/state/atom.eli" atom deref swap!)
+
+(let ((counter (atom 0)))
+  (swap! counter (lambda (value) (1+ value)))
+  (deref counter))
+```
+
 Runtime-backed core values use the same Lisp-facing module style:
 
 ```elisp
@@ -179,6 +193,7 @@ The implemented language includes:
 - first-class immutable Keyword and Symbol values with qualified names
 - immutable metadata on Symbols and persistent collections
 - canonical readable text for optimized and portable persistent values
+- synchronous Atom state with validators and ordered watch notifications
 
 Eliscript deliberately differs from Emacs Lisp. It uses ECMAScript numbers,
 distinguishes `false` from `nil`, has lexical scope, and does not attempt to run

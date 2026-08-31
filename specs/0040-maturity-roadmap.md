@@ -47,6 +47,8 @@ Eliscript already has the difficult vertical foundations:
   worker protocol
 - initial portable bit, sequence, text, object, keyed-data, and persistent
   vector modules
+- synchronous Atom state references with validators and ordered nested watch
+  notifications
 - shared seed/self-hosted conformance fixtures and end-to-end execution tests
 
 This proves that the architecture is viable. It does not yet establish a

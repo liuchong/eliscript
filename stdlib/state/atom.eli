@@ -1,0 +1,221 @@
+(module eliscript.state.atom
+  (import-portable "../value.eli" empty-value-map)
+  (import-portable "../persistent-map.eli"
+                   persistent-map-assoc
+                   persistent-map-count
+                   persistent-map-dissoc
+                   persistent-map-reduce)
+  (import-portable "../persistent-vector.eli"
+                   empty-persistent-vector
+                   persistent-vector-conj
+                   persistent-vector-count
+                   persistent-vector-nth)
+
+  (defconst atom-registry (js* "new WeakSet()"))
+
+  (defun atom-fail (code message)
+    (throw
+     (object :kind "eliscript/atom-error"
+             :code code
+             :message message)))
+
+  (defun atom? (reference)
+    (if (= (value-type reference) "object")
+        (try
+          (js-call atom-registry :has reference)
+          (catch _error false))
+      false))
+
+  (defun atom-method (reference name)
+    (if (atom? reference)
+        (get reference name nil)
+      (atom-fail
+       "ELI-ATOM-INVALID-REFERENCE"
+       "operation requires an Atom")))
+
+  (defun atom-option-validator (options)
+    (if (nullish? options)
+        nil
+      (if (not (= (value-type options) "object"))
+          (atom-fail
+           "ELI-ATOM-INVALID-OPTIONS"
+           "Atom options must be an object or nil")
+        (let ((keys (object-keys options))
+              (index 0))
+          (while (< index (length keys))
+            (unless (= (nth index keys) "validator")
+              (atom-fail
+               "ELI-ATOM-INVALID-OPTIONS"
+               (str "unknown Atom option: " (nth index keys))))
+            (setq index (1+ index)))
+          (let ((validator
+                 (if (object-has? options "validator")
+                     (get options "validator" nil)
+                   nil)))
+            (if (or (nil? validator)
+                    (= (value-type validator) "function"))
+                validator
+              (atom-fail
+               "ELI-ATOM-INVALID-VALIDATOR"
+               "Atom validator must be a function or nil")))))))
+
+  (defun atom-validate-candidate (validator candidate)
+    (when (and (not (nil? validator))
+               (not (funcall validator candidate)))
+      (atom-fail
+       "ELI-ATOM-VALIDATION"
+       "Atom validator rejected the new value"))
+    candidate)
+
+  (defun atom (initial &optional options)
+    (let* ((current initial)
+           (validator (atom-option-validator options))
+           (watches (empty-value-map))
+           (phase nil)
+           (notifications (empty-persistent-vector))
+           (notification-index 0)
+           (notifying false)
+           (reference nil)
+           (ensure-transition-allowed nil)
+           (validate nil)
+           (drain-notifications nil)
+           (commit nil))
+      (atom-validate-candidate validator initial)
+
+      (setq ensure-transition-allowed
+            (lambda ()
+              (unless (nil? phase)
+                (atom-fail
+                 "ELI-ATOM-REENTRANT"
+                 (str "Atom transition is not allowed during " phase)))))
+
+      (setq validate
+            (lambda (candidate candidate-validator)
+              (funcall ensure-transition-allowed)
+              (setq phase "validation")
+              (try
+                (atom-validate-candidate candidate-validator candidate)
+                (finally (setq phase nil)))))
+
+      (setq drain-notifications
+            (lambda ()
+              (unless notifying
+                (let ((first-error nil)
+                      (failed false))
+                  (setq notifying t)
+                  (try
+                    (while
+                        (< notification-index
+                           (persistent-vector-count notifications))
+                      (let* ((transition
+                              (persistent-vector-nth
+                               notifications notification-index nil))
+                             (old-value (get transition "old-value" nil))
+                             (new-value (get transition "new-value" nil))
+                             (snapshot (get transition "watches" nil)))
+                        (setq notification-index (1+ notification-index))
+                        (persistent-map-reduce
+                         (lambda (_result key watch)
+                           (try
+                             (funcall watch key reference old-value new-value)
+                             (catch error
+                               (unless failed
+                                 (setq first-error error
+                                       failed t))))
+                           nil)
+                         nil
+                         snapshot)))
+                    (finally
+                     (setq notifications (empty-persistent-vector)
+                           notification-index 0
+                           notifying false)))
+                  (when failed (throw first-error))))))
+
+      (setq commit
+            (lambda (candidate)
+              (funcall validate candidate validator)
+              (let ((old-value current))
+                (setq current candidate)
+                (when (> (persistent-map-count watches) 0)
+                  (setq notifications
+                        (persistent-vector-conj
+                         notifications
+                         (object :old-value old-value
+                                 :new-value candidate
+                                 :watches watches)))
+                  (funcall drain-notifications))
+                candidate)))
+
+      (setq reference
+            (object
+             :kind "eliscript/atom"
+             :read (lambda () current)
+             :reset (lambda (candidate) (funcall commit candidate))
+             :swap
+             (lambda (transform arguments)
+               (when (not (= (value-type transform) "function"))
+                 (atom-fail
+                  "ELI-ATOM-INVALID-TRANSFORM"
+                  "Atom swap transform must be a function"))
+               (funcall ensure-transition-allowed)
+               (let ((candidate nil))
+                 (setq phase "swap")
+                 (try
+                   (setq candidate
+                         (apply transform (cons current arguments)))
+                   (finally (setq phase nil)))
+                 (funcall commit candidate)))
+             :add-watch
+             (lambda (key watch)
+               (funcall ensure-transition-allowed)
+               (when (not (= (value-type watch) "function"))
+                 (atom-fail
+                  "ELI-ATOM-INVALID-WATCH"
+                  "Atom watch must be a function"))
+               (setq watches (persistent-map-assoc watches key watch))
+               reference)
+             :remove-watch
+             (lambda (key)
+               (funcall ensure-transition-allowed)
+               (setq watches (persistent-map-dissoc watches key))
+               reference)
+             :get-validator (lambda () validator)
+             :set-validator
+             (lambda (candidate-validator)
+               (funcall ensure-transition-allowed)
+               (when
+                   (not
+                    (or (nil? candidate-validator)
+                        (= (value-type candidate-validator) "function")))
+                 (atom-fail
+                  "ELI-ATOM-INVALID-VALIDATOR"
+                  "Atom validator must be a function or nil"))
+               (funcall validate current candidate-validator)
+               (setq validator candidate-validator)
+               validator)))
+      (js-call atom-registry :add reference)
+      reference))
+
+  (defun deref (reference)
+    (funcall (atom-method reference "read")))
+
+  (defun reset! (reference candidate)
+    (funcall (atom-method reference "reset") candidate))
+
+  (defun swap! (reference transform &rest arguments)
+    (funcall (atom-method reference "swap") transform arguments))
+
+  (defun add-watch (reference key watch)
+    (funcall (atom-method reference "add-watch") key watch))
+
+  (defun remove-watch (reference key)
+    (funcall (atom-method reference "remove-watch") key))
+
+  (defun get-validator (reference)
+    (funcall (atom-method reference "get-validator")))
+
+  (defun set-validator! (reference validator)
+    (funcall (atom-method reference "set-validator") validator))
+
+  (export add-watch atom atom? deref get-validator remove-watch reset!
+          set-validator! swap!))
