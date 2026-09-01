@@ -61,6 +61,10 @@ and cleanup. `host/evaluation-cli.mjs` exposes one-shot, NDJSON, and persistent
 terminal REPL modes through the public `eliscript-eval` command. Terminal
 commands and presentation remain host behavior; multiline completeness remains
 compiler-owned reader behavior.
+`host/watch.mjs` owns canonical content snapshots, sorted project invalidation
+events, polling lifecycle, and the versioned `eliscript-watch-event` boundary.
+`host/watch-cli.mjs` exposes that boundary without a framework, bundler, or
+development server.
 
 ## Build
 

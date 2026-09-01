@@ -1716,6 +1716,48 @@
           "contains": "terminal prompt policy and incomplete EOF are deterministic"
         }
       ]
+    },
+    {
+      "id": "toolchain.host-neutral-project-watch",
+      "title": "Host-neutral project watch events",
+      "status": "accepted",
+      "spec": "0121",
+      "contracts": [
+        "Emits versioned ready and sorted content-level source change events",
+        "Detects create, modify, and delete without timestamp or native watcher semantics",
+        "Excludes non-source files, generated output, and symlink traversal",
+        "Resolves configured projects through the public versioned request",
+        "Produces equivalent Node and Bun events and closes polling on signals",
+        "Shares, validates, consumes, and explicitly stops project watch sessions in Emacs",
+        "Keeps application frameworks and development servers outside implementation and evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/watch.test.mjs",
+          "contains": "project snapshots normalize source creation modification and deletion"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/watch.test.mjs",
+          "contains": "Node and Bun emit equivalent project watch events and stop cleanly"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/watch.test.mjs",
+          "contains": "configured command resolves the project request and watches its file"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-frames-validates-and-applies-watch-events"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-consumes-public-project-watch-events"
+        }
+      ]
     }
   ]
 }

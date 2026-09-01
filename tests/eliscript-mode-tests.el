@@ -241,6 +241,177 @@
                            "--diagnostic-format" "human")))))
       (delete-directory directory t))))
 
+(ert-deftest eliscript-mode-builds-project-watch-command ()
+  (let* ((directory (make-temp-file "eliscript-mode-watch-" t))
+         (source (expand-file-name "src/main.eli" directory))
+         (configuration (expand-file-name "eliscript.json" directory))
+         (eliscript-mode-watch-command '("eliscript-watch" "--json" "--fixed")))
+    (unwind-protect
+        (progn
+          (make-directory (file-name-directory source) t)
+          (write-region "{}" nil configuration nil 'silent)
+          (write-region "(print 42)\n" nil source nil 'silent)
+          (with-temp-buffer
+            (setq buffer-file-name source)
+            (setq default-directory (file-name-directory source))
+            (eliscript-mode)
+            (let ((context (eliscript-mode--watch-context)))
+              (should (equal (plist-get context :configuration)
+                             (file-truename configuration)))
+              (should (equal
+                       (eliscript-mode--watch-arguments context)
+                       (list "--json" "--fixed" "--config"
+                             (file-truename configuration)))))))
+      (delete-directory directory t))))
+
+(ert-deftest eliscript-mode-frames-validates-and-applies-watch-events ()
+  (let* ((directory (make-temp-file "eliscript-mode-watch-event-" t))
+         (source (expand-file-name "main.eli" directory))
+         (root (file-name-as-directory (file-truename directory)))
+         (process-buffer (generate-new-buffer " *eliscript-watch-test*"))
+         (source-buffer (generate-new-buffer " *eliscript-watch-source*"))
+         (process (make-process
+                   :name "eliscript-watch-filter-test"
+                   :buffer process-buffer
+                   :command '("sh" "-c" "sleep 30")
+                   :noquery t))
+         (eliscript-mode-watch-event-hook nil)
+         events
+         refreshes)
+    (unwind-protect
+        (progn
+          (write-region "(print 1)\n" nil source nil 'silent)
+          (process-put process 'eliscript-watch-root root)
+          (process-put process 'eliscript-watch-partial "")
+          (puthash root process eliscript-mode--watch-processes)
+          (with-current-buffer source-buffer
+            (setq buffer-file-name source)
+            (setq default-directory directory)
+            (eliscript-mode)
+            (setq-local flymake-mode t))
+          (add-hook 'eliscript-mode-watch-event-hook
+                    (lambda (event) (push event events)))
+          (cl-letf (((symbol-function 'flymake-start)
+                     (lambda (&rest _) (push (current-buffer) refreshes))))
+            (let* ((ready
+                    (json-serialize
+                     `((format . "eliscript-watch-event")
+                       (version . 1)
+                       (sequence . 0)
+                       (event . "ready")
+                       (root . ,root)
+                       (changes . [])
+                       (digest . ,(make-string 64 ?0)))))
+                   (change
+                    (json-serialize
+                     `((format . "eliscript-watch-event")
+                       (version . 1)
+                       (sequence . 1)
+                       (event . "change")
+                       (root . ,root)
+                       (changes . [((file . ,source)
+                                    (path . "main.eli")
+                                    (kind . "modify"))])
+                       (digest . ,(make-string 64 ?1)))))
+                   (split (/ (length ready) 2)))
+              (eliscript-mode--watch-filter process (substring ready 0 split))
+              (should-not events)
+              (eliscript-mode--watch-filter
+               process (concat (substring ready split) "\n" change "\n"))
+              (should (= (length events) 2))
+              (should (eq (car refreshes) source-buffer))
+              (should (= (process-get process 'eliscript-watch-sequence) 1))
+              (should-error
+               (eliscript-mode--handle-watch-event
+                process (eliscript-mode--watch-event-from-json change))
+               :type 'eliscript-mode-error))))
+      (remhash root eliscript-mode--watch-processes)
+      (when (process-live-p process) (delete-process process))
+      (when (buffer-live-p process-buffer) (kill-buffer process-buffer))
+      (when (buffer-live-p source-buffer)
+        (with-current-buffer source-buffer
+          (set-buffer-modified-p nil))
+        (kill-buffer source-buffer))
+      (delete-directory directory t))))
+
+(ert-deftest eliscript-mode-shares-and-stops-project-watch-process ()
+  (let* ((directory (make-temp-file "eliscript-mode-watch-session-" t))
+         (configuration (expand-file-name "eliscript.json" directory))
+         (eliscript-mode-watch-command
+          '("sh" "-c" "sleep 30" "eliscript-watch-test"))
+         first)
+    (unwind-protect
+        (progn
+          (write-region "{}" nil configuration nil 'silent)
+          (with-temp-buffer
+            (setq default-directory directory)
+            (setq first (eliscript-mode-watch-project directory))
+            (should (process-live-p first))
+            (should (eq first (eliscript-mode-watch-project directory)))
+            (should (eliscript-mode-watch-project-p directory))
+            (should (eliscript-mode-stop-watch directory))
+            (should-not (eliscript-mode-watch-project-p directory))))
+      (when (process-live-p first) (delete-process first))
+      (clrhash eliscript-mode--watch-processes)
+      (delete-directory directory t))))
+
+(ert-deftest eliscript-mode-consumes-public-project-watch-events ()
+  (let* ((directory (make-temp-file "eliscript-mode-watch-public-" t))
+         (source (expand-file-name "src/main.eli" directory))
+         (configuration (expand-file-name "eliscript.json" directory))
+         (watcher (expand-file-name "bin/eliscript-watch"
+                                    eliscript-mode-tests--root))
+         (eliscript-mode-watch-command
+          (list watcher "--json" "--interval" "25"))
+         (eliscript-mode-watch-event-hook nil)
+         events
+         process)
+    (unwind-protect
+        (progn
+          (make-directory (file-name-directory source) t)
+          (write-region "(print 1)\n" nil source nil 'silent)
+          (write-region
+           "{\"schemaVersion\":1,\"sourceRoot\":\"src\",\"entry\":\"main.eli\",\"outDir\":\"build\",\"portableEntries\":[],\"cache\":true}\n"
+           nil configuration nil 'silent)
+          (add-hook 'eliscript-mode-watch-event-hook
+                    (lambda (event) (push event events)))
+          (with-temp-buffer
+            (setq default-directory directory)
+            (setq process (eliscript-mode-watch-project directory))
+            (let ((deadline (+ (float-time) 15)))
+              (while (and (not (seq-find
+                                (lambda (event)
+                                  (equal (alist-get 'event event) "ready"))
+                                events))
+                          (< (float-time) deadline))
+                (accept-process-output process 0.05)))
+            (should (process-live-p process))
+            (should (seq-find
+                     (lambda (event)
+                       (equal (alist-get 'event event) "ready"))
+                     events))
+            (write-region "(print 2)\n" nil source nil 'silent)
+            (let ((deadline (+ (float-time) 15)))
+              (while (and (not (seq-find
+                                (lambda (event)
+                                  (equal (alist-get 'event event) "change"))
+                                events))
+                          (< (float-time) deadline))
+                (accept-process-output process 0.05)))
+            (let ((change
+                   (seq-find
+                    (lambda (event)
+                      (equal (alist-get 'event event) "change"))
+                    events)))
+              (should change)
+              (should (equal (alist-get 'path
+                                        (car (alist-get 'changes change)))
+                             "main.eli")))
+            (should (eliscript-mode-stop-watch directory))))
+      (when (process-live-p process) (delete-process process))
+      (clrhash eliscript-mode--watch-processes)
+      (delete-directory directory t))))
+
 (ert-deftest eliscript-mode-compiles-unsaved-buffer-through-public-build ()
   (let* ((directory (make-temp-file "eliscript-mode-virtual-build-" t))
          (source (expand-file-name "src/main.eli" directory))

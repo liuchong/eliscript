@@ -78,8 +78,8 @@ The long-term objective is:
 
 > Eliscript is a stable, self-hosted, Emacs-first functional Lisp language and
 > toolchain with persistent immutable values, direct host interop, and
-> protocols for producing standard ECMAScript modules, programmable
-> publishing systems, and portable high-performance Emacs workloads.
+> protocols for producing standard ECMAScript modules and portable
+> high-performance Emacs workloads.
 
 A user should be able to start from a clean machine, write a multi-module
 Eliscript project, use JavaScript packages directly, receive source-level
@@ -123,13 +123,13 @@ Eliscript is pleasant to edit as a Lisp in Emacs. Indentation, formatting,
 navigation, compilation diagnostics, interactive evaluation, and worker
 management are coherent parts of the project rather than private setup.
 
-### 5. Proven Runtime Integration
+### 5. Proven Host Integration
 
-Generated output is ordinary ESM. Browser applications, programmable
-publishing, command-line programs, and portable Emacs workloads are proven by
-maintained applications, not only isolated compiler fixtures. A proving
-application may use a replaceable UI library or bundler, but neither is part
-of the language contract.
+Generated output is ordinary ESM. Supported JavaScript hosts, browser
+execution, command-line programs, and portable Emacs workloads are proven by
+host-neutral conformance and real-process tests rather than only isolated
+compiler fixtures. Maintained applications may validate those public
+boundaries separately, but do not define or satisfy language maturity.
 
 ### 6. Sustainable Engineering
 
@@ -905,13 +905,21 @@ macros, live values, and loaded project state; supports load, reload, reset,
 help, and exit; recovers after reader, compiler, and runtime failures; and keeps
 terminal presentation outside language semantics.
 
+Specification 0121 completes the host-neutral watch slice. One versioned
+content-snapshot stream reports sorted source creation, modification, and
+deletion without exposing native watcher events. Explicit-root and configured
+projects behave equivalently under Bun and Node, and the Emacs mode shares one
+process per project, validates framed events, refreshes matching Flymake
+buffers, and stops ownership explicitly.
+
 **M10 status:** In progress. Formatter, single-file format-check, the
 foundational Emacs major mode, project-aware check, unsaved-buffer validation,
 diagnostic navigation, virtual-source builds, and buffer/file/project compile
 commands are implemented. Persistent source-mapped evaluation and Emacs
 restart recovery are implemented. The terminal REPL is implemented with
-compiler-owned multiline input and Bun/Node evidence; host-neutral watch
-events, onboarding, the full AC-12 matrix, and the exit gate remain open.
+compiler-owned multiline input and Bun/Node evidence. Host-neutral project
+watch events and their Emacs consumer are implemented; onboarding, the full
+AC-12 matrix, and the exit gate remain open.
 
 ### M11: Standard and Platform Libraries (8-12 weeks)
 
@@ -1020,7 +1028,7 @@ The non-blocking application validation set may include:
 These applications are practical consumer checks, not language-core
 deliverables. Their framework, publishing, hosting, or bundling results do not
 contribute to core milestone completion or the 1.0 acceptance decision. The
-Emacs acceleration contract is accepted independently by AC-18 and AC-19.
+Emacs acceleration contract is accepted independently by AC-16 and AC-17.
 
 **Construction steps:**
 
@@ -1242,7 +1250,7 @@ Compiler, runtime, browser event, async rejection, and worker failures in the
 acceptance fixtures all identify the correct `.eli` file and source span. No
 required workflow exposes only a generated `.mjs` stack location.
 
-### E. Libraries and Non-blocking Applications
+### E. Libraries
 
 **AC-15 MUST - Stable library contract**
 
@@ -1253,32 +1261,16 @@ collection implementation also passes PD-01 through PD-07 from 0041, including
 structural bounds, collision behavior, transient safety, and allocation-free
 composed transformation evidence.
 
-**AC-16 SHOULD - Maintained application validation**
-
-Maintained reference applications should build from public interfaces, pass
-behavioral tests, retain source maps, and contain no private compiler patches,
-copied generated compiler source, or undocumented build step. This criterion
-is reported separately and neither supplies nor blocks core maturity credit.
-
-**AC-17 SHOULD - Browser publishing application validation**
-
-The publishing application renders multiple Org articles, navigation, assets,
-interactive application state, deterministic production output and content
-metadata, and mapped failures. It consumes only public language and compiler
-interfaces. No specific UI library or bundler is part of this criterion, and
-a no-content change produces identical output. This is a replaceable practical
-validation only; it is not part of the language-core acceptance gate.
-
 ### F. Emacs Acceleration
 
-**AC-18 MUST - Worker correctness and recovery**
+**AC-16 MUST - Worker correctness and recovery**
 
 Protocol negotiation, concurrent requests, progress, cancellation, timeout,
 module replacement, source-mapped errors, process death, restart, and clean
 shutdown pass in real-process tests without applying a failed result to Emacs
 state.
 
-**AC-19 MUST - End-to-end performance value**
+**AC-17 MUST - End-to-end performance value**
 
 On the declared reference machine and datasets, two maintained coarse-grained
 Emacs workloads each achieve at least a 2.0x median warm end-to-end speedup over
@@ -1290,7 +1282,7 @@ PD-11 from 0041.
 
 ### G. Reliability and Security
 
-**AC-20 MUST - Fuzz robustness**
+**AC-18 MUST - Fuzz robustness**
 
 At least 100,000 deterministic generated or mutated inputs complete without a
 compiler crash, hang, uncontrolled host exception, or invalid source span.
@@ -1298,21 +1290,21 @@ Accepted programs satisfy round-trip invariants; rejected programs return
 structured diagnostics. The seed and self-hosted readers agree on the shared
 input domain.
 
-**AC-21 MUST - Scale and soak**
+**AC-19 MUST - Scale and soak**
 
 The 1,000-module graph completes clean and incremental builds within documented
 resource limits. The worker completes an eight-hour or 100,000-request soak,
 whichever is reached first, with no lost response, deadlock, orphan process,
 or unbounded memory trend. Peak and steady-state memory are recorded.
 
-**AC-22 MUST - Boundary security**
+**AC-20 MUST - Boundary security**
 
 Automated cases prove project-root containment across direct paths and
 symlinks, deny undeclared macro and worker capabilities, reject protocol and
 configuration schema mismatches, and prevent generated output from overwriting
 source inputs.
 
-**AC-23 MUST - Supported environment matrix**
+**AC-21 MUST - Supported environment matrix**
 
 The full required suite passes on macOS and Linux, Emacs 29 and 30, the declared
 Bun version, and Node.js LTS where applicable. Exact versions are recorded in
@@ -1320,7 +1312,7 @@ the acceptance manifest.
 
 ### H. Documentation and Sustainability
 
-**AC-24 MUST - Clean-machine onboarding**
+**AC-22 MUST - Clean-machine onboarding**
 
 A new user following only repository documentation can install prerequisites,
 build the compiler, compile and run a basic program, and run the core test suite
@@ -1328,7 +1320,7 @@ in 15 minutes of active steps, excluding dependency download time. Every core
 prerequisite and command is documented. Application examples have separate,
 non-blocking onboarding instructions.
 
-**AC-25 MUST - Complete documentation set**
+**AC-23 MUST - Complete documentation set**
 
 The repository contains current getting-started, language reference, macro,
 interop, project configuration, compiler architecture, Emacs mode, REPL,
@@ -1337,22 +1329,41 @@ publishing, and framework-adapter documentation is maintained outside the core
 documentation gate. Links and executable snippets in the required set pass
 automated checks.
 
-**AC-26 MUST - Acceptance audit**
+**AC-24 MUST - Acceptance audit**
 
 The acceptance directory contains:
 
 - `manifest.json` with commit identity, platform, tool versions, criterion
   results, artifact digests, and test commands
 - `report.md` explaining the evidence for every MUST criterion, PD-01 through
-  PD-11, and the separately labeled status of SHOULD application validations
+  PD-11, and the separately labeled status of optional application validations
 - machine-readable test, fuzz, benchmark, scale, and soak summaries
 - zero unresolved severity-1 or severity-2 correctness, data-loss, security,
   bootstrap, or compatibility defects
 
 The final goal is reached only when every MUST criterion and PD-01 through
 PD-11 read `pass` in the same manifest and the repository is clean after
-reproducing that result. AC-16 and AC-17 are non-blocking SHOULD results and
-cannot compensate for or prevent that outcome.
+reproducing that result.
+
+## Optional Application Validation
+
+Application validation is consumer feedback, not part of the core acceptance
+matrix. Its status is reported separately and cannot supply, block, or weaken
+any AC or PD result.
+
+**AV-01 - Maintained application validation**
+
+Maintained reference applications should build from public interfaces, pass
+behavioral tests, retain source maps, and contain no private compiler patches,
+copied generated compiler source, or undocumented build step.
+
+**AV-02 - Browser publishing validation**
+
+A publishing application may validate multiple Org articles, navigation,
+assets, interactive state, deterministic production output, content metadata,
+and mapped failures through public interfaces. Any UI library, bundler,
+publishing tool, site generator, or hosting system remains a replaceable
+application choice and receives no language-core maturity credit.
 
 ## Definition of Final Success
 

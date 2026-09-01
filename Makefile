@@ -34,6 +34,7 @@ test: check-contracts
 		tests/compiler-source-map-cursor.test.mjs \
 		tests/bootstrap-compiler.test.mjs tests/bootstrap-project.test.mjs \
 		tests/bootstrap-evaluation.test.mjs \
+		tests/watch.test.mjs \
 		tests/loop-recur.test.mjs \
 		tests/macro-generated-names.test.mjs \
 		tests/worker-runtime.test.mjs \

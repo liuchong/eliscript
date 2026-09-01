@@ -90,6 +90,13 @@ process from Emacs, verifies project-scoped unsaved-buffer evaluation and
 located failures, kills the process, proves acknowledged namespace recovery,
 and stops the replacement before the test exits.
 
+`watch.test.mjs` verifies canonical content snapshots, sorted source
+create/modify/delete events, symlink and non-source exclusion, configured
+project identity, bounded intervals, Node/Bun parity, and clean signal exit.
+Mode ERT frames partial NDJSON, rejects sequence drift, refreshes only matching
+Flymake buffers, shares and stops project ownership, and consumes the real
+public watch command.
+
 The analyzer fixture runs after both readers. It compares success and complete
 diagnostic strings for scope resolution, declaration collisions, mutability,
 imports, exports, and malformed special forms. Both analyzers must accept all

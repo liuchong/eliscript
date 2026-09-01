@@ -106,7 +106,7 @@ CLI output, and worker loading now identify the union of multiple entry
 closures while preserving version 1 single-entry behavior. Application
 frameworks and publishing infrastructure remain replaceable validation
 outside these core deliverables.
-M10 has begun with specifications 0114 through 0120. The generated compiler owns a
+M10 has begun with specifications 0114 through 0121. The generated compiler owns a
 comment-preserving deterministic formatter, and the Bun/Node public command
 provides stdout, atomic write, format-check, and structured diagnostics. The
 formatter passes idempotence and generated-ESM equivalence over maintained
@@ -124,7 +124,10 @@ sessions that restore acknowledged state after a host restart. M10 remains in
 progress. The public terminal REPL now adds compiler-owned multiline input
 classification, persistent definitions and macros, load/reload/reset commands,
 recoverable diagnostics, prompt policy, and equivalent Bun/Node behavior.
-Watching, onboarding, the complete AC-12 matrix, and the exit gate remain open.
+A versioned project watch stream now normalizes content-level source changes
+across Bun and Node, while the Emacs mode shares one process per project and
+refreshes matching Flymake buffers. Onboarding, the complete AC-12 matrix, and
+the exit gate remain open.
 
 ## Reading Paths
 
@@ -398,6 +401,7 @@ The schemas and change workflow are defined by specifications
 | 0118 | [Framework-neutral Library Interoperation](0118-framework-neutral-library-interop.md) | Accepted | Implemented |
 | 0119 | [Self-hosted Persistent Evaluation](0119-self-hosted-persistent-evaluation.md) | Accepted | Implemented |
 | 0120 | [Interactive Terminal REPL](0120-interactive-terminal-repl.md) | Accepted | Implemented |
+| 0121 | [Host-neutral Project Watch Events](0121-host-neutral-project-watch.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

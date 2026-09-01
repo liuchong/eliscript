@@ -38,5 +38,10 @@ Customize `eliscript-mode-eval-command` when `eliscript-eval` is not on
 
 Each project owns one persistent process. If it exits unexpectedly, the mode
 fails unacknowledged work, starts one replacement, restores only acknowledged
-namespace requests, and then accepts new evaluation. File watching and the
-complete terminal REPL remain separate M10 capabilities.
+namespace requests, and then accepts new evaluation.
+
+`M-x eliscript-mode-watch-project` starts or reuses one `eliscript-watch`
+process for the project. Versioned change events refresh Flymake for matching
+live buffers and run `eliscript-mode-watch-event-hook`.
+`M-x eliscript-mode-stop-watch` releases the shared process. Customize
+`eliscript-mode-watch-command` when the public command is not on `PATH`.

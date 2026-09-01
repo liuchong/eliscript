@@ -33,7 +33,7 @@ single-file, single-entry project, and multi-entry project builds through one
 versioned operation boundary. Version 2 project identity, reports, cache
 validation, and worker loading preserve the version 1 single-entry contract.
 
-The first six M10 slices are complete. The self-hosted compiler now owns a
+The first seven M10 slices are complete. The self-hosted compiler now owns a
 comment-preserving concrete-syntax formatter with fixed two-space/88-column
 layout, byte-idempotence and ESM-semantic corpus evidence, plus one Bun/Node
 `eliscript-format` command for stdout, atomic `--write`, and non-mutating
@@ -52,8 +52,10 @@ unsaved buffers, restores acknowledged project state after a host restart, and
 stops sessions explicitly. The same session now powers a terminal REPL with
 compiler-owned multiline input classification, persistent definitions and
 macros, load/reload/reset commands, recoverable errors, and deterministic
-prompt control. Watching, onboarding, and the complete M10 exit gate remain
-future work.
+prompt control. A separate `eliscript-watch` stream now reports canonical
+content-level project changes under Bun and Node, and Emacs shares one watcher
+per project to refresh Flymake diagnostics. Onboarding and the complete M10
+exit gate remain future work.
 
 The current M8 work provides:
 
@@ -244,6 +246,13 @@ Use `:load FILE`, `:reload`, `:reset`, `:help`, and `:quit` while no multiline
 form is pending. `--prompt` and `--no-prompt` make transcript presentation
 explicit.
 
+Observe source invalidations without a framework or development server:
+
+```sh
+./bin/eliscript-watch --config eliscript.json --json
+./bin/eliscript-watch --root src
+```
+
 Pass multiple entries with an explicit root to emit one versioned union graph:
 
 ```sh
@@ -386,6 +395,7 @@ arbitrary Emacs packages in JavaScript.
 | Evaluate one form | `./bin/eliscript-eval --eval '(+ 20 22)'` |
 | Load one source namespace | `./bin/eliscript-eval --file source.eli --json` |
 | Start a persistent terminal REPL | `./bin/eliscript-eval --repl` |
+| Watch canonical project source changes | `./bin/eliscript-watch --config eliscript.json --json` |
 | Request JSON diagnostics | `./bin/eliscript --diagnostic-format json source.eli` |
 | Inspect build decisions | `./bin/eliscript-build --json --root . --out-dir dist source.eli` |
 | Build the self-hosted compiler | `bun run build:bootstrap` |

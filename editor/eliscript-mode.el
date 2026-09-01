@@ -40,6 +40,11 @@
   :type '(repeat string)
   :group 'eliscript)
 
+(defcustom eliscript-mode-watch-command '("eliscript-watch" "--json")
+  "Command and fixed arguments used for project watch sessions."
+  :type '(repeat string)
+  :group 'eliscript)
+
 (defcustom eliscript-mode-build-directory "dist"
   "Output directory used for builds without `eliscript.json'.
 
@@ -48,6 +53,12 @@ Relative paths are resolved from the discovered project root."
   :group 'eliscript)
 
 (define-error 'eliscript-mode-error "Eliscript editor integration error")
+
+(defvar eliscript-mode-watch-event-hook nil
+  "Hook run with one validated project watch event argument.")
+
+(defvar eliscript-mode--watch-processes (make-hash-table :test #'equal)
+  "Canonical project roots mapped to their live watch processes.")
 
 (defconst eliscript-mode--function-heads
   '("defasync" "defn" "defportable" "defun"))
@@ -343,6 +354,168 @@ Prefer the nearest `eliscript.json', then fall back to `project.el'."
         (signal 'eliscript-mode-error
                 (list (format "builder executable not found: %s"
                               configured))))))
+
+(defun eliscript-mode--watch-program ()
+  "Resolve and validate `eliscript-mode-watch-command'."
+  (unless (and (consp eliscript-mode-watch-command)
+               (seq-every-p #'stringp eliscript-mode-watch-command)
+               (not (string-empty-p (car eliscript-mode-watch-command))))
+    (signal 'eliscript-mode-error
+            '("eliscript-mode-watch-command must be non-empty strings")))
+  (let* ((configured (car eliscript-mode-watch-command))
+         (program (if (file-name-absolute-p configured)
+                      (and (file-executable-p configured) configured)
+                    (executable-find configured))))
+    (or program
+        (signal 'eliscript-mode-error
+                (list (format "watch executable not found: %s"
+                              configured))))))
+
+(defun eliscript-mode--watch-context (&optional directory)
+  "Return canonical watch context containing DIRECTORY."
+  (let* ((root (or (eliscript-mode-project-root directory)
+                   (file-name-as-directory
+                    (expand-file-name (or directory default-directory)))))
+         (canonical-root (file-name-as-directory (file-truename root)))
+         (configuration (expand-file-name "eliscript.json" root)))
+    (list :root canonical-root
+          :configuration (and (file-regular-p configuration)
+                              (file-truename configuration)))))
+
+(defun eliscript-mode--watch-arguments (context)
+  "Return public watch-command arguments for CONTEXT."
+  (append (cdr eliscript-mode-watch-command)
+          (if-let* ((configuration (plist-get context :configuration)))
+              (list "--config" configuration)
+            (list "--root" (plist-get context :root)))))
+
+(defun eliscript-mode--watch-event-from-json (source)
+  "Decode and validate one watch event from JSON SOURCE."
+  (condition-case error-data
+      (let* ((event (json-parse-string source
+                                       :object-type 'alist
+                                       :array-type 'list
+                                       :null-object nil
+                                       :false-object nil))
+             (kind (alist-get 'event event))
+             (sequence (alist-get 'sequence event))
+             (root (alist-get 'root event)))
+        (unless (and (equal (alist-get 'format event)
+                            "eliscript-watch-event")
+                     (= (or (alist-get 'version event) 0) 1)
+                     (integerp sequence)
+                     (>= sequence 0)
+                     (member kind '("ready" "change" "error"))
+                     (stringp root)
+                     (not (string-empty-p root)))
+          (signal 'eliscript-mode-error '("invalid project watch event")))
+        event)
+    (json-parse-error
+     (signal 'eliscript-mode-error
+             (list (format "invalid project watch JSON: %s"
+                           (error-message-string error-data)))))))
+
+(defun eliscript-mode--refresh-watch-buffers (root)
+  "Request diagnostics for live Eliscript buffers below ROOT."
+  (dolist (buffer (buffer-list))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (when (and (derived-mode-p 'eliscript-mode)
+                   flymake-mode
+                   buffer-file-name
+                   (file-in-directory-p
+                    (file-truename buffer-file-name) root))
+          (flymake-start))))))
+
+(defun eliscript-mode--handle-watch-event (process event)
+  "Apply validated EVENT received from watch PROCESS."
+  (let* ((event-root (file-name-as-directory
+                      (file-truename (alist-get 'root event))))
+         (expected-root (process-get process 'eliscript-watch-event-root))
+         (sequence (alist-get 'sequence event))
+         (last-sequence (process-get process 'eliscript-watch-sequence)))
+    (when (and expected-root (not (equal expected-root event-root)))
+      (signal 'eliscript-mode-error '("project watch root changed")))
+    (unless (or (and (null last-sequence) (= sequence 0))
+                (and (integerp last-sequence) (> sequence last-sequence)))
+      (signal 'eliscript-mode-error '("project watch sequence is not increasing")))
+    (process-put process 'eliscript-watch-event-root event-root)
+    (process-put process 'eliscript-watch-sequence sequence)
+    (run-hook-with-args 'eliscript-mode-watch-event-hook event)
+    (when (equal (alist-get 'event event) "change")
+      (eliscript-mode--refresh-watch-buffers event-root))))
+
+(defun eliscript-mode--watch-filter (process output)
+  "Decode complete watch events from PROCESS OUTPUT."
+  (let ((source (concat (or (process-get process 'eliscript-watch-partial) "")
+                        output))
+        line-end)
+    (while (setq line-end (string-match "\n" source))
+      (let ((line (substring source 0 line-end)))
+        (setq source (substring source (1+ line-end)))
+        (unless (string-empty-p line)
+          (condition-case error-data
+              (eliscript-mode--handle-watch-event
+               process (eliscript-mode--watch-event-from-json line))
+            (error
+             (process-put process 'eliscript-watch-error
+                          (error-message-string error-data))
+             (delete-process process))))))
+    (process-put process 'eliscript-watch-partial source)))
+
+(defun eliscript-mode--watch-sentinel (process _event)
+  "Release project ownership after watch PROCESS exits."
+  (when (memq (process-status process) '(exit signal failed))
+    (let ((root (process-get process 'eliscript-watch-root)))
+      (when (eq process (gethash root eliscript-mode--watch-processes))
+        (remhash root eliscript-mode--watch-processes)))))
+
+(defun eliscript-mode-watch-project (&optional directory)
+  "Start or reuse the watch session containing DIRECTORY."
+  (interactive)
+  (let* ((context (eliscript-mode--watch-context directory))
+         (root (plist-get context :root))
+         (existing (gethash root eliscript-mode--watch-processes)))
+    (if (process-live-p existing)
+        existing
+      (let* ((default-directory root)
+             (program (eliscript-mode--watch-program))
+             (buffer (get-buffer-create
+                      (format "*Eliscript watch %s*" root)))
+             (process
+              (make-process
+               :name (format "eliscript-watch:%s" root)
+               :buffer buffer
+               :stderr buffer
+               :command (cons program
+                              (eliscript-mode--watch-arguments context))
+               :connection-type 'pipe
+               :coding 'utf-8-unix
+               :noquery t
+               :filter #'eliscript-mode--watch-filter
+               :sentinel #'eliscript-mode--watch-sentinel)))
+        (process-put process 'eliscript-watch-root root)
+        (process-put process 'eliscript-watch-partial "")
+        (puthash root process eliscript-mode--watch-processes)
+        process))))
+
+(defun eliscript-mode-watch-project-p (&optional directory)
+  "Return non-nil when DIRECTORY has a live project watch session."
+  (let* ((context (eliscript-mode--watch-context directory))
+         (process (gethash (plist-get context :root)
+                           eliscript-mode--watch-processes)))
+    (and (process-live-p process) process)))
+
+(defun eliscript-mode-stop-watch (&optional directory)
+  "Stop the project watch session containing DIRECTORY."
+  (interactive)
+  (let* ((context (eliscript-mode--watch-context directory))
+         (root (plist-get context :root))
+         (process (gethash root eliscript-mode--watch-processes)))
+    (remhash root eliscript-mode--watch-processes)
+    (when (process-live-p process)
+      (delete-process process))
+    (and process t)))
 
 (defun eliscript-mode--build-context ()
   "Return the current file, project root, configuration, and output path."
