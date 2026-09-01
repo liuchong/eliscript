@@ -60,7 +60,8 @@ mature user contract. The main remaining gaps are:
   the broader M8 language and standard-library exit audit remains incomplete
 - incomplete module interop and core data semantics
 - compiler capabilities still split between the seed and self-hosted paths
-- no canonical project configuration file
+- the canonical project configuration currently supports one graph entry and
+  is not yet routed through the self-hosted project service
 - no formatter, interactive REPL, or complete Emacs editing mode
 - an intentionally small standard library without a documented stability
   classification
@@ -713,7 +714,7 @@ Specification
 [0100-profile-guided-binary-comparison-emission.md](0100-profile-guided-binary-comparison-emission.md)
 then specializes exactly binary numeric comparisons as direct ECMAScript
 infix expressions while preserving eager argument capture for n-ary forms.
-An exact historical-baseline replay over all eleven compiler modules records a
+An exact historical-baseline replay over all twelve compiler modules records a
 1.646111x complete-compiler median speedup and reduces generated JavaScript
 from 409,281 to 309,249 bytes. A broader constant-dispatch experiment was
 rejected because its complete-compiler result regressed. Application
@@ -796,9 +797,11 @@ implementation while preserving the seed as a trustworthy bootstrap.
 
 Specification 0106 delivers the first versioned single-entry project request,
 closed-key configuration validation, command-line precedence, and shared seed
-project operation. Multi-entry identity, host-neutral graph planning, and
-self-hosted execution remain M9 work; this partial delivery does not satisfy
-the exit gate.
+project operation. Specification 0107 adds host-neutral graph and portable
+closure planning in `.eli`, plus byte-identical ordinary and portable project
+execution under Bun and Node. Existing CLI/configuration routing, multi-entry
+identity, versioned IR, and incremental cache convergence remain M9 work; this
+partial delivery does not satisfy the exit gate.
 
 **Exit gate:** All normal user builds can use the self-hosted compiler; the
 seed is no longer the only implementation of a user-facing build capability.

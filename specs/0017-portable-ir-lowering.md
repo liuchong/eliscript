@@ -17,7 +17,7 @@ model without consulting Emacs objects or reader-shaped seed forms.
 portable syntax -> macro expansion -> lexical analysis -> portable IR lowering
 ```
 
-The generated reader, expander, analyzer, and lowerer can process all ten
+The generated reader, expander, analyzer, and lowerer can process all twelve
 bootstrap compiler modules, including the compiler driver source.
 
 ## Data Contract
@@ -49,7 +49,7 @@ Quoted brace syntax therefore remains a tagged `list` beginning with
 
 ## Lowering Surface
 
-The portable lowerer implements all 55 public IR kinds from specification
+The portable lowerer implements all 57 public IR kinds from specification
 0007. The surface includes modules and imports, declarations and exports,
 functions and lexical bindings, all control forms, assignments, intrinsics,
 native and persistent collection constructors, JavaScript interop, objects,
@@ -75,7 +75,7 @@ The fixture verifies:
 - complete recursive values, children, and kind-specific properties
 - literal tags and recursively quoted data
 - narrow structural spans and macro call-site origins
-- all ten bootstrap compiler sources
+- all twelve bootstrap compiler sources
 - deterministic generated modules and Source Map files
 
 ## Next Phase

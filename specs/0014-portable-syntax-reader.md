@@ -94,11 +94,13 @@ bootstrap/compiler/symbol.eli -> dist/bootstrap/symbol.mjs
 bootstrap/compiler/syntax.eli -> dist/bootstrap/syntax.mjs
 bootstrap/compiler/reader.eli -> dist/bootstrap/reader.mjs
 bootstrap/compiler/expander.eli -> dist/bootstrap/expander.mjs
+bootstrap/compiler/transient-analysis.eli -> dist/bootstrap/transient-analysis.mjs
 bootstrap/compiler/analyzer.eli -> dist/bootstrap/analyzer.mjs
 bootstrap/compiler/ir.eli -> dist/bootstrap/ir.mjs
 bootstrap/compiler/lower.eli -> dist/bootstrap/lower.mjs
 bootstrap/compiler/source-map.eli -> dist/bootstrap/source-map.mjs
 bootstrap/compiler/emitter.eli -> dist/bootstrap/emitter.mjs
+bootstrap/compiler/project.eli -> dist/bootstrap/project.mjs
 bootstrap/compiler/compiler.eli -> dist/bootstrap/compiler.mjs
 ```
 

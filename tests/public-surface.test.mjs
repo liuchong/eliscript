@@ -32,8 +32,8 @@ test("repository public surface matches every tracked implementation", async () 
     language: { groups: 12, entries: 174 },
     ir: { nodeKinds: 57 },
     commands: { commands: 5, options: 21 },
-    schemas: { total: 11 },
-    adapters: { adapters: 4, exports: 17 },
+    schemas: { total: 12 },
+    adapters: { adapters: 5, exports: 18 },
     runtimeModules: { modules: 29, exports: 219, public: 20, internal: 9 },
     standardLibrary: { modules: 29, exports: 304 },
     emacs: {
@@ -73,7 +73,7 @@ test("public surface checker rejects CLI option drift", async () => {
 
 test("public surface checker rejects adapter export drift", async () => {
   const surface = await surfaceDocument();
-  surface.adapters[2].namedExports.shift();
+  surface.adapters.find(({ id }) => id === "vite").namedExports.shift();
   expect(await validationErrors(surface)).toContain(
     "vite export inventory is missing current entries: compileEliscript",
   );

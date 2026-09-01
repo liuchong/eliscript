@@ -62,7 +62,7 @@ source names, `sourcesContent`, diagnostics, or Source Map v3 JSON shape.
 
 `tools/compiler/source-map-cursor-benchmark.mjs` accepts only a detached
 baseline at revision `a6013833226af047622aceca42d687b6e33e3701`. It builds
-real emission artifacts for all eleven current self-hosted compiler modules,
+real emission artifacts for all twelve current self-hosted compiler modules,
 compares both cursor pairs with their references, and adds explicit empty,
 duplicate, trailing-offset, newline, tab, and non-BMP boundaries.
 

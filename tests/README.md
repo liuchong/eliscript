@@ -85,9 +85,9 @@ current bootstrap sources, including `analyzer.eli` itself.
 
 The IR fixture runs the complete generated front end and lowerer, then compares
 the resulting program with a normalized seed oracle. It covers every one of
-the 55 public IR node kinds, JSON-safe quoted data and literal tags,
+the 57 public IR node kinds, JSON-safe quoted data and literal tags,
 kind-specific properties, complete nested source spans, macro call origins,
-and all ten bootstrap compiler modules.
+and all twelve bootstrap compiler modules.
 
 The emitter fixture sends the same portable IR through the generated backend
 and the Emacs seed backend. It compares complete ESM text and parsed Source Map
@@ -97,9 +97,15 @@ also part of the self-source fixture set.
 
 The compiler-driver test builds Generation 1 with the Emacs Lisp seed,
 Generation 2 with Generation 1, and Generation 3 with Generation 2. It compares
-all ten ESM and Source Map artifacts byte-for-byte, checks the portable CLI
+all twelve ESM and Source Map artifacts byte-for-byte, checks the portable CLI
 against seed output, and verifies mapped file output and located diagnostics.
 It also compares seed and self-hosted `defportable` closure builds.
+
+The self-hosted project test exercises cycle-safe graph closure and portable
+requested-name fixed points in generated Eliscript code. It then compares
+ordinary and portable ESM, Source Maps, and public project-manifest identity
+with cache-free seed builds and repeats the self-hosted build service under Bun
+and Node.
 
 `literal-runtime.test.mjs` compiles square-bracket Vector literals, brace Map
 literals, `#{...}` Set literals, source Keyword values, and explicit persistent

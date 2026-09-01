@@ -1253,6 +1253,36 @@
         { "kind": "shell", "file": "tests/project-cli-test.sh", "contains": "CONFIG_OUTPUT" },
         { "kind": "shell", "file": "tests/project-cli-test.sh", "contains": "CONFIG_DIAGNOSTIC_FILE" }
       ]
+    },
+    {
+      "id": "bootstrap.self-hosted-project-planning",
+      "title": "Self-hosted project graph planning",
+      "status": "accepted",
+      "spec": "0107",
+      "contracts": [
+        "Owns deterministic cycle-safe project traversal in Eliscript",
+        "Propagates portable requested names to a complete graph fixed point",
+        "Keeps filesystem, path containment, and artifact writes behind a standards-based host boundary",
+        "Matches seed ESM, Source Maps, and manifest identity under Bun and Node",
+        "Keeps application frameworks, publishing, sites, hosting, and development servers outside core implementation and evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-project.test.mjs",
+          "contains": "self-hosted project planning reaches deterministic graph fixed points"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-project.test.mjs",
+          "contains": "self-hosted project service matches seed output under Bun and Node"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }

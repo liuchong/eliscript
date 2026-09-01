@@ -24,6 +24,7 @@ const compilerSources = Object.freeze([
   "bootstrap/compiler/lower.eli",
   "bootstrap/compiler/source-map.eli",
   "bootstrap/compiler/emitter.eli",
+  "bootstrap/compiler/project.eli",
   "bootstrap/compiler/compiler.eli",
 ]);
 const digestFiles = Object.freeze([

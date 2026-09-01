@@ -117,7 +117,7 @@ expander, and analyzer, then compares:
   boundaries
 - quoted and syntax-specific expansion boundaries
 - definition, nesting, execution, and depth-limit diagnostics
-- all ten bootstrap compiler modules, including `emitter.eli` and
+- all twelve bootstrap compiler modules, including `emitter.eli` and
   `compiler.eli`
 - acceptance of every valid expanded result by the portable analyzer
 

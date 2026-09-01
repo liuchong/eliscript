@@ -15,6 +15,7 @@ const reportPath = path.join(
   projectDirectory,
   "benchmarks/compiler-source-map-cursor-macos-arm64.json",
 );
+const compilerModuleCount = 12;
 const compilerNames = [
   "symbol", "syntax", "reader", "expander", "transient-analysis",
   "analyzer", "ir", "lower", "source-map", "emitter", "compiler",
@@ -130,9 +131,10 @@ test("committed Source Map cursor report matches measured sources", async () => 
   expect(report.sourceDigest).toEqual(
     await compilerSourceMapCursorSourceDigest(),
   );
-  expect(report.corpus.files).toHaveLength(11);
+  expect(report.corpus.files).toHaveLength(compilerModuleCount);
+  expect(report.corpus.files).toContain("bootstrap/compiler/project.eli");
   expect(report.corpus.artifactMarks).toBeGreaterThan(20_000);
-  expect(report.validation.identicalCompilerOutputs).toBe(11);
+  expect(report.validation.identicalCompilerOutputs).toBe(compilerModuleCount);
   expect(report.measurements.pipelineSpeedup).toBeGreaterThanOrEqual(
     report.decision.minimumPipelineSpeedup,
   );

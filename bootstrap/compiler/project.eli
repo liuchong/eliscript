@@ -1,0 +1,202 @@
+(module bootstrap.compiler.project
+  (defconst project-plan-format "eliscript-project-plan")
+  (defconst project-plan-version 1)
+  (defconst project-plan-max-iterations 100000)
+
+  (defconst fail
+    (js* "(message) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-B0003', severity: 'error', phase: 'project-plan', message }; throw error; }"))
+  (defconst array-p (js* "Array.isArray"))
+  (defconst object-p
+    (js* "(value) => value !== null && typeof value === 'object' && !Array.isArray(value)"))
+  (defconst sorted-set-values
+    (js* "(values) => Array.from(values).sort()"))
+
+  (defun normalize-strings (values label require-entry)
+    (unless (funcall array-p values)
+      (fail (str label " must be an array")))
+    (let ((seen (new globalThis.Set))
+          (result (js-array)))
+      (js-call values :forEach
+        (lambda (value)
+          (unless (and (= (js* "typeof value") "string")
+                       (> (get value :length) 0))
+            (fail (str label " must contain only non-empty strings")))
+          (unless (js-call seen :has value)
+            (js-call seen :add value)
+            (js-call result :push value))))
+      (when (and require-entry (= (get result :length) 0))
+        (fail (str label " must not be empty")))
+      (js-call result :sort)
+      result))
+
+  (defun freeze-request (request)
+    (js-call globalThis.Object :freeze (get request :entries))
+    (js-call globalThis.Object :freeze request))
+
+  (defun normalize-portable-requests (values label require-entry)
+    (unless (funcall array-p values)
+      (fail (str label " must be an array")))
+    (let ((entries-by-module (new globalThis.Map)))
+      (js-call values :forEach
+        (lambda (request)
+          (unless (funcall object-p request)
+            (fail (str label " must contain only request objects")))
+          (let* ((module-id (get request :id))
+                 (entries
+                  (normalize-strings
+                    (get request :entries)
+                    (str label " entries")
+                    t)))
+            (unless (and (= (js* "typeof module_id") "string")
+                         (> (get module-id :length) 0))
+              (fail (str label " id must be a non-empty string")))
+            (let ((requested
+                   (or (js-call entries-by-module :get module-id)
+                       (let ((created (new globalThis.Set)))
+                         (js-call entries-by-module :set module-id created)
+                         created))))
+              (js-call entries :forEach
+                (lambda (entry) (js-call requested :add entry)))))))
+      (when (and require-entry (= (get entries-by-module :size) 0))
+        (fail (str label " must not be empty")))
+      (let ((result (js-array)))
+        (js-call (funcall sorted-set-values (js-call entries-by-module :keys))
+          :forEach
+          (lambda (module-id)
+            (js-call result :push
+              (freeze-request
+                (js-object
+                  :id module-id
+                  :entries
+                  (funcall sorted-set-values
+                    (js-call entries-by-module :get module-id)))))))
+        (js-call globalThis.Object :freeze result))))
+
+  (defun project-plan (entries dependencies-for)
+    (unless (= (js* "typeof dependencies_for") "function")
+      (fail "project dependency resolver must be a function"))
+    (let* ((entry-list (normalize-strings entries "project entries" t))
+           (pending (new globalThis.Set entry-list))
+           (visited (new globalThis.Set))
+           (records (new globalThis.Map))
+           (iterations 0))
+      (while (> (get pending :size) 0)
+        (setq iterations (1+ iterations))
+        (when (> iterations project-plan-max-iterations)
+          (fail "project graph exceeded the planning iteration limit"))
+        (let ((module-id (js-nth 0 (funcall sorted-set-values pending))))
+          (js-call pending :delete module-id)
+          (unless (js-call visited :has module-id)
+            (js-call visited :add module-id)
+            (let ((dependencies
+                   (normalize-strings
+                     (funcall dependencies-for module-id)
+                     (str "dependencies for " module-id)
+                     false)))
+              (js-call records :set module-id
+                (js-call globalThis.Object :freeze
+                  (js-object
+                    :id module-id
+                    :dependencies
+                    (js-call globalThis.Object :freeze dependencies))))
+              (js-call dependencies :forEach
+                (lambda (dependency)
+                  (unless (js-call visited :has dependency)
+                    (js-call pending :add dependency))))))))
+      (let ((modules (js-array)))
+        (js-call (funcall sorted-set-values (js-call records :keys)) :forEach
+          (lambda (module-id)
+            (js-call modules :push (js-call records :get module-id))))
+        (js-call globalThis.Object :freeze modules)
+        (js-call globalThis.Object :freeze
+          (js-object
+            :format project-plan-format
+            :version project-plan-version
+            :mode "standard"
+            :entries (js-call globalThis.Object :freeze entry-list)
+            :modules modules)))))
+
+  (defun add-portable-request (requests pending request)
+    (let* ((module-id (get request :id))
+           (requested
+            (or (js-call requests :get module-id)
+                (let ((created (new globalThis.Set)))
+                  (js-call requests :set module-id created)
+                  created)))
+           (changed false))
+      (js-call (get request :entries) :forEach
+        (lambda (entry)
+          (unless (js-call requested :has entry)
+            (js-call requested :add entry)
+            (setq changed t))))
+      (when changed (js-call pending :add module-id))
+      changed))
+
+  (defun portable-project-plan (initial-requests dependencies-for)
+    (unless (= (js* "typeof dependencies_for") "function")
+      (fail "portable dependency resolver must be a function"))
+    (let* ((initial
+            (normalize-portable-requests
+              initial-requests "portable project entries" t))
+           (requests (new globalThis.Map))
+           (pending (new globalThis.Set))
+           (processed (new globalThis.Map))
+           (records (new globalThis.Map))
+           (iterations 0))
+      (js-call initial :forEach
+        (lambda (request)
+          (add-portable-request requests pending request)))
+      (while (> (get pending :size) 0)
+        (setq iterations (1+ iterations))
+        (when (> iterations project-plan-max-iterations)
+          (fail "portable project graph exceeded the planning iteration limit"))
+        (let* ((module-id
+                (js-nth 0 (funcall sorted-set-values pending)))
+               (entries
+                (funcall sorted-set-values
+                  (js-call requests :get module-id)))
+               (signature (js-call entries :join "\u0000")))
+          (js-call pending :delete module-id)
+          (unless (= signature (js-call processed :get module-id))
+            (js-call processed :set module-id signature)
+            (let* ((discovered
+                    (normalize-portable-requests
+                      (funcall dependencies-for module-id entries)
+                      (str "portable dependencies for " module-id)
+                      false))
+                   (previous (js-call records :get module-id))
+                   (dependencies
+                    (if previous
+                        (normalize-portable-requests
+                          (js-call (get previous :dependencies)
+                            :concat discovered)
+                          (str "portable dependencies for " module-id)
+                          false)
+                      discovered)))
+              (js-call records :set module-id
+                (js-call globalThis.Object :freeze
+                  (js-object
+                    :id module-id
+                    :entries (js-call globalThis.Object :freeze entries)
+                    :dependencies dependencies)))
+              (js-call dependencies :forEach
+                (lambda (request)
+                  (add-portable-request requests pending request)))))))
+      (let ((modules (js-array)))
+        (js-call (funcall sorted-set-values (js-call records :keys)) :forEach
+          (lambda (module-id)
+            (js-call modules :push (js-call records :get module-id))))
+        (js-call globalThis.Object :freeze modules)
+        (js-call globalThis.Object :freeze
+          (js-object
+            :format project-plan-format
+            :version project-plan-version
+            :mode "portable"
+            :entries initial
+            :modules modules)))))
+
+  (export
+    project-plan-format
+    project-plan-version
+    project-plan
+    portable-project-plan))

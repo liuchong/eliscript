@@ -15,6 +15,7 @@ const reportPath = path.join(
   projectDirectory,
   "benchmarks/compiler-binary-comparison-macos-arm64.json",
 );
+const compilerModuleCount = 12;
 
 async function run(command, options = {}) {
   const child = Bun.spawn(command, {
@@ -88,7 +89,8 @@ test("committed binary comparison report matches measured sources", async () => 
   expect(report.sourceDigest).toEqual(
     await compilerBinaryComparisonSourceDigest(),
   );
-  expect(report.corpus.files).toHaveLength(11);
+  expect(report.corpus.files).toHaveLength(compilerModuleCount);
+  expect(report.corpus.files).toContain("bootstrap/compiler/project.eli");
   expect(report.corpus.sourceBytes).toBeGreaterThan(200_000);
   expect(report.measurements.speedup).toBeGreaterThanOrEqual(
     report.decision.minimumSpeedup,

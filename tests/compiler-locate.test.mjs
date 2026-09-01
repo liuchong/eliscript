@@ -26,6 +26,7 @@ const compilerSources = [
   "lower",
   "source-map",
   "emitter",
+  "project",
   "compiler",
 ];
 
@@ -117,7 +118,7 @@ test("ordered compiler mark location matches its scan and copy reference", async
         }
       }
     }
-    expect(cases).toBe(33);
+    expect(cases).toBe(compilerSources.length * 3);
 
     const node = { span: "parent" };
     const empty = { text: "", marks: [] };
@@ -158,9 +159,9 @@ test("committed compiler location report matches measured sources", async () => 
   expect(report.sourceDigest).toEqual(await compilerLocateSourceDigest());
   expect(report.corpus.files).toHaveLength(compilerSources.length);
   expect(report.corpus.sourceBytes).toBeGreaterThan(200_000);
-  expect(report.corpus.artifactFragments).toBe(22);
-  expect(report.corpus.shiftedCases).toBe(11);
-  expect(report.corpus.cases).toBe(33);
+  expect(report.corpus.artifactFragments).toBe(compilerSources.length * 2);
+  expect(report.corpus.shiftedCases).toBe(compilerSources.length);
+  expect(report.corpus.cases).toBe(compilerSources.length * 3);
   expect(report.corpus.marks).toBeGreaterThan(30_000);
   expect(report.measurements.speedup).toBeGreaterThanOrEqual(
     report.decision.minimumSpeedup,

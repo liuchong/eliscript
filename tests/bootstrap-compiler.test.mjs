@@ -25,6 +25,7 @@ const moduleNames = [
   "lower",
   "source-map",
   "emitter",
+  "project",
   "compiler",
 ];
 

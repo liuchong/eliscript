@@ -20,6 +20,7 @@ symbol semantics (implemented)
   -> IR data model (implemented)
   -> IR lowering (implemented)
   -> ESM and Source Map emitter (implemented)
+  -> project graph and portable closure planner (implemented)
   -> compiler driver (implemented)
   -> reproducible self-compilation (implemented)
 ```
@@ -38,6 +39,9 @@ mapping fragments, while `compiler/source-map.eli` encodes those marks as
 Source Map v3. The generated pipeline can process and emit every current
 bootstrap module, including its own sources. `compiler/compiler.eli` composes
 the complete in-memory pipeline without filesystem dependencies.
+`compiler/project.eli` owns cycle-safe dependency traversal and portable-name
+fixed points. `host/project.mjs` supplies the replaceable filesystem and path
+boundary while using that generated planner for real multi-module builds.
 
 ## Build
 
@@ -58,12 +62,12 @@ adapter:
 
 Generated files are written below `dist/bootstrap/` and are not source
 artifacts. Shared fixtures cover symbol behavior, reader syntax, macro
-expansion, lexical analysis, all 55 IR node kinds, direct ESM emission, and
+expansion, lexical analysis, all 57 IR node kinds, direct ESM emission, and
 Source Map v3. Oracles compare complete syntax and IR trees, spans, properties,
 acceptance, exact diagnostics, JavaScript bytes, and parsed source maps between
 the seed and generated implementations. Repeated builds must be byte-identical.
 
 Generation 1 is self-hosting. The conformance suite builds it with the seed,
 uses it to build Generation 2, then uses Generation 2 to build Generation 3.
-All ten ESM modules and Source Maps are byte-identical across those generations.
+All twelve ESM modules and Source Maps are byte-identical across those generations.
 The Emacs Lisp seed remains the readable bootstrap and reference implementation.

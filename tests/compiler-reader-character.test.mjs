@@ -15,6 +15,7 @@ const reportPath = path.join(
   projectDirectory,
   "benchmarks/compiler-reader-character-macos-arm64.json",
 );
+const compilerModuleCount = 12;
 
 async function run(command, options = {}) {
   const child = Bun.spawn(command, {
@@ -78,9 +79,10 @@ test("committed reader character report matches measured sources", async () => {
   expect(report.sourceDigest).toEqual(
     await compilerReaderCharacterSourceDigest(),
   );
-  expect(report.corpus.files).toHaveLength(11);
+  expect(report.corpus.files).toHaveLength(compilerModuleCount);
+  expect(report.corpus.files).toContain("bootstrap/compiler/project.eli");
   expect(report.corpus.sourceBytes).toBeGreaterThan(200_000);
-  expect(report.validation.identicalCompilerOutputs).toBe(11);
+  expect(report.validation.identicalCompilerOutputs).toBe(compilerModuleCount);
   expect(report.measurements.completeCompilerSpeedup).toBeGreaterThanOrEqual(
     report.decision.minimumCompleteCompilerSpeedup,
   );

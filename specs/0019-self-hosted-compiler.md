@@ -26,13 +26,16 @@ as the readable bootstrap and independent reference implementation.
 
 ## In-Memory Driver
 
-`bootstrap/compiler/compiler.eli` imports only portable compiler modules and
-exports:
+`bootstrap/compiler/compiler.eli` imports only portable compiler modules. Its
+stable single-file entry points are:
 
 - `compile-ir-string(source, filename)`
 - `compile-string(source, filename)`
 - `compile-string-with-source-map(source, filename, generated-name,
   source-name)`
+
+Provisional portable and project entry points are specified separately by
+0021 and 0107 rather than being promoted through this stable specification.
 
 The driver has no filesystem, process, environment, Bun, or Node.js dependency.
 Diagnostics are thrown by the phase that detects them and retain the shared
@@ -64,7 +67,7 @@ Generation 1    -> Generation 2
 Generation 2    -> Generation 3
 ```
 
-Each generation contains ten ESM modules and ten external Source Maps. Every
+Each generation contains twelve ESM modules and twelve external Source Maps. Every
 `.mjs` and `.mjs.map` file from Generation 1 is byte-identical to Generation 2,
 and every Generation 2 file is byte-identical to Generation 3. The comparison
 includes `compiler.mjs` itself and its mapping back to `compiler.eli`.

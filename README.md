@@ -18,8 +18,9 @@ modules, and bootstraps a compiler written in Eliscript itself.
 ## Project Status
 
 Eliscript has a working Emacs Lisp seed compiler, a reproducible self-hosted
-compiler, multi-file builds, persistent values, protocols, and a long-lived
-Emacs-to-JavaScript worker. The repository also carries React, Org, and
+compiler, self-hosted multi-file graph planning, persistent values, protocols,
+and a long-lived Emacs-to-JavaScript worker. The repository also carries React,
+Org, and
 optional bundler probes as replaceable application-level evidence. The project
 is now in **M8: Language Contract Closure**.
 
@@ -384,6 +385,7 @@ Start with the document that matches the question:
 | How do persistent values and Emacs acceleration fit together? | [Host Symbiosis and Persistent Data](specs/0041-host-symbiosis-and-persistent-data.md) |
 | Where is measured Emacs performance reinvestment specified? | [Emacs Analysis Performance Reinvestment](specs/0105-emacs-analysis-performance-reinvestment.md) |
 | How is a versioned project build configured? | [Versioned Project Request Configuration](specs/0106-versioned-project-request.md) |
+| How does the self-hosted compiler plan projects? | [Self-hosted Project Graph Planning](specs/0107-self-hosted-project-graph-planning.md) |
 | Which behavior is implemented or stable? | [Specification Catalog](specs/README.md#specification-catalog) |
 | How does the seed compiler work? | [Compiler Guide](compiler/README.md) |
 | How does self-hosting work? | [Bootstrap Compiler Guide](bootstrap/README.md) |

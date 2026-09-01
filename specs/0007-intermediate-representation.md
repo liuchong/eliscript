@@ -97,7 +97,7 @@ implemented language surface.
 - CLI snapshots remain byte-for-byte stable and Bun executes the emitted ESM.
 - The portable `ir.eli` and `lower.eli` implementations serialize this model
   as ordinary JavaScript objects and arrays. A shared oracle compares complete
-  seed and portable trees for all 55 node kinds and all bootstrap sources.
+  seed and portable trees for all 57 node kinds and all bootstrap sources.
 
 ## Deferred Work
 

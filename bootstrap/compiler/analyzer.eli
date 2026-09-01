@@ -1179,7 +1179,8 @@
                   (js-call pending :push dependency)))))))
       forms))
 
-  (defun select-portable-module (forms entries filename)
+  (defun select-portable-module
+      (forms entries filename &optional allow-project-imports)
     (let* ((context (js-object :filename filename))
            (flattened (flatten-modules forms context))
            (declarations (portable-declarations flattened context))
@@ -1199,7 +1200,8 @@
           (unless (js-call selected :has name)
             (js-call selected :add name)
             (let ((declaration (js-call declarations :get name)))
-              (when (= (get declaration :kind) "portable-import")
+              (when (and (= (get declaration :kind) "portable-import")
+                         (not allow-project-imports))
                 (analyzer-fail
                   context (node-span (get declaration :form))
                   (str "portable import " name

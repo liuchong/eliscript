@@ -28,7 +28,7 @@ and explicit identity, ordering, and immutability boundaries.
 
 ## Profile Evidence
 
-The discovery profile covered eight complete compilations of all eleven
+The discovery profile covered eight complete compilations of all twelve
 maintained self-hosted modules with Source Maps. The previous generated
 location path was the largest self-time entry at about 5.9%; native `some`
 accounted for about 9.0% total sampled time through its callers.

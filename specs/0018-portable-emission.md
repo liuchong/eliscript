@@ -71,7 +71,7 @@ adapters without moving host concerns into these modules.
 `tests/fixtures/bootstrap-ir.json` is shared by the Emacs seed and generated
 backends. The emission oracle compares complete JavaScript strings and parsed
 Source Map documents for the full IR surface, quoted literal identity, Unicode
-columns, executable programs, macro call-site spans, and all ten bootstrap
+columns, executable programs, macro call-site spans, and all twelve bootstrap
 compiler sources.
 
 Additional checks verify signed VLQ boundaries, execute a generated module in a

@@ -173,6 +173,28 @@
       ]
     },
     {
+      "id": "project-plan",
+      "spec": "0107",
+      "format": "eliscript-project-plan",
+      "version": 1,
+      "evidence": [
+        {
+          "file": "bootstrap/compiler/project.eli",
+          "contains": [
+            "project-plan-format \"eliscript-project-plan\"",
+            "project-plan-version 1"
+          ]
+        },
+        {
+          "file": "specs/0107-self-hosted-project-graph-planning.md",
+          "contains": [
+            "\"format\": \"eliscript-project-plan\"",
+            "\"version\": 1"
+          ]
+        }
+      ]
+    },
+    {
       "id": "project-request",
       "spec": "0106",
       "format": "eliscript-project-request",
@@ -239,6 +261,15 @@
       "spec": "0019",
       "file": "bootstrap/host/bun.mjs",
       "namedExports": ["compileFile", "diagnosticFromError", "loadCompiler", "main", "parseArguments", "requestedDiagnosticFormat"],
+      "defaultExport": false
+    },
+    {
+      "id": "bootstrap-project-host",
+      "spec": "0107",
+      "file": "bootstrap/host/project.mjs",
+      "namedExports": [
+        "buildProject"
+      ],
       "defaultExport": false
     },
     {

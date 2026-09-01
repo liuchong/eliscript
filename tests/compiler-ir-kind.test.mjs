@@ -26,6 +26,7 @@ const compilerSources = [
   "lower",
   "source-map",
   "emitter",
+  "project",
   "compiler",
 ];
 
