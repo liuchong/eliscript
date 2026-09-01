@@ -88,9 +88,10 @@ before starting the self-hosted command.
 bootstrap and differential verification. It is not the normal project command
 and is not evidence that self-hosting succeeded.
 
-This routing does not yet change `bin/eliscript`. Single-file compilation still
-uses the seed command, so the M9 shared single-file/multi-file operation and
-multi-entry project identity remain open.
+At completion of this specification, `bin/eliscript` still used the seed
+command. Specification 0112 subsequently routes both public commands through a
+shared, compiler-owned build-operation boundary while retaining explicit seed
+references. Multi-entry project identity remains open.
 
 ## Compatibility
 

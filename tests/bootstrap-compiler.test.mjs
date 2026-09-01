@@ -11,7 +11,8 @@ import {
 
 const projectDirectory = resolve(import.meta.dir, "..");
 const buildPath = resolve(projectDirectory, "bin/eliscript-bootstrap");
-const seedCliPath = resolve(projectDirectory, "bin/eliscript");
+const publicCliPath = resolve(projectDirectory, "bin/eliscript");
+const seedCliPath = resolve(projectDirectory, "bin/eliscript-seed");
 const portableCliPath = resolve(projectDirectory, "bin/eliscript-portable");
 const emacs = process.env.EMACS ?? "emacs";
 const moduleNames = [
@@ -143,6 +144,34 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
       },
     });
     expect(portableOutput).toBe(seedOutput);
+    const publicBunOutput = await runSuccessful([publicCliPath, coreSource], {
+      env: {
+        ...process.env,
+        ELISCRIPT_BOOTSTRAP_MODULE_DIR: generationTwo,
+      },
+    });
+    const publicNodeOutput = await runSuccessful([publicCliPath, coreSource], {
+      env: {
+        ...process.env,
+        ELISCRIPT_BOOTSTRAP_MODULE_DIR: generationTwo,
+        ELISCRIPT_JS_RUNTIME: "node",
+      },
+    });
+    expect(publicBunOutput).toBe(seedOutput);
+    expect(publicNodeOutput).toBe(seedOutput);
+
+    const automaticCompiler = resolve(directory, "automatic-compiler");
+    const automaticOutput = await runSuccessful([publicCliPath, coreSource], {
+      env: {
+        ...process.env,
+        EMACS: emacs,
+        ELISCRIPT_BOOTSTRAP_MODULE_DIR: automaticCompiler,
+        ELISCRIPT_JS_RUNTIME: "node",
+      },
+    });
+    expect(automaticOutput).toBe(seedOutput);
+    expect(await Bun.file(resolve(automaticCompiler, "compiler.mjs")).exists())
+      .toBeTrue();
 
     const diagnosticSource = resolve(directory, "diagnostic.eli");
     await writeFile(diagnosticSource, "(defun broken ()\n  missing)\n");
@@ -172,6 +201,22 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         end: { offset: 26, line: 2, column: 10 },
       },
     });
+    const publicNodeDiagnostic = await run([
+      publicCliPath,
+      "--diagnostic-format",
+      "json",
+      diagnosticSource,
+    ], {
+      env: {
+        ...process.env,
+        ELISCRIPT_BOOTSTRAP_MODULE_DIR: generationTwo,
+        ELISCRIPT_JS_RUNTIME: "node",
+      },
+    });
+    expect(publicNodeDiagnostic.exitCode).toBe(1);
+    expect(publicNodeDiagnostic.stdout).toBe("");
+    expect(JSON.parse(publicNodeDiagnostic.stderr))
+      .toEqual(JSON.parse(diagnosticFailure.stderr));
 
     for (const [sourcePath, expectedFunctions] of [
       ["stdlib/sequence.eli", [
@@ -355,6 +400,7 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
 
     const seedMapped = resolve(directory, "seed-cli/core.mjs");
     const portableMapped = resolve(directory, "portable-cli/core.mjs");
+    const publicNodeMapped = resolve(directory, "public-node/core.mjs");
     await runSuccessful(
       [seedCliPath, "--source-map", "--output", seedMapped, coreSource],
       { env: { ...process.env, EMACS: emacs } },
@@ -368,9 +414,23 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         },
       },
     );
+    await runSuccessful(
+      [publicCliPath, "--source-map", "--output", publicNodeMapped, coreSource],
+      {
+        env: {
+          ...process.env,
+          ELISCRIPT_BOOTSTRAP_MODULE_DIR: generationTwo,
+          ELISCRIPT_JS_RUNTIME: "node",
+        },
+      },
+    );
     expect(await Bun.file(portableMapped).text())
       .toBe(await Bun.file(seedMapped).text());
     expect(await Bun.file(`${portableMapped}.map`).text())
+      .toBe(await Bun.file(`${seedMapped}.map`).text());
+    expect(await Bun.file(publicNodeMapped).text())
+      .toBe(await Bun.file(seedMapped).text());
+    expect(await Bun.file(`${publicNodeMapped}.map`).text())
       .toBe(await Bun.file(`${seedMapped}.map`).text());
 
     const brokenSource = resolve(directory, "broken.eli");

@@ -9,7 +9,7 @@ import {
   loadCompiler,
   requestedDiagnosticFormat,
 } from "./bun.mjs";
-import { buildProject } from "./project.mjs";
+import { executeBuild } from "./build.mjs";
 
 const usage = `Usage: eliscript-build [OPTIONS] [ENTRY]
 
@@ -232,7 +232,8 @@ export async function execute(arguments_, options = {}) {
       useCache: parsed.useCache,
     };
   }
-  const result = await buildProject({
+  const result = await executeBuild({
+    mode: "project",
     ...request,
     moduleDirectory: options.moduleDirectory,
   });

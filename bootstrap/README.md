@@ -40,8 +40,11 @@ mapping fragments, while `compiler/source-map.eli` encodes those marks as
 Source Map v3. The generated pipeline can process and emit every current
 bootstrap module, including its own sources. `compiler/compiler.eli` composes
 the complete in-memory pipeline without filesystem dependencies.
-`compiler/project.eli` owns cycle-safe dependency traversal, portable-name
-fixed points, and versioned build-report normalization and cache-status policy.
+`compiler/project.eli` owns the versioned single-file/project operation
+boundary, cycle-safe dependency traversal, portable-name fixed points, and
+versioned build-report normalization and cache-status policy.
+`host/build.mjs` dispatches normalized operations without defining compiler
+semantics.
 `host/project.mjs` supplies the replaceable filesystem, path, artifact, and
 timing boundary while using those generated operations for real multi-module
 builds.
@@ -54,11 +57,11 @@ Build the current bootstrap modules with the seed compiler:
 bun run build:bootstrap
 ```
 
-After that seed build, compile through the generated compiler and Bun host
-adapter:
+The normal command automatically establishes that seed build when needed, then
+compiles through the generated compiler under Bun or Node:
 
 ```sh
-./bin/eliscript-portable --output dist/program.mjs source/program.eli
+./bin/eliscript --output dist/program.mjs source/program.eli
 ```
 
 ## Fixed-point Evidence

@@ -96,7 +96,7 @@
     {
       "name": "eliscript",
       "entry": "bin/eliscript",
-      "implementation": "compiler/eliscript-cli.el",
+      "implementation": "bootstrap/host/bun.mjs",
       "options": ["--diagnostic-format", "--help", "--output", "--portable", "--source-map"]
     },
     {
@@ -125,6 +125,16 @@
     }
   ],
   "schemas": [
+    {
+      "id": "build-operation",
+      "spec": "0112",
+      "format": "eliscript-build-operation",
+      "version": 1,
+      "evidence": [
+        {"file": "bootstrap/compiler/project.eli", "contains": ["build-operation-format \"eliscript-build-operation\"", "build-operation-version 1", "build-operation-request"]},
+        {"file": "specs/0112-unified-self-hosted-build-operation.md", "contains": ["\"format\": \"eliscript-build-operation\"", "\"version\": 1"]}
+      ]
+    },
     {
       "id": "build-report",
       "spec": "0032",
@@ -284,6 +294,13 @@
     }
   ],
   "adapters": [
+    {
+      "id": "bootstrap-build-host",
+      "spec": "0112",
+      "file": "bootstrap/host/build.mjs",
+      "namedExports": ["executeBuild"],
+      "defaultExport": false
+    },
     {
       "id": "bootstrap-bun-host",
       "spec": "0019",

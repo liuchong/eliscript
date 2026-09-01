@@ -27,8 +27,8 @@ is now in **M8: Language Contract Closure**.
 In parallel, M9 compiler convergence now includes canonical project requests,
 graph planning, IR serialization, build reports, v1-to-v2 cache migration,
 selective recompilation, cross-host Bun/Node cache reuse, and self-hosted public
-project builds. Single-file command convergence and multi-entry graph identity
-remain open.
+single-file and project builds through one versioned operation boundary.
+Multi-entry graph identity remains open.
 
 The current M8 work provides:
 
@@ -401,6 +401,7 @@ Start with the document that matches the question:
 | How are self-hosted build decisions reported? | [Self-hosted Build Decision Reports](specs/0109-self-hosted-build-decision-reports.md) |
 | How does self-hosted incremental reuse work? | [Self-hosted Incremental Project Cache](specs/0110-self-hosted-incremental-project-cache.md) |
 | How is the public project command self-hosted? | [Self-hosted Project Command and Configuration](specs/0111-self-hosted-project-command.md) |
+| How do single-file and project commands share one operation? | [Unified Self-hosted Build Operation](specs/0112-unified-self-hosted-build-operation.md) |
 | Which behavior is implemented or stable? | [Specification Catalog](specs/README.md#specification-catalog) |
 | How does the seed compiler work? | [Compiler Guide](compiler/README.md) |
 | How does self-hosting work? | [Bootstrap Compiler Guide](bootstrap/README.md) |

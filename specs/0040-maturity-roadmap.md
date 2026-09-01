@@ -807,9 +807,11 @@ matches cache-free seed reports under Bun and Node. Specification 0110 adds
 compiler-owned v2 cache identity, v1 migration, selective recompilation, and
 cross-host reuse. Specification 0111 moves request/configuration normalization
 into Eliscript and routes the public multi-file project command through the
-self-hosted service under Bun and Node. Single-file command convergence and
-multi-entry project identity remain M9 work; these partial deliveries do not
-satisfy the exit gate.
+self-hosted service under Bun and Node. Specification 0112 adds one
+compiler-owned build-operation request and host dispatcher behind the public
+single-file and project commands while retaining explicit non-circular seed
+references. Multi-entry project identity remains M9 work; these partial
+deliveries do not complete the milestone.
 Application frameworks, bundlers, blog and site generators, publishing,
 hosting, and development servers remain replaceable
 application validation and cannot satisfy any remaining M9 core deliverable.

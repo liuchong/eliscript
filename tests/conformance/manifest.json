@@ -1398,6 +1398,36 @@
           "contains": "ELISCRIPT_BOOTSTRAP_MODULE_DIR"
         }
       ]
+    },
+    {
+      "id": "bootstrap.unified-build-operation",
+      "title": "Unified self-hosted build operation",
+      "status": "accepted",
+      "spec": "0112",
+      "contracts": [
+        "Owns version 1 single-file and project operation normalization in Eliscript",
+        "Routes normal single-file and project commands through one generated-compiler dispatcher",
+        "Preserves stdout, Source Map, portable, diagnostic, graph, report, and cache contracts under Bun and Node",
+        "Keeps explicit seed commands non-circular and limited to bootstrap plus differential evidence",
+        "Keeps application integrations outside core implementation, goals, dependencies, and maturity evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-project.test.mjs",
+          "contains": "self-hosted project planning reaches deterministic graph fixed points"
+        },
+        {
+          "kind": "shell",
+          "file": "tests/cli-test.sh",
+          "contains": "CLI and Bun execution test passed"
+        }
+      ]
     }
   ]
 }

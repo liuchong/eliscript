@@ -7,6 +7,8 @@
   (defconst project-request-format "eliscript-project-request")
   (defconst project-request-version 1)
   (defconst project-configuration-version 1)
+  (defconst build-operation-format "eliscript-build-operation")
+  (defconst build-operation-version 1)
   (defconst project-cache-format "eliscript-project-cache")
   (defconst project-cache-version 2)
   (defconst project-cache-legacy-version 1)
@@ -119,6 +121,70 @@
           :root root
           :portableEntries portable-entries
           :useCache use-cache))))
+
+  (defun build-operation-request (input)
+    (unless (funcall object-p input)
+      (project-request-fail "build operation request must be an object"))
+    (let ((mode (get input :mode)))
+      (cond
+        ((= mode "single")
+         (let* ((source-input
+                 (object-field input "input" (js* "undefined")))
+                (raw-output
+                 (object-field input "output" (js* "undefined")))
+                (output
+                 (if (js* "raw_output === undefined")
+                     (js* "null")
+                   raw-output))
+                (source-map (object-field input "sourceMap" false))
+                (portable-input
+                 (object-field input "portableEntries" (js-array))))
+           (unless (and (= (js* "typeof source_input") "string")
+                        (> (get source-input :length) 0))
+             (project-request-fail "single-file input is invalid"))
+           (unless (or (nil? output)
+                       (and (= (js* "typeof output") "string")
+                            (> (get output :length) 0)))
+             (project-request-fail "single-file output is invalid"))
+           (unless (funcall boolean-p source-map)
+             (project-request-fail "single-file source-map option is invalid"))
+           (unless (and (funcall array-p portable-input)
+                        (js-call portable-input :every
+                          (lambda (name)
+                            (and (= (js* "typeof name") "string")
+                                 (> (get name :length) 0)))))
+             (project-request-fail
+               "single-file portable entries are invalid"))
+           (when (and source-map (nil? output))
+             (project-request-fail
+               "single-file source maps require an output"))
+           (let ((portable-entries
+                  (normalize-strings
+                    portable-input "single-file portable entries" false)))
+             (js-call globalThis.Object :freeze portable-entries)
+             (js-call globalThis.Object :freeze
+               (js-object
+                 :format build-operation-format
+                 :version build-operation-version
+                 :mode "single"
+                 :input source-input
+                 :output output
+                 :sourceMap source-map
+                 :portableEntries portable-entries)))))
+        ((= mode "project")
+         (let ((request (project-request input)))
+           (js-call globalThis.Object :freeze
+             (js-object
+               :format build-operation-format
+               :version build-operation-version
+               :mode "project"
+               :entry (get request :entry)
+               :outDir (get request :outDir)
+               :root (get request :root)
+               :portableEntries (get request :portableEntries)
+               :useCache (get request :useCache)))))
+        (t
+         (project-request-fail "unsupported build operation mode")))))
 
   (defun project-configuration (input filename)
     (unless (funcall object-p input)
@@ -671,6 +737,9 @@
     project-request-version
     project-request
     project-configuration
+    build-operation-format
+    build-operation-version
+    build-operation-request
     project-cache-format
     project-cache-version
     project-cache-lookup

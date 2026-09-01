@@ -531,7 +531,8 @@ export async function buildProject(options) {
   }
   const moduleDirectory = compilerModuleDirectory(options.moduleDirectory);
   const compiler = options.compiler ?? await loadCompiler(moduleDirectory);
-  const request = compiler.project_request({
+  const request = compiler.build_operation_request({
+    mode: "project",
     entry: options.entry,
     outDir: options.outDir,
     root: options.root ?? null,

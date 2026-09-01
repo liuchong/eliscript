@@ -4,7 +4,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const usage = `Usage: eliscript-portable [OPTIONS] INPUT
+const commandName = process.env.ELISCRIPT_COMMAND_NAME ?? "eliscript-portable";
+const usage = `Usage: ${commandName} [OPTIONS] INPUT
 
 Options:
   -o, --output FILE  Write the generated ECMAScript module to FILE
@@ -110,16 +111,23 @@ export async function loadCompiler(moduleDirectory) {
 }
 
 export async function compileFile(options) {
-  const inputPath = resolve(options.input);
-  const outputPath = options.output ? resolve(options.output) : undefined;
-  const source = await readFile(inputPath, "utf8");
   const compiler = options.compiler ?? await loadCompiler(options.moduleDirectory);
+  const request = compiler.build_operation_request({
+    mode: "single",
+    input: options.input,
+    output: options.output ?? null,
+    sourceMap: options.sourceMap === undefined ? false : options.sourceMap,
+    portableEntries: options.portableEntries ?? [],
+  });
+  const inputPath = resolve(request.input);
+  const outputPath = request.output ? resolve(request.output) : undefined;
+  const source = await readFile(inputPath, "utf8");
 
-  if (!options.sourceMap) {
-    const javascript = options.portableEntries?.length > 0
+  if (!request.sourceMap) {
+    const javascript = request.portableEntries.length > 0
       ? compiler.compile_portable_string(
         source,
-        options.portableEntries,
+        request.portableEntries,
         inputPath,
       )
       : compiler.compile_string(source, inputPath);
@@ -135,10 +143,10 @@ export async function compileFile(options) {
   const mapDirectory = dirname(mapPath);
   const generatedName = relative(mapDirectory, outputPath);
   const sourceName = relative(mapDirectory, inputPath);
-  const emission = options.portableEntries?.length > 0
+  const emission = request.portableEntries.length > 0
     ? compiler.compile_portable_string_with_source_map(
       source,
-      options.portableEntries,
+      request.portableEntries,
       inputPath,
       generatedName,
       sourceName,
@@ -165,11 +173,14 @@ export async function main(arguments_ = process.argv.slice(2)) {
     process.stdout.write(usage);
     return;
   }
-  const result = await compileFile(options);
+  const { executeBuild } = await import("./build.mjs");
+  const result = await executeBuild({ mode: "single", ...options });
   if (!options.output) process.stdout.write(result.javascript);
 }
 
-if (import.meta.main) {
+const isMain = process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) {
   const outputFormat = requestedDiagnosticFormat(process.argv.slice(2));
   main().catch((error) => {
     if (outputFormat === "json") {

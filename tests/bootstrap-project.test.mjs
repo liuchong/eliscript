@@ -165,6 +165,38 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
     expect(compiler.project_build_report_version).toBe(1);
     expect(compiler.project_request_format).toBe("eliscript-project-request");
     expect(compiler.project_request_version).toBe(1);
+    expect(compiler.build_operation_format).toBe("eliscript-build-operation");
+    expect(compiler.build_operation_version).toBe(1);
+    const singleOperation = compiler.build_operation_request({
+      mode: "single",
+      input: "src/main.eli",
+      output: null,
+      sourceMap: false,
+      portableEntries: ["zeta", "alpha", "zeta"],
+    });
+    expect(singleOperation).toEqual({
+      format: "eliscript-build-operation",
+      version: 1,
+      mode: "single",
+      input: "src/main.eli",
+      output: null,
+      sourceMap: false,
+      portableEntries: ["alpha", "zeta"],
+    });
+    expect(Object.isFrozen(singleOperation)).toBeTrue();
+    expect(Object.isFrozen(singleOperation.portableEntries)).toBeTrue();
+    expect(compiler.build_operation_request({
+      mode: "single",
+      input: "src/defaults.eli",
+    })).toEqual({
+      format: "eliscript-build-operation",
+      version: 1,
+      mode: "single",
+      input: "src/defaults.eli",
+      output: null,
+      sourceMap: false,
+      portableEntries: [],
+    });
     const request = compiler.project_request({
       entry: "/project/src/main.eli",
       outDir: "/project/dist",
@@ -183,6 +215,38 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
     });
     expect(Object.isFrozen(request)).toBeTrue();
     expect(Object.isFrozen(request.portableEntries)).toBeTrue();
+    const projectOperation = compiler.build_operation_request({
+      mode: "project",
+      entry: request.entry,
+      outDir: request.outDir,
+      root: request.root,
+      portableEntries: request.portableEntries,
+      useCache: request.useCache,
+    });
+    expect(projectOperation).toEqual({
+      format: "eliscript-build-operation",
+      version: 1,
+      mode: "project",
+      entry: request.entry,
+      outDir: request.outDir,
+      root: request.root,
+      portableEntries: request.portableEntries,
+      useCache: request.useCache,
+    });
+    expect(Object.isFrozen(projectOperation)).toBeTrue();
+    try {
+      compiler.build_operation_request({
+        mode: "single",
+        input: "main.eli",
+        output: null,
+        sourceMap: true,
+        portableEntries: [],
+      });
+      throw new Error("expected single-file request rejection");
+    } catch (error) {
+      expect(error.eliscriptDiagnostic?.code).toBe("ELI-B0001");
+      expect(error.eliscriptDiagnostic?.phase).toBe("project-build");
+    }
     const configuration = compiler.project_configuration({
       schemaVersion: 1,
       entry: "src/main.eli",
