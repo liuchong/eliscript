@@ -1363,6 +1363,41 @@
           "contains": "portable compiler driver reaches a reproducible fixed point"
         }
       ]
+    },
+    {
+      "id": "bootstrap.self-hosted-project-command",
+      "title": "Self-hosted project command and configuration",
+      "status": "accepted",
+      "spec": "0111",
+      "contracts": [
+        "Owns version 1 request and configuration normalization in Eliscript",
+        "Keeps JSON, filesystem, path, process, and presentation effects in a shared standards-based host",
+        "Routes the public project command through the self-hosted service under Bun and Node",
+        "Retains the seed project command as an explicit differential reference",
+        "Keeps application frameworks, bundlers, publishing, blogs, sites, hosting, and development servers outside core goals and evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-project.test.mjs",
+          "contains": "self-hosted project planning reaches deterministic graph fixed points"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-project.test.mjs",
+          "contains": "self-hosted project service matches seed output under Bun and Node"
+        },
+        {
+          "kind": "shell",
+          "file": "tests/project-cli-test.sh",
+          "contains": "ELISCRIPT_JS_RUNTIME=node"
+        },
+        {
+          "kind": "shell",
+          "file": "tests/project-cli-test.sh",
+          "contains": "ELISCRIPT_BOOTSTRAP_MODULE_DIR"
+        }
+      ]
     }
   ]
 }

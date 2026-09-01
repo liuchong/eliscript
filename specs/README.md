@@ -360,6 +360,7 @@ The schemas and change workflow are defined by specifications
 | 0108 | [Versioned Canonical IR Serialization](0108-versioned-canonical-ir.md) | Accepted | Implemented |
 | 0109 | [Self-hosted Build Decision Reports](0109-self-hosted-build-decision-reports.md) | Accepted | Implemented |
 | 0110 | [Self-hosted Incremental Project Cache](0110-self-hosted-incremental-project-cache.md) | Accepted | Implemented |
+| 0111 | [Self-hosted Project Command and Configuration](0111-self-hosted-project-command.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

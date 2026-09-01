@@ -108,7 +108,7 @@
     {
       "name": "eliscript-build",
       "entry": "bin/eliscript-build",
-      "implementation": "compiler/eliscript-project-cli.el",
+      "implementation": "bootstrap/host/project-cli.mjs",
       "options": ["--config", "--diagnostic-format", "--help", "--json", "--no-cache", "--out-dir", "--portable", "--root"]
     },
     {
@@ -228,6 +228,7 @@
       "version": 1,
       "evidence": [
         {"file": "compiler/eliscript-project.el", "contains": ["eliscript-project-configuration-format \"eliscript-project-request\"", "eliscript-project-configuration-version 1"]},
+        {"file": "bootstrap/compiler/project.eli", "contains": ["project-request-format \"eliscript-project-request\"", "project-request-version 1", "project-configuration"]},
         {"file": "specs/0106-versioned-project-request.md", "contains": ["\"schemaVersion\": 1", "unknown key rejects"]}
       ]
     },
@@ -288,6 +289,13 @@
       "spec": "0019",
       "file": "bootstrap/host/bun.mjs",
       "namedExports": ["compileFile", "diagnosticFromError", "loadCompiler", "main", "parseArguments", "requestedDiagnosticFormat"],
+      "defaultExport": false
+    },
+    {
+      "id": "bootstrap-project-cli-host",
+      "spec": "0111",
+      "file": "bootstrap/host/project-cli.mjs",
+      "namedExports": ["execute", "main", "parseArguments", "parseConfigurationJson"],
       "defaultExport": false
     },
     {

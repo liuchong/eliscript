@@ -529,18 +529,27 @@ export async function buildProject(options) {
   if (options.entry === undefined || options.outDir === undefined) {
     projectError("project build requires entry and outDir");
   }
-  const entryPath = resolve(pathOption(options.entry, "entry"));
+  const moduleDirectory = compilerModuleDirectory(options.moduleDirectory);
+  const compiler = options.compiler ?? await loadCompiler(moduleDirectory);
+  const request = compiler.project_request({
+    entry: options.entry,
+    outDir: options.outDir,
+    root: options.root ?? null,
+    portableEntries: options.portableEntries ?? [],
+    useCache: options.useCache === undefined ? true : options.useCache,
+  });
+  const entryPath = resolve(pathOption(request.entry, "entry"));
   const root = canonicalDirectory(
-    options.root === undefined
+    request.root === null
       ? dirname(entryPath)
-      : pathOption(options.root, "project root"),
+      : pathOption(request.root, "project root"),
     "project root",
   );
   const entry = canonicalSource(entryPath, root, entryPath);
   if (!entry.endsWith(".eli")) {
     projectError("entry file must use the .eli extension", entry);
   }
-  const requestedOutDir = resolve(pathOption(options.outDir, "output"));
+  const requestedOutDir = resolve(pathOption(request.outDir, "output"));
   try {
     const attributes = statSync(requestedOutDir);
     if (!attributes.isDirectory()) {
@@ -551,21 +560,11 @@ export async function buildProject(options) {
     mkdirSync(requestedOutDir, { recursive: true });
   }
   const outDir = realpathSync(requestedOutDir);
-  if (options.useCache !== undefined && typeof options.useCache !== "boolean") {
-    projectError("project cache option must be a boolean");
-  }
-  const useCache = options.useCache !== false;
-  const moduleDirectory = compilerModuleDirectory(options.moduleDirectory);
-  const compiler = options.compiler ?? await loadCompiler(moduleDirectory);
+  const useCache = request.useCache;
   const compilerDigest = options.compiler === undefined
     ? compilerDirectoryDigest(moduleDirectory)
     : compilerDigestOption(options.compilerDigest);
-  const portableEntries = options.portableEntries ?? [];
-  if (!Array.isArray(portableEntries) || portableEntries.some((entryName) =>
-    typeof entryName !== "string" || entryName.length === 0)) {
-    projectError("portable entries must contain only non-empty strings");
-  }
-  const requestedPortableEntries = [...new Set(portableEntries)].sort();
+  const requestedPortableEntries = [...request.portableEntries];
   const mode = requestedPortableEntries.length > 0 ? "portable" : "standard";
   const entryOutput = outputFor(entry, root, outDir);
   const cacheStartedAt = performance.now();

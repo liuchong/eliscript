@@ -26,8 +26,9 @@ is now in **M8: Language Contract Closure**.
 
 In parallel, M9 compiler convergence now includes canonical project requests,
 graph planning, IR serialization, build reports, v1-to-v2 cache migration,
-selective recompilation, and cross-host Bun/Node cache reuse. Default CLI
-routing and multi-entry graph identity remain open.
+selective recompilation, cross-host Bun/Node cache reuse, and self-hosted public
+project builds. Single-file command convergence and multi-entry graph identity
+remain open.
 
 The current M8 work provides:
 
@@ -176,6 +177,10 @@ Build a complete local module graph without Vite:
   examples/stdlib-cli/main.eli
 bun run dist/project/examples/stdlib-cli/main.mjs
 ```
+
+`eliscript-build` uses the generated self-hosted compiler and bootstraps it when
+absent. Set `ELISCRIPT_JS_RUNTIME=node` to run the same project service under
+Node.
 
 Run the default verification suite:
 
@@ -395,6 +400,7 @@ Start with the document that matches the question:
 | How is compiler IR serialized reproducibly? | [Versioned Canonical IR Serialization](specs/0108-versioned-canonical-ir.md) |
 | How are self-hosted build decisions reported? | [Self-hosted Build Decision Reports](specs/0109-self-hosted-build-decision-reports.md) |
 | How does self-hosted incremental reuse work? | [Self-hosted Incremental Project Cache](specs/0110-self-hosted-incremental-project-cache.md) |
+| How is the public project command self-hosted? | [Self-hosted Project Command and Configuration](specs/0111-self-hosted-project-command.md) |
 | Which behavior is implemented or stable? | [Specification Catalog](specs/README.md#specification-catalog) |
 | How does the seed compiler work? | [Compiler Guide](compiler/README.md) |
 | How does self-hosting work? | [Bootstrap Compiler Guide](bootstrap/README.md) |

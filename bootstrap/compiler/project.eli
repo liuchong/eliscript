@@ -4,6 +4,9 @@
   (defconst project-plan-max-iterations 100000)
   (defconst project-build-report-format "eliscript-build-report")
   (defconst project-build-report-version 1)
+  (defconst project-request-format "eliscript-project-request")
+  (defconst project-request-version 1)
+  (defconst project-configuration-version 1)
   (defconst project-cache-format "eliscript-project-cache")
   (defconst project-cache-version 2)
   (defconst project-cache-legacy-version 1)
@@ -19,6 +22,15 @@
     (js* "(value) => typeof value === 'number' && Number.isFinite(value) && value >= 0"))
   (defconst boolean-p
     (js* "(value) => typeof value === 'boolean'"))
+  (defconst safe-relative-path-p
+    (js* "(value) => typeof value === 'string' && value.length > 0 && !/^(?:[\\\\/]|[A-Za-z]:[\\\\/])/.test(value) && !value.split(/[\\\\/]+/u).includes('..')"))
+  (defconst project-request-fail
+    (js* "(message) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-B0001', severity: 'error', phase: 'project-build', message }; throw error; }"))
+  (defconst project-configuration-fail
+    (js* "(message, filename) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-B0002', severity: 'error', phase: 'project-config', message, ...(filename ? { location: { file: filename } } : {}) }; throw error; }"))
+  (defconst project-configuration-keys
+    (js-array "schemaVersion" "sourceRoot" "entry" "outDir"
+              "portableEntries" "cache"))
 
   (defun require-string (value label)
     (unless (and (= (js* "typeof value") "string")
@@ -60,6 +72,114 @@
         (fail (str label " must not be empty")))
       (js-call result :sort)
       result))
+
+  (defun object-field (object key fallback)
+    (if (js-call globalThis.Object :hasOwn object key)
+        (get object key)
+      fallback))
+
+  (defun project-request (input)
+    (unless (funcall object-p input)
+      (project-request-fail "project request must be an object"))
+    (let* ((entry (get input :entry))
+           (out-dir (get input :outDir))
+           (root (get input :root))
+           (portable-input (get input :portableEntries))
+           (portable-entries
+            (progn
+              (unless (and (funcall array-p portable-input)
+                           (js-call portable-input :every
+                             (lambda (name)
+                               (and (= (js* "typeof name") "string")
+                                    (> (get name :length) 0)))))
+                (project-request-fail
+                  "project request portable entries are invalid"))
+              (normalize-strings
+                portable-input "project request portable entries" false)))
+           (use-cache (get input :useCache)))
+      (unless (and (= (js* "typeof entry") "string")
+                   (> (get entry :length) 0))
+        (project-request-fail "project request entry is invalid"))
+      (unless (and (= (js* "typeof out_dir") "string")
+                   (> (get out-dir :length) 0))
+        (project-request-fail "project request output is invalid"))
+      (unless (or (nil? root)
+                  (and (= (js* "typeof root") "string")
+                       (> (get root :length) 0)))
+        (project-request-fail "project request root is invalid"))
+      (unless (funcall boolean-p use-cache)
+        (project-request-fail "project request cache is invalid"))
+      (js-call globalThis.Object :freeze portable-entries)
+      (js-call globalThis.Object :freeze
+        (js-object
+          :format project-request-format
+          :version project-request-version
+          :entry entry
+          :outDir out-dir
+          :root root
+          :portableEntries portable-entries
+          :useCache use-cache))))
+
+  (defun project-configuration (input filename)
+    (unless (funcall object-p input)
+      (project-configuration-fail
+        "configuration root must be an object" filename))
+    (let ((unknown (js-array)))
+      (js-call (js-call globalThis.Object :keys input) :forEach
+        (lambda (key)
+          (unless (js-call project-configuration-keys :includes key)
+            (js-call unknown :push key))))
+      (js-call unknown :sort)
+      (when (> (get unknown :length) 0)
+        (project-configuration-fail
+          (str "unknown configuration key: " (js-nth 0 unknown))
+          filename)))
+    (let* ((schema-version
+            (object-field input "schemaVersion" (js* "undefined")))
+           (source-root (object-field input "sourceRoot" "."))
+           (entry (object-field input "entry" (js* "undefined")))
+           (out-dir (object-field input "outDir" (js* "undefined")))
+           (portable-input
+            (object-field input "portableEntries" (js-array)))
+           (cache (object-field input "cache" t)))
+      (unless (= schema-version project-configuration-version)
+        (project-configuration-fail
+          (str "unsupported schemaVersion: " schema-version) filename))
+      (unless (and (funcall array-p portable-input)
+                   (js-call portable-input :every
+                     (lambda (name)
+                       (and (= (js* "typeof name") "string")
+                            (> (get name :length) 0)))))
+        (project-configuration-fail
+          "portableEntries must be an array of non-empty strings" filename))
+      (let ((portable-entries
+             (normalize-strings
+               portable-input "configuration portable entries" false)))
+        (unless (= (get portable-entries :length)
+                   (get portable-input :length))
+          (project-configuration-fail
+            "portableEntries must not contain duplicates" filename))
+        (unless (funcall boolean-p cache)
+          (project-configuration-fail "cache must be a boolean" filename))
+        (unless (funcall safe-relative-path-p source-root)
+          (project-configuration-fail
+            "sourceRoot must be a contained relative path" filename))
+        (unless (funcall safe-relative-path-p entry)
+          (project-configuration-fail
+            "entry must be a contained relative path" filename))
+        (unless (funcall safe-relative-path-p out-dir)
+          (project-configuration-fail
+            "outDir must be a contained relative path" filename))
+        (js-call globalThis.Object :freeze portable-entries)
+        (js-call globalThis.Object :freeze
+          (js-object
+            :format project-request-format
+            :version project-request-version
+            :sourceRoot source-root
+            :entry entry
+            :outDir out-dir
+            :portableEntries portable-entries
+            :cache cache)))))
 
   (defun freeze-request (request)
     (js-call globalThis.Object :freeze (get request :entries))
@@ -547,6 +667,10 @@
     project-build-report-format
     project-build-report-version
     project-build-report
+    project-request-format
+    project-request-version
+    project-request
+    project-configuration
     project-cache-format
     project-cache-version
     project-cache-lookup

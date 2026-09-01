@@ -80,6 +80,51 @@ grep -q 'from "../../stdlib/object.mjs"' "$ENTRY"
 RESULT=$(bun run "$ENTRY")
 test "$RESULT" = '{"values":[1,2,3,4,5,6,7],"squares":[1,4,9,16,25,36,49],"even":[2,4,6],"sum":28,"summary":"1, 2, 3, 4, 5, 6, 7","slug":"eliscript","title":"Emacs + JavaScript","profile":{"language":"Eliscript","host":"Emacs","runtime":"JavaScript"},"selected":{"language":"Eliscript","runtime":"JavaScript"}}'
 
+NODE_OUTPUT=$(
+  cd "$PROJECT_DIR"
+  ELISCRIPT_JS_RUNTIME=node "$PROJECT_DIR/bin/eliscript-build" \
+    --no-cache \
+    --root "$PROJECT_DIR" \
+    --out-dir "$TMP_DIR/node-build" \
+    "$PROJECT_DIR/examples/stdlib-cli/main.eli"
+)
+test "$NODE_OUTPUT" = "$TMP_DIR/node-build/examples/stdlib-cli/main.mjs"
+for artifact in \
+  examples/stdlib-cli/main.mjs examples/stdlib-cli/main.mjs.map \
+  stdlib/sequence.mjs stdlib/sequence.mjs.map \
+  stdlib/text.mjs stdlib/text.mjs.map \
+  stdlib/object.mjs stdlib/object.mjs.map; do
+  cmp "$TMP_DIR/build/$artifact" "$TMP_DIR/node-build/$artifact"
+done
+
+SEED_OUTPUT=$(
+  cd "$PROJECT_DIR"
+  "$PROJECT_DIR/bin/eliscript-seed-build" \
+    --no-cache \
+    --root "$PROJECT_DIR" \
+    --out-dir "$TMP_DIR/seed-build" \
+    "$PROJECT_DIR/examples/stdlib-cli/main.eli"
+)
+test "$SEED_OUTPUT" = "$TMP_DIR/seed-build/examples/stdlib-cli/main.mjs"
+for artifact in \
+  examples/stdlib-cli/main.mjs examples/stdlib-cli/main.mjs.map \
+  stdlib/sequence.mjs stdlib/sequence.mjs.map \
+  stdlib/text.mjs stdlib/text.mjs.map \
+  stdlib/object.mjs stdlib/object.mjs.map; do
+  cmp "$TMP_DIR/node-build/$artifact" "$TMP_DIR/seed-build/$artifact"
+done
+PUBLIC_MANIFEST="$TMP_DIR/node-build/eliscript-project.json" \
+SEED_MANIFEST="$TMP_DIR/seed-build/eliscript-project.json" bun -e '
+  const publicManifest = await Bun.file(process.env.PUBLIC_MANIFEST).json();
+  const seedManifest = await Bun.file(process.env.SEED_MANIFEST).json();
+  const identity = ({ format, version, entry, modules, digest }) =>
+    ({ format, version, entry, modules, digest });
+  if (JSON.stringify(identity(publicManifest)) !==
+      JSON.stringify(identity(seedManifest))) {
+    throw new Error("seed and self-hosted public manifests differ");
+  }
+'
+
 cat >"$TMP_DIR/eliscript.json" <<EOF
 {"schemaVersion":1,"sourceRoot":"$PROJECT_DIR","entry":"examples/stdlib-cli/main.eli","outDir":"configured-build","portableEntries":[],"cache":true}
 EOF
@@ -128,6 +173,37 @@ CONFIG_DIAGNOSTIC_FILE="$TMP_DIR/config-diagnostic-stderr" bun -e '
     throw new Error("unexpected project configuration diagnostic");
   }
 '
+
+cat >"$TMP_DIR/config-project/duplicate.json" <<'EOF'
+{"schemaVersion":1,"entry":"main.eli","\u0065ntry":"other.eli","outDir":"build"}
+EOF
+if "$PROJECT_DIR/bin/eliscript-build" --diagnostic-format json \
+    --config "$TMP_DIR/config-project/duplicate.json" \
+    >"$TMP_DIR/duplicate-stdout" 2>"$TMP_DIR/duplicate-stderr"; then
+  printf '%s\n' 'expected duplicate configuration key to fail' >&2
+  exit 1
+fi
+DUPLICATE_DIAGNOSTIC_FILE="$TMP_DIR/duplicate-stderr" bun -e '
+  const diagnostic = await Bun.file(process.env.DUPLICATE_DIAGNOSTIC_FILE).json();
+  if (diagnostic.code !== "ELI-B0002" ||
+      diagnostic.phase !== "project-config" ||
+      diagnostic.message !== "duplicate configuration key: entry") {
+    throw new Error("unexpected duplicate configuration diagnostic");
+  }
+'
+
+AUTO_OUTPUT=$(
+  ELISCRIPT_BOOTSTRAP_MODULE_DIR="$TMP_DIR/auto-compiler" \
+    ELISCRIPT_JS_RUNTIME=node \
+    "$PROJECT_DIR/bin/eliscript-build" \
+      --no-cache \
+      --root "$TMP_DIR/config-project/src" \
+      --out-dir "$TMP_DIR/auto-build" \
+      "$TMP_DIR/config-project/src/main.eli"
+)
+test -f "$TMP_DIR/auto-compiler/compiler.mjs"
+test "$AUTO_OUTPUT" = "$TMP_DIR/auto-build/main.mjs"
+test "$(node "$AUTO_OUTPUT")" = '42'
 
 if "$PROJECT_DIR/bin/eliscript-build" "$PROJECT_DIR/examples/stdlib-cli/main.eli" \
     >"$TMP_DIR/stdout" 2>"$TMP_DIR/stderr"; then

@@ -3,8 +3,13 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
-: "${EMACS:=emacs}"
+MODULE_DIR=${ELISCRIPT_BOOTSTRAP_MODULE_DIR:-"$PROJECT_DIR/dist/bootstrap"}
+: "${ELISCRIPT_JS_RUNTIME:=bun}"
 
-exec "$EMACS" --batch -Q \
-  --script "$PROJECT_DIR/compiler/eliscript-project-cli.el" \
-  -- "$@"
+if [ ! -f "$MODULE_DIR/compiler.mjs" ]; then
+  ELISCRIPT_BOOTSTRAP_OUT_DIR="$MODULE_DIR" \
+    "$PROJECT_DIR/bin/eliscript-bootstrap"
+fi
+
+export ELISCRIPT_BOOTSTRAP_MODULE_DIR="$MODULE_DIR"
+exec "$ELISCRIPT_JS_RUNTIME" "$PROJECT_DIR/bootstrap/host/project-cli.mjs" "$@"

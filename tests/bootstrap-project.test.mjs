@@ -6,10 +6,11 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { buildProject } from "../bootstrap/host/project.mjs";
+import { parseConfigurationJson } from "../bootstrap/host/project-cli.mjs";
 
 const projectDirectory = resolve(import.meta.dir, "..");
 const bootstrapPath = resolve(projectDirectory, "bin/eliscript-bootstrap");
-const seedBuildPath = resolve(projectDirectory, "bin/eliscript-build");
+const seedBuildPath = resolve(projectDirectory, "bin/eliscript-seed-build");
 const node = process.env.NODE ?? "node";
 
 async function run(command, options = {}) {
@@ -162,6 +163,82 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
 
     expect(compiler.project_build_report_format).toBe("eliscript-build-report");
     expect(compiler.project_build_report_version).toBe(1);
+    expect(compiler.project_request_format).toBe("eliscript-project-request");
+    expect(compiler.project_request_version).toBe(1);
+    const request = compiler.project_request({
+      entry: "/project/src/main.eli",
+      outDir: "/project/dist",
+      root: null,
+      portableEntries: ["zeta", "alpha", "zeta"],
+      useCache: true,
+    });
+    expect(request).toEqual({
+      format: "eliscript-project-request",
+      version: 1,
+      entry: "/project/src/main.eli",
+      outDir: "/project/dist",
+      root: null,
+      portableEntries: ["alpha", "zeta"],
+      useCache: true,
+    });
+    expect(Object.isFrozen(request)).toBeTrue();
+    expect(Object.isFrozen(request.portableEntries)).toBeTrue();
+    const configuration = compiler.project_configuration({
+      schemaVersion: 1,
+      entry: "src/main.eli",
+      outDir: "dist",
+    }, "/project/eliscript.json");
+    expect(configuration).toEqual({
+      format: "eliscript-project-request",
+      version: 1,
+      sourceRoot: ".",
+      entry: "src/main.eli",
+      outDir: "dist",
+      portableEntries: [],
+      cache: true,
+    });
+    expect(Object.isFrozen(configuration)).toBeTrue();
+    expect(Object.isFrozen(configuration.portableEntries)).toBeTrue();
+    for (const invalid of [
+      { ...configuration, schemaVersion: 1, undeclared: true },
+      { schemaVersion: 1, entry: "../main.eli", outDir: "dist" },
+      { schemaVersion: 1, entry: "main.eli", outDir: "dist", cache: "yes" },
+    ]) {
+      try {
+        compiler.project_configuration(invalid, "/project/eliscript.json");
+        throw new Error("expected project configuration rejection");
+      } catch (error) {
+        expect(error.eliscriptDiagnostic?.code).toBe("ELI-B0002");
+        expect(error.eliscriptDiagnostic?.phase).toBe("project-config");
+      }
+    }
+    try {
+      compiler.project_request({
+        entry: "main.eli",
+        outDir: "dist",
+        root: null,
+        portableEntries: [42],
+        useCache: true,
+      });
+      throw new Error("expected project request rejection");
+    } catch (error) {
+      expect(error.eliscriptDiagnostic?.code).toBe("ELI-B0001");
+      expect(error.eliscriptDiagnostic?.phase).toBe("project-build");
+    }
+    try {
+      parseConfigurationJson(
+        '{"schemaVersion":1,"entry":"main.eli","\\u0065ntry":"other.eli"}',
+        "/project/eliscript.json",
+      );
+      throw new Error("expected duplicate configuration key rejection");
+    } catch (error) {
+      expect(error.eliscriptDiagnostic).toMatchObject({
+        code: "ELI-B0002",
+        phase: "project-config",
+        message: "duplicate configuration key: entry",
+        location: { file: "/project/eliscript.json" },
+      });
+    }
     expect(compiler.project_cache_format).toBe("eliscript-project-cache");
     expect(compiler.project_cache_version).toBe(2);
     const cacheModules = [{

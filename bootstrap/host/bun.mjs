@@ -2,7 +2,7 @@
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const usage = `Usage: eliscript-portable [OPTIONS] INPUT
 
@@ -100,10 +100,11 @@ export function diagnosticFromError(error) {
 }
 
 export async function loadCompiler(moduleDirectory) {
+  const hostDirectory = dirname(fileURLToPath(import.meta.url));
   const directory = resolve(
     moduleDirectory ??
       process.env.ELISCRIPT_BOOTSTRAP_MODULE_DIR ??
-      resolve(import.meta.dir, "../../dist/bootstrap"),
+      resolve(hostDirectory, "../../dist/bootstrap"),
   );
   return import(pathToFileURL(resolve(directory, "compiler.mjs")).href);
 }

@@ -803,9 +803,13 @@ execution under Bun and Node. Specification 0108 then adds closed, versioned,
 canonical IR serialization with complete 57-node round trips, strict
 diagnostics, and byte identity under Bun and Node. Specification 0109 moves
 build-report version 1 normalization and cache-status policy into Eliscript and
-matches cache-free seed reports under Bun and Node. Existing CLI/configuration
-routing, multi-entry identity, and incremental cache identity, migration, and
-reuse remain M9 work; these partial deliveries do not satisfy the exit gate.
+matches cache-free seed reports under Bun and Node. Specification 0110 adds
+compiler-owned v2 cache identity, v1 migration, selective recompilation, and
+cross-host reuse. Specification 0111 moves request/configuration normalization
+into Eliscript and routes the public multi-file project command through the
+self-hosted service under Bun and Node. Single-file command convergence and
+multi-entry project identity remain M9 work; these partial deliveries do not
+satisfy the exit gate.
 Application frameworks, bundlers, blog and site generators, publishing,
 hosting, and development servers remain replaceable
 application validation and cannot satisfy any remaining M9 core deliverable.

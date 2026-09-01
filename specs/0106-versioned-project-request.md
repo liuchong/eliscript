@@ -93,14 +93,17 @@ semantics. More than one `--config` option is an error.
 
 ## M9 Boundary
 
-This specification completes a usable versioned request contract and the
-first shared project operation. It does not claim the M9 exit gate: filesystem
-graph discovery is still implemented by the seed, the self-hosted compiler
-does not yet execute this request, Node host parity is still pending, and
-single-file compilation has not yet become a one-module project internally.
+This specification completed the first usable versioned request contract and
+shared seed project operation. At that point, filesystem graph discovery was
+still seed-owned, the self-hosted compiler did not execute the request, Node
+parity was pending, and single-file compilation had not become a one-module
+project internally.
 
-The next convergence slice can move graph and portable-closure planning into
-`.eli` against this request boundary without changing CLI parsing again.
+Specifications 0107 through 0111 subsequently moved graph planning, reports,
+incremental policy, request normalization, and the public multi-file project
+command into the self-hosted service without changing this version 1 external
+configuration contract. Single-file command convergence and multi-entry
+identity remain outside this specification and keep the M9 exit gate open.
 
 ## Acceptance Criteria
 
