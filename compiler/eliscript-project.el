@@ -58,7 +58,8 @@
   records
   sources
   manifest
-  digest)
+  digest
+  source-version)
 
 (cl-defstruct (eliscript-project-cache-lookup
                (:constructor eliscript-project-cache-lookup-create))
@@ -82,8 +83,14 @@
 (defconst eliscript-project-manifest-filename "eliscript-project.json"
   "Filename of the deterministic project build manifest.")
 
-(defconst eliscript-project-cache-version 1
+(defconst eliscript-project-cache-format "eliscript-project-cache"
+  "Stable identity of private incremental project metadata.")
+
+(defconst eliscript-project-cache-version 2
   "Version of private incremental metadata in the project manifest.")
+
+(defconst eliscript-project-cache-legacy-version 1
+  "Oldest private cache version accepted for read-only migration.")
 
 (defconst eliscript-project-build-report-version 1
   "Version of the public project build decision report.")
@@ -390,6 +397,33 @@ FILENAME and SPAN identify the import responsible for PATH."
     (dependencies . ,(vconcat (alist-get 'dependencies record)))
     (portableEntries . ,(vconcat (alist-get 'portableEntries record)))))
 
+(defun eliscript-project--cache-version-kind (cache)
+  "Return the supported version kind of CACHE, or nil."
+  (cond
+   ((and (equal (alist-get 'format cache) eliscript-project-cache-format)
+         (equal (alist-get 'version cache) eliscript-project-cache-version))
+    'current)
+   ((and (null (alist-get 'format cache))
+         (equal (alist-get 'version cache)
+                eliscript-project-cache-legacy-version))
+    'legacy)))
+
+(defun eliscript-project--cache-identity (cache cache-modules version-kind)
+  "Normalize CACHE and CACHE-MODULES for VERSION-KIND digest verification."
+  (let ((identity
+         `((version . ,(alist-get 'version cache))
+           (compilerDigest . ,(alist-get 'compilerDigest cache))
+           (mode . ,(alist-get 'mode cache))
+           (portableEntries . ,(vconcat (alist-get 'portableEntries cache)))
+           (modules
+            . ,(vconcat
+                (mapcar
+                 #'eliscript-project--cache-identity-module
+                 cache-modules))))))
+    (if (eq version-kind 'current)
+        (cons `(format . ,(alist-get 'format cache)) identity)
+      identity)))
+
 (defun eliscript-project--cache-miss (reason)
   "Return a cache lookup miss with stable REASON."
   (eliscript-project-cache-lookup-create :reason reason))
@@ -415,6 +449,9 @@ FILENAME and SPAN identify the import responsible for PATH."
                  (cache (alist-get 'cache manifest))
                  (identity-modules (alist-get 'modules manifest))
                  (cache-modules (alist-get 'modules cache))
+                 (cache-version-kind
+                  (and (consp cache)
+                       (eliscript-project--cache-version-kind cache)))
                  (expected-entry (file-relative-name entry-output out-dir)))
             (cond
              ((or (not (equal (alist-get 'format manifest)
@@ -434,23 +471,13 @@ FILENAME and SPAN identify the import responsible for PATH."
               (eliscript-project--cache-miss "graph-digest-invalid"))
              ((not (consp cache))
               (eliscript-project--cache-miss "cache-missing"))
-             ((not (equal (alist-get 'version cache)
-                          eliscript-project-cache-version))
+             ((not cache-version-kind)
               (eliscript-project--cache-miss "cache-version-changed"))
              ((not (listp cache-modules))
               (eliscript-project--cache-miss "cache-records-invalid"))
              ((let ((cache-identity
-                     `((version . ,(alist-get 'version cache))
-                       (compilerDigest
-                        . ,(alist-get 'compilerDigest cache))
-                       (mode . ,(alist-get 'mode cache))
-                       (portableEntries
-                        . ,(vconcat (alist-get 'portableEntries cache)))
-                       (modules
-                        . ,(vconcat
-                            (mapcar
-                             #'eliscript-project--cache-identity-module
-                             cache-modules))))))
+                     (eliscript-project--cache-identity
+                      cache cache-modules cache-version-kind)))
                 (not (equal (alist-get 'digest cache)
                             (eliscript-project--json-digest cache-identity))))
               (eliscript-project--cache-miss "cache-digest-invalid"))
@@ -489,7 +516,8 @@ FILENAME and SPAN identify the import responsible for PATH."
                       :records records
                       :sources (sort sources #'string-lessp)
                       :manifest (file-truename manifest-path)
-                      :digest (alist-get 'digest manifest))
+                      :digest (alist-get 'digest manifest)
+                      :source-version (alist-get 'version cache))
                      :reason "verified")
                   (eliscript-project--cache-miss
                    "cache-records-invalid"))))))
@@ -577,7 +605,9 @@ the entries recorded by CACHE for complete-graph reuse."
   "Return a fully reused result for ENTRY from CACHE, or nil.
 
 STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
-  (when cache
+  (when (and cache
+             (= (eliscript-project-cache-source-version cache)
+                eliscript-project-cache-version))
     (let (modules valid)
       (setq valid t)
       (dolist (relative (eliscript-project-cache-sources cache))
@@ -689,7 +719,8 @@ ROOT and OUT-DIR provide stable relative namespaces for MODULES."
          (manifest-path
           (expand-file-name eliscript-project-manifest-filename out-dir))
          (cache-identity
-          `((version . ,eliscript-project-cache-version)
+          `((format . ,eliscript-project-cache-format)
+            (version . ,eliscript-project-cache-version)
             (compilerDigest . ,compiler-digest)
             (mode . ,mode)
             (portableEntries . ,(vconcat portable-entries))

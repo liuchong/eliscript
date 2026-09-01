@@ -18,11 +18,16 @@ modules, and bootstraps a compiler written in Eliscript itself.
 ## Project Status
 
 Eliscript has a working Emacs Lisp seed compiler, a reproducible self-hosted
-compiler, self-hosted multi-file graph planning, persistent values, protocols,
-and a long-lived Emacs-to-JavaScript worker. The repository also carries React,
-Org, and
+compiler, self-hosted multi-file graph planning and incremental reuse,
+persistent values, protocols, and a long-lived Emacs-to-JavaScript worker. The
+repository also carries React, Org, and
 optional bundler probes as replaceable application-level evidence. The project
 is now in **M8: Language Contract Closure**.
+
+In parallel, M9 compiler convergence now includes canonical project requests,
+graph planning, IR serialization, build reports, v1-to-v2 cache migration,
+selective recompilation, and cross-host Bun/Node cache reuse. Default CLI
+routing and multi-entry graph identity remain open.
 
 The current M8 work provides:
 
@@ -389,6 +394,7 @@ Start with the document that matches the question:
 | How does the self-hosted compiler plan projects? | [Self-hosted Project Graph Planning](specs/0107-self-hosted-project-graph-planning.md) |
 | How is compiler IR serialized reproducibly? | [Versioned Canonical IR Serialization](specs/0108-versioned-canonical-ir.md) |
 | How are self-hosted build decisions reported? | [Self-hosted Build Decision Reports](specs/0109-self-hosted-build-decision-reports.md) |
+| How does self-hosted incremental reuse work? | [Self-hosted Incremental Project Cache](specs/0110-self-hosted-incremental-project-cache.md) |
 | Which behavior is implemented or stable? | [Specification Catalog](specs/README.md#specification-catalog) |
 | How does the seed compiler work? | [Compiler Guide](compiler/README.md) |
 | How does self-hosting work? | [Bootstrap Compiler Guide](bootstrap/README.md) |

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   statSync,
   writeFileSync,
@@ -14,10 +15,14 @@ import {
   resolve,
   sep,
 } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { loadCompiler } from "./bun.mjs";
 
 const manifestFilename = "eliscript-project.json";
+const cacheFormat = "eliscript-project-cache";
+const cacheVersion = 2;
+const hostDirectory = dirname(fileURLToPath(import.meta.url));
 
 function projectError(message, filename) {
   const error = new Error(message);
@@ -158,7 +163,60 @@ function digestFile(filename) {
   return digestBytes(readFileSync(filename));
 }
 
-function writeModule({ compiler, program, source, sourceText, root, outDir }) {
+function regularFile(filename) {
+  try {
+    return statSync(filename).isFile();
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function compilerModuleDirectory(moduleDirectory) {
+  return resolve(
+    moduleDirectory ??
+      process.env.ELISCRIPT_BOOTSTRAP_MODULE_DIR ??
+      resolve(hostDirectory, "../../dist/bootstrap"),
+  );
+}
+
+function compilerDirectoryDigest(directory) {
+  const filenames = readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() &&
+      (entry.name.endsWith(".mjs") || entry.name.endsWith(".mjs.map")))
+    .map((entry) => entry.name)
+    .sort();
+  if (!filenames.includes("compiler.mjs")) {
+    projectError("generated compiler directory is incomplete", directory);
+  }
+  const hash = createHash("sha256");
+  for (const filename of filenames) {
+    hash.update(filename);
+    hash.update("\0");
+    hash.update(readFileSync(resolve(directory, filename)));
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+function compilerDigestOption(value) {
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/u.test(value)) {
+    projectError("injected compiler requires a lowercase SHA-256 compilerDigest");
+  }
+  return value;
+}
+
+function writeModule({
+  compiler,
+  program,
+  source,
+  sourceText,
+  root,
+  outDir,
+  dependencies,
+  portableEntries,
+  reason,
+}) {
   const output = outputFor(source, root, outDir);
   const sourceMap = `${output}.map`;
   rewriteLocalImports(program, source, root, outDir);
@@ -179,19 +237,22 @@ function writeModule({ compiler, program, source, sourceText, root, outDir }) {
     sourceDigest: digestFile(source),
     outputDigest: digestFile(output),
     sourceMapDigest: digestFile(sourceMap),
+    dependencies,
+    portableEntries,
+    reused: false,
+    reason,
   };
 }
 
-function reportModule(module, record, root, outDir) {
+function reportModule(module, root, outDir) {
   return {
     source: relative(root, module.source),
     output: relative(outDir, module.output),
     sourceMap: relative(outDir, module.sourceMap),
-    status: "compiled",
-    reason: "cache-disabled",
-    dependencies: record.dependencies.map((dependency) =>
-      relative(root, typeof dependency === "string" ? dependency : dependency.id)),
-    portableEntries: record.entries === undefined ? [] : [...record.entries],
+    status: module.reused ? "reused" : "compiled",
+    reason: module.reason,
+    dependencies: module.dependencies.map((dependency) => relative(root, dependency)),
+    portableEntries: [...module.portableEntries],
   };
 }
 
@@ -206,7 +267,53 @@ function manifestRecord(module, root, outDir) {
   };
 }
 
-function writeManifest(entryOutput, modules, root, outDir) {
+function cacheMetadataRecord(module, root) {
+  return {
+    source: relative(root, module.source),
+    dependencies: module.dependencies.map((dependency) => relative(root, dependency)),
+    portableEntries: [...module.portableEntries],
+  };
+}
+
+function cacheIdentityModule(record) {
+  return {
+    source: record.source,
+    dependencies: record.dependencies,
+    portableEntries: record.portableEntries,
+  };
+}
+
+function cacheIdentity(value) {
+  if (!value || !Array.isArray(value.modules)) return undefined;
+  const modules = value.modules.map(cacheIdentityModule);
+  if (value.format === undefined && value.version === 1) {
+    return {
+      version: 1,
+      compilerDigest: value.compilerDigest,
+      mode: value.mode,
+      portableEntries: value.portableEntries,
+      modules,
+    };
+  }
+  return {
+    format: value.format,
+    version: value.version,
+    compilerDigest: value.compilerDigest,
+    mode: value.mode,
+    portableEntries: value.portableEntries,
+    modules,
+  };
+}
+
+function writeManifest(
+  entryOutput,
+  modules,
+  root,
+  outDir,
+  mode,
+  portableEntries,
+  compilerDigest,
+) {
   const identity = {
     format: "eliscript-project",
     version: 1,
@@ -214,14 +321,172 @@ function writeManifest(entryOutput, modules, root, outDir) {
     modules: modules.map((module) => manifestRecord(module, root, outDir)),
   };
   const digest = digestBytes(JSON.stringify(identity));
+  const cache = {
+    format: cacheFormat,
+    version: cacheVersion,
+    compilerDigest,
+    mode,
+    portableEntries,
+    modules: modules.map((module) => cacheMetadataRecord(module, root)),
+  };
+  const cacheDigest = digestBytes(JSON.stringify(cache));
   const manifest = resolve(outDir, manifestFilename);
   mkdirSync(outDir, { recursive: true });
-  writeFileSync(manifest, `${JSON.stringify({ ...identity, digest })}\n`);
+  writeFileSync(manifest, `${JSON.stringify({
+    ...identity,
+    digest,
+    cache: { ...cache, digest: cacheDigest },
+  })}\n`);
   return { manifest: realpathSync(manifest), digest };
 }
 
-function standardPlan(compiler, entry, root, sourceCache, programCache) {
+function readCache({
+  compiler,
+  enabled,
+  outDir,
+  entryOutput,
+  mode,
+  portableEntries,
+  compilerDigest,
+}) {
+  const manifestPath = resolve(outDir, manifestFilename);
+  if (!enabled) {
+    return compiler.project_cache_lookup({
+      enabled: false,
+      manifestStatus: "missing",
+    });
+  }
+  if (!regularFile(manifestPath)) {
+    return compiler.project_cache_lookup({
+      enabled: true,
+      manifestStatus: "missing",
+    });
+  }
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const graphIdentity = {
+      format: manifest?.format,
+      version: manifest?.version,
+      entry: manifest?.entry,
+      modules: manifest?.modules,
+    };
+    const privateIdentity = cacheIdentity(manifest?.cache);
+    return compiler.project_cache_lookup({
+      enabled: true,
+      manifestStatus: "readable",
+      manifest,
+      expectedEntry: relative(outDir, entryOutput),
+      graphDigestValid: manifest?.digest ===
+        digestBytes(JSON.stringify(graphIdentity)),
+      cacheDigestValid: privateIdentity !== undefined &&
+        manifest.cache?.digest === digestBytes(JSON.stringify(privateIdentity)),
+      compilerDigest,
+      mode,
+      portableEntries,
+    });
+  } catch {
+    return compiler.project_cache_lookup({
+      enabled: true,
+      manifestStatus: "unreadable",
+    });
+  }
+}
+
+function cachedRecords(lookup) {
+  return new Map((lookup.cache?.records ?? []).map((record) =>
+    [record.source, record]));
+}
+
+function cachedModule({
+  compiler,
+  source,
+  root,
+  outDir,
+  record,
+  expectedPortableEntries,
+}) {
+  const output = outputFor(source, root, outDir);
+  const sourceMap = `${output}.map`;
+  let sourceDigest;
+  let outputDigest;
+  let sourceMapDigest;
+  let outputExists = false;
+  let sourceMapExists = false;
+  let artifactFailure;
+  try {
+    sourceDigest = digestFile(source);
+    outputExists = regularFile(output);
+    sourceMapExists = regularFile(sourceMap);
+    if (outputExists) outputDigest = digestFile(output);
+    if (sourceMapExists) sourceMapDigest = digestFile(sourceMap);
+  } catch {
+    artifactFailure = "artifact-unreadable";
+  }
+  let dependencies = [];
+  let dependenciesValid = true;
+  try {
+    if (!Array.isArray(record?.metadata?.dependencies) ||
+        !Array.isArray(record?.metadata?.portableEntries)) {
+      throw new TypeError("cache module metadata is invalid");
+    }
+    dependencies = record.metadata.dependencies.map((dependency) =>
+      canonicalSource(resolve(root, dependency), root, source));
+  } catch {
+    dependenciesValid = false;
+  }
+  const decision = compiler.project_cache_decision({
+    record,
+    output: relative(outDir, output),
+    sourceMap: relative(outDir, sourceMap),
+    expectedPortableEntries,
+    sourceDigest,
+    outputExists,
+    sourceMapExists,
+    outputDigest,
+    sourceMapDigest,
+    dependenciesValid,
+    artifactFailure,
+  });
+  return {
+    decision,
+    module: decision.reused
+      ? {
+          source,
+          output,
+          sourceMap,
+          sourceDigest,
+          outputDigest,
+          sourceMapDigest,
+          dependencies,
+          portableEntries: [...record.metadata.portableEntries],
+          reused: true,
+          reason: "verified",
+        }
+      : undefined,
+  };
+}
+
+function standardPlan(
+  compiler,
+  entry,
+  root,
+  outDir,
+  sourceCache,
+  programCache,
+  records,
+  decisions,
+) {
   return compiler.project_plan([entry], (source) => {
+    const cached = cachedModule({
+      compiler,
+      source,
+      root,
+      outDir,
+      record: records.get(relative(root, source)),
+      expectedPortableEntries: [],
+    });
+    decisions.set(source, cached);
+    if (cached.module !== undefined) return cached.module.dependencies;
     const sourceText = readFileSync(source, "utf8");
     const program = compiler.compile_ir_string(sourceText, source);
     sourceCache.set(source, sourceText);
@@ -286,41 +551,100 @@ export async function buildProject(options) {
     mkdirSync(requestedOutDir, { recursive: true });
   }
   const outDir = realpathSync(requestedOutDir);
-  const compiler = options.compiler ?? await loadCompiler(options.moduleDirectory);
+  if (options.useCache !== undefined && typeof options.useCache !== "boolean") {
+    projectError("project cache option must be a boolean");
+  }
+  const useCache = options.useCache !== false;
+  const moduleDirectory = compilerModuleDirectory(options.moduleDirectory);
+  const compiler = options.compiler ?? await loadCompiler(moduleDirectory);
+  const compilerDigest = options.compiler === undefined
+    ? compilerDirectoryDigest(moduleDirectory)
+    : compilerDigestOption(options.compilerDigest);
   const portableEntries = options.portableEntries ?? [];
+  if (!Array.isArray(portableEntries) || portableEntries.some((entryName) =>
+    typeof entryName !== "string" || entryName.length === 0)) {
+    projectError("portable entries must contain only non-empty strings");
+  }
+  const requestedPortableEntries = [...new Set(portableEntries)].sort();
+  const mode = requestedPortableEntries.length > 0 ? "portable" : "standard";
+  const entryOutput = outputFor(entry, root, outDir);
+  const cacheStartedAt = performance.now();
+  const cacheLookup = readCache({
+    compiler,
+    enabled: useCache,
+    outDir,
+    entryOutput,
+    mode,
+    portableEntries: requestedPortableEntries,
+    compilerDigest,
+  });
+  const cacheReadMs = performance.now() - cacheStartedAt;
+  const records = cachedRecords(cacheLookup);
   const sourceCache = new Map();
   const programCache = new Map();
-  const plan = portableEntries.length > 0
+  const decisions = new Map();
+  const plan = mode === "portable"
     ? portablePlan(
       compiler,
       entry,
-      portableEntries,
+      requestedPortableEntries,
       root,
       sourceCache,
       programCache,
     )
-    : standardPlan(compiler, entry, root, sourceCache, programCache);
+    : standardPlan(
+      compiler,
+      entry,
+      root,
+      outDir,
+      sourceCache,
+      programCache,
+      records,
+      decisions,
+    );
   const normalizedPortableEntries = plan.mode === "portable"
     ? [...plan.entries[0].entries]
     : [];
-  const modules = plan.modules.map((record) => ({
-    record,
-    module: writeModule({
+  const modules = plan.modules.map((record) => {
+    const dependencies = record.dependencies.map((dependency) =>
+      typeof dependency === "string" ? dependency : dependency.id);
+    const modulePortableEntries = record.entries === undefined
+      ? []
+      : [...record.entries];
+    const cached = plan.mode === "standard"
+      ? decisions.get(record.id)
+      : cachedModule({
+        compiler,
+        source: record.id,
+        root,
+        outDir,
+        record: records.get(relative(root, record.id)),
+        expectedPortableEntries: modulePortableEntries,
+      });
+    if (cached?.module !== undefined) return cached.module;
+    return writeModule({
       compiler,
       program: programCache.get(record.id),
       source: record.id,
       sourceText: sourceCache.get(record.id),
       root,
       outDir,
-    }),
-  }));
+      dependencies,
+      portableEntries: modulePortableEntries,
+      reason: cacheLookup.cache === null
+        ? cacheLookup.reason
+        : cached.decision.reason,
+    });
+  });
   const workFinishedAt = performance.now();
-  const entryOutput = outputFor(entry, root, outDir);
   const manifestData = writeManifest(
     entryOutput,
-    modules.map(({ module }) => module),
+    modules,
     root,
     outDir,
+    plan.mode,
+    normalizedPortableEntries,
+    compilerDigest,
   );
   const manifestFinishedAt = performance.now();
   const report = compiler.project_build_report({
@@ -332,15 +656,14 @@ export async function buildProject(options) {
     manifest: relative(outDir, manifestData.manifest),
     digest: manifestData.digest,
     portableEntries: normalizedPortableEntries,
-    cache: { enabled: false, reason: "cache-disabled" },
+    cache: { enabled: useCache, reason: cacheLookup.reason },
     timings: {
-      cacheReadMs: 0,
-      workMs: workFinishedAt - startedAt,
+      cacheReadMs,
+      workMs: Math.max(0, workFinishedAt - startedAt - cacheReadMs),
       manifestWriteMs: manifestFinishedAt - workFinishedAt,
       totalMs: manifestFinishedAt - startedAt,
     },
-    modules: modules.map(({ module, record }) =>
-      reportModule(module, record, root, outDir)),
+    modules: modules.map((module) => reportModule(module, root, outDir)),
   });
   return Object.freeze({
     format: "eliscript-project-build",
@@ -351,7 +674,7 @@ export async function buildProject(options) {
     entryOutput,
     mode: plan.mode,
     portableEntries: Object.freeze(normalizedPortableEntries),
-    modules: Object.freeze(modules.map(({ module }) => Object.freeze(module))),
+    modules: Object.freeze(modules.map((module) => Object.freeze(module))),
     manifest: manifestData.manifest,
     digest: manifestData.digest,
     report,

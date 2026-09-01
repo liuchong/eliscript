@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -42,6 +43,10 @@ async function manifest(directory) {
     resolve(directory, "eliscript-project.json"),
     "utf8",
   ));
+}
+
+function digestJson(value) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
 function publicManifestIdentity(value) {
@@ -157,6 +162,83 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
 
     expect(compiler.project_build_report_format).toBe("eliscript-build-report");
     expect(compiler.project_build_report_version).toBe(1);
+    expect(compiler.project_cache_format).toBe("eliscript-project-cache");
+    expect(compiler.project_cache_version).toBe(2);
+    const cacheModules = [{
+      source: "src/main.eli",
+      output: "src/main.mjs",
+      sourceMap: "src/main.mjs.map",
+      sourceDigest: "source",
+      outputDigest: "output",
+      sourceMapDigest: "map",
+    }];
+    const metadataModules = [{
+      source: "src/main.eli",
+      dependencies: [],
+      portableEntries: [],
+    }];
+    const cacheLookupInput = {
+      enabled: true,
+      manifestStatus: "readable",
+      expectedEntry: "src/main.mjs",
+      graphDigestValid: true,
+      cacheDigestValid: true,
+      compilerDigest: "compiler",
+      mode: "standard",
+      portableEntries: [],
+    };
+    const currentLookup = compiler.project_cache_lookup({
+      ...cacheLookupInput,
+      manifest: {
+        format: "eliscript-project",
+        version: 1,
+        entry: "src/main.mjs",
+        digest: "manifest",
+        modules: cacheModules,
+        cache: {
+          format: "eliscript-project-cache",
+          version: 2,
+          compilerDigest: "compiler",
+          mode: "standard",
+          portableEntries: [],
+          modules: metadataModules,
+        },
+      },
+    });
+    expect(currentLookup.reason).toBe("verified");
+    expect(currentLookup.cache.sourceVersion).toBe(2);
+    const legacyLookup = compiler.project_cache_lookup({
+      ...cacheLookupInput,
+      manifest: {
+        format: "eliscript-project",
+        version: 1,
+        entry: "src/main.mjs",
+        digest: "manifest",
+        modules: cacheModules,
+        cache: {
+          version: 1,
+          compilerDigest: "compiler",
+          mode: "standard",
+          portableEntries: [],
+          modules: metadataModules,
+        },
+      },
+    });
+    expect(legacyLookup.reason).toBe("verified");
+    expect(legacyLookup.cache.sourceVersion).toBe(1);
+    expect(compiler.project_cache_decision({
+      record: currentLookup.cache.records[0],
+      output: "src/main.mjs",
+      sourceMap: "src/main.mjs.map",
+      expectedPortableEntries: [],
+      sourceDigest: "changed",
+      outputExists: true,
+      sourceMapExists: true,
+      outputDigest: "output",
+      sourceMapDigest: "map",
+      dependenciesValid: true,
+      artifactFailure: "artifact-unreadable",
+    })).toEqual({ reused: false, reason: "artifact-unreadable" });
     const reportInput = {
       mode: "standard",
       root: "/project",
@@ -255,10 +337,12 @@ test("self-hosted project service matches seed output under Bun and Node", async
     const bunResult = await buildProject({
       ...standardOptions,
       outDir: standardBun,
+      useCache: false,
     });
     const nodeResult = await nodeBuild({
       ...standardOptions,
       outDir: standardNode,
+      useCache: false,
     });
     const standardFiles = [
       "examples/stdlib-cli/main.mjs",
@@ -287,6 +371,74 @@ test("self-hosted project service matches seed output under Bun and Node", async
     expect(nodeResult.digest).toBe(standardManifest.digest);
     expect(nodeResult.mode).toBe("standard");
 
+    const standardNodeHit = await nodeBuild({
+      ...standardOptions,
+      outDir: standardBun,
+    });
+    expect(standardNodeHit.report.cache).toEqual({
+      enabled: true,
+      status: "hit",
+      reason: "verified",
+    });
+    expect(standardNodeHit.report.counts).toEqual({
+      modules: 4,
+      compiled: 0,
+      reused: 4,
+    });
+    expect(standardNodeHit.report.modules.every((module) =>
+      module.reason === "verified")).toBeTrue();
+
+    const legacyManifest = await manifest(standardBun);
+    const {
+      format: _cacheFormat,
+      digest: _cacheDigest,
+      ...legacyCacheIdentity
+    } = legacyManifest.cache;
+    legacyCacheIdentity.version = 1;
+    legacyManifest.cache = {
+      ...legacyCacheIdentity,
+      digest: digestJson(legacyCacheIdentity),
+    };
+    await writeFile(
+      resolve(standardBun, "eliscript-project.json"),
+      `${JSON.stringify(legacyManifest)}\n`,
+    );
+    const migratedHit = await nodeBuild({
+      ...standardOptions,
+      outDir: standardBun,
+    });
+    expect(migratedHit.report.cache.status).toBe("hit");
+    expect(migratedHit.report.counts).toEqual({
+      modules: 4,
+      compiled: 0,
+      reused: 4,
+    });
+    const migratedManifest = await manifest(standardBun);
+    expect(migratedManifest.cache.format).toBe("eliscript-project-cache");
+    expect(migratedManifest.cache.version).toBe(2);
+
+    await writeFile(resolve(standardBun, "stdlib/text.mjs"), "// tampered\n");
+    const standardPartial = await buildProject({
+      ...standardOptions,
+      outDir: standardBun,
+    });
+    expect(standardPartial.report.cache).toEqual({
+      enabled: true,
+      status: "partial",
+      reason: "dirty-modules",
+    });
+    expect(standardPartial.report.counts).toEqual({
+      modules: 4,
+      compiled: 1,
+      reused: 3,
+    });
+    expect(standardPartial.report.modules.find((module) =>
+      module.source === "stdlib/text.eli")).toMatchObject({
+      status: "compiled",
+      reason: "output-digest-changed",
+    });
+    await expectFilesEqual(standardSeed, standardBun, standardFiles);
+
     const portableSeed = resolve(directory, "portable-seed");
     const portableBun = resolve(directory, "portable-bun");
     const portableNode = resolve(directory, "portable-node");
@@ -313,10 +465,12 @@ test("self-hosted project service matches seed output under Bun and Node", async
     const portableBunResult = await buildProject({
       ...portableOptions,
       outDir: portableBun,
+      useCache: false,
     });
     const portableNodeResult = await nodeBuild({
       ...portableOptions,
       outDir: portableNode,
+      useCache: false,
     });
     const portableFiles = [
       "data.mjs",
@@ -345,6 +499,21 @@ test("self-hosted project service matches seed output under Bun and Node", async
     expectValidTimings(portableNodeResult.report);
     expect(portableNodeResult.digest).toBe(portableManifest.digest);
     expect(portableNodeResult.mode).toBe("portable");
+
+    const portableNodeHit = await nodeBuild({
+      ...portableOptions,
+      outDir: portableBun,
+    });
+    expect(portableNodeHit.report.cache).toEqual({
+      enabled: true,
+      status: "hit",
+      reason: "verified",
+    });
+    expect(portableNodeHit.report.counts).toEqual({
+      modules: 2,
+      compiled: 0,
+      reused: 2,
+    });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

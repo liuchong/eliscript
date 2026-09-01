@@ -8,7 +8,7 @@
 
 ## Summary
 
-The Emacs project builder now reuses verified modules from the previous
+The seed and self-hosted project builders reuse verified modules from the previous
 `eliscript-project.json`. Incrementality is conservative: a cache hit must prove
 that the build configuration, compiler implementation, source bytes, generated
 ESM, Source Map, and dependency metadata still agree.
@@ -23,7 +23,8 @@ The manifest adds a private `cache` object after the graph digest:
 ```json
 {
   "cache": {
-    "version": 1,
+    "format": "eliscript-project-cache",
+    "version": 2,
     "compilerDigest": "<sha256>",
     "mode": "portable",
     "portableEntries": ["score-document"],
@@ -39,9 +40,11 @@ The manifest adds a private `cache` object after the graph digest:
 }
 ```
 
-The cache digest covers the ordered metadata fields before its own `digest` is
-added. This prevents damaged dependency edges from being trusted while keeping
-private build mechanics outside the runtime graph digest.
+The cache digest covers the ordered metadata fields, including `format` and
+`version`, before its own `digest` is added. This prevents damaged dependency
+edges from being trusted while keeping private build mechanics outside the
+runtime graph digest. Legacy version 1 records without `format` remain
+read-only compatible and are rewritten as version 2 after a successful build.
 
 `compilerDigest` hashes the relative name and exact bytes of every Emacs Lisp
 compiler source. A compiler edit therefore invalidates all cached modules even

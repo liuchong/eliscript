@@ -129,6 +129,9 @@
         (should (equal (alist-get 'format manifest) "eliscript-project"))
         (should (= (alist-get 'version manifest) 1))
         (should (equal (alist-get 'entry manifest) "src/main.mjs"))
+        (should (equal (alist-get 'format cache)
+                       "eliscript-project-cache"))
+        (should (= (alist-get 'version cache) 2))
         (should (equal (alist-get 'mode cache) "standard"))
         (should (string-match-p
                  "\\`[[:xdigit:]]\\{64\\}\\'"
@@ -153,6 +156,41 @@
         (should (equal first-text
                        (eliscript-project-tests--read
                         (eliscript-project-build-result-manifest second))))))))
+
+(ert-deftest eliscript-project-migrates-legacy-cache-on-successful-read ()
+  (eliscript-project-tests--with-directory root
+    (let* ((entry (expand-file-name "main.eli" root))
+           (out-dir (expand-file-name "build" root))
+           (manifest-path
+            (expand-file-name eliscript-project-manifest-filename out-dir)))
+      (eliscript-project-tests--write
+       entry "(defconst answer 42)\n(export answer)\n")
+      (eliscript-project-build entry out-dir root)
+      (let* ((manifest
+              (json-parse-string
+               (eliscript-project-tests--read manifest-path)
+               :object-type 'alist :array-type 'array))
+             (cache (alist-get 'cache manifest))
+             (legacy (assq-delete-all 'format cache)))
+        (setf (alist-get 'version legacy) 1)
+        (setf (alist-get 'digest legacy)
+              (eliscript-project--json-digest
+               (eliscript-project--cache-identity
+                legacy (append (alist-get 'modules legacy) nil) 'legacy)))
+        (setf (alist-get 'cache manifest) legacy)
+        (with-temp-file manifest-path
+          (insert (json-serialize manifest) "\n")))
+      (let ((migrated (eliscript-project-build entry out-dir root)))
+        (should (= (eliscript-project-build-result-compiled-count migrated) 0))
+        (should (= (eliscript-project-build-result-reused-count migrated) 1)))
+      (let* ((manifest
+              (json-parse-string
+               (eliscript-project-tests--read manifest-path)
+               :object-type 'alist :array-type 'list))
+             (cache (alist-get 'cache manifest)))
+        (should (equal (alist-get 'format cache)
+                       "eliscript-project-cache"))
+        (should (= (alist-get 'version cache) 2))))))
 
 (ert-deftest eliscript-project-reuses-clean-modules-and-rebuilds-dirty-ones ()
   (eliscript-project-tests--with-directory root

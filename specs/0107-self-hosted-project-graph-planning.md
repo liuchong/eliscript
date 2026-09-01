@@ -85,9 +85,9 @@ seed builds. Every generated ESM module and Source Map must be byte-identical,
 and the public project manifest digest must match. The same self-hosted service
 must produce those bytes under Bun and Node.
 
-The seed's private incremental cache is intentionally not reproduced by this
-slice. Cache identity, migration, and build-report convergence remain part of
-the broader M9 work.
+Private cache convergence was completed by specifications 0109 and 0110 after
+this planning slice. Graph planning remains independent of cache effects and
+application integrations.
 
 ## Acceptance Criteria
 

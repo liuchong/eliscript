@@ -1333,6 +1333,36 @@
           "contains": "self-hosted project service matches seed output under Bun and Node"
         }
       ]
+    },
+    {
+      "id": "bootstrap.self-hosted-incremental-cache",
+      "title": "Self-hosted incremental project cache",
+      "status": "accepted",
+      "spec": "0110",
+      "contracts": [
+        "Owns v2 cache identity, legacy v1 migration, and module reuse policy in Eliscript",
+        "Keeps filesystem, path, digest, and artifact effects in standards-based hosts",
+        "Reuses standard cached dependency edges and revalidates portable closure before artifact reuse",
+        "Supports complete Bun and Node cross-host hits plus selective repair of damaged outputs",
+        "Keeps Vite, React, UI libraries, bundlers, publishing, blogs, sites, hosting, and development servers outside core goals and evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-project-tests.el",
+          "contains": "eliscript-project-migrates-legacy-cache-on-successful-read"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-project.test.mjs",
+          "contains": "self-hosted project service matches seed output under Bun and Node"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }

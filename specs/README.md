@@ -96,10 +96,11 @@ serialization, and an Eliscript-owned `eliscript-build-report` version 1
 operation. Ordinary closure, cycle handling, portable-name fixed points,
 complete 57-node IR round trips, build-decision normalization, and
 standards-based Bun/Node execution match seed semantics and reproducible bytes.
-Existing project CLI/configuration routing, multi-entry identity, and
-incremental cache convergence remain incomplete. Application frameworks and
-publishing infrastructure remain replaceable validation outside these core
-deliverables.
+The self-hosted host now also owns v2 cache identity policy, v1 migration,
+selective standard recompilation, portable closure revalidation, and cross-host
+Bun/Node reuse. Existing project CLI/configuration routing and multi-entry
+identity remain incomplete. Application frameworks and publishing
+infrastructure remain replaceable validation outside these core deliverables.
 
 ## Reading Paths
 
@@ -358,6 +359,7 @@ The schemas and change workflow are defined by specifications
 | 0107 | [Self-hosted Project Graph Planning](0107-self-hosted-project-graph-planning.md) | Accepted | Implemented |
 | 0108 | [Versioned Canonical IR Serialization](0108-versioned-canonical-ir.md) | Accepted | Implemented |
 | 0109 | [Self-hosted Build Decision Reports](0109-self-hosted-build-decision-reports.md) | Accepted | Implemented |
+| 0110 | [Self-hosted Incremental Project Cache](0110-self-hosted-incremental-project-cache.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

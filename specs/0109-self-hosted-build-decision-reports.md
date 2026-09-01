@@ -65,10 +65,10 @@ canonical paths to report-relative paths, and passes the completed module
 decisions to the generated compiler. The returned project result exposes the
 frozen report as `report`.
 
-The current self-hosted host compiles every module and truthfully reports cache
-reads as disabled. It does not claim incremental reuse. Reading versioned
-private cache metadata, migration of persisted cache identities, selective
-artifact verification, and partial graph reuse remain later M9 work.
+The self-hosted host now reads versioned private metadata and reports disabled,
+miss, partial, and hit outcomes through the same compiler-owned operation.
+Cache identity, migration, artifact verification, and partial reuse are defined
+by specification 0110 rather than by this reporting layer.
 
 ## Reproducibility
 
@@ -89,8 +89,9 @@ byte-for-byte.
   decimal places without entering deterministic graph identity.
 - **SBR-04:** Cache-free ordinary and portable reports match seed semantics
   under both Bun and Node.
-- **SBR-05:** The host reports cache-disabled behavior honestly; this slice does
-  not claim incremental cache convergence or default CLI routing.
+- **SBR-05:** The host reports disabled, miss, partial, and hit behavior
+  honestly; report normalization remains independent of cache effects and
+  default CLI routing.
 - **SBR-06:** Application frameworks, UI libraries, bundlers, publishing,
   sites, hosting, and development servers remain outside core implementation,
   evidence, goals, and maturity credit.

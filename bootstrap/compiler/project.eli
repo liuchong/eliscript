@@ -4,6 +4,9 @@
   (defconst project-plan-max-iterations 100000)
   (defconst project-build-report-format "eliscript-build-report")
   (defconst project-build-report-version 1)
+  (defconst project-cache-format "eliscript-project-cache")
+  (defconst project-cache-version 2)
+  (defconst project-cache-legacy-version 1)
 
   (defconst fail
     (js* "(message) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-B0003', severity: 'error', phase: 'project-plan', message }; throw error; }"))
@@ -27,6 +30,18 @@
     (unless (funcall nonnegative-number-p value)
       (fail (str label " must be a non-negative finite number")))
     (/ (js-call globalThis.Math :round (* value 1000)) 1000))
+
+  (defun same-string-arrays (left right)
+    (and (funcall array-p left)
+         (funcall array-p right)
+         (= (get left :length) (get right :length))
+         (let ((index 0)
+               (same t))
+           (while (and same (< index (get left :length)))
+             (unless (= (js-nth index left) (js-nth index right))
+               (setq same false))
+             (setq index (1+ index)))
+           same)))
 
   (defun normalize-strings (values label require-entry)
     (unless (funcall array-p values)
@@ -212,6 +227,184 @@
             :entries initial
             :modules modules)))))
 
+  (defun project-cache-miss (reason)
+    (js-call globalThis.Object :freeze
+      (js-object :cache nil :reason reason)))
+
+  (defun project-cache-version-kind (cache)
+    (cond
+      ((and (= (get cache :format) project-cache-format)
+            (= (get cache :version) project-cache-version))
+       "current")
+      ((and (undefined? (get cache :format))
+            (= (get cache :version) project-cache-legacy-version))
+       "legacy")
+      (t false)))
+
+  (defun project-cache-records (identity-modules cache-modules)
+    (if (not (and (funcall array-p identity-modules)
+                  (funcall array-p cache-modules)))
+        false
+      (let ((identities (new globalThis.Map))
+            (metadata-by-source (new globalThis.Map))
+            (records (js-array))
+            (valid t))
+        (js-call identity-modules :forEach
+          (lambda (identity)
+            (if (not (funcall object-p identity))
+                (setq valid false)
+              (let ((source (get identity :source)))
+                (if (or (not (= (js* "typeof source") "string"))
+                        (= (get source :length) 0)
+                        (js-call identities :has source))
+                    (setq valid false)
+                  (js-call identities :set source identity))))))
+        (js-call cache-modules :forEach
+          (lambda (metadata)
+            (if (not (funcall object-p metadata))
+                (setq valid false)
+              (let ((source (get metadata :source)))
+                (if (or (not (= (js* "typeof source") "string"))
+                        (= (get source :length) 0)
+                        (js-call metadata-by-source :has source))
+                    (setq valid false)
+                  (js-call metadata-by-source :set source metadata))))))
+        (when (or (not (= (get identities :size)
+                          (get identity-modules :length)))
+                  (not (= (get metadata-by-source :size)
+                          (get cache-modules :length)))
+                  (not (= (get identities :size)
+                          (get metadata-by-source :size))))
+          (setq valid false))
+        (when valid
+          (js-call (funcall sorted-set-values (js-call identities :keys))
+            :forEach
+            (lambda (source)
+              (let ((metadata (js-call metadata-by-source :get source)))
+                (if (undefined? metadata)
+                    (setq valid false)
+                  (js-call records :push
+                    (js-call globalThis.Object :freeze
+                      (js-object
+                        :source source
+                        :identity (js-call identities :get source)
+                        :metadata metadata))))))))
+        (if valid
+            (js-call globalThis.Object :freeze records)
+          false))))
+
+  (defun project-cache-lookup (input)
+    (unless (funcall object-p input)
+      (fail "project cache lookup input must be an object"))
+    (let ((enabled (get input :enabled))
+          (manifest-status (get input :manifestStatus)))
+      (unless (funcall boolean-p enabled)
+        (fail "project cache enabled must be a boolean"))
+      (cond
+        ((not enabled) (project-cache-miss "cache-disabled"))
+        ((= manifest-status "missing")
+         (project-cache-miss "manifest-missing"))
+        ((= manifest-status "unreadable")
+         (project-cache-miss "manifest-unreadable"))
+        ((not (= manifest-status "readable"))
+         (fail "project cache manifest status is invalid"))
+        (t
+         (let* ((manifest (get input :manifest))
+                (cache (and (funcall object-p manifest)
+                            (get manifest :cache)))
+                (identity-modules
+                 (and (funcall object-p manifest)
+                      (get manifest :modules)))
+                (cache-modules
+                 (and (funcall object-p cache) (get cache :modules)))
+                (version-kind
+                 (and (funcall object-p cache)
+                      (project-cache-version-kind cache))))
+           (cond
+             ((or (not (funcall object-p manifest))
+                  (not (= (get manifest :format) "eliscript-project"))
+                  (not (= (get manifest :version) 1))
+                  (not (funcall array-p identity-modules)))
+              (project-cache-miss "manifest-version-changed"))
+             ((not (= (get manifest :entry) (get input :expectedEntry)))
+              (project-cache-miss "entry-changed"))
+             ((not (= (get input :graphDigestValid) t))
+              (project-cache-miss "graph-digest-invalid"))
+             ((not (funcall object-p cache))
+              (project-cache-miss "cache-missing"))
+             ((not version-kind)
+              (project-cache-miss "cache-version-changed"))
+             ((not (funcall array-p cache-modules))
+              (project-cache-miss "cache-records-invalid"))
+             ((not (= (get input :cacheDigestValid) t))
+              (project-cache-miss "cache-digest-invalid"))
+             ((not (= (get cache :compilerDigest)
+                      (get input :compilerDigest)))
+              (project-cache-miss "compiler-changed"))
+             ((not (= (get cache :mode) (get input :mode)))
+              (project-cache-miss "mode-changed"))
+             ((not (same-string-arrays
+                     (get cache :portableEntries)
+                     (get input :portableEntries)))
+              (project-cache-miss "portable-roots-changed"))
+             (t
+              (let ((records
+                     (project-cache-records identity-modules cache-modules)))
+                (if (not records)
+                    (project-cache-miss "cache-records-invalid")
+                  (js-call globalThis.Object :freeze
+                    (js-object
+                      :cache
+                      (js-call globalThis.Object :freeze
+                        (js-object
+                          :sourceVersion (get cache :version)
+                          :manifestDigest (get manifest :digest)
+                          :records records))
+                      :reason "verified")))))))))))
+
+  (defun project-cache-decision (input)
+    (unless (funcall object-p input)
+      (fail "project cache decision input must be an object"))
+    (let* ((record (get input :record))
+           (identity (and (funcall object-p record) (get record :identity)))
+           (metadata (and (funcall object-p record) (get record :metadata)))
+           (expected-portable-entries (get input :expectedPortableEntries))
+           (recorded-portable-entries
+            (and (funcall object-p metadata) (get metadata :portableEntries)))
+           (reason
+            (cond
+              ((not (and (funcall object-p identity)
+                         (funcall object-p metadata)))
+               "not-cached")
+              ((not (= (get identity :output) (get input :output)))
+               "output-path-changed")
+              ((not (= (get identity :sourceMap) (get input :sourceMap)))
+               "source-map-path-changed")
+              ((and (not (nil? expected-portable-entries))
+                    (not (same-string-arrays
+                           recorded-portable-entries
+                           expected-portable-entries)))
+               "portable-entries-changed")
+              ((and (not (undefined? (get input :artifactFailure)))
+                    (not (nil? (get input :artifactFailure))))
+               (get input :artifactFailure))
+              ((not (= (get identity :sourceDigest)
+                       (get input :sourceDigest)))
+               "source-changed")
+              ((not (= (get input :outputExists) t)) "output-missing")
+              ((not (= (get input :sourceMapExists) t)) "source-map-missing")
+              ((not (= (get identity :outputDigest)
+                       (get input :outputDigest)))
+               "output-digest-changed")
+              ((not (= (get identity :sourceMapDigest)
+                       (get input :sourceMapDigest)))
+               "source-map-digest-changed")
+              ((not (= (get input :dependenciesValid) t))
+               "dependencies-invalid")
+              (t "verified"))))
+      (js-call globalThis.Object :freeze
+        (js-object :reused (= reason "verified") :reason reason))))
+
   (defun normalize-report-modules (values)
     (unless (funcall array-p values)
       (fail "build report modules must be an array"))
@@ -353,4 +546,8 @@
     portable-project-plan
     project-build-report-format
     project-build-report-version
-    project-build-report))
+    project-build-report
+    project-cache-format
+    project-cache-version
+    project-cache-lookup
+    project-cache-decision))
