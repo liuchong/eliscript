@@ -16,10 +16,10 @@
    "Usage: eliscript-build [--config FILE] [--root DIR] [--portable NAME]\n"
    "                       [--no-cache]\n"
    "                       [--json] [--diagnostic-format human|json]\n"
-   "                       --out-dir DIR ENTRY\n\n"
-   "Compile ENTRY and its relative .eli imports into an ESM directory tree.\n"
+   "                       --out-dir DIR ENTRY...\n\n"
+   "Compile ENTRIES and their relative .eli imports into an ESM directory tree.\n"
    "Use --config FILE for a versioned project request. Explicit build flags\n"
-   "and ENTRY override configured values; --no-cache always disables reuse.\n"
+   "and ENTRIES override configured values; --no-cache always disables reuse.\n"
    "Write eliscript-project.json with deterministic graph content digests.\n"
    "Reuse verified modules by default; --no-cache forces complete compilation.\n"
    "Use --json for a machine-readable build decision report on stdout.\n"
@@ -45,7 +45,7 @@
   (let ((use-cache t)
         (json-report nil)
         (diagnostic-format "human")
-        entry out-dir root portable-entries configuration)
+        entries out-dir root portable-entries configuration)
     (while arguments
       (let ((argument (pop arguments)))
         (cond
@@ -82,14 +82,22 @@
             (error "unsupported diagnostic format: %s" diagnostic-format)))
          ((string-prefix-p "-" argument)
           (error "unknown option: %s" argument))
-         (entry (error "multiple entry files are not supported"))
-         (t (setq entry argument)))))
+         (t (push argument entries)))))
+    (setq entries (nreverse entries))
     (let ((request
            (if configuration
                (let ((configured
                       (eliscript-project-read-configuration configuration)))
-                 (when entry
-                   (setf (eliscript-project-request-entry configured) entry))
+                 (when entries
+                   (if (= (length entries) 1)
+                       (progn
+                         (setf (eliscript-project-request-entry configured)
+                               (car entries))
+                         (setf (eliscript-project-request-entries configured)
+                               nil))
+                     (setf (eliscript-project-request-entry configured) nil)
+                     (setf (eliscript-project-request-entries configured)
+                           entries)))
                  (when out-dir
                    (setf (eliscript-project-request-out-dir configured) out-dir))
                  (when root
@@ -101,12 +109,13 @@
                    (setf (eliscript-project-request-use-cache configured) nil))
                  configured)
              (progn
-               (unless entry
+               (unless entries
                  (error "missing entry file"))
                (unless out-dir
                  (error "missing --out-dir"))
                (eliscript-project-request-create
-                :entry entry
+                :entry (and (= (length entries) 1) (car entries))
+                :entries (and (> (length entries) 1) entries)
                 :out-dir out-dir
                 :root root
                 :portable-entries (nreverse portable-entries)
@@ -127,7 +136,9 @@
                  (json-serialize
                   (eliscript-project-build-report result)
                   :false-object :false)
-               (eliscript-project-build-result-entry-output result)))
+               (mapconcat #'identity
+                          (eliscript-project-build-result-entry-outputs result)
+                          "\n")))
             (princ "\n")))
       (error
        (if (equal requested-format "json")

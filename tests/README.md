@@ -111,9 +111,10 @@ The self-hosted project test exercises cycle-safe graph closure and portable
 requested-name fixed points in generated Eliscript code. It then compares
 ordinary and portable ESM, Source Maps, and public project-manifest identity
 with cache-free seed builds and repeats the self-hosted build service under Bun
-and Node. It also compares complete stable `eliscript-build-report` version 1
-semantics across the seed, Bun, and Node while validating host-specific timing
-measurements independently.
+and Node. It also proves version 2 multi-entry request, manifest, report, cache,
+CLI, and worker identity while preserving complete stable
+`eliscript-build-report` version 1 semantics. Host-specific timing measurements
+remain validated independently.
 
 `literal-runtime.test.mjs` compiles square-bracket Vector literals, brace Map
 literals, `#{...}` Set literals, source Keyword values, and explicit persistent

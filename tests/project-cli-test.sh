@@ -147,6 +147,41 @@ CONFIG_OUTPUT=$(
 test "$CONFIG_OUTPUT" = "$TMP_DIR/config-project/build/main.mjs"
 test "$(bun run "$CONFIG_OUTPUT")" = '42'
 
+printf '%s\n' '(print 43)' >"$TMP_DIR/config-project/src/other.eli"
+cat >"$TMP_DIR/config-project/eliscript-v2.json" <<'EOF'
+{"schemaVersion":2,"sourceRoot":"src","entries":["other.eli","main.eli"],"outDir":"multi-build","portableEntries":[],"cache":true}
+EOF
+MULTI_OUTPUT=$(
+  "$PROJECT_DIR/bin/eliscript-build" \
+    --config "$TMP_DIR/config-project/eliscript-v2.json"
+)
+EXPECTED_MULTI_OUTPUT=$(printf '%s\n%s' \
+  "$TMP_DIR/config-project/multi-build/main.mjs" \
+  "$TMP_DIR/config-project/multi-build/other.mjs")
+test "$MULTI_OUTPUT" = "$EXPECTED_MULTI_OUTPUT"
+test "$(bun run "$TMP_DIR/config-project/multi-build/main.mjs")" = '42'
+test "$(bun run "$TMP_DIR/config-project/multi-build/other.mjs")" = '43'
+grep -q '"version":2' "$TMP_DIR/config-project/multi-build/eliscript-project.json"
+grep -q '"entries":\["main.mjs","other.mjs"\]' \
+  "$TMP_DIR/config-project/multi-build/eliscript-project.json"
+
+DIRECT_MULTI_REPORT=$(
+  "$PROJECT_DIR/bin/eliscript-build" \
+    --json \
+    --root "$TMP_DIR/config-project/src" \
+    --out-dir "$TMP_DIR/config-project/direct-multi-build" \
+    "$TMP_DIR/config-project/src/other.eli" \
+    "$TMP_DIR/config-project/src/main.eli"
+)
+printf '%s' "$DIRECT_MULTI_REPORT" | bun --eval '
+  const report = JSON.parse(await Bun.stdin.text());
+  if (report.version !== 2 ||
+      JSON.stringify(report.entries) !== JSON.stringify(["main.eli", "other.eli"]) ||
+      JSON.stringify(report.entryOutputs) !== JSON.stringify(["main.mjs", "other.mjs"])) {
+    throw new Error("unexpected multi-entry build report");
+  }
+'
+
 OVERRIDE_OUTPUT=$(
   "$PROJECT_DIR/bin/eliscript-build" \
     --config "$TMP_DIR/config-project/eliscript.json" \

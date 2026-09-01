@@ -10,6 +10,7 @@ export async function executeBuild(options) {
 
   const projectOptions = {
     entry: request.entry,
+    entries: request.entries,
     outDir: request.outDir,
     root: request.root,
     portableEntries: request.portableEntries,

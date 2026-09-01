@@ -41,8 +41,9 @@ Source Map v3. The generated pipeline can process and emit every current
 bootstrap module, including its own sources. `compiler/compiler.eli` composes
 the complete in-memory pipeline without filesystem dependencies.
 `compiler/project.eli` owns the versioned single-file/project operation
-boundary, cycle-safe dependency traversal, portable-name fixed points, and
-versioned build-report normalization and cache-status policy.
+boundary, single-entry and multi-entry request identity, cycle-safe dependency
+traversal, portable-name fixed points, and versioned build-report normalization
+and cache-status policy.
 `host/build.mjs` dispatches normalized operations without defining compiler
 semantics.
 `host/project.mjs` supplies the replaceable filesystem, path, artifact, and

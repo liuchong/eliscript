@@ -11,7 +11,7 @@ import {
 } from "./bun.mjs";
 import { executeBuild } from "./build.mjs";
 
-const usage = `Usage: eliscript-build [OPTIONS] [ENTRY]
+const usage = `Usage: eliscript-build [OPTIONS] [ENTRY ...]
 
 Options:
   --out-dir DIR     Write the generated module tree to DIR
@@ -122,7 +122,7 @@ export function parseArguments(arguments_) {
   const argumentsList = [...arguments_];
   if (argumentsList[0] === "--") argumentsList.shift();
   const portableEntries = [];
-  let entry;
+  const entries = [];
   let outDir;
   let root;
   let configuration;
@@ -162,19 +162,18 @@ export function parseArguments(arguments_) {
       }
     } else if (argument.startsWith("-")) {
       throw new Error(`unknown option: ${argument}`);
-    } else if (entry !== undefined) {
-      throw new Error("multiple entry files are not supported");
     } else {
-      entry = argument;
+      entries.push(argument);
     }
   }
 
   if (configuration === undefined) {
-    if (entry === undefined) throw new Error("missing entry file");
+    if (entries.length === 0) throw new Error("missing entry file");
     if (outDir === undefined) throw new Error("missing --out-dir");
   }
   return {
-    entry,
+    entry: entries.length === 1 ? entries[0] : undefined,
+    entries: entries.length > 1 ? entries : undefined,
     outDir,
     root,
     portableEntries,
@@ -200,7 +199,9 @@ async function readConfiguration(filename, compiler) {
   const directory = dirname(canonical);
   const root = resolve(directory, configuration.sourceRoot);
   return {
-    entry: resolve(root, configuration.entry),
+    ...(configuration.version === 2
+      ? { entries: configuration.entries.map((entry) => resolve(root, entry)) }
+      : { entry: resolve(root, configuration.entry) }),
     outDir: resolve(directory, configuration.outDir),
     root,
     portableEntries: [...configuration.portableEntries],
@@ -216,7 +217,13 @@ export async function execute(arguments_, options = {}) {
   if (parsed.configuration !== undefined) {
     const compiler = await loadCompiler(options.moduleDirectory);
     request = await readConfiguration(parsed.configuration, compiler);
-    if (parsed.entry !== undefined) request.entry = parsed.entry;
+    if (parsed.entries !== undefined) {
+      request.entries = parsed.entries;
+      delete request.entry;
+    } else if (parsed.entry !== undefined) {
+      request.entry = parsed.entry;
+      delete request.entries;
+    }
     if (parsed.outDir !== undefined) request.outDir = parsed.outDir;
     if (parsed.root !== undefined) request.root = parsed.root;
     if (parsed.portableEntries.length > 0) {
@@ -226,6 +233,7 @@ export async function execute(arguments_, options = {}) {
   } else {
     request = {
       entry: parsed.entry,
+      entries: parsed.entries,
       outDir: parsed.outDir,
       root: parsed.root,
       portableEntries: parsed.portableEntries,
@@ -248,7 +256,7 @@ export async function main(arguments_ = process.argv.slice(2)) {
   }
   process.stdout.write(execution.jsonReport
     ? `${JSON.stringify(execution.result.report)}\n`
-    : `${execution.result.entryOutput}\n`);
+    : `${execution.result.entryOutputs.join("\n")}\n`);
 }
 
 const isMain = process.argv[1] !== undefined &&

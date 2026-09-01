@@ -1428,6 +1428,42 @@
           "contains": "CLI and Bun execution test passed"
         }
       ]
+    },
+    {
+      "id": "toolchain.versioned-multi-entry-project-identity",
+      "title": "Versioned multi-entry project identity",
+      "status": "accepted",
+      "spec": "0113",
+      "contracts": [
+        "Preserves version 1 single-entry request, manifest, report, command, and worker behavior",
+        "Owns version 2 request and build-operation normalization in Eliscript",
+        "Builds one deterministic union graph with version 2 manifest, cache, and report identity",
+        "Allows either declared entry to start one verified worker generation",
+        "Matches seed, Bun, and Node artifacts without application-framework evidence",
+        "Keeps application frameworks and application tooling outside core implementation, goals, dependencies, evidence, and maturity credit"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-project-tests.el",
+          "contains": "eliscript-project-builds-versioned-multi-entry-graph"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-project.test.mjs",
+          "contains": "self-hosted project service matches seed output under Bun and Node"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/worker-runtime.test.mjs",
+          "contains": "multi-project-entry"
+        },
+        {
+          "kind": "shell",
+          "file": "tests/project-cli-test.sh",
+          "contains": "DIRECT_MULTI_REPORT"
+        }
+      ]
     }
   ]
 }

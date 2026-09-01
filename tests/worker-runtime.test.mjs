@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -441,20 +442,76 @@ test("long-lived worker implements the versioned NDJSON protocol", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "eliscript-worker-"));
   const modulePath = resolve(directory, "worker.mjs");
   const reloadPath = resolve(directory, "reload.mjs");
+  const reloadMapPath = resolve(directory, "reload.mjs.map");
+  const otherPath = resolve(directory, "other.mjs");
+  const otherMapPath = resolve(directory, "other.mjs.map");
+  const outsidePath = resolve(directory, "outside.mjs");
   const invalidManifestPath = resolve(directory, "invalid-project.json");
+  const multiManifestPath = resolve(directory, "multi-project.json");
   let client;
   try {
     await runSuccessful(
       [compilerPath, "--source-map", "--output", modulePath, fixturePath],
       { env: { ...process.env, EMACS: emacs } },
     );
-    await writeFile(reloadPath, "export function value() { return 1; }\n");
+    const reloadSource = "export function value() { return 1; }\n";
+    const reloadMap = JSON.stringify({
+      version: 3,
+      file: "reload.mjs",
+      sources: ["reload.eli"],
+      names: [],
+      mappings: "",
+    });
+    const otherMap = JSON.stringify({
+      version: 3,
+      file: "other.mjs",
+      sources: ["other.eli"],
+      names: [],
+      mappings: "",
+    });
+    await writeFile(reloadPath, reloadSource);
+    await writeFile(reloadMapPath, reloadMap);
+    await writeFile(otherPath, "export function other() { return 2; }\n");
+    await writeFile(otherMapPath, otherMap);
+    await writeFile(outsidePath, "export function outside() { return 3; }\n");
     await writeFile(invalidManifestPath, JSON.stringify({
       format: "eliscript-project",
       version: 1,
       entry: "reload.mjs",
       modules: [],
       digest: "0".repeat(64),
+    }));
+    const multiIdentity = {
+      format: "eliscript-project",
+      version: 2,
+      entries: ["other.mjs", "reload.mjs"],
+      modules: [
+        {
+          source: "other.eli",
+          output: "other.mjs",
+          sourceMap: "other.mjs.map",
+          sourceDigest: "0".repeat(64),
+          outputDigest: createHash("sha256")
+            .update("export function other() { return 2; }\n")
+            .digest("hex"),
+          sourceMapDigest: createHash("sha256").update(otherMap).digest("hex"),
+        },
+        {
+          source: "reload.eli",
+          output: "reload.mjs",
+          sourceMap: "reload.mjs.map",
+          sourceDigest: "1".repeat(64),
+          outputDigest: createHash("sha256").update(reloadSource).digest("hex"),
+          sourceMapDigest: createHash("sha256").update(reloadMap).digest("hex"),
+        },
+      ],
+    };
+    const multiDigest = createHash("sha256")
+      .update(JSON.stringify(multiIdentity))
+      .digest("hex");
+    await writeFile(multiManifestPath, JSON.stringify({
+      ...multiIdentity,
+      digest: multiDigest,
     }));
     client = createWorkerClient();
     const ready = await client.next((message) => message.type === "ready");
@@ -464,6 +521,37 @@ test("long-lived worker implements the versioned NDJSON protocol", async () => {
     expect(ready.capabilities).toContain("module-version");
     expect(ready.capabilities).toContain("project-manifest");
     expect(ready.capabilities).toContain("portable-manifest");
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "multi-project-entry",
+      module: reloadPath,
+      projectManifest: multiManifestPath,
+      moduleVersion: multiDigest,
+      export: "value",
+      arguments: [],
+    });
+    expect(await client.next(
+      (message) => message.id === "multi-project-entry",
+    )).toMatchObject({ ok: true, value: 1 });
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "multi-project-outside-entry",
+      module: outsidePath,
+      projectManifest: multiManifestPath,
+      moduleVersion: multiDigest,
+      export: "outside",
+      arguments: [],
+    });
+    expect(await client.next(
+      (message) => message.id === "multi-project-outside-entry",
+    )).toMatchObject({
+      ok: false,
+      error: { code: "invalid-project-manifest" },
+    });
 
     client.send({
       version: 1,

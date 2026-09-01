@@ -102,8 +102,9 @@ project internally.
 Specifications 0107 through 0111 subsequently moved graph planning, reports,
 incremental policy, request normalization, and the public multi-file project
 command into the self-hosted service without changing this version 1 external
-configuration contract. Single-file command convergence and multi-entry
-identity remain outside this specification and keep the M9 exit gate open.
+configuration contract. Specifications 0112 and 0113 subsequently implement
+single-file convergence and version 2 multi-entry identity, closing M9 without
+changing configuration version 1.
 
 ## Acceptance Criteria
 

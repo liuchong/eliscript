@@ -59,9 +59,8 @@ mature user contract. The main remaining gaps are:
 - the persistent value and explicit host-container boundary is stable, while
   the broader M8 language and standard-library exit audit remains incomplete
 - incomplete module interop and core data semantics
-- compiler capabilities still split between the seed and self-hosted paths
-- the canonical project configuration currently supports one graph entry and
-  is not yet routed through the self-hosted project service
+- some compiler capabilities outside normal build execution still split
+  between the seed and self-hosted paths
 - no formatter, interactive REPL, or complete Emacs editing mode
 - an intentionally small standard library without a documented stability
   classification
@@ -760,7 +759,7 @@ Specification
 [0105-emacs-analysis-performance-reinvestment.md](0105-emacs-analysis-performance-reinvestment.md)
 then completes P7 and PD-10 with three maintained Emacs Lisp/Eliscript text
 analysis candidates. Search and statistics use transducers plus persistent
-Vector construction and record 9.648x and 8.082x median warm end-to-end
+Vector construction and record 9.142x and 8.237x median warm end-to-end
 speedups across 30 runs. Source-bound cold, warm, segmented, and crossover
 evidence selects a conservative 16,000-character threshold, while a
 200-request one-generation soak applies 100 stable buffer results and discards
@@ -811,13 +810,19 @@ self-hosted service under Bun and Node. Specification 0112 adds one
 compiler-owned build-operation request and host dispatcher behind the public
 single-file and project commands while retaining explicit non-circular seed
 references. Multi-entry project identity remains M9 work; these partial
-deliveries do not complete the milestone.
+deliveries are completed by specification 0113, which adds version 2 request,
+manifest, report, cache-validation, CLI, and worker identity while preserving
+version 1 single-entry behavior. M9 is complete.
 Application frameworks, bundlers, blog and site generators, publishing,
 hosting, and development servers remain replaceable
-application validation and cannot satisfy any remaining M9 core deliverable.
+application validation and contributed no M9 core evidence or maturity credit.
 
 **Exit gate:** All normal user builds can use the self-hosted compiler; the
 seed is no longer the only implementation of a user-facing build capability.
+
+**Status:** Complete. Seed, Bun, and Node cover normal single-file,
+single-entry project, and multi-entry project builds through compiler-owned
+versioned operations.
 
 ### M10: Daily Development Experience (10-14 weeks)
 

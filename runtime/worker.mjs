@@ -351,24 +351,35 @@ async function readProjectManifest(identity, entryUrl) {
   } catch (error) {
     throw projectManifestError(`could not read project manifest: ${error.message}`);
   }
-  if (manifest.format !== "eliscript-project" || manifest.version !== 1 ||
+  if (manifest.format !== "eliscript-project" ||
+      (manifest.version !== 1 && manifest.version !== 2) ||
       typeof manifest.digest !== "string" ||
       !/^[0-9a-f]{64}$/.test(manifest.digest) ||
       !Array.isArray(manifest.modules)) {
     throw projectManifestError("project manifest has an unsupported shape");
   }
-  const entry = projectFile(root, manifest.entry, "manifest entry");
-  let canonicalEntry;
+  const manifestEntries = manifest.version === 1
+    ? [manifest.entry]
+    : manifest.entries;
+  if (!Array.isArray(manifestEntries) || manifestEntries.length === 0 ||
+      new Set(manifestEntries).size !== manifestEntries.length ||
+      [...manifestEntries].sort().some((entry, index) =>
+        entry !== manifestEntries[index])) {
+    throw projectManifestError("project manifest entries have an unsupported shape");
+  }
+  const entries = manifestEntries.map((entry, index) =>
+    projectFile(root, entry, `manifest entry ${index}`));
+  let canonicalEntries;
   let canonicalModule;
   try {
-    [canonicalEntry, canonicalModule] = await Promise.all([
-      realpath(entry),
+    [canonicalEntries, canonicalModule] = await Promise.all([
+      Promise.all(entries.map((entry) => realpath(entry))),
       realpath(fileURLToPath(entryUrl)),
     ]);
   } catch (error) {
     throw projectManifestError(`could not resolve project entry: ${error.message}`);
   }
-  if (canonicalEntry !== canonicalModule) {
+  if (!canonicalEntries.includes(canonicalModule)) {
     throw projectManifestError("project manifest entry does not match request module");
   }
   const identityModules = [];
@@ -401,12 +412,23 @@ async function readProjectManifest(identity, entryUrl) {
       sourceMapDigest: module.sourceMapDigest,
     };
   });
-  const graphIdentity = {
-    format: manifest.format,
-    version: manifest.version,
-    entry: manifest.entry,
-    modules: identityModules,
-  };
+  const declaredOutputs = new Set(identityModules.map((module) => module.output));
+  if (manifestEntries.some((entry) => !declaredOutputs.has(entry))) {
+    throw projectManifestError("project manifest does not describe every entry artifact");
+  }
+  const graphIdentity = manifest.version === 1
+    ? {
+      format: manifest.format,
+      version: manifest.version,
+      entry: manifest.entry,
+      modules: identityModules,
+    }
+    : {
+      format: manifest.format,
+      version: manifest.version,
+      entries: manifest.entries,
+      modules: identityModules,
+    };
   if (textDigest(JSON.stringify(graphIdentity)) !== manifest.digest) {
     throw projectManifestError("project manifest graph digest does not match its records");
   }

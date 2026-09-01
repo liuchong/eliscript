@@ -662,9 +662,9 @@
       (dolist
           (case
            '(("{\"schemaVersion\":1,\"entry\":\"main.eli\",\"outDir\":\"build\",\"undeclaredOption\":{}}"
-              "unknown configuration key: undeclaredOption")
-             ("{\"schemaVersion\":2,\"entry\":\"main.eli\",\"outDir\":\"build\"}"
-              "unsupported schemaVersion: 2")
+             "unknown configuration key: undeclaredOption")
+             ("{\"schemaVersion\":3,\"entry\":\"main.eli\",\"outDir\":\"build\"}"
+              "unsupported schemaVersion: 3")
              ("{\"schemaVersion\":1,\"entry\":\"first.eli\",\"entry\":\"second.eli\",\"outDir\":\"build\"}"
               "duplicate configuration key: entry")
              ("{\"schemaVersion\":1,\"sourceRoot\":\"../src\",\"entry\":\"main.eli\",\"outDir\":\"build\"}"
@@ -679,6 +679,71 @@
           (should (string-match-p
                    (regexp-quote (cadr case))
                    (error-message-string error-data))))))))
+
+(ert-deftest eliscript-project-builds-versioned-multi-entry-graph ()
+  (eliscript-project-tests--with-directory project
+    (let* ((source-root (expand-file-name "src" project))
+           (first (expand-file-name "first.eli" source-root))
+           (second (expand-file-name "second.eli" source-root))
+           (shared (expand-file-name "shared.eli" source-root))
+           (configuration (expand-file-name "eliscript.json" project)))
+      (eliscript-project-tests--write
+       shared "(export answer)\n(defconst answer 42)\n")
+      (eliscript-project-tests--write
+       first "(import \"./shared.eli\" answer)\n(print answer)\n")
+      (eliscript-project-tests--write
+       second "(import \"./shared.eli\" answer)\n(print (+ answer 1))\n")
+      (eliscript-project-tests--write
+       configuration
+       (concat
+        "{\"schemaVersion\":2,\"sourceRoot\":\"src\","
+        "\"entries\":[\"second.eli\",\"first.eli\"],"
+        "\"outDir\":\"build\",\"portableEntries\":[],\"cache\":true}\n"))
+      (let* ((request
+              (eliscript-project-read-configuration configuration))
+             (result (eliscript-project-execute request))
+             (report (eliscript-project-build-report result))
+             (manifest
+              (with-temp-buffer
+                (insert-file-contents
+                 (eliscript-project-build-result-manifest result))
+                (json-parse-buffer :object-type 'alist :array-type 'list))))
+        (should (equal (mapcar #'file-truename
+                               (eliscript-project-request-entries request))
+                       (mapcar #'file-truename (list first second))))
+        (should (equal (eliscript-project-build-result-entries result)
+                       (sort (list (file-truename first)
+                                   (file-truename second))
+                             #'string-lessp)))
+        (should (= (length (eliscript-project-build-result-modules result)) 3))
+        (should (equal (alist-get 'version manifest) 2))
+        (should (equal (alist-get 'entries manifest)
+                       '("first.mjs" "second.mjs")))
+        (should (equal (alist-get 'version report) 2))
+        (should (equal (append (alist-get 'entries report) nil)
+                       '("first.eli" "second.eli")))
+        (let* ((again (eliscript-project-execute request))
+               (again-report (eliscript-project-build-report again)))
+          (should (= (eliscript-project-build-result-compiled-count again) 0))
+          (should (= (eliscript-project-build-result-reused-count again) 3))
+          (should (equal (alist-get 'status (alist-get 'cache again-report))
+                         "hit")))
+        (let* ((alias (expand-file-name "first-alias.eli" source-root))
+               (duplicate-request
+                (eliscript-project-request-create
+                 :entries (list first alias)
+                 :out-dir (expand-file-name "duplicate-build" project)
+                 :root source-root
+                 :portable-entries nil
+                 :use-cache nil)))
+          (make-symbolic-link first alias)
+          (let ((error-data
+                 (should-error
+                  (eliscript-project-execute duplicate-request)
+                  :type 'eliscript-project-error)))
+            (should (string-match-p
+                     "project entries resolve to duplicate sources"
+                     (error-message-string error-data)))))))))
 
 (provide 'eliscript-project-tests)
 

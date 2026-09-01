@@ -28,15 +28,15 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 108 specifications.
+The registry currently contains 113 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 78 |
+| Accepted design | 83 |
 | Stable design | 29 |
 | Implementation in progress | 3 |
-| Implemented | 105 |
+| Implemented | 110 |
 
 Compatibility Baseline 1 separately classifies 29 specifications as stable,
 76 as provisional, and 3 as planning. That baseline is derived from registry
@@ -86,21 +86,24 @@ continuous result verification, module generations, cancellation, stale-buffer
 rejection, and transactional application. Its maintained index integration
 and real-worker tests complete PD-09 without application-framework evidence.
 P7 and PD-10 now close through a maintained Emacs analysis package: three
-equivalent candidates, two selected transducer-backed workflows at 9.648x and
-8.082x median warm end-to-end speedup, a source-bound 16,000-character
+equivalent candidates, two selected transducer-backed workflows at 9.142x and
+8.237x median warm end-to-end speedup, a source-bound 16,000-character
 crossover decision, and a 200-request stable/stale buffer soak. No application
 framework contributes to this result.
-M9 now has a closed, versioned single-entry project request, a self-hosted
+M9 is complete with closed, versioned single-entry and multi-entry project
+requests, a self-hosted
 host-neutral graph planner, strict canonical `eliscript-ir` version 1
 serialization, and an Eliscript-owned `eliscript-build-report` version 1
 operation. Ordinary closure, cycle handling, portable-name fixed points,
 complete 57-node IR round trips, build-decision normalization, and
 standards-based Bun/Node execution match seed semantics and reproducible bytes.
-The self-hosted host now also owns v2 cache identity policy, v1 migration,
+The self-hosted host also owns v2 cache identity policy, v1 migration,
 selective standard recompilation, portable closure revalidation, and cross-host
-Bun/Node reuse. Existing project CLI/configuration routing and multi-entry
-identity remain incomplete. Application frameworks and publishing
-infrastructure remain replaceable validation outside these core deliverables.
+Bun/Node reuse. Version 2 configuration, manifest, report, cache validation,
+CLI output, and worker loading now identify the union of multiple entry
+closures while preserving version 1 single-entry behavior. Application
+frameworks and publishing infrastructure remain replaceable validation
+outside these core deliverables.
 
 ## Reading Paths
 
@@ -362,6 +365,7 @@ The schemas and change workflow are defined by specifications
 | 0110 | [Self-hosted Incremental Project Cache](0110-self-hosted-incremental-project-cache.md) | Accepted | Implemented |
 | 0111 | [Self-hosted Project Command and Configuration](0111-self-hosted-project-command.md) | Accepted | Implemented |
 | 0112 | [Unified Self-hosted Build Operation](0112-unified-self-hosted-build-operation.md) | Accepted | Implemented |
+| 0113 | [Versioned Multi-entry Project Identity](0113-versioned-multi-entry-project-identity.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

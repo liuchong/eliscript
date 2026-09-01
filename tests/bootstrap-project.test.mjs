@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -51,13 +59,15 @@ function digestJson(value) {
 }
 
 function publicManifestIdentity(value) {
-  return {
+  const identity = {
     format: value.format,
     version: value.version,
-    entry: value.entry,
     modules: value.modules,
     digest: value.digest,
   };
+  if (value.version === 2) identity.entries = value.entries;
+  else identity.entry = value.entry;
+  return identity;
 }
 
 function stableReportIdentity(report) {
@@ -234,6 +244,45 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
       useCache: request.useCache,
     });
     expect(Object.isFrozen(projectOperation)).toBeTrue();
+    const multiRequest = compiler.project_request({
+      entries: ["/project/src/z.eli", "/project/src/a.eli"],
+      outDir: "/project/dist",
+      root: "/project",
+      portableEntries: [],
+      useCache: true,
+    });
+    expect(multiRequest).toEqual({
+      format: "eliscript-project-request",
+      version: 2,
+      entries: ["/project/src/a.eli", "/project/src/z.eli"],
+      outDir: "/project/dist",
+      root: "/project",
+      portableEntries: [],
+      useCache: true,
+    });
+    expect(Object.isFrozen(multiRequest.entries)).toBeTrue();
+    expect(compiler.build_operation_request({
+      mode: "project",
+      ...multiRequest,
+    })).toMatchObject({
+      format: "eliscript-build-operation",
+      version: 2,
+      mode: "project",
+      entries: multiRequest.entries,
+    });
+    try {
+      compiler.project_request({
+        entries: [],
+        outDir: "/project/dist",
+        root: "/project",
+        portableEntries: [],
+        useCache: true,
+      });
+      throw new Error("expected empty multi-entry request rejection");
+    } catch (error) {
+      expect(error.eliscriptDiagnostic?.code).toBe("ELI-B0001");
+      expect(error.eliscriptDiagnostic?.phase).toBe("project-build");
+    }
     try {
       compiler.build_operation_request({
         mode: "single",
@@ -263,10 +312,26 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
     });
     expect(Object.isFrozen(configuration)).toBeTrue();
     expect(Object.isFrozen(configuration.portableEntries)).toBeTrue();
+    const multiConfiguration = compiler.project_configuration({
+      schemaVersion: 2,
+      sourceRoot: "src",
+      entries: ["z.eli", "a.eli"],
+      outDir: "dist",
+    }, "/project/eliscript.json");
+    expect(multiConfiguration).toEqual({
+      format: "eliscript-project-request",
+      version: 2,
+      sourceRoot: "src",
+      entries: ["a.eli", "z.eli"],
+      outDir: "dist",
+      portableEntries: [],
+      cache: true,
+    });
     for (const invalid of [
       { ...configuration, schemaVersion: 1, undeclared: true },
       { schemaVersion: 1, entry: "../main.eli", outDir: "dist" },
       { schemaVersion: 1, entry: "main.eli", outDir: "dist", cache: "yes" },
+      { schemaVersion: 2, entries: [], outDir: "dist" },
     ]) {
       try {
         compiler.project_configuration(invalid, "/project/eliscript.json");
@@ -367,6 +432,27 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
     });
     expect(legacyLookup.reason).toBe("verified");
     expect(legacyLookup.cache.sourceVersion).toBe(1);
+    const multiLookup = compiler.project_cache_lookup({
+      ...cacheLookupInput,
+      expectedEntry: undefined,
+      expectedEntries: ["src/a.mjs", "src/main.mjs"],
+      manifest: {
+        format: "eliscript-project",
+        version: 2,
+        entries: ["src/a.mjs", "src/main.mjs"],
+        digest: "manifest",
+        modules: cacheModules,
+        cache: {
+          format: "eliscript-project-cache",
+          version: 2,
+          compilerDigest: "compiler",
+          mode: "standard",
+          portableEntries: [],
+          modules: metadataModules,
+        },
+      },
+    });
+    expect(multiLookup.reason).toBe("verified");
     expect(compiler.project_cache_decision({
       record: currentLookup.cache.records[0],
       output: "src/main.mjs",
@@ -437,6 +523,19 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
     expect(report.modules[0].dependencies).toEqual(["src/value.eli"]);
     expect(Object.isFrozen(report)).toBeTrue();
     expect(Object.isFrozen(report.modules)).toBeTrue();
+    const multiReport = compiler.project_build_report({
+      ...reportInput,
+      entry: undefined,
+      entryOutput: undefined,
+      entries: ["src/z.eli", "src/a.eli"],
+      entryOutputs: ["src/z.mjs", "src/a.mjs"],
+    });
+    expect(multiReport).toMatchObject({
+      format: "eliscript-build-report",
+      version: 2,
+      entries: ["src/a.eli", "src/z.eli"],
+      entryOutputs: ["src/a.mjs", "src/z.mjs"],
+    });
     expect(() => compiler.project_build_report({
       ...reportInput,
       cache: { enabled: "yes", reason: "verified" },
@@ -511,6 +610,101 @@ test("self-hosted project service matches seed output under Bun and Node", async
     expectValidTimings(nodeResult.report);
     expect(nodeResult.digest).toBe(standardManifest.digest);
     expect(nodeResult.mode).toBe("standard");
+
+    const multiRoot = resolve(directory, "multi-source");
+    await mkdir(multiRoot);
+    const multiFirst = resolve(multiRoot, "first.eli");
+    const multiSecond = resolve(multiRoot, "second.eli");
+    await writeFile(multiFirst, "(print 41)\n");
+    await writeFile(multiSecond, "(print 42)\n");
+    const multiSeed = resolve(directory, "multi-seed");
+    const multiBun = resolve(directory, "multi-bun");
+    const multiNode = resolve(directory, "multi-node");
+    const multiEntries = [multiSecond, multiFirst];
+    const multiSeedOutput = await run([
+      seedBuildPath,
+      "--no-cache",
+      "--root",
+      multiRoot,
+      "--out-dir",
+      multiSeed,
+      ...multiEntries,
+    ]);
+    const canonicalMultiSeed = await realpath(multiSeed);
+    expect(multiSeedOutput.trim().split("\n")).toEqual([
+      resolve(canonicalMultiSeed, "first.mjs"),
+      resolve(canonicalMultiSeed, "second.mjs"),
+    ]);
+    const multiOptions = {
+      root: multiRoot,
+      entries: multiEntries,
+      moduleDirectory: compilerDirectory,
+      useCache: false,
+    };
+    const multiBunResult = await buildProject({
+      ...multiOptions,
+      outDir: multiBun,
+    });
+    const multiNodeResult = await nodeBuild({
+      ...multiOptions,
+      outDir: multiNode,
+    });
+    await expectFilesEqual(multiSeed, multiBun, [
+      "first.mjs", "first.mjs.map", "second.mjs", "second.mjs.map",
+    ]);
+    await expectFilesEqual(multiSeed, multiNode, [
+      "first.mjs", "first.mjs.map", "second.mjs", "second.mjs.map",
+    ]);
+    const multiManifest = await manifest(multiSeed);
+    expect(multiManifest).toMatchObject({
+      format: "eliscript-project",
+      version: 2,
+      entries: ["first.mjs", "second.mjs"],
+    });
+    expect(publicManifestIdentity(await manifest(multiBun)))
+      .toEqual(publicManifestIdentity(multiManifest));
+    expect(publicManifestIdentity(await manifest(multiNode)))
+      .toEqual(publicManifestIdentity(multiManifest));
+    expect(multiBunResult.report).toMatchObject({
+      format: "eliscript-build-report",
+      version: 2,
+      entries: ["first.eli", "second.eli"],
+      entryOutputs: ["first.mjs", "second.mjs"],
+    });
+    expect(multiNodeResult.report.version).toBe(2);
+    const multiHit = await buildProject({
+      ...multiOptions,
+      outDir: multiBun,
+      useCache: true,
+    });
+    expect(multiHit.report.cache.status).toBe("hit");
+    expect(multiHit.report.counts).toEqual({
+      modules: 2,
+      compiled: 0,
+      reused: 2,
+    });
+    const multiAlias = resolve(multiRoot, "first-alias.eli");
+    await symlink(multiFirst, multiAlias);
+    const duplicateEntries = [multiFirst, multiAlias];
+    await expect(buildProject({
+      ...multiOptions,
+      entries: duplicateEntries,
+      outDir: resolve(directory, "multi-duplicate-bun"),
+    })).rejects.toThrow("project entries resolve to duplicate sources");
+    await expect(nodeBuild({
+      ...multiOptions,
+      entries: duplicateEntries,
+      outDir: resolve(directory, "multi-duplicate-node"),
+    })).rejects.toThrow("project entries resolve to duplicate sources");
+    await expect(run([
+      seedBuildPath,
+      "--no-cache",
+      "--root",
+      multiRoot,
+      "--out-dir",
+      resolve(directory, "multi-duplicate-seed"),
+      ...duplicateEntries,
+    ])).rejects.toThrow("project entries resolve to duplicate sources");
 
     const standardNodeHit = await nodeBuild({
       ...standardOptions,

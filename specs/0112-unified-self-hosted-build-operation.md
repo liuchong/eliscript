@@ -134,7 +134,9 @@ This specification completes normal single-file and project command routing
 through the self-hosted compiler and satisfies the narrow M9 exit statement
 that the seed is no longer the only implementation of a user-facing build
 capability. M9 remains in progress because version 1 project identity still has
-one entry and the planned multi-entry identity is not implemented.
+one entry at this specification's boundary. Specification 0113 subsequently
+adds version 2 multi-entry identity and closes M9 without changing this version
+1 operation.
 
 ## Acceptance Criteria
 

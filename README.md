@@ -24,11 +24,12 @@ repository also carries React, Org, and
 optional bundler probes as replaceable application-level evidence. The project
 is now in **M8: Language Contract Closure**.
 
-In parallel, M9 compiler convergence now includes canonical project requests,
+M9 compiler convergence is complete: it includes canonical project requests,
 graph planning, IR serialization, build reports, v1-to-v2 cache migration,
 selective recompilation, cross-host Bun/Node cache reuse, and self-hosted public
-single-file and project builds through one versioned operation boundary.
-Multi-entry graph identity remains open.
+single-file, single-entry project, and multi-entry project builds through one
+versioned operation boundary. Version 2 project identity, reports, cache
+validation, and worker loading preserve the version 1 single-entry contract.
 
 The current M8 work provides:
 
@@ -135,7 +136,7 @@ buffer versions, transactional application, cancellation, timeout, and worker
 restart. The maintained Emacs index workflow uses this boundary, completing P6
 and PD-09 without adding an application-framework dependency. The persistent
 analysis package now keeps revisioned documents in one worker generation,
-selects search and statistics at 9.648x and 8.082x median warm end-to-end
+selects search and statistics at 9.142x and 8.237x median warm end-to-end
 speedup over 30 runs, and discards intentionally stale buffer results. This
 completes P7 and PD-10 without application-framework evidence. The persistent
 Vector/Map/Set literal family is now complete;
@@ -170,7 +171,7 @@ Add `--source-map` to emit an external Source Map v3 file:
   examples/basic/main.eli
 ```
 
-Build a complete local module graph without Vite:
+Build a complete local module graph directly:
 
 ```sh
 ./bin/eliscript-build --root . --out-dir dist/project \
@@ -178,9 +179,17 @@ Build a complete local module graph without Vite:
 bun run dist/project/examples/stdlib-cli/main.mjs
 ```
 
+Pass multiple entries with an explicit root to emit one versioned union graph:
+
+```sh
+./bin/eliscript-build --root src --out-dir dist \
+  src/main.eli src/admin.eli
+```
+
 `eliscript-build` uses the generated self-hosted compiler and bootstraps it when
 absent. Set `ELISCRIPT_JS_RUNTIME=node` to run the same project service under
-Node.
+Node. Version 2 `eliscript.json` files use an `entries` array for the same
+multi-entry operation; version 1 `entry` configurations remain compatible.
 
 Run the default verification suite:
 
@@ -402,6 +411,7 @@ Start with the document that matches the question:
 | How does self-hosted incremental reuse work? | [Self-hosted Incremental Project Cache](specs/0110-self-hosted-incremental-project-cache.md) |
 | How is the public project command self-hosted? | [Self-hosted Project Command and Configuration](specs/0111-self-hosted-project-command.md) |
 | How do single-file and project commands share one operation? | [Unified Self-hosted Build Operation](specs/0112-unified-self-hosted-build-operation.md) |
+| How are multi-entry project graphs identified? | [Versioned Multi-entry Project Identity](specs/0113-versioned-multi-entry-project-identity.md) |
 | Which behavior is implemented or stable? | [Specification Catalog](specs/README.md#specification-catalog) |
 | How does the seed compiler work? | [Compiler Guide](compiler/README.md) |
 | How does self-hosting work? | [Bootstrap Compiler Guide](bootstrap/README.md) |

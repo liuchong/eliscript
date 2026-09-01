@@ -136,6 +136,16 @@
       ]
     },
     {
+      "id": "build-operation-v2",
+      "spec": "0113",
+      "format": "eliscript-build-operation",
+      "version": 2,
+      "evidence": [
+        {"file": "bootstrap/compiler/project.eli", "contains": ["build-operation-format \"eliscript-build-operation\"", "build-operation-multi-version 2", ":entries (get request :entries)"]},
+        {"file": "specs/0113-versioned-multi-entry-project-identity.md", "contains": ["version 2 build-operation", "frozen `entries` array"]}
+      ]
+    },
+    {
       "id": "build-report",
       "spec": "0032",
       "format": "eliscript-build-report",
@@ -143,6 +153,16 @@
       "evidence": [
         {"file": "compiler/eliscript-project.el", "contains": ["(format . \"eliscript-build-report\")", "eliscript-project-build-report-version 1"]},
         {"file": "bootstrap/compiler/project.eli", "contains": ["project-build-report-format \"eliscript-build-report\"", "project-build-report-version 1", "project-build-report"]}
+      ]
+    },
+    {
+      "id": "build-report-v2",
+      "spec": "0113",
+      "format": "eliscript-build-report",
+      "version": 2,
+      "evidence": [
+        {"file": "compiler/eliscript-project.el", "contains": ["eliscript-project-build-report-multi-version 2", "entryOutputs"]},
+        {"file": "bootstrap/compiler/project.eli", "contains": ["project-build-report-multi-version 2", ":entryOutputs entry-outputs"]}
       ]
     },
     {
@@ -210,6 +230,16 @@
       ]
     },
     {
+      "id": "project-manifest-v2",
+      "spec": "0113",
+      "format": "eliscript-project",
+      "version": 2,
+      "evidence": [
+        {"file": "compiler/eliscript-project.el", "contains": ["(version . 2)", "(entries . ,(vconcat relative-entries))"]},
+        {"file": "runtime/worker.mjs", "contains": ["manifest.version !== 2", "manifest.entries"]}
+      ]
+    },
+    {
       "id": "project-plan",
       "spec": "0107",
       "format": "eliscript-project-plan",
@@ -240,6 +270,17 @@
         {"file": "compiler/eliscript-project.el", "contains": ["eliscript-project-configuration-format \"eliscript-project-request\"", "eliscript-project-configuration-version 1"]},
         {"file": "bootstrap/compiler/project.eli", "contains": ["project-request-format \"eliscript-project-request\"", "project-request-version 1", "project-configuration"]},
         {"file": "specs/0106-versioned-project-request.md", "contains": ["\"schemaVersion\": 1", "unknown key rejects"]}
+      ]
+    },
+    {
+      "id": "project-request-v2",
+      "spec": "0113",
+      "format": "eliscript-project-request",
+      "version": 2,
+      "evidence": [
+        {"file": "compiler/eliscript-project.el", "contains": ["eliscript-project-configuration-multi-version 2", "eliscript-project-request-entries"]},
+        {"file": "bootstrap/compiler/project.eli", "contains": ["project-request-multi-version 2", ":entries entries"]},
+        {"file": "specs/0113-versioned-multi-entry-project-identity.md", "contains": ["\"schemaVersion\": 2", "\"entries\""]}
       ]
     },
     {

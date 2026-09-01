@@ -1054,8 +1054,8 @@ input and output backpressure, progress and result streams, and cancellation
 during upload and traversal. Specification
 [0090-large-worker-value-memory-probe.md](0090-large-worker-value-memory-probe.md)
 adds the source-bound 256 MiB round-trip report: 1,058 chunks in each
-direction, 1,215.078125 MiB Emacs peak RSS, 680.046875 MiB Bun peak RSS, and
-1,895.125 MiB simultaneous combined peak. All remain within the documented
+direction, 1,260.90625 MiB Emacs peak RSS, 681.34375 MiB Bun peak RSS, and
+1,942.25 MiB simultaneous combined peak. All remain within the documented
 2,048/1,024/2,560 MiB budgets, completing PD-08 and the P5 exit.
 
 ### P6: Accelerated Emacs API
@@ -1095,7 +1095,7 @@ faster path produces byte- or value-equivalent results.
 **Status:** Complete on 2026-09-01 through specification
 [0105-emacs-analysis-performance-reinvestment.md](0105-emacs-analysis-performance-reinvestment.md).
 Three equivalent candidates are maintained in one Emacs package. Search and
-statistics are selected at 9.648x and 8.082x median warm end-to-end speedup
+statistics are selected at 9.142x and 8.237x median warm end-to-end speedup
 over 30 runs, with cold startup, one-time indexing, segmented timing, and a
 16,000-character crossover threshold retained in a source-bound report. A
 200-request one-generation soak applies 100 stable buffer results and discards
@@ -1187,8 +1187,8 @@ data model contributes directly to useful editor performance.
 
 **Status:** Complete on 2026-09-01 through specification 0105. Maintained
 search and statistics workflows use transducers and persistent Vector
-construction, preserve exact Emacs Lisp references, and record 9.648x and
-8.082x median warm end-to-end speedups over 30 measured primary runs.
+construction, preserve exact Emacs Lisp references, and record 9.142x and
+8.237x median warm end-to-end speedups over 30 measured primary runs.
 
 ### PD-11: State Discipline
 

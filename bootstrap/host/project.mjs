@@ -306,7 +306,7 @@ function cacheIdentity(value) {
 }
 
 function writeManifest(
-  entryOutput,
+  entryOutputs,
   modules,
   root,
   outDir,
@@ -314,12 +314,21 @@ function writeManifest(
   portableEntries,
   compilerDigest,
 ) {
-  const identity = {
-    format: "eliscript-project",
-    version: 1,
-    entry: relative(outDir, entryOutput),
-    modules: modules.map((module) => manifestRecord(module, root, outDir)),
-  };
+  const outputEntries = entryOutputs.map((entryOutput) =>
+    relative(outDir, entryOutput));
+  const identity = outputEntries.length === 1
+    ? {
+      format: "eliscript-project",
+      version: 1,
+      entry: outputEntries[0],
+      modules: modules.map((module) => manifestRecord(module, root, outDir)),
+    }
+    : {
+      format: "eliscript-project",
+      version: 2,
+      entries: outputEntries,
+      modules: modules.map((module) => manifestRecord(module, root, outDir)),
+    };
   const digest = digestBytes(JSON.stringify(identity));
   const cache = {
     format: cacheFormat,
@@ -344,7 +353,7 @@ function readCache({
   compiler,
   enabled,
   outDir,
-  entryOutput,
+  entryOutputs,
   mode,
   portableEntries,
   compilerDigest,
@@ -364,18 +373,29 @@ function readCache({
   }
   try {
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    const graphIdentity = {
-      format: manifest?.format,
-      version: manifest?.version,
-      entry: manifest?.entry,
-      modules: manifest?.modules,
-    };
+    const graphIdentity = manifest?.version === 2
+      ? {
+        format: manifest?.format,
+        version: manifest?.version,
+        entries: manifest?.entries,
+        modules: manifest?.modules,
+      }
+      : {
+        format: manifest?.format,
+        version: manifest?.version,
+        entry: manifest?.entry,
+        modules: manifest?.modules,
+      };
     const privateIdentity = cacheIdentity(manifest?.cache);
     return compiler.project_cache_lookup({
       enabled: true,
       manifestStatus: "readable",
       manifest,
-      expectedEntry: relative(outDir, entryOutput),
+      expectedEntry: entryOutputs.length === 1
+        ? relative(outDir, entryOutputs[0])
+        : undefined,
+      expectedEntries: entryOutputs.map((entryOutput) =>
+        relative(outDir, entryOutput)),
       graphDigestValid: manifest?.digest ===
         digestBytes(JSON.stringify(graphIdentity)),
       cacheDigestValid: privateIdentity !== undefined &&
@@ -468,7 +488,7 @@ function cachedModule({
 
 function standardPlan(
   compiler,
-  entry,
+  entries,
   root,
   outDir,
   sourceCache,
@@ -476,7 +496,7 @@ function standardPlan(
   records,
   decisions,
 ) {
-  return compiler.project_plan([entry], (source) => {
+  return compiler.project_plan(entries, (source) => {
     const cached = cachedModule({
       compiler,
       source,
@@ -526,29 +546,44 @@ export async function buildProject(options) {
   if (!options || typeof options !== "object") {
     projectError("project build options must be an object");
   }
-  if (options.entry === undefined || options.outDir === undefined) {
-    projectError("project build requires entry and outDir");
+  if ((options.entry === undefined && options.entries === undefined) ||
+      options.outDir === undefined) {
+    projectError("project build requires entry or entries and outDir");
   }
   const moduleDirectory = compilerModuleDirectory(options.moduleDirectory);
   const compiler = options.compiler ?? await loadCompiler(moduleDirectory);
   const request = compiler.build_operation_request({
     mode: "project",
     entry: options.entry,
+    entries: options.entries,
     outDir: options.outDir,
     root: options.root ?? null,
     portableEntries: options.portableEntries ?? [],
     useCache: options.useCache === undefined ? true : options.useCache,
   });
-  const entryPath = resolve(pathOption(request.entry, "entry"));
+  const requestedEntries = request.version === 2
+    ? [...request.entries]
+    : [request.entry];
+  if (requestedEntries.length > 1 && request.root === null) {
+    projectError("multi-entry project builds require an explicit project root");
+  }
+  const entryPaths = requestedEntries.map((entry) =>
+    resolve(pathOption(entry, "entry")));
   const root = canonicalDirectory(
     request.root === null
-      ? dirname(entryPath)
+      ? dirname(entryPaths[0])
       : pathOption(request.root, "project root"),
     "project root",
   );
-  const entry = canonicalSource(entryPath, root, entryPath);
-  if (!entry.endsWith(".eli")) {
-    projectError("entry file must use the .eli extension", entry);
+  const entries = entryPaths.map((entryPath) => {
+    const entry = canonicalSource(entryPath, root, entryPath);
+    if (!entry.endsWith(".eli")) {
+      projectError("entry file must use the .eli extension", entry);
+    }
+    return entry;
+  }).sort();
+  if (new Set(entries).size !== entries.length) {
+    projectError("project entries resolve to duplicate sources");
   }
   const requestedOutDir = resolve(pathOption(request.outDir, "output"));
   try {
@@ -567,13 +602,13 @@ export async function buildProject(options) {
     : compilerDigestOption(options.compilerDigest);
   const requestedPortableEntries = [...request.portableEntries];
   const mode = requestedPortableEntries.length > 0 ? "portable" : "standard";
-  const entryOutput = outputFor(entry, root, outDir);
+  const entryOutputs = entries.map((entry) => outputFor(entry, root, outDir));
   const cacheStartedAt = performance.now();
   const cacheLookup = readCache({
     compiler,
     enabled: useCache,
     outDir,
-    entryOutput,
+    entryOutputs,
     mode,
     portableEntries: requestedPortableEntries,
     compilerDigest,
@@ -586,7 +621,7 @@ export async function buildProject(options) {
   const plan = mode === "portable"
     ? portablePlan(
       compiler,
-      entry,
+      entries[0],
       requestedPortableEntries,
       root,
       sourceCache,
@@ -594,7 +629,7 @@ export async function buildProject(options) {
     )
     : standardPlan(
       compiler,
-      entry,
+      entries,
       root,
       outDir,
       sourceCache,
@@ -638,7 +673,7 @@ export async function buildProject(options) {
   });
   const workFinishedAt = performance.now();
   const manifestData = writeManifest(
-    entryOutput,
+    entryOutputs,
     modules,
     root,
     outDir,
@@ -647,12 +682,10 @@ export async function buildProject(options) {
     compilerDigest,
   );
   const manifestFinishedAt = performance.now();
-  const report = compiler.project_build_report({
+  const reportInput = {
     mode: plan.mode,
     root,
     outDir,
-    entry: relative(root, entry),
-    entryOutput: relative(outDir, entryOutput),
     manifest: relative(outDir, manifestData.manifest),
     digest: manifestData.digest,
     portableEntries: normalizedPortableEntries,
@@ -664,14 +697,25 @@ export async function buildProject(options) {
       totalMs: manifestFinishedAt - startedAt,
     },
     modules: modules.map((module) => reportModule(module, root, outDir)),
-  });
+  };
+  if (entries.length === 1) {
+    reportInput.entry = relative(root, entries[0]);
+    reportInput.entryOutput = relative(outDir, entryOutputs[0]);
+  } else {
+    reportInput.entries = entries.map((entry) => relative(root, entry));
+    reportInput.entryOutputs = entryOutputs.map((entryOutput) =>
+      relative(outDir, entryOutput));
+  }
+  const report = compiler.project_build_report(reportInput);
   return Object.freeze({
     format: "eliscript-project-build",
-    version: 1,
+    version: entries.length === 1 ? 1 : 2,
     root,
     outDir,
-    entry,
-    entryOutput,
+    entry: entries.length === 1 ? entries[0] : undefined,
+    entryOutput: entries.length === 1 ? entryOutputs[0] : undefined,
+    entries: Object.freeze(entries),
+    entryOutputs: Object.freeze(entryOutputs),
     mode: plan.mode,
     portableEntries: Object.freeze(normalizedPortableEntries),
     modules: Object.freeze(modules.map((module) => Object.freeze(module))),

@@ -86,11 +86,11 @@ for diagnosis but are not acceptance thresholds.
 | Logical dataset | 256 MiB |
 | Request chunks | 1,058 |
 | Response chunks | 1,058 |
-| Emacs peak RSS | 1,215.078125 MiB |
-| Bun peak RSS | 680.046875 MiB |
-| Combined peak RSS | 1,895.125 MiB |
-| Memory samples | 1,074 |
-| Round-trip time | 217,894.196033 ms |
+| Emacs peak RSS | 1,260.90625 MiB |
+| Bun peak RSS | 681.34375 MiB |
+| Combined peak RSS | 1,942.25 MiB |
+| Memory samples | 1,067 |
+| Round-trip time | 203,439.776897 ms |
 
 The source and result digest is
 `8531f9720e3f5ce15fde831a4c677c501b3ef320d4f156c1248299cd9955392d`.
