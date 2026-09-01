@@ -20,7 +20,7 @@ symbol semantics (implemented)
   -> IR data model (implemented)
   -> IR lowering (implemented)
   -> ESM and Source Map emitter (implemented)
-  -> project graph and portable closure planner (implemented)
+  -> project graph, portable closure, and build-report policy (implemented)
   -> compiler driver (implemented)
   -> reproducible self-compilation (implemented)
 ```
@@ -40,9 +40,11 @@ mapping fragments, while `compiler/source-map.eli` encodes those marks as
 Source Map v3. The generated pipeline can process and emit every current
 bootstrap module, including its own sources. `compiler/compiler.eli` composes
 the complete in-memory pipeline without filesystem dependencies.
-`compiler/project.eli` owns cycle-safe dependency traversal and portable-name
-fixed points. `host/project.mjs` supplies the replaceable filesystem and path
-boundary while using that generated planner for real multi-module builds.
+`compiler/project.eli` owns cycle-safe dependency traversal, portable-name
+fixed points, and versioned build-report normalization and cache-status policy.
+`host/project.mjs` supplies the replaceable filesystem, path, artifact, and
+timing boundary while using those generated operations for real multi-module
+builds.
 
 ## Build
 

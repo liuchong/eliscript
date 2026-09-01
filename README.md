@@ -388,6 +388,7 @@ Start with the document that matches the question:
 | How is a versioned project build configured? | [Versioned Project Request Configuration](specs/0106-versioned-project-request.md) |
 | How does the self-hosted compiler plan projects? | [Self-hosted Project Graph Planning](specs/0107-self-hosted-project-graph-planning.md) |
 | How is compiler IR serialized reproducibly? | [Versioned Canonical IR Serialization](specs/0108-versioned-canonical-ir.md) |
+| How are self-hosted build decisions reported? | [Self-hosted Build Decision Reports](specs/0109-self-hosted-build-decision-reports.md) |
 | Which behavior is implemented or stable? | [Specification Catalog](specs/README.md#specification-catalog) |
 | How does the seed compiler work? | [Compiler Guide](compiler/README.md) |
 | How does self-hosting work? | [Bootstrap Compiler Guide](bootstrap/README.md) |

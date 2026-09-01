@@ -682,21 +682,21 @@ The first profile-guided P4 compiler slice now lands in
 the self-hosted emitter collects five conditional runtime requirements in one
 IR traversal, the previous five recursive scans remain an executable semantic
 reference, and a source-bound benchmark records exact agreement plus a reviewed
-1.692794x local median speedup. Application frameworks and bundlers do not
+1.596247x local median speedup. Application frameworks and bundlers do not
 participate in this core evidence.
 Specification
 [0097-profile-guided-ir-node-kind-decisions.md](0097-profile-guided-ir-node-kind-decisions.md)
 then replaces the common linear IR node-kind scan with a module-private native
 index, freezes the registry, retains the array scan as an executable reference,
-and records exact agreement plus a reviewed 10.748017x local median speedup over
-24,578 real compiler IR nodes. Application frameworks, Vite adapters, site
+and records exact agreement plus a reviewed 10.671811x local median speedup over
+25,037 real compiler IR nodes. Application frameworks, Vite adapters, site
 generators, and publishing tools remain outside this language-core slice and
 its acceptance evidence.
 Specification
 [0098-profile-guided-emitter-indentation.md](0098-profile-guided-emitter-indentation.md)
 then replaces character-by-character indentation with source-map-aware line
 segments and one final join, retains the previous loop as an executable
-reference, and records exact text/mark agreement plus a reviewed 14.093078x
+reference, and records exact text/mark agreement plus a reviewed 14.610301x
 local median speedup. The same whole-compiler profile moves indentation out of
 the dominant paths. Application frameworks and publishing adapters remain
 outside this compiler evidence.
@@ -706,7 +706,7 @@ then uses the emitter's ordered-mark invariant for constant-time start checks
 and one-step immutable prepend. A compiler-private host specialization is
 called directly at normal emission sites while the previous complete scan and
 iterative copy remain an executable Eliscript reference. The reviewed real
-artifact corpus records exact agreement plus a current 2.324131x local median
+artifact corpus records exact agreement plus a current 2.428094x local median
 speedup after the general comparison-emission optimization;
 follow-up whole-compiler sampling removes location from the dominant entries.
 Application frameworks and site tooling receive no core roadmap credit.
@@ -715,8 +715,8 @@ Specification
 then specializes exactly binary numeric comparisons as direct ECMAScript
 infix expressions while preserving eager argument capture for n-ary forms.
 An exact historical-baseline replay over all twelve compiler modules records a
-1.575784x complete-compiler median speedup and reduces generated JavaScript
-from 434,010 to 331,247 bytes. A broader constant-dispatch experiment was
+1.618252x complete-compiler median speedup and reduces generated JavaScript
+from 441,772 to 337,871 bytes. A broader constant-dispatch experiment was
 rejected because its complete-compiler result regressed. Application
 frameworks, Vite, bundlers, publishing, and site tooling remain application
 validation only and receive no language-core evidence or maturity credit.
@@ -724,17 +724,17 @@ Specification
 [0101-profile-guided-reader-character-classification.md](0101-profile-guided-reader-character-classification.md)
 then replaces generated whitespace and delimiter `or` closure chains with two
 bounded compiler-private predicates while retaining the Eliscript algorithms
-as executable references. The reviewed real-source trace records a 5.011063x
+as executable references. The reviewed real-source trace records a 5.399289x
 predicate median speedup, and the exact historical-baseline replay records a
-1.238266x complete-compiler median speedup with byte-identical ESM and Source
+1.249726x complete-compiler median speedup with byte-identical ESM and Source
 Maps. Application frameworks and build tools remain absent from the core
 implementation, corpus, decision, and roadmap credit.
 Specification
 [0102-profile-guided-source-map-cursors.md](0102-profile-guided-source-map-cursors.md)
 then replaces complete generated/source position scans with ordered private
 cursors while retaining both Eliscript scans as executable references. The
-reviewed 21,896-mark compiler corpus records a 4.589534x combined cursor median
-speedup and a 1.151910x complete-compiler median speedup against the exact
+reviewed 22,310-mark compiler corpus records a 4.546145x combined cursor median
+speedup and a 1.128405x complete-compiler median speedup against the exact
 pre-specialization revision. ESM and Source Maps remain byte-identical, and no
 application framework or build tool participates in the evidence.
 Specification
@@ -801,11 +801,13 @@ project operation. Specification 0107 adds host-neutral graph and portable
 closure planning in `.eli`, plus byte-identical ordinary and portable project
 execution under Bun and Node. Specification 0108 then adds closed, versioned,
 canonical IR serialization with complete 57-node round trips, strict
-diagnostics, and byte identity under Bun and Node. Existing CLI/configuration
-routing, multi-entry identity, versioned build-report migration, and
-incremental cache convergence remain M9 work; these partial deliveries do not
-satisfy the exit gate. Application frameworks, bundlers, blog and site
-generators, publishing, hosting, and development servers remain replaceable
+diagnostics, and byte identity under Bun and Node. Specification 0109 moves
+build-report version 1 normalization and cache-status policy into Eliscript and
+matches cache-free seed reports under Bun and Node. Existing CLI/configuration
+routing, multi-entry identity, and incremental cache identity, migration, and
+reuse remain M9 work; these partial deliveries do not satisfy the exit gate.
+Application frameworks, bundlers, blog and site generators, publishing,
+hosting, and development servers remain replaceable
 application validation and cannot satisfy any remaining M9 core deliverable.
 
 **Exit gate:** All normal user builds can use the self-hosted compiler; the

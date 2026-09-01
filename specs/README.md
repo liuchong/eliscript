@@ -91,13 +91,15 @@ equivalent candidates, two selected transducer-backed workflows at 9.648x and
 crossover decision, and a 200-request stable/stale buffer soak. No application
 framework contributes to this result.
 M9 now has a closed, versioned single-entry project request, a self-hosted
-host-neutral graph planner, and strict canonical `eliscript-ir` version 1
-serialization. Ordinary closure, cycle handling, portable-name fixed points,
-complete 57-node IR round trips, and standards-based Bun/Node execution match
-seed semantics and reproducible bytes. Existing project CLI/configuration
-routing, build-report migration, and incremental cache convergence remain
-incomplete. Application frameworks and publishing infrastructure remain
-replaceable validation outside these core deliverables.
+host-neutral graph planner, strict canonical `eliscript-ir` version 1
+serialization, and an Eliscript-owned `eliscript-build-report` version 1
+operation. Ordinary closure, cycle handling, portable-name fixed points,
+complete 57-node IR round trips, build-decision normalization, and
+standards-based Bun/Node execution match seed semantics and reproducible bytes.
+Existing project CLI/configuration routing, multi-entry identity, and
+incremental cache convergence remain incomplete. Application frameworks and
+publishing infrastructure remain replaceable validation outside these core
+deliverables.
 
 ## Reading Paths
 
@@ -177,6 +179,7 @@ number.
 46. [0106: Versioned Project Request Configuration](0106-versioned-project-request.md)
 47. [0107: Self-hosted Project Graph Planning](0107-self-hosted-project-graph-planning.md)
 48. [0108: Versioned Canonical IR Serialization](0108-versioned-canonical-ir.md)
+49. [0109: Self-hosted Build Decision Reports](0109-self-hosted-build-decision-reports.md)
 
 ### Application Validation (Non-core)
 
@@ -354,6 +357,7 @@ The schemas and change workflow are defined by specifications
 | 0106 | [Versioned Project Request Configuration](0106-versioned-project-request.md) | Accepted | Implemented |
 | 0107 | [Self-hosted Project Graph Planning](0107-self-hosted-project-graph-planning.md) | Accepted | Implemented |
 | 0108 | [Versioned Canonical IR Serialization](0108-versioned-canonical-ir.md) | Accepted | Implemented |
+| 0109 | [Self-hosted Build Decision Reports](0109-self-hosted-build-decision-reports.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

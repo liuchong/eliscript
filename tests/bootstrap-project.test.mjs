@@ -54,11 +54,39 @@ function publicManifestIdentity(value) {
   };
 }
 
+function stableReportIdentity(report) {
+  const { outDir: _outDir, timings: _timings, ...stable } = report;
+  return stable;
+}
+
+function expectValidTimings(report) {
+  expect(Object.keys(report.timings).sort()).toEqual([
+    "cacheReadMs",
+    "manifestWriteMs",
+    "totalMs",
+    "workMs",
+  ]);
+  for (const milliseconds of Object.values(report.timings)) {
+    expect(Number.isFinite(milliseconds)).toBeTrue();
+    expect(milliseconds).toBeGreaterThanOrEqual(0);
+  }
+  expect(report.timings.totalMs).toBeGreaterThanOrEqual(
+    report.timings.cacheReadMs,
+  );
+  expect(report.timings.totalMs).toBeGreaterThanOrEqual(
+    report.timings.manifestWriteMs,
+  );
+}
+
 async function nodeBuild(options) {
   const source = `
     const { buildProject } = await import(process.env.ELISCRIPT_PROJECT_HOST);
     const result = await buildProject(JSON.parse(process.env.ELISCRIPT_OPTIONS));
-    console.log(JSON.stringify({ digest: result.digest, mode: result.mode }));
+    console.log(JSON.stringify({
+      digest: result.digest,
+      mode: result.mode,
+      report: result.report,
+    }));
   `;
   return JSON.parse(await run([node, "--input-type=module", "--eval", source], {
     env: {
@@ -126,6 +154,70 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
       { id: "b", entries: ["y"] },
       { id: "c", entries: ["q"] },
     ]);
+
+    expect(compiler.project_build_report_format).toBe("eliscript-build-report");
+    expect(compiler.project_build_report_version).toBe(1);
+    const reportInput = {
+      mode: "standard",
+      root: "/project",
+      outDir: "/project/dist",
+      entry: "src/main.eli",
+      entryOutput: "src/main.mjs",
+      manifest: "eliscript-project.json",
+      digest: "abc123",
+      portableEntries: [],
+      cache: { enabled: true, reason: "verified" },
+      timings: {
+        cacheReadMs: 0.1236,
+        workMs: 1.2344,
+        manifestWriteMs: 0.3456,
+        totalMs: 1.7036,
+      },
+      modules: [
+        {
+          source: "src/value.eli",
+          output: "src/value.mjs",
+          sourceMap: "src/value.mjs.map",
+          status: "compiled",
+          reason: "source-changed",
+          dependencies: [],
+          portableEntries: [],
+        },
+        {
+          source: "src/main.eli",
+          output: "src/main.mjs",
+          sourceMap: "src/main.mjs.map",
+          status: "reused",
+          reason: "verified",
+          dependencies: ["src/value.eli", "src/value.eli"],
+          portableEntries: [],
+        },
+      ],
+    };
+    const report = compiler.project_build_report(reportInput);
+    expect(report.cache).toEqual({
+      enabled: true,
+      status: "partial",
+      reason: "dirty-modules",
+    });
+    expect(report.counts).toEqual({ modules: 2, compiled: 1, reused: 1 });
+    expect(report.timings).toEqual({
+      cacheReadMs: 0.124,
+      workMs: 1.234,
+      manifestWriteMs: 0.346,
+      totalMs: 1.704,
+    });
+    expect(report.modules.map((module) => module.source)).toEqual([
+      "src/main.eli",
+      "src/value.eli",
+    ]);
+    expect(report.modules[0].dependencies).toEqual(["src/value.eli"]);
+    expect(Object.isFrozen(report)).toBeTrue();
+    expect(Object.isFrozen(report.modules)).toBeTrue();
+    expect(() => compiler.project_build_report({
+      ...reportInput,
+      cache: { enabled: "yes", reason: "verified" },
+    })).toThrow("build report cache enabled must be a boolean");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -150,15 +242,16 @@ test("self-hosted project service matches seed output under Bun and Node", async
       entry: resolve(projectDirectory, "examples/stdlib-cli/main.eli"),
       moduleDirectory: compilerDirectory,
     };
-    await run([
+    const standardSeedReport = JSON.parse(await run([
       seedBuildPath,
+      "--json",
       "--no-cache",
       "--root",
       projectDirectory,
       "--out-dir",
       standardSeed,
       standardOptions.entry,
-    ]);
+    ]));
     const bunResult = await buildProject({
       ...standardOptions,
       outDir: standardBun,
@@ -185,10 +278,14 @@ test("self-hosted project service matches seed output under Bun and Node", async
     expect(publicManifestIdentity(await manifest(standardNode)))
       .toEqual(publicManifestIdentity(standardManifest));
     expect(bunResult.digest).toBe(standardManifest.digest);
-    expect(nodeResult).toEqual({
-      digest: standardManifest.digest,
-      mode: "standard",
-    });
+    expect(stableReportIdentity(bunResult.report))
+      .toEqual(stableReportIdentity(standardSeedReport));
+    expect(stableReportIdentity(nodeResult.report))
+      .toEqual(stableReportIdentity(standardSeedReport));
+    expectValidTimings(bunResult.report);
+    expectValidTimings(nodeResult.report);
+    expect(nodeResult.digest).toBe(standardManifest.digest);
+    expect(nodeResult.mode).toBe("standard");
 
     const portableSeed = resolve(directory, "portable-seed");
     const portableBun = resolve(directory, "portable-bun");
@@ -201,8 +298,9 @@ test("self-hosted project service matches seed output under Bun and Node", async
       portableEntries: ["group-by"],
       moduleDirectory: compilerDirectory,
     };
-    await run([
+    const portableSeedReport = JSON.parse(await run([
       seedBuildPath,
+      "--json",
       "--no-cache",
       "--root",
       portableRoot,
@@ -211,7 +309,7 @@ test("self-hosted project service matches seed output under Bun and Node", async
       "--out-dir",
       portableSeed,
       portableEntry,
-    ]);
+    ]));
     const portableBunResult = await buildProject({
       ...portableOptions,
       outDir: portableBun,
@@ -239,10 +337,14 @@ test("self-hosted project service matches seed output under Bun and Node", async
       [portableEntry, ["group-by"]],
       [resolve(portableRoot, "object.eli"), ["assoc", "has?"]],
     ]);
-    expect(portableNodeResult).toEqual({
-      digest: portableManifest.digest,
-      mode: "portable",
-    });
+    expect(stableReportIdentity(portableBunResult.report))
+      .toEqual(stableReportIdentity(portableSeedReport));
+    expect(stableReportIdentity(portableNodeResult.report))
+      .toEqual(stableReportIdentity(portableSeedReport));
+    expectValidTimings(portableBunResult.report);
+    expectValidTimings(portableNodeResult.report);
+    expect(portableNodeResult.digest).toBe(portableManifest.digest);
+    expect(portableNodeResult.mode).toBe("portable");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

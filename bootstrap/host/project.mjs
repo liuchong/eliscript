@@ -182,6 +182,19 @@ function writeModule({ compiler, program, source, sourceText, root, outDir }) {
   };
 }
 
+function reportModule(module, record, root, outDir) {
+  return {
+    source: relative(root, module.source),
+    output: relative(outDir, module.output),
+    sourceMap: relative(outDir, module.sourceMap),
+    status: "compiled",
+    reason: "cache-disabled",
+    dependencies: record.dependencies.map((dependency) =>
+      relative(root, typeof dependency === "string" ? dependency : dependency.id)),
+    portableEntries: record.entries === undefined ? [] : [...record.entries],
+  };
+}
+
 function manifestRecord(module, root, outDir) {
   return {
     source: relative(root, module.source),
@@ -244,6 +257,7 @@ function portablePlan(
 }
 
 export async function buildProject(options) {
+  const startedAt = performance.now();
   if (!options || typeof options !== "object") {
     projectError("project build options must be an object");
   }
@@ -289,16 +303,45 @@ export async function buildProject(options) {
   const normalizedPortableEntries = plan.mode === "portable"
     ? [...plan.entries[0].entries]
     : [];
-  const modules = plan.modules.map((record) => writeModule({
-    compiler,
-    program: programCache.get(record.id),
-    source: record.id,
-    sourceText: sourceCache.get(record.id),
+  const modules = plan.modules.map((record) => ({
+    record,
+    module: writeModule({
+      compiler,
+      program: programCache.get(record.id),
+      source: record.id,
+      sourceText: sourceCache.get(record.id),
+      root,
+      outDir,
+    }),
+  }));
+  const workFinishedAt = performance.now();
+  const entryOutput = outputFor(entry, root, outDir);
+  const manifestData = writeManifest(
+    entryOutput,
+    modules.map(({ module }) => module),
     root,
     outDir,
-  }));
-  const entryOutput = outputFor(entry, root, outDir);
-  const manifestData = writeManifest(entryOutput, modules, root, outDir);
+  );
+  const manifestFinishedAt = performance.now();
+  const report = compiler.project_build_report({
+    mode: plan.mode,
+    root,
+    outDir,
+    entry: relative(root, entry),
+    entryOutput: relative(outDir, entryOutput),
+    manifest: relative(outDir, manifestData.manifest),
+    digest: manifestData.digest,
+    portableEntries: normalizedPortableEntries,
+    cache: { enabled: false, reason: "cache-disabled" },
+    timings: {
+      cacheReadMs: 0,
+      workMs: workFinishedAt - startedAt,
+      manifestWriteMs: manifestFinishedAt - workFinishedAt,
+      totalMs: manifestFinishedAt - startedAt,
+    },
+    modules: modules.map(({ module, record }) =>
+      reportModule(module, record, root, outDir)),
+  });
   return Object.freeze({
     format: "eliscript-project-build",
     version: 1,
@@ -308,9 +351,10 @@ export async function buildProject(options) {
     entryOutput,
     mode: plan.mode,
     portableEntries: Object.freeze(normalizedPortableEntries),
-    modules: Object.freeze(modules.map((module) => Object.freeze(module))),
+    modules: Object.freeze(modules.map(({ module }) => Object.freeze(module))),
     manifest: manifestData.manifest,
     digest: manifestData.digest,
+    report,
     plan,
   });
 }

@@ -2,6 +2,8 @@
   (defconst project-plan-format "eliscript-project-plan")
   (defconst project-plan-version 1)
   (defconst project-plan-max-iterations 100000)
+  (defconst project-build-report-format "eliscript-build-report")
+  (defconst project-build-report-version 1)
 
   (defconst fail
     (js* "(message) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-B0003', severity: 'error', phase: 'project-plan', message }; throw error; }"))
@@ -10,6 +12,21 @@
     (js* "(value) => value !== null && typeof value === 'object' && !Array.isArray(value)"))
   (defconst sorted-set-values
     (js* "(values) => Array.from(values).sort()"))
+  (defconst nonnegative-number-p
+    (js* "(value) => typeof value === 'number' && Number.isFinite(value) && value >= 0"))
+  (defconst boolean-p
+    (js* "(value) => typeof value === 'boolean'"))
+
+  (defun require-string (value label)
+    (unless (and (= (js* "typeof value") "string")
+                 (> (get value :length) 0))
+      (fail (str label " must be a non-empty string")))
+    value)
+
+  (defun report-milliseconds (value label)
+    (unless (funcall nonnegative-number-p value)
+      (fail (str label " must be a non-negative finite number")))
+    (/ (js-call globalThis.Math :round (* value 1000)) 1000))
 
   (defun normalize-strings (values label require-entry)
     (unless (funcall array-p values)
@@ -195,8 +212,145 @@
             :entries initial
             :modules modules)))))
 
+  (defun normalize-report-modules (values)
+    (unless (funcall array-p values)
+      (fail "build report modules must be an array"))
+    (let ((result (js-array))
+          (compiled 0)
+          (reused 0))
+      (js-call values :forEach
+        (lambda (module)
+          (unless (funcall object-p module)
+            (fail "build report modules must contain only objects"))
+          (let ((status (require-string
+                          (get module :status)
+                          "build report module status")))
+            (unless (or (= status "compiled") (= status "reused"))
+              (fail "build report module status must be compiled or reused"))
+            (if (= status "compiled")
+                (setq compiled (1+ compiled))
+              (setq reused (1+ reused)))
+            (js-call result :push
+              (js-call globalThis.Object :freeze
+                (js-object
+                  :source
+                  (require-string
+                    (get module :source) "build report module source")
+                  :output
+                  (require-string
+                    (get module :output) "build report module output")
+                  :sourceMap
+                  (require-string
+                    (get module :sourceMap) "build report module source map")
+                  :status status
+                  :reason
+                  (require-string
+                    (get module :reason) "build report module reason")
+                  :dependencies
+                  (js-call globalThis.Object :freeze
+                    (normalize-strings
+                      (get module :dependencies)
+                      "build report module dependencies"
+                      false))
+                  :portableEntries
+                  (js-call globalThis.Object :freeze
+                    (normalize-strings
+                      (get module :portableEntries)
+                      "build report module portable entries"
+                      false))))))))
+      (js-call result :sort
+        (lambda (left right)
+          (js-call (get left :source) :localeCompare (get right :source))))
+      (js-call globalThis.Object :freeze result)
+      (js-call globalThis.Object :freeze
+        (js-object :modules result :compiled compiled :reused reused))))
+
+  (defun project-build-report (build)
+    (unless (funcall object-p build)
+      (fail "project build report input must be an object"))
+    (let* ((mode (require-string (get build :mode) "build report mode"))
+           (cache (get build :cache))
+           (timings (get build :timings))
+           (normalized (normalize-report-modules (get build :modules)))
+           (modules (get normalized :modules))
+           (compiled (get normalized :compiled))
+           (reused (get normalized :reused))
+           (lookup-reason
+            (if (funcall object-p cache)
+                (require-string (get cache :reason) "build report cache reason")
+              (fail "build report cache must be an object")))
+           (cache-enabled (get cache :enabled))
+           (cache-status
+            (cond
+              ((not cache-enabled) "disabled")
+              ((= reused 0) "miss")
+              ((= compiled 0) "hit")
+              (t "partial")))
+           (cache-reason
+            (cond
+              ((not cache-enabled) "cache-disabled")
+              ((= cache-status "hit") "verified")
+              ((= cache-status "partial") "dirty-modules")
+              ((= lookup-reason "verified") "all-modules-dirty")
+              (t lookup-reason))))
+      (unless (or (= mode "standard") (= mode "portable"))
+        (fail "build report mode must be standard or portable"))
+      (unless (funcall boolean-p cache-enabled)
+        (fail "build report cache enabled must be a boolean"))
+      (unless (funcall object-p timings)
+        (fail "build report timings must be an object"))
+      (js-call globalThis.Object :freeze
+        (js-object
+          :format project-build-report-format
+          :version project-build-report-version
+          :mode mode
+          :root (require-string (get build :root) "build report root")
+          :outDir (require-string (get build :outDir) "build report output directory")
+          :entry (require-string (get build :entry) "build report entry")
+          :entryOutput
+          (require-string (get build :entryOutput) "build report entry output")
+          :manifest (require-string (get build :manifest) "build report manifest")
+          :digest (require-string (get build :digest) "build report digest")
+          :portableEntries
+          (js-call globalThis.Object :freeze
+            (normalize-strings
+              (get build :portableEntries)
+              "build report portable entries"
+              false))
+          :cache
+          (js-call globalThis.Object :freeze
+            (js-object
+              :enabled (if cache-enabled t false)
+              :status cache-status
+              :reason cache-reason))
+          :counts
+          (js-call globalThis.Object :freeze
+            (js-object
+              :modules (get modules :length)
+              :compiled compiled
+              :reused reused))
+          :timings
+          (js-call globalThis.Object :freeze
+            (js-object
+              :cacheReadMs
+              (report-milliseconds
+                (get timings :cacheReadMs) "build report cache read time")
+              :workMs
+              (report-milliseconds
+                (get timings :workMs) "build report work time")
+              :manifestWriteMs
+              (report-milliseconds
+                (get timings :manifestWriteMs) "build report manifest write time")
+              :totalMs
+              (report-milliseconds
+                (get timings :totalMs) "build report total time")))
+          :modules modules))))
+
   (export
     project-plan-format
     project-plan-version
     project-plan
-    portable-project-plan))
+    portable-project-plan
+    project-build-report-format
+    project-build-report-version
+    project-build-report))

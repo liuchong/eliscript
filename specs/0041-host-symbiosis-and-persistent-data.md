@@ -960,13 +960,13 @@ loop escape with seed/self-hosted agreement. Specification
 [0096-profile-guided-compiler-runtime-scan.md](0096-profile-guided-compiler-runtime-scan.md)
 adds the first source-bound compiler profile, replaces five recursive emitter
 runtime-link scans with one production traversal, retains the five predicates
-as an executable reference, and records a reviewed 1.692794x local median
+as an executable reference, and records a reviewed 1.596247x local median
 speedup.
 Specification
 [0097-profile-guided-ir-node-kind-decisions.md](0097-profile-guided-ir-node-kind-decisions.md)
 adds a frozen node-kind registry and module-private native membership index for
 production IR validation, retains the linear scan as an executable reference,
-and records exact agreement plus a reviewed 10.748017x local median speedup over
+and records exact agreement plus a reviewed 10.671811x local median speedup over
 the maintained compiler corpus. The native index is compiler-internal host
 symbiosis, not a language collection or standard-library dependency. Broader
 compiler hot-path review remains required before P4 exits.
@@ -974,7 +974,7 @@ Specification
 [0098-profile-guided-emitter-indentation.md](0098-profile-guided-emitter-indentation.md)
 replaces repeated character string growth with LF-delimited source slices,
 translates Source Map marks through one monotonic cursor, retains the original
-character loop as an executable reference, and records a reviewed 14.093078x
+character loop as an executable reference, and records a reviewed 14.610301x
 local median speedup. Follow-up whole-compiler sampling moves indentation out
 of the dominant paths. Broader compiler and standard-library hot-path review
 remains required before P4 exits.
@@ -984,7 +984,7 @@ uses the emitter's ordered-mark invariant for constant-time start checks and
 one-step immutable prepend. Normal emission calls a module-private host
 specialization directly, while the previous complete scan and iterative copy
 remain an executable Eliscript reference. The reviewed real-artifact corpus
-records exact agreement plus a current 2.324131x local median speedup after the
+records exact agreement plus a current 2.428094x local median speedup after the
 general comparison-emission optimization, and follow-up
 whole-compiler sampling moves location out of the dominant entries. This is a
 compiler-internal host optimization, not a general collection primitive or an
@@ -995,8 +995,8 @@ Specification
 specializes exactly binary numeric comparisons as direct ECMAScript infix
 expressions while retaining eager capture for n-ary comparison arguments. The
 exact pre-specialization baseline and current compiler alternately compile all
-twelve maintained modules; the reviewed report records a 1.575784x
-complete-compiler median speedup and a 23.7% generated-JavaScript byte
+twelve maintained modules; the reviewed report records a 1.618252x
+complete-compiler median speedup and a 23.5% generated-JavaScript byte
 reduction. A broader constant-dispatch experiment was rejected after its
 complete-compiler result regressed. This is compiler code generation, not an
 application framework or site-tool dependency. Broader compiler and
@@ -1006,8 +1006,8 @@ Specification
 uses two bounded module-private predicates for reader whitespace and delimiter
 decisions while retaining the generated Eliscript `or` chains as independent
 references. Exhaustive Unicode evidence and the real compiler source trace
-agree exactly; the reviewed report records a 5.011063x predicate median
-speedup and a 1.238266x complete-compiler median speedup against the exact
+agree exactly; the reviewed report records a 5.399289x predicate median
+speedup and a 1.249726x complete-compiler median speedup against the exact
 pre-specialization revision. The complete compiler outputs remain byte
 identical. No application framework or build tool participates in this P4
 evidence, and broader hot-path review remains required before P4 exits.
@@ -1016,8 +1016,8 @@ Specification
 uses monotonic generated-mark and sorted source-offset cursors for the two
 largest remaining Source Map preparation entries. The prior complete scans
 remain independent executable references. The reviewed report records exact
-agreement over 21,896 artifact marks and explicit boundaries, a 4.589534x
-cursor-pipeline median speedup, and a 1.151910x complete-compiler median
+agreement over 22,310 artifact marks and explicit boundaries, a 4.546145x
+cursor-pipeline median speedup, and a 1.128405x complete-compiler median
 speedup with byte-identical ESM and Source Maps. Application tooling receives
 no P4 credit.
 Specification

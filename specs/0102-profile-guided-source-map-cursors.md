@@ -73,8 +73,8 @@ baseline/optimized complete-compiler timings alternate after warmup.
 
 The predeclared acceptance thresholds are 1.5x for the combined cursor pipeline
 and 1.08x for the complete compiler. The reviewed macOS arm64 report covers 14
-pipeline cases and 21,896 artifact marks. It records a 4.589534x pipeline
-median speedup and a 1.151910x complete-compiler median speedup, plus raw
+pipeline cases and 22,310 artifact marks. It records a 4.546145x pipeline
+median speedup and a 1.128405x complete-compiler median speedup, plus raw
 samples, checksums, host identity, corpus shape, SHA-256 source identity, and
 the decision. Default tests validate the report without rerunning wall-clock
 timing.
