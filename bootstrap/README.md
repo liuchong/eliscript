@@ -41,8 +41,8 @@ mapping fragments, while `compiler/source-map.eli` encodes those marks as
 Source Map v3. The generated pipeline can process and emit every current
 bootstrap module, including its own sources. `compiler/compiler.eli` composes
 the complete in-memory pipeline without filesystem dependencies and owns the
-versioned evaluation request, form-classification, binding, export, and macro
-descriptors used by persistent evaluation.
+versioned evaluation request, interactive-input, form-classification, binding,
+export, and macro descriptors used by persistent evaluation.
 `compiler/formatter.eli` separately owns comment-preserving concrete syntax,
 fixed layout, and canonical source text without using emitter or application
 formatting behavior.
@@ -57,8 +57,10 @@ timing boundary while using those generated operations for real multi-module
 builds.
 `host/evaluation.mjs` owns one persistent temporary namespace, canonical value
 printing, output framing, Source Map failure normalization, revision commits,
-and cleanup. `host/evaluation-cli.mjs` exposes one-shot and NDJSON modes through
-the public `eliscript-eval` command.
+and cleanup. `host/evaluation-cli.mjs` exposes one-shot, NDJSON, and persistent
+terminal REPL modes through the public `eliscript-eval` command. Terminal
+commands and presentation remain host behavior; multiline completeness remains
+compiler-owned reader behavior.
 
 ## Build
 

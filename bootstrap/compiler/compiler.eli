@@ -38,6 +38,8 @@
     project-cache-decision)
   (defconst evaluation-operation-format "eliscript-evaluation-operation")
   (defconst evaluation-operation-version 1)
+  (defconst evaluation-input-format "eliscript-evaluation-input")
+  (defconst evaluation-input-version 1)
   (defconst evaluation-form-format "eliscript-evaluation-form")
   (defconst evaluation-form-version 1)
   (defconst evaluation-module-format "eliscript-evaluation-module")
@@ -79,6 +81,43 @@
     (unless (and (= (js* "typeof filename") "string") (> (get filename :length) 0))
       (funcall evaluation-fail "evaluation filename must be a non-empty string" false))
     filename)
+  (defun evaluation-input-result
+    (status filename)
+    (js-call
+      globalThis.Object
+      :freeze
+      (js-object
+        :format
+        evaluation-input-format
+        :version
+        evaluation-input-version
+        :status
+        status
+        :filename
+        filename)))
+  (defun evaluation-input-description
+    (source filename)
+    (evaluation-require-filename filename)
+    (unless (= (js* "typeof source") "string")
+      (funcall evaluation-fail "evaluation input source must be a string" filename))
+    (try
+      (let ((forms (read-string source filename)))
+        (cond ((= (get forms :length) 0) (evaluation-input-result "empty" filename))
+          ((= (get forms :length) 1) (evaluation-input-result "complete" filename))
+          (t
+            (funcall
+              evaluation-fail
+              "interactive input must contain exactly one top-level form"
+              filename))))
+      (catch error
+        (let ((diagnostic (get error :eliscriptDiagnostic nil)))
+          (if
+            (and
+              diagnostic
+              (= (get diagnostic :code nil) "ELI-R0001")
+              (= (get diagnostic :message nil) "unexpected end of input"))
+            (evaluation-input-result "incomplete" filename)
+            (throw error))))))
   (defun evaluation-operation-request
     (input)
     (unless (funcall evaluation-object-p input)
@@ -389,6 +428,9 @@
     evaluation-operation-format
     evaluation-operation-version
     evaluation-operation-request
+    evaluation-input-format
+    evaluation-input-version
+    evaluation-input-description
     evaluation-form-format
     evaluation-form-version
     evaluation-form-description

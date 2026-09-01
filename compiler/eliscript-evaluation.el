@@ -20,6 +20,8 @@
 (defconst eliscript-evaluation-operation-format
   "eliscript-evaluation-operation")
 (defconst eliscript-evaluation-operation-version 1)
+(defconst eliscript-evaluation-input-format "eliscript-evaluation-input")
+(defconst eliscript-evaluation-input-version 1)
 (defconst eliscript-evaluation-form-format "eliscript-evaluation-form")
 (defconst eliscript-evaluation-form-version 1)
 (defconst eliscript-evaluation-module-format "eliscript-evaluation-module")
@@ -63,6 +65,39 @@
     (eliscript-evaluation--fail
      "evaluation source must be a non-empty string" filename))
   source)
+
+(defun eliscript-evaluation--input-result (status filename)
+  "Return an immutable-style input descriptor for STATUS and FILENAME."
+  `((format . ,eliscript-evaluation-input-format)
+    (version . ,eliscript-evaluation-input-version)
+    (status . ,status)
+    (filename . ,filename)))
+
+(defun eliscript-evaluation-input-description (source filename)
+  "Classify interactive SOURCE from FILENAME without evaluating it."
+  (eliscript-evaluation--require-filename filename)
+  (unless (stringp source)
+    (eliscript-evaluation--fail
+     "evaluation input source must be a string" filename))
+  (condition-case error-data
+      (let ((forms (eliscript-read-located-string source filename)))
+        (cond
+         ((null forms)
+          (eliscript-evaluation--input-result "empty" filename))
+         ((null (cdr forms))
+          (eliscript-evaluation--input-result "complete" filename))
+         (t
+          (eliscript-evaluation--fail
+           "interactive input must contain exactly one top-level form"
+           filename))))
+    (eliscript-read-error
+     (let ((diagnostic (eliscript-diagnostic-from-error error-data)))
+       (if (and (string-equal (eliscript-diagnostic-code diagnostic)
+                              "ELI-R0001")
+                (string-equal (eliscript-diagnostic-message diagnostic)
+                              "unexpected end of input"))
+           (eliscript-evaluation--input-result "incomplete" filename)
+         (signal (car error-data) (cdr error-data)))))))
 
 (defun eliscript-evaluation-operation-request (input)
   "Normalize version 1 evaluation operation INPUT."

@@ -67,6 +67,27 @@
         (format "(%s 1)" name) "repl.eli"))
       "expression"))))
 
+(ert-deftest eliscript-evaluation-seed-classifies-interactive-input ()
+  (dolist (case '(("" "empty")
+                  (" ; comment\n" "empty")
+                  ("(+ 1" "incomplete")
+                  ("\"unfinished" "incomplete")
+                  ("'" "incomplete")
+                  ("(+ 1 2)" "complete")
+                  ("#{1 2}" "complete")))
+    (should
+     (equal
+      (alist-get
+       'status
+       (eliscript-evaluation-input-description (car case) "repl.eli"))
+      (cadr case))))
+  (should-error
+   (eliscript-evaluation-input-description "(+ 1 ])" "repl.eli")
+   :type 'eliscript-read-error)
+  (should-error
+   (eliscript-evaluation-input-description "1 2" "repl.eli")
+   :type 'eliscript-evaluation-error))
+
 (ert-deftest eliscript-evaluation-seed-describes-module-bindings-and-macros ()
   (let ((description
          (eliscript-evaluation-module-description

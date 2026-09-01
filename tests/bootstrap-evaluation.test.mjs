@@ -63,6 +63,21 @@ async function protocol(runtime, lines) {
   return result.stdout.trim().split("\n").map((line) => JSON.parse(line));
 }
 
+async function terminal(
+  runtime,
+  lines,
+  options = ["--repl", "--no-prompt", "--root", projectDirectory],
+) {
+  return run([evaluationPath, ...options], {
+    env: {
+      ...process.env,
+      ELISCRIPT_BOOTSTRAP_MODULE_DIR: compilerDirectory,
+      ELISCRIPT_JS_RUNTIME: runtime,
+    },
+    stdin: lines.join("\n"),
+  });
+}
+
 beforeAll(async () => {
   directory = mkdtempSync(join(tmpdir(), "eliscript-evaluation-test-"));
   compilerDirectory = resolve(directory, "compiler");
@@ -110,6 +125,15 @@ test("self-hosted evaluation descriptors are closed and framework neutral", () =
     operation: "describe",
     framework: "anything",
   })).toThrow("unknown evaluation operation key: framework");
+
+  expect(compiler.evaluation_input_format).toBe("eliscript-evaluation-input");
+  expect(compiler.evaluation_input_version).toBe(1);
+  expect(compiler.evaluation_input_description("(+ 1", "repl.eli")).toEqual({
+    format: "eliscript-evaluation-input",
+    version: 1,
+    status: "incomplete",
+    filename: "repl.eli",
+  });
 
   expect(compiler.evaluation_form_description(
     "(defun value () 42)",
@@ -185,6 +209,14 @@ test("seed and self-hosted evaluation descriptors agree", async () => {
       kind: "operation",
       input: { id: 9007199254740992, operation: "describe" },
     },
+    { kind: "input", source: "", filename: "repl.eli" },
+    { kind: "input", source: "; comment\n", filename: "repl.eli" },
+    { kind: "input", source: "(+ 1", filename: "repl.eli" },
+    { kind: "input", source: "\"unfinished", filename: "repl.eli" },
+    { kind: "input", source: "'", filename: "repl.eli" },
+    { kind: "input", source: "#{1 2}", filename: "repl.eli" },
+    { kind: "input", source: "(+ 1 ])", filename: "repl.eli" },
+    { kind: "input", source: "1 2", filename: "repl.eli" },
     {
       kind: "operation",
       input: { operation: "describe", unknown: true },
@@ -217,6 +249,8 @@ test("seed and self-hosted evaluation descriptors agree", async () => {
     try {
       const value = entry.kind === "operation"
         ? compiler.evaluation_operation_request(entry.input)
+        : entry.kind === "input"
+          ? compiler.evaluation_input_description(entry.source, entry.filename)
         : entry.kind === "form"
           ? compiler.evaluation_form_description(entry.source, entry.filename)
           : compiler.evaluation_module_description(entry.source, entry.filename);
@@ -413,4 +447,98 @@ test("Node and Bun preserve NDJSON framing and source locations", async () => {
     });
     expect(results[4]).toMatchObject({ id: 4, revision: 1, value: "43" });
   }
+});
+
+test("Node and Bun terminal REPLs preserve multiline state and recover", async () => {
+  const lines = [
+    ":reload",
+    ":unknown",
+    "; an empty submission",
+    "(defvar x 40)",
+    "(+",
+    " x",
+    " 2)",
+    "(defmacro twice (value) `(+ ,value ,value))",
+    "(twice 21)",
+    "(+ x ]",
+    "(+ x 3)",
+    ":load tests/fixtures/evaluation-session/main.eli",
+    "(explode)",
+    "(current)",
+    ":load tests/fixtures/evaluation-session/missing.eli",
+    ":reload",
+    "(current)",
+    ":reset",
+    "(defvar done 7)",
+    "done",
+    ":quit",
+    "(+ 1 1000)",
+  ];
+  const [nodeResult, bunResult] = await Promise.all([
+    terminal(node, lines),
+    terminal(bun, lines),
+  ]);
+  for (const result of [nodeResult, bunResult]) {
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+  }
+  const runtimePrefix = `eliscript-eval: ${fixture}:8:30: `;
+  const normalizeRuntimeMessage = (output) => output
+    .split("\n")
+    .map((line) => line.startsWith(runtimePrefix)
+      ? `${runtimePrefix}<host-runtime-message>`
+      : line)
+    .join("\n");
+  expect(normalizeRuntimeMessage(nodeResult.stdout))
+    .toBe(normalizeRuntimeMessage(bunResult.stdout));
+  expect(nodeResult.stdout).toContain(
+    "eliscript-eval: :reload requires a prior successful :load\n",
+  );
+  expect(nodeResult.stdout).toContain(
+    "eliscript-eval: unknown REPL command: :unknown\n",
+  );
+  expect(nodeResult.stdout).toContain("40\n42\ntwice\n42\n");
+  expect(nodeResult.stdout).toContain(
+    'eliscript-eval: <repl>.eli:1:1: Invalid read syntax: "]"\n43\n',
+  );
+  expect(nodeResult.stdout.match(/evaluation fixture loaded\n/g)).toHaveLength(2);
+  for (const result of [nodeResult, bunResult]) {
+    expect(result.stdout).toContain(runtimePrefix);
+    expect(result.stdout).toContain("\n[1 1]\n");
+  }
+  expect(nodeResult.stdout).toContain("missing.eli");
+  expect(nodeResult.stdout).toEndWith("session reset\n7\n7\n");
+  expect(nodeResult.stdout).not.toContain("1001");
+});
+
+test("terminal prompt policy and incomplete EOF are deterministic", async () => {
+  const promptedLines = ["(+", " 20", " 22)", ":help", ":quit"];
+  const [nodePrompted, bunPrompted] = await Promise.all([
+    terminal(node, promptedLines, ["--repl", "--prompt"]),
+    terminal(bun, promptedLines, ["--repl", "--prompt"]),
+  ]);
+  expect(nodePrompted).toEqual(bunPrompted);
+  expect(nodePrompted.exitCode).toBe(0);
+  expect(nodePrompted.stdout).toStartWith(
+    "Eliscript REPL. Type :help for commands.\neliscript=> ",
+  );
+  expect(nodePrompted.stdout).toContain("      ...       ... 42\n");
+  expect(nodePrompted.stdout).toContain("Commands:\n");
+
+  const [nodeDefault, bunDefault] = await Promise.all([
+    terminal(node, ["(+ 20 22)", ":quit"], ["--no-prompt"]),
+    terminal(bun, ["(+ 20 22)", ":quit"], ["--no-prompt"]),
+  ]);
+  expect(nodeDefault.stdout).toBe("42\n");
+  expect(bunDefault.stdout).toBe(nodeDefault.stdout);
+
+  const [nodeIncomplete, bunIncomplete] = await Promise.all([
+    terminal(node, ["(+", " 1"]),
+    terminal(bun, ["(+", " 1"]),
+  ]);
+  expect(nodeIncomplete.stdout).toBe(bunIncomplete.stdout);
+  expect(nodeIncomplete.stdout).toContain(
+    "eliscript-eval: <repl>.eli:1:1: unexpected end of input\n",
+  );
+  expect(nodeIncomplete.exitCode).toBe(0);
 });

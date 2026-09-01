@@ -19,6 +19,9 @@
                ((string-equal kind "operation")
                 (eliscript-evaluation-operation-request
                  (alist-get 'input case)))
+               ((string-equal kind "input")
+                (eliscript-evaluation-input-description
+                 (alist-get 'source case) (alist-get 'filename case)))
                ((string-equal kind "form")
                 (eliscript-evaluation-form-description
                  (alist-get 'source case) (alist-get 'filename case)))

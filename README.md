@@ -33,7 +33,7 @@ single-file, single-entry project, and multi-entry project builds through one
 versioned operation boundary. Version 2 project identity, reports, cache
 validation, and worker loading preserve the version 1 single-entry contract.
 
-The first five M10 slices are complete. The self-hosted compiler now owns a
+The first six M10 slices are complete. The self-hosted compiler now owns a
 comment-preserving concrete-syntax formatter with fixed two-space/88-column
 layout, byte-idempotence and ESM-semantic corpus evidence, plus one Bun/Node
 `eliscript-format` command for stdout, atomic `--write`, and non-mutating
@@ -49,8 +49,11 @@ seed/self-hosted evaluation descriptors now drive one persistent Bun/Node
 session with canonical value printing, source-mapped failures, atomic
 namespace revisions, and framed output. The Emacs mode evaluates forms and
 unsaved buffers, restores acknowledged project state after a host restart, and
-stops sessions explicitly. A complete terminal REPL, watching, onboarding,
-and the complete M10 exit gate remain future work.
+stops sessions explicitly. The same session now powers a terminal REPL with
+compiler-owned multiline input classification, persistent definitions and
+macros, load/reload/reset commands, recoverable errors, and deterministic
+prompt control. Watching, onboarding, and the complete M10 exit gate remain
+future work.
 
 The current M8 work provides:
 
@@ -233,7 +236,13 @@ compiler:
 ```sh
 ./bin/eliscript-eval --eval '(+ 20 22)'
 ./bin/eliscript-eval --file examples/basic/main.eli --json
+./bin/eliscript-eval --repl
 ```
+
+The terminal REPL is also the default when no evaluation mode is supplied.
+Use `:load FILE`, `:reload`, `:reset`, `:help`, and `:quit` while no multiline
+form is pending. `--prompt` and `--no-prompt` make transcript presentation
+explicit.
 
 Pass multiple entries with an explicit root to emit one versioned union graph:
 
@@ -376,6 +385,7 @@ arbitrary Emacs packages in JavaScript.
 | Check a source graph | `./bin/eliscript-check --json --root . source.eli` |
 | Evaluate one form | `./bin/eliscript-eval --eval '(+ 20 22)'` |
 | Load one source namespace | `./bin/eliscript-eval --file source.eli --json` |
+| Start a persistent terminal REPL | `./bin/eliscript-eval --repl` |
 | Request JSON diagnostics | `./bin/eliscript --diagnostic-format json source.eli` |
 | Inspect build decisions | `./bin/eliscript-build --json --root . --out-dir dist source.eli` |
 | Build the self-hosted compiler | `bun run build:bootstrap` |

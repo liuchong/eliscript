@@ -82,7 +82,10 @@ single-evaluation corpus under Bun and Node.js.
 evaluation descriptors, then exercises atomic definition replacement, macro
 reuse, complete-source reload, persistent Atom identity, canonical values,
 captured output, source-mapped failures, NDJSON recovery, Node/Bun parity, and
-temporary-session cleanup. `eliscript-repl-tests.el` drives the real public
+temporary-session cleanup. It also compares compiler-owned interactive input
+classification and drives equivalent Node/Bun terminal transcripts through
+multiline forms, load/reload/reset, recoverable failures, prompt policy, EOF,
+and explicit exit. `eliscript-repl-tests.el` drives the real public
 process from Emacs, verifies project-scoped unsaved-buffer evaluation and
 located failures, kills the process, proves acknowledged namespace recovery,
 and stops the replacement before the test exits.

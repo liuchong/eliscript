@@ -1680,6 +1680,42 @@
           "contains": "Node and Bun preserve NDJSON framing and source locations"
         }
       ]
+    },
+    {
+      "id": "toolchain.interactive-terminal-repl",
+      "title": "Interactive terminal REPL",
+      "status": "accepted",
+      "spec": "0120",
+      "contracts": [
+        "Classifies empty, incomplete, complete, and invalid interactive input in seed and self-hosted compilers",
+        "Preserves definitions, macros, live values, and loaded source across terminal submissions",
+        "Supports deterministic load, reload, reset, help, prompt, and exit behavior",
+        "Recovers from reader, compiler, runtime, and terminal command failures in one process",
+        "Reports exact Eliscript source locations under Bun and Node",
+        "Keeps application frameworks and publishing infrastructure outside language behavior and evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-evaluation-tests.el",
+          "contains": "eliscript-evaluation-seed-classifies-interactive-input"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-evaluation.test.mjs",
+          "contains": "seed and self-hosted evaluation descriptors agree"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-evaluation.test.mjs",
+          "contains": "Node and Bun terminal REPLs preserve multiline state and recover"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-evaluation.test.mjs",
+          "contains": "terminal prompt policy and incomplete EOF are deterministic"
+        }
+      ]
     }
   ]
 }

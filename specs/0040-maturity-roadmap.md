@@ -898,13 +898,20 @@ and runtime failures back to `.eli`. The Emacs mode loads unsaved buffers,
 evaluates forms, displays navigable failures, and restores only acknowledged
 namespace state after an unexpected process restart.
 
+Specification 0120 completes the terminal REPL slice. The generated compiler
+classifies empty, incomplete, and complete interactive input through the
+self-hosted reader. One public Bun/Node terminal process preserves definitions,
+macros, live values, and loaded project state; supports load, reload, reset,
+help, and exit; recovers after reader, compiler, and runtime failures; and keeps
+terminal presentation outside language semantics.
+
 **M10 status:** In progress. Formatter, single-file format-check, the
 foundational Emacs major mode, project-aware check, unsaved-buffer validation,
 diagnostic navigation, virtual-source builds, and buffer/file/project compile
 commands are implemented. Persistent source-mapped evaluation and Emacs
-restart recovery are implemented; the complete terminal REPL, host-neutral
-watch events, onboarding, full AC-12/AC-13 matrices, and the exit gate remain
-open.
+restart recovery are implemented. The terminal REPL is implemented with
+compiler-owned multiline input and Bun/Node evidence; host-neutral watch
+events, onboarding, the full AC-12 matrix, and the exit gate remain open.
 
 ### M11: Standard and Platform Libraries (8-12 weeks)
 

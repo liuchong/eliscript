@@ -96,7 +96,7 @@ function stackLocation(stack) {
 function generatedStackLocation(stack) {
   if (typeof stack !== "string") return null;
   const match = stack.match(
-    /(?:at\s+)?(?:file:\/\/)?([^\s()]+\.mjs):(\d+):(\d+)/u,
+    /(?:at\s+)?(?:file:\/\/)?([^\s()?]+\.mjs)(?:[?#][^\s():]*)?:(\d+):(\d+)/u,
   );
   if (!match) return null;
   const generatedFile = decodeURIComponent(match[1].trim());
@@ -329,7 +329,7 @@ export class EvaluationSession {
     );
     writeFileSync(
       modulePath,
-      `${emission.javascript}\n//# sourceMappingURL=${generatedName}.map\n`,
+      `${emission.javascript}\n`,
       "utf8",
     );
     writeFileSync(`${modulePath}.map`, emission.sourceMap, "utf8");
@@ -348,6 +348,7 @@ export class EvaluationSession {
       sourceOverrides: new Map([[filename, source]]),
       compiler: this.compiler,
       compilerDigest: evaluationCompilerDigest,
+      sourceMapReference: false,
     });
     const modulePath = result.entryOutput;
     const url = `${pathToFileURL(modulePath).href}?artifact=${this.artifact}`;

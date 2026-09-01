@@ -216,6 +216,7 @@ function writeModule({
   dependencies,
   portableEntries,
   reason,
+  sourceMapReference,
 }) {
   const output = outputFor(source, root, outDir);
   const sourceMap = `${output}.map`;
@@ -226,7 +227,9 @@ function writeModule({
     basename(output),
     relative(dirname(sourceMap), source),
   );
-  const javascript = `${emission.javascript}//# sourceMappingURL=${basename(sourceMap)}\n`;
+  const javascript = sourceMapReference
+    ? `${emission.javascript}//# sourceMappingURL=${basename(sourceMap)}\n`
+    : emission.javascript;
   mkdirSync(dirname(output), { recursive: true });
   writeFileSync(sourceMap, emission.sourceMap);
   writeFileSync(output, javascript);
@@ -736,7 +739,9 @@ export async function buildProject(options) {
     mkdirSync(requestedOutDir, { recursive: true });
   }
   const outDir = realpathSync(requestedOutDir);
-  const useCache = request.useCache && sourceOverrides.size === 0;
+  const sourceMapReference = options.sourceMapReference !== false;
+  const useCache = request.useCache && sourceOverrides.size === 0 &&
+    sourceMapReference;
   const compilerDigest = options.compiler === undefined
     ? compilerDirectoryDigest(moduleDirectory)
     : compilerDigestOption(options.compilerDigest);
@@ -812,6 +817,7 @@ export async function buildProject(options) {
       reason: cacheLookup.cache === null
         ? cacheLookup.reason
         : cached.decision.reason,
+      sourceMapReference,
     });
   });
   const workFinishedAt = performance.now();

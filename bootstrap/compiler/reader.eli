@@ -6,33 +6,33 @@
     symbol-node
     keyword-node
     collection-node)
-
   (defconst fail
-    (js* "(diagnostic) => { const p = diagnostic.location.start; const error = new Error(`${diagnostic.location.file}:${p.line}:${p.column}: ${diagnostic.message}`); error.eliscriptDiagnostic = diagnostic; throw error; }"))
+    (js*
+      "(diagnostic) => { const p = diagnostic.location.start; const error = new Error(`${diagnostic.location.file}:${p.line}:${p.column}: ${diagnostic.message}`); error.eliscriptDiagnostic = diagnostic; throw error; }"))
   (defconst number-pattern
     (js* "/^[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?$/"))
   (defconst native-whitespace-code-p
-    (js* "(code) => code === 32 || code === 9 || code === 10 || code === 13 || code === 12"))
+    (js*
+      "(code) => code === 32 || code === 9 || code === 10 || code === 13 || code === 12"))
   (defconst native-delimiter-code-p
-    (js* "(code) => code === undefined || code === 32 || code === 9 || code === 10 || code === 13 || code === 12 || code === 40 || code === 41 || code === 91 || code === 93 || code === 123 || code === 125 || code === 34 || code === 39 || code === 44 || code === 59 || code === 96"))
-
-  (defun make-state (source filename)
+    (js*
+      "(code) => code === undefined || code === 32 || code === 9 || code === 10 || code === 13 || code === 12 || code === 40 || code === 41 || code === 91 || code === 93 || code === 123 || code === 125 || code === 34 || code === 39 || code === 44 || code === 59 || code === 96"))
+  (defun make-state
+    (source filename)
+    (js-object :source source :filename filename :index 0 :offset 0 :line 1 :column 1))
+  (defun mark
+    (state)
     (js-object
-      :source source
-      :filename filename
-      :index 0
-      :offset 0
-      :line 1
-      :column 1))
-
-  (defun mark (state)
-    (js-object
-      :index (get state :index)
-      :offset (get state :offset)
-      :line (get state :line)
-      :column (get state :column)))
-
-  (defun span-from (state start)
+      :index
+      (get state :index)
+      :offset
+      (get state :offset)
+      :line
+      (get state :line)
+      :column
+      (get state :column)))
+  (defun span-from
+    (state start)
     (make-span
       (get state :filename)
       (get start :offset)
@@ -41,174 +41,157 @@
       (get start :column)
       (get state :line)
       (get state :column)))
-
-  (defun fail-at (state position message)
-    (fail
-      (js-object
-        :format "eliscript-diagnostic"
-        :version 1
-        :code "ELI-R0001"
-        :severity "error"
-        :phase "reader"
-        :message message
-        :location
+  (defun fail-at
+    (state position message &optional width)
+    (let ((span-width (or width 0)))
+      (fail
         (js-object
-          :file (or (get state :filename) "<input>")
-          :start
+          :format
+          "eliscript-diagnostic"
+          :version
+          1
+          :code
+          "ELI-R0001"
+          :severity
+          "error"
+          :phase
+          "reader"
+          :message
+          message
+          :location
           (js-object
-            :offset (get position :offset)
-            :line (get position :line)
-            :column (get position :column))
-          :end
-          (js-object
-            :offset (get position :offset)
-            :line (get position :line)
-            :column (get position :column))))))
-
-  (defun peek-code (state)
+            :file
+            (or (get state :filename) "<input>")
+            :start
+            (js-object
+              :offset
+              (get position :offset)
+              :line
+              (get position :line)
+              :column
+              (get position :column))
+            :end
+            (js-object
+              :offset
+              (+ (get position :offset) span-width)
+              :line
+              (get position :line)
+              :column
+              (+ (get position :column) span-width)))))))
+  (defun peek-code
+    (state)
     (js-call (get state :source) :codePointAt (get state :index)))
-
-  (defun peek-code-ahead (state code-units)
-    (js-call
-      (get state :source)
-      :codePointAt
-      (+ (get state :index) code-units)))
-
-  (defun advance (state)
+  (defun peek-code-ahead
+    (state code-units)
+    (js-call (get state :source) :codePointAt (+ (get state :index) code-units)))
+  (defun advance
+    (state)
     (let ((code (peek-code state)))
       (unless (eq code undefined)
-        (put state :index
-          (+ (get state :index) (if (> code 65535) 2 1)))
+        (put state :index (+ (get state :index) (if (> code 65535) 2 1)))
         (put state :offset (1+ (get state :offset)))
         (if (= code 10)
-            (progn
-              (put state :line (1+ (get state :line)))
-              (put state :column 1))
+          (progn (put state :line (1+ (get state :line))) (put state :column 1))
           (put state :column (1+ (get state :column)))))
       code))
-
-  (defun reference-whitespace-code-p (code)
-    (or (= code 32)
-        (= code 9)
-        (= code 10)
-        (= code 13)
-        (= code 12)))
-
-  (defun whitespace-code-p (code)
-    (funcall native-whitespace-code-p code))
-
-  (defun reference-delimiter-code-p (code)
-    (or (eq code undefined)
-        (reference-whitespace-code-p code)
-        (= code 40)
-        (= code 41)
-        (= code 91)
-        (= code 93)
-        (= code 123)
-        (= code 125)
-        (= code 34)
-        (= code 39)
-        (= code 44)
-        (= code 59)
-        (= code 96)))
-
-  (defun delimiter-code-p (code)
-    (funcall native-delimiter-code-p code))
-
-  (defun closing-code-p (code)
-    (or (= code 41) (= code 93) (= code 125)))
-
-  (defun code-character (code)
-    (js-call (js* "String") :fromCodePoint code))
-
-  (defun invalid-closing (state position code)
+  (defun reference-whitespace-code-p
+    (code)
+    (or (= code 32) (= code 9) (= code 10) (= code 13) (= code 12)))
+  (defun whitespace-code-p (code) (funcall native-whitespace-code-p code))
+  (defun reference-delimiter-code-p
+    (code)
+    (or
+      (eq code undefined)
+      (reference-whitespace-code-p code)
+      (= code 40)
+      (= code 41)
+      (= code 91)
+      (= code 93)
+      (= code 123)
+      (= code 125)
+      (= code 34)
+      (= code 39)
+      (= code 44)
+      (= code 59)
+      (= code 96)))
+  (defun delimiter-code-p (code) (funcall native-delimiter-code-p code))
+  (defun closing-code-p (code) (or (= code 41) (= code 93) (= code 125)))
+  (defun code-character (code) (js-call (js* "String") :fromCodePoint code))
+  (defun invalid-closing
+    (state position code)
     (fail-at
-      state position
-      (str "Invalid read syntax: \"" (code-character code) "\"")))
-
-  (defun skip-space-and-comments (state)
+      state
+      position
+      (str "Invalid read syntax: \"" (code-character code) "\"")
+      1))
+  (defun skip-space-and-comments
+    (state)
     (let ((done false))
       (while (not done)
         (let ((code (peek-code state)))
-          (cond
-            ((eq code undefined)
-             (setq done t))
-            ((whitespace-code-p code)
-             (advance state))
+          (cond ((eq code undefined) (setq done t))
+            ((whitespace-code-p code) (advance state))
             ((= code 59)
-             (while (and (not (eq (peek-code state) undefined))
-                         (not (= (peek-code state) 10)))
-               (advance state)))
+              (while
+                (and
+                  (not (eq (peek-code state) undefined))
+                  (not (= (peek-code state) 10)))
+                (advance state)))
             (t (setq done t)))))))
-
-  (defun read-token (state start)
-    (while (not (delimiter-code-p (peek-code state)))
-      (advance state))
-    (js-call
-      (get state :source)
-      :slice
-      (get start :index)
-      (get state :index)))
-
-  (defun number-token-p (token)
-    (js-call number-pattern :test token))
-
-  (defun valid-keyword-name-p (name)
+  (defun read-token
+    (state start)
+    (while (not (delimiter-code-p (peek-code state))) (advance state))
+    (js-call (get state :source) :slice (get start :index) (get state :index)))
+  (defun number-token-p (token) (js-call number-pattern :test token))
+  (defun valid-keyword-name-p
+    (name)
     (let ((separator (js-call name :indexOf "/")))
-      (and (> (get name :length) 0)
-           (or (= separator -1)
-               (and (> separator 0)
-                    (< separator (1- (get name :length)))
-                    (= (js-call name :indexOf "/" (1+ separator)) -1))))))
-
-  (defun read-atom (state start)
-    (let* ((token (read-token state start))
-           (span (span-from state start)))
-      (cond
-        ((= token "nil") (literal-node nil span))
+      (and
+        (> (get name :length) 0)
+        (or
+          (= separator -1)
+          (and
+            (> separator 0)
+            (< separator (1- (get name :length)))
+            (= (js-call name :indexOf "/" (1+ separator)) -1))))))
+  (defun read-atom
+    (state start)
+    (let* ((token (read-token state start)) (span (span-from state start)))
+      (cond ((= token "nil") (literal-node nil span))
         ((= token "t") (literal-node t span))
         ((= token "false") (literal-node false span))
         ((= token "undefined") (undefined-node span))
         ((js-call token :startsWith ":")
-         (let ((name (js-call token :slice 1)))
-           (unless (valid-keyword-name-p name)
-             (fail-at state start (str "invalid keyword literal: " token)))
-           (keyword-node name span)))
-        ((number-token-p token)
-         (literal-node (funcall (js* "Number") token) span))
+          (let ((name (js-call token :slice 1)))
+            (unless (valid-keyword-name-p name)
+              (fail-at state start (str "invalid keyword literal: " token)))
+            (keyword-node name span)))
+        ((number-token-p token) (literal-node (funcall (js* "Number") token) span))
         (t (symbol-node token span)))))
-
-  (defun read-string-literal (state start)
+  (defun read-string-literal
+    (state start)
     (advance state)
     (let ((done false))
       (while (not done)
         (let ((code (peek-code state)))
-          (cond
-            ((eq code undefined)
-             (fail-at state start "unexpected end of input"))
+          (cond ((eq code undefined) (fail-at state start "unexpected end of input"))
             ((= code 92)
-             (advance state)
-             (when (eq (peek-code state) undefined)
-               (fail-at state start "unexpected end of input"))
-             (advance state))
-            ((= code 34)
-             (advance state)
-             (setq done t))
+              (advance state)
+              (when (eq (peek-code state) undefined)
+                (fail-at state start "unexpected end of input"))
+              (advance state))
+            ((= code 34) (advance state) (setq done t))
             (t (advance state)))))
-      (let* ((raw
-              (js-call
-                (get state :source)
-                :slice
-                (get start :index)
-                (get state :index)))
-             (value (js-call (js* "JSON") :parse raw)))
+      (let*
+        (
+          (raw
+            (js-call (get state :source) :slice (get start :index) (get state :index)))
+          (value (js-call (js* "JSON") :parse raw)))
         (literal-node value (span-from state start)))))
-
-  (defun read-prefix (state start name width)
+  (defun read-prefix
+    (state start name width)
     (let ((remaining width))
-      (while (> remaining 0)
-        (advance state)
-        (setq remaining (1- remaining))))
+      (while (> remaining 0) (advance state) (setq remaining (1- remaining))))
     (let ((prefix-span (span-from state start)))
       (skip-space-and-comments state)
       (when (eq (peek-code state) undefined)
@@ -218,67 +201,49 @@
           "list"
           (js-array (symbol-node name prefix-span) child)
           (span-from state start)))))
-
-  (defun read-collection (state start closing kind)
+  (defun read-collection
+    (state start closing kind)
     (advance state)
-    (let ((opening-span (span-from state start))
-          (items (js-array))
-          (done false))
+    (let ((opening-span (span-from state start)) (items (js-array)) (done false))
       (while (not done)
         (skip-space-and-comments state)
         (let ((code (peek-code state)))
-          (cond
-            ((eq code undefined)
-             (fail-at state start "unexpected end of input"))
-            ((= code closing)
-             (advance state)
-             (setq done t))
-            ((closing-code-p code)
-             (invalid-closing state start code))
+          (cond ((eq code undefined) (fail-at state start "unexpected end of input"))
+            ((= code closing) (advance state) (setq done t))
+            ((closing-code-p code) (invalid-closing state start code))
             (t (js-call items :push (read-node state))))))
       (let ((span (span-from state start)))
         (cond
           ((= kind "map")
-           (when (= (% (get items :length) 2) 1)
-             (fail-at
-               state start
-               "map literal must contain an even number of forms"))
-           (let ((form-items
-                  (js-array (symbol-node "hash-map" opening-span))))
-             (js-call items :forEach
-               (lambda (item) (js-call form-items :push item)))
-             (collection-node "list" form-items span)))
+            (when (= (% (get items :length) 2) 1)
+              (fail-at state start "map literal must contain an even number of forms"))
+            (let ((form-items (js-array (symbol-node "hash-map" opening-span))))
+              (js-call items :forEach (lambda (item) (js-call form-items :push item)))
+              (collection-node "list" form-items span)))
           ((= kind "set")
-           (let ((form-items
-                  (js-array (symbol-node "hash-set" opening-span))))
-             (js-call items :forEach
-               (lambda (item) (js-call form-items :push item)))
-             (collection-node "list" form-items span)))
-          ((and (= kind "list") (= (get items :length) 0))
-           (literal-node nil span))
+            (let ((form-items (js-array (symbol-node "hash-set" opening-span))))
+              (js-call items :forEach (lambda (item) (js-call form-items :push item)))
+              (collection-node "list" form-items span)))
+          ((and (= kind "list") (= (get items :length) 0)) (literal-node nil span))
           (t (collection-node kind items span))))))
-
-  (defun read-dispatch (state start)
+  (defun read-dispatch
+    (state start)
     (let ((next (peek-code-ahead state 1)))
-      (cond
-        ((= next 39) (read-prefix state start "function" 2))
-        ((= next 123)
-         (advance state)
-         (read-collection state start 125 "set"))
+      (cond ((= next 39) (read-prefix state start "function" 2))
+        ((= next 123) (advance state) (read-collection state start 125 "set"))
         (t
-         (fail-at
-           state start
-           (str "Invalid read syntax: \"#"
-                (if (eq next undefined) "" (code-character next))
-                "\""))))))
-
-  (defun read-node (state)
+          (fail-at
+            state
+            start
+            (str
+              "Invalid read syntax: \"#"
+              (if (eq next undefined) "" (code-character next))
+              "\""))))))
+  (defun read-node
+    (state)
     (skip-space-and-comments state)
-    (let ((start (mark state))
-          (code (peek-code state)))
-      (cond
-        ((eq code undefined)
-         (fail-at state start "unexpected end of input"))
+    (let ((start (mark state)) (code (peek-code state)))
+      (cond ((eq code undefined) (fail-at state start "unexpected end of input"))
         ((= code 40) (read-collection state start 41 "list"))
         ((= code 91) (read-collection state start 93 "vector"))
         ((= code 123) (read-collection state start 125 "map"))
@@ -287,21 +252,19 @@
         ((= code 39) (read-prefix state start "quote" 1))
         ((= code 96) (read-prefix state start "`" 1))
         ((= code 44)
-         (if (= (peek-code-ahead state 1) 64)
-             (read-prefix state start ",@" 2)
-           (read-prefix state start "," 1)))
+          (if (= (peek-code-ahead state 1) 64)
+            (read-prefix state start ",@" 2)
+            (read-prefix state start "," 1)))
         ((= code 35) (read-dispatch state start))
         (t (read-atom state start)))))
-
-  (defun read-string (source filename)
-    (let ((state (make-state source filename))
-          (forms (js-array)))
+  (defun read-string
+    (source filename)
+    (let ((state (make-state source filename)) (forms (js-array)))
       (skip-space-and-comments state)
       (while (not (eq (peek-code state) undefined))
         (js-call forms :push (read-node state))
         (skip-space-and-comments state))
       forms))
-
   (export
     read-string
     whitespace-code-p
