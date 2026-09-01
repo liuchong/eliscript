@@ -1,0 +1,95 @@
+(module example.emacs-analysis
+  (import "eliscript/runtime/core/collection.mjs" count)
+  (import "eliscript/runtime/core/data.mjs" frequencies)
+  (import "eliscript/runtime/core/transducer.mjs"
+          composeTransducers filtering into mapping)
+  (import "eliscript/runtime/core/vector.mjs" EMPTY_VECTOR)
+
+  (defconst iterable-to-array (js* "(value) => Array.from(value)"))
+  (defconst map-to-object (js* "(value) => Object.fromEntries(value)"))
+  (defconst tokenize-text
+    (js* "(text) => text.toLowerCase().match(/[A-Za-z0-9_]+/g) ?? []"))
+  (defconst native-frequencies
+    (js* "(values) => { const result = new Map(); for (const value of values) result.set(value, (result.get(value) ?? 0) + 1); return result; }"))
+  (defconst frequency-count
+    (js* "(counts, value) => counts.get(value) ?? 0"))
+  (defconst analysis-index
+    (js-object :revision nil :documents (js-array)))
+  (defconst replace-analysis-index
+    (js* "(state, documents, revision) => { state.documents = documents; state.revision = revision; return { revision, documents: documents.length }; }"))
+  (defconst indexed-documents
+    (js* "(state, revision) => { if (state.revision !== revision) throw new Error(`analysis index revision mismatch: expected ${revision}, found ${state.revision}`); return state.documents; }"))
+
+  (defun score-document (document query-terms)
+    (let* ((terms (funcall tokenize-text (get document "text" "")))
+           (counts (funcall native-frequencies terms))
+          (query-index 0)
+          (matches 0))
+      (while (< query-index (js-length query-terms))
+        (setq matches
+              (+ matches
+                 (funcall frequency-count
+                          counts
+                          (js-nth query-index query-terms)))
+              query-index (1+ query-index)))
+      (js-object :id (get document "id" nil)
+                 :matches matches
+                 :terms (js-length terms))))
+
+  (defun search-documents (documents query)
+    (let ((query-terms (funcall tokenize-text query)))
+    (funcall iterable-to-array
+     (into
+      EMPTY_VECTOR
+      (composeTransducers
+       (mapping (lambda (document)
+                  (score-document document query-terms)))
+       (filtering (lambda (result) (> (get result "matches" 0) 0))))
+      documents))))
+
+  (defun document-statistics (documents)
+    (funcall iterable-to-array
+     (into
+      EMPTY_VECTOR
+      (mapping
+       (lambda (document)
+         (let* ((terms (funcall tokenize-text (get document "text" "")))
+                (counts (funcall native-frequencies terms)))
+           (js-object :id (get document "id" nil)
+                      :terms (js-length terms)
+                      :uniqueTerms (count counts)))))
+      documents)))
+
+  (defun term-frequencies (documents)
+    (let ((terms (js-array))
+          (document-index 0))
+      (while (< document-index (js-length documents))
+        (let ((document-terms
+               (funcall
+                tokenize-text
+                (get (js-nth document-index documents) "text" "")))
+              (term-index 0))
+          (while (< term-index (js-length document-terms))
+            (js-call terms :push (js-nth term-index document-terms))
+            (setq term-index (1+ term-index))))
+        (setq document-index (1+ document-index)))
+      (funcall map-to-object (frequencies terms))))
+
+  (defun cache-documents (documents revision)
+    (funcall replace-analysis-index analysis-index documents revision))
+
+  (defun search-index (query revision)
+    (search-documents
+     (funcall indexed-documents analysis-index revision)
+     query))
+
+  (defun statistics-index (revision)
+    (document-statistics
+     (funcall indexed-documents analysis-index revision)))
+
+  (defun frequencies-index (revision)
+    (term-frequencies
+     (funcall indexed-documents analysis-index revision)))
+
+  (export cache-documents document-statistics frequencies-index
+          search-documents search-index statistics-index term-frequencies))

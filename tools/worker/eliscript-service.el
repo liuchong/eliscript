@@ -35,6 +35,7 @@
   portable-name
   export-name
   workload-size
+  worker-arguments
   threshold
   equal)
 
@@ -79,11 +80,13 @@
 
 (cl-defun eliscript-service-operation
     (name reference &key portable-name export-name workload-size
-          (threshold 0) (equal #'equal))
+          worker-arguments (threshold 0) (equal #'equal))
   "Declare dual-path operation NAME with REFERENCE and worker entry.
 
 Exactly one of PORTABLE-NAME and EXPORT-NAME identifies the accelerated entry.
-WORKLOAD-SIZE receives the complete argument list.  Workloads smaller than
+WORKLOAD-SIZE receives the complete argument list.  WORKER-ARGUMENTS may
+project that list to a smaller worker-specific representation after path
+selection and optional reference verification.  Workloads smaller than
 THRESHOLD use REFERENCE; larger workloads use the worker."
   (unless (symbolp name)
     (signal 'wrong-type-argument (list 'symbolp name)))
@@ -97,6 +100,8 @@ THRESHOLD use REFERENCE; larger workloads use the worker."
       (signal 'wrong-type-argument (list 'non-empty-string-p entry))))
   (unless (or (null workload-size) (functionp workload-size))
     (signal 'wrong-type-argument (list 'functionp workload-size)))
+  (unless (or (null worker-arguments) (functionp worker-arguments))
+    (signal 'wrong-type-argument (list 'functionp worker-arguments)))
   (unless (and (integerp threshold) (>= threshold 0))
     (signal 'wrong-type-argument (list 'natnump threshold)))
   (unless (functionp equal)
@@ -107,6 +112,7 @@ THRESHOLD use REFERENCE; larger workloads use the worker."
    :portable-name portable-name
    :export-name export-name
    :workload-size (or workload-size (lambda (arguments) (length arguments)))
+   :worker-arguments (or worker-arguments #'identity)
    :threshold threshold
    :equal equal))
 
@@ -261,6 +267,18 @@ request from the previous module generation can complete successfully."
             'reference
           'accelerated))))
 
+(defun eliscript-service--worker-arguments (operation arguments)
+  "Return validated worker arguments for OPERATION and ARGUMENTS."
+  (let ((projected
+         (funcall
+          (eliscript-service-operation-worker-arguments operation)
+          arguments)))
+    (unless (listp projected)
+      (signal 'eliscript-service-error
+              (list "worker argument projection must return a list"
+                    (eliscript-service-operation-name operation))))
+    projected))
+
 (cl-defun eliscript-service-call
     (service name arguments callback
              &key path buffer apply progress metrics timeout-ms)
@@ -309,6 +327,8 @@ current after successful verification."
                            arguments)))
             (let* ((module (eliscript-service-module service))
                    (worker (eliscript-service-worker service))
+                   (worker-arguments
+                    (eliscript-service--worker-arguments operation arguments))
                    (worker-callback
                     (lambda (value request-error)
                       (eliscript-service--deliver
@@ -319,7 +339,7 @@ current after successful verification."
                          worker
                          (eliscript-service-module-path module)
                          (eliscript-service-operation-portable-name operation)
-                         arguments worker-callback
+                         worker-arguments worker-callback
                          :module-version (eliscript-service-module-version module)
                          :project-manifest
                          (eliscript-service-module-project-manifest module)
@@ -331,7 +351,7 @@ current after successful verification."
                        worker
                        (eliscript-service-module-path module)
                        (eliscript-service-operation-export-name operation)
-                       arguments worker-callback
+                       worker-arguments worker-callback
                        :module-version (eliscript-service-module-version module)
                        :project-manifest
                        (eliscript-service-module-project-manifest module)

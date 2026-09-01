@@ -755,6 +755,16 @@ timeout, stale versions, and worker restart. The maintained index workflow now
 uses this service rather than protocol calls. This completes PD-09 and P6;
 application frameworks, Vite, bundlers, publishing, and site tooling remain
 outside the implementation and evidence.
+Specification
+[0105-emacs-analysis-performance-reinvestment.md](0105-emacs-analysis-performance-reinvestment.md)
+then completes P7 and PD-10 with three maintained Emacs Lisp/Eliscript text
+analysis candidates. Search and statistics use transducers plus persistent
+Vector construction and record 9.648x and 8.082x median warm end-to-end
+speedups across 30 runs. Source-bound cold, warm, segmented, and crossover
+evidence selects a conservative 16,000-character threshold, while a
+200-request one-generation soak applies 100 stable buffer results and discards
+100 stale results. No application framework, bundler, publishing tool, site,
+hosting system, or development server contributes to this completion.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

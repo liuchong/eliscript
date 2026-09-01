@@ -34,8 +34,9 @@ The public API has four explicit records:
 1. A module declaration owns a generated module path plus optional project
    manifest and module version metadata.
 2. An operation owns a symbolic name, an Emacs Lisp reference, exactly one
-   portable or direct worker entry, workload sizing, a nonnegative threshold,
-   and an equality predicate.
+   portable or direct worker entry, workload sizing, an optional validated
+   worker-argument projection, a nonnegative threshold, and an equality
+   predicate.
 3. A service owns one worker lifecycle, one current module declaration, an
    identity-keyed operation registry, verification policy, and value transport
    defaults.
@@ -60,6 +61,11 @@ accelerated request and applies the operation equality predicate to the two
 results. A mismatch returns a structured `verification-mismatch` error and no
 application callback runs. Reference execution therefore remains independently
 exercisable in production code, tests, and future performance reviews.
+
+An optional worker-argument projection runs only after routing and reference
+verification have consumed the complete argument list. It must return a list.
+This supports persistent worker snapshots without weakening the reference
+contract or forcing unchanged bulk values across the process boundary.
 
 The service passes progress, timing, timeout, project-manifest, module-version,
 value-codec, and chunking concerns to the existing worker implementation. These
@@ -129,3 +135,6 @@ operation requires extending this same reference and generated-case evidence.
 - **EOS-13:** Application frameworks, bundlers, publishing, sites, hosting, and
   development servers remain outside core goals, dependencies, evidence, and
   maturity credit.
+- **EOS-14:** Worker argument projection preserves complete reference and
+  routing inputs, returns a validated list, and affects only accelerated
+  dispatch.

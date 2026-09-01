@@ -2,7 +2,8 @@
 
 [Project README](../../README.md) | [Tools](../README.md) |
 [Specification 0022](../../specs/0022-emacs-worker-integration.md) |
-[Operation service 0104](../../specs/0104-accelerated-emacs-operation-service.md)
+[Operation service 0104](../../specs/0104-accelerated-emacs-operation-service.md) |
+[Performance reinvestment 0105](../../specs/0105-emacs-analysis-performance-reinvestment.md)
 
 `eliscript-service.el` is the package-facing API. It declares generated
 modules and dual-path operations, selects reference or accelerated execution
@@ -36,6 +37,10 @@ implementation. Async calls return a cancellable service request and accept
 progress and timing callbacks. A target `:buffer` plus `:apply` callback makes
 application conditional on an unchanged buffer and wraps edits in an atomic
 change group.
+
+Operations may declare `:worker-arguments` to project complete reference
+arguments to a smaller accelerated request. Routing and verification still see
+the complete values, and the projection must return a list.
 
 ## Worker Transport
 
@@ -125,3 +130,9 @@ bun run benchmark:worker
 Tune it with `ELISCRIPT_BENCHMARK_SIZE`, `ELISCRIPT_BENCHMARK_ROUNDS`, and
 `ELISCRIPT_BENCHMARK_ITERATIONS`. The report is JSON so repeated runs can be
 captured and compared without parsing display text.
+
+`eliscript-analysis.el` is the maintained performance reinvestment package. It
+keeps a revisioned document snapshot in one worker generation, routes small
+workloads to exact Emacs Lisp references, and exposes synchronous plus
+buffer-safe asynchronous search and statistics. Run its source-bound evidence
+with `bun run benchmark:emacs-analysis` and `bun run soak:emacs-analysis`.

@@ -1092,6 +1092,16 @@ credit.
 **Exit:** the Emacs acceleration acceptance criteria in 0040 pass and the
 faster path produces byte- or value-equivalent results.
 
+**Status:** Complete on 2026-09-01 through specification
+[0105-emacs-analysis-performance-reinvestment.md](0105-emacs-analysis-performance-reinvestment.md).
+Three equivalent candidates are maintained in one Emacs package. Search and
+statistics are selected at 9.648x and 8.082x median warm end-to-end speedup
+over 30 runs, with cold startup, one-time indexing, segmented timing, and a
+16,000-character crossover threshold retained in a source-bound report. A
+200-request one-generation soak applies 100 stable buffer results and discards
+100 intentionally stale results. Application frameworks and bundlers provide
+no P7 evidence.
+
 ## Acceptance Criteria
 
 These criteria supplement the final 1.0 contract in 0040.
@@ -1174,6 +1184,11 @@ failure rolls buffer edits back atomically.
 At least two real Emacs workflows satisfy AC-19 from 0040. One must use the
 persistent collection/transducer layer, proving that the language's richer
 data model contributes directly to useful editor performance.
+
+**Status:** Complete on 2026-09-01 through specification 0105. Maintained
+search and statistics workflows use transducers and persistent Vector
+construction, preserve exact Emacs Lisp references, and record 9.648x and
+8.082x median warm end-to-end speedups over 30 measured primary runs.
 
 ### PD-11: State Discipline
 

@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 104 specifications.
+The registry currently contains 105 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 74 |
+| Accepted design | 75 |
 | Stable design | 29 |
 | Implementation in progress | 3 |
-| Implemented | 101 |
+| Implemented | 102 |
 
 Compatibility Baseline 1 separately classifies 29 specifications as stable,
-72 as provisional, and 3 as planning. That baseline is derived from registry
+73 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -85,6 +85,11 @@ The P6 accelerated-operation service now owns reference/worker routing,
 continuous result verification, module generations, cancellation, stale-buffer
 rejection, and transactional application. Its maintained index integration
 and real-worker tests complete PD-09 without application-framework evidence.
+P7 and PD-10 now close through a maintained Emacs analysis package: three
+equivalent candidates, two selected transducer-backed workflows at 9.648x and
+8.082x median warm end-to-end speedup, a source-bound 16,000-character
+crossover decision, and a 200-request stable/stale buffer soak. No application
+framework contributes to this result.
 
 ## Reading Paths
 
@@ -160,6 +165,7 @@ number.
 42. [0102: Profile-guided Ordered Source Map Cursors](0102-profile-guided-source-map-cursors.md)
 43. [0103: Transient Bulk Builder Performance](0103-transient-bulk-builder-performance.md)
 44. [0104: Accelerated Emacs Operation Service](0104-accelerated-emacs-operation-service.md)
+45. [0105: Emacs Analysis Performance Reinvestment](0105-emacs-analysis-performance-reinvestment.md)
 
 ### Application Validation (Non-core)
 
@@ -333,6 +339,7 @@ The schemas and change workflow are defined by specifications
 | 0102 | [Profile-guided Ordered Source Map Cursors](0102-profile-guided-source-map-cursors.md) | Accepted | Implemented |
 | 0103 | [Transient Bulk Builder Performance](0103-transient-bulk-builder-performance.md) | Accepted | Implemented |
 | 0104 | [Accelerated Emacs Operation Service](0104-accelerated-emacs-operation-service.md) | Accepted | Implemented |
+| 0105 | [Emacs Analysis Performance Reinvestment](0105-emacs-analysis-performance-reinvestment.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

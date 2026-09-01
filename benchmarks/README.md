@@ -210,6 +210,34 @@ source digest, validates the aggregate digest, and runs a smaller subprocess
 probe. A measurement-source change invalidates the committed report until the
 full acceptance command is rerun and reviewed.
 
+## Emacs Analysis Reinvestment
+
+Run the maintained three-candidate benchmark with:
+
+```sh
+bun run benchmark:emacs-analysis
+```
+
+Set `ELISCRIPT_ANALYSIS_OUTPUT` to intentionally refresh a reviewed report.
+[`emacs-analysis-macos-arm64.json`](emacs-analysis-macos-arm64.json) records
+service startup, one-time document indexing, six crossover corpora, and 30
+alternating primary samples for exact Emacs Lisp and Eliscript implementations.
+Search and statistics are the selected transducer-backed workflows; the
+committed report records 9.648x and 8.082x median warm end-to-end speedups and
+the conservative 16,000-character routing threshold.
+
+Run the real buffer lifecycle soak with:
+
+```sh
+bun run soak:emacs-analysis
+```
+
+Set `ELISCRIPT_ANALYSIS_SOAK_OUTPUT` when refreshing
+[`emacs-analysis-soak-macos-arm64.json`](emacs-analysis-soak-macos-arm64.json).
+It records 100 stable atomic applications and 100 intentionally stale discards
+on one worker generation. Default tests validate both reports and source
+digests without rerunning wall-clock timing.
+
 ## HAMT Layout
 
 Run the HAMT layout benchmark with:

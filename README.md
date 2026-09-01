@@ -78,6 +78,9 @@ The current M8 work provides:
 - a completed P6 Emacs operation service with per-operation reference paths,
   workload thresholds, accelerated-result verification, cancellation, worker
   lifecycle ownership, stale-buffer guards, and transactional application
+- a completed P7 performance reinvestment proof with three maintained Emacs
+  analysis candidates, two selected transducer-backed workflows above 8x,
+  source-bound crossover evidence, and a 200-request real-buffer soak
 
 First-class immutable Keyword and Symbol values now have optimized and
 portable representations that share equality, hashing, Map keys, and Set
@@ -124,6 +127,10 @@ accelerated paths explicit, verifies results before editor mutation, and owns
 buffer versions, transactional application, cancellation, timeout, and worker
 restart. The maintained Emacs index workflow uses this boundary, completing P6
 and PD-09 without adding an application-framework dependency. The persistent
+analysis package now keeps revisioned documents in one worker generation,
+selects search and statistics at 9.648x and 8.082x median warm end-to-end
+speedup over 30 runs, and discards intentionally stale buffer results. This
+completes P7 and PD-10 without application-framework evidence. The persistent
 Vector/Map/Set literal family is now complete;
 static transient ownership analysis is enforced, and the P3 compatibility
 freeze now removes the provisional `array`/`object` aliases in favor of the
@@ -375,6 +382,7 @@ Start with the document that matches the question:
 | --- | --- |
 | What is the final project goal? | [Project Maturity Roadmap](specs/0040-maturity-roadmap.md) |
 | How do persistent values and Emacs acceleration fit together? | [Host Symbiosis and Persistent Data](specs/0041-host-symbiosis-and-persistent-data.md) |
+| Where is measured Emacs performance reinvestment specified? | [Emacs Analysis Performance Reinvestment](specs/0105-emacs-analysis-performance-reinvestment.md) |
 | Which behavior is implemented or stable? | [Specification Catalog](specs/README.md#specification-catalog) |
 | How does the seed compiler work? | [Compiler Guide](compiler/README.md) |
 | How does self-hosting work? | [Bootstrap Compiler Guide](bootstrap/README.md) |

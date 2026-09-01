@@ -37,9 +37,9 @@ test("repository public surface matches every tracked implementation", async () 
     runtimeModules: { modules: 29, exports: 219, public: 20, internal: 9 },
     standardLibrary: { modules: 29, exports: 304 },
     emacs: {
-      functions: 121,
-      records: 42,
-      publicRecords: 25,
+      functions: 128,
+      records: 43,
+      publicRecords: 26,
       internalRecords: 17,
     },
   });
@@ -112,7 +112,7 @@ test("public surface checker rejects unclassified Emacs APIs", async () => {
   const surface = await surfaceDocument();
   surface.emacs.publicFunctions.shift();
   expect(await validationErrors(surface)).toContain(
-    "Emacs public function inventory is missing current entries: eliscript-analyze-module",
+    "Emacs public function inventory is missing current entries: eliscript-analysis-frequencies-sync",
   );
 });
 

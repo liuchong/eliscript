@@ -1226,6 +1226,20 @@
         { "kind": "ert", "file": "tests/eliscript-service-tests.el", "contains": "eliscript-service-rejects-invalid-operation-declarations" },
         { "kind": "ert", "file": "tests/eliscript-worker-tests.el", "contains": "eliscript-index-scores-texts-asynchronously" }
       ]
+    },
+    {
+      "id": "worker.emacs-analysis-performance-reinvestment",
+      "title": "Emacs analysis performance reinvestment",
+      "status": "accepted",
+      "spec": "0105",
+      "contracts": ["Maintains three equivalent Emacs Lisp and Eliscript analysis candidates", "Selects search and statistics only after 30-run warm end-to-end evidence exceeds 2.0x", "Uses persistent Vectors and transducers in both selected workflows", "Routes below a source-bound conservative crossover threshold to Emacs Lisp", "Applies stable buffer results atomically and discards stale results over an extended one-generation soak", "Keeps application frameworks, Vite, bundlers, publishing, sites, hosting, and development servers outside core goals, dependencies, evidence, and maturity credit"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-analysis-tests.el", "contains": "eliscript-analysis-workflows-agree-across-both-paths" },
+        { "kind": "ert", "file": "tests/eliscript-analysis-tests.el", "contains": "eliscript-analysis-buffer-application-rejects-stale-results" },
+        { "kind": "ert", "file": "tests/eliscript-analysis-tests.el", "contains": "eliscript-analysis-routes-and-reindexes-worker-generations" },
+        { "kind": "bun-test", "file": "tests/emacs-analysis-evidence.test.mjs", "contains": "committed Emacs analysis benchmark preserves qualified evidence" },
+        { "kind": "bun-test", "file": "tests/emacs-analysis-evidence.test.mjs", "contains": "committed Emacs analysis soak proves buffer lifecycle safety" }
+      ]
     }
   ]
 }

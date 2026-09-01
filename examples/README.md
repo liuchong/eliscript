@@ -12,6 +12,7 @@ expected generated JavaScript, and the smallest environment needed to run it.
 | [`react-counter/`](react-counter/README.md) | React, hooks, browser mounting, Vite, and Fast Refresh | `bun run dev:react-counter` |
 | [`org-site/`](org-site/README.md) | Org export, watched content, and a custom React site | `bun run dev:org-site` |
 | [`emacs-index/`](emacs-index/README.md) | Portable computation called from a long-lived Emacs worker | `bun run benchmark:worker` |
+| [`emacs-analysis/`](emacs-analysis/README.md) | Revisioned Emacs text analysis with measured worker acceleration | `bun run benchmark:emacs-analysis` |
 
 Examples are maintained as end-to-end evidence. Generated files belong below
 `dist/` and are never hand-edited source.

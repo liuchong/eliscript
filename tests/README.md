@@ -52,6 +52,13 @@ a small memory-probe smoke run. It also validates the committed 256 MiB report,
 all three RSS budgets, exact bidirectional chunking, and every source digest.
 The large workload is not repeated by the default suite.
 
+Emacs analysis ERT compiles the maintained Eliscript module, compares all
+three candidate workflows with their exact Emacs Lisp references, applies a
+stable asynchronous result atomically, and rejects an intentionally stale
+buffer result. `emacs-analysis-evidence.test.mjs` validates the committed
+30-sample primary/crossover benchmark and 200-request buffer soak, including
+source digests, without rerunning wall-clock measurements.
+
 ## Bootstrap and Compiler
 
 Bootstrap tests use shared JSON conformance fixtures. ERT runs the Emacs Lisp

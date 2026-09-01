@@ -9,6 +9,7 @@ test: check-contracts
 		-l tests/eliscript-org-tests.el \
 		-l tests/eliscript-worker-tests.el \
 		-l tests/eliscript-service-tests.el \
+		-l tests/eliscript-analysis-tests.el \
 		-l tests/bootstrap-tests.el \
 		-f ert-run-tests-batch-and-exit
 	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
@@ -32,7 +33,9 @@ test: check-contracts
 		tests/worker-value-codec.test.mjs \
 		tests/worker-value-stream.test.mjs \
 		tests/worker-value-stream-probe.test.mjs \
-		tests/worker-benchmark.test.mjs tests/stdlib-sequence.test.mjs \
+		tests/worker-benchmark.test.mjs \
+		tests/emacs-analysis-evidence.test.mjs \
+		tests/stdlib-sequence.test.mjs \
 		tests/stdlib-text.test.mjs tests/stdlib-object.test.mjs \
 		tests/stdlib-bit.test.mjs \
 		tests/portable-persistent-list.test.mjs \

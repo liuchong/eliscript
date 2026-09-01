@@ -49,6 +49,13 @@
            'delay (lambda (value _milliseconds) value)
            :export-name "delayed_echo"
            :threshold 0))
+         (projected-delay
+          (eliscript-service-operation
+           'projected-delay (lambda (_large value _milliseconds) value)
+           :export-name "delayed_echo"
+           :worker-arguments
+           (lambda (arguments) (cdr arguments))
+           :threshold 0))
          service)
     (unwind-protect
         (progn
@@ -56,11 +63,19 @@
           (setq service
                 (eliscript-service-start
                  (eliscript-service-module-declare module)
-                 (list score bad-score delay)
+                 (list score bad-score delay projected-delay)
                  :verify 'always
                  :value-codec nil
                  :value-chunks nil))
           (should (eliscript-service-live-p service))
+
+          (should
+           (equal
+            (eliscript-service-call-sync
+             service 'projected-delay
+             (list (make-string 10000 ?x) "projected" 0)
+             :timeout-ms 2000)
+            "projected"))
 
           (let (value error-object)
             (let ((request
@@ -255,12 +270,24 @@
    (eliscript-service-operation
     'bad-threshold #'identity :export-name "identity" :threshold -1)
    :type 'wrong-type-argument)
+  (should-error
+   (eliscript-service-operation
+    'bad-worker-arguments #'identity :export-name "identity"
+    :worker-arguments 'not-a-function)
+   :type 'wrong-type-argument)
   (let ((operation
          (eliscript-service-operation
           'bad-size #'identity :export-name "identity"
           :workload-size (lambda (_arguments) -1))))
     (should-error (eliscript-service--path operation nil nil)
                   :type 'eliscript-service-error))
+  (let ((operation
+         (eliscript-service-operation
+          'bad-projection #'identity :export-name "identity"
+          :worker-arguments (lambda (_arguments) ["not" "a" "list"]))))
+    (should-error
+     (eliscript-service--worker-arguments operation nil)
+     :type 'eliscript-service-error))
   (let ((duplicate
          (eliscript-service-operation
           'duplicate #'identity :export-name "identity")))
