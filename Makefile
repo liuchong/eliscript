@@ -5,8 +5,10 @@ BUN ?= bun
 test: check-contracts
 	$(EMACS) --batch -Q -L compiler -L editor -L tools/org -L tools/worker -L tests \
 		-l tests/eliscript-tests.el \
+		-l tests/eliscript-evaluation-tests.el \
 		-l tests/eliscript-project-tests.el \
 		-l tests/eliscript-mode-tests.el \
+		-l tests/eliscript-repl-tests.el \
 		-l tests/eliscript-org-tests.el \
 		-l tests/eliscript-worker-tests.el \
 		-l tests/eliscript-service-tests.el \
@@ -31,6 +33,7 @@ test: check-contracts
 		tests/compiler-reader-character.test.mjs \
 		tests/compiler-source-map-cursor.test.mjs \
 		tests/bootstrap-compiler.test.mjs tests/bootstrap-project.test.mjs \
+		tests/bootstrap-evaluation.test.mjs \
 		tests/loop-recur.test.mjs \
 		tests/macro-generated-names.test.mjs \
 		tests/worker-runtime.test.mjs \

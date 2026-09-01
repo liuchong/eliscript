@@ -9,11 +9,7 @@
   (import "./expander.mjs" expand-module)
   (import "./analyzer.mjs" analyze-module select-portable-module)
   (import "./lower.mjs" lower-module)
-  (import "./ir.mjs"
-    ir-format
-    ir-version
-    serialize-program
-    deserialize-program)
+  (import "./ir.mjs" ir-format ir-version serialize-program deserialize-program)
   (import "./emitter.mjs" emit-module emit-module-with-source-map)
   (import "./project.mjs"
     project-plan-format
@@ -40,65 +36,344 @@
     project-cache-version
     project-cache-lookup
     project-cache-decision)
-
-  (defun compile-ir-string (source filename)
-    (let* ((read-forms (read-string source filename))
-           (expanded-forms (expand-module read-forms filename)))
+  (defconst evaluation-operation-format "eliscript-evaluation-operation")
+  (defconst evaluation-operation-version 1)
+  (defconst evaluation-form-format "eliscript-evaluation-form")
+  (defconst evaluation-form-version 1)
+  (defconst evaluation-module-format "eliscript-evaluation-module")
+  (defconst evaluation-module-version 1)
+  (defconst evaluation-operation-keys
+    (js-array "id" "operation" "source" "filename" "root" "line" "column"))
+  (defconst evaluation-definition-heads
+    (js-array "defasync" "defconst" "defmacro" "defn" "defportable" "defun" "defvar"))
+  (defconst evaluation-module-heads
+    (js-array "export" "export-default" "import" "import-portable" "module"))
+  (defconst evaluation-fail
+    (js*
+      "(message, filename) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-E0001', severity: 'error', phase: 'evaluation-request', message, ...(filename ? { location: { file: filename } } : {}) }; throw error; }"))
+  (defconst evaluation-object-p
+    (js*
+      "(value) => value !== null && typeof value === 'object' && !Array.isArray(value)"))
+  (defconst evaluation-id-p
+    (js*
+      "(value) => value === null || (typeof value === 'string' && value.length > 0) || (Number.isSafeInteger(value) && value >= 0)"))
+  (defconst evaluation-positive-integer-p
+    (js* "(value) => Number.isSafeInteger(value) && value >= 1"))
+  (defun compile-ir-string
+    (source filename)
+    (let*
+      ((read-forms (read-string source filename))
+        (expanded-forms (expand-module read-forms filename)))
       (analyze-module expanded-forms filename)
       (lower-module expanded-forms filename)))
-
-  (defun compile-string (source filename)
+  (defun evaluation-object-field
+    (value key fallback)
+    (if (js-call globalThis.Object :hasOwn value key) (get value key) fallback))
+  (defun evaluation-require-source
+    (source filename)
+    (unless (and (= (js* "typeof source") "string") (> (get source :length) 0))
+      (funcall evaluation-fail "evaluation source must be a non-empty string" filename))
+    source)
+  (defun evaluation-require-filename
+    (filename)
+    (unless (and (= (js* "typeof filename") "string") (> (get filename :length) 0))
+      (funcall evaluation-fail "evaluation filename must be a non-empty string" false))
+    filename)
+  (defun evaluation-operation-request
+    (input)
+    (unless (funcall evaluation-object-p input)
+      (funcall evaluation-fail "evaluation operation request must be an object" false))
+    (js-call
+      (js-call globalThis.Object :keys input)
+      :forEach
+      (lambda
+        (key)
+        (unless (js-call evaluation-operation-keys :includes key)
+          (funcall evaluation-fail (str "unknown evaluation operation key: " key) false))))
+    (let*
+      ((id (evaluation-object-field input "id" (js* "null")))
+        (operation (get input :operation)))
+      (unless (funcall evaluation-id-p id)
+        (funcall
+          evaluation-fail
+          "evaluation operation id must be null, a non-empty string, or a non-negative safe integer"
+          false))
+      (unless
+        (js-call (js-array "describe" "evaluate" "load" "reset") :includes operation)
+        (funcall
+          evaluation-fail
+          "evaluation operation must be describe, evaluate, load, or reset"
+          false))
+      (if (or (= operation "evaluate") (= operation "load"))
+        (let*
+          ((filename (evaluation-require-filename (get input :filename)))
+            (source (evaluation-require-source (get input :source) filename))
+            (root (evaluation-object-field input "root" (js* "null")))
+            (line (evaluation-object-field input "line" 1))
+            (column (evaluation-object-field input "column" 1)))
+          (unless
+            (or
+              (nil? root)
+              (and (= (js* "typeof root") "string") (> (get root :length) 0)))
+            (funcall
+              evaluation-fail
+              "evaluation root must be null or a non-empty string"
+              filename))
+          (unless (funcall evaluation-positive-integer-p line)
+            (funcall
+              evaluation-fail
+              "evaluation line must be a positive safe integer"
+              filename))
+          (unless (funcall evaluation-positive-integer-p column)
+            (funcall
+              evaluation-fail
+              "evaluation column must be a positive safe integer"
+              filename))
+          (js-call
+            globalThis.Object
+            :freeze
+            (js-object
+              :format
+              evaluation-operation-format
+              :version
+              evaluation-operation-version
+              :id
+              id
+              :operation
+              operation
+              :source
+              source
+              :filename
+              filename
+              :root
+              root
+              :line
+              line
+              :column
+              column)))
+        (progn
+          (when
+            (or
+              (js-call globalThis.Object :hasOwn input "source")
+              (js-call globalThis.Object :hasOwn input "filename")
+              (js-call globalThis.Object :hasOwn input "root")
+              (js-call globalThis.Object :hasOwn input "line")
+              (js-call globalThis.Object :hasOwn input "column"))
+            (funcall
+              evaluation-fail
+              (str operation " evaluation operation does not accept source fields")
+              false))
+          (js-call
+            globalThis.Object
+            :freeze
+            (js-object
+              :format
+              evaluation-operation-format
+              :version
+              evaluation-operation-version
+              :id
+              id
+              :operation
+              operation))))))
+  (defun evaluation-form-head
+    (form)
+    (if (= (get form :kind) "list")
+      (let ((items (get form :items)))
+        (if (> (get items :length) 0)
+          (let ((head (js-nth 0 items)))
+            (if (= (get head :kind) "symbol") (get head :name) false))
+          false))
+      false))
+  (defun evaluation-form-description
+    (source filename)
+    (evaluation-require-filename filename)
+    (evaluation-require-source source filename)
+    (let ((forms (read-string source filename)))
+      (unless (= (get forms :length) 1)
+        (funcall
+          evaluation-fail
+          "evaluate requires exactly one top-level form"
+          filename))
+      (let*
+        ((form (js-nth 0 forms))
+          (head (evaluation-form-head form))
+          (definition (and head (js-call evaluation-definition-heads :includes head)))
+          (module-form (and head (js-call evaluation-module-heads :includes head)))
+          (name
+            (if definition
+              (let ((items (get form :items)))
+                (if (> (get items :length) 1)
+                  (let ((candidate (js-nth 1 items)))
+                    (if (= (get candidate :kind) "symbol") (get candidate :name) false))
+                  false))
+              false)))
+        (when (and definition (not name))
+          (funcall
+            evaluation-fail
+            (str head " evaluation form requires a symbol name")
+            filename))
+        (js-call
+          globalThis.Object
+          :freeze
+          (js-object
+            :format
+            evaluation-form-format
+            :version
+            evaluation-form-version
+            :kind
+            (cond (definition "definition") (module-form "module") (t "expression"))
+            :head
+            (or head (js* "null"))
+            :name
+            (or name (js* "null"))
+            :runtimeBinding
+            (and definition (not (= head "defmacro")))
+            :filename
+            filename)))))
+  (defun evaluation-add-name
+    (names seen value)
+    (when
+      (and
+        (= (js* "typeof value") "string")
+        (> (get value :length) 0)
+        (not (js-call seen :has value)))
+      (js-call seen :add value)
+      (js-call names :push value)))
+  (defun evaluation-collect-ir-names
+    (nodes bindings binding-set exports export-set)
+    (js-call
+      nodes
+      :forEach
+      (lambda
+        (node)
+        (let ((kind (get node :kind)))
+          (cond
+            ((or (= kind "function-declaration") (= kind "variable-declaration"))
+              (evaluation-add-name bindings binding-set (get node :value)))
+            ((= kind "import-declaration")
+              (js-call
+                (get node :children)
+                :forEach
+                (lambda
+                  (child)
+                  (when (= (get child :kind) "import-named")
+                    (evaluation-add-name bindings binding-set (get child :value))))))
+            ((= kind "export-declaration")
+              (js-call
+                (get node :children)
+                :forEach
+                (lambda
+                  (child)
+                  (evaluation-add-name exports export-set (get child :value)))))
+            ((= kind "module-declaration")
+              (evaluation-collect-ir-names
+                (get node :children)
+                bindings
+                binding-set
+                exports
+                export-set)))))))
+  (defun evaluation-collect-macro-sources
+    (forms source result)
+    (js-call
+      forms
+      :forEach
+      (lambda
+        (form)
+        (let ((head (evaluation-form-head form)))
+          (cond
+            ((= head "defmacro")
+              (let ((span (get form :span)))
+                (js-call
+                  result
+                  :push
+                  (js-call source :slice (get span :start) (get span :end)))))
+            ((= head "module")
+              (evaluation-collect-macro-sources
+                (js-call (get form :items) :slice 2)
+                source
+                result)))))))
+  (defun evaluation-module-description
+    (source filename)
+    (evaluation-require-filename filename)
+    (evaluation-require-source source filename)
+    (let*
+      ((program (compile-ir-string source filename))
+        (bindings (js-array))
+        (binding-set (new globalThis.Set))
+        (exports (js-array))
+        (export-set (new globalThis.Set))
+        (macro-sources (js-array)))
+      (evaluation-collect-ir-names
+        (get program :body)
+        bindings
+        binding-set
+        exports
+        export-set)
+      (evaluation-collect-macro-sources
+        (read-string source filename)
+        source
+        macro-sources)
+      (js-call bindings :sort)
+      (js-call exports :sort)
+      (js-call globalThis.Object :freeze bindings)
+      (js-call globalThis.Object :freeze exports)
+      (js-call globalThis.Object :freeze macro-sources)
+      (js-call
+        globalThis.Object
+        :freeze
+        (js-object
+          :format
+          evaluation-module-format
+          :version
+          evaluation-module-version
+          :filename
+          filename
+          :bindings
+          bindings
+          :exports
+          exports
+          :macroSources
+          macro-sources))))
+  (defun compile-string
+    (source filename)
     (emit-module (compile-ir-string source filename)))
-
-  (defun compile-portable-ir-string (source entries filename)
-    (let* ((read-forms (read-string source filename))
-           (expanded-forms (expand-module read-forms filename)))
+  (defun compile-portable-ir-string
+    (source entries filename)
+    (let*
+      ((read-forms (read-string source filename))
+        (expanded-forms (expand-module read-forms filename)))
       (analyze-module expanded-forms filename)
-      (lower-module
-        (select-portable-module expanded-forms entries filename)
-        filename)))
-
-  (defun compile-project-portable-ir-string (source entries filename)
-    (let* ((read-forms (read-string source filename))
-           (expanded-forms (expand-module read-forms filename)))
+      (lower-module (select-portable-module expanded-forms entries filename) filename)))
+  (defun compile-project-portable-ir-string
+    (source entries filename)
+    (let*
+      ((read-forms (read-string source filename))
+        (expanded-forms (expand-module read-forms filename)))
       (analyze-module expanded-forms filename)
-      (lower-module
-        (select-portable-module expanded-forms entries filename t)
-        filename)))
-
-  (defun emit-ir-string (program)
-    (emit-module program))
-
-  (defun serialize-ir-program (program)
-    (serialize-program program))
-
-  (defun deserialize-ir-program (source)
-    (deserialize-program source))
-
+      (lower-module (select-portable-module expanded-forms entries filename t) filename)))
+  (defun emit-ir-string (program) (emit-module program))
+  (defun serialize-ir-program (program) (serialize-program program))
+  (defun deserialize-ir-program (source) (deserialize-program source))
   (defun emit-ir-string-with-source-map
-      (program source generated-name source-name)
-    (emit-module-with-source-map
-      program source generated-name source-name))
-
-  (defun compile-portable-string (source entries filename)
+    (program source generated-name source-name)
+    (emit-module-with-source-map program source generated-name source-name))
+  (defun compile-portable-string
+    (source entries filename)
     (emit-module (compile-portable-ir-string source entries filename)))
-
   (defun compile-portable-string-with-source-map
-      (source entries filename generated-name source-name)
+    (source entries filename generated-name source-name)
     (emit-module-with-source-map
       (compile-portable-ir-string source entries filename)
       source
       generated-name
       (or source-name filename "<string>")))
-
   (defun compile-string-with-source-map
-      (source filename generated-name source-name)
+    (source filename generated-name source-name)
     (emit-module-with-source-map
       (compile-ir-string source filename)
       source
       generated-name
       (or source-name filename "<string>")))
-
   (export
     compile-ir-string
     compile-project-portable-ir-string
@@ -111,6 +386,15 @@
     emit-ir-string-with-source-map
     serialize-ir-program
     deserialize-ir-program
+    evaluation-operation-format
+    evaluation-operation-version
+    evaluation-operation-request
+    evaluation-form-format
+    evaluation-form-version
+    evaluation-form-description
+    evaluation-module-format
+    evaluation-module-version
+    evaluation-module-description
     formatter-format
     formatter-version
     formatter-width

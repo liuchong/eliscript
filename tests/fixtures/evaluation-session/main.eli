@@ -1,0 +1,10 @@
+(module evaluation.session
+  (import "../../../stdlib/state/atom.eli" atom deref swap!)
+  (defvar loads (atom 0))
+  (swap! loads (lambda (value) (+ value 1)))
+  (defvar state (atom 1))
+  (defun current () [(deref state) (deref loads)])
+  (defun bump () (swap! state (lambda (value) (+ value 1))))
+  (defun explode () (js-call nil :missing))
+  (js-call globalThis.console :log "evaluation fixture loaded")
+  (export bump current explode))

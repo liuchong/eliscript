@@ -33,7 +33,7 @@ single-file, single-entry project, and multi-entry project builds through one
 versioned operation boundary. Version 2 project identity, reports, cache
 validation, and worker loading preserve the version 1 single-entry contract.
 
-The first four M10 slices are complete. The self-hosted compiler now owns a
+The first five M10 slices are complete. The self-hosted compiler now owns a
 comment-preserving concrete-syntax formatter with fixed two-space/88-column
 layout, byte-idempotence and ESM-semantic corpus evidence, plus one Bun/Node
 `eliscript-format` command for stdout, atomic `--write`, and non-mutating
@@ -44,8 +44,13 @@ validates complete configured source graphs in memory, accepts unsaved source
 through stdin, emits deterministic Bun/Node reports, and feeds structured
 diagnostics to Flymake. The public build also accepts one unsaved source through
 stdin, and the Emacs mode builds the current buffer, saved file, or configured
-project through compilation-mode without saving the buffer. Interactive
-evaluation, REPL, watching, and the complete M10 exit gate remain future work.
+project through compilation-mode without saving the buffer. Versioned
+seed/self-hosted evaluation descriptors now drive one persistent Bun/Node
+session with canonical value printing, source-mapped failures, atomic
+namespace revisions, and framed output. The Emacs mode evaluates forms and
+unsaved buffers, restores acknowledged project state after a host restart, and
+stops sessions explicitly. A complete terminal REPL, watching, onboarding,
+and the complete M10 exit gate remain future work.
 
 The current M8 work provides:
 
@@ -222,6 +227,14 @@ Enable the maintained Emacs mode from this checkout:
 (require 'eliscript-mode)
 ```
 
+Evaluate one form or load a complete source file through the generated
+compiler:
+
+```sh
+./bin/eliscript-eval --eval '(+ 20 22)'
+./bin/eliscript-eval --file examples/basic/main.eli --json
+```
+
 Pass multiple entries with an explicit root to emit one versioned union graph:
 
 ```sh
@@ -336,7 +349,7 @@ The implemented language includes:
 - stack-safe function and binding iteration through tail-position `recur`
 - explicit IR lowering, structured diagnostics, and Source Map v3 output
 - versioned canonical IR serialization with strict lossless validation
-- ESM modules, JavaScript interop, and application-level element syntax
+- ESM modules and framework-neutral JavaScript library interoperation
 - statically checked portable functions and dependency-pruned builds
 - persistent collections, value semantics, and open collection protocols
 - persistent List, Vector, Map, and Set construction with explicit native
@@ -361,6 +374,8 @@ arbitrary Emacs packages in JavaScript.
 | Format a source file | `./bin/eliscript-format --write source.eli` |
 | Check source formatting | `./bin/eliscript-format --check source.eli` |
 | Check a source graph | `./bin/eliscript-check --json --root . source.eli` |
+| Evaluate one form | `./bin/eliscript-eval --eval '(+ 20 22)'` |
+| Load one source namespace | `./bin/eliscript-eval --file source.eli --json` |
 | Request JSON diagnostics | `./bin/eliscript --diagnostic-format json source.eli` |
 | Inspect build decisions | `./bin/eliscript-build --json --root . --out-dir dist source.eli` |
 | Build the self-hosted compiler | `bun run build:bootstrap` |

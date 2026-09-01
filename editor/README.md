@@ -28,5 +28,15 @@ and `C-c C-r` navigate located build failures. Customize
 `eliscript-mode-build-command` or the unconfigured
 `eliscript-mode-build-directory` when needed.
 
-Interactive evaluation, watching, and REPL sessions remain separate M10
-capabilities.
+`C-c C-e` evaluates the complete form preceding point, `C-c C-l` loads the
+current unsaved buffer as the project namespace, and `C-M-x` reloads that
+namespace while point is inside a definition. Values and captured standard
+output appear in the project-scoped `C-c C-z` result buffer. Located failures
+use normal compilation navigation. `C-c C-q` stops and forgets the session.
+Customize `eliscript-mode-eval-command` when `eliscript-eval` is not on
+`PATH`.
+
+Each project owns one persistent process. If it exits unexpectedly, the mode
+fails unacknowledged work, starts one replacement, restores only acknowledged
+namespace requests, and then accepts new evaluation. File watching and the
+complete terminal REPL remain separate M10 capabilities.

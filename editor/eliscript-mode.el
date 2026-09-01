@@ -35,6 +35,11 @@
   :type '(repeat string)
   :group 'eliscript)
 
+(defcustom eliscript-mode-eval-command '("eliscript-eval" "--stdio")
+  "Command and fixed arguments used for persistent evaluation sessions."
+  :type '(repeat string)
+  :group 'eliscript)
+
 (defcustom eliscript-mode-build-directory "dist"
   "Output directory used for builds without `eliscript.json'.
 
@@ -45,21 +50,21 @@ Relative paths are resolved from the discovered project root."
 (define-error 'eliscript-mode-error "Eliscript editor integration error")
 
 (defconst eliscript-mode--function-heads
-  '("defasync" "defcomponent" "defn" "defportable" "defun"))
+  '("defasync" "defn" "defportable" "defun"))
 
 (defconst eliscript-mode--macro-heads '("defmacro"))
 
 (defconst eliscript-mode--variable-heads '("defconst" "defvar"))
 
 (defconst eliscript-mode--top-level-heads
-  '("defasync" "defcomponent" "defconst" "defmacro" "defn"
+  '("defasync" "defconst" "defmacro" "defn"
     "defportable" "defun" "defvar" "export" "export-default"
     "import" "import-portable" "module"))
 
 (defconst eliscript-mode--special-heads
   '("and" "apply" "async" "await" "catch" "cond" "do" "finally"
-    "fn" "fragment" "funcall" "if" "js*" "js-array" "js-call"
-    "js-cons" "js-length" "js-nth" "js-object" "jsx" "lambda" "let"
+    "fn" "funcall" "if" "js*" "js-array" "js-call"
+    "js-cons" "js-length" "js-nth" "js-object" "lambda" "let"
     "let*" "loop" "new" "or" "progn" "quote" "recur" "set!" "setq"
     "throw" "try" "unless" "when" "while"))
 
@@ -169,6 +174,11 @@ Relative paths are resolved from the discovered project root."
     (define-key map (kbd "C-c C-p") #'eliscript-mode-compile-project)
     (define-key map (kbd "C-c C-n") #'eliscript-mode-next-error)
     (define-key map (kbd "C-c C-r") #'eliscript-mode-previous-error)
+    (define-key map (kbd "C-c C-e") #'eliscript-mode-eval-last-form)
+    (define-key map (kbd "C-M-x") #'eliscript-mode-eval-defun)
+    (define-key map (kbd "C-c C-l") #'eliscript-mode-eval-buffer)
+    (define-key map (kbd "C-c C-z") #'eliscript-mode-show-repl)
+    (define-key map (kbd "C-c C-q") #'eliscript-mode-stop-repl)
     map)
   "Keymap used by `eliscript-mode'.")
 
@@ -655,6 +665,8 @@ The visited file is not saved.  On failure the buffer remains unchanged."
 
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.eli\\'" . eliscript-mode))
+
+(require 'eliscript-repl)
 
 (provide 'eliscript-mode)
 

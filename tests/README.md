@@ -78,6 +78,15 @@ lexical analyzer. `macro-generated-names.test.mjs` additionally compares seed
 and self-hosted JavaScript and Source Maps, then executes the capture and
 single-evaluation corpus under Bun and Node.js.
 
+`bootstrap-evaluation.test.mjs` differentially checks seed and self-hosted
+evaluation descriptors, then exercises atomic definition replacement, macro
+reuse, complete-source reload, persistent Atom identity, canonical values,
+captured output, source-mapped failures, NDJSON recovery, Node/Bun parity, and
+temporary-session cleanup. `eliscript-repl-tests.el` drives the real public
+process from Emacs, verifies project-scoped unsaved-buffer evaluation and
+located failures, kills the process, proves acknowledged namespace recovery,
+and stops the replacement before the test exits.
+
 The analyzer fixture runs after both readers. It compares success and complete
 diagnostic strings for scope resolution, declaration collisions, mutability,
 imports, exports, and malformed special forms. Both analyzers must accept all

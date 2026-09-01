@@ -31,16 +31,16 @@ test("repository public surface matches every tracked implementation", async () 
     schemaVersion: 1,
     language: { groups: 12, entries: 171 },
     ir: { nodeKinds: 55 },
-    commands: { commands: 7, options: 33 },
-    schemas: { total: 21 },
+    commands: { commands: 8, options: 39 },
+    schemas: { total: 25 },
     adapters: { adapters: 9, exports: 32 },
     runtimeModules: { modules: 29, exports: 219, public: 20, internal: 9 },
     standardLibrary: { modules: 29, exports: 304 },
     emacs: {
-      functions: 141,
-      records: 44,
+      functions: 151,
+      records: 46,
       publicRecords: 27,
-      internalRecords: 17,
+      internalRecords: 19,
     },
   });
 });

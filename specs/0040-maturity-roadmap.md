@@ -889,11 +889,22 @@ saving; virtual builds disable cache reuse and the next disk build invalidates
 the changed identity normally. The Emacs mode adds asynchronous buffer, file,
 and configured-project compilation plus next-error source navigation.
 
+Specification 0119 adds the first persistent evaluation slice. Seed and
+self-hosted compiler code agree on closed operation, form, and module
+descriptors. One Bun/Node session commits namespace revisions atomically,
+preserves live Atom state between expressions, prints canonical values,
+captures standard output without breaking NDJSON framing, and maps compiler
+and runtime failures back to `.eli`. The Emacs mode loads unsaved buffers,
+evaluates forms, displays navigable failures, and restores only acknowledged
+namespace state after an unexpected process restart.
+
 **M10 status:** In progress. Formatter, single-file format-check, the
 foundational Emacs major mode, project-aware check, unsaved-buffer validation,
 diagnostic navigation, virtual-source builds, and buffer/file/project compile
-commands are implemented; source-mapped evaluation, REPL, host-neutral watch
-events, onboarding, AC-12, and the complete exit gate remain open.
+commands are implemented. Persistent source-mapped evaluation and Emacs
+restart recovery are implemented; the complete terminal REPL, host-neutral
+watch events, onboarding, full AC-12/AC-13 matrices, and the exit gate remain
+open.
 
 ### M11: Standard and Platform Libraries (8-12 weeks)
 
@@ -1212,6 +1223,11 @@ diagnostic navigation, and buffer/project commands.
 A documented REPL session evaluates forms and files, reloads changed modules,
 prints ordinary values, maps runtime failures to Eliscript source, and recovers
 after a worker restart without losing protocol integrity.
+
+Specification 0119 supplies executable form/file evaluation, explicit reload,
+ordinary value printing, runtime source mapping, framed failures, and Emacs
+restart recovery. AC-13 remains open until the complete documented terminal
+REPL and maintained compatibility matrix pass together.
 
 **AC-14 MUST - Source-level debugging evidence**
 

@@ -195,6 +195,8 @@ an external `sourceMappingURL' comment.  Return an `eliscript-emission'."
           (insert javascript))))
     emission))
 
+(require 'eliscript-evaluation)
+
 (provide 'eliscript)
 
 ;;; eliscript.el ends here

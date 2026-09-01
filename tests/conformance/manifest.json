@@ -1644,6 +1644,42 @@
           "contains": "Vite remains an application adapter outside language core"
         }
       ]
+    },
+    {
+      "id": "editor.persistent-evaluation",
+      "title": "Self-hosted persistent evaluation",
+      "status": "accepted",
+      "spec": "0119",
+      "contracts": [
+        "Normalizes evaluation operations and source descriptors in seed and self-hosted compilers",
+        "Commits immutable namespace revisions while preserving live Atom and module identity between expressions",
+        "Prints canonical values and captures standard output without corrupting NDJSON framing",
+        "Maps compiler and runtime failures to original Eliscript source under Bun and Node",
+        "Restores only acknowledged project namespace state after an Emacs host restart",
+        "Keeps application frameworks, bundlers, publishing, sites, hosting, and development servers outside core dependencies and evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-evaluation-tests.el",
+          "contains": "eliscript-evaluation-seed-describes-module-bindings-and-macros"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-repl-tests.el",
+          "contains": "eliscript-repl-loads-evaluates-and-recovers-project-session"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-evaluation.test.mjs",
+          "contains": "seed and self-hosted evaluation descriptors agree"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-evaluation.test.mjs",
+          "contains": "Node and Bun preserve NDJSON framing and source locations"
+        }
+      ]
     }
   ]
 }

@@ -40,7 +40,9 @@ surface. `compiler/emitter.eli` formats portable IR through explicit text and
 mapping fragments, while `compiler/source-map.eli` encodes those marks as
 Source Map v3. The generated pipeline can process and emit every current
 bootstrap module, including its own sources. `compiler/compiler.eli` composes
-the complete in-memory pipeline without filesystem dependencies.
+the complete in-memory pipeline without filesystem dependencies and owns the
+versioned evaluation request, form-classification, binding, export, and macro
+descriptors used by persistent evaluation.
 `compiler/formatter.eli` separately owns comment-preserving concrete syntax,
 fixed layout, and canonical source text without using emitter or application
 formatting behavior.
@@ -53,6 +55,10 @@ semantics.
 `host/project.mjs` supplies the replaceable filesystem, path, artifact, and
 timing boundary while using those generated operations for real multi-module
 builds.
+`host/evaluation.mjs` owns one persistent temporary namespace, canonical value
+printing, output framing, Source Map failure normalization, revision commits,
+and cleanup. `host/evaluation-cli.mjs` exposes one-shot and NDJSON modes through
+the public `eliscript-eval` command.
 
 ## Build
 
@@ -73,10 +79,10 @@ compiles through the generated compiler under Bun or Node:
 
 Generated files are written below `dist/bootstrap/` and are not source
 artifacts. Shared fixtures cover symbol behavior, reader syntax, macro
-expansion, lexical analysis, all 57 IR node kinds, direct ESM emission, and
+expansion, lexical analysis, all 55 IR node kinds, direct ESM emission, and
 Source Map v3. Oracles compare complete syntax and IR trees, spans, properties,
 acceptance, exact diagnostics, JavaScript bytes, and parsed source maps between
-the seed and generated implementations. Canonical IR round trips all 57 node
+the seed and generated implementations. Canonical IR round trips all 55 node
 kinds and produces identical bytes under Bun and Node. Repeated builds must be
 byte-identical.
 

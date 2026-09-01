@@ -106,7 +106,7 @@ CLI output, and worker loading now identify the union of multiple entry
 closures while preserving version 1 single-entry behavior. Application
 frameworks and publishing infrastructure remain replaceable validation
 outside these core deliverables.
-M10 has begun with specifications 0114 through 0117. The generated compiler owns a
+M10 has begun with specifications 0114 through 0119. The generated compiler owns a
 comment-preserving deterministic formatter, and the Bun/Node public command
 provides stdout, atomic write, format-check, and structured diagnostics. The
 formatter passes idempotence and generated-ESM equivalence over maintained
@@ -117,8 +117,12 @@ project check now traverses configured source closures without build artifacts,
 supports unsaved stdin source, agrees across Bun and Node, and reports compiler
 diagnostics through Flymake. The public toolchain supports virtual-source
 project builds and buffer/file/project compilation through Emacs
-compilation-mode. M10 remains in progress because evaluation, REPL, watching,
-onboarding, AC-12, and the complete exit gate are not yet implemented.
+compilation-mode. Versioned seed/self-hosted evaluation descriptors now drive a
+persistent Bun/Node process with canonical value printing, source-mapped
+failures, atomic namespace revisions, output framing, and project-scoped Emacs
+sessions that restore acknowledged state after a host restart. M10 remains in
+progress because the complete terminal REPL, watching, onboarding, complete
+AC-12/AC-13 gates, and the exit gate are not yet implemented.
 
 ## Reading Paths
 
@@ -390,6 +394,7 @@ The schemas and change workflow are defined by specifications
 | 0116 | [Read-only Project Check and Emacs Diagnostics](0116-read-only-project-check-and-emacs-diagnostics.md) | Accepted | Implemented |
 | 0117 | [Virtual-source Builds and Emacs Compilation Commands](0117-virtual-source-builds-and-emacs-compilation.md) | Accepted | Implemented |
 | 0118 | [Framework-neutral Library Interoperation](0118-framework-neutral-library-interop.md) | Accepted | Implemented |
+| 0119 | [Self-hosted Persistent Evaluation](0119-self-hosted-persistent-evaluation.md) | Accepted | Implemented |
 
 ## Adding a Specification
 
