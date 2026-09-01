@@ -80,6 +80,55 @@ grep -q 'from "../../stdlib/object.mjs"' "$ENTRY"
 RESULT=$(bun run "$ENTRY")
 test "$RESULT" = '{"values":[1,2,3,4,5,6,7],"squares":[1,4,9,16,25,36,49],"even":[2,4,6],"sum":28,"summary":"1, 2, 3, 4, 5, 6, 7","slug":"eliscript","title":"Emacs + JavaScript","profile":{"language":"Eliscript","host":"Emacs","runtime":"JavaScript"},"selected":{"language":"Eliscript","runtime":"JavaScript"}}'
 
+cat >"$TMP_DIR/eliscript.json" <<EOF
+{"schemaVersion":1,"sourceRoot":"$PROJECT_DIR","entry":"examples/stdlib-cli/main.eli","outDir":"configured-build","portableEntries":[],"cache":true}
+EOF
+if "$PROJECT_DIR/bin/eliscript-build" --config "$TMP_DIR/eliscript.json" \
+    >"$TMP_DIR/config-stdout" 2>"$TMP_DIR/config-stderr"; then
+  printf '%s\n' 'expected absolute sourceRoot configuration to fail' >&2
+  exit 1
+fi
+grep -q 'sourceRoot must be a contained relative path' "$TMP_DIR/config-stderr"
+
+mkdir -p "$TMP_DIR/config-project/src"
+printf '%s\n' '(print 42)' >"$TMP_DIR/config-project/src/main.eli"
+cat >"$TMP_DIR/config-project/eliscript.json" <<'EOF'
+{"schemaVersion":1,"sourceRoot":"src","entry":"main.eli","outDir":"build","portableEntries":[],"cache":false}
+EOF
+CONFIG_OUTPUT=$(
+  "$PROJECT_DIR/bin/eliscript-build" \
+    --config "$TMP_DIR/config-project/eliscript.json"
+)
+test "$CONFIG_OUTPUT" = "$TMP_DIR/config-project/build/main.mjs"
+test "$(bun run "$CONFIG_OUTPUT")" = '42'
+
+OVERRIDE_OUTPUT=$(
+  "$PROJECT_DIR/bin/eliscript-build" \
+    --config "$TMP_DIR/config-project/eliscript.json" \
+    --out-dir "$TMP_DIR/config-project/override-build"
+)
+test "$OVERRIDE_OUTPUT" = "$TMP_DIR/config-project/override-build/main.mjs"
+test "$(bun run "$OVERRIDE_OUTPUT")" = '42'
+
+cat >"$TMP_DIR/config-project/invalid.json" <<'EOF'
+{"schemaVersion":1,"entry":"main.eli","outDir":"build","undeclaredOption":true}
+EOF
+if "$PROJECT_DIR/bin/eliscript-build" --diagnostic-format json \
+    --config "$TMP_DIR/config-project/invalid.json" \
+    >"$TMP_DIR/config-diagnostic-stdout" \
+    2>"$TMP_DIR/config-diagnostic-stderr"; then
+  printf '%s\n' 'expected unknown configuration key to fail' >&2
+  exit 1
+fi
+CONFIG_DIAGNOSTIC_FILE="$TMP_DIR/config-diagnostic-stderr" bun -e '
+  const diagnostic = await Bun.file(process.env.CONFIG_DIAGNOSTIC_FILE).json();
+  if (diagnostic.code !== "ELI-B0002" ||
+      diagnostic.phase !== "project-config" ||
+      diagnostic.message !== "unknown configuration key: undeclaredOption") {
+    throw new Error("unexpected project configuration diagnostic");
+  }
+'
+
 if "$PROJECT_DIR/bin/eliscript-build" "$PROJECT_DIR/examples/stdlib-cli/main.eli" \
     >"$TMP_DIR/stdout" 2>"$TMP_DIR/stderr"; then
   printf '%s\n' 'expected missing --out-dir to fail' >&2

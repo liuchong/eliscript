@@ -70,6 +70,15 @@
   module
   reason)
 
+(cl-defstruct (eliscript-project-request
+               (:constructor eliscript-project-request-create))
+  entry
+  out-dir
+  root
+  portable-entries
+  use-cache
+  configuration)
+
 (defconst eliscript-project-manifest-filename "eliscript-project.json"
   "Filename of the deterministic project build manifest.")
 
@@ -78,6 +87,19 @@
 
 (defconst eliscript-project-build-report-version 1
   "Version of the public project build decision report.")
+
+(defconst eliscript-project-configuration-version 1
+  "Current version of the public `eliscript.json' request schema.")
+
+(defconst eliscript-project-configuration-format "eliscript-project-request"
+  "Stable identity of the versioned project request schema family.")
+
+(defconst eliscript-project-configuration-filename "eliscript.json"
+  "Conventional filename for an Eliscript project request.")
+
+(defconst eliscript-project--configuration-keys
+  '(schemaVersion sourceRoot entry outDir portableEntries cache)
+  "Complete top-level key set accepted by configuration version 1.")
 
 (defvar eliscript-project-use-cache t
   "When non-nil, project builds may reuse verified manifest artifacts.")
@@ -101,6 +123,163 @@ FORMAT-STRING and ARGUMENTS describe the failure."
   (apply #'eliscript-diagnostic-signal
          'eliscript-project-error "ELI-B0001" "project-build"
          filename span format-string arguments))
+
+(defun eliscript-project--configuration-fail
+    (filename format-string &rest arguments)
+  "Signal a configuration failure in FILENAME.
+
+FORMAT-STRING and ARGUMENTS describe the failure."
+  (apply #'eliscript-diagnostic-signal
+         'eliscript-project-error "ELI-B0002" "project-config"
+         filename nil format-string arguments))
+
+(defun eliscript-project--safe-relative-path-p (path)
+  "Return non-nil when PATH is a non-empty contained relative path."
+  (and (stringp path)
+       (not (string-empty-p path))
+       (not (file-name-absolute-p path))
+       (not (member ".." (split-string path "[/\\\\]" t)))))
+
+(defun eliscript-project--configuration-field
+    (configuration key default)
+  "Return KEY from CONFIGURATION, or DEFAULT when it is absent."
+  (let ((entry (assq key configuration)))
+    (if entry (cdr entry) default)))
+
+(defun eliscript-project--configuration-path
+    (filename directory key value)
+  "Resolve relative configuration path VALUE below DIRECTORY.
+
+FILENAME and KEY identify invalid values in diagnostics."
+  (unless (eliscript-project--safe-relative-path-p value)
+    (eliscript-project--configuration-fail
+     filename "%s must be a contained relative path" key))
+  (expand-file-name value directory))
+
+(defun eliscript-project-read-configuration (filename)
+  "Read and validate a versioned project request from FILENAME."
+  (let* ((expanded (expand-file-name filename))
+         (canonical
+          (if (file-regular-p expanded)
+              (file-truename expanded)
+            (eliscript-project--configuration-fail
+             expanded "configuration file does not exist")))
+         (directory (file-name-directory canonical))
+         configuration)
+    (condition-case error-data
+        (with-temp-buffer
+          (insert-file-contents canonical)
+          (setq configuration
+                (json-parse-buffer
+                 :object-type 'alist :array-type 'list
+                 :null-object :null :false-object :false)))
+      (json-parse-error
+       (eliscript-project--configuration-fail
+        canonical "invalid JSON: %s" (error-message-string error-data))))
+    (unless (and (listp configuration)
+                 (cl-every #'consp configuration))
+      (eliscript-project--configuration-fail
+       canonical "configuration root must be an object"))
+    (let (seen duplicate)
+      (dolist (key (mapcar #'car configuration))
+        (if (memq key seen)
+            (unless duplicate (setq duplicate key))
+          (push key seen)))
+      (when duplicate
+        (eliscript-project--configuration-fail
+         canonical "duplicate configuration key: %s" duplicate)))
+    (let ((unknown
+           (sort
+            (cl-remove-if
+             (lambda (key)
+               (memq key eliscript-project--configuration-keys))
+             (mapcar #'car configuration))
+            (lambda (left right)
+              (string-lessp (symbol-name left) (symbol-name right))))))
+      (when unknown
+        (eliscript-project--configuration-fail
+         canonical "unknown configuration key: %s" (car unknown))))
+    (let* ((version
+            (eliscript-project--configuration-field
+             configuration 'schemaVersion nil))
+           (source-root
+            (eliscript-project--configuration-field
+             configuration 'sourceRoot "."))
+           (entry
+            (eliscript-project--configuration-field
+             configuration 'entry nil))
+           (out-dir
+            (eliscript-project--configuration-field
+             configuration 'outDir nil))
+           (portable-entries
+            (eliscript-project--configuration-field
+             configuration 'portableEntries nil))
+           (cache
+            (eliscript-project--configuration-field
+             configuration 'cache t)))
+      (unless (equal version eliscript-project-configuration-version)
+        (eliscript-project--configuration-fail
+         canonical "unsupported schemaVersion: %s" version))
+      (unless (and (listp portable-entries)
+                   (cl-every
+                    (lambda (name)
+                      (and (stringp name) (not (string-empty-p name))))
+                    portable-entries))
+        (eliscript-project--configuration-fail
+         canonical "portableEntries must be an array of non-empty strings"))
+      (unless (= (length portable-entries)
+                 (length (delete-dups (copy-sequence portable-entries))))
+        (eliscript-project--configuration-fail
+         canonical "portableEntries must not contain duplicates"))
+      (unless (memq cache '(t :false))
+        (eliscript-project--configuration-fail
+         canonical "cache must be a boolean"))
+      (let* ((root
+              (eliscript-project--configuration-path
+               canonical directory 'sourceRoot source-root))
+             (entry-path
+              (eliscript-project--configuration-path
+               canonical root 'entry entry))
+             (output-path
+              (eliscript-project--configuration-path
+               canonical directory 'outDir out-dir)))
+        (eliscript-project-request-create
+         :entry entry-path
+         :out-dir output-path
+         :root root
+         :portable-entries portable-entries
+         :use-cache (eq cache t)
+         :configuration canonical)))))
+
+(defun eliscript-project-execute (request)
+  "Execute validated project build REQUEST through the shared operation."
+  (unless (eliscript-project-request-p request)
+    (eliscript-project--fail nil nil "project request is invalid"))
+  (let ((entry (eliscript-project-request-entry request))
+        (out-dir (eliscript-project-request-out-dir request))
+        (root (eliscript-project-request-root request))
+        (portable-entries
+         (eliscript-project-request-portable-entries request))
+        (eliscript-project-use-cache
+         (eliscript-project-request-use-cache request)))
+    (unless (and (stringp entry) (not (string-empty-p entry)))
+      (eliscript-project--fail nil nil "project request entry is invalid"))
+    (unless (and (stringp out-dir) (not (string-empty-p out-dir)))
+      (eliscript-project--fail entry nil "project request output is invalid"))
+    (unless (or (null root) (stringp root))
+      (eliscript-project--fail entry nil "project request root is invalid"))
+    (unless (and (listp portable-entries)
+                 (cl-every
+                  (lambda (name)
+                    (or (symbolp name)
+                        (and (stringp name) (not (string-empty-p name)))))
+                  portable-entries))
+      (eliscript-project--fail
+       entry nil "project request portable entries are invalid"))
+    (if portable-entries
+        (eliscript-project-build-portable
+         entry portable-entries out-dir root)
+      (eliscript-project-build entry out-dir root))))
 
 (defun eliscript-project--canonical-directory (directory label)
   "Return canonical DIRECTORY with a trailing slash, or fail using LABEL."

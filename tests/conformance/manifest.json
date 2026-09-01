@@ -1240,6 +1240,19 @@
         { "kind": "bun-test", "file": "tests/emacs-analysis-evidence.test.mjs", "contains": "committed Emacs analysis benchmark preserves qualified evidence" },
         { "kind": "bun-test", "file": "tests/emacs-analysis-evidence.test.mjs", "contains": "committed Emacs analysis soak proves buffer lifecycle safety" }
       ]
+    },
+    {
+      "id": "toolchain.versioned-project-request-v1",
+      "title": "Versioned project request configuration",
+      "status": "accepted",
+      "spec": "0106",
+      "contracts": ["Routes direct and configured project builds through one request operation", "Validates a closed schemaVersion 1 configuration before graph traversal", "Rejects unknown or duplicate keys, unsafe paths, invalid booleans, and duplicate portable entries", "Preserves explicit command-line precedence and structured configuration diagnostics", "Keeps application frameworks, bundlers, publishing, hosting, and development servers outside the core schema and evidence"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-configuration-drives-shared-build-operation" },
+        { "kind": "ert", "file": "tests/eliscript-project-tests.el", "contains": "eliscript-project-configuration-rejects-undeclared-inputs" },
+        { "kind": "shell", "file": "tests/project-cli-test.sh", "contains": "CONFIG_OUTPUT" },
+        { "kind": "shell", "file": "tests/project-cli-test.sh", "contains": "CONFIG_DIAGNOSTIC_FILE" }
+      ]
     }
   ]
 }

@@ -383,6 +383,7 @@ Start with the document that matches the question:
 | What is the final project goal? | [Project Maturity Roadmap](specs/0040-maturity-roadmap.md) |
 | How do persistent values and Emacs acceleration fit together? | [Host Symbiosis and Persistent Data](specs/0041-host-symbiosis-and-persistent-data.md) |
 | Where is measured Emacs performance reinvestment specified? | [Emacs Analysis Performance Reinvestment](specs/0105-emacs-analysis-performance-reinvestment.md) |
+| How is a versioned project build configured? | [Versioned Project Request Configuration](specs/0106-versioned-project-request.md) |
 | Which behavior is implemented or stable? | [Specification Catalog](specs/README.md#specification-catalog) |
 | How does the seed compiler work? | [Compiler Guide](compiler/README.md) |
 | How does self-hosting work? | [Bootstrap Compiler Guide](bootstrap/README.md) |

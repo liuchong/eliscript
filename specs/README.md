@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 105 specifications.
+The registry currently contains 106 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 75 |
+| Accepted design | 76 |
 | Stable design | 29 |
 | Implementation in progress | 3 |
-| Implemented | 102 |
+| Implemented | 103 |
 
 Compatibility Baseline 1 separately classifies 29 specifications as stable,
-73 as provisional, and 3 as planning. That baseline is derived from registry
+74 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -90,6 +90,10 @@ equivalent candidates, two selected transducer-backed workflows at 9.648x and
 8.082x median warm end-to-end speedup, a source-bound 16,000-character
 crossover decision, and a 200-request stable/stale buffer soak. No application
 framework contributes to this result.
+M9 has started with a closed, versioned single-entry project request,
+configuration-relative path rules, structured unknown-key failures, and one
+seed project execution operation. Host-neutral graph planning and self-hosted
+project execution remain incomplete.
 
 ## Reading Paths
 
@@ -166,6 +170,7 @@ number.
 43. [0103: Transient Bulk Builder Performance](0103-transient-bulk-builder-performance.md)
 44. [0104: Accelerated Emacs Operation Service](0104-accelerated-emacs-operation-service.md)
 45. [0105: Emacs Analysis Performance Reinvestment](0105-emacs-analysis-performance-reinvestment.md)
+46. [0106: Versioned Project Request Configuration](0106-versioned-project-request.md)
 
 ### Application Validation (Non-core)
 
@@ -340,6 +345,7 @@ The schemas and change workflow are defined by specifications
 | 0103 | [Transient Bulk Builder Performance](0103-transient-bulk-builder-performance.md) | Accepted | Implemented |
 | 0104 | [Accelerated Emacs Operation Service](0104-accelerated-emacs-operation-service.md) | Accepted | Implemented |
 | 0105 | [Emacs Analysis Performance Reinvestment](0105-emacs-analysis-performance-reinvestment.md) | Accepted | Implemented |
+| 0106 | [Versioned Project Request Configuration](0106-versioned-project-request.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

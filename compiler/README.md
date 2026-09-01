@@ -27,6 +27,30 @@ This directory contains the first Emacs Lisp seed compiler:
 - `eliscript-project-cli.el` implements the batch command used by
   `bin/eliscript-build`.
 
+## Project Requests
+
+Direct project flags and versioned configuration both produce an
+`eliscript-project-request` and execute it through
+`eliscript-project-execute`. A minimal `eliscript.json` is:
+
+```json
+{
+  "schemaVersion": 1,
+  "sourceRoot": "src",
+  "entry": "main.eli",
+  "outDir": "dist"
+}
+```
+
+Run it with `./bin/eliscript-build --config eliscript.json`. Paths in the file
+are relative to the file as defined by specification 0106. Explicit entry,
+root, output, portable-entry, and no-cache flags override configured values.
+Unknown keys and unsupported versions fail with structured diagnostics.
+
+The schema is a compiler project contract. Application framework, bundler,
+publishing, hosting, and development-server options belong in replaceable
+adapters outside this file and outside core maturity evidence.
+
 ## Pipeline
 
 The current pipeline expands user macros before passing forms through lexical

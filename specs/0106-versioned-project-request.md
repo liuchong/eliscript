@@ -1,0 +1,118 @@
+# 0106: Versioned Project Request Configuration
+
+- Status: Accepted
+- Implementation: Implemented
+- Date: 2026-09-01
+- Depends on: 0030 Project Graph Manifest,
+  0032 Build Decision Reports,
+  0040 Project Maturity Roadmap,
+  0043 Structured Compiler Diagnostics
+
+## Summary
+
+Eliscript project builds now enter the seed toolchain through one explicit
+`ProjectRequest` operation. The request can be assembled by an Emacs caller,
+by legacy command-line flags, or from a versioned `eliscript.json` file. Both
+ordinary and portable builds pass through `eliscript-project-execute` before
+the existing graph compiler is selected.
+
+This is the first M9 configuration and service convergence slice. Version 1
+intentionally describes one graph root and one entry because the current
+public build artifact has one entry identity. Multi-entry graph identity,
+source-map policy, build profiles, declared macro capabilities, namespaced
+host options, and self-hosted parsing require later versioned specifications;
+they are not accepted as ignored version 1 fields.
+
+Application frameworks, bundlers, publishing tools, sites, hosting systems,
+and development servers are replaceable consumers. They do not define this
+schema, enter the project operation, or contribute core maturity evidence.
+
+## Project Request
+
+The in-memory request contains:
+
+| Field | Meaning |
+| --- | --- |
+| `entry` | source entry path |
+| `root` | source containment root |
+| `out-dir` | generated ESM directory |
+| `portable-entries` | empty for an ordinary graph, otherwise portable names |
+| `use-cache` | whether verified incremental artifacts may be reused |
+| `configuration` | optional source configuration identity |
+
+`eliscript-project-execute` validates the request shape, binds cache policy,
+and dispatches ordinary or portable compilation. Callers no longer select the
+two project builders themselves. The lower-level builders remain temporarily
+public for compatibility while M9 moves graph discovery into Eliscript.
+
+## Configuration Schema Version 1
+
+The conventional filename is `eliscript.json`. Configuration is activated
+explicitly with `eliscript-build --config FILE`; automatic upward discovery is
+not part of version 1.
+
+```json
+{
+  "schemaVersion": 1,
+  "sourceRoot": "src",
+  "entry": "main.eli",
+  "outDir": "dist",
+  "portableEntries": [],
+  "cache": true
+}
+```
+
+`schemaVersion`, `entry`, and `outDir` are required. `sourceRoot` defaults to
+`.` relative to the configuration directory. `portableEntries` defaults to an
+empty array and must contain unique non-empty strings. `cache` defaults to
+true and must be a JSON boolean.
+
+`sourceRoot`, `entry`, and `outDir` are non-empty relative paths. Absolute
+paths and any `..` component reject before filesystem traversal. `sourceRoot`
+and `outDir` resolve from the configuration directory; `entry` resolves from
+`sourceRoot`. Existing canonical-path and symlink containment checks remain
+authoritative when the graph is built.
+
+The top-level schema is closed. Every unknown key rejects with `ELI-B0002`,
+phase `project-config`, and a stable key-bearing message. Unsupported schema
+versions, malformed JSON, duplicate top-level keys, invalid field types,
+duplicate portable entries, and unsafe paths also fail through that structured
+diagnostic category. No field is silently ignored.
+
+## Command-line Precedence
+
+Without `--config`, the historical entry and build flags construct the same
+request directly. With `--config`, explicit `ENTRY`, `--root`, `--out-dir`,
+and repeated `--portable` values replace their configured counterparts.
+`--no-cache` always disables reuse. `--json` and `--diagnostic-format` remain
+presentation controls and never enter artifact identity.
+
+Relative command-line override paths retain historical current-directory
+semantics. Relative paths inside the JSON file retain configuration-directory
+semantics. More than one `--config` option is an error.
+
+## M9 Boundary
+
+This specification completes a usable versioned request contract and the
+first shared project operation. It does not claim the M9 exit gate: filesystem
+graph discovery is still implemented by the seed, the self-hosted compiler
+does not yet execute this request, Node host parity is still pending, and
+single-file compilation has not yet become a one-module project internally.
+
+The next convergence slice can move graph and portable-closure planning into
+`.eli` against this request boundary without changing CLI parsing again.
+
+## Acceptance Criteria
+
+- **VPR-01:** Direct flags and version 1 configuration both execute through
+  `eliscript-project-execute`.
+- **VPR-02:** Required fields, defaults, booleans, portable names, and path
+  containment are validated before project traversal.
+- **VPR-03:** Unknown keys and unsupported versions fail with structured
+  project-configuration diagnostics; duplicate top-level keys also fail.
+- **VPR-04:** Explicit build flags override configured values while
+  `--no-cache` can only disable reuse.
+- **VPR-05:** Configuration-driven ordinary output is executable and follows
+  the same manifest and Source Map behavior as direct project builds.
+- **VPR-06:** No application framework or publishing tool enters the schema,
+  implementation dependency, or acceptance evidence.

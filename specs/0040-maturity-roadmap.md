@@ -794,6 +794,12 @@ implementation while preserving the seed as a trustworthy bootstrap.
 8. Make clean bootstrap, ordinary builds, and portable builds independently
    reproducible.
 
+Specification 0106 delivers the first versioned single-entry project request,
+closed-key configuration validation, command-line precedence, and shared seed
+project operation. Multi-entry identity, host-neutral graph planning, and
+self-hosted execution remain M9 work; this partial delivery does not satisfy
+the exit gate.
+
 **Exit gate:** All normal user builds can use the self-hosted compiler; the
 seed is no longer the only implementation of a user-facing build capability.
 

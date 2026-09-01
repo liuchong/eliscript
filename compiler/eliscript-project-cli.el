@@ -13,10 +13,13 @@
 
 (defconst eliscript-project-cli--usage
   (concat
-   "Usage: eliscript-build [--root DIR] [--portable NAME] [--no-cache]\n"
+   "Usage: eliscript-build [--config FILE] [--root DIR] [--portable NAME]\n"
+   "                       [--no-cache]\n"
    "                       [--json] [--diagnostic-format human|json]\n"
    "                       --out-dir DIR ENTRY\n\n"
    "Compile ENTRY and its relative .eli imports into an ESM directory tree.\n"
+   "Use --config FILE for a versioned project request. Explicit build flags\n"
+   "and ENTRY override configured values; --no-cache always disables reuse.\n"
    "Write eliscript-project.json with deterministic graph content digests.\n"
    "Reuse verified modules by default; --no-cache forces complete compilation.\n"
    "Use --json for a machine-readable build decision report on stdout.\n"
@@ -36,13 +39,13 @@
     format-name))
 
 (defun eliscript-project-cli--parse (arguments)
-  "Parse ARGUMENTS into entry, output, root, portable, cache, and JSON fields."
+  "Parse ARGUMENTS into a project request and presentation fields."
   (when (equal (car arguments) "--")
     (setq arguments (cdr arguments)))
   (let ((use-cache t)
         (json-report nil)
         (diagnostic-format "human")
-        entry out-dir root portable-entries)
+        entry out-dir root portable-entries configuration)
     (while arguments
       (let ((argument (pop arguments)))
         (cond
@@ -53,6 +56,12 @@
           (unless arguments
             (error "%s requires a directory" argument))
           (setq out-dir (pop arguments)))
+         ((equal argument "--config")
+          (unless arguments
+            (error "%s requires a file" argument))
+          (when configuration
+            (error "multiple --config files are not supported"))
+          (setq configuration (pop arguments)))
          ((equal argument "--root")
           (unless arguments
             (error "%s requires a directory" argument))
@@ -75,28 +84,44 @@
           (error "unknown option: %s" argument))
          (entry (error "multiple entry files are not supported"))
          (t (setq entry argument)))))
-    (unless entry
-      (error "missing entry file"))
-    (unless out-dir
-      (error "missing --out-dir"))
-    (list entry out-dir root (nreverse portable-entries)
-          use-cache json-report diagnostic-format)))
+    (let ((request
+           (if configuration
+               (let ((configured
+                      (eliscript-project-read-configuration configuration)))
+                 (when entry
+                   (setf (eliscript-project-request-entry configured) entry))
+                 (when out-dir
+                   (setf (eliscript-project-request-out-dir configured) out-dir))
+                 (when root
+                   (setf (eliscript-project-request-root configured) root))
+                 (when portable-entries
+                   (setf (eliscript-project-request-portable-entries configured)
+                         (nreverse portable-entries)))
+                 (unless use-cache
+                   (setf (eliscript-project-request-use-cache configured) nil))
+                 configured)
+             (progn
+               (unless entry
+                 (error "missing entry file"))
+               (unless out-dir
+                 (error "missing --out-dir"))
+               (eliscript-project-request-create
+                :entry entry
+                :out-dir out-dir
+                :root root
+                :portable-entries (nreverse portable-entries)
+                :use-cache use-cache)))))
+      (list request json-report diagnostic-format))))
 
 (defun eliscript-project-cli-main (arguments)
   "Build an Eliscript project according to command-line ARGUMENTS."
   (let ((requested-format
          (eliscript-project-cli--requested-diagnostic-format arguments)))
     (condition-case error-data
-        (pcase-let ((`(,entry ,out-dir ,root ,portable-entries
-			        ,use-cache ,json-report ,diagnostic-format)
+        (pcase-let ((`(,request ,json-report ,diagnostic-format)
                       (eliscript-project-cli--parse arguments)))
           (setq requested-format diagnostic-format)
-          (let* ((eliscript-project-use-cache use-cache)
-                 (result
-                  (if portable-entries
-                      (eliscript-project-build-portable
-                       entry portable-entries out-dir root)
-                    (eliscript-project-build entry out-dir root))))
+          (let ((result (eliscript-project-execute request)))
             (princ
              (if json-report
                  (json-serialize

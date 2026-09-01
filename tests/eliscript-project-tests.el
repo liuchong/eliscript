@@ -594,6 +594,54 @@
       (should (string-match-p "function has_QMARK_" object-text))
       (should-not (string-match-p "function keys" object-text)))))
 
+(ert-deftest eliscript-project-configuration-drives-shared-build-operation ()
+  (eliscript-project-tests--with-directory project
+    (let* ((source (expand-file-name "src/main.eli" project))
+           (configuration (expand-file-name "eliscript.json" project)))
+      (eliscript-project-tests--write source "(print 42)\n")
+      (eliscript-project-tests--write
+       configuration
+       (concat
+        "{\"schemaVersion\":1,\"sourceRoot\":\"src\","
+        "\"entry\":\"main.eli\",\"outDir\":\"build\","
+        "\"portableEntries\":[],\"cache\":false}\n"))
+      (let* ((request
+              (eliscript-project-read-configuration configuration))
+             (result (eliscript-project-execute request)))
+        (should (equal (eliscript-project-request-entry request)
+                       (file-truename source)))
+        (should (equal (eliscript-project-request-root request)
+                       (file-truename (expand-file-name "src" project))))
+        (should-not (eliscript-project-request-use-cache request))
+        (should-not
+         (eliscript-project-build-result-cache-enabled result))
+        (should
+         (file-exists-p (expand-file-name "build/main.mjs" project)))))))
+
+(ert-deftest eliscript-project-configuration-rejects-undeclared-inputs ()
+  (eliscript-project-tests--with-directory project
+    (let ((configuration (expand-file-name "eliscript.json" project)))
+      (dolist
+          (case
+           '(("{\"schemaVersion\":1,\"entry\":\"main.eli\",\"outDir\":\"build\",\"undeclaredOption\":{}}"
+              "unknown configuration key: undeclaredOption")
+             ("{\"schemaVersion\":2,\"entry\":\"main.eli\",\"outDir\":\"build\"}"
+              "unsupported schemaVersion: 2")
+             ("{\"schemaVersion\":1,\"entry\":\"first.eli\",\"entry\":\"second.eli\",\"outDir\":\"build\"}"
+              "duplicate configuration key: entry")
+             ("{\"schemaVersion\":1,\"sourceRoot\":\"../src\",\"entry\":\"main.eli\",\"outDir\":\"build\"}"
+              "sourceRoot must be a contained relative path")
+             ("{\"schemaVersion\":1,\"entry\":\"main.eli\",\"outDir\":\"build\",\"portableEntries\":[\"work\",\"work\"]}"
+              "portableEntries must not contain duplicates")))
+        (eliscript-project-tests--write configuration (concat (car case) "\n"))
+        (let ((error-data
+               (should-error
+                (eliscript-project-read-configuration configuration)
+                :type 'eliscript-project-error)))
+          (should (string-match-p
+                   (regexp-quote (cadr case))
+                   (error-message-string error-data))))))))
+
 (provide 'eliscript-project-tests)
 
 ;;; eliscript-project-tests.el ends here
