@@ -47,6 +47,11 @@ are relative to the file as defined by specification 0106. Explicit entry,
 root, output, portable-entry, and no-cache flags override configured values.
 Unknown keys and unsupported versions fail with structured diagnostics.
 
+Run `./bin/eliscript-check --config eliscript.json --json` to validate the same
+entry closure without writing the configured output directory, manifest, or
+cache. `--stdin-file FILE` checks standard input as the current contents of an
+existing project source for editor integrations.
+
 The schema is a compiler project contract. Application framework, bundler,
 publishing, hosting, and development-server options belong in replaceable
 adapters outside this file and outside core maturity evidence.

@@ -33,15 +33,17 @@ single-file, single-entry project, and multi-entry project builds through one
 versioned operation boundary. Version 2 project identity, reports, cache
 validation, and worker loading preserve the version 1 single-entry contract.
 
-The first two M10 slices are complete. The self-hosted compiler now owns a
+The first three M10 slices are complete. The self-hosted compiler now owns a
 comment-preserving concrete-syntax formatter with fixed two-space/88-column
 layout, byte-idempotence and ESM-semantic corpus evidence, plus one Bun/Node
 `eliscript-format` command for stdout, atomic `--write`, and non-mutating
 `--check`. The maintained Emacs major mode adds syntax, two-space indentation,
 font locking, Imenu, balanced definition navigation, project discovery, and
-transactional buffer formatting. Project-aware checking, diagnostic
-navigation, interactive evaluation, REPL, watching, and the complete M10 exit
-gate remain future work.
+transactional buffer formatting. A read-only `eliscript-check` operation now
+validates complete configured source graphs in memory, accepts unsaved source
+through stdin, emits deterministic Bun/Node reports, and feeds structured
+diagnostics to Flymake. Compile commands, interactive evaluation, REPL,
+watching, and the complete M10 exit gate remain future work.
 
 The current M8 work provides:
 
@@ -198,6 +200,12 @@ Format one source file in place or check canonical formatting without writing:
 ./bin/eliscript-format --check examples/basic/main.eli
 ```
 
+Check a complete source graph without writing build outputs:
+
+```sh
+./bin/eliscript-check --json --root . examples/stdlib-cli/main.eli
+```
+
 Enable the maintained Emacs mode from this checkout:
 
 ```elisp
@@ -342,6 +350,7 @@ arbitrary Emacs packages in JavaScript.
 | Build a source graph | `./bin/eliscript-build --root . --out-dir dist source.eli` |
 | Format a source file | `./bin/eliscript-format --write source.eli` |
 | Check source formatting | `./bin/eliscript-format --check source.eli` |
+| Check a source graph | `./bin/eliscript-check --json --root . source.eli` |
 | Request JSON diagnostics | `./bin/eliscript --diagnostic-format json source.eli` |
 | Inspect build decisions | `./bin/eliscript-build --json --root . --out-dir dist source.eli` |
 | Build the self-hosted compiler | `bun run build:bootstrap` |

@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   realpath,
   rm,
   symlink,
@@ -13,7 +14,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { buildProject } from "../bootstrap/host/project.mjs";
+import { buildProject, checkProject } from "../bootstrap/host/project.mjs";
 import { parseConfigurationJson } from "../bootstrap/host/project-cli.mjs";
 
 const projectDirectory = resolve(import.meta.dir, "..");
@@ -270,6 +271,62 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
       mode: "project",
       entries: multiRequest.entries,
     });
+    expect(compiler.check_operation_request({
+      entries: ["/project/src/z.eli", "/project/src/a.eli"],
+      root: "/project",
+      portableEntries: [],
+    })).toEqual({
+      format: "eliscript-check-operation",
+      version: 1,
+      mode: "project",
+      entries: ["/project/src/a.eli", "/project/src/z.eli"],
+      root: "/project",
+      portableEntries: [],
+    });
+    expect(compiler.project_check_report({
+      mode: "standard",
+      root: "/project",
+      entries: ["src/z.eli", "src/a.eli"],
+      portableEntries: [],
+      modules: [
+        {
+          source: "src/z.eli",
+          dependencies: [],
+          portableEntries: [],
+        },
+        {
+          source: "src/a.eli",
+          dependencies: ["src/z.eli"],
+          portableEntries: [],
+        },
+      ],
+    })).toEqual({
+      format: "eliscript-check-report",
+      version: 1,
+      status: "ok",
+      mode: "standard",
+      root: "/project",
+      entries: ["src/a.eli", "src/z.eli"],
+      portableEntries: [],
+      counts: { modules: 2 },
+      modules: [
+        {
+          source: "src/a.eli",
+          dependencies: ["src/z.eli"],
+          portableEntries: [],
+        },
+        {
+          source: "src/z.eli",
+          dependencies: [],
+          portableEntries: [],
+        },
+      ],
+    });
+    expect(() => compiler.check_operation_request({
+      entries: ["/project/src/a.eli", "/project/src/z.eli"],
+      root: "/project",
+      portableEntries: ["main"],
+    })).toThrow("multi-entry portable project requests are not supported");
     try {
       compiler.project_request({
         entries: [],
@@ -556,6 +613,72 @@ test("self-hosted project service matches seed output under Bun and Node", async
       },
     });
 
+    const checkRoot = resolve(directory, "check-source");
+    const checkEntry = resolve(checkRoot, "main.eli");
+    const checkDependency = resolve(checkRoot, "helper.eli");
+    await mkdir(checkRoot);
+    await writeFile(
+      checkEntry,
+      '(import "./helper.eli" answer)\n(print answer)\n',
+    );
+    await writeFile(checkDependency, "(defconst answer 42)\n(export answer)\n");
+    const canonicalCheckRoot = await realpath(checkRoot);
+    const canonicalCheckEntry = await realpath(checkEntry);
+    const checked = await checkProject({
+      root: canonicalCheckRoot,
+      entry: checkEntry,
+      moduleDirectory: compilerDirectory,
+    });
+    expect(checked.report).toEqual({
+      format: "eliscript-check-report",
+      version: 1,
+      status: "ok",
+      mode: "standard",
+      root: canonicalCheckRoot,
+      entries: ["main.eli"],
+      portableEntries: [],
+      counts: { modules: 2 },
+      modules: [
+        {
+          source: "helper.eli",
+          dependencies: [],
+          portableEntries: [],
+        },
+        {
+          source: "main.eli",
+          dependencies: ["helper.eli"],
+          portableEntries: [],
+        },
+      ],
+    });
+    expect((await readdir(checkRoot)).sort()).toEqual(["helper.eli", "main.eli"]);
+    await expect(checkProject({
+      root: checkRoot,
+      entry: checkEntry,
+      moduleDirectory: compilerDirectory,
+      sourceOverrides: {
+        [checkEntry]: "(print missing)\n",
+      },
+    })).rejects.toMatchObject({
+      eliscriptDiagnostic: {
+        code: "ELI-A0001",
+        phase: "analysis",
+        location: { file: canonicalCheckEntry },
+      },
+    });
+    const detachedSource = resolve(checkRoot, "detached.eli");
+    await writeFile(detachedSource, "(print 1)\n");
+    await expect(checkProject({
+      root: checkRoot,
+      entry: checkEntry,
+      moduleDirectory: compilerDirectory,
+      sourceOverrides: {
+        [detachedSource]: "(print 2)\n",
+      },
+    })).rejects.toThrow(
+      "project check source override is outside the checked graph",
+    );
+
     const standardSeed = resolve(directory, "standard-seed");
     const standardBun = resolve(directory, "standard-bun");
     const standardNode = resolve(directory, "standard-node");
@@ -785,6 +908,21 @@ test("self-hosted project service matches seed output under Bun and Node", async
       portableEntries: ["group-by"],
       moduleDirectory: compilerDirectory,
     };
+    const portableChecked = await checkProject(portableOptions);
+    expect(portableChecked.report).toMatchObject({
+      format: "eliscript-check-report",
+      version: 1,
+      status: "ok",
+      mode: "portable",
+      entries: ["data.eli"],
+      portableEntries: ["group-by"],
+      counts: { modules: 2 },
+    });
+    expect(portableChecked.report.modules.map((module) =>
+      [module.source, module.portableEntries])).toEqual([
+      ["data.eli", ["group-by"]],
+      ["object.eli", ["assoc", "has?"]],
+    ]);
     const portableSeedReport = JSON.parse(await run([
       seedBuildPath,
       "--json",

@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 115 specifications.
+The registry currently contains 116 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 85 |
+| Accepted design | 86 |
 | Stable design | 29 |
 | Implementation in progress | 3 |
-| Implemented | 112 |
+| Implemented | 113 |
 
 Compatibility Baseline 1 separately classifies 29 specifications as stable,
-83 as provisional, and 3 as planning. That baseline is derived from registry
+84 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -104,15 +104,18 @@ CLI output, and worker loading now identify the union of multiple entry
 closures while preserving version 1 single-entry behavior. Application
 frameworks and publishing infrastructure remain replaceable validation
 outside these core deliverables.
-M10 has begun with specifications 0114 and 0115. The generated compiler owns a
+M10 has begun with specifications 0114 through 0116. The generated compiler owns a
 comment-preserving deterministic formatter, and the Bun/Node public command
 provides stdout, atomic write, format-check, and structured diagnostics. The
 formatter passes idempotence and generated-ESM equivalence over maintained
 compiler and standard-library sources. The maintained Emacs mode now provides
 syntax, indentation, font locking, Imenu, definition movement, project
-discovery, and transactional formatter integration. M10 remains in progress
-because project-aware checking, diagnostic navigation, compile commands, REPL,
-watching, onboarding, AC-12, and the complete exit gate are not yet implemented.
+discovery, and transactional formatter integration. A versioned read-only
+project check now traverses configured source closures without build artifacts,
+supports unsaved stdin source, agrees across Bun and Node, and reports compiler
+diagnostics through Flymake. M10 remains in progress because compile commands,
+evaluation, REPL, watching, onboarding, AC-12, and the complete exit gate are
+not yet implemented.
 
 ## Reading Paths
 

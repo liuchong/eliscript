@@ -8,6 +8,8 @@
 ;;; Code:
 
 (require 'imenu)
+(require 'json)
+(require 'flymake)
 (require 'project)
 (require 'seq)
 (require 'subr-x)
@@ -19,6 +21,11 @@
 
 (defcustom eliscript-mode-format-command '("eliscript-format")
   "Command and fixed arguments used to format the current buffer."
+  :type '(repeat string)
+  :group 'eliscript)
+
+(defcustom eliscript-mode-check-command '("eliscript-check")
+  "Command and fixed arguments used to check the current project."
   :type '(repeat string)
   :group 'eliscript)
 
@@ -135,8 +142,11 @@
 (defvar eliscript-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-f") #'eliscript-mode-format-buffer)
+    (define-key map (kbd "C-c C-k") #'eliscript-mode-check-buffer)
     map)
   "Keymap used by `eliscript-mode'.")
+
+(defvar-local eliscript-mode--flymake-process nil)
 
 (defun eliscript-mode--line-indentation ()
   "Return canonical structural indentation for the current line."
@@ -262,6 +272,158 @@ Prefer the nearest `eliscript.json', then fall back to `project.el'."
                 (list (format "formatter executable not found: %s"
                               configured))))))
 
+(defun eliscript-mode--check-program ()
+  "Resolve and validate `eliscript-mode-check-command'."
+  (unless (and (consp eliscript-mode-check-command)
+               (seq-every-p #'stringp eliscript-mode-check-command)
+               (not (string-empty-p (car eliscript-mode-check-command))))
+    (signal 'eliscript-mode-error
+            '("eliscript-mode-check-command must be non-empty strings")))
+  (let* ((configured (car eliscript-mode-check-command))
+         (program (if (file-name-absolute-p configured)
+                      (and (file-executable-p configured) configured)
+                    (executable-find configured))))
+    (or program
+        (signal 'eliscript-mode-error
+                (list (format "checker executable not found: %s"
+                              configured))))))
+
+(defun eliscript-mode--check-arguments ()
+  "Return project-aware checker arguments for the current buffer."
+  (unless buffer-file-name
+    (signal 'eliscript-mode-error
+            '("project checking requires a file-backed buffer")))
+  (let* ((root (or (eliscript-mode-project-root)
+                   (file-name-directory (expand-file-name buffer-file-name))))
+         (configuration (expand-file-name "eliscript.json" root))
+         (project-arguments
+          (if (file-regular-p configuration)
+              (list "--config" configuration)
+            (list "--root" root buffer-file-name))))
+    (append (cdr eliscript-mode-check-command)
+            project-arguments
+            (list "--stdin-file" buffer-file-name
+                  "--json" "--diagnostic-format" "json"))))
+
+(defun eliscript-mode--diagnostic-position (position fallback)
+  "Convert diagnostic POSITION to a buffer position, or use FALLBACK."
+  (let ((offset (and (listp position) (alist-get 'offset position))))
+    (if (and (integerp offset) (>= offset 0))
+        (min (point-max) (+ (point-min) offset))
+      fallback)))
+
+(defun eliscript-mode--diagnostic-from-json (source)
+  "Return a Flymake diagnostic decoded from JSON SOURCE, or nil."
+  (condition-case nil
+      (let* ((value (json-parse-string source
+                                       :object-type 'alist
+                                       :array-type 'list
+                                       :null-object nil
+                                       :false-object nil))
+             (location (alist-get 'location value))
+             (filename (alist-get 'file location))
+             (same-file
+              (or (null filename)
+                  (and buffer-file-name
+                       (equal (ignore-errors (file-truename filename))
+                              (ignore-errors
+                                (file-truename buffer-file-name)))))))
+        (when (and (equal (alist-get 'format value) "eliscript-diagnostic")
+                   (= (or (alist-get 'version value) 0) 1)
+                   same-file)
+          (let* ((start (eliscript-mode--diagnostic-position
+                         (alist-get 'start location) (point-min)))
+                 (raw-end (eliscript-mode--diagnostic-position
+                           (alist-get 'end location) start))
+                 (end (max start (min (point-max) raw-end)))
+                 (severity (alist-get 'severity value))
+                 (type (cond
+                         ((equal severity "warning") :warning)
+                         ((equal severity "info") :note)
+                         (t :error))))
+            (flymake-make-diagnostic
+             (current-buffer) start end type
+             (format "%s: %s"
+                     (or (alist-get 'code value) "ELI-C0001")
+                     (or (alist-get 'message value)
+                         "Eliscript check failed"))))))
+    (error nil)))
+
+(defun eliscript-mode--stop-flymake-process ()
+  "Stop the checker process owned by the current buffer."
+  (when (process-live-p eliscript-mode--flymake-process)
+    (kill-process eliscript-mode--flymake-process))
+  (setq eliscript-mode--flymake-process nil))
+
+(defun eliscript-mode-flymake-backend (report-fn &rest _arguments)
+  "Check the current project asynchronously and call REPORT-FN."
+  (eliscript-mode--stop-flymake-process)
+  (let* ((source-buffer (current-buffer))
+         (generation (buffer-chars-modified-tick))
+         (output-buffer (generate-new-buffer " *eliscript-check-output*"))
+         (error-buffer (generate-new-buffer " *eliscript-check-error*"))
+         (program (eliscript-mode--check-program))
+         (command (cons program (eliscript-mode--check-arguments)))
+         process)
+    (condition-case error-data
+        (progn
+          (setq process
+                (make-process
+                 :name "eliscript-check"
+                 :buffer output-buffer
+                 :stderr error-buffer
+                 :command command
+                 :connection-type 'pipe
+                 :coding 'utf-8-unix
+                 :noquery t
+                 :sentinel
+                 (lambda (finished _event)
+                   (when (memq (process-status finished) '(exit signal))
+                     (unwind-protect
+                         (when (buffer-live-p source-buffer)
+                           (with-current-buffer source-buffer
+                             (when (and
+                                    (eq finished
+                                        eliscript-mode--flymake-process)
+                                    (= generation
+                                       (buffer-chars-modified-tick)))
+                               (setq eliscript-mode--flymake-process nil)
+                               (if (and
+                                    (eq (process-status finished) 'exit)
+                                    (zerop (process-exit-status finished)))
+                                   (funcall report-fn nil)
+                                 (let* ((json-source
+                                         (with-current-buffer error-buffer
+                                           (string-trim (buffer-string))))
+                                        (diagnostic
+                                         (eliscript-mode--diagnostic-from-json
+                                          json-source)))
+                                   (funcall report-fn
+                                            (if diagnostic
+                                                (list diagnostic)
+                                              nil)))))))
+                       (when (buffer-live-p output-buffer)
+                         (kill-buffer output-buffer))
+                       (when (buffer-live-p error-buffer)
+                         (kill-buffer error-buffer)))))))
+          (setq eliscript-mode--flymake-process process)
+          (save-restriction
+            (widen)
+            (process-send-region process (point-min) (point-max)))
+          (process-send-eof process))
+      (error
+       (setq eliscript-mode--flymake-process nil)
+       (when (process-live-p process) (kill-process process))
+       (when (buffer-live-p output-buffer) (kill-buffer output-buffer))
+       (when (buffer-live-p error-buffer) (kill-buffer error-buffer))
+       (signal (car error-data) (cdr error-data))))))
+
+(defun eliscript-mode-check-buffer ()
+  "Check the current project and expose diagnostics through Flymake."
+  (interactive)
+  (unless flymake-mode (flymake-mode 1))
+  (flymake-start))
+
 (defun eliscript-mode--read-file (filename)
   "Return the complete contents of FILENAME as a string."
   (with-temp-buffer
@@ -330,7 +492,10 @@ The visited file is not saved.  On failure the buffer remains unchanged."
   (setq-local beginning-of-defun-function
               #'eliscript-mode--beginning-of-defun)
   (setq-local end-of-defun-function #'eliscript-mode--end-of-defun)
-  (setq-local parse-sexp-ignore-comments t))
+  (setq-local parse-sexp-ignore-comments t)
+  (add-hook 'flymake-diagnostic-functions
+            #'eliscript-mode-flymake-backend nil t)
+  (add-hook 'kill-buffer-hook #'eliscript-mode--stop-flymake-process nil t))
 
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.eli\\'" . eliscript-mode))

@@ -107,11 +107,14 @@ Name conversion between Lisp-style symbols and JavaScript identifiers is not
 yet fixed. The emitter must keep a reversible mapping for diagnostics and
 source maps regardless of the chosen convention.
 
-## React Target
+## Application Validation: React
 
 React support belongs in a library and macro layer above the language core.
 Eliscript should emit ordinary React calls or JSX-compatible JavaScript rather
 than implement its own reconciler.
+
+This section is a replaceable application probe, not a core language goal,
+compiler dependency, standard-library requirement, or maturity prerequisite.
 
 The first React slice needs to prove:
 
@@ -203,6 +206,11 @@ acceptance prerequisite.
 
 ## Roadmap
 
+M2 and M3 retain their historical sequence numbers, but they are application
+validation tracks rather than core roadmap gates. Their frameworks, bundlers,
+publishing paths, dependencies, and tests cannot satisfy a core-language,
+compiler, runtime, standard-library, self-hosting, or 1.0 acceptance criterion.
+
 ### M0: Vertical Slice (Complete)
 
 - Read literals, symbols, calls, `if`, `let`, and functions.
@@ -225,7 +233,7 @@ macro expansion, recursively located forms, filename/line/column diagnostics,
 explicit IR lowering, direct IR emission, output-name collision checks,
 external Source Map v3 output, and JavaScript execution are implemented.
 
-### M2: React (Complete)
+### M2: React Application Probe (Complete; Non-core)
 
 - Add the React library and component macros.
 - Compile and run the counter example.
@@ -237,7 +245,7 @@ hooks, props, children, events, conditional children, fragments, an imported
 React component, server rendering, browser mounting, production bundling, and
 state-preserving React Fast Refresh through the optional Vite adapter.
 
-### M3: Publishing (Complete)
+### M3: Publishing Application Probe (Complete; Non-core)
 
 - Add an Org publishing adapter.
 - Compile article metadata and content into application-consumable modules.

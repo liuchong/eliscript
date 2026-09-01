@@ -15,6 +15,11 @@ discovery, and `C-c C-f` buffer formatting. The formatter command defaults to
 command is not on `PATH`.
 
 Project discovery prefers the nearest `eliscript.json` and then falls back to
-the current `project.el` project. Compilation diagnostics, project checking,
-interactive evaluation, and REPL sessions are separate M10 capabilities and
-are not claimed by this foundational mode.
+the current `project.el` project. `C-c C-k` starts the asynchronous
+`eliscript-check` Flymake backend, sends the current unsaved buffer through
+stdin, and exposes normal Flymake diagnostic navigation. Customize
+`eliscript-mode-check-command` when the public command is not on `PATH`.
+
+Project checking is read-only: it does not save the buffer or create build
+outputs. Compile commands, interactive evaluation, watching, and REPL sessions
+remain separate M10 capabilities.

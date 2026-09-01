@@ -13,6 +13,10 @@
   (defconst build-operation-format "eliscript-build-operation")
   (defconst build-operation-version 1)
   (defconst build-operation-multi-version 2)
+  (defconst check-operation-format "eliscript-check-operation")
+  (defconst check-operation-version 1)
+  (defconst project-check-report-format "eliscript-check-report")
+  (defconst project-check-report-version 1)
   (defconst project-cache-format "eliscript-project-cache")
   (defconst project-cache-version 2)
   (defconst project-cache-legacy-version 1)
@@ -241,6 +245,33 @@
                  :useCache (get request :useCache))))))
         (t
          (project-request-fail "unsupported build operation mode")))))
+
+  (defun check-operation-request (input)
+    (unless (funcall object-p input)
+      (project-request-fail "check operation request must be an object"))
+    (let* ((request
+            (project-request
+              (js-object
+                :entry (get input :entry)
+                :entries (get input :entries)
+                :outDir "."
+                :root (object-field input "root" (js* "null"))
+                :portableEntries
+                (object-field input "portableEntries" (js-array))
+                :useCache false)))
+           (entries
+            (if (= (get request :version) project-request-multi-version)
+                (get request :entries)
+              (js-array (get request :entry)))))
+      (js-call globalThis.Object :freeze entries)
+      (js-call globalThis.Object :freeze
+        (js-object
+          :format check-operation-format
+          :version check-operation-version
+          :mode "project"
+          :entries entries
+          :root (get request :root)
+          :portableEntries (get request :portableEntries)))))
 
   (defun project-configuration (input filename)
     (unless (funcall object-p input)
@@ -865,6 +896,76 @@
                 (get build :entryOutput) "build report entry output"))))
         (js-call globalThis.Object :freeze common))))
 
+  (defun normalize-check-modules (modules)
+    (unless (funcall array-p modules)
+      (fail "project check report modules must be an array"))
+    (let ((seen (new globalThis.Set))
+          (result (js-array)))
+      (js-call modules :forEach
+        (lambda (module)
+          (unless (funcall object-p module)
+            (fail "project check report modules must contain objects"))
+          (let ((source
+                 (require-string
+                   (get module :source) "project check report module source")))
+            (when (js-call seen :has source)
+              (fail "project check report module sources must be unique"))
+            (js-call seen :add source)
+            (js-call result :push
+              (js-call globalThis.Object :freeze
+                (js-object
+                  :source source
+                  :dependencies
+                  (js-call globalThis.Object :freeze
+                    (normalize-strings
+                      (get module :dependencies)
+                      "project check report module dependencies"
+                      false))
+                  :portableEntries
+                  (js-call globalThis.Object :freeze
+                    (normalize-strings
+                      (get module :portableEntries)
+                      "project check report module portable entries"
+                      false))))))))
+      (js-call result :sort
+        (lambda (left right)
+          (js-call (get left :source) :localeCompare (get right :source))))
+      (js-call globalThis.Object :freeze result)))
+
+  (defun project-check-report (check)
+    (unless (funcall object-p check)
+      (fail "project check report input must be an object"))
+    (let* ((mode
+            (require-string (get check :mode) "project check report mode"))
+           (entries
+            (normalize-strings
+              (get check :entries) "project check report entries" t))
+           (portable-entries
+            (normalize-strings
+              (get check :portableEntries)
+              "project check report portable entries"
+              false))
+           (modules (normalize-check-modules (get check :modules))))
+      (unless (or (= mode "standard") (= mode "portable"))
+        (fail "project check report mode must be standard or portable"))
+      (when (and (= mode "standard") (> (get portable-entries :length) 0))
+        (fail "standard project check cannot report portable entries"))
+      (js-call globalThis.Object :freeze entries)
+      (js-call globalThis.Object :freeze portable-entries)
+      (js-call globalThis.Object :freeze
+        (js-object
+          :format project-check-report-format
+          :version project-check-report-version
+          :status "ok"
+          :mode mode
+          :root (require-string (get check :root) "project check report root")
+          :entries entries
+          :portableEntries portable-entries
+          :counts
+          (js-call globalThis.Object :freeze
+            (js-object :modules (get modules :length)))
+          :modules modules))))
+
   (export
     project-plan-format
     project-plan-version
@@ -883,6 +984,12 @@
     build-operation-version
     build-operation-multi-version
     build-operation-request
+    check-operation-format
+    check-operation-version
+    check-operation-request
+    project-check-report-format
+    project-check-report-version
+    project-check-report
     project-cache-format
     project-cache-version
     project-cache-lookup

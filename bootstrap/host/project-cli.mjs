@@ -184,7 +184,7 @@ export function parseArguments(arguments_) {
   };
 }
 
-async function readConfiguration(filename, compiler) {
+export async function readProjectConfiguration(filename, compiler) {
   const expanded = resolve(filename);
   let canonical;
   try {
@@ -216,7 +216,7 @@ export async function execute(arguments_, options = {}) {
   let request;
   if (parsed.configuration !== undefined) {
     const compiler = await loadCompiler(options.moduleDirectory);
-    request = await readConfiguration(parsed.configuration, compiler);
+    request = await readProjectConfiguration(parsed.configuration, compiler);
     if (parsed.entries !== undefined) {
       request.entries = parsed.entries;
       delete request.entry;

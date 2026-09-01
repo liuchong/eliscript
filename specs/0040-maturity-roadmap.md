@@ -874,10 +874,18 @@ transactional use of the public self-hosted formatter. It deliberately leaves
 project checking, diagnostic navigation, compile commands, evaluation, REPL,
 watching, AC-12, and the M10 exit gate open.
 
-**M10 status:** In progress. Formatter, single-file format-check, and the
-foundational Emacs major mode are implemented; project-aware check, diagnostic
-navigation, compile commands, source-mapped evaluation, REPL, host-neutral
-watch events, onboarding, AC-12, and the complete exit gate remain open.
+Specification 0116 adds a self-hosted, read-only project check operation and
+deterministic report. Bun and Node traverse the same configured source closure
+without outputs or cache mutation, stdin overlays represent unsaved buffers,
+and the Emacs mode maps versioned compiler JSON to asynchronous Flymake
+diagnostics. Application integrations are excluded from implementation,
+dependencies, evidence, and maturity credit.
+
+**M10 status:** In progress. Formatter, single-file format-check, the
+foundational Emacs major mode, project-aware check, unsaved-buffer validation,
+and diagnostic navigation are implemented; compile commands, source-mapped
+evaluation, REPL, host-neutral watch events, onboarding, AC-12, and the complete
+exit gate remain open.
 
 ### M11: Standard and Platform Libraries (8-12 weeks)
 

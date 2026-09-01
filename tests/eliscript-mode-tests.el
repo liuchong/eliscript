@@ -141,6 +141,78 @@
                            (file-name-as-directory vcs)))))
       (delete-directory directory t))))
 
+(ert-deftest eliscript-mode-builds-project-aware-check-command ()
+  (let* ((directory (make-temp-file "eliscript-mode-check-" t))
+         (source (expand-file-name "src/main.eli" directory))
+         (configuration (expand-file-name "eliscript.json" directory))
+         (eliscript-mode-check-command '("eliscript-check" "--fixed")))
+    (unwind-protect
+        (progn
+          (make-directory (file-name-directory source) t)
+          (write-region "{}" nil configuration nil 'silent)
+          (write-region "(print 42)\n" nil source nil 'silent)
+          (with-temp-buffer
+            (setq buffer-file-name source)
+            (eliscript-mode)
+            (should (equal
+                     (eliscript-mode--check-arguments)
+                     (list "--fixed" "--config" configuration
+                           "--stdin-file" source "--json"
+                           "--diagnostic-format" "json")))))
+      (delete-directory directory t))))
+
+(ert-deftest eliscript-mode-decodes-versioned-check-diagnostics ()
+  (let* ((source (make-temp-file "eliscript-mode-diagnostic-" nil ".eli"))
+         (json (json-serialize
+                `((format . "eliscript-diagnostic")
+                  (version . 1)
+                  (code . "ELI-A0001")
+                  (severity . "error")
+                  (phase . "analysis")
+                  (message . "unbound symbol: missing")
+                  (location
+                   (file . ,source)
+                   (start (offset . 7) (line . 1) (column . 8))
+                   (end (offset . 14) (line . 1) (column . 15)))))))
+    (unwind-protect
+        (with-temp-buffer
+          (setq buffer-file-name source)
+          (insert "(print missing)\n")
+          (let ((diagnostic (eliscript-mode--diagnostic-from-json json)))
+            (should diagnostic)
+            (should (= (flymake-diagnostic-beg diagnostic) 8))
+            (should (= (flymake-diagnostic-end diagnostic) 15))
+            (should (eq (flymake-diagnostic-type diagnostic) :error))
+            (should (equal (flymake-diagnostic-text diagnostic)
+                           "ELI-A0001: unbound symbol: missing"))))
+      (delete-file source))))
+
+(ert-deftest eliscript-mode-flymake-backend-reports-json-failures ()
+  (let* ((source (make-temp-file "eliscript-mode-flymake-" nil ".eli"))
+         (eliscript-mode-check-command
+          '("/bin/sh" "-c"
+            "cat >/dev/null; printf '%s\\n' '{\"format\":\"eliscript-diagnostic\",\"version\":1,\"code\":\"ELI-A0001\",\"severity\":\"error\",\"phase\":\"analysis\",\"message\":\"unbound symbol: missing\"}' >&2; exit 1"
+            "eliscript-check-test"))
+         completed
+         diagnostics)
+    (unwind-protect
+        (with-temp-buffer
+          (setq buffer-file-name source)
+          (insert "(print missing)\n")
+          (eliscript-mode)
+          (eliscript-mode-flymake-backend
+           (lambda (reported)
+             (setq diagnostics reported)
+             (setq completed t)))
+          (let ((deadline (+ (float-time) 5)))
+            (while (and (not completed) (< (float-time) deadline))
+              (accept-process-output nil 0.05)))
+          (should completed)
+          (should (= (length diagnostics) 1))
+          (should (equal (flymake-diagnostic-text (car diagnostics))
+                         "ELI-A0001: unbound symbol: missing")))
+      (delete-file source))))
+
 (ert-deftest eliscript-mode-formats-buffer-through-public-command ()
   (let ((eliscript-mode-format-command
          (list (expand-file-name "bin/eliscript-format"

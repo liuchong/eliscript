@@ -120,7 +120,9 @@ command.
 delimiter syntax, reader punctuation, idempotent structural indentation,
 semantic font locking, Imenu, balanced definition navigation, configured and
 VCS project discovery, real public-formatter integration, and transactional
-formatter failure. The mode and its tests are included in strict byte
+formatter failure. It also covers project-aware check arguments, versioned
+diagnostic decoding, and asynchronous Flymake failure reporting. The mode and
+its tests are included in strict byte
 compilation with warnings as errors and the maintained Emacs 29/30 matrix.
 
 The self-hosted project test exercises cycle-safe graph closure and portable
@@ -131,6 +133,11 @@ and Node. It also proves version 2 multi-entry request, manifest, report, cache,
 CLI, and worker identity while preserving complete stable
 `eliscript-build-report` version 1 semantics. Host-specific timing measurements
 remain validated independently.
+
+`check-cli-test.sh` checks the same configured source graph under Bun and Node,
+requires byte-identical version 1 reports, overlays unsaved stdin source under
+its canonical filename, validates exact compiler diagnostics, and proves that
+success and failure create no configured output directory.
 
 `literal-runtime.test.mjs` compiles square-bracket Vector literals, brace Map
 literals, `#{...}` Set literals, source Keyword values, and explicit persistent

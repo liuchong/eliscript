@@ -1551,6 +1551,52 @@
           "contains": "eliscript-mode-rejects-invalid-formatter-command"
         }
       ]
+    },
+    {
+      "id": "editor.project-check-diagnostics",
+      "title": "Read-only project check and Emacs diagnostics",
+      "status": "accepted",
+      "spec": "0116",
+      "contracts": [
+        "Normalizes self-hosted check operations and deterministic successful reports",
+        "Traverses standard and portable project closures without build outputs or cache mutation",
+        "Checks unsaved stdin source under its canonical project filename",
+        "Preserves structured compiler diagnostics and exact source spans across Bun and Node",
+        "Maps current-buffer diagnostics asynchronously through Flymake and discards stale work",
+        "Keeps application frameworks, bundlers, and application tooling outside core dependencies, evidence, and maturity credit"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-project.test.mjs",
+          "contains": "self-hosted project planning reaches deterministic graph fixed points"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-project.test.mjs",
+          "contains": "self-hosted project service matches seed output under Bun and Node"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-builds-project-aware-check-command"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-decodes-versioned-check-diagnostics"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-flymake-backend-reports-json-failures"
+        },
+        {
+          "kind": "shell",
+          "file": "tests/check-cli-test.sh",
+          "contains": "Check CLI test passed"
+        }
+      ]
     }
   ]
 }

@@ -64,6 +64,7 @@ test: check-contracts
 		tests/persistent-map.test.mjs tests/persistent-set.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/project-cli-test.sh
+	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/check-cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/format-cli-test.sh
 
 check-contracts:

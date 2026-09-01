@@ -11,8 +11,8 @@ const componentFile = resolve(
 );
 
 test("Vite remains an application adapter outside language core", async () => {
-  const forbiddenImport = /(?:from\s*|import\s*\(\s*|require\s*\(\s*)["'](?:vite|@vitejs\/)/;
-  for (const root of ["compiler", "runtime", "stdlib"]) {
+  const forbiddenImport = /(?:from\s*|import\s*\(\s*|require\s*\(\s*)["'](?:vite|@vitejs\/|react(?:-dom)?(?:\/[^"']*)?)["']/;
+  for (const root of ["bootstrap/compiler", "compiler", "runtime", "stdlib"]) {
     const glob = new Bun.Glob("**/*.{el,eli,mjs}");
     for await (const file of glob.scan({
       cwd: resolve(projectDirectory, root),
@@ -29,6 +29,10 @@ test("Vite remains an application adapter outside language core", async () => {
   ));
   expect(packageJson.dependencies?.vite).toBeUndefined();
   expect(packageJson.dependencies?.["@vitejs/plugin-react"]).toBeUndefined();
+  expect(packageJson.dependencies?.react).toBeUndefined();
+  expect(packageJson.dependencies?.["react-dom"]).toBeUndefined();
+  expect(packageJson.devDependencies?.react).toBeDefined();
+  expect(packageJson.devDependencies?.["react-dom"]).toBeDefined();
   expect(packageJson.devDependencies?.vite).toBeDefined();
 });
 

@@ -541,6 +541,139 @@ function portablePlan(
     });
 }
 
+function checkSourceOverrides(values, root) {
+  if (values === undefined) return new Map();
+  const entries = values instanceof Map
+    ? [...values.entries()]
+    : Object.entries(values);
+  const overrides = new Map();
+  for (const [filename, sourceText] of entries) {
+    if (typeof sourceText !== "string") {
+      projectError("project check source override must be a string", filename);
+    }
+    const source = canonicalSource(
+      pathOption(filename, "project check source override"),
+      root,
+      filename,
+    );
+    if (overrides.has(source)) {
+      projectError("project check source overrides resolve to duplicates", source);
+    }
+    overrides.set(source, sourceText);
+  }
+  return overrides;
+}
+
+function checkStandardPlan(compiler, entries, root, sourceOverrides) {
+  return compiler.project_plan(entries, (source) => {
+    const sourceText = sourceOverrides.get(source) ?? readFileSync(source, "utf8");
+    const program = compiler.compile_ir_string(sourceText, source);
+    return projectImports(program, source, root, false)
+      .map(({ dependency }) => dependency);
+  });
+}
+
+function checkPortablePlan(
+  compiler,
+  entry,
+  entries,
+  root,
+  sourceOverrides,
+) {
+  return compiler.portable_project_plan([{ id: entry, entries }],
+    (source, requestedEntries) => {
+      const sourceText = sourceOverrides.get(source) ?? readFileSync(source, "utf8");
+      const program = compiler.compile_project_portable_ir_string(
+        sourceText,
+        requestedEntries,
+        source,
+      );
+      return projectImports(program, source, root, true).map((dependency) => ({
+        id: dependency.dependency,
+        entries: dependency.entries,
+      }));
+    });
+}
+
+export async function checkProject(options) {
+  if (!options || typeof options !== "object") {
+    projectError("project check options must be an object");
+  }
+  if (options.entry === undefined && options.entries === undefined) {
+    projectError("project check requires entry or entries");
+  }
+  const moduleDirectory = compilerModuleDirectory(options.moduleDirectory);
+  const compiler = options.compiler ?? await loadCompiler(moduleDirectory);
+  const request = compiler.check_operation_request({
+    entry: options.entry,
+    entries: options.entries,
+    root: options.root ?? null,
+    portableEntries: options.portableEntries ?? [],
+  });
+  const entryPaths = request.entries.map((entry) =>
+    resolve(pathOption(entry, "entry")));
+  if (entryPaths.length > 1 && request.root === null) {
+    projectError("multi-entry project checks require an explicit project root");
+  }
+  const root = canonicalDirectory(
+    request.root === null
+      ? dirname(entryPaths[0])
+      : pathOption(request.root, "project root"),
+    "project root",
+  );
+  const entries = entryPaths.map((entryPath) => {
+    const entry = canonicalSource(entryPath, root, entryPath);
+    if (!entry.endsWith(".eli")) {
+      projectError("entry file must use the .eli extension", entry);
+    }
+    return entry;
+  }).sort();
+  if (new Set(entries).size !== entries.length) {
+    projectError("project entries resolve to duplicate sources");
+  }
+  const sourceOverrides = checkSourceOverrides(options.sourceOverrides, root);
+  const portableEntries = [...request.portableEntries];
+  const plan = portableEntries.length > 0
+    ? checkPortablePlan(
+      compiler,
+      entries[0],
+      portableEntries,
+      root,
+      sourceOverrides,
+    )
+    : checkStandardPlan(compiler, entries, root, sourceOverrides);
+  const checkedSources = new Set(plan.modules.map((record) => record.id));
+  for (const source of sourceOverrides.keys()) {
+    if (!checkedSources.has(source)) {
+      projectError("project check source override is outside the checked graph", source);
+    }
+  }
+  const mode = plan.mode;
+  const modules = plan.modules.map((record) => ({
+    source: relative(root, record.id),
+    dependencies: record.dependencies.map((dependency) =>
+      relative(root, typeof dependency === "string" ? dependency : dependency.id)),
+    portableEntries: record.entries === undefined ? [] : [...record.entries],
+  }));
+  const report = compiler.project_check_report({
+    mode,
+    root,
+    entries: entries.map((entry) => relative(root, entry)),
+    portableEntries,
+    modules,
+  });
+  return Object.freeze({
+    format: "eliscript-project-check",
+    version: 1,
+    root,
+    entries: Object.freeze(entries),
+    mode,
+    portableEntries: Object.freeze(portableEntries),
+    report,
+    plan,
+  });
+}
+
 export async function buildProject(options) {
   const startedAt = performance.now();
   if (!options || typeof options !== "object") {
