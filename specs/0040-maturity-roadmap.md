@@ -61,8 +61,9 @@ mature user contract. The main remaining gaps are:
 - incomplete module interop and core data semantics
 - some compiler capabilities outside normal build execution still split
   between the seed and self-hosted paths
-- a deterministic formatter now exists, while the interactive REPL and
-  complete Emacs editing mode remain absent
+- a deterministic formatter and foundational Emacs mode now exist, while
+  project diagnostics, the interactive REPL, and the complete editor workflow
+  remain absent
 - an intentionally small standard library without a documented stability
   classification
 - insufficient malformed-input, fuzz, scale, soak, and security evidence
@@ -866,10 +867,17 @@ structured diagnostics. The maintained compiler and standard-library corpus
 is byte-idempotent after formatting and emits byte-identical ESM before and
 after formatting. Application tooling contributes no evidence.
 
-**M10 status:** In progress. Formatter and single-file format-check are
-implemented; Emacs major mode, project-aware check, source-mapped evaluation,
-REPL, host-neutral watch events, onboarding, and the complete exit gate remain
-open.
+Specification 0115 adds the foundational maintained Emacs major mode: complete
+source syntax, fixed structural indentation, semantic font locking, Imenu,
+balanced definition movement, configured/VCS project discovery, and
+transactional use of the public self-hosted formatter. It deliberately leaves
+project checking, diagnostic navigation, compile commands, evaluation, REPL,
+watching, AC-12, and the M10 exit gate open.
+
+**M10 status:** In progress. Formatter, single-file format-check, and the
+foundational Emacs major mode are implemented; project-aware check, diagnostic
+navigation, compile commands, source-mapped evaluation, REPL, host-neutral
+watch events, onboarding, AC-12, and the complete exit gate remain open.
 
 ### M11: Standard and Platform Libraries (8-12 weeks)
 

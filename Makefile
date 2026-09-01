@@ -3,9 +3,10 @@ BUN ?= bun
 
 .PHONY: test check-contracts byte-compile
 test: check-contracts
-	$(EMACS) --batch -Q -L compiler -L tools/org -L tools/worker -L tests \
+	$(EMACS) --batch -Q -L compiler -L editor -L tools/org -L tools/worker -L tests \
 		-l tests/eliscript-tests.el \
 		-l tests/eliscript-project-tests.el \
+		-l tests/eliscript-mode-tests.el \
 		-l tests/eliscript-org-tests.el \
 		-l tests/eliscript-worker-tests.el \
 		-l tests/eliscript-service-tests.el \

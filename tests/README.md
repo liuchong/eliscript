@@ -116,6 +116,13 @@ separately proves stdout, atomic write, non-mutating check, structured reader
 and formatter diagnostics, and canonical no-op behavior through the public
 command.
 
+`eliscript-mode-tests.el` covers `.eli` activation, comments, strings,
+delimiter syntax, reader punctuation, idempotent structural indentation,
+semantic font locking, Imenu, balanced definition navigation, configured and
+VCS project discovery, real public-formatter integration, and transactional
+formatter failure. The mode and its tests are included in strict byte
+compilation with warnings as errors and the maintained Emacs 29/30 matrix.
+
 The self-hosted project test exercises cycle-safe graph closure and portable
 requested-name fixed points in generated Eliscript code. It then compares
 ordinary and portable ESM, Source Maps, and public project-manifest identity

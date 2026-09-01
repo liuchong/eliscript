@@ -33,12 +33,15 @@ single-file, single-entry project, and multi-entry project builds through one
 versioned operation boundary. Version 2 project identity, reports, cache
 validation, and worker loading preserve the version 1 single-entry contract.
 
-The first M10 slice is also complete: the self-hosted compiler now owns a
+The first two M10 slices are complete. The self-hosted compiler now owns a
 comment-preserving concrete-syntax formatter with fixed two-space/88-column
 layout, byte-idempotence and ESM-semantic corpus evidence, plus one Bun/Node
 `eliscript-format` command for stdout, atomic `--write`, and non-mutating
-`--check`. Emacs mode, project-aware checking, interactive evaluation, REPL,
-watching, and the complete M10 exit gate remain future work.
+`--check`. The maintained Emacs major mode adds syntax, two-space indentation,
+font locking, Imenu, balanced definition navigation, project discovery, and
+transactional buffer formatting. Project-aware checking, diagnostic
+navigation, interactive evaluation, REPL, watching, and the complete M10 exit
+gate remain future work.
 
 The current M8 work provides:
 
@@ -193,6 +196,13 @@ Format one source file in place or check canonical formatting without writing:
 ```sh
 ./bin/eliscript-format --write examples/basic/main.eli
 ./bin/eliscript-format --check examples/basic/main.eli
+```
+
+Enable the maintained Emacs mode from this checkout:
+
+```elisp
+(add-to-list 'load-path "/path/to/eliscript/editor")
+(require 'eliscript-mode)
 ```
 
 Pass multiple entries with an explicit root to emit one versioned union graph:
@@ -402,6 +412,7 @@ is not automatically considered an improvement.
 | --- | --- |
 | [`bin/`](bin/) | Single-file, project, portable, and Org command-line entry points |
 | [`compiler/`](compiler/README.md) | Emacs Lisp seed compiler |
+| [`editor/`](editor/README.md) | Maintained Emacs major mode and editor integration |
 | [`bootstrap/`](bootstrap/README.md) | Compiler implementation written in Eliscript |
 | [`runtime/`](runtime/README.md) | JavaScript value, protocol, collection, and worker runtime |
 | [`stdlib/`](stdlib/README.md) | Portable Eliscript standard library |
@@ -430,6 +441,7 @@ Start with the document that matches the question:
 | How is the public project command self-hosted? | [Self-hosted Project Command and Configuration](specs/0111-self-hosted-project-command.md) |
 | How do single-file and project commands share one operation? | [Unified Self-hosted Build Operation](specs/0112-unified-self-hosted-build-operation.md) |
 | How are multi-entry project graphs identified? | [Versioned Multi-entry Project Identity](specs/0113-versioned-multi-entry-project-identity.md) |
+| How is Eliscript edited in Emacs? | [Emacs Editor Integration](editor/README.md) |
 | Which behavior is implemented or stable? | [Specification Catalog](specs/README.md#specification-catalog) |
 | How does the seed compiler work? | [Compiler Guide](compiler/README.md) |
 | How does self-hosting work? | [Bootstrap Compiler Guide](bootstrap/README.md) |

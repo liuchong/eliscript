@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 114 specifications.
+The registry currently contains 115 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 84 |
+| Accepted design | 85 |
 | Stable design | 29 |
 | Implementation in progress | 3 |
-| Implemented | 111 |
+| Implemented | 112 |
 
 Compatibility Baseline 1 separately classifies 29 specifications as stable,
-82 as provisional, and 3 as planning. That baseline is derived from registry
+83 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -104,13 +104,15 @@ CLI output, and worker loading now identify the union of multiple entry
 closures while preserving version 1 single-entry behavior. Application
 frameworks and publishing infrastructure remain replaceable validation
 outside these core deliverables.
-M10 has begun with specification 0114: the generated compiler now owns a
+M10 has begun with specifications 0114 and 0115. The generated compiler owns a
 comment-preserving deterministic formatter, and the Bun/Node public command
 provides stdout, atomic write, format-check, and structured diagnostics. The
 formatter passes idempotence and generated-ESM equivalence over maintained
-compiler and standard-library sources. M10 remains in progress because its
-Emacs mode, project-aware check, REPL, watch API, onboarding, and complete exit
-gate are not yet implemented.
+compiler and standard-library sources. The maintained Emacs mode now provides
+syntax, indentation, font locking, Imenu, definition movement, project
+discovery, and transactional formatter integration. M10 remains in progress
+because project-aware checking, diagnostic navigation, compile commands, REPL,
+watching, onboarding, AC-12, and the complete exit gate are not yet implemented.
 
 ## Reading Paths
 
@@ -374,6 +376,7 @@ The schemas and change workflow are defined by specifications
 | 0112 | [Unified Self-hosted Build Operation](0112-unified-self-hosted-build-operation.md) | Accepted | Implemented |
 | 0113 | [Versioned Multi-entry Project Identity](0113-versioned-multi-entry-project-identity.md) | Accepted | Implemented |
 | 0114 | [Deterministic Concrete-syntax Formatter](0114-deterministic-concrete-syntax-formatter.md) | Accepted | Implemented |
+| 0115 | [Emacs Major Mode Foundation](0115-emacs-major-mode-foundation.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

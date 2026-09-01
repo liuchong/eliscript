@@ -1,0 +1,340 @@
+;;; eliscript-mode.el --- Major mode for Eliscript source -*- lexical-binding: t; -*-
+
+;;; Commentary:
+
+;; Syntax-aware editing, navigation, project discovery, and formatter
+;; integration for Eliscript source files.
+
+;;; Code:
+
+(require 'imenu)
+(require 'project)
+(require 'seq)
+(require 'subr-x)
+
+(defgroup eliscript nil
+  "Editing and tool integration for Eliscript."
+  :group 'languages
+  :prefix "eliscript-")
+
+(defcustom eliscript-mode-format-command '("eliscript-format")
+  "Command and fixed arguments used to format the current buffer."
+  :type '(repeat string)
+  :group 'eliscript)
+
+(define-error 'eliscript-mode-error "Eliscript editor integration error")
+
+(defconst eliscript-mode--function-heads
+  '("defasync" "defcomponent" "defn" "defportable" "defun"))
+
+(defconst eliscript-mode--macro-heads '("defmacro"))
+
+(defconst eliscript-mode--variable-heads '("defconst" "defvar"))
+
+(defconst eliscript-mode--top-level-heads
+  '("defasync" "defcomponent" "defconst" "defmacro" "defn"
+    "defportable" "defun" "defvar" "export" "export-default"
+    "import" "import-portable" "module"))
+
+(defconst eliscript-mode--special-heads
+  '("and" "apply" "async" "await" "catch" "cond" "do" "finally"
+    "fn" "fragment" "funcall" "if" "js*" "js-array" "js-call"
+    "js-cons" "js-length" "js-nth" "js-object" "jsx" "lambda" "let"
+    "let*" "loop" "new" "or" "progn" "quote" "recur" "set!" "setq"
+    "throw" "try" "unless" "when" "while"))
+
+(defconst eliscript-mode--definition-heads
+  (append eliscript-mode--function-heads
+          eliscript-mode--macro-heads
+          eliscript-mode--variable-heads))
+
+(defconst eliscript-mode--name-regexp "\\([^][(){}\"; \t\r\n]+\\)")
+
+(defconst eliscript-mode--definition-regexp
+  (concat "^[ \t]*(\\(?:"
+          (regexp-opt eliscript-mode--definition-heads)
+          "\\)\\_>"))
+
+(defconst eliscript-mode--function-definition-regexp
+  (concat "^[ \t]*(\\(?:"
+          (regexp-opt eliscript-mode--function-heads)
+          "\\)\\_>[ \t]+"
+          eliscript-mode--name-regexp))
+
+(defconst eliscript-mode--macro-definition-regexp
+  (concat "^[ \t]*(\\(?:"
+          (regexp-opt eliscript-mode--macro-heads)
+          "\\)\\_>[ \t]+"
+          eliscript-mode--name-regexp))
+
+(defconst eliscript-mode--variable-definition-regexp
+  (concat "^[ \t]*(\\(?:"
+          (regexp-opt eliscript-mode--variable-heads)
+          "\\)\\_>[ \t]+"
+          eliscript-mode--name-regexp))
+
+(defconst eliscript-mode--module-regexp
+  (concat "^[ \t]*(module\\_>[ \t]+" eliscript-mode--name-regexp))
+
+(defconst eliscript-mode-font-lock-keywords
+  `((,(concat "(\\("
+              (regexp-opt eliscript-mode--function-heads)
+              "\\)\\_>[ \t\n]+"
+              eliscript-mode--name-regexp)
+     (1 font-lock-keyword-face)
+     (2 font-lock-function-name-face))
+    (,(concat "(\\("
+              (regexp-opt eliscript-mode--macro-heads)
+              "\\)\\_>[ \t\n]+"
+              eliscript-mode--name-regexp)
+     (1 font-lock-keyword-face)
+     (2 font-lock-function-name-face))
+    (,(concat "(\\("
+              (regexp-opt eliscript-mode--variable-heads)
+              "\\)\\_>[ \t\n]+"
+              eliscript-mode--name-regexp)
+     (1 font-lock-keyword-face)
+     (2 font-lock-variable-name-face))
+    (,(concat "(\\(module\\)\\_>[ \t\n]+" eliscript-mode--name-regexp)
+     (1 font-lock-keyword-face)
+     (2 font-lock-type-face))
+    (,(concat "(\\("
+              (regexp-opt (append eliscript-mode--top-level-heads
+                                  eliscript-mode--special-heads))
+              "\\)\\_>")
+     (1 font-lock-keyword-face))
+    ("\\_<\\(?:false\\|nil\\|t\\|undefined\\)\\_>"
+     . font-lock-constant-face)
+    ("\\_<:[^][(){}\"; \t\r\n]+\\_>" . font-lock-constant-face)
+    ("\\_<&\\(?:body\\|optional\\|rest\\)\\_>" . font-lock-builtin-face)))
+
+(defvar eliscript-mode-syntax-table
+  (let ((table (make-syntax-table)))
+    (modify-syntax-entry ?\; "<" table)
+    (modify-syntax-entry ?\n ">" table)
+    (modify-syntax-entry ?\" "\"" table)
+    (modify-syntax-entry ?\( "()" table)
+    (modify-syntax-entry ?\) ")(" table)
+    (modify-syntax-entry ?\[ "(]" table)
+    (modify-syntax-entry ?\] ")[" table)
+    (modify-syntax-entry ?\{ "(}" table)
+    (modify-syntax-entry ?\} "){" table)
+    (dolist (character '(?' ?` ?, ?#))
+      (modify-syntax-entry character "'" table))
+    (dolist (character '(?- ?+ ?* ?/ ?< ?> ?= ?! ?? ?_ ?. ?$ ?% ?& ?:))
+      (modify-syntax-entry character "_" table))
+    table)
+  "Syntax table used by `eliscript-mode'.")
+
+(defconst eliscript-mode-imenu-generic-expression
+  `(("Modules" ,eliscript-mode--module-regexp 1)
+    ("Functions" ,eliscript-mode--function-definition-regexp 1)
+    ("Macros" ,eliscript-mode--macro-definition-regexp 1)
+    ("Variables" ,eliscript-mode--variable-definition-regexp 1)))
+
+(defvar eliscript-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c C-f") #'eliscript-mode-format-buffer)
+    map)
+  "Keymap used by `eliscript-mode'.")
+
+(defun eliscript-mode--line-indentation ()
+  "Return canonical structural indentation for the current line."
+  (let* ((line-start (line-beginning-position))
+         (state (syntax-ppss line-start)))
+    (if (nth 3 state)
+        (current-indentation)
+      (save-excursion
+        (back-to-indentation)
+        (* 2 (max 0 (- (car state)
+                        (if (looking-at-p "[])}]") 1 0))))))))
+
+(defun eliscript-mode--indent-line ()
+  "Indent the current line according to Eliscript structural depth."
+  (let ((offset (- (current-column) (current-indentation)))
+        (indentation (eliscript-mode--line-indentation)))
+    (indent-line-to indentation)
+    (when (> offset 0)
+      (move-to-column (+ indentation offset)))))
+
+(defun eliscript-mode--definition-open-position (start)
+  "Return the opening delimiter position for definition at START."
+  (save-excursion
+    (goto-char start)
+    (search-forward "(" (line-end-position) t)
+    (1- (point))))
+
+(defun eliscript-mode--current-definition-start ()
+  "Return the top-level definition containing point, or nil."
+  (let ((position (point))
+        start)
+    (save-excursion
+      (beginning-of-line)
+      (unless (looking-at eliscript-mode--definition-regexp)
+        (goto-char position)
+        (when (re-search-backward eliscript-mode--definition-regexp nil t)
+          (setq start (match-beginning 0))))
+      (unless start
+        (when (looking-at eliscript-mode--definition-regexp)
+          (setq start (match-beginning 0))))
+      (when start
+        (let* ((open (eliscript-mode--definition-open-position start))
+               (end (condition-case nil (scan-sexps open 1)
+                      (scan-error nil))))
+          (and end (<= start position) (<= position end) start))))))
+
+(defun eliscript-mode--beginning-of-defun (&optional arg)
+  "Move backward ARG top-level Eliscript definitions."
+  (let ((count (or arg 1)))
+    (if (< count 0)
+        (eliscript-mode--end-of-defun (- count))
+      (catch 'missing
+        (dotimes (index count)
+          (let ((start (and (= index 0)
+                            (eliscript-mode--current-definition-start))))
+            (unless start
+              (beginning-of-line)
+              (unless (re-search-backward
+                       eliscript-mode--definition-regexp nil t)
+                (goto-char (point-min))
+                (throw 'missing nil))
+              (setq start (match-beginning 0)))
+            (goto-char start)))
+        t))))
+
+(defun eliscript-mode--end-of-defun (&optional arg)
+  "Move forward ARG top-level Eliscript definitions."
+  (let ((count (or arg 1)))
+    (if (< count 0)
+        (eliscript-mode--beginning-of-defun (- count))
+      (catch 'missing
+        (dotimes (index count)
+          (let ((start (and (= index 0)
+                            (eliscript-mode--current-definition-start))))
+            (unless start
+              (unless (re-search-forward
+                       eliscript-mode--definition-regexp nil t)
+                (goto-char (point-max))
+                (throw 'missing nil))
+              (setq start (match-beginning 0)))
+            (let* ((open (eliscript-mode--definition-open-position start))
+                   (end (condition-case nil (scan-sexps open 1)
+                          (scan-error nil))))
+              (unless end
+                (goto-char (point-max))
+                (throw 'missing nil))
+              (goto-char end))))
+        t))))
+
+(defun eliscript-mode-project-root (&optional directory)
+  "Return the Eliscript project root containing DIRECTORY.
+
+Prefer the nearest `eliscript.json', then fall back to `project.el'."
+  (let* ((candidate (or directory buffer-file-name default-directory))
+         (start (file-name-as-directory
+                 (expand-file-name
+                  (if (file-directory-p candidate)
+                      candidate
+                    (or (file-name-directory candidate)
+                        default-directory)))))
+         (configuration-root
+          (locate-dominating-file start "eliscript.json")))
+    (or (and configuration-root
+             (file-name-as-directory
+              (expand-file-name configuration-root)))
+        (when-let* ((current-project (project-current nil start)))
+          (file-name-as-directory
+           (expand-file-name (project-root current-project)))))))
+
+(defun eliscript-mode--formatter-program ()
+  "Resolve and validate `eliscript-mode-format-command'."
+  (unless (and (consp eliscript-mode-format-command)
+               (seq-every-p #'stringp eliscript-mode-format-command)
+               (not (string-empty-p (car eliscript-mode-format-command))))
+    (signal 'eliscript-mode-error
+            '("eliscript-mode-format-command must be non-empty strings")))
+  (let* ((configured (car eliscript-mode-format-command))
+         (program (if (file-name-absolute-p configured)
+                      (and (file-executable-p configured) configured)
+                    (executable-find configured))))
+    (or program
+        (signal 'eliscript-mode-error
+                (list (format "formatter executable not found: %s"
+                              configured))))))
+
+(defun eliscript-mode--read-file (filename)
+  "Return the complete contents of FILENAME as a string."
+  (with-temp-buffer
+    (insert-file-contents filename)
+    (buffer-string)))
+
+(defun eliscript-mode-format-buffer ()
+  "Format the current buffer with the public self-hosted formatter.
+
+The visited file is not saved.  On failure the buffer remains unchanged."
+  (interactive)
+  (barf-if-buffer-read-only)
+  (let ((program (eliscript-mode--formatter-program))
+        (arguments (cdr eliscript-mode-format-command))
+        (source-file (make-temp-file "eliscript-mode-" nil ".eli"))
+        (error-file (make-temp-file "eliscript-mode-error-"))
+        (output-buffer (generate-new-buffer " *eliscript-format*"))
+        status)
+    (unwind-protect
+        (progn
+          (save-restriction
+            (widen)
+            (let ((coding-system-for-write 'utf-8-unix))
+              (write-region (point-min) (point-max) source-file nil 'silent)))
+          (let ((default-directory
+                 (or (eliscript-mode-project-root) default-directory)))
+            (setq status
+                  (apply #'process-file program nil
+                         (list output-buffer error-file) nil
+                         (append arguments (list source-file)))))
+          (unless (and (integerp status) (zerop status))
+            (let ((detail (string-trim
+                           (eliscript-mode--read-file error-file))))
+              (signal 'eliscript-mode-error
+                      (list (if (string-empty-p detail)
+                                (format "formatter exited with status %s" status)
+                              detail)))))
+          (save-restriction
+            (widen)
+            (unless (string= (buffer-string)
+                             (with-current-buffer output-buffer
+                               (buffer-string)))
+              (replace-region-contents
+               (point-min) (point-max)
+               (if (< emacs-major-version 31)
+                   (lambda () output-buffer)
+                 output-buffer))
+              t)))
+      (when (buffer-live-p output-buffer)
+        (kill-buffer output-buffer))
+      (delete-file source-file)
+      (delete-file error-file))))
+
+;;;###autoload
+(define-derived-mode eliscript-mode prog-mode "Eliscript"
+  "Major mode for editing Eliscript source."
+  :syntax-table eliscript-mode-syntax-table
+  (setq-local comment-start "; ")
+  (setq-local comment-end "")
+  (setq-local comment-start-skip ";+\s-*")
+  (setq-local indent-tabs-mode nil)
+  (setq-local indent-line-function #'eliscript-mode--indent-line)
+  (setq-local font-lock-defaults '(eliscript-mode-font-lock-keywords))
+  (setq-local imenu-generic-expression
+              eliscript-mode-imenu-generic-expression)
+  (setq-local beginning-of-defun-function
+              #'eliscript-mode--beginning-of-defun)
+  (setq-local end-of-defun-function #'eliscript-mode--end-of-defun)
+  (setq-local parse-sexp-ignore-comments t))
+
+;;;###autoload
+(add-to-list 'auto-mode-alist '("\\.eli\\'" . eliscript-mode))
+
+(provide 'eliscript-mode)
+
+;;; eliscript-mode.el ends here

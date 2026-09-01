@@ -1495,6 +1495,62 @@
           "contains": "Formatter CLI test passed"
         }
       ]
+    },
+    {
+      "id": "editor.emacs-major-mode-foundation",
+      "title": "Emacs major mode foundation",
+      "status": "accepted",
+      "spec": "0115",
+      "contracts": [
+        "Associates .eli source with a maintained Emacs major mode and complete syntax table",
+        "Provides deterministic two-space indentation, semantic font locking, Imenu, and balanced definition navigation",
+        "Discovers configured and VCS-backed projects without running a build",
+        "Formats buffers transactionally through the public self-hosted formatter command",
+        "Leaves checking, compiler diagnostics, evaluation, REPL, watch, AC-12, and the M10 exit gate open",
+        "Keeps application integrations outside core implementation, dependencies, evidence, and maturity credit"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-activates-complete-source-syntax"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-indentation-matches-formatter-structure"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-font-locks-semantic-categories"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-indexes-and-navigates-definitions"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-discovers-configured-and-vcs-projects"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-formats-buffer-through-public-command"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-formatter-failure-is-transactional"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-rejects-invalid-formatter-command"
+        }
+      ]
     }
   ]
 }
