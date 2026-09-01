@@ -61,7 +61,8 @@ mature user contract. The main remaining gaps are:
 - incomplete module interop and core data semantics
 - some compiler capabilities outside normal build execution still split
   between the seed and self-hosted paths
-- no formatter, interactive REPL, or complete Emacs editing mode
+- a deterministic formatter now exists, while the interactive REPL and
+  complete Emacs editing mode remain absent
 - an intentionally small standard library without a documented stability
   classification
 - insufficient malformed-input, fuzz, scale, soak, and security evidence
@@ -713,7 +714,7 @@ Specification
 [0100-profile-guided-binary-comparison-emission.md](0100-profile-guided-binary-comparison-emission.md)
 then specializes exactly binary numeric comparisons as direct ECMAScript
 infix expressions while preserving eager argument capture for n-ary forms.
-An exact historical-baseline replay over all twelve compiler modules records a
+An exact historical-baseline replay over all thirteen compiler modules records a
 1.618252x complete-compiler median speedup and reduces generated JavaScript
 from 441,772 to 337,871 bytes. A broader constant-dispatch experiment was
 rejected because its complete-compiler result regressed. Application
@@ -857,6 +858,18 @@ especially inside Emacs.
 
 **Exit gate:** A developer can create, navigate, format, check, evaluate,
 build, and debug a project from Emacs using documented project commands.
+
+Specification 0114 completes the first M10 deliverable. The self-hosted
+compiler owns comment-preserving concrete-syntax formatting with fixed layout,
+and the Bun/Node command exposes stdout, atomic write, non-mutating check, and
+structured diagnostics. The maintained compiler and standard-library corpus
+is byte-idempotent after formatting and emits byte-identical ESM before and
+after formatting. Application tooling contributes no evidence.
+
+**M10 status:** In progress. Formatter and single-file format-check are
+implemented; Emacs major mode, project-aware check, source-mapped evaluation,
+REPL, host-neutral watch events, onboarding, and the complete exit gate remain
+open.
 
 ### M11: Standard and Platform Libraries (8-12 weeks)
 

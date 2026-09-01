@@ -87,7 +87,8 @@ The IR fixture runs the complete generated front end and lowerer, then compares
 the resulting program with a normalized seed oracle. It covers every one of
 the 57 public IR node kinds, JSON-safe quoted data and literal tags,
 kind-specific properties, complete nested source spans, macro call origins,
-and all twelve bootstrap compiler modules.
+and all thirteen bootstrap compiler modules, including the self-hosted
+concrete-syntax formatter.
 
 The canonical IR suite serializes that complete corpus through the generated
 compiler, validates lossless fixed-point round trips, and compares the same
@@ -103,9 +104,17 @@ also part of the self-source fixture set.
 
 The compiler-driver test builds Generation 1 with the Emacs Lisp seed,
 Generation 2 with Generation 1, and Generation 3 with Generation 2. It compares
-all twelve ESM and Source Map artifacts byte-for-byte, checks the portable CLI
+all thirteen ESM and Source Map artifacts byte-for-byte, checks the portable CLI
 against seed output, and verifies mapped file output and located diagnostics.
 It also compares seed and self-hosted `defportable` closure builds.
+
+`bootstrap-formatter.test.mjs` builds the formatter with the seed, exercises
+comments, strings, collection delimiters, and reader prefixes, compares Bun and
+Node bytes, and checks every compiler and standard-library `.eli` source for
+byte-idempotence plus byte-identical generated ESM. `format-cli-test.sh`
+separately proves stdout, atomic write, non-mutating check, structured reader
+and formatter diagnostics, and canonical no-op behavior through the public
+command.
 
 The self-hosted project test exercises cycle-safe graph closure and portable
 requested-name fixed points in generated Eliscript code. It then compares

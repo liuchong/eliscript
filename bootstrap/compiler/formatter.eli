@@ -1,0 +1,356 @@
+(module bootstrap.compiler.formatter
+  (import "./reader.mjs" read-string)
+
+  (defconst formatter-format "eliscript-formatter")
+  (defconst formatter-version 1)
+  (defconst formatter-width 88)
+  (defconst formatter-indent 2)
+  (defconst formatter-fail
+    (js* "(message, filename) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-F0001', severity: 'error', phase: 'formatter', message, ...(filename ? { location: { file: filename } } : {}) }; throw error; }"))
+  (defconst declaration-heads
+    (js-array
+      "module" "defasync" "defcomponent" "defconst" "defmacro"
+      "defn" "defportable" "defun" "defvar" "export-default"))
+  (defconst operand-heads
+    (js-array
+      "catch" "cond" "if" "import" "import-portable" "let" "let*"
+      "loop" "unless" "when" "while"))
+
+  (defun formatter-error (message filename)
+    (formatter-fail message filename))
+
+  (defun make-scan-state (source filename)
+    (js-object :source source :filename filename :index 0))
+
+  (defun peek-code (state)
+    (js-call (get state :source) :charCodeAt (get state :index)))
+
+  (defun peek-code-ahead (state count)
+    (js-call
+      (get state :source)
+      :charCodeAt
+      (+ (get state :index) count)))
+
+  (defun at-end-p (state)
+    (>= (get state :index) (get (get state :source) :length)))
+
+  (defun advance (state)
+    (unless (at-end-p state)
+      (put state :index (1+ (get state :index)))))
+
+  (defun whitespace-code-p (code)
+    (or (= code 32) (= code 9) (= code 10) (= code 13) (= code 12)))
+
+  (defun token-delimiter-code-p (code)
+    (or (js-call globalThis.Number :isNaN code)
+        (whitespace-code-p code)
+        (= code 40) (= code 41)
+        (= code 91) (= code 93)
+        (= code 123) (= code 125)
+        (= code 34) (= code 39)
+        (= code 44) (= code 59) (= code 96)))
+
+  (defun token (kind text)
+    (js-object :kind kind :text text))
+
+  (defun collection-token (text closing)
+    (js-object :kind "open" :text text :closing closing))
+
+  (defun read-string-token (state)
+    (let ((start (get state :index))
+          (escaped false)
+          (done false))
+      (advance state)
+      (while (and (not done) (not (at-end-p state)))
+        (let ((code (peek-code state)))
+          (advance state)
+          (cond
+            (escaped (setq escaped false))
+            ((= code 92) (setq escaped t))
+            ((= code 34) (setq done t)))))
+      (token
+        "string"
+        (js-call
+          (get state :source)
+          :slice
+          start
+          (get state :index)))))
+
+  (defun read-comment-token (state)
+    (let ((start (get state :index)))
+      (while (and (not (at-end-p state))
+                  (not (= (peek-code state) 10))
+                  (not (= (peek-code state) 13)))
+        (advance state))
+      (token
+        "comment"
+        (js-call
+          (js-call
+            (get state :source)
+            :slice
+            start
+            (get state :index))
+          :replace
+          (js* "/[ \\t]+$/u")
+          ""))))
+
+  (defun read-atom-token (state)
+    (let ((start (get state :index)))
+      (while (and (not (at-end-p state))
+                  (not (token-delimiter-code-p (peek-code state))))
+        (advance state))
+      (token
+        "atom"
+        (js-call
+          (get state :source)
+          :slice
+          start
+          (get state :index)))))
+
+  (defun tokenize (source filename)
+    (let ((state (make-scan-state source filename))
+          (tokens (js-array)))
+      (while (not (at-end-p state))
+        (let ((code (peek-code state))
+              next)
+          (cond
+            ((whitespace-code-p code)
+             (advance state))
+            ((= code 59)
+             (js-call tokens :push (read-comment-token state)))
+            ((= code 34)
+             (js-call tokens :push (read-string-token state)))
+            ((and (= code 35) (= (peek-code-ahead state 1) 123))
+             (advance state)
+             (advance state)
+             (js-call tokens :push (collection-token "#{" "}")))
+            ((and (= code 35) (= (peek-code-ahead state 1) 39))
+             (advance state)
+             (advance state)
+             (js-call tokens :push (token "prefix" "#'")))
+            ((= code 40)
+             (advance state)
+             (js-call tokens :push (collection-token "(" ")")))
+            ((= code 91)
+             (advance state)
+             (js-call tokens :push (collection-token "[" "]")))
+            ((= code 123)
+             (advance state)
+             (js-call tokens :push (collection-token "{" "}")))
+            ((or (= code 41) (= code 93) (= code 125))
+             (setq next (js-call (get state :source) :charAt (get state :index)))
+             (advance state)
+             (js-call tokens :push (token "close" next)))
+            ((or (= code 39) (= code 96))
+             (setq next (js-call (get state :source) :charAt (get state :index)))
+             (advance state)
+             (js-call tokens :push (token "prefix" next)))
+            ((= code 44)
+             (advance state)
+             (if (= (peek-code state) 64)
+                 (progn
+                   (advance state)
+                   (js-call tokens :push (token "prefix" ",@")))
+               (js-call tokens :push (token "prefix" ","))))
+            (t
+             (let ((atom (read-atom-token state)))
+               (when (= (get (get atom :text) :length) 0)
+                 (formatter-error "formatter tokenizer made no progress" filename))
+               (js-call tokens :push atom))))))
+      tokens))
+
+  (defun parse-node (tokens cursor filename)
+    (when (>= (get cursor :index) (get tokens :length))
+      (formatter-error "unexpected end of formatter token stream" filename))
+    (let* ((current (js-nth (get cursor :index) tokens))
+           (kind (get current :kind)))
+      (put cursor :index (1+ (get cursor :index)))
+      (cond
+        ((or (= kind "atom") (= kind "string") (= kind "comment"))
+         current)
+        ((= kind "prefix")
+         (let ((children (js-array)))
+           (while (and (< (get cursor :index) (get tokens :length))
+                       (= (get (js-nth (get cursor :index) tokens) :kind)
+                          "comment"))
+             (js-call children :push (js-nth (get cursor :index) tokens))
+             (put cursor :index (1+ (get cursor :index))))
+           (when (>= (get cursor :index) (get tokens :length))
+             (formatter-error "reader prefix has no target" filename))
+           (js-call children :push (parse-node tokens cursor filename))
+           (js-object :kind "prefix" :text (get current :text)
+                      :children children)))
+        ((= kind "open")
+         (let ((children (js-array))
+               (done false))
+           (while (not done)
+             (when (>= (get cursor :index) (get tokens :length))
+               (formatter-error "collection has no closing delimiter" filename))
+             (let ((next (js-nth (get cursor :index) tokens)))
+               (if (= (get next :kind) "close")
+                   (progn
+                     (unless (= (get next :text) (get current :closing))
+                       (formatter-error "mismatched collection delimiter" filename))
+                     (put cursor :index (1+ (get cursor :index)))
+                     (setq done t))
+                 (js-call children :push (parse-node tokens cursor filename)))))
+           (js-object :kind "collection" :text (get current :text)
+                      :closing (get current :closing) :children children)))
+        (t
+         (formatter-error "unexpected closing delimiter" filename)))))
+
+  (defun concrete-tree (source filename)
+    (let* ((tokens (tokenize source filename))
+           (cursor (js-object :index 0))
+           (children (js-array)))
+      (while (< (get cursor :index) (get tokens :length))
+        (js-call children :push (parse-node tokens cursor filename)))
+      (js-object :kind "root" :children children)))
+
+  (defun flat-node (node)
+    (let ((kind (get node :kind)))
+      (cond
+        ((or (= kind "atom") (= kind "string"))
+         (get node :text))
+        ((= kind "comment") nil)
+        ((= kind "prefix")
+         (let ((children (get node :children)))
+           (if (not (= (get children :length) 1))
+               nil
+             (let ((child (flat-node (js-nth 0 children))))
+               (and child (str (get node :text) child))))))
+        ((= kind "collection")
+         (let ((pieces (js-array))
+               (children (get node :children))
+               (index 0)
+               (possible t))
+           (while (and possible (< index (get children :length)))
+             (let ((piece (flat-node (js-nth index children))))
+               (if piece
+                   (js-call pieces :push piece)
+                 (setq possible false)))
+             (setq index (1+ index)))
+           (and possible
+                (str
+                  (get node :text)
+                  (js-call pieces :join " ")
+                  (get node :closing)))))
+        (t nil))))
+
+  (defun spaces (count)
+    (js-call " " :repeat count))
+
+  (defun list-leading-count (node)
+    (if (not (= (get node :text) "("))
+        0
+      (let ((children (get node :children)))
+        (if (= (get children :length) 0)
+            0
+          (let ((head (flat-node (js-nth 0 children))))
+            (cond
+              ((and head (js-call declaration-heads :includes head)) 2)
+              ((and head (js-call operand-heads :includes head)) 2)
+              (t 1)))))))
+
+  (defun append-inline-child (output child indent)
+    (let* ((piece (flat-node child))
+           (separator (if (= (get output :length) 1) "" " "))
+           (candidate (and piece (str output separator piece))))
+      (and candidate
+           (<= (+ indent (get candidate :length)) formatter-width)
+           candidate)))
+
+  (defun render-prefix (node indent)
+    (let ((children (get node :children)))
+      (if (= (get children :length) 1)
+          (str
+            (get node :text)
+            (render-node
+              (js-nth 0 children)
+              (+ indent (get (get node :text) :length))))
+        (let ((output (get node :text))
+              (index 0))
+          (while (< index (get children :length))
+            (setq output
+              (str output "\n" (spaces (+ indent formatter-indent))
+                   (render-node
+                     (js-nth index children)
+                     (+ indent formatter-indent))))
+            (setq index (1+ index)))
+          output))))
+
+  (defun render-collection (node indent)
+    (let* ((flat (flat-node node))
+           (children (get node :children)))
+      (if (and flat (<= (+ indent (get flat :length)) formatter-width))
+          flat
+        (let ((output (get node :text))
+              (index 0)
+              (inline-left (list-leading-count node))
+              (last-comment false))
+          (while (and (> inline-left 0) (< index (get children :length)))
+            (let ((candidate
+                   (append-inline-child
+                     output (js-nth index children) indent)))
+              (if candidate
+                  (progn
+                    (setq output candidate)
+                    (setq index (1+ index))
+                    (setq inline-left (1- inline-left)))
+                (setq inline-left 0))))
+          (while (< index (get children :length))
+            (let* ((child (js-nth index children))
+                   (comment (= (get child :kind) "comment")))
+              (setq output
+                (str output "\n" (spaces (+ indent formatter-indent))
+                     (render-node child (+ indent formatter-indent))))
+              (setq last-comment comment))
+            (setq index (1+ index)))
+          (when last-comment
+            (setq output (str output "\n" (spaces indent))))
+          (str output (get node :closing))))))
+
+  (defun render-node (node indent)
+    (let ((kind (get node :kind)))
+      (cond
+        ((or (= kind "atom") (= kind "string") (= kind "comment"))
+         (get node :text))
+        ((= kind "prefix") (render-prefix node indent))
+        ((= kind "collection") (render-collection node indent))
+        (t (formatter-error "unsupported concrete syntax node" nil)))))
+
+  (defun render-root (root)
+    (let ((children (get root :children))
+          (output "")
+          (index 0)
+          (seen-form false)
+          (previous-comment false))
+      (while (< index (get children :length))
+        (let* ((child (js-nth index children))
+               (comment (= (get child :kind) "comment")))
+          (when (> (get output :length) 0)
+            (setq output
+              (str output
+                   (if (and seen-form (not previous-comment) (not comment))
+                       "\n\n"
+                     "\n"))))
+          (setq output (str output (render-node child 0)))
+          (unless comment (setq seen-form t))
+          (setq previous-comment comment))
+        (setq index (1+ index)))
+      (if (= (get output :length) 0) "" (str output "\n"))))
+
+  (defun format-source (source filename)
+    (unless (= (js* "typeof source") "string")
+      (formatter-error "formatter source must be a string" filename))
+    (read-string source filename)
+    (let ((formatted (render-root (concrete-tree source filename))))
+      (read-string formatted filename)
+      formatted))
+
+  (export
+    formatter-format
+    formatter-version
+    formatter-width
+    formatter-indent
+    format-source))

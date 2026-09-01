@@ -15,7 +15,7 @@ const reportPath = path.join(
   projectDirectory,
   "benchmarks/compiler-reader-character-macos-arm64.json",
 );
-const compilerModuleCount = 12;
+const compilerModuleCount = 13;
 
 async function run(command, options = {}) {
   const child = Bun.spawn(command, {

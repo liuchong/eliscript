@@ -15,6 +15,7 @@ The bootstrap grows along this dependency order:
 symbol semantics (implemented)
   -> syntax data model (implemented)
   -> reader (implemented)
+  -> concrete-syntax formatter (implemented)
   -> macro expander (implemented)
   -> lexical analyzer (implemented)
   -> IR data model (implemented)
@@ -40,6 +41,9 @@ mapping fragments, while `compiler/source-map.eli` encodes those marks as
 Source Map v3. The generated pipeline can process and emit every current
 bootstrap module, including its own sources. `compiler/compiler.eli` composes
 the complete in-memory pipeline without filesystem dependencies.
+`compiler/formatter.eli` separately owns comment-preserving concrete syntax,
+fixed layout, and canonical source text without using emitter or application
+formatting behavior.
 `compiler/project.eli` owns the versioned single-file/project operation
 boundary, single-entry and multi-entry request identity, cycle-safe dependency
 traversal, portable-name fixed points, and versioned build-report normalization
@@ -78,5 +82,7 @@ byte-identical.
 
 Generation 1 is self-hosting. The conformance suite builds it with the seed,
 uses it to build Generation 2, then uses Generation 2 to build Generation 3.
-All twelve ESM modules and Source Maps are byte-identical across those generations.
+All thirteen ESM modules and Source Maps are byte-identical across those
+generations. Formatter corpus tests additionally require canonical source to
+be byte-idempotent and original/formatted core sources to emit identical ESM.
 The Emacs Lisp seed remains the readable bootstrap and reference implementation.

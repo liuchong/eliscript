@@ -28,7 +28,7 @@ or publishing tools into the language core or its performance evidence.
 
 A Bun CPU profile of self-hosted compilation identified ESM emission and its
 recursive runtime-link analysis among the dominant paths. The source-bound
-benchmark therefore measures the real IR of all twelve maintained self-hosted
+benchmark therefore measures the real IR of all thirteen maintained self-hosted
 compiler modules rather than a generated tree with a convenient shape.
 
 The reviewed macOS arm64 report covers:

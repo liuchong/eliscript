@@ -1,13 +1,14 @@
 {
   "format": "eliscript-compiler-reader-character-benchmark",
   "version": 1,
-  "generatedAt": "2026-09-01T05:46:04.729Z",
+  "generatedAt": "2026-09-01T06:35:06.448Z",
   "sourceDigest": {
     "algorithm": "sha256",
     "files": [
       "bootstrap/compiler/symbol.eli",
       "bootstrap/compiler/syntax.eli",
       "bootstrap/compiler/reader.eli",
+      "bootstrap/compiler/formatter.eli",
       "bootstrap/compiler/expander.eli",
       "bootstrap/compiler/transient-analysis.eli",
       "bootstrap/compiler/analyzer.eli",
@@ -19,7 +20,7 @@
       "bootstrap/compiler/compiler.eli",
       "tools/compiler/reader-character-benchmark.mjs"
     ],
-    "value": "1f7948072f600362f837357fd8f373c982b0658af12569941de0dbeb77b85764"
+    "value": "b1dedfc3508500b1ff8b9e97ba262e1ed82b5ecd13e50109a2158179295d747b"
   },
   "host": {
     "runtime": "bun",
@@ -38,6 +39,7 @@
       "bootstrap/compiler/symbol.eli",
       "bootstrap/compiler/syntax.eli",
       "bootstrap/compiler/reader.eli",
+      "bootstrap/compiler/formatter.eli",
       "bootstrap/compiler/expander.eli",
       "bootstrap/compiler/transient-analysis.eli",
       "bootstrap/compiler/analyzer.eli",
@@ -48,9 +50,9 @@
       "bootstrap/compiler/project.eli",
       "bootstrap/compiler/compiler.eli"
     ],
-    "sourceBytes": 301107,
-    "generatedBytes": 367784,
-    "predicateCodePoints": 301108
+    "sourceBytes": 314885,
+    "generatedBytes": 387468,
+    "predicateCodePoints": 314886
   },
   "parameters": {
     "warmupRounds": 2,
@@ -59,96 +61,96 @@
     "timingSamples": 15
   },
   "validation": {
-    "equivalentCodePoints": 301108,
-    "identicalCompilerOutputs": 12,
-    "validSourceMaps": 12,
-    "predicateChecksum": 4539620,
-    "baselineCompilerChecksum": 6512120,
-    "optimizedCompilerChecksum": 6512120
+    "equivalentCodePoints": 314886,
+    "identicalCompilerOutputs": 13,
+    "validSourceMaps": 13,
+    "predicateChecksum": 4757820,
+    "baselineCompilerChecksum": 6842696,
+    "optimizedCompilerChecksum": 6842696
   },
   "measurements": {
     "referencePredicates": {
       "samplesMs": [
-        273.5352079999999,
-        318.8884170000001,
-        259.08841699999994,
-        285.00491599999987,
-        298.90120900000056,
-        248.10762500000055,
-        316.9505829999998,
-        320.6234169999989,
-        256.8478329999998,
-        274.4514999999992,
-        308.69087500000023,
-        321.0757909999993,
-        309.3289160000022,
-        308.2502920000006,
-        302.049791999998
+        296.08841699999994,
+        333.7879170000001,
+        270.58087499999965,
+        287.17654200000015,
+        334.32345799999985,
+        261.5071659999994,
+        323.0903330000001,
+        265.1060839999991,
+        335.01579200000015,
+        278.5377919999992,
+        266.5387499999997,
+        263.67316599999685,
+        335.7479579999999,
+        331.4499999999971,
+        274.02649999999994
       ],
-      "medianMs": 302.049791999998
+      "medianMs": 287.17654200000015
     },
     "optimizedPredicates": {
       "samplesMs": [
-        37.65379200000007,
-        37.63337499999989,
-        41.159083000000464,
-        41.02649999999994,
-        42.8441670000002,
-        57.16849999999977,
-        58.404207999999926,
-        57.64416700000038,
-        56.13133300000118,
-        53.30366600000161,
-        57.58391699999993,
-        53.322040999999444,
-        54.27091600000131,
-        52.92683300000135,
-        54.33116700000028
+        39.1279169999998,
+        38.7774159999999,
+        42.996083,
+        43.0503749999998,
+        46.29137499999888,
+        56.88458299999911,
+        59.7075420000001,
+        59.43866600000001,
+        58.38445799999863,
+        54.747457999998005,
+        58.499166999998124,
+        58.27141599999959,
+        58.875457999998616,
+        61.209249999999884,
+        66.64520799999809
       ],
-      "medianMs": 53.322040999999444
+      "medianMs": 58.27141599999959
     },
-    "predicateSpeedup": 5.66463297982163,
+    "predicateSpeedup": 4.928257483909473,
     "baselineCompiler": {
       "samplesMs": [
-        725.0941660000001,
-        746.0747920000003,
-        723.076,
-        773.3067499999997,
-        703.2979160000004,
-        749.7739170000004,
-        715.3250000000007,
-        725.4603339999994,
-        714.2306250000001,
-        779.1902919999993,
-        717.2290409999987,
-        762.6504160000004,
-        747.8808340000032,
-        730.3097080000007,
-        727.6838749999988
+        783.4256249999999,
+        773.1540420000001,
+        819.6338750000004,
+        800.1951250000002,
+        807.192665999999,
+        789.8462920000002,
+        759.208125000001,
+        766.7450829999998,
+        853.5103330000002,
+        763.7157499999994,
+        775.6253749999996,
+        823.4847090000003,
+        765.8523749999986,
+        788.7825420000008,
+        805.1452079999981
       ],
-      "medianMs": 727.6838749999988
+      "medianMs": 788.7825420000008
     },
     "optimizedCompiler": {
       "samplesMs": [
-        617.9476669999997,
-        597.2619589999999,
-        578.5978329999998,
-        600.8667919999998,
-        599.8981670000012,
-        579.3562499999989,
-        606.2104579999996,
-        611.3839580000003,
-        643.160249999999,
-        593.8594580000008,
-        613.4681249999994,
-        626.5232080000023,
-        589.7932079999991,
-        626.5035419999986,
-        613.9071659999972
+        644.917625,
+        654.7689580000001,
+        668.8251249999994,
+        611.9126669999996,
+        607.885624999999,
+        602.5729580000007,
+        631.9502499999999,
+        608.1950829999987,
+        691.5555829999994,
+        606.1760829999985,
+        601.5879999999997,
+        621.7080000000024,
+        642.4114999999983,
+        616.2667919999985,
+        632.286541999998
       ],
-      "medianMs": 606.2104579999996
+      "medianMs": 621.7080000000024
     },
-    "completeCompilerSpeedup": 1.2003815925590635
+    "completeCompilerSpeedup": 1.2687347468586505
   },
   "decision": {
     "minimumCompleteCompilerSpeedup": 1.08,

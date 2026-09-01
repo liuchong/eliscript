@@ -99,7 +99,7 @@ generated analyzer, then compares acceptance and complete diagnostic strings.
 
 Coverage includes forward declarations, lexical scope, mutable state, imports,
 exports, special forms, lambdas, JavaScript references, duplicate bindings,
-identifier collisions, invalid arities, malformed clauses, and all twelve
+identifier collisions, invalid arities, malformed clauses, and all thirteen
 bootstrap modules. Repeated bootstrap builds remain byte-identical, including
 the new analyzer and its source map.
 

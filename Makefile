@@ -18,6 +18,7 @@ test: check-contracts
 		tests/collection-layout-benchmark.test.mjs \
 		tests/transient-builder-benchmark.test.mjs \
 		tests/bootstrap-symbol.test.mjs tests/bootstrap-reader.test.mjs \
+		tests/bootstrap-formatter.test.mjs \
 		tests/bootstrap-expander.test.mjs tests/bootstrap-analyzer.test.mjs \
 		tests/bootstrap-ir.test.mjs tests/bootstrap-ir-serialization.test.mjs \
 		tests/bootstrap-emitter.test.mjs \
@@ -62,6 +63,7 @@ test: check-contracts
 		tests/persistent-map.test.mjs tests/persistent-set.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/project-cli-test.sh
+	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/format-cli-test.sh
 
 check-contracts:
 	$(BUN) tools/conformance/check.mjs

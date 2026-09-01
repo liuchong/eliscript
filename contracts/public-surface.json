@@ -112,6 +112,12 @@
       "options": ["--config", "--diagnostic-format", "--help", "--json", "--no-cache", "--out-dir", "--portable", "--root"]
     },
     {
+      "name": "eliscript-format",
+      "entry": "bin/eliscript-format",
+      "implementation": "bootstrap/host/format-cli.mjs",
+      "options": ["--check", "--diagnostic-format", "--help", "--write"]
+    },
+    {
       "name": "eliscript-org",
       "entry": "bin/eliscript-org",
       "implementation": "tools/org/eliscript-org-cli.el",
@@ -217,6 +223,16 @@
             "\"version\": 1"
           ]
         }
+      ]
+    },
+    {
+      "id": "formatter",
+      "spec": "0114",
+      "format": "eliscript-formatter",
+      "version": 1,
+      "evidence": [
+        {"file": "bootstrap/compiler/formatter.eli", "contains": ["formatter-format \"eliscript-formatter\"", "formatter-version 1", "format-source"]},
+        {"file": "specs/0114-deterministic-concrete-syntax-formatter.md", "contains": ["`formatter_format`: `\"eliscript-formatter\"`", "`formatter_version`: `1`"]}
       ]
     },
     {
@@ -347,6 +363,13 @@
       "spec": "0019",
       "file": "bootstrap/host/bun.mjs",
       "namedExports": ["compileFile", "diagnosticFromError", "loadCompiler", "main", "parseArguments", "requestedDiagnosticFormat"],
+      "defaultExport": false
+    },
+    {
+      "id": "bootstrap-formatter-cli-host",
+      "spec": "0114",
+      "file": "bootstrap/host/format-cli.mjs",
+      "namedExports": ["formatFile", "main", "parseArguments"],
       "defaultExport": false
     },
     {

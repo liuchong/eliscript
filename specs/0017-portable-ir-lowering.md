@@ -17,8 +17,8 @@ model without consulting Emacs objects or reader-shaped seed forms.
 portable syntax -> macro expansion -> lexical analysis -> portable IR lowering
 ```
 
-The generated reader, expander, analyzer, and lowerer can process all twelve
-bootstrap compiler modules, including the compiler driver source.
+The generated reader, formatter, expander, analyzer, and lowerer can process all
+thirteen bootstrap compiler modules, including the compiler driver source.
 
 ## Data Contract
 
@@ -75,7 +75,7 @@ The fixture verifies:
 - complete recursive values, children, and kind-specific properties
 - literal tags and recursively quoted data
 - narrow structural spans and macro call-site origins
-- all twelve bootstrap compiler sources
+- all thirteen bootstrap compiler sources
 - deterministic generated modules and Source Map files
 
 ## Next Phase

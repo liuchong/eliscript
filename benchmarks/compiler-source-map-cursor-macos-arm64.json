@@ -1,13 +1,14 @@
 {
   "format": "eliscript-compiler-source-map-cursor-benchmark",
   "version": 1,
-  "generatedAt": "2026-09-01T05:46:27.444Z",
+  "generatedAt": "2026-09-01T06:35:31.076Z",
   "sourceDigest": {
     "algorithm": "sha256",
     "files": [
       "bootstrap/compiler/symbol.eli",
       "bootstrap/compiler/syntax.eli",
       "bootstrap/compiler/reader.eli",
+      "bootstrap/compiler/formatter.eli",
       "bootstrap/compiler/expander.eli",
       "bootstrap/compiler/transient-analysis.eli",
       "bootstrap/compiler/analyzer.eli",
@@ -19,7 +20,7 @@
       "bootstrap/compiler/compiler.eli",
       "tools/compiler/source-map-cursor-benchmark.mjs"
     ],
-    "value": "f37eb747dc819c0c6123252141f7dd2ce9508d38467695b1d7d0d65ce1a6fb2b"
+    "value": "4b16d1069cb88f910f69276f9100ba644d6923d51fb87fd295677c35e58949db"
   },
   "host": {
     "runtime": "bun",
@@ -38,6 +39,7 @@
       "bootstrap/compiler/symbol.eli",
       "bootstrap/compiler/syntax.eli",
       "bootstrap/compiler/reader.eli",
+      "bootstrap/compiler/formatter.eli",
       "bootstrap/compiler/expander.eli",
       "bootstrap/compiler/transient-analysis.eli",
       "bootstrap/compiler/analyzer.eli",
@@ -48,10 +50,10 @@
       "bootstrap/compiler/project.eli",
       "bootstrap/compiler/compiler.eli"
     ],
-    "sourceBytes": 301107,
-    "generatedBytes": 367784,
-    "artifactMarks": 23859,
-    "pipelineCases": 14
+    "sourceBytes": 314885,
+    "generatedBytes": 387468,
+    "artifactMarks": 25166,
+    "pipelineCases": 15
   },
   "parameters": {
     "warmupRounds": 2,
@@ -60,97 +62,97 @@
     "timingSamples": 15
   },
   "validation": {
-    "equivalentCases": 14,
-    "identicalCompilerOutputs": 12,
-    "validSourceMaps": 12,
-    "referencePipelineChecksum": 951120,
-    "optimizedPipelineChecksum": 951120,
-    "baselineCompilerChecksum": 6512120,
-    "optimizedCompilerChecksum": 6512120
+    "equivalentCases": 15,
+    "identicalCompilerOutputs": 13,
+    "validSourceMaps": 13,
+    "referencePipelineChecksum": 1002940,
+    "optimizedPipelineChecksum": 1002940,
+    "baselineCompilerChecksum": 6842696,
+    "optimizedCompilerChecksum": 6842696
   },
   "measurements": {
     "referencePipeline": {
       "samplesMs": [
-        190.544125,
-        185.71345800000017,
-        182.6880000000001,
-        183.84066600000006,
-        167.37174999999934,
-        178.73599999999988,
-        183.43308399999842,
-        190.86683300000004,
-        185.44954099999995,
-        172.13387499999953,
-        182.29241600000023,
-        185.74487500000032,
-        187.36083299999882,
-        178.38816699999734,
-        206.70366699999795
+        209.52374999999995,
+        193.82454199999984,
+        210.41283299999986,
+        202.7290409999996,
+        195.33174999999937,
+        201.76537500000086,
+        183.69179200000144,
+        192.64199999999983,
+        200.1599589999987,
+        196.18483299999934,
+        215.5962499999987,
+        218.25095900000088,
+        209.9134170000034,
+        193.90808300000208,
+        205.22183399999994
       ],
-      "medianMs": 183.84066600000006
+      "medianMs": 201.76537500000086
     },
     "optimizedPipeline": {
       "samplesMs": [
-        39.91066599999999,
-        39.419167000000016,
-        36.49137500000006,
-        40.19200000000001,
-        42.82899999999972,
-        40.15049999999974,
-        40.034959000000526,
-        40.80437499999971,
-        37.17541700000038,
-        43.51341700000012,
-        37.68791699999929,
-        43.37583299999824,
-        50.42795800000022,
-        40.76954200000182,
-        40.66100000000006
+        40.30154199999993,
+        44.608999999999924,
+        40.913541000000805,
+        44.44016699999975,
+        44.60729199999969,
+        43.852750000000015,
+        42.38199999999961,
+        43.134250000000975,
+        44.30529100000058,
+        43.86262499999975,
+        42.7077500000014,
+        43.2010420000006,
+        42.60895800000071,
+        46.18883300000016,
+        41.740583000002516
       ],
-      "medianMs": 40.19200000000001
+      "medianMs": 43.2010420000006
     },
-    "pipelineSpeedup": 4.574061156449045,
+    "pipelineSpeedup": 4.670382140319626,
     "baselineCompiler": {
       "samplesMs": [
-        651.886708,
-        631.3350829999999,
-        644.3947090000001,
-        648.7112500000003,
-        627.1986669999997,
-        641.9581249999992,
-        630.624541000001,
-        634.7135830000007,
-        623.0768339999995,
-        629.4979590000003,
-        670.674500000001,
-        646.4457909999983,
-        681.8396659999999,
-        659.2465410000004,
-        675.6546670000025
+        716.5701669999999,
+        719.6874159999998,
+        726.2725829999999,
+        699.6692909999992,
+        705.123540999999,
+        698.1501250000001,
+        681.4683750000004,
+        696.7368749999987,
+        690.7633750000005,
+        754.3998339999998,
+        717.4732079999994,
+        701.6640420000003,
+        685.8161250000012,
+        689.9429999999993,
+        679.6660419999971
       ],
-      "medianMs": 644.3947090000001
+      "medianMs": 699.6692909999992
     },
     "optimizedCompiler": {
       "samplesMs": [
-        603.5734170000001,
-        592.788583,
-        582.6186250000001,
-        589.8470830000006,
-        588.9472079999996,
-        584.036583000001,
-        603.9365409999991,
-        575.0284170000014,
-        577.1217500000002,
-        564.8788750000003,
-        603.7927499999987,
-        557.570040999999,
-        598.4994159999987,
-        571.5972919999986,
-        615.7318750000013
+        643.6716250000002,
+        620.2384590000001,
+        711.6437079999996,
+        624.5737500000005,
+        624.5717079999995,
+        618.256875000001,
+        617.4747910000006,
+        603.5221249999995,
+        615.0824159999993,
+        647.2710420000003,
+        639.5173340000001,
+        664.3743329999998,
+        653.4734580000004,
+        609.7740829999966,
+        624.7355830000015
       ],
-      "medianMs": 588.9472079999996
+      "medianMs": 624.5737500000005
     },
-    "completeCompilerSpeedup": 1.0941468101840472
+    "completeCompilerSpeedup": 1.1202348657784589
   },
   "decision": {
     "minimumPipelineSpeedup": 1.5,

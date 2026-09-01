@@ -19,6 +19,7 @@ const compilerSources = [
   "symbol",
   "syntax",
   "reader",
+  "formatter",
   "expander",
   "transient-analysis",
   "analyzer",

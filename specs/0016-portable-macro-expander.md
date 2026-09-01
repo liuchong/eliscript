@@ -117,8 +117,8 @@ expander, and analyzer, then compares:
   boundaries
 - quoted and syntax-specific expansion boundaries
 - definition, nesting, execution, and depth-limit diagnostics
-- all twelve bootstrap compiler modules, including `emitter.eli` and
-  `compiler.eli`
+- all thirteen bootstrap compiler modules, including `formatter.eli`,
+  `emitter.eli`, and `compiler.eli`
 - acceptance of every valid expanded result by the portable analyzer
 
 The position oracle now indexes each source once, keeping normalization linear

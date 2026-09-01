@@ -89,7 +89,7 @@ compiler with the last accepted compiler revision before this specialization:
 checkout at exactly that revision with its own bootstrap compiler already
 generated. The benchmark refuses any other baseline revision.
 
-Both compilers compile the same current source text for all twelve maintained
+Both compilers compile the same current source text for all thirteen maintained
 self-hosted modules with Source Maps. Before timing, every module must compile,
 every Source Map must parse, both checksums must be non-zero, and optimized
 generated JavaScript must be smaller than baseline output. Timing alternates

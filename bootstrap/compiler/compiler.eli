@@ -1,5 +1,11 @@
 (module bootstrap.compiler.compiler
   (import "./reader.mjs" read-string)
+  (import "./formatter.mjs"
+    formatter-format
+    formatter-version
+    formatter-width
+    formatter-indent
+    format-source)
   (import "./expander.mjs" expand-module)
   (import "./analyzer.mjs" analyze-module select-portable-module)
   (import "./lower.mjs" lower-module)
@@ -99,6 +105,11 @@
     emit-ir-string-with-source-map
     serialize-ir-program
     deserialize-ir-program
+    formatter-format
+    formatter-version
+    formatter-width
+    formatter-indent
+    format-source
     ir-format
     ir-version
     project-plan-format

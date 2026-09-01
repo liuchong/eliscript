@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PROJECT_DIR=$(dirname -- "$SCRIPT_DIR")
+MODULE_DIR=${ELISCRIPT_BOOTSTRAP_MODULE_DIR:-"$PROJECT_DIR/dist/bootstrap"}
+: "${ELISCRIPT_JS_RUNTIME:=bun}"
+
+if [ ! -f "$MODULE_DIR/compiler.mjs" ]; then
+  ELISCRIPT_BOOTSTRAP_OUT_DIR="$MODULE_DIR" \
+    "$PROJECT_DIR/bin/eliscript-bootstrap"
+fi
+
+export ELISCRIPT_BOOTSTRAP_MODULE_DIR="$MODULE_DIR"
+exec "$ELISCRIPT_JS_RUNTIME" "$PROJECT_DIR/bootstrap/host/format-cli.mjs" "$@"

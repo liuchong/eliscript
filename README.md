@@ -22,7 +22,9 @@ compiler, self-hosted multi-file graph planning and incremental reuse,
 persistent values, protocols, and a long-lived Emacs-to-JavaScript worker. The
 repository also carries React, Org, and
 optional bundler probes as replaceable application-level evidence. The project
-is now in **M8: Language Contract Closure**.
+continues the remaining **M8: Language Contract Closure** audit, has completed
+**M9: Compiler and Build Convergence**, and has started **M10: Daily
+Development Experience**.
 
 M9 compiler convergence is complete: it includes canonical project requests,
 graph planning, IR serialization, build reports, v1-to-v2 cache migration,
@@ -30,6 +32,13 @@ selective recompilation, cross-host Bun/Node cache reuse, and self-hosted public
 single-file, single-entry project, and multi-entry project builds through one
 versioned operation boundary. Version 2 project identity, reports, cache
 validation, and worker loading preserve the version 1 single-entry contract.
+
+The first M10 slice is also complete: the self-hosted compiler now owns a
+comment-preserving concrete-syntax formatter with fixed two-space/88-column
+layout, byte-idempotence and ESM-semantic corpus evidence, plus one Bun/Node
+`eliscript-format` command for stdout, atomic `--write`, and non-mutating
+`--check`. Emacs mode, project-aware checking, interactive evaluation, REPL,
+watching, and the complete M10 exit gate remain future work.
 
 The current M8 work provides:
 
@@ -179,6 +188,13 @@ Build a complete local module graph directly:
 bun run dist/project/examples/stdlib-cli/main.mjs
 ```
 
+Format one source file in place or check canonical formatting without writing:
+
+```sh
+./bin/eliscript-format --write examples/basic/main.eli
+./bin/eliscript-format --check examples/basic/main.eli
+```
+
 Pass multiple entries with an explicit root to emit one versioned union graph:
 
 ```sh
@@ -314,6 +330,8 @@ arbitrary Emacs packages in JavaScript.
 | --- | --- |
 | Compile one source file | `./bin/eliscript --output dist/program.mjs source.eli` |
 | Build a source graph | `./bin/eliscript-build --root . --out-dir dist source.eli` |
+| Format a source file | `./bin/eliscript-format --write source.eli` |
+| Check source formatting | `./bin/eliscript-format --check source.eli` |
 | Request JSON diagnostics | `./bin/eliscript --diagnostic-format json source.eli` |
 | Inspect build decisions | `./bin/eliscript-build --json --root . --out-dir dist source.eli` |
 | Build the self-hosted compiler | `bun run build:bootstrap` |

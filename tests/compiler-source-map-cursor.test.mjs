@@ -15,9 +15,9 @@ const reportPath = path.join(
   projectDirectory,
   "benchmarks/compiler-source-map-cursor-macos-arm64.json",
 );
-const compilerModuleCount = 12;
+const compilerModuleCount = 13;
 const compilerNames = [
-  "symbol", "syntax", "reader", "expander", "transient-analysis",
+  "symbol", "syntax", "reader", "formatter", "expander", "transient-analysis",
   "analyzer", "ir", "lower", "source-map", "emitter", "compiler",
 ];
 

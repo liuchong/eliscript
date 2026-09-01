@@ -1464,6 +1464,37 @@
           "contains": "DIRECT_MULTI_REPORT"
         }
       ]
+    },
+    {
+      "id": "toolchain.deterministic-concrete-syntax-formatter",
+      "title": "Deterministic concrete-syntax formatter",
+      "status": "accepted",
+      "spec": "0114",
+      "contracts": [
+        "Owns comment-preserving concrete-syntax formatting in self-hosted Eliscript",
+        "Uses one fixed width, indentation, line-ending, whitespace, and final-newline contract",
+        "Is byte-idempotent and preserves generated ESM over compiler and standard-library sources",
+        "Exposes one Bun and Node command with stdout, atomic write, check, and structured diagnostics",
+        "Keeps application frameworks and application tooling outside core implementation, dependencies, evidence, and maturity credit",
+        "Leaves M10 in progress until its remaining Emacs-first deliverables and exit gate are proven"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-formatter.test.mjs",
+          "contains": "self-hosted formatter preserves concrete syntax and core semantics"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-formatter.test.mjs",
+          "contains": "formatter returns stable reader and formatter diagnostics"
+        },
+        {
+          "kind": "shell",
+          "file": "tests/format-cli-test.sh",
+          "contains": "Formatter CLI test passed"
+        }
+      ]
     }
   ]
 }

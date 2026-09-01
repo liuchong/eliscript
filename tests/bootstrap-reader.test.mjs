@@ -22,6 +22,8 @@ const artifactNames = [
   "syntax.mjs.map",
   "reader.mjs",
   "reader.mjs.map",
+  "formatter.mjs",
+  "formatter.mjs.map",
   "expander.mjs",
   "expander.mjs.map",
   "transient-analysis.mjs",

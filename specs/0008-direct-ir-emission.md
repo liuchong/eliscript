@@ -73,7 +73,7 @@ source-mapped output.
 - Bun executes the generated fixture and validates its exports and behavior.
 - Every existing IR node retains its source span through emission.
 - The generated Eliscript backend matches the seed ESM byte-for-byte across
-  the shared IR fixture and all twelve compiler modules.
+  the shared IR fixture and all thirteen compiler modules.
 
 ## Deferred Work
 

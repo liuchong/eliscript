@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 113 specifications.
+The registry currently contains 114 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 83 |
+| Accepted design | 84 |
 | Stable design | 29 |
 | Implementation in progress | 3 |
-| Implemented | 110 |
+| Implemented | 111 |
 
 Compatibility Baseline 1 separately classifies 29 specifications as stable,
-76 as provisional, and 3 as planning. That baseline is derived from registry
+82 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -104,6 +104,13 @@ CLI output, and worker loading now identify the union of multiple entry
 closures while preserving version 1 single-entry behavior. Application
 frameworks and publishing infrastructure remain replaceable validation
 outside these core deliverables.
+M10 has begun with specification 0114: the generated compiler now owns a
+comment-preserving deterministic formatter, and the Bun/Node public command
+provides stdout, atomic write, format-check, and structured diagnostics. The
+formatter passes idempotence and generated-ESM equivalence over maintained
+compiler and standard-library sources. M10 remains in progress because its
+Emacs mode, project-aware check, REPL, watch API, onboarding, and complete exit
+gate are not yet implemented.
 
 ## Reading Paths
 
@@ -366,6 +373,7 @@ The schemas and change workflow are defined by specifications
 | 0111 | [Self-hosted Project Command and Configuration](0111-self-hosted-project-command.md) | Accepted | Implemented |
 | 0112 | [Unified Self-hosted Build Operation](0112-unified-self-hosted-build-operation.md) | Accepted | Implemented |
 | 0113 | [Versioned Multi-entry Project Identity](0113-versioned-multi-entry-project-identity.md) | Accepted | Implemented |
+| 0114 | [Deterministic Concrete-syntax Formatter](0114-deterministic-concrete-syntax-formatter.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

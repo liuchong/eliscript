@@ -19,6 +19,7 @@ const moduleNames = [
   "symbol",
   "syntax",
   "reader",
+  "formatter",
   "expander",
   "transient-analysis",
   "analyzer",

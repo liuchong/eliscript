@@ -17,6 +17,7 @@ const compilerSources = Object.freeze([
   "bootstrap/compiler/symbol.eli",
   "bootstrap/compiler/syntax.eli",
   "bootstrap/compiler/reader.eli",
+  "bootstrap/compiler/formatter.eli",
   "bootstrap/compiler/expander.eli",
   "bootstrap/compiler/transient-analysis.eli",
   "bootstrap/compiler/analyzer.eli",
