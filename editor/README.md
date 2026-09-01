@@ -21,5 +21,12 @@ stdin, and exposes normal Flymake diagnostic navigation. Customize
 `eliscript-mode-check-command` when the public command is not on `PATH`.
 
 Project checking is read-only: it does not save the buffer or create build
-outputs. Compile commands, interactive evaluation, watching, and REPL sessions
-remain separate M10 capabilities.
+outputs. `C-c C-b` builds the current unsaved buffer, `C-c C-c` builds the
+saved file, and `C-c C-p` builds the configured project. These commands use the
+public `eliscript-build` process and `eliscript-compilation-mode`; `C-c C-n`
+and `C-c C-r` navigate located build failures. Customize
+`eliscript-mode-build-command` or the unconfigured
+`eliscript-mode-build-directory` when needed.
+
+Interactive evaluation, watching, and REPL sessions remain separate M10
+capabilities.

@@ -234,7 +234,7 @@ function writeModule({
     source,
     output,
     sourceMap,
-    sourceDigest: digestFile(source),
+    sourceDigest: digestBytes(sourceText),
     outputDigest: digestFile(output),
     sourceMapDigest: digestFile(sourceMap),
     dependencies,
@@ -495,6 +495,7 @@ function standardPlan(
   programCache,
   records,
   decisions,
+  sourceOverrides,
 ) {
   return compiler.project_plan(entries, (source) => {
     const cached = cachedModule({
@@ -507,7 +508,7 @@ function standardPlan(
     });
     decisions.set(source, cached);
     if (cached.module !== undefined) return cached.module.dependencies;
-    const sourceText = readFileSync(source, "utf8");
+    const sourceText = sourceOverrides.get(source) ?? readFileSync(source, "utf8");
     const program = compiler.compile_ir_string(sourceText, source);
     sourceCache.set(source, sourceText);
     programCache.set(source, program);
@@ -523,10 +524,11 @@ function portablePlan(
   root,
   sourceCache,
   programCache,
+  sourceOverrides,
 ) {
   return compiler.portable_project_plan([{ id: entry, entries }],
     (source, requestedEntries) => {
-      const sourceText = readFileSync(source, "utf8");
+      const sourceText = sourceOverrides.get(source) ?? readFileSync(source, "utf8");
       const program = compiler.compile_project_portable_ir_string(
         sourceText,
         requestedEntries,
@@ -541,7 +543,7 @@ function portablePlan(
     });
 }
 
-function checkSourceOverrides(values, root) {
+function sourceOverridesOption(values, root) {
   if (values === undefined) return new Map();
   const entries = values instanceof Map
     ? [...values.entries()]
@@ -549,19 +551,28 @@ function checkSourceOverrides(values, root) {
   const overrides = new Map();
   for (const [filename, sourceText] of entries) {
     if (typeof sourceText !== "string") {
-      projectError("project check source override must be a string", filename);
+      projectError("project source override must be a string", filename);
     }
     const source = canonicalSource(
-      pathOption(filename, "project check source override"),
+      pathOption(filename, "project source override"),
       root,
       filename,
     );
     if (overrides.has(source)) {
-      projectError("project check source overrides resolve to duplicates", source);
+      projectError("project source overrides resolve to duplicates", source);
     }
     overrides.set(source, sourceText);
   }
   return overrides;
+}
+
+function validateSourceOverrides(sourceOverrides, plan) {
+  const plannedSources = new Set(plan.modules.map((record) => record.id));
+  for (const source of sourceOverrides.keys()) {
+    if (!plannedSources.has(source)) {
+      projectError("project source override is outside the project graph", source);
+    }
+  }
 }
 
 function checkStandardPlan(compiler, entries, root, sourceOverrides) {
@@ -631,7 +642,7 @@ export async function checkProject(options) {
   if (new Set(entries).size !== entries.length) {
     projectError("project entries resolve to duplicate sources");
   }
-  const sourceOverrides = checkSourceOverrides(options.sourceOverrides, root);
+  const sourceOverrides = sourceOverridesOption(options.sourceOverrides, root);
   const portableEntries = [...request.portableEntries];
   const plan = portableEntries.length > 0
     ? checkPortablePlan(
@@ -642,12 +653,7 @@ export async function checkProject(options) {
       sourceOverrides,
     )
     : checkStandardPlan(compiler, entries, root, sourceOverrides);
-  const checkedSources = new Set(plan.modules.map((record) => record.id));
-  for (const source of sourceOverrides.keys()) {
-    if (!checkedSources.has(source)) {
-      projectError("project check source override is outside the checked graph", source);
-    }
-  }
+  validateSourceOverrides(sourceOverrides, plan);
   const mode = plan.mode;
   const modules = plan.modules.map((record) => ({
     source: relative(root, record.id),
@@ -718,6 +724,7 @@ export async function buildProject(options) {
   if (new Set(entries).size !== entries.length) {
     projectError("project entries resolve to duplicate sources");
   }
+  const sourceOverrides = sourceOverridesOption(options.sourceOverrides, root);
   const requestedOutDir = resolve(pathOption(request.outDir, "output"));
   try {
     const attributes = statSync(requestedOutDir);
@@ -729,7 +736,7 @@ export async function buildProject(options) {
     mkdirSync(requestedOutDir, { recursive: true });
   }
   const outDir = realpathSync(requestedOutDir);
-  const useCache = request.useCache;
+  const useCache = request.useCache && sourceOverrides.size === 0;
   const compilerDigest = options.compiler === undefined
     ? compilerDirectoryDigest(moduleDirectory)
     : compilerDigestOption(options.compilerDigest);
@@ -759,6 +766,7 @@ export async function buildProject(options) {
       root,
       sourceCache,
       programCache,
+      sourceOverrides,
     )
     : standardPlan(
       compiler,
@@ -769,7 +777,9 @@ export async function buildProject(options) {
       programCache,
       records,
       decisions,
+      sourceOverrides,
     );
+  validateSourceOverrides(sourceOverrides, plan);
   const normalizedPortableEntries = plan.mode === "portable"
     ? [...plan.entries[0].entries]
     : [];

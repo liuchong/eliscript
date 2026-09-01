@@ -139,6 +139,12 @@ requires byte-identical version 1 reports, overlays unsaved stdin source under
 its canonical filename, validates exact compiler diagnostics, and proves that
 success and failure create no configured output directory.
 
+The project CLI test builds stdin source under its original project filename,
+requires cache reuse to be disabled, executes the virtual artifact, checks
+embedded Source Map content and located human diagnostics, proves the source
+file unchanged, and then rebuilds from disk. Mode ERT tests invoke the same
+public command from an unsaved buffer and cover buffer/file/project arguments.
+
 `literal-runtime.test.mjs` compiles square-bracket Vector literals, brace Map
 literals, `#{...}` Set literals, source Keyword values, and explicit persistent
 constructors through

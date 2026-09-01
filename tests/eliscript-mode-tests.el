@@ -213,6 +213,84 @@
                          "ELI-A0001: unbound symbol: missing")))
       (delete-file source))))
 
+(ert-deftest eliscript-mode-builds-buffer-file-and-project-commands ()
+  (let* ((directory (make-temp-file "eliscript-mode-build-" t))
+         (source (expand-file-name "src/main.eli" directory))
+         (configuration (expand-file-name "eliscript.json" directory))
+         (eliscript-mode-build-command '("eliscript-build" "--fixed")))
+    (unwind-protect
+        (progn
+          (make-directory (file-name-directory source) t)
+          (write-region "{}" nil configuration nil 'silent)
+          (write-region "(print 42)\n" nil source nil 'silent)
+          (with-temp-buffer
+            (setq buffer-file-name source)
+            (eliscript-mode)
+            (should (equal
+                     (eliscript-mode--build-arguments 'buffer)
+                     (list "--fixed" "--config" configuration
+                           "--stdin-file" source "--no-cache"
+                           "--diagnostic-format" "human")))
+            (should (equal
+                     (eliscript-mode--build-arguments 'file)
+                     (list "--fixed" "--config" configuration source
+                           "--diagnostic-format" "human")))
+            (should (equal
+                     (eliscript-mode--build-arguments 'project)
+                     (list "--fixed" "--config" configuration
+                           "--diagnostic-format" "human")))))
+      (delete-directory directory t))))
+
+(ert-deftest eliscript-mode-compiles-unsaved-buffer-through-public-build ()
+  (let* ((directory (make-temp-file "eliscript-mode-virtual-build-" t))
+         (source (expand-file-name "src/main.eli" directory))
+         (configuration (expand-file-name "eliscript.json" directory))
+         (output (expand-file-name "build/main.mjs" directory))
+         (builder (expand-file-name "bin/eliscript-build"
+                                    eliscript-mode-tests--root))
+         (eliscript-mode-build-command (list builder))
+         source-buffer
+         compilation-buffer)
+    (unwind-protect
+        (progn
+          (make-directory (file-name-directory source) t)
+          (write-region "(print 41)\n" nil source nil 'silent)
+          (write-region
+           "{\"schemaVersion\":1,\"sourceRoot\":\"src\",\"entry\":\"main.eli\",\"outDir\":\"build\",\"portableEntries\":[],\"cache\":true}\n"
+           nil configuration nil 'silent)
+          (setq source-buffer (find-file-noselect source))
+          (with-current-buffer source-buffer
+            (erase-buffer)
+            (insert "(print 82)\n")
+            (eliscript-mode)
+            (setq compilation-buffer (eliscript-mode-compile-buffer)))
+          (let* ((process (get-buffer-process compilation-buffer))
+                 (deadline (+ (float-time) 15)))
+            (while (and (process-live-p process)
+                        (< (float-time) deadline))
+              (accept-process-output process 0.05))
+            (should-not (process-live-p process))
+            (should (= (process-exit-status process) 0)))
+          (should (equal (with-temp-buffer
+                           (insert-file-contents source)
+                           (buffer-string))
+                         "(print 41)\n"))
+          (with-temp-buffer
+            (should (= (process-file "bun" nil t nil output) 0))
+            (should (equal (string-trim (buffer-string)) "82")))
+          (with-current-buffer compilation-buffer
+            (should (eq major-mode 'eliscript-compilation-mode))
+            (should (equal compilation-error-regexp-alist '(eliscript)))))
+      (when (buffer-live-p compilation-buffer)
+        (let ((process (get-buffer-process compilation-buffer)))
+          (when (process-live-p process) (kill-process process)))
+        (kill-buffer compilation-buffer))
+      (when (buffer-live-p source-buffer)
+        (with-current-buffer source-buffer
+          (set-buffer-modified-p nil))
+        (kill-buffer source-buffer))
+      (delete-directory directory t))))
+
 (ert-deftest eliscript-mode-formats-buffer-through-public-command ()
   (let ((eliscript-mode-format-command
          (list (expand-file-name "bin/eliscript-format"

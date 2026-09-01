@@ -33,7 +33,7 @@ single-file, single-entry project, and multi-entry project builds through one
 versioned operation boundary. Version 2 project identity, reports, cache
 validation, and worker loading preserve the version 1 single-entry contract.
 
-The first three M10 slices are complete. The self-hosted compiler now owns a
+The first four M10 slices are complete. The self-hosted compiler now owns a
 comment-preserving concrete-syntax formatter with fixed two-space/88-column
 layout, byte-idempotence and ESM-semantic corpus evidence, plus one Bun/Node
 `eliscript-format` command for stdout, atomic `--write`, and non-mutating
@@ -42,8 +42,10 @@ font locking, Imenu, balanced definition navigation, project discovery, and
 transactional buffer formatting. A read-only `eliscript-check` operation now
 validates complete configured source graphs in memory, accepts unsaved source
 through stdin, emits deterministic Bun/Node reports, and feeds structured
-diagnostics to Flymake. Compile commands, interactive evaluation, REPL,
-watching, and the complete M10 exit gate remain future work.
+diagnostics to Flymake. The public build also accepts one unsaved source through
+stdin, and the Emacs mode builds the current buffer, saved file, or configured
+project through compilation-mode without saving the buffer. Interactive
+evaluation, REPL, watching, and the complete M10 exit gate remain future work.
 
 The current M8 work provides:
 
@@ -206,6 +208,13 @@ Check a complete source graph without writing build outputs:
 ./bin/eliscript-check --json --root . examples/stdlib-cli/main.eli
 ```
 
+Build a configured project with current unsaved source on standard input:
+
+```sh
+printf '(print 42)\n' | ./bin/eliscript-build \
+  --config eliscript.json --stdin-file src/main.eli
+```
+
 Enable the maintained Emacs mode from this checkout:
 
 ```elisp
@@ -348,6 +357,7 @@ arbitrary Emacs packages in JavaScript.
 | --- | --- |
 | Compile one source file | `./bin/eliscript --output dist/program.mjs source.eli` |
 | Build a source graph | `./bin/eliscript-build --root . --out-dir dist source.eli` |
+| Build current stdin source | `./bin/eliscript-build --config eliscript.json --stdin-file source.eli` |
 | Format a source file | `./bin/eliscript-format --write source.eli` |
 | Check source formatting | `./bin/eliscript-format --check source.eli` |
 | Check a source graph | `./bin/eliscript-check --json --root . source.eli` |

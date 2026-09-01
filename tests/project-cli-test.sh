@@ -138,13 +138,52 @@ grep -q 'sourceRoot must be a contained relative path' "$TMP_DIR/config-stderr"
 mkdir -p "$TMP_DIR/config-project/src"
 printf '%s\n' '(print 42)' >"$TMP_DIR/config-project/src/main.eli"
 cat >"$TMP_DIR/config-project/eliscript.json" <<'EOF'
-{"schemaVersion":1,"sourceRoot":"src","entry":"main.eli","outDir":"build","portableEntries":[],"cache":false}
+{"schemaVersion":1,"sourceRoot":"src","entry":"main.eli","outDir":"build","portableEntries":[],"cache":true}
 EOF
 CONFIG_OUTPUT=$(
   "$PROJECT_DIR/bin/eliscript-build" \
     --config "$TMP_DIR/config-project/eliscript.json"
 )
 test "$CONFIG_OUTPUT" = "$TMP_DIR/config-project/build/main.mjs"
+test "$(bun run "$CONFIG_OUTPUT")" = '42'
+
+VIRTUAL_REPORT=$(printf '%s\n' '(print 84)' | \
+  "$PROJECT_DIR/bin/eliscript-build" \
+    --json \
+    --config "$TMP_DIR/config-project/eliscript.json" \
+    --stdin-file "$TMP_DIR/config-project/src/main.eli")
+printf '%s' "$VIRTUAL_REPORT" | bun --eval '
+  const report = JSON.parse(await Bun.stdin.text());
+  if (report.cache.enabled !== false || report.cache.status !== "disabled" ||
+      report.cache.reason !== "cache-disabled" || report.counts.compiled !== 1 ||
+      report.counts.reused !== 0) {
+    throw new Error("virtual source build did not disable cache reuse");
+  }
+'
+test "$(bun run "$CONFIG_OUTPUT")" = '84'
+test "$(cat "$TMP_DIR/config-project/src/main.eli")" = '(print 42)'
+SOURCE_MAP="$TMP_DIR/config-project/build/main.mjs.map" bun --eval '
+  const sourceMap = await Bun.file(process.env.SOURCE_MAP).json();
+  if (JSON.stringify(sourceMap.sourcesContent) !== JSON.stringify(["(print 84)\n"])) {
+    throw new Error("virtual source map does not contain stdin source");
+  }
+'
+
+set +e
+VIRTUAL_DIAGNOSTIC=$(printf '%s\n' '(print missing)' | \
+  "$PROJECT_DIR/bin/eliscript-build" \
+    --config "$TMP_DIR/config-project/eliscript.json" \
+    --stdin-file "$TMP_DIR/config-project/src/main.eli" 2>&1 >/dev/null)
+VIRTUAL_STATUS=$?
+set -e
+test "$VIRTUAL_STATUS" -ne 0
+printf '%s\n' "$VIRTUAL_DIAGNOSTIC" | grep -Fq \
+  "eliscript-build: $TMP_DIR/config-project/src/main.eli:1:8: unbound symbol: missing"
+
+CONFIG_OUTPUT=$(
+  "$PROJECT_DIR/bin/eliscript-build" \
+    --config "$TMP_DIR/config-project/eliscript.json"
+)
 test "$(bun run "$CONFIG_OUTPUT")" = '42'
 
 printf '%s\n' '(print 43)' >"$TMP_DIR/config-project/src/other.eli"

@@ -52,6 +52,11 @@ entry closure without writing the configured output directory, manifest, or
 cache. `--stdin-file FILE` checks standard input as the current contents of an
 existing project source for editor integrations.
 
+`./bin/eliscript-build --config eliscript.json --stdin-file FILE` performs a
+real build with standard input as the current contents of that existing source.
+Virtual builds disable cache reuse, preserve the canonical source identity in
+diagnostics and Source Maps, and never rewrite the source file.
+
 The schema is a compiler project contract. Application framework, bundler,
 publishing, hosting, and development-server options belong in replaceable
 adapters outside this file and outside core maturity evidence.

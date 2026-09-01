@@ -338,7 +338,7 @@ async function validateEmacs(root, emacs, cache, errors) {
       if (!match[1].includes("--")) actualFunctions.push(match[1]);
     }
     for (const match of source.matchAll(
-      /^\(define-derived-mode\s+(eliscript-[^\s()]+)/gmu,
+      /^\(define-(?:derived|compilation)-mode\s+(eliscript-[^\s()]+)/gmu,
     )) {
       if (!match[1].includes("--")) actualFunctions.push(match[1]);
     }

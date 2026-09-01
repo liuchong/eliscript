@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   diagnosticFromError,
   loadCompiler,
+  renderDiagnostic,
   requestedDiagnosticFormat,
 } from "./bun.mjs";
 import { executeBuild } from "./build.mjs";
@@ -18,6 +19,7 @@ Options:
   --config FILE     Read a versioned project request from FILE
   --root DIR        Contain local source imports below DIR
   --portable NAME   Emit NAME and its transitive portable closure
+  --stdin-file FILE Use standard input as the current contents of FILE
   --no-cache        Disable cache reads for this build
   --json            Print the versioned build decision report
   --diagnostic-format human|json
@@ -126,6 +128,7 @@ export function parseArguments(arguments_) {
   let outDir;
   let root;
   let configuration;
+  let stdinFile;
   let useCache = true;
   let jsonReport = false;
   let diagnosticFormat = "human";
@@ -148,6 +151,12 @@ export function parseArguments(arguments_) {
     } else if (argument === "--portable") {
       if (argumentsList.length === 0) throw new Error(`${argument} requires an entry name`);
       portableEntries.push(argumentsList.shift());
+    } else if (argument === "--stdin-file") {
+      if (argumentsList.length === 0) throw new Error(`${argument} requires a file`);
+      if (stdinFile !== undefined) {
+        throw new Error("multiple --stdin-file values are not supported");
+      }
+      stdinFile = argumentsList.shift();
     } else if (argument === "--no-cache") {
       useCache = false;
     } else if (argument === "--json") {
@@ -181,6 +190,7 @@ export function parseArguments(arguments_) {
     jsonReport,
     diagnosticFormat,
     configuration,
+    stdinFile,
   };
 }
 
@@ -240,9 +250,15 @@ export async function execute(arguments_, options = {}) {
       useCache: parsed.useCache,
     };
   }
+  let sourceOverrides;
+  if (parsed.stdinFile !== undefined) {
+    const sourceText = options.stdinSource ?? await readFile(0, "utf8");
+    sourceOverrides = { [resolve(parsed.stdinFile)]: sourceText };
+  }
   const result = await executeBuild({
     mode: "project",
     ...request,
+    sourceOverrides,
     moduleDirectory: options.moduleDirectory,
   });
   return { result, jsonReport: parsed.jsonReport };
@@ -268,7 +284,7 @@ if (isMain) {
     if (outputFormat === "json") {
       console.error(JSON.stringify(diagnostic));
     } else {
-      console.error(`eliscript-build: ${diagnostic.message}`);
+      console.error(`eliscript-build: ${renderDiagnostic(diagnostic)}`);
     }
     process.exitCode = 1;
   });

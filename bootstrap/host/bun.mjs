@@ -100,6 +100,17 @@ export function diagnosticFromError(error) {
   };
 }
 
+export function renderDiagnostic(diagnostic) {
+  const location = diagnostic?.location;
+  const start = location?.start;
+  if (typeof location?.file === "string" &&
+      Number.isSafeInteger(start?.line) &&
+      Number.isSafeInteger(start?.column)) {
+    return `${location.file}:${start.line}:${start.column}: ${diagnostic.message}`;
+  }
+  return diagnostic.message;
+}
+
 export async function loadCompiler(moduleDirectory) {
   const hostDirectory = dirname(fileURLToPath(import.meta.url));
   const directory = resolve(

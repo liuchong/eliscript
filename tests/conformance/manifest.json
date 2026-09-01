@@ -1597,6 +1597,42 @@
           "contains": "Check CLI test passed"
         }
       ]
+    },
+    {
+      "id": "editor.virtual-source-compilation",
+      "title": "Virtual-source builds and Emacs compilation commands",
+      "status": "accepted",
+      "spec": "0117",
+      "contracts": [
+        "Builds one in-memory source under its canonical project identity",
+        "Disables cache reuse and hashes the exact virtual source text",
+        "Preserves unsaved source in generated Source Maps without rewriting disk",
+        "Produces byte-identical Bun and Node modules for virtual source",
+        "Compiles buffer, file, and project scopes through the public build command",
+        "Navigates located human diagnostics without application dependencies"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-project.test.mjs",
+          "contains": "self-hosted project service matches seed output under Bun and Node"
+        },
+        {
+          "kind": "shell",
+          "file": "tests/project-cli-test.sh",
+          "contains": "VIRTUAL_REPORT="
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-builds-buffer-file-and-project-commands"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-compiles-unsaved-buffer-through-public-build"
+        }
+      ]
     }
   ]
 }

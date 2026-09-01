@@ -7,6 +7,7 @@
 
 ;;; Code:
 
+(require 'compile)
 (require 'imenu)
 (require 'json)
 (require 'flymake)
@@ -27,6 +28,18 @@
 (defcustom eliscript-mode-check-command '("eliscript-check")
   "Command and fixed arguments used to check the current project."
   :type '(repeat string)
+  :group 'eliscript)
+
+(defcustom eliscript-mode-build-command '("eliscript-build")
+  "Command and fixed arguments used to build Eliscript projects."
+  :type '(repeat string)
+  :group 'eliscript)
+
+(defcustom eliscript-mode-build-directory "dist"
+  "Output directory used for builds without `eliscript.json'.
+
+Relative paths are resolved from the discovered project root."
+  :type 'string
   :group 'eliscript)
 
 (define-error 'eliscript-mode-error "Eliscript editor integration error")
@@ -56,6 +69,14 @@
           eliscript-mode--variable-heads))
 
 (defconst eliscript-mode--name-regexp "\\([^][(){}\"; \t\r\n]+\\)")
+
+(defconst eliscript-mode--compilation-regexp
+  '(eliscript
+    "^eliscript-build: \\(.+\\):\\([0-9]+\\):\\([0-9]+\\): " 1 2 3)
+  "Compilation regexp for located Eliscript build diagnostics.")
+
+(add-to-list 'compilation-error-regexp-alist-alist
+             eliscript-mode--compilation-regexp)
 
 (defconst eliscript-mode--definition-regexp
   (concat "^[ \t]*(\\(?:"
@@ -143,10 +164,19 @@
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-f") #'eliscript-mode-format-buffer)
     (define-key map (kbd "C-c C-k") #'eliscript-mode-check-buffer)
+    (define-key map (kbd "C-c C-b") #'eliscript-mode-compile-buffer)
+    (define-key map (kbd "C-c C-c") #'eliscript-mode-compile-file)
+    (define-key map (kbd "C-c C-p") #'eliscript-mode-compile-project)
+    (define-key map (kbd "C-c C-n") #'eliscript-mode-next-error)
+    (define-key map (kbd "C-c C-r") #'eliscript-mode-previous-error)
     map)
   "Keymap used by `eliscript-mode'.")
 
 (defvar-local eliscript-mode--flymake-process nil)
+
+(define-compilation-mode eliscript-compilation-mode "Eliscript-Compilation"
+  "Compilation mode for Eliscript project builds."
+  (setq-local compilation-error-regexp-alist '(eliscript)))
 
 (defun eliscript-mode--line-indentation ()
   "Return canonical structural indentation for the current line."
@@ -287,6 +317,132 @@ Prefer the nearest `eliscript.json', then fall back to `project.el'."
         (signal 'eliscript-mode-error
                 (list (format "checker executable not found: %s"
                               configured))))))
+
+(defun eliscript-mode--build-program ()
+  "Resolve and validate `eliscript-mode-build-command'."
+  (unless (and (consp eliscript-mode-build-command)
+               (seq-every-p #'stringp eliscript-mode-build-command)
+               (not (string-empty-p (car eliscript-mode-build-command))))
+    (signal 'eliscript-mode-error
+            '("eliscript-mode-build-command must be non-empty strings")))
+  (let* ((configured (car eliscript-mode-build-command))
+         (program (if (file-name-absolute-p configured)
+                      (and (file-executable-p configured) configured)
+                    (executable-find configured))))
+    (or program
+        (signal 'eliscript-mode-error
+                (list (format "builder executable not found: %s"
+                              configured))))))
+
+(defun eliscript-mode--build-context ()
+  "Return the current file, project root, configuration, and output path."
+  (unless buffer-file-name
+    (signal 'eliscript-mode-error
+            '("project building requires a file-backed buffer")))
+  (unless (and (stringp eliscript-mode-build-directory)
+               (not (string-empty-p eliscript-mode-build-directory)))
+    (signal 'eliscript-mode-error
+            '("eliscript-mode-build-directory must be a non-empty path")))
+  (let* ((file (expand-file-name buffer-file-name))
+         (root (or (eliscript-mode-project-root)
+                   (file-name-directory file)))
+         (configuration (expand-file-name "eliscript.json" root))
+         (configured (file-regular-p configuration))
+         (output (if (file-name-absolute-p eliscript-mode-build-directory)
+                     eliscript-mode-build-directory
+                   (expand-file-name eliscript-mode-build-directory root))))
+    (list :file file
+          :root root
+          :configuration (and configured configuration)
+          :output output)))
+
+(defun eliscript-mode--build-arguments (scope)
+  "Return public build-command arguments for SCOPE."
+  (let* ((context (eliscript-mode--build-context))
+         (file (plist-get context :file))
+         (root (plist-get context :root))
+         (configuration (plist-get context :configuration))
+         (output (plist-get context :output))
+         (base
+          (pcase scope
+            ('project
+             (unless configuration
+               (signal 'eliscript-mode-error
+                       '("project compilation requires eliscript.json")))
+             (list "--config" configuration))
+            ('file
+             (if configuration
+                 (list "--config" configuration file)
+               (list "--root" root "--out-dir" output file)))
+            ('buffer
+             (append
+              (if configuration
+                  (list "--config" configuration)
+                (list "--root" root "--out-dir" output file))
+              (list "--stdin-file" file "--no-cache")))
+            (_
+             (signal 'eliscript-mode-error
+                     (list (format "unsupported build scope: %s" scope)))))))
+    (append (cdr eliscript-mode-build-command)
+            base
+            (list "--diagnostic-format" "human"))))
+
+(defun eliscript-mode--start-build (scope &optional send-buffer)
+  "Start an Eliscript build for SCOPE and optionally SEND-BUFFER on stdin."
+  (let* ((source-buffer (current-buffer))
+         (context (eliscript-mode--build-context))
+         (default-directory (plist-get context :root))
+         (program (eliscript-mode--build-program))
+         (arguments (eliscript-mode--build-arguments scope))
+         (command
+          (mapconcat #'shell-quote-argument
+                     (cons program arguments) " "))
+         (buffer-name (format "*Eliscript %s build*" scope))
+         (compilation-buffer
+          (compilation-start
+           command 'eliscript-compilation-mode
+           (lambda (_mode) buffer-name))))
+    (when send-buffer
+      (let ((process (get-buffer-process compilation-buffer)))
+        (unless (process-live-p process)
+          (signal 'eliscript-mode-error
+                  '("builder process did not start")))
+        (with-current-buffer source-buffer
+          (save-restriction
+            (widen)
+            (process-send-region process (point-min) (point-max))))
+        (process-send-eof process)))
+    compilation-buffer))
+
+(defun eliscript-mode-compile-buffer ()
+  "Build the project using the current unsaved buffer contents."
+  (interactive)
+  (eliscript-mode--start-build 'buffer t))
+
+(defun eliscript-mode-compile-file ()
+  "Build the visited Eliscript file from its saved contents."
+  (interactive)
+  (when (buffer-modified-p)
+    (signal 'eliscript-mode-error
+            '("buffer is modified; save it or use compile-buffer")))
+  (eliscript-mode--start-build 'file))
+
+(defun eliscript-mode-compile-project ()
+  "Build the configured Eliscript project."
+  (interactive)
+  (eliscript-mode--start-build 'project))
+
+(defun eliscript-mode-next-error (&optional count reset)
+  "Visit the next Eliscript build diagnostic.
+
+With COUNT, move that many diagnostics.  RESET starts from the beginning."
+  (interactive "p")
+  (next-error count reset))
+
+(defun eliscript-mode-previous-error (&optional count)
+  "Visit the previous Eliscript build diagnostic by COUNT entries."
+  (interactive "p")
+  (previous-error count))
 
 (defun eliscript-mode--check-arguments ()
   "Return project-aware checker arguments for the current buffer."

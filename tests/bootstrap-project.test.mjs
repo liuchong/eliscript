@@ -676,7 +676,93 @@ test("self-hosted project service matches seed output under Bun and Node", async
         [detachedSource]: "(print 2)\n",
       },
     })).rejects.toThrow(
-      "project check source override is outside the checked graph",
+      "project source override is outside the project graph",
+    );
+
+    const virtualSource =
+      '(import "./helper.eli" answer)\n(print (+ answer 1))\n';
+    const virtualBun = resolve(directory, "virtual-bun");
+    const virtualNode = resolve(directory, "virtual-node");
+    const virtualOptions = {
+      root: checkRoot,
+      entry: checkEntry,
+      moduleDirectory: compilerDirectory,
+      useCache: true,
+      sourceOverrides: { [checkEntry]: virtualSource },
+    };
+    const virtualBunResult = await buildProject({
+      ...virtualOptions,
+      outDir: virtualBun,
+    });
+    const virtualNodeResult = await nodeBuild({
+      ...virtualOptions,
+      outDir: virtualNode,
+    });
+    expect(virtualBunResult.report.cache).toEqual({
+      enabled: false,
+      status: "disabled",
+      reason: "cache-disabled",
+    });
+    expect(stableReportIdentity(virtualNodeResult.report))
+      .toEqual(stableReportIdentity(virtualBunResult.report));
+    await expectFilesEqual(virtualBun, virtualNode, [
+      "helper.mjs", "helper.mjs.map", "main.mjs", "main.mjs.map",
+    ]);
+    expect((await run([process.execPath, resolve(virtualBun, "main.mjs")])).trim())
+      .toBe("43");
+    expect(await readFile(checkEntry, "utf8")).toBe(
+      '(import "./helper.eli" answer)\n(print answer)\n',
+    );
+    const virtualMap = JSON.parse(await readFile(
+      resolve(virtualBun, "main.mjs.map"),
+      "utf8",
+    ));
+    expect(virtualMap.sourcesContent).toEqual([virtualSource]);
+    expect(virtualBunResult.modules.find((module) =>
+      module.source === canonicalCheckEntry)?.sourceDigest).toBe(
+      createHash("sha256").update(virtualSource).digest("hex"),
+    );
+    const diskRebuild = await buildProject({
+      root: checkRoot,
+      entry: checkEntry,
+      outDir: virtualBun,
+      moduleDirectory: compilerDirectory,
+      useCache: true,
+    });
+    expect(diskRebuild.report.cache.status).toBe("partial");
+    expect(diskRebuild.report.counts).toEqual({
+      modules: 2,
+      compiled: 1,
+      reused: 1,
+    });
+    expect((await run([process.execPath, resolve(virtualBun, "main.mjs")])).trim())
+      .toBe("42");
+
+    const virtualPortableSource = resolve(checkRoot, "portable.eli");
+    const virtualPortableOut = resolve(directory, "virtual-portable");
+    await writeFile(
+      virtualPortableSource,
+      "(defportable answer () 42)\n(export answer)\n",
+    );
+    const portableVirtualText =
+      "(defportable answer () 43)\n(export answer)\n";
+    const virtualPortableResult = await buildProject({
+      root: checkRoot,
+      entry: virtualPortableSource,
+      outDir: virtualPortableOut,
+      portableEntries: ["answer"],
+      sourceOverrides: { [virtualPortableSource]: portableVirtualText },
+      moduleDirectory: compilerDirectory,
+      useCache: true,
+    });
+    expect(virtualPortableResult.mode).toBe("portable");
+    expect(virtualPortableResult.report.cache.enabled).toBeFalse();
+    const virtualPortableModule = await import(
+      `${pathToFileURL(resolve(virtualPortableOut, "portable.mjs")).href}?virtual`
+    );
+    expect(virtualPortableModule.answer()).toBe(43);
+    expect(await readFile(virtualPortableSource, "utf8")).toBe(
+      "(defportable answer () 42)\n(export answer)\n",
     );
 
     const standardSeed = resolve(directory, "standard-seed");

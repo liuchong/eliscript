@@ -881,11 +881,18 @@ and the Emacs mode maps versioned compiler JSON to asynchronous Flymake
 diagnostics. Application integrations are excluded from implementation,
 dependencies, evidence, and maturity credit.
 
+Specification 0117 extends the public project build with one virtual source
+under its original canonical identity. Unsaved Emacs buffers now participate
+in real graph discovery, emission, source digests, and Source Maps without
+saving; virtual builds disable cache reuse and the next disk build invalidates
+the changed identity normally. The Emacs mode adds asynchronous buffer, file,
+and configured-project compilation plus next-error source navigation.
+
 **M10 status:** In progress. Formatter, single-file format-check, the
 foundational Emacs major mode, project-aware check, unsaved-buffer validation,
-and diagnostic navigation are implemented; compile commands, source-mapped
-evaluation, REPL, host-neutral watch events, onboarding, AC-12, and the complete
-exit gate remain open.
+diagnostic navigation, virtual-source builds, and buffer/file/project compile
+commands are implemented; source-mapped evaluation, REPL, host-neutral watch
+events, onboarding, AC-12, and the complete exit gate remain open.
 
 ### M11: Standard and Platform Libraries (8-12 weeks)
 

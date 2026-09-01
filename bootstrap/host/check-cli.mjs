@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   diagnosticFromError,
   loadCompiler,
+  renderDiagnostic,
   requestedDiagnosticFormat,
 } from "./bun.mjs";
 import { checkProject } from "./project.mjs";
@@ -155,7 +156,7 @@ if (isMain) {
     if (outputFormat === "json") {
       console.error(JSON.stringify(diagnostic));
     } else {
-      console.error(`eliscript-check: ${diagnostic.message}`);
+      console.error(`eliscript-check: ${renderDiagnostic(diagnostic)}`);
     }
     process.exitCode = 1;
   });

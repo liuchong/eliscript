@@ -15,6 +15,7 @@ export async function executeBuild(options) {
     root: request.root,
     portableEntries: request.portableEntries,
     useCache: request.useCache,
+    sourceOverrides: options.sourceOverrides,
     moduleDirectory: options.moduleDirectory,
   };
   if (options.compiler !== undefined) {
