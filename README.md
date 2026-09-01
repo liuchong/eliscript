@@ -273,6 +273,7 @@ The implemented language includes:
 - expression-valued control flow, exceptions, async functions, and `await`
 - stack-safe function and binding iteration through tail-position `recur`
 - explicit IR lowering, structured diagnostics, and Source Map v3 output
+- versioned canonical IR serialization with strict lossless validation
 - ESM modules, JavaScript interop, and application-level element syntax
 - statically checked portable functions and dependency-pruned builds
 - persistent collections, value semantics, and open collection protocols
@@ -386,6 +387,7 @@ Start with the document that matches the question:
 | Where is measured Emacs performance reinvestment specified? | [Emacs Analysis Performance Reinvestment](specs/0105-emacs-analysis-performance-reinvestment.md) |
 | How is a versioned project build configured? | [Versioned Project Request Configuration](specs/0106-versioned-project-request.md) |
 | How does the self-hosted compiler plan projects? | [Self-hosted Project Graph Planning](specs/0107-self-hosted-project-graph-planning.md) |
+| How is compiler IR serialized reproducibly? | [Versioned Canonical IR Serialization](specs/0108-versioned-canonical-ir.md) |
 | Which behavior is implemented or stable? | [Specification Catalog](specs/README.md#specification-catalog) |
 | How does the seed compiler work? | [Compiler Guide](compiler/README.md) |
 | How does self-hosting work? | [Bootstrap Compiler Guide](bootstrap/README.md) |

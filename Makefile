@@ -19,7 +19,8 @@ test: check-contracts
 		tests/transient-builder-benchmark.test.mjs \
 		tests/bootstrap-symbol.test.mjs tests/bootstrap-reader.test.mjs \
 		tests/bootstrap-expander.test.mjs tests/bootstrap-analyzer.test.mjs \
-		tests/bootstrap-ir.test.mjs tests/bootstrap-emitter.test.mjs \
+		tests/bootstrap-ir.test.mjs tests/bootstrap-ir-serialization.test.mjs \
+		tests/bootstrap-emitter.test.mjs \
 		tests/compiler-runtime-scan.test.mjs \
 		tests/compiler-ir-kind.test.mjs \
 		tests/compiler-indent.test.mjs \

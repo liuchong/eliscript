@@ -89,6 +89,12 @@ the 57 public IR node kinds, JSON-safe quoted data and literal tags,
 kind-specific properties, complete nested source spans, macro call origins,
 and all twelve bootstrap compiler modules.
 
+The canonical IR suite serializes that complete corpus through the generated
+compiler, validates lossless fixed-point round trips, and compares the same
+bytes under Bun and Node. Closed-schema negative cases cover duplicate keys,
+unknown versions and fields, malformed spans, unsupported JSON values, sparse
+arrays, accessors, and cycles.
+
 The emitter fixture sends the same portable IR through the generated backend
 and the Emacs seed backend. It compares complete ESM text and parsed Source Map
 documents, checks signed Base64 VLQ boundaries and Unicode columns, and runs a

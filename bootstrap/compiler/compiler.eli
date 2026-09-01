@@ -3,6 +3,11 @@
   (import "./expander.mjs" expand-module)
   (import "./analyzer.mjs" analyze-module select-portable-module)
   (import "./lower.mjs" lower-module)
+  (import "./ir.mjs"
+    ir-format
+    ir-version
+    serialize-program
+    deserialize-program)
   (import "./emitter.mjs" emit-module emit-module-with-source-map)
   (import "./project.mjs"
     project-plan-format
@@ -38,6 +43,12 @@
   (defun emit-ir-string (program)
     (emit-module program))
 
+  (defun serialize-ir-program (program)
+    (serialize-program program))
+
+  (defun deserialize-ir-program (source)
+    (deserialize-program source))
+
   (defun emit-ir-string-with-source-map
       (program source generated-name source-name)
     (emit-module-with-source-map
@@ -72,6 +83,10 @@
     compile-string-with-source-map
     emit-ir-string
     emit-ir-string-with-source-map
+    serialize-ir-program
+    deserialize-ir-program
+    ir-format
+    ir-version
     project-plan-format
     project-plan-version
     project-plan

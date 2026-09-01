@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 107 specifications.
+The registry currently contains 108 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 77 |
+| Accepted design | 78 |
 | Stable design | 29 |
 | Implementation in progress | 3 |
-| Implemented | 104 |
+| Implemented | 105 |
 
 Compatibility Baseline 1 separately classifies 29 specifications as stable,
-75 as provisional, and 3 as planning. That baseline is derived from registry
+76 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -90,11 +90,14 @@ equivalent candidates, two selected transducer-backed workflows at 9.648x and
 8.082x median warm end-to-end speedup, a source-bound 16,000-character
 crossover decision, and a 200-request stable/stale buffer soak. No application
 framework contributes to this result.
-M9 now has a closed, versioned single-entry project request plus a self-hosted,
-host-neutral graph planner. Ordinary closure, cycle handling, portable-name
-fixed points, and a standards-based Bun/Node project service match seed ESM,
-Source Maps, and public manifest identity. Existing project CLI/configuration
-routing, versioned IR, and incremental cache convergence remain incomplete.
+M9 now has a closed, versioned single-entry project request, a self-hosted
+host-neutral graph planner, and strict canonical `eliscript-ir` version 1
+serialization. Ordinary closure, cycle handling, portable-name fixed points,
+complete 57-node IR round trips, and standards-based Bun/Node execution match
+seed semantics and reproducible bytes. Existing project CLI/configuration
+routing, build-report migration, and incremental cache convergence remain
+incomplete. Application frameworks and publishing infrastructure remain
+replaceable validation outside these core deliverables.
 
 ## Reading Paths
 
@@ -173,6 +176,7 @@ number.
 45. [0105: Emacs Analysis Performance Reinvestment](0105-emacs-analysis-performance-reinvestment.md)
 46. [0106: Versioned Project Request Configuration](0106-versioned-project-request.md)
 47. [0107: Self-hosted Project Graph Planning](0107-self-hosted-project-graph-planning.md)
+48. [0108: Versioned Canonical IR Serialization](0108-versioned-canonical-ir.md)
 
 ### Application Validation (Non-core)
 
@@ -349,6 +353,7 @@ The schemas and change workflow are defined by specifications
 | 0105 | [Emacs Analysis Performance Reinvestment](0105-emacs-analysis-performance-reinvestment.md) | Accepted | Implemented |
 | 0106 | [Versioned Project Request Configuration](0106-versioned-project-request.md) | Accepted | Implemented |
 | 0107 | [Self-hosted Project Graph Planning](0107-self-hosted-project-graph-planning.md) | Accepted | Implemented |
+| 0108 | [Versioned Canonical IR Serialization](0108-versioned-canonical-ir.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

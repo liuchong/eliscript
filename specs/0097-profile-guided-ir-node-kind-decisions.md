@@ -34,14 +34,14 @@ maintained compiler corpus instead of constructing a synthetic IR tree.
 
 The reviewed macOS arm64 report covers:
 
-- 249,326 bytes across eleven maintained compiler modules
-- 23,216 real IR nodes and 17 explicit boundary values
-- exact optimized/reference agreement for all 23,233 decisions
+- 268,550 bytes across twelve maintained compiler modules
+- 24,578 real IR nodes and 17 explicit boundary values
+- exact optimized/reference agreement for all 24,595 decisions
 - 9 alternating timing samples after warmup
 - 100 complete corpus passes per sample
 
-The reviewed median is 39.595959 ms for native `Set` membership and
-426.366125 ms for the retained linear reference, a 10.767920x local speedup.
+The reviewed median is 41.686334 ms for native `Set` membership and
+448.045417 ms for the retained linear reference, a 10.748017x local speedup.
 The decision threshold was fixed at 1.5x before recording the report. This is
 host-specific implementation evidence, not a universal performance promise.
 

@@ -32,7 +32,8 @@ ECMAScript identifiers. `compiler/syntax.eli` defines serializable syntax nodes
 and source spans. `compiler/reader.eli` parses the portable source grammar into
 that representation. `compiler/expander.eli` evaluates the deterministic macro
 subset without host `eval`, then `compiler/analyzer.eli` validates lexical
-scope and special forms. `compiler/ir.eli` defines JSON-safe IR nodes, and
+scope and special forms. `compiler/ir.eli` defines JSON-safe IR nodes plus the
+closed `eliscript-ir` v1 canonical serialization boundary, and
 `compiler/lower.eli` lowers analyzed syntax across the complete language
 surface. `compiler/emitter.eli` formats portable IR through explicit text and
 mapping fragments, while `compiler/source-map.eli` encodes those marks as
@@ -65,7 +66,9 @@ artifacts. Shared fixtures cover symbol behavior, reader syntax, macro
 expansion, lexical analysis, all 57 IR node kinds, direct ESM emission, and
 Source Map v3. Oracles compare complete syntax and IR trees, spans, properties,
 acceptance, exact diagnostics, JavaScript bytes, and parsed source maps between
-the seed and generated implementations. Repeated builds must be byte-identical.
+the seed and generated implementations. Canonical IR round trips all 57 node
+kinds and produces identical bytes under Bun and Node. Repeated builds must be
+byte-identical.
 
 Generation 1 is self-hosting. The conformance suite builds it with the seed,
 uses it to build Generation 2, then uses Generation 2 to build Generation 3.

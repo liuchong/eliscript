@@ -68,6 +68,7 @@ Version 1 reserves these implemented category codes:
 | `ELI-P0001` | `portable-analysis` | portable closure validation |
 | `ELI-S0001` | `symbol` | identifier mapping |
 | `ELI-E0001` | `emission` | ECMAScript emission |
+| `ELI-I0001` | `ir-schema` | canonical IR serialization and validation |
 | `ELI-B0001` | `project-build` | project graph and build validation |
 | `ELI-C0001` | `cli` | option, host, and uncategorized CLI failures |
 

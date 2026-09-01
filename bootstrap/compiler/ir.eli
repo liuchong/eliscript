@@ -1,4 +1,8 @@
 (module bootstrap.compiler.ir
+  (defconst ir-format "eliscript-ir")
+  (defconst ir-version 1)
+  (defconst ir-max-depth 512)
+
   (defconst node-kinds
     (js-call globalThis.Object :freeze
       (js-array "module-declaration" "import-declaration" "import-default"
@@ -23,8 +27,188 @@
   (defconst fail
     (js* "(message) => { throw new Error(message); }"))
 
+  (defconst schema-fail
+    (js* "(message) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-I0001', severity: 'error', phase: 'ir-schema', message }; throw error; }"))
+
+  (defconst array-p (js* "Array.isArray"))
+  (defconst dense-json-array-p
+    (js* "(value) => { if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || Object.getOwnPropertySymbols(value).length !== 0) return false; const names = Object.getOwnPropertyNames(value); if (names.length !== value.length + 1 || names[names.length - 1] !== 'length') return false; for (let index = 0; index < value.length; index += 1) { const name = String(index); if (names[index] !== name) return false; const descriptor = Object.getOwnPropertyDescriptor(value, name); if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) return false; } return true; }"))
+  (defconst plain-record-keys
+    (js* "(value) => { if (value === null || typeof value !== 'object' || Array.isArray(value)) return null; const prototype = Object.getPrototypeOf(value); if (prototype !== Object.prototype && prototype !== null) return null; if (Object.getOwnPropertySymbols(value).length !== 0) return null; const names = Object.getOwnPropertyNames(value); for (const name of names) { const descriptor = Object.getOwnPropertyDescriptor(value, name); if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) return null; } return names.sort(); }"))
+  (defconst has-own (js* "Object.hasOwn"))
+  (defconst finite-number-p (js* "Number.isFinite"))
+  (defconst non-negative-integer-p
+    (js* "(value) => Number.isSafeInteger(value) && value >= 0"))
+  (defconst positive-integer-p
+    (js* "(value) => Number.isSafeInteger(value) && value >= 1"))
+  (defconst parse-json
+    (js* "(source, reject) => { try { return JSON.parse(source); } catch (error) { return reject(`invalid canonical IR JSON: ${error.message}`); } }"))
+
   (defconst node-kind-set
     (new globalThis.Set node-kinds))
+
+  (defun require-closed-record (value expected label)
+    (let ((keys (funcall plain-record-keys value)))
+      (when (nil? keys)
+        (schema-fail (str label " must be a plain data object")))
+      (unless (= (get keys :length) (get expected :length))
+        (schema-fail (str label " has unknown or missing fields")))
+      (js-call expected :forEach
+        (lambda (key)
+          (unless (js-call keys :includes key)
+            (schema-fail (str label " has unknown or missing fields")))))
+      keys))
+
+  (defun canonical-json-array (value path active depth)
+    (unless (funcall dense-json-array-p value)
+      (schema-fail (str path " must be a dense plain array")))
+    (when (js-call active :has value)
+      (schema-fail (str path " contains a cyclic JSON value")))
+    (js-call active :add value)
+    (let ((parts (js-array))
+          (index 0))
+      (while (< index (get value :length))
+        (js-call parts :push
+          (canonical-json-value
+            (js-nth index value)
+            (str path "[" index "]")
+            active
+            (1+ depth)))
+        (setq index (1+ index)))
+      (js-call active :delete value)
+      (str "[" (js-call parts :join ",") "]")))
+
+  (defun canonical-json-record (value path active depth)
+    (let ((keys (funcall plain-record-keys value)))
+      (when (nil? keys)
+        (schema-fail (str path " must be a plain data object")))
+      (when (js-call active :has value)
+        (schema-fail (str path " contains a cyclic JSON value")))
+      (js-call active :add value)
+      (let ((parts (js-array)))
+        (js-call keys :forEach
+          (lambda (key)
+            (js-call parts :push
+              (str
+                (JSON/stringify key)
+                ":"
+                (canonical-json-value
+                  (get value key)
+                  (str path "." key)
+                  active
+                  (1+ depth))))))
+        (js-call active :delete value)
+        (str "{" (js-call parts :join ",") "}"))))
+
+  (defun canonical-json-value (value path active depth)
+    (when (> depth ir-max-depth)
+      (schema-fail (str path " exceeds IR nesting depth " ir-max-depth)))
+    (let ((type (js* "typeof value")))
+      (cond
+       ((nil? value) "null")
+       ((= type "boolean") (if value "true" "false"))
+       ((= type "number")
+        (unless (funcall finite-number-p value)
+          (schema-fail (str path " must contain only finite numbers")))
+        (if (js* "Object.is(value, -0)") "-0" (JSON/stringify value)))
+       ((= type "string") (JSON/stringify value))
+       ((funcall array-p value)
+        (canonical-json-array value path active depth))
+       ((= type "object")
+        (canonical-json-record value path active depth))
+       (t
+        (schema-fail (str path " contains unsupported JSON type " type))))))
+
+  (defun canonical-json (value)
+    (canonical-json-value value "$" (new globalThis.Set) 0))
+
+  (defun validate-span (span)
+    (require-closed-record
+      span
+      (js-array "column" "end" "endColumn" "endLine" "filename" "line" "start")
+      "IR span")
+    (unless (= (js* "typeof span.filename") "string")
+      (schema-fail "IR span filename must be a string"))
+    (js-call (js-array "start" "end") :forEach
+      (lambda (key)
+        (unless (funcall non-negative-integer-p (get span key))
+          (schema-fail (str "IR span " key " must be a non-negative integer")))))
+    (js-call (js-array "line" "column" "endLine" "endColumn") :forEach
+      (lambda (key)
+        (unless (funcall positive-integer-p (get span key))
+          (schema-fail (str "IR span " key " must be a positive integer")))))
+    (when (> (get span :start) (get span :end))
+      (schema-fail "IR span start must not exceed end"))
+    span)
+
+  (defun validate-node (node active depth)
+    (when (> depth ir-max-depth)
+      (schema-fail (str "IR node exceeds nesting depth " ir-max-depth)))
+    (when (js-call active :has node)
+      (schema-fail "IR node children must not contain a cycle"))
+    (let ((keys (funcall plain-record-keys node)))
+      (when (nil? keys)
+        (schema-fail "IR node must be a plain data object"))
+      (let ((expected
+             (if (js-call keys :includes "properties")
+                 (js-array "children" "kind" "properties" "span" "value")
+               (js-array "children" "kind" "span" "value"))))
+        (require-closed-record node expected "IR node")))
+    (unless (and (= (js* "typeof node.kind") "string")
+                 (node-kind-p (get node :kind)))
+      (schema-fail (str "unknown Eliscript IR node kind: " (get node :kind))))
+    (validate-span (get node :span))
+    (unless (funcall dense-json-array-p (get node :children))
+      (schema-fail "IR node children must be a dense plain array"))
+    (when (funcall has-own node "properties")
+      (when (nil? (funcall plain-record-keys (get node :properties)))
+        (schema-fail "IR node properties must be a plain data object")))
+    (js-call active :add node)
+    (js-call (get node :children) :forEach
+      (lambda (child) (validate-node child active (1+ depth))))
+    (js-call active :delete node)
+    node)
+
+  (defun validate-program (program)
+    (require-closed-record
+      program (js-array "body" "filename") "IR program")
+    (unless (= (js* "typeof program.filename") "string")
+      (schema-fail "IR program filename must be a string"))
+    (unless (funcall dense-json-array-p (get program :body))
+      (schema-fail "IR program body must be a dense plain array"))
+    (let ((active (new globalThis.Set)))
+      (js-call (get program :body) :forEach
+        (lambda (node) (validate-node node active 0))))
+    program)
+
+  (defun validate-document (document)
+    (require-closed-record
+      document (js-array "format" "program" "version") "IR document")
+    (unless (= (get document :format) ir-format)
+      (schema-fail (str "unsupported IR format: " (get document :format))))
+    (unless (= (get document :version) ir-version)
+      (schema-fail (str "unsupported IR version: " (get document :version))))
+    (validate-program (get document :program))
+    document)
+
+  (defun serialize-program (program)
+    (let ((document
+           (js-object
+             :format ir-format
+             :version ir-version
+             :program program)))
+      (validate-document document)
+      (canonical-json document)))
+
+  (defun deserialize-program (source)
+    (unless (= (js* "typeof source") "string")
+      (schema-fail "canonical IR source must be a string"))
+    (let* ((document (funcall parse-json source schema-fail))
+           (_validated (validate-document document))
+           (canonical (canonical-json document)))
+      (unless (= source canonical)
+        (schema-fail "IR source is valid JSON but not canonical IR JSON"))
+      (get document :program)))
 
   (defun node-kind-p (kind)
     (js-call node-kind-set :has kind))
@@ -92,6 +276,8 @@
       (and properties (get properties name))))
 
   (export
+    ir-format
+    ir-version
     node-kinds
     node-kind-p
     reference-node-kind-p
@@ -106,4 +292,6 @@
     ir-value
     ir-children
     ir-properties
-    ir-property))
+    ir-property
+    serialize-program
+    deserialize-program))

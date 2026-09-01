@@ -98,6 +98,10 @@ implemented language surface.
 - The portable `ir.eli` and `lower.eli` implementations serialize this model
   as ordinary JavaScript objects and arrays. A shared oracle compares complete
   seed and portable trees for all 57 node kinds and all bootstrap sources.
+- The portable compiler's persisted and cross-process representation is the
+  closed, versioned canonical schema defined by
+  [0108](0108-versioned-canonical-ir.md); ordinary object shape alone is not a
+  stable byte contract.
 
 ## Deferred Work
 

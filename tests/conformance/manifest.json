@@ -1283,6 +1283,31 @@
           "contains": "portable compiler driver reaches a reproducible fixed point"
         }
       ]
+    },
+    {
+      "id": "bootstrap.canonical-ir-serialization",
+      "title": "Versioned canonical IR serialization",
+      "status": "accepted",
+      "spec": "0108",
+      "contracts": [
+        "Exports the closed eliscript-ir version 1 schema from the self-hosted compiler",
+        "Round trips complete source-located IR without structural loss",
+        "Produces byte-identical canonical JSON under Bun and Node",
+        "Rejects unknown schema data, unsupported JSON values, cycles, and non-canonical input with ELI-I0001",
+        "Keeps application frameworks, bundlers, blog and site generators, publishing, hosting, and development servers outside core implementation and evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-ir-serialization.test.mjs",
+          "contains": "canonical IR v1 is lossless, strict, and host reproducible"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }

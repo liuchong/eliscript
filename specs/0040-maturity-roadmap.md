@@ -682,21 +682,21 @@ The first profile-guided P4 compiler slice now lands in
 the self-hosted emitter collects five conditional runtime requirements in one
 IR traversal, the previous five recursive scans remain an executable semantic
 reference, and a source-bound benchmark records exact agreement plus a reviewed
-1.708280x local median speedup. Application frameworks and bundlers do not
+1.692794x local median speedup. Application frameworks and bundlers do not
 participate in this core evidence.
 Specification
 [0097-profile-guided-ir-node-kind-decisions.md](0097-profile-guided-ir-node-kind-decisions.md)
 then replaces the common linear IR node-kind scan with a module-private native
 index, freezes the registry, retains the array scan as an executable reference,
-and records exact agreement plus a reviewed 10.767920x local median speedup over
-23,216 real compiler IR nodes. Application frameworks, Vite adapters, site
+and records exact agreement plus a reviewed 10.748017x local median speedup over
+24,578 real compiler IR nodes. Application frameworks, Vite adapters, site
 generators, and publishing tools remain outside this language-core slice and
 its acceptance evidence.
 Specification
 [0098-profile-guided-emitter-indentation.md](0098-profile-guided-emitter-indentation.md)
 then replaces character-by-character indentation with source-map-aware line
 segments and one final join, retains the previous loop as an executable
-reference, and records exact text/mark agreement plus a reviewed 13.948266x
+reference, and records exact text/mark agreement plus a reviewed 14.093078x
 local median speedup. The same whole-compiler profile moves indentation out of
 the dominant paths. Application frameworks and publishing adapters remain
 outside this compiler evidence.
@@ -706,7 +706,7 @@ then uses the emitter's ordered-mark invariant for constant-time start checks
 and one-step immutable prepend. A compiler-private host specialization is
 called directly at normal emission sites while the previous complete scan and
 iterative copy remain an executable Eliscript reference. The reviewed real
-artifact corpus records exact agreement plus a current 2.376061x local median
+artifact corpus records exact agreement plus a current 2.324131x local median
 speedup after the general comparison-emission optimization;
 follow-up whole-compiler sampling removes location from the dominant entries.
 Application frameworks and site tooling receive no core roadmap credit.
@@ -715,8 +715,8 @@ Specification
 then specializes exactly binary numeric comparisons as direct ECMAScript
 infix expressions while preserving eager argument capture for n-ary forms.
 An exact historical-baseline replay over all twelve compiler modules records a
-1.646111x complete-compiler median speedup and reduces generated JavaScript
-from 409,281 to 309,249 bytes. A broader constant-dispatch experiment was
+1.575784x complete-compiler median speedup and reduces generated JavaScript
+from 434,010 to 331,247 bytes. A broader constant-dispatch experiment was
 rejected because its complete-compiler result regressed. Application
 frameworks, Vite, bundlers, publishing, and site tooling remain application
 validation only and receive no language-core evidence or maturity credit.
@@ -724,17 +724,17 @@ Specification
 [0101-profile-guided-reader-character-classification.md](0101-profile-guided-reader-character-classification.md)
 then replaces generated whitespace and delimiter `or` closure chains with two
 bounded compiler-private predicates while retaining the Eliscript algorithms
-as executable references. The reviewed real-source trace records a 5.298507x
+as executable references. The reviewed real-source trace records a 5.011063x
 predicate median speedup, and the exact historical-baseline replay records a
-1.236266x complete-compiler median speedup with byte-identical ESM and Source
+1.238266x complete-compiler median speedup with byte-identical ESM and Source
 Maps. Application frameworks and build tools remain absent from the core
 implementation, corpus, decision, and roadmap credit.
 Specification
 [0102-profile-guided-source-map-cursors.md](0102-profile-guided-source-map-cursors.md)
 then replaces complete generated/source position scans with ordered private
 cursors while retaining both Eliscript scans as executable references. The
-reviewed 20,658-mark compiler corpus records a 4.479467x combined cursor median
-speedup and a 1.153237x complete-compiler median speedup against the exact
+reviewed 21,896-mark compiler corpus records a 4.589534x combined cursor median
+speedup and a 1.151910x complete-compiler median speedup against the exact
 pre-specialization revision. ESM and Source Maps remain byte-identical, and no
 application framework or build tool participates in the evidence.
 Specification
@@ -799,9 +799,14 @@ Specification 0106 delivers the first versioned single-entry project request,
 closed-key configuration validation, command-line precedence, and shared seed
 project operation. Specification 0107 adds host-neutral graph and portable
 closure planning in `.eli`, plus byte-identical ordinary and portable project
-execution under Bun and Node. Existing CLI/configuration routing, multi-entry
-identity, versioned IR, and incremental cache convergence remain M9 work; this
-partial delivery does not satisfy the exit gate.
+execution under Bun and Node. Specification 0108 then adds closed, versioned,
+canonical IR serialization with complete 57-node round trips, strict
+diagnostics, and byte identity under Bun and Node. Existing CLI/configuration
+routing, multi-entry identity, versioned build-report migration, and
+incremental cache convergence remain M9 work; these partial deliveries do not
+satisfy the exit gate. Application frameworks, bundlers, blog and site
+generators, publishing, hosting, and development servers remain replaceable
+application validation and cannot satisfy any remaining M9 core deliverable.
 
 **Exit gate:** All normal user builds can use the self-hosted compiler; the
 seed is no longer the only implementation of a user-facing build capability.
