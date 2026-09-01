@@ -75,6 +75,9 @@ The current M8 work provides:
   ordered Source Map cursors, and complete-compiler benchmarks
 - a completed P4 transient/hot-path phase with retained semantic references,
   rejected low-impact candidates, and no application-tool maturity credit
+- a completed P6 Emacs operation service with per-operation reference paths,
+  workload thresholds, accelerated-result verification, cancellation, worker
+  lifecycle ownership, stale-buffer guards, and transactional application
 
 First-class immutable Keyword and Symbol values now have optimized and
 portable representations that share equality, hashing, Map keys, and Set
@@ -116,7 +119,12 @@ codec traversal. A source-bound 256 MiB real-process round trip now verifies
 1,058 chunks in each direction within explicit Emacs, Bun, and combined RSS
 budgets, completing the P5 value-bridge gate. Protocol-definition transport
 now uses a strict versioned data descriptor with fresh local identities,
-completing P2. The persistent Vector/Map/Set literal family is now complete;
+completing P2. A high-level operation service now makes reference and
+accelerated paths explicit, verifies results before editor mutation, and owns
+buffer versions, transactional application, cancellation, timeout, and worker
+restart. The maintained Emacs index workflow uses this boundary, completing P6
+and PD-09 without adding an application-framework dependency. The persistent
+Vector/Map/Set literal family is now complete;
 static transient ownership analysis is enforced, and the P3 compatibility
 freeze now removes the provisional `array`/`object` aliases in favor of the
 stable explicit `js-array`/`js-object` boundary.

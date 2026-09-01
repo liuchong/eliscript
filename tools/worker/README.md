@@ -1,11 +1,48 @@
 # Emacs Worker Adapter
 
 [Project README](../../README.md) | [Tools](../README.md) |
-[Specification 0022](../../specs/0022-emacs-worker-integration.md)
+[Specification 0022](../../specs/0022-emacs-worker-integration.md) |
+[Operation service 0104](../../specs/0104-accelerated-emacs-operation-service.md)
+
+`eliscript-service.el` is the package-facing API. It declares generated
+modules and dual-path operations, selects reference or accelerated execution
+by workload threshold, optionally verifies worker results, and owns buffer
+version checks, atomic application, cancellation, timeout, and worker restart:
+
+```elisp
+(require 'eliscript-service)
+
+(let* ((operation
+        (eliscript-service-operation
+         'score-values #'my-emacs-score
+         :portable-name "score-values"
+         :workload-size (lambda (arguments) (length (car arguments)))
+         :threshold 128))
+       (service
+        (eliscript-service-start
+         (eliscript-service-module-declare
+          "/absolute/path/to/generated.mjs"
+          :project-manifest "/absolute/path/to/project.json")
+         (list operation)
+         :verify 'always)))
+  (unwind-protect
+      (eliscript-service-call-sync
+       service 'score-values (list [1 2 3]) :timeout-ms 5000)
+    (eliscript-service-stop service)))
+```
+
+Callers can pass `:path 'reference` or `:path 'accelerated` to force an
+implementation. Async calls return a cancellable service request and accept
+progress and timing callbacks. A target `:buffer` plus `:apply` callback makes
+application conditional on an unchanged buffer and wraps edits in an atomic
+change group.
+
+## Worker Transport
 
 `eliscript-worker.el` keeps one Bun process alive and exchanges protocol v1
 NDJSON messages with `runtime/worker.mjs`. Load it from Emacs with the compiler
-and worker directories on `load-path`:
+and worker directories on `load-path`. This lower-level API remains available
+for transport implementations and diagnostics:
 
 ```elisp
 (require 'eliscript-worker)
@@ -62,8 +99,9 @@ counts, SHA-256 correctness, timing, memory peaks, host versions, and measured
 source digests.
 
 `eliscript-index.el` is the representative high-level integration. It compiles
-the portable kernel in `examples/emacs-index/`, owns its temporary module and
-worker, and scores tokenized documents concurrently:
+the portable kernel in `examples/emacs-index/`, declares the generated module
+and scoring operation, and lets the service own its worker while tokenized
+documents are scored concurrently:
 
 ```elisp
 (require 'eliscript-index)

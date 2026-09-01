@@ -745,6 +745,16 @@ speedups, identical values and hashes, one completion each, and persistent-node
 allocation ratios below one third. A fresh compiler profile also rejects a
 1.042127x complete-compiler Source Map encoding candidate rather than adding
 low-impact native complexity. This closes P4 without application evidence.
+Specification
+[0104-accelerated-emacs-operation-service.md](0104-accelerated-emacs-operation-service.md)
+then completes the P6 operation boundary over the existing worker and value
+bridge. Named dual-path operations retain executable Emacs Lisp references,
+route by declared workload thresholds, optionally verify every accelerated
+result, and guard transactional buffer application across cancellation,
+timeout, stale versions, and worker restart. The maintained index workflow now
+uses this service rather than protocol calls. This completes PD-09 and P6;
+application frameworks, Vite, bundlers, publishing, and site tooling remain
+outside the implementation and evidence.
 
 ### M9: Compiler and Build Convergence (8-12 weeks)
 

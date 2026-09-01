@@ -28,18 +28,18 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 103 specifications.
+The registry currently contains 104 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 73 |
+| Accepted design | 74 |
 | Stable design | 29 |
 | Implementation in progress | 3 |
-| Implemented | 100 |
+| Implemented | 101 |
 
 Compatibility Baseline 1 separately classifies 29 specifications as stable,
-71 as provisional, and 3 as planning. That baseline is derived from registry
+72 as provisional, and 3 as planning. That baseline is derived from registry
 and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -81,6 +81,10 @@ generated hot paths while preserving independent semantic and historical
 baselines. P4 now closes with source-bound transient bulk-builder evidence:
 Vector, Map, and Set are value-equivalent to repeated persistent construction
 while recording 12.329933x, 17.486689x, and 17.937565x median speedups.
+The P6 accelerated-operation service now owns reference/worker routing,
+continuous result verification, module generations, cancellation, stale-buffer
+rejection, and transactional application. Its maintained index integration
+and real-worker tests complete PD-09 without application-framework evidence.
 
 ## Reading Paths
 
@@ -155,6 +159,7 @@ number.
 41. [0101: Profile-guided Reader Character Classification](0101-profile-guided-reader-character-classification.md)
 42. [0102: Profile-guided Ordered Source Map Cursors](0102-profile-guided-source-map-cursors.md)
 43. [0103: Transient Bulk Builder Performance](0103-transient-bulk-builder-performance.md)
+44. [0104: Accelerated Emacs Operation Service](0104-accelerated-emacs-operation-service.md)
 
 ### Application Validation (Non-core)
 
@@ -327,6 +332,7 @@ The schemas and change workflow are defined by specifications
 | 0101 | [Profile-guided Reader Character Classification](0101-profile-guided-reader-character-classification.md) | Accepted | Implemented |
 | 0102 | [Profile-guided Ordered Source Map Cursors](0102-profile-guided-source-map-cursors.md) | Accepted | Implemented |
 | 0103 | [Transient Bulk Builder Performance](0103-transient-bulk-builder-performance.md) | Accepted | Implemented |
+| 0104 | [Accelerated Emacs Operation Service](0104-accelerated-emacs-operation-service.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

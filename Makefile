@@ -8,6 +8,7 @@ test: check-contracts
 		-l tests/eliscript-project-tests.el \
 		-l tests/eliscript-org-tests.el \
 		-l tests/eliscript-worker-tests.el \
+		-l tests/eliscript-service-tests.el \
 		-l tests/bootstrap-tests.el \
 		-f ert-run-tests-batch-and-exit
 	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \

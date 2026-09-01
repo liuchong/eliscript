@@ -1213,6 +1213,19 @@
         { "kind": "bun-test", "file": "tests/transient-builder-benchmark.test.mjs", "contains": "committed transient builder report matches core runtime sources" },
         { "kind": "bun-test", "file": "tests/transient-builder-benchmark.test.mjs", "contains": "transient builder report validator rejects incomplete evidence" }
       ]
+    },
+    {
+      "id": "worker.accelerated-operation-service-v1",
+      "title": "Accelerated Emacs operation service",
+      "status": "accepted",
+      "spec": "0104",
+      "contracts": ["Declares generated modules and dual-path named operations above the worker protocol", "Routes by workload threshold while preserving forceable reference and accelerated paths", "Verifies accelerated results against executable Emacs Lisp references before application", "Rejects cancelled, stale, timed-out, and obsolete-generation results without editor mutation", "Applies successful buffer results transactionally and rolls back application failure", "Keeps application frameworks, Vite, bundlers, publishing, sites, hosting, and development servers outside core goals, dependencies, evidence, and maturity credit"],
+      "evidence": [
+        { "kind": "ert", "file": "tests/eliscript-service-tests.el", "contains": "eliscript-service-routes-verifies-and-owns-worker-lifecycle" },
+        { "kind": "ert", "file": "tests/eliscript-service-tests.el", "contains": "eliscript-service-guards-and-transactionally-applies-buffer-results" },
+        { "kind": "ert", "file": "tests/eliscript-service-tests.el", "contains": "eliscript-service-rejects-invalid-operation-declarations" },
+        { "kind": "ert", "file": "tests/eliscript-worker-tests.el", "contains": "eliscript-index-scores-texts-asynchronously" }
+      ]
     }
   ]
 }

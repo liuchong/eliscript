@@ -1069,6 +1069,16 @@ direction, 1,215.078125 MiB Emacs peak RSS, 680.046875 MiB Bun peak RSS, and
 **Exit:** Emacs packages invoke accelerated functions without protocol-level
 code and can always exercise the reference path for correctness.
 
+**Status:** Complete on 2026-09-01 through specification
+[0104-accelerated-emacs-operation-service.md](0104-accelerated-emacs-operation-service.md).
+The module, operation, service, and request layers now own dual-path threshold
+routing, forced reference execution, continuous verification, project module
+metadata, value transport, progress, timing, timeout, cancellation, worker
+restart, stale-buffer rejection, and atomic application. The maintained index
+workflow uses this API without direct protocol calls. Application frameworks,
+bundlers, publishing, and site tooling remain consumers and receive no P6
+credit.
+
 ### P7: Performance Reinvestment Proof
 
 1. Maintain equivalent Emacs Lisp and Eliscript implementations for at least
@@ -1152,6 +1162,12 @@ all three budgets.
 For every maintained accelerated operation, reference Emacs Lisp and Eliscript
 results agree over the fixed corpus and generated cases. Cancellation, stale
 buffer versions, and worker replacement apply no result.
+
+**Status:** Complete on 2026-09-01 through specification 0104. The maintained
+index scorer agrees across its integration fixture and twenty deterministic
+generated workloads. Deliberate mismatch, cancellation, stale-buffer, timeout,
+and worker-restart cases fail without applying a result, while application
+failure rolls buffer edits back atomically.
 
 ### PD-10: Emacs Performance Reinvestment
 

@@ -10,7 +10,7 @@ directory is required by the compiler core.
 | --- | --- |
 | [`vite/`](vite/README.md) | `.eli` transforms, source-map handoff, and React Fast Refresh |
 | [`org/`](org/README.md) | Pure Emacs Org-to-ESM export and Vite virtual modules |
-| [`worker/`](worker/README.md) | Emacs client, worker lifecycle, indexing adapter, and measurement probe |
+| [`worker/`](worker/README.md) | Emacs operation service, worker lifecycle, indexing adapter, and measurement probe |
 | [`collections/`](collections/) | Bun, Node, and browser HAMT layout measurements |
 | [`conformance/`](conformance/) | Specification registry and evidence validation |
 | [`surface/`](surface/) | Public-surface and compatibility-baseline validation |

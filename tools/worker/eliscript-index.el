@@ -11,7 +11,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'eliscript-project)
-(require 'eliscript-worker)
+(require 'eliscript-service)
 
 (defconst eliscript-index--source-file
   (expand-file-name
@@ -22,9 +22,32 @@
 (cl-defstruct (eliscript-index-session
                (:constructor eliscript-index-session--create))
   worker
+  service
   build
   module
   directory)
+
+(defun eliscript-index--score-document-reference (id terms query-terms)
+  "Return the reference score for ID, TERMS, and QUERY-TERMS."
+  (let ((frequencies (make-hash-table :test #'equal))
+        (matches 0))
+    (dotimes (index (length terms))
+      (let ((term (elt terms index)))
+        (puthash term (1+ (gethash term frequencies 0)) frequencies)))
+    (dotimes (index (length query-terms))
+      (setq matches
+            (+ matches (gethash (elt query-terms index) frequencies 0))))
+    `((id . ,id) (matches . ,matches) (terms . ,(length terms)))))
+
+(defconst eliscript-index--score-operation
+  (eliscript-service-operation
+   'score-document #'eliscript-index--score-document-reference
+   :portable-name "score-document"
+   :workload-size
+   (lambda (arguments)
+     (* (length (nth 1 arguments)) (length (nth 2 arguments))))
+   :threshold 0)
+  "Dual-path declaration for document scoring.")
 
 (defun eliscript-index-tokenize (text)
   "Return normalized word tokens from TEXT as a vector."
@@ -48,7 +71,7 @@ COMMAND has the same meaning as in `eliscript-worker-start'."
          (project-root eliscript-worker--project-directory)
          build
          module
-         worker)
+         service)
     (condition-case error-data
         (progn
           (setq build
@@ -58,18 +81,32 @@ COMMAND has the same meaning as in `eliscript-worker-start'."
                  directory
                  project-root)
                 module (eliscript-project-build-result-entry-output build))
-          (setq worker (eliscript-worker-start command))
+          (setq service
+                (eliscript-service-start
+                 (eliscript-service-module-declare
+                  module
+                  :project-manifest
+                  (eliscript-project-build-result-manifest build))
+                 (list eliscript-index--score-operation)
+                 :command command
+                 :verify 'always
+                 :value-codec nil
+                 :value-chunks nil))
           (eliscript-index-session--create
-           :worker worker :build build :module module :directory directory))
+           :worker (eliscript-service-worker service)
+           :service service
+           :build build
+           :module module
+           :directory directory))
       (error
-       (when worker (eliscript-worker-stop worker t))
+       (when service (eliscript-service-stop service t))
        (delete-directory directory t)
        (signal (car error-data) (cdr error-data))))))
 
 (defun eliscript-index-stop (session)
   "Stop SESSION and remove its generated module tree and source maps."
   (when (eliscript-index-session-p session)
-    (eliscript-worker-stop (eliscript-index-session-worker session))
+    (eliscript-service-stop (eliscript-index-session-service session))
     (let ((directory (eliscript-index-session-directory session)))
       (when (file-directory-p directory)
         (delete-directory directory t)))))
@@ -88,12 +125,8 @@ COMMAND has the same meaning as in `eliscript-worker-start'."
 Each document is an alist with `id' and `terms' fields. CALLBACK receives
 (RESULT ERROR), where RESULT is a vector preserving document order. METRICS,
 when non-nil, receives the vector of worker timing objects after success.
-Return the worker request ids."
-  (let* ((worker (eliscript-index-session-worker session))
-         (build (eliscript-index-session-build session))
-         (module (eliscript-index-session-module session))
-         (project-manifest
-          (eliscript-project-build-result-manifest build))
+Return cancellable service request handles."
+  (let* ((service (eliscript-index-session-service session))
          (items (vconcat documents))
          (count (length items))
          (payloads
@@ -109,11 +142,11 @@ Return the worker request ids."
          (timings (make-vector count nil))
          (remaining count)
          (finished nil)
-         request-ids)
+         requests)
     (cl-labels
-        ((cancel-pending ()
-           (dolist (id request-ids)
-             (eliscript-worker-cancel worker id)))
+         ((cancel-pending ()
+           (dolist (request requests)
+             (eliscript-service-cancel request)))
          (complete (index value error-object)
            (unless finished
              (if error-object
@@ -134,15 +167,14 @@ Return the worker request ids."
         (dotimes (index count)
           (let ((result-index index))
             (push
-             (eliscript-worker-call-portable
-              worker module "score-document" (aref payloads result-index)
+             (eliscript-service-call
+              service 'score-document (aref payloads result-index)
               (lambda (value error-object)
                 (complete result-index value error-object))
-              :project-manifest project-manifest
               :metrics (lambda (value) (aset timings result-index value))
               :timeout-ms timeout-ms)
-             request-ids))))
-      (nreverse request-ids))))
+             requests))))
+      (nreverse requests))))
 
 (cl-defun eliscript-index-score-documents-sync
     (session documents query-terms &key metrics timeout-ms)
