@@ -115,7 +115,7 @@ wire representation explicitly.
 
 This M8 surface is provisional. It adds explicit values and extends
 `value-type`, equality, hashing, and collection-key behavior without changing
-reader syntax, keyword property keys, JSX tag handling, quoted forms, or
+reader syntax, keyword property keys, host-library calling conventions, quoted forms, or
 compiler binding Symbols.
 
 Immutable Symbol metadata is now specified by 0068; Keywords remain

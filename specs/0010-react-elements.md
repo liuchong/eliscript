@@ -1,8 +1,12 @@
 # 0010: React Element Compilation
 
-- Status: Stable
-- Implementation: Implemented
+- Status: Superseded
+- Implementation: Superseded
 - Date: 2026-08-28
+
+> Superseded by [0118: Framework-neutral Library Interoperation](0118-framework-neutral-library-interop.md).
+> This document is retained as the historical contract for compatibility
+> baseline 1 and is not part of the current language surface.
 
 ## Summary
 

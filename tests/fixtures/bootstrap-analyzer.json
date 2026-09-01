@@ -13,7 +13,7 @@
     {
       "name": "imports-and-special-forms",
       "filename": "forms.eli",
-      "source": "(import \"react\" :default React useState)\n(defun view (ready items)\n  (cond\n    (ready (jsx :main (js-object :className \"ready\") items))\n    (t (fragment \"waiting\" (get React :version)))))\n(export React useState view)"
+      "source": "(import \"view-runtime\" :default View create-view)\n(defun render (ready items)\n  (cond\n    (ready (create-view \"main\" (js-object :className \"ready\") items))\n    (t (create-view View (js-object :state \"waiting\" :items items)))))\n(export View create-view render)"
     },
     {
       "name": "expression-surface",
@@ -34,6 +34,11 @@
       "name": "retired-alias-names-remain-bindable",
       "filename": "alias-bindings.eli",
       "source": "(defun array (value) value)\n(defun object (value) value)\n(defun exercise () (js-array (array 1) (object 2)))\n(export array object exercise)"
+    },
+    {
+      "name": "framework-names-remain-bindable",
+      "filename": "framework-bindings.eli",
+      "source": "(defun jsx (value) (+ value 1))\n(defun fragment (value) (+ value 2))\n(defun defcomponent (value) (+ value 3))\n(defun exercise () [(jsx 1) (fragment 1) (defcomponent 1)])\n(export jsx fragment defcomponent exercise)"
     },
     {
       "name": "optional-and-rest-parameters",
@@ -467,10 +472,10 @@
       "error": "object-alias.eli:1:2: unbound symbol: object"
     },
     {
-      "name": "invalid-jsx-arity",
-      "filename": "jsx.eli",
+      "name": "framework-names-are-ordinary",
+      "filename": "ordinary.eli",
       "source": "(jsx :main)",
-      "error": "jsx.eli:1:1: jsx expects a type, props, and optional children"
+      "error": "ordinary.eli:1:2: unbound symbol: jsx"
     },
     {
       "name": "invalid-module-name",

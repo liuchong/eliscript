@@ -98,10 +98,6 @@ test("optimized compiler runtime scan matches its readable reference", async () 
     const allRequirements = {
       filename: "all-runtime-requirements.eli",
       body: [
-        expression(irNode("react-element", null, [
-          literal("section"),
-          literal(null),
-        ])),
         expression(irNode("persistent-vector-literal", null, [literal(1)])),
         expression(irNode("intrinsic", "host-identity-token", [
           irNode("object-literal", null),
@@ -133,14 +129,12 @@ test("optimized compiler runtime scan matches its readable reference", async () 
       );
     }
     expect(emitter.runtime_requirements(allRequirements)).toEqual({
-      react: true,
       hostIdentityToken: true,
       literal: true,
       collection: true,
       list: true,
     });
     expect(emitter.runtime_requirements(staticKeywordProperty)).toEqual({
-      react: false,
       hostIdentityToken: false,
       literal: false,
       collection: false,

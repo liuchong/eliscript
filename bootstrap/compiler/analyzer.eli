@@ -19,8 +19,7 @@
      "object-keys" "object-has?" "object-assoc" "funcall" "apply"))
 
   (defconst portable-forbidden-operators
-    (js-array "js*" "print" "put" "js-call" "new" "async" "await" "throw" "try"
-     "jsx" "fragment"))
+    (js-array "js*" "print" "put" "js-call" "new" "async" "await" "throw" "try"))
 
   (defconst fail
     (js* "(diagnostic) => { const p = diagnostic.location.start; const error = new Error(`${diagnostic.location.file}:${p.line}:${p.column}: ${diagnostic.message}`); error.eliscriptDiagnostic = diagnostic; throw error; }"))
@@ -588,16 +587,6 @@
           context form-span "try requires a catch or finally clause"))
       (put context :recurBarrier recur-barrier)))
 
-  (defun analyze-jsx (args scope context form-span)
-    (when (< (get args :length) 2)
-      (analyzer-fail
-        context form-span
-        "jsx expects a type, props, and optional children"))
-    (let ((type (js-nth 0 args)))
-      (unless (or (keyword-node-p type) (string-node-p type))
-        (analyze-non-tail type scope context)))
-    (analyze-non-tail-sequence (js-call args :slice 1) scope context))
-
   (defun analyze-call (form scope context)
     (let* ((items (node-items form))
            (operator-node (js-nth 0 items))
@@ -671,10 +660,6 @@
          (when (= (get args :length) 0)
            (analyzer-fail context form-span "while expects 1+ arguments"))
          (analyze-non-tail-sequence args scope context))
-        ((= operator "jsx")
-         (analyze-jsx args scope context form-span))
-        ((= operator "fragment")
-         (analyze-non-tail-sequence args scope context))
         ((= operator "quote") nil)
         ((= operator "js-object")
          (analyze-object args scope context form-span operator))
@@ -691,7 +676,7 @@
         ((js-call builtin-operators :includes operator)
          (analyze-non-tail-sequence args scope context))
         ((js-call
-          (js-array "defun" "defn" "defportable" "defasync" "defcomponent"
+          (js-array "defun" "defn" "defportable" "defasync"
             "defvar" "defconst"
             "export" "export-default" "import" "import-portable" "module")
            :includes operator)
@@ -1094,7 +1079,7 @@
                  ((= operator "await") "asynchronous suspension")
                  ((or (= operator "throw") (= operator "try"))
                   "exception control flow")
-                (t "React runtime access"))
+                (t "unsupported host capability"))
                ")")))
       (cond
         ((= operator "quote") nil)

@@ -18,7 +18,7 @@ introduced by `&rest`.
 ```
 
 The grammar is shared by `defun`, `defn`, `defportable`, `lambda`, and `fn`.
-`defcomponent` expands to `defun` and therefore inherits the same grammar.
+Application macros that expand to these forms inherit the same grammar.
 
 ## Grammar
 

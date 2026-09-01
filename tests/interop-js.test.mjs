@@ -229,9 +229,12 @@ test("Eliscript JS interop preserves explicit host and persistent boundaries", a
           origin: null,
         },
       },
-      react: {
-        propsArray: true,
-        rendered: '<section class="interop">leftright</section>',
+      hostBoundary: {
+        plainObject: true,
+        childrenArray: true,
+        className: "interop",
+        childCount: 2,
+        joinedChildren: "left|right",
       },
       generated: {
         count: 2_000,

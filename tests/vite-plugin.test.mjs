@@ -12,6 +12,7 @@ const componentFile = resolve(
 
 test("Vite remains an application adapter outside language core", async () => {
   const forbiddenImport = /(?:from\s*|import\s*\(\s*|require\s*\(\s*)["'](?:vite|@vitejs\/|react(?:-dom)?(?:\/[^"']*)?)["']/;
+  const forbiddenCoreSyntax = /\b(?:defcomponent|jsx|react-element|react-fragment)\b/iu;
   for (const root of ["bootstrap/compiler", "compiler", "runtime", "stdlib"]) {
     const glob = new Bun.Glob("**/*.{el,eli,mjs}");
     for await (const file of glob.scan({
@@ -20,6 +21,7 @@ test("Vite remains an application adapter outside language core", async () => {
     })) {
       const source = await readFile(resolve(projectDirectory, root, file), "utf8");
       expect(source).not.toMatch(forbiddenImport);
+      expect(source).not.toMatch(forbiddenCoreSyntax);
     }
   }
 
@@ -51,6 +53,7 @@ test("Vite adapter compiles .eli modules with source maps", async () => {
   );
 
   expect(result.code).toContain('from "react/jsx-runtime"');
+  expect(result.code).not.toContain("__eliscript_react");
   expect(result.code).toContain("function Counter(props)");
   expect(result.code).not.toContain("sourceMappingURL");
   expect(result.map.version).toBe(3);

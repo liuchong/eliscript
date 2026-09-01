@@ -45,7 +45,7 @@ flag.
 - functions, lambdas, `let`, and `let*`
 - assignment and mutability
 - conditionals, sequences, built-in operators, and calls
-- vectors, objects, property operations, raw JavaScript, and React forms
+- vectors, objects, property operations, raw JavaScript, and ordinary calls
 - qualified JavaScript references and identifier validation
 
 Quoted forms and raw `js*` payloads are intentionally opaque to lexical

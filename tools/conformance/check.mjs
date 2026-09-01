@@ -318,12 +318,13 @@ async function validateManifest(root, manifest, specsById, errors) {
 function validateCompatibilityBaseline(baseline, specsById, manifest, errors) {
   if (!isPlainObject(baseline) || baseline.schemaVersion !== 1 ||
       baseline.format !== "eliscript-compatibility-baseline" ||
-      baseline.version !== 1) {
-    errors.push("compatibility baseline must use eliscript-compatibility-baseline version 1");
+      baseline.version !== 2) {
+    errors.push("compatibility baseline must use eliscript-compatibility-baseline version 2");
     return {
       stableSpecifications: 0,
       provisionalSpecifications: 0,
       planningSpecifications: 0,
+      supersededSpecifications: 0,
       stableFeatures: 0,
       provisionalFeatures: 0,
     };
@@ -334,6 +335,7 @@ function validateCompatibilityBaseline(baseline, specsById, manifest, errors) {
       stableSpecifications: 0,
       provisionalSpecifications: 0,
       planningSpecifications: 0,
+      supersededSpecifications: 0,
       stableFeatures: 0,
       provisionalFeatures: 0,
     };
@@ -352,6 +354,11 @@ function validateCompatibilityBaseline(baseline, specsById, manifest, errors) {
   const planningSpecifications = validateSortedStrings(
     baseline.specifications.planning,
     "planning specification baseline",
+    errors,
+  );
+  const supersededSpecifications = validateSortedStrings(
+    baseline.specifications.superseded,
+    "superseded specification baseline",
     errors,
   );
   const stableFeatures = validateSortedStrings(
@@ -375,7 +382,13 @@ function validateCompatibilityBaseline(baseline, specsById, manifest, errors) {
     .map((spec) => spec.id)
     .sort();
   const expectedPlanningSpecifications = specs
-    .filter((spec) => spec.implementation !== "implemented")
+    .filter((spec) =>
+      spec.implementation !== "implemented" &&
+      spec.implementation !== "superseded")
+    .map((spec) => spec.id)
+    .sort();
+  const expectedSupersededSpecifications = specs
+    .filter((spec) => spec.status === "superseded")
     .map((spec) => spec.id)
     .sort();
   const features = Array.isArray(manifest.features) ? manifest.features : [];
@@ -407,6 +420,12 @@ function validateCompatibilityBaseline(baseline, specsById, manifest, errors) {
     errors,
   );
   compareClassification(
+    supersededSpecifications,
+    expectedSupersededSpecifications,
+    "superseded specification baseline",
+    errors,
+  );
+  compareClassification(
     stableFeatures,
     expectedStableFeatures,
     "stable feature baseline",
@@ -423,6 +442,7 @@ function validateCompatibilityBaseline(baseline, specsById, manifest, errors) {
     ...stableSpecifications,
     ...provisionalSpecifications,
     ...planningSpecifications,
+    ...supersededSpecifications,
   ];
   if (new Set(allSpecifications).size !== allSpecifications.length) {
     errors.push("compatibility baseline classifies a specification more than once");
@@ -436,6 +456,7 @@ function validateCompatibilityBaseline(baseline, specsById, manifest, errors) {
     stableSpecifications: stableSpecifications.length,
     provisionalSpecifications: provisionalSpecifications.length,
     planningSpecifications: planningSpecifications.length,
+    supersededSpecifications: supersededSpecifications.length,
     stableFeatures: stableFeatures.length,
     provisionalFeatures: provisionalFeatures.length,
   };

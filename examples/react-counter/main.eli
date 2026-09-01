@@ -1,23 +1,36 @@
 (module example.react-counter
   (import "react" useState StrictMode)
-
-  (defcomponent Counter (props)
-    (let* ((state (useState 0))
-           (count (js-nth 0 state))
-           (set-count (js-nth 1 state)))
-      (jsx StrictMode nil
-        (jsx :section
+  (import "react/jsx-runtime" jsx jsxs Fragment)
+  (defun ui-props
+    (props children)
+    (if (= (length children) 0)
+      (or props (js-object))
+      (object-assoc
+        (or props (js-object))
+        "children"
+        (if (= (length children) 1) (js-nth 0 children) children))))
+  (defun ui-element
+    (type props &rest children)
+    (let ((resolved (ui-props props children)))
+      (if (> (length children) 1) (jsxs type resolved) (jsx type resolved))))
+  (defun Counter
+    (props)
+    (let* ((state (useState 0)) (count (js-nth 0 state)) (set-count (js-nth 1 state)))
+      (ui-element
+        StrictMode
+        nil
+        (ui-element
+          "section"
           (js-object :className "counter" :data-count count)
-          (jsx :h1 nil (get props :title "Counter"))
-          (fragment
-            (jsx :button
-              (js-object
-                :type "button"
-                :onClick (lambda () (set-count (1+ count))))
+          (ui-element "h1" nil (get props :title "Counter"))
+          (ui-element
+            Fragment
+            nil
+            (ui-element
+              "button"
+              (js-object :type "button" :onClick (lambda () (set-count (1+ count))))
               "Increment")
-            (when (> count 0)
-              (jsx :strong nil (str "Count: " count)))
+            (when (> count 0) (ui-element "strong" nil (str "Count: " count)))
             (get props :children))))))
-
   (export Counter)
   (export-default Counter))

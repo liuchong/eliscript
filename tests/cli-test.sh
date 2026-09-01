@@ -189,7 +189,7 @@ fi
   "$PROJECT_DIR/examples/react-counter/main.eli"
 
 if ! grep -F 'react/jsx-runtime' "$TEMP_DIR/react-counter.mjs" >/dev/null; then
-  printf 'expected automatic React JSX runtime import\n' >&2
+  printf 'expected explicit application JSX runtime import\n' >&2
   exit 1
 fi
 

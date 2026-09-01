@@ -41,7 +41,9 @@ The node-kind vocabulary covers the complete implemented language surface:
   short-circuit and exception expressions
 - intrinsics, ordinary and computed calls, invocation, and application
 - objects, properties, method calls, constructors, and raw JavaScript interop
-- React elements and fragments
+
+Framework values and calls use these generic module and interop nodes. The IR
+does not encode a UI framework or bundler.
 
 Import specifiers, function parameters, lexical and catch bindings, assignment
 pairs, conditional and exception clauses, and object properties are first-class
@@ -97,7 +99,7 @@ implemented language surface.
 - CLI snapshots remain byte-for-byte stable and Bun executes the emitted ESM.
 - The portable `ir.eli` and `lower.eli` implementations serialize this model
   as ordinary JavaScript objects and arrays. A shared oracle compares complete
-  seed and portable trees for all 57 node kinds and all bootstrap sources.
+  seed and portable trees for all 55 node kinds and all bootstrap sources.
 - The portable compiler's persisted and cross-process representation is the
   closed, versioned canonical schema defined by
   [0108](0108-versioned-canonical-ir.md); ordinary object shape alone is not a

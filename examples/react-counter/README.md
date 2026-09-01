@@ -1,11 +1,12 @@
 # React Counter
 
 [Examples](../README.md) | [Project README](../../README.md) |
-[Specification 0010](../../specs/0010-react-elements.md)
+[Specification 0118](../../specs/0118-framework-neutral-library-interop.md)
 
-This is the first executable React slice. It uses a component declaration,
-`useState`, props and children, an event handler, a fragment, a conditional
-child, and the automatic JSX runtime.
+This application-level probe imports React and `react/jsx-runtime` explicitly.
+It uses an ordinary function declaration, app-local element helpers,
+`useState`, props and children, an event handler, and a conditional child. No
+framework syntax or runtime is supplied by the Eliscript compiler.
 
 ```sh
 bun run compile:react-counter

@@ -21,8 +21,8 @@ native JavaScript array binding patterns:
 ```
 
 Patterns are accepted in required and optional function parameters, anonymous
-functions, `let` and `let*` targets, and catch bindings. `defcomponent` and
-`defportable` inherit function parameter support.
+functions, `let` and `let*` targets, and catch bindings. `defportable` inherits
+function parameter support.
 
 ## Grammar
 

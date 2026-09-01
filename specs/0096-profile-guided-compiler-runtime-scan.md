@@ -12,8 +12,8 @@
 
 The self-hosted emitter now discovers conditional runtime imports with one IR
 traversal. The previous implementation recursively traversed the same program
-five times to detect React elements, persistent literals, generic collection
-operations, List operations, and process-local host identity tokens.
+four times to detect persistent literals, generic collection operations, List
+operations, and process-local host identity tokens.
 
 The five independent predicates remain in the Eliscript-authored emitter as a
 readable reference implementation. The production emitter uses the one-pass

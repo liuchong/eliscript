@@ -1,7 +1,5 @@
 import { pathToFileURL } from "node:url";
 import vm from "node:vm";
-import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 
 const [modulePath] = process.argv.slice(2);
 const moduleUrl = pathToFileURL(modulePath);
@@ -187,7 +185,13 @@ const propsMap = valueMapFromEntries([
   ["children", persistentVectorFromArray(["left", "right"])],
 ]);
 const props = toJsObject(propsMap, { deep: true });
-const rendered = renderToStaticMarkup(React.createElement("section", props));
+const hostBoundary = {
+  plainObject: Object.getPrototypeOf(props) === Object.prototype,
+  childrenArray: Array.isArray(props.children),
+  className: props.className,
+  childCount: props.children.length,
+  joinedChildren: props.children.join("|"),
+};
 
 let generatedAgreement = true;
 for (let index = 0; index < 2_000; index += 1) {
@@ -308,10 +312,7 @@ console.log(JSON.stringify({
       valueMapFromEntries([[1, "value"]]),
     )),
   },
-  react: {
-    propsArray: Array.isArray(props.children),
-    rendered,
-  },
+  hostBoundary,
   generated: {
     count: 2_000,
     agreement: generatedAgreement,

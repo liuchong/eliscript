@@ -407,14 +407,6 @@
             (make-node
               "array-literal" (node-span form) nil
               (lower-sequence args) nil))
-           ((= operator "jsx")
-            (make-node
-              "react-element" (node-span form) nil (lower-sequence args)
-              (js-object :childCount (- (get args :length) 2))))
-           ((= operator "fragment")
-            (make-node
-              "react-fragment" (node-span form) nil (lower-sequence args)
-              (js-object :childCount (get args :length))))
            ((js-call intrinsics :includes operator)
             (lower-call-node "intrinsic" form operator args))
            ((= operator "js-object")

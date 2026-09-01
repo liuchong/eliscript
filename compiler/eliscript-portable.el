@@ -44,9 +44,7 @@
     (async . "asynchronous functions")
     (await . "asynchronous suspension")
     (throw . "exception control flow")
-    (try . "exception control flow")
-    (jsx . "React runtime access")
-    (fragment . "React runtime access")))
+    (try . "exception control flow")))
 
 (defvar eliscript-portable--filename nil)
 (defvar eliscript-portable--entry nil)

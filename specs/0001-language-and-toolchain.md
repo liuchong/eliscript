@@ -109,9 +109,9 @@ source maps regardless of the chosen convention.
 
 ## Application Validation: React
 
-React support belongs in a library and macro layer above the language core.
-Eliscript should emit ordinary React calls or JSX-compatible JavaScript rather
-than implement its own reconciler.
+React support belongs in an application library above the language core.
+Eliscript emits ordinary imported calls and does not implement a reconciler or
+reserve framework-specific compiler forms.
 
 This section is a replaceable application probe, not a core language goal,
 compiler dependency, standard-library requirement, or maturity prerequisite.
@@ -122,7 +122,7 @@ The first React slice needs to prove:
 - props and children
 - one hook call
 - event handlers
-- fragments and conditional children
+- nested and conditional children
 - importing a third-party component
 - browser refresh through an optional Vite adapter
 
@@ -233,17 +233,18 @@ macro expansion, recursively located forms, filename/line/column diagnostics,
 explicit IR lowering, direct IR emission, output-name collision checks,
 external Source Map v3 output, and JavaScript execution are implemented.
 
-### M2: React Application Probe (Complete; Non-core)
+### M2: UI Library Application Probe (Complete; Non-core)
 
-- Add the React library and component macros.
+- Exercise explicit ESM imports and application-local UI helpers.
 - Compile and run the counter example.
 - Add an optional Vite adapter with fast refresh where feasible.
 
-Completed on 2026-08-28. `defcomponent`, `jsx`, and `fragment` compile through
-dedicated IR nodes to the automatic JSX runtime. The counter example exercises
-hooks, props, children, events, conditional children, fragments, an imported
-React component, server rendering, browser mounting, production bundling, and
-state-preserving React Fast Refresh through the optional Vite adapter.
+Completed on 2026-08-28 and corrected by specification 0118 on 2026-09-01. The
+counter imports its selected UI runtime explicitly and uses only ordinary
+Eliscript functions, ESM bindings, calls, strings, and host objects. It
+exercises hooks, props, children, events, server rendering, browser mounting,
+production bundling, and refresh without adding framework syntax or IR to the
+language core.
 
 ### M3: Publishing Application Probe (Complete; Non-core)
 
@@ -284,7 +285,7 @@ and downstream analysis match the seed over one shared fixture. See
 [0016-portable-macro-expander.md](0016-portable-macro-expander.md).
 The fifth slice adds a JSON-safe IR model and a complete lowering pass written
 in Eliscript. Seed and generated lowerers agree on every node, property,
-quoted datum, and source span across all 57 IR kinds and all thirteen bootstrap
+quoted datum, and source span across all 55 IR kinds and all thirteen bootstrap
 modules. See [0017-portable-ir-lowering.md](0017-portable-ir-lowering.md).
 The sixth slice adds direct ESM and Source Map emitters written in Eliscript.
 Seed and generated backends agree on complete JavaScript text and Source Map

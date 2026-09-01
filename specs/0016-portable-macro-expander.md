@@ -72,7 +72,6 @@ The expander understands Eliscript syntax boundaries:
   keys
 - bodies, initializers, tests, values, computed keys, and call arguments are
   recursively expanded
-- `defcomponent` becomes a located `defun`
 - a macro result at module scope is processed again as a top-level form
 
 Macro definitions disappear from the result. Expansion recurses until the

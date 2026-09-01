@@ -1,5 +1,6 @@
 (module example.org-site.browser
   (import "react" useEffect useState StrictMode)
+  (import "react/jsx-runtime" jsx jsxs)
   (import "react-dom/client" createRoot)
   (import "virtual:eliscript-org" articles)
   (import "../../stdlib/sequence.eli" map)
@@ -8,97 +9,152 @@
   (import "../../stdlib/data.eli" index-by)
   (import "./site.css")
   (import "../../docs/pages/assets/eliscript-logo.png" :default logo-url)
-
+  (defun ui-props
+    (props children)
+    (if (= (length children) 0)
+      (or props (js-object))
+      (object-assoc
+        (or props (js-object))
+        "children"
+        (if (= (length children) 1) (js-nth 0 children) children))))
+  (defun ui-element
+    (type props &rest children)
+    (let ((resolved (ui-props props children)))
+      (if (> (length children) 1) (jsxs type resolved) (jsx type resolved))))
+  (defun ui-keyed-element
+    (type props key &rest children)
+    (let ((resolved (ui-props props children)))
+      (if (> (length children) 1) (jsxs type resolved key) (jsx type resolved key))))
   (defconst browser-window (js* "window"))
-  (defconst articles-by-slug
-    (index-by (lambda (article) (get article :slug)) articles))
-
-  (defun article-from-location ()
-    (let* ((hash (get window/location :hash ""))
-           (slug (strip-prefix "#" hash)))
-      (or (get articles-by-slug slug nil)
-          (js-nth 0 articles))))
-
-  (defcomponent OrgSite ()
-    (let* ((selection-state (useState (article-from-location)))
-           (selected (js-nth 0 selection-state))
-           (set-selected (js-nth 1 selection-state))
-           (sync-selection
-            (lambda ()
-              (progn
-                (set-selected (article-from-location))
-                (js-call browser-window :scrollTo
-                  (assoc (js-object :top 0) "behavior" "auto")))))
-           (effect
-            (useEffect
-              (lambda ()
-                (js-call browser-window :addEventListener
-                  "hashchange" sync-selection)
-                (lambda ()
-                  (js-call browser-window :removeEventListener
-                    "hashchange" sync-selection)))
-              (js-array))))
-      (jsx :main (js-object :className "site-shell")
-        (jsx :header (js-object :className "site-header")
-          (jsx :a (js-object :className "brand" :href "#")
-            (jsx :span (js-object :className "logo-light")
-              (jsx :img
-                (js-object :className "brand-logo"
-                        :src logo-url
-                        :alt "Eliscript")))
-            (jsx :span (js-object :className "brand-name") "Eliscript"))
-          (jsx :span (js-object :className "edition") "ORG EDITION / 2026"))
-        (jsx :div (js-object :className "publication")
-          (jsx :aside (js-object :className "article-index")
-            (jsx :p (js-object :className "index-label") "PUBLISHED NOTES")
-            (jsx :ol nil
+  (defconst articles-by-slug (index-by (lambda (article) (get article :slug)) articles))
+  (defun article-from-location
+    ()
+    (let* ((hash (get window/location :hash "")) (slug (strip-prefix "#" hash)))
+      (or (get articles-by-slug slug nil) (js-nth 0 articles))))
+  (defun OrgSite
+    ()
+    (let*
+      ((selection-state (useState (article-from-location)))
+        (selected (js-nth 0 selection-state))
+        (set-selected (js-nth 1 selection-state))
+        (sync-selection
+          (lambda
+            ()
+            (progn
+              (set-selected (article-from-location))
+              (js-call
+                browser-window
+                :scrollTo
+                (assoc (js-object :top 0) "behavior" "auto")))))
+        (effect
+          (useEffect
+            (lambda
+              ()
+              (js-call browser-window :addEventListener "hashchange" sync-selection)
+              (lambda
+                ()
+                (js-call
+                  browser-window
+                  :removeEventListener
+                  "hashchange"
+                  sync-selection)))
+            (js-array))))
+      (ui-element
+        "main"
+        (js-object :className "site-shell")
+        (ui-element
+          "header"
+          (js-object :className "site-header")
+          (ui-element
+            "a"
+            (js-object :className "brand" :href "#")
+            (ui-element
+              "span"
+              (js-object :className "logo-light")
+              (ui-element
+                "img"
+                (js-object :className "brand-logo" :src logo-url :alt "Eliscript")))
+            (ui-element "span" (js-object :className "brand-name") "Eliscript"))
+          (ui-element "span" (js-object :className "edition") "ORG EDITION / 2026"))
+        (ui-element
+          "div"
+          (js-object :className "publication")
+          (ui-element
+            "aside"
+            (js-object :className "article-index")
+            (ui-element "p" (js-object :className "index-label") "PUBLISHED NOTES")
+            (ui-element
+              "ol"
+              nil
               (map
-                (lambda (article)
-                  (let* ((slug (get article :slug))
-                         (active
-                          (and selected
-                               (= slug (get selected :slug)))))
-                    (jsx :li (js-object :key slug)
-                      (jsx :a
-                        (js-object :href (str "#" slug)
-                                :className (if active "active" ""))
-                        (jsx :time
+                (lambda
+                  (article)
+                  (let*
+                    ((slug (get article :slug))
+                      (active (and selected (= slug (get selected :slug)))))
+                    (ui-keyed-element
+                      "li"
+                      nil
+                      slug
+                      (ui-element
+                        "a"
+                        (js-object
+                          :href
+                          (str "#" slug)
+                          :className
+                          (if active "active" ""))
+                        (ui-element
+                          "time"
                           (js-object :dateTime (get article :date))
                           (get article :date))
-                      (jsx :span nil (get article :title))))))
+                        (ui-element "span" nil (get article :title))))))
                 articles))
-            (jsx :p (js-object :className "index-note")
+            (ui-element
+              "p"
+              (js-object :className "index-note")
               (str (get articles :length) " articles, authored in Org Mode.")))
           (if selected
-              (jsx :article (js-object :className "article")
-                (jsx :header (js-object :className "article-header")
-                  (jsx :div (js-object :className "article-meta")
-                    (jsx :time
-                      (js-object :dateTime (get selected :date))
-                      (get selected :date))
-                    (map
-                      (lambda (tag)
-                        (jsx :span (js-object :key tag :className "tag") tag))
-                      (get selected :tags)))
-                  (jsx :h1 nil (get selected :title))
-                  (jsx :p (js-object :className "description")
-                    (get selected :description)))
-                (jsx :div
-                  (js-object
-                    :className "article-body"
-                    :dangerouslySetInnerHTML
-                    (js-object :__html (get selected :html)))))
-            (jsx :p (js-object :className "empty-state")
+            (ui-element
+              "article"
+              (js-object :className "article")
+              (ui-element
+                "header"
+                (js-object :className "article-header")
+                (ui-element
+                  "div"
+                  (js-object :className "article-meta")
+                  (ui-element
+                    "time"
+                    (js-object :dateTime (get selected :date))
+                    (get selected :date))
+                  (map
+                    (lambda
+                      (tag)
+                      (ui-keyed-element "span" (js-object :className "tag") tag tag))
+                    (get selected :tags)))
+                (ui-element "h1" nil (get selected :title))
+                (ui-element
+                  "p"
+                  (js-object :className "description")
+                  (get selected :description)))
+              (ui-element
+                "div"
+                (js-object
+                  :className
+                  "article-body"
+                  :dangerouslySetInnerHTML
+                  (js-object :__html (get selected :html)))))
+            (ui-element
+              "p"
+              (js-object :className "empty-state")
               "No published articles.")))
-        (jsx :footer (js-object :className "site-footer")
-          (jsx :span nil "Org Mode source")
-          (jsx :span nil "Pure Emacs export")
-          (jsx :span nil "Eliscript + React")))))
-
+        (ui-element
+          "footer"
+          (js-object :className "site-footer")
+          (ui-element "span" nil "Org Mode source")
+          (ui-element "span" nil "Pure Emacs export")
+          (ui-element "span" nil "Eliscript + explicit ESM UI library")))))
   (defconst mount-node (document/getElementById "app"))
-  (defconst root
-    (or (get mount-node :eliscriptRoot)
-        (createRoot mount-node)))
+  (defconst root (or (get mount-node :eliscriptRoot) (createRoot mount-node)))
   (put mount-node :eliscriptRoot root)
-  (js-call root :render
-    (jsx StrictMode nil (jsx OrgSite nil))))
+  (js-call root :render (ui-element StrictMode nil (ui-element OrgSite nil))))

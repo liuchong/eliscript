@@ -637,12 +637,12 @@
 (ert-deftest eliscript-emits-esm-imports-and-exports ()
   (let ((output
          (eliscript-compile-string
-          "(import \"react\" :default React useState)\n(export React useState)")))
+          "(import \"view-kit\" :default View createView)\n(export View createView)")))
     (should (string-match-p
-             (regexp-quote "import React, {useState} from \"react\";")
+             (regexp-quote "import View, {createView} from \"view-kit\";")
              output))
     (should (string-match-p
-             (regexp-quote "export {React, useState};")
+             (regexp-quote "export {View, createView};")
              output))))
 
 (ert-deftest eliscript-emits-javascript-interop ()
@@ -1252,8 +1252,8 @@
 
 (ert-deftest eliscript-ir-emitter-matches-compatibility-backend ()
   (let ((source
-         "(import \"react\" :default React useState)
-(import \"react-dom\" :as ReactDOM)
+         "(import \"host-library\" :default Host createValue)
+(import \"host-renderer\" :as Renderer)
 (import-portable \"./helper.eli\" helper)
 (defvar state 0)
 (defconst quoted-constructor '(vector 1))
@@ -1537,102 +1537,51 @@
              (= (nth 4 segment) 7)))
       segments))))
 
-(ert-deftest eliscript-react-lowers-components-and-elements-to-ir ()
+(ert-deftest eliscript-framework-names-are-ordinary-bindings ()
   (let* ((source
-         "(import \"react\" StrictMode)
-(defcomponent App (props)
-  (jsx StrictMode nil
-    (fragment (jsx :h1 nil (get props :title)))))
-(export App)")
-         (program (eliscript-compile-ir-string source "react-ir.eli"))
-         node-kinds
-         react-nodes)
+          "(defun jsx (value) (+ value 1))
+(defun fragment (value) (+ value 2))
+(defun defcomponent (value) (+ value 3))
+(defun values () [(jsx 1) (fragment 1) (defcomponent 1)])
+(export jsx fragment defcomponent values)")
+         (program (eliscript-compile-ir-string source "ordinary-names.eli"))
+         node-kinds)
     (eliscript-ir-walk
      program
      (lambda (node)
-       (push (eliscript-ir-node-kind node) node-kinds)
-       (when (memq (eliscript-ir-node-kind node)
-                   '(react-element react-fragment))
-         (push node react-nodes))))
-    (should (memq 'function-declaration node-kinds))
-    (should (memq 'react-element node-kinds))
-    (should (memq 'react-fragment node-kinds))
-    (should (cl-every #'eliscript-ir-node-span react-nodes))
-    (should-not (string-match-p
-                 "defcomponent"
-                 (eliscript-compile-string source "react-ir.eli")))))
+       (push (eliscript-ir-node-kind node) node-kinds)))
+    (should (memq 'call node-kinds))
+    (should-not (memq 'react-element node-kinds))
+    (should-not (memq 'react-fragment node-kinds))
+    (let ((output (eliscript-compile-string source "ordinary-names.eli")))
+      (should (string-match-p "function jsx(value)" output))
+      (should (string-match-p "function fragment(value)" output))
+      (should (string-match-p "function defcomponent(value)" output))
+      (should-not (string-match-p "react/jsx-runtime" output)))))
 
-(ert-deftest eliscript-react-emits-the-automatic-jsx-runtime ()
+(ert-deftest eliscript-ui-library-interop-uses-ordinary-esm ()
   (let ((output
          (eliscript-compile-string
-          "(import \"react\" useState StrictMode)
-(defcomponent Counter (props)
-  (let* ((state (useState 0))
-         (count (nth 0 state))
-         (set-count (nth 1 state)))
-    (jsx StrictMode nil
-      (jsx :section (js-object :className \"counter\")
-        (jsx :button
-          (js-object :onClick (lambda () (set-count (1+ count))))
-          \"Increment\")
-        (fragment
-          (when (> count 0) (jsx :strong nil count))
-          (get props :children))))))
-(export Counter)"
-          "react-emitter.eli")))
-    (should (= (length
-                (split-string output "react/jsx-runtime" t))
-               2))
+          "(import \"view-runtime\" create-view create-views ViewGroup)
+(defun render (title items)
+  (create-view ViewGroup
+    (js-object :title title :children items)))
+(export render)"
+          "ui-library.eli")))
     (should (string-match-p
              (regexp-quote
-              "import * as __eliscript_react_jsx_runtime from \"react/jsx-runtime\";")
+              "import {create_view, create_views, ViewGroup} from \"view-runtime\";")
              output))
     (should (string-match-p
-             (regexp-quote
-              "__eliscript_react_jsx_runtime.jsx(StrictMode")
+             (regexp-quote "create_view(ViewGroup, ({\"title\": title")
              output))
-    (should (string-match-p
-             (regexp-quote
-              "__eliscript_react_jsx_runtime.jsxs(\"section\"")
-             output))
-    (should (string-match-p ".Fragment" output))
-    (should (string-match-p "\"onClick\"" output))
-    (should-not
-     (string-match-p
-      "react/jsx-runtime"
-      (eliscript-compile-string "(defun identity (value) value)")))))
+    (should-not (string-match-p "__eliscript_.*view-runtime" output))))
 
-(ert-deftest eliscript-react-emits-key-as-a-runtime-argument ()
-  (let ((output
-         (eliscript-compile-string
-          "(defun item (slug)
-  (jsx :li (js-object :key slug :className \"entry\") slug))"
-          "react-key.eli")))
-    (should (string-match-p
-             (regexp-quote
-              "__eliscript_react_jsx_runtime.jsx(\"li\"")
-             output))
-    (should (string-match-p
-             (regexp-quote "\"className\": \"entry\"")
-             output))
-    (should (string-match-p
-             (regexp-quote "children: slug}, slug)")
-             output))
-    (should-not (string-match-p "\"key\":" output))))
-
-(ert-deftest eliscript-react-validates-jsx-and-internal-bindings ()
-  (should-error (eliscript-compile-string "(jsx :div)")
-                :type 'eliscript-analyze-error)
-  (should-error (eliscript-compile-string "(jsx Missing nil)")
-                :type 'eliscript-analyze-error)
-  (should-error
-   (eliscript-compile-string
-    "(defun outer () (defcomponent Inner () (jsx :span nil)))")
-   :type 'eliscript-expand-error)
+(ert-deftest eliscript-framework-neutral-core-reserves-only-internal-prefix ()
   (should-error (eliscript-compile-string "(defconst __eliscript_truthy 1)")
                 :type 'eliscript-analyze-error)
   (should-error
-   (eliscript-compile-string "(print __eliscript_react_jsx_runtime/jsx)")
+   (eliscript-compile-string "(print __eliscript_private/value)")
    :type 'eliscript-analyze-error))
 
 (provide 'eliscript-tests)

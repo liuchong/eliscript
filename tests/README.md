@@ -85,7 +85,7 @@ current bootstrap sources, including `analyzer.eli` itself.
 
 The IR fixture runs the complete generated front end and lowerer, then compares
 the resulting program with a normalized seed oracle. It covers every one of
-the 57 public IR node kinds, JSON-safe quoted data and literal tags,
+the 55 public IR node kinds, JSON-safe quoted data and literal tags,
 kind-specific properties, complete nested source spans, macro call origins,
 and all thirteen bootstrap compiler modules, including the self-hosted
 concrete-syntax formatter.
@@ -287,7 +287,7 @@ boundary and its persistent dependencies with both compiler generations,
 compares every artifact and Source Map byte-for-byte, and executes both outputs
 under Bun and Node. It covers cross-realm predicates, shallow and deep
 conversion, sharing and cycles, accessors and Symbol keys, duplicate
-value-semantic Map/Set entries, resource limits, a React server-rendered props
+value-semantic Map/Set entries, resource limits, a plain-object host API
 fixture, 2,000 generated nested graphs, and a 100,000-value snapshot.
 
 The protocol suite exercises immutable protocol definitions, direct Symbol

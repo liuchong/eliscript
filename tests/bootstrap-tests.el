@@ -290,8 +290,6 @@
        (and (eliscript-ir-property node :pattern) '((pattern . t))))
       ('array-binding-pattern
        (and (eliscript-ir-property node :rest) '((rest . t))))
-      ((or 'react-element 'react-fragment)
-       `((childCount . ,(eliscript-ir-property node :child-count))))
       ('object-property
        `((computed . ,(if (eliscript-ir-property node :computed) t :false))))
       (_ nil))))

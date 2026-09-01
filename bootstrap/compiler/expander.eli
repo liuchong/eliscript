@@ -1014,9 +1014,6 @@
            ((= operator "defmacro")
             (expander-fail
               context span "defmacro is only valid at module top level"))
-           ((= operator "defcomponent")
-            (expander-fail
-              context span "defcomponent is only valid at module top level"))
            ((= operator "defportable")
             (expander-fail
               context span "defportable is only valid at module top level"))
@@ -1136,20 +1133,6 @@
                         :forEach
                         (lambda (item) (js-call expanded :push item))))
                   (setq expanded items)))
-               ((= operator "defcomponent")
-                (unless (>= (get args :length) 2)
-                  (expander-fail
-                    context span
-                    "defcomponent expects a name and parameter list"))
-                (setq expanded
-                  (js-array (symbol-node "defun" (node-span operator-node))
-                   (js-nth 0 args)
-                   (js-nth 1 args)))
-                (js-call (expand-sequence
-                           (js-call args :slice 2)
-                           environment depth context)
-                  :forEach
-                  (lambda (item) (js-call expanded :push item))))
                ((or (= operator "defvar") (= operator "defconst"))
                 (when (> (get args :length) 0)
                   (js-call expanded :push (js-nth 0 args))

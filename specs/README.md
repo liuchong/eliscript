@@ -28,19 +28,21 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 117 specifications.
+The registry currently contains 118 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 87 |
-| Stable design | 29 |
+| Accepted design | 88 |
+| Stable design | 28 |
+| Superseded design | 1 |
 | Implementation in progress | 3 |
 | Implemented | 114 |
+| Superseded implementation | 1 |
 
-Compatibility Baseline 1 separately classifies 29 specifications as stable,
-85 as provisional, and 3 as planning. That baseline is derived from registry
-and feature statuses, so it cannot drift independently.
+Compatibility Baseline 2 separately classifies 28 specifications as stable,
+86 as provisional, 3 as planning, and 1 as superseded. That baseline is
+derived from registry and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
 implementations, shared value semantics, open protocol dispatch, collection
@@ -95,7 +97,7 @@ requests, a self-hosted
 host-neutral graph planner, strict canonical `eliscript-ir` version 1
 serialization, and an Eliscript-owned `eliscript-build-report` version 1
 operation. Ordinary closure, cycle handling, portable-name fixed points,
-complete 57-node IR round trips, build-decision normalization, and
+complete 55-node IR round trips, build-decision normalization, and
 standards-based Bun/Node execution match seed semantics and reproducible bytes.
 The self-hosted host also owns v2 cache identity policy, v1 migration,
 selective standard recompilation, portable closure revalidation, and cross-host
@@ -127,7 +129,7 @@ number.
 
 1. [0040: Project Maturity Roadmap](0040-maturity-roadmap.md)
 2. [0041: Host Symbiosis, Persistent Data, and Emacs Acceleration](0041-host-symbiosis-and-persistent-data.md)
-3. [0046: M7 Compatibility Baseline 1](0046-m7-compatibility-baseline.md)
+3. [0046: M7 Compatibility Baseline](0046-m7-compatibility-baseline.md)
 
 ### Language and Compiler
 
@@ -203,9 +205,13 @@ number.
 These specifications exercise public compiler and ESM boundaries. They are
 replaceable application evidence and do not define core goals or maturity.
 
-1. [0010: React Element Compilation](0010-react-elements.md)
-2. [0011: Vite Adapter](0011-vite-adapter.md)
-3. [0012: Org Publishing](0012-org-publishing.md)
+1. [0011: Vite Adapter](0011-vite-adapter.md)
+2. [0012: Org Publishing](0012-org-publishing.md)
+
+### Superseded Contracts
+
+1. [0010: React Element Compilation](0010-react-elements.md), replaced by
+   [0118: Framework-neutral Library Interoperation](0118-framework-neutral-library-interop.md)
 
 ## Contract System
 
@@ -255,7 +261,7 @@ The schemas and change workflow are defined by specifications
 | 0007 | [Explicit Compiler Intermediate Representation](0007-intermediate-representation.md) | Accepted | Implemented |
 | 0008 | [Direct ECMAScript Emission from IR](0008-direct-ir-emission.md) | Accepted | Implemented |
 | 0009 | [Source Map v3 Emission](0009-source-maps.md) | Stable | Implemented |
-| 0010 | [React Element Compilation](0010-react-elements.md) | Stable | Implemented |
+| 0010 | [React Element Compilation](0010-react-elements.md) | Superseded | Superseded |
 | 0011 | [Vite Adapter](0011-vite-adapter.md) | Stable | Implemented |
 | 0012 | [Org Publishing](0012-org-publishing.md) | Stable | Implemented |
 
@@ -306,7 +312,7 @@ The schemas and change workflow are defined by specifications
 | 0043 | [Structured Compiler Diagnostics](0043-structured-diagnostics.md) | Stable | Implemented |
 | 0044 | [Public Surface Registry and Consistency Matrix](0044-public-surface-registry.md) | Stable | Implemented |
 | 0045 | [Continuous Compatibility Matrix](0045-continuous-compatibility-matrix.md) | Stable | Implemented |
-| 0046 | [M7 Compatibility Baseline 1](0046-m7-compatibility-baseline.md) | Stable | Implemented |
+| 0046 | [M7 Compatibility Baseline](0046-m7-compatibility-baseline.md) | Stable | Implemented |
 
 ### Persistent Data and Protocols
 
@@ -381,6 +387,9 @@ The schemas and change workflow are defined by specifications
 | 0113 | [Versioned Multi-entry Project Identity](0113-versioned-multi-entry-project-identity.md) | Accepted | Implemented |
 | 0114 | [Deterministic Concrete-syntax Formatter](0114-deterministic-concrete-syntax-formatter.md) | Accepted | Implemented |
 | 0115 | [Emacs Major Mode Foundation](0115-emacs-major-mode-foundation.md) | Accepted | Implemented |
+| 0116 | [Read-only Project Check and Emacs Diagnostics](0116-read-only-project-check-and-emacs-diagnostics.md) | Accepted | Implemented |
+| 0117 | [Virtual-source Builds and Emacs Compilation Commands](0117-virtual-source-builds-and-emacs-compilation.md) | Accepted | Implemented |
+| 0118 | [Framework-neutral Library Interoperation](0118-framework-neutral-library-interop.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

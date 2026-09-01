@@ -37,7 +37,7 @@ when the fragment does not already begin with a more specific child mark. Plain
 emission and mapped emission therefore share one formatter.
 
 Temporary names are allocated in seed evaluation order. This keeps readable
-formatting, React runtime imports, identifier mapping, quoted data, and all
+formatting, explicit ESM imports, identifier mapping, quoted data, and all
 control-flow rewrites byte-identical to the reference backend.
 
 ## Portable Source Maps

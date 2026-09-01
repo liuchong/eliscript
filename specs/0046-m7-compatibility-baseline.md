@@ -1,4 +1,4 @@
-# 0046: M7 Compatibility Baseline 1
+# 0046: M7 Compatibility Baseline
 
 - Status: Stable
 - Implementation: Implemented
@@ -10,7 +10,7 @@
 
 ## Summary
 
-Eliscript Compatibility Baseline 1 closes M7 by dividing every current
+Eliscript Compatibility Baseline 1 closed M7 by dividing every current
 specification and conformance feature into an explicit compatibility class:
 
 - **stable:** implemented behavior covered by the compatibility promise
@@ -25,18 +25,20 @@ the expected groups independently from the specification index and conformance
 manifest. A missing item, duplicate classification, stale promotion, or stable
 specification with provisional feature evidence fails before the test suite.
 
-This baseline freezes dependable contracts without freezing the provisional
-mutable collection representation that M8 must replace.
+The versioned registry now records baseline 2. It retains the same
+classification model while applying the pre-1.0 framework-neutral migration
+defined by specification 0118. Baseline 1 remains historical evidence; baseline
+2 is the current compatibility target.
 
 ## Stable Contract
 
-Baseline 1 promotes 28 specifications and their 28 conformance features. The
+Baseline 2 promotes 28 specifications and their 28 conformance features. The
 stable set covers these externally meaningful areas:
 
 - lexical binding, deterministic macro behavior, source locations, and Source
   Map v3 output
-- React element lowering, Vite transformation, and deterministic Org
-  publishing
+- separately maintained application validation adapters over public compiler
+  output
 - reproducible self-hosting and the compiler fixed-point requirement
 - worker protocol v1, portable function closure, resilient Emacs worker
   integration, and portable module composition

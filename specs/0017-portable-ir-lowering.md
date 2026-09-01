@@ -49,11 +49,11 @@ Quoted brace syntax therefore remains a tagged `list` beginning with
 
 ## Lowering Surface
 
-The portable lowerer implements all 57 public IR kinds from specification
+The portable lowerer implements all 55 public IR kinds from specification
 0007. The surface includes modules and imports, declarations and exports,
 functions and lexical bindings, all control forms, assignments, intrinsics,
 native and persistent collection constructors, JavaScript interop, objects,
-and application-level React elements and fragments. Portable closure analysis
+and ordinary host-library calls. Portable closure analysis
 accepts persistent collection, evaluated Keyword, and quoted persistent values
 now that 0088 defines their explicit worker codec. Static host-property Keyword
 markers remain strings and do not cross that value boundary.

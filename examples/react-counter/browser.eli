@@ -1,45 +1,79 @@
 (module example.react-counter.browser
   (import "react" StrictMode)
+  (import "react/jsx-runtime" jsx jsxs)
   (import "react-dom/client" createRoot)
   (import "./main.eli" :default Counter)
   (import "../../stdlib/sequence.eli" map)
   (import "./counter.css")
   (import "../../docs/pages/assets/eliscript-logo.png" :default logo-url)
-
-(defconst mount-node (document/getElementById "app"))
-(defconst root
-  (or (get mount-node :eliscriptRoot)
-      (createRoot mount-node)))
-(put mount-node :eliscriptRoot root)
-
-(js-call root :render
-    (jsx StrictMode nil
-      (jsx :main (js-object :className "demo-shell")
-        (jsx :header (js-object :className "demo-header")
-          (jsx :span (js-object :className "logo-light")
-            (jsx :img
-              (js-object :className "demo-logo"
-                      :src logo-url
-                      :alt "Eliscript")))
-          (jsx :span (js-object :className "wordmark") "Eliscript")
-          (jsx :a
-            (js-object :className "source-link"
-                    :href "https://github.com/liuchong/eliscript")
+  (defun ui-props
+    (props children)
+    (if (= (length children) 0)
+      (or props (js-object))
+      (object-assoc
+        (or props (js-object))
+        "children"
+        (if (= (length children) 1) (js-nth 0 children) children))))
+  (defun ui-element
+    (type props &rest children)
+    (let ((resolved (ui-props props children)))
+      (if (> (length children) 1) (jsxs type resolved) (jsx type resolved))))
+  (defun ui-keyed-element
+    (type props key &rest children)
+    (let ((resolved (ui-props props children)))
+      (if (> (length children) 1) (jsxs type resolved key) (jsx type resolved key))))
+  (defconst mount-node (document/getElementById "app"))
+  (defconst root (or (get mount-node :eliscriptRoot) (createRoot mount-node)))
+  (put mount-node :eliscriptRoot root)
+  (js-call
+    root
+    :render
+    (ui-element
+      StrictMode
+      nil
+      (ui-element
+        "main"
+        (js-object :className "demo-shell")
+        (ui-element
+          "header"
+          (js-object :className "demo-header")
+          (ui-element
+            "span"
+            (js-object :className "logo-light")
+            (ui-element
+              "img"
+              (js-object :className "demo-logo" :src logo-url :alt "Eliscript")))
+          (ui-element "span" (js-object :className "wordmark") "Eliscript")
+          (ui-element
+            "a"
+            (js-object
+              :className
+              "source-link"
+              :href
+              "https://github.com/liuchong/eliscript")
             "Source"))
-        (jsx :section (js-object :className "intro")
-          (jsx :p (js-object :className "eyebrow") "ELISCRIPT / REACT")
-          (jsx :h1 nil "A Lisp component, alive in the browser.")
-          (jsx :p (js-object :className "lede")
-            "Compiled by Emacs, mounted by Vite, rendered by React."))
-        (jsx Counter
+        (ui-element
+          "section"
+          (js-object :className "intro")
+          (ui-element "p" (js-object :className "eyebrow") "ELISCRIPT / REACT")
+          (ui-element "h1" nil "A Lisp component, alive in the browser.")
+          (ui-element
+            "p"
+            (js-object :className "lede")
+            "Compiled to standard ESM and rendered through explicit library calls."))
+        (ui-element
+          Counter
           (js-object :title "Interactive counter")
-          (jsx :p (js-object :className "status")
-            "Edit the .eli source and Vite will refresh this module."))
-        (jsx :footer (js-object :className "demo-footer")
+          (ui-element
+            "p"
+            (js-object :className "status")
+            "Edit the .eli source and the application adapter will refresh it."))
+        (ui-element
+          "footer"
+          (js-object :className "demo-footer")
           (map
-            (lambda (label)
-              (jsx :span (js-object :key label) label))
+            (lambda (label) (ui-keyed-element "span" nil label label))
             (js-array
-              "Automatic JSX runtime"
+              "Explicit ESM UI runtime"
               "Source Map v3"
               "Portable sequence library")))))))

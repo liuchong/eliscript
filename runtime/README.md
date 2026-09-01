@@ -14,8 +14,8 @@ The compiler still emits a local Lisp-truthiness helper for standalone
 generated forms. `core/truth.mjs` exposes the same semantics to shared runtime
 algorithms: only `false`, `null`, and `undefined` are false.
 
-React modules import `react/jsx-runtime` directly. There is no Eliscript wrapper
-runtime for element construction.
+Host libraries are imported explicitly by application modules. The runtime
+contains no UI-framework wrapper, element constructor, or bundler adapter.
 
 ## Modules
 

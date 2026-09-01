@@ -150,10 +150,11 @@ The following boundaries remain fixed through the maturity roadmap:
   or host-neutral compiler boundaries.
 - UI frameworks remain replaceable application/library targets; Eliscript
   does not own a reconciler or a web application framework.
-- Existing React-specific forms, IR nodes, and Vite adapters are compatibility-
-  tracked application extensions, not core language evidence. Before 1.0 they
-  must be removable or replaceable without changing the core conformance
-  corpus, bootstrap fixed point, runtime, or standard library.
+- Framework-specific forms, IR nodes, and automatic runtime injection were
+  removed by specification 0118. Application adapters are compatibility-
+  tracked integrations, not core language evidence, and remain replaceable
+  without changing the core conformance corpus, bootstrap fixed point, runtime,
+  or standard library.
 - Org publishing remains an adapter over the compiler, not a mandatory part of
   the language core.
 - Vite, React, blog generators, site generators, Pages hosting, and other

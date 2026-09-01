@@ -1151,7 +1151,7 @@ an exact path, and never mutate their source. Replaceable UI-library and
 JavaScript package fixtures consume converted native values without persistent
 implementation details leaking across the boundary.
 
-Specification 0073 supplies the core conversion semantics and one React-based
+Specification 0073 supplies the core conversion semantics and one plain-object
 application fixture. That fixture is non-normative and replaceable. This gate
 remains open until the maintained JavaScript package fixture and full supported
 compatibility matrix also pass.

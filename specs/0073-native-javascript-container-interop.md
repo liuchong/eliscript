@@ -11,8 +11,8 @@
 This specification defines the explicit boundary between Eliscript persistent
 values and mutable native JavaScript containers. It adds native constructors
 and predicates, shallow conversion by default, explicit deep conversion,
-cycle and resource diagnostics, and a focused plain-object adapter for React
-props and ordinary JavaScript option objects.
+cycle and resource diagnostics, and a focused plain-object adapter for host
+APIs and ordinary JavaScript option objects.
 
 The implementation lives in `stdlib/interop/js.eli`. Conversion traversal,
 category selection, duplicate detection, path construction, and error policy
@@ -189,8 +189,9 @@ never copied more than once per distinct source identity.
 - **JSI-08:** Depth, value-count, option, key, entry, and opaque-value failures
   use structured interop errors.
 - **JSI-09:** Deep conversion leaves source host graphs unchanged.
-- **JSI-10:** A React server renderer consumes a deeply converted props object
-  containing a persistent Vector without implementation details leaking.
+- **JSI-10:** An ordinary JavaScript host consumer receives a deeply converted
+  plain object containing a persistent Vector without implementation details
+  leaking.
 - **JSI-11:** At least 2,000 generated nested host graphs round-trip
   structurally, and a 100,000-value snapshot remains stack safe.
 - **JSI-12:** Seed/self-hosted modules and Source Maps are byte-identical; Bun
@@ -205,5 +206,5 @@ user-defined conversion protocols, asynchronous streaming, and configurable
 Map-to-object key coercion are outside this specification. They require
 separate loss, identity, and capability contracts. The final PD-07 gate still
 requires maintained package/application evidence under the full supported
-matrix; this specification provides its core conversion and React boundary
+matrix; this specification provides its core conversion and host-boundary
 evidence.

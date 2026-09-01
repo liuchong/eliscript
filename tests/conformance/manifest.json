@@ -87,17 +87,6 @@
       ]
     },
     {
-      "id": "react.element-compilation",
-      "title": "React element compilation",
-      "status": "stable",
-      "spec": "0010",
-      "contracts": ["Lowers components and elements to dedicated IR", "Uses the automatic JSX runtime"],
-      "evidence": [
-        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-react-lowers-components-and-elements-to-ir" },
-        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-react-emits-the-automatic-jsx-runtime" }
-      ]
-    },
-    {
       "id": "tooling.vite-adapter",
       "title": "Vite transform adapter",
       "status": "stable",
@@ -812,7 +801,7 @@
       "title": "Native JavaScript container interop",
       "status": "accepted",
       "spec": "0073",
-      "contracts": ["Keeps native and persistent container boundaries explicit with shallow conversion by default", "Deeply converts mixed supported graphs while preserving sharing and rejecting cycles or value-semantic collapse", "Rejects accessors, Symbol keys, opaque values, and resource-limit violations with structured exact-path errors", "Matches self-hosted artifacts and Bun/Node execution including a React props boundary"],
+      "contracts": ["Keeps native and persistent container boundaries explicit with shallow conversion by default", "Deeply converts mixed supported graphs while preserving sharing and rejecting cycles or value-semantic collapse", "Rejects accessors, Symbol keys, opaque values, and resource-limit violations with structured exact-path errors", "Matches self-hosted artifacts and Bun/Node execution including a plain-object host boundary"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/interop-js.test.mjs", "contains": "Eliscript JS interop preserves explicit host and persistent boundaries" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
@@ -1631,6 +1620,28 @@
           "kind": "ert",
           "file": "tests/eliscript-mode-tests.el",
           "contains": "eliscript-mode-compiles-unsaved-buffer-through-public-build"
+        }
+      ]
+    },
+    {
+      "id": "language.framework-neutral-library-interop",
+      "title": "Framework-neutral library interoperation",
+      "status": "accepted",
+      "spec": "0118",
+      "contracts": [
+        "Keeps framework names as ordinary bindings",
+        "Uses explicit ESM without framework-specific IR or runtime injection"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-framework-names-are-ordinary-bindings"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/vite-plugin.test.mjs",
+          "contains": "Vite remains an application adapter outside language core"
         }
       ]
     }

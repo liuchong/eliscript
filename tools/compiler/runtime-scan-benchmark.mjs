@@ -98,7 +98,6 @@ function requirementExerciseProgram() {
   return {
     filename: "<runtime-requirement-exercise>",
     body: [
-      expression(irNode("react-element", null, [literal("section"), literal(null)])),
       expression(irNode("persistent-vector-literal", null, [literal(1)])),
       expression(irNode("intrinsic", "host-identity-token", [
         irNode("object-literal", null),
@@ -118,11 +117,10 @@ function requirementExerciseProgram() {
 }
 
 function requirementChecksum(requirements) {
-  return Number(requirements.react) +
-    Number(requirements.hostIdentityToken) * 2 +
-    Number(requirements.literal) * 4 +
-    Number(requirements.collection) * 8 +
-    Number(requirements.list) * 16;
+  return Number(requirements.hostIdentityToken) +
+    Number(requirements.literal) * 2 +
+    Number(requirements.collection) * 4 +
+    Number(requirements.list) * 8;
 }
 
 function countProgramNodes(program) {

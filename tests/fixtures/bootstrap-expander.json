@@ -121,9 +121,9 @@
       "source": "(defmacro twice (value) `(+ ,value ,value))\n(defconst syntax '(twice 1))\n(export syntax)"
     },
     {
-      "name": "component-and-expression-boundaries",
+      "name": "function-and-expression-boundaries",
       "filename": "boundaries.eli",
-      "source": "(defmacro identity (value) value)\n(defcomponent View (props)\n  (let ((value (identity props)))\n    (js-object :fixed (identity value) literal-key (identity value) (identity :computed) (identity value))))\n(export View)"
+      "source": "(defmacro identity (value) value)\n(defun View (props)\n  (let ((value (identity props)))\n    (js-object :fixed (identity value) literal-key (identity value) (identity :computed) (identity value))))\n(export View)"
     },
     {
       "name": "self-symbol-module",
@@ -224,22 +224,10 @@
       "error": "nested.eli:2:3: defmacro is only valid at module top level"
     },
     {
-      "name": "nested-component",
-      "filename": "component.eli",
-      "source": "(defun broken ()\n  (defcomponent Nested () nil))",
-      "error": "component.eli:2:3: defcomponent is only valid at module top level"
-    },
-    {
       "name": "nested-portable-function",
       "filename": "portable-nested.eli",
       "source": "(defun broken ()\n  (defportable nested () 1))",
       "error": "portable-nested.eli:2:3: defportable is only valid at module top level"
-    },
-    {
-      "name": "invalid-component",
-      "filename": "component-arity.eli",
-      "source": "(defcomponent OnlyName)",
-      "error": "component-arity.eli:1:1: defcomponent expects a name and parameter list"
     },
     {
       "name": "macro-failure",

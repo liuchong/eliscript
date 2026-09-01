@@ -502,7 +502,7 @@ The versioned project contracts are:
 | --- | --- |
 | [`contracts/public-surface.json`](contracts/public-surface.json) | [0044: Public Surface Registry](specs/0044-public-surface-registry.md) |
 | [`contracts/compatibility-matrix.json`](contracts/compatibility-matrix.json) | [0045: Continuous Compatibility Matrix](specs/0045-continuous-compatibility-matrix.md) |
-| [`contracts/compatibility-baseline.json`](contracts/compatibility-baseline.json) | [0046: M7 Compatibility Baseline 1](specs/0046-m7-compatibility-baseline.md) |
+| [`contracts/compatibility-baseline.json`](contracts/compatibility-baseline.json) | [0046: M7 Compatibility Baseline](specs/0046-m7-compatibility-baseline.md) |
 
 Run warning-as-error Emacs byte compilation with:
 

@@ -8,10 +8,9 @@ runtime-backed `core/` modules for semantics that need optimized host support.
 UI-library and publishing support should be focused application packages, not
 special cases embedded throughout the compiler or core standard library.
 
-Existing JSX/React lowering is retained for application compatibility and
-verification. It does not define core language semantics, core library design,
-or the project maturity target; framework helpers belong in replaceable
-application packages.
+Framework integration uses ordinary ESM imports and calls. The standard
+library contains no framework lowering or framework-specific helpers;
+application ergonomics belong in replaceable application packages.
 
 ## Bit
 

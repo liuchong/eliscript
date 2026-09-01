@@ -17,10 +17,6 @@
 
 (defvar eliscript-ir-emitter--record-source-spans nil)
 
-(defconst eliscript-ir-emitter--react-runtime-binding
-  "__eliscript_react_jsx_runtime"
-  "Internal namespace binding for the automatic React JSX runtime.")
-
 (defconst eliscript-ir-emitter--literal-runtime-import
   "import { hashMap as __eliscript_hash_map, hashSet as __eliscript_hash_set, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n"
   "Generated import for canonical language literal construction.")
@@ -970,93 +966,6 @@
    ((eq value 'undefined) "undefined")
    (t (eliscript-emitter--fail "unsupported IR literal: %S" value))))
 
-(defun eliscript-ir-emitter--emit-react-type (node)
-  "Emit React element type NODE."
-  (let ((value (eliscript-ir-node-value node)))
-    (if (and (eq (eliscript-ir-node-kind node) 'literal)
-             (or (keywordp value) (stringp value)))
-        (eliscript-emitter--json-string
-         (if (keywordp value) (substring (symbol-name value) 1) value))
-      (eliscript-ir-emitter-emit-expression node))))
-
-(defun eliscript-ir-emitter--react-key-property-p (property)
-  "Return non-nil when PROPERTY is a static React key property."
-  (and (eq (eliscript-ir-node-kind property) 'object-property)
-       (not (eliscript-ir-property property :computed))
-       (let ((key (eliscript-ir-node-value property)))
-         (string-equal
-          (cond
-           ((keywordp key) (substring (symbol-name key) 1))
-           ((symbolp key) (symbol-name key))
-           ((stringp key) key)
-           (t ""))
-          "key"))))
-
-(defun eliscript-ir-emitter--emit-react-props
-    (props children &optional omitted-properties)
-  "Emit React PROPS with explicit CHILDREN merged in.
-
-Exclude OMITTED-PROPERTIES from an object-literal props node."
-  (let* ((empty-props
-          (or (null props)
-              (and (eq (eliscript-ir-node-kind props) 'literal)
-                   (null (eliscript-ir-node-value props)))))
-         (props-output
-          (unless empty-props
-            (if (and omitted-properties
-                     (eq (eliscript-ir-node-kind props) 'object-literal))
-                (format
-                 "({%s})"
-                 (eliscript-ir-emitter--emit-object-properties
-                  (seq-remove
-                   (lambda (property)
-                     (memq property omitted-properties))
-                   (eliscript-ir-emitter--children props))))
-              (eliscript-ir-emitter-emit-expression props))))
-         (children-output
-          (pcase (length children)
-            (0 nil)
-            (1 (eliscript-ir-emitter-emit-expression (car children)))
-            (_ (format "[%s]"
-                       (eliscript-ir-emitter--emit-arguments children))))))
-    (cond
-     ((and empty-props (null children-output)) "{}")
-     (empty-props (format "{children: %s}" children-output))
-     ((null children-output) (format "{...((%s) ?? {})}" props-output))
-     (t (format "{...((%s) ?? {}), children: %s}"
-                props-output children-output)))))
-
-(defun eliscript-ir-emitter--emit-react-element (node)
-  "Emit React element or fragment NODE through the automatic JSX runtime."
-  (let* ((fragment (eq (eliscript-ir-node-kind node) 'react-fragment))
-         (children (eliscript-ir-emitter--children node))
-         (type
-          (if fragment
-              (concat eliscript-ir-emitter--react-runtime-binding ".Fragment")
-            (eliscript-ir-emitter--emit-react-type (pop children))))
-         (props (unless fragment (pop children)))
-         (key-properties
-          (and props
-               (eq (eliscript-ir-node-kind props) 'object-literal)
-               (seq-filter
-                #'eliscript-ir-emitter--react-key-property-p
-                (eliscript-ir-emitter--children props))))
-         (key-property (car (last key-properties)))
-         (key-output
-          (and key-property
-               (eliscript-ir-emitter-emit-expression
-                (car (eliscript-ir-emitter--children key-property)))))
-         (runtime-function (if (> (length children) 1) "jsxs" "jsx")))
-    (format "%s.%s(%s, %s%s)"
-            eliscript-ir-emitter--react-runtime-binding
-            runtime-function
-            type
-            (if fragment
-                (eliscript-ir-emitter--emit-react-props nil children)
-              (eliscript-ir-emitter--emit-react-props
-               props children key-properties))
-            (if key-output (format ", %s" key-output) ""))))
-
 (defun eliscript-ir-emitter-emit-expression (node)
   "Emit expression IR NODE as ECMAScript."
   (unless (eliscript-ir-node-p node)
@@ -1109,8 +1018,6 @@ Exclude OMITTED-PROPERTIES from an object-literal props node."
         children (eliscript-ir-node-value node)))
       ('intrinsic (eliscript-ir-emitter--emit-intrinsic node))
       ('object-literal (eliscript-ir-emitter--emit-object node))
-      ((or 'react-element 'react-fragment)
-       (eliscript-ir-emitter--emit-react-element node))
       ('property-read
        (let ((access
               (format "(%s)[%s]"
@@ -1277,8 +1184,6 @@ JavaScript property or tag string rather than an Eliscript value."
      ((eliscript-ir-emitter--keyword-literal-p node) t)
      ((memq kind '(property-read property-write method-call))
       (eliscript-ir-emitter--children-use-literal-runtime-p children 1))
-     ((eq kind 'react-element)
-      (eliscript-ir-emitter--children-use-literal-runtime-p children 0))
      ((and (eq kind 'intrinsic)
            (memq (eliscript-ir-node-value node)
                  '(aref object-has? object-assoc)))
@@ -1290,7 +1195,6 @@ JavaScript property or tag string rather than an Eliscript value."
   (unless (eliscript-ir-program-p program)
     (eliscript-emitter--fail "expected an IR program: %S" program))
   (let ((eliscript-emitter--temporary-counter 0)
-        uses-react-runtime
         uses-literal-runtime
         uses-collection-runtime
         uses-list-runtime
@@ -1300,9 +1204,6 @@ JavaScript property or tag string rather than an Eliscript value."
     (eliscript-ir-walk
      program
      (lambda (node)
-       (when (memq (eliscript-ir-node-kind node)
-                   '(react-element react-fragment))
-         (setq uses-react-runtime t))
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (memq (eliscript-ir-node-value node) '(nth length)))
          (setq uses-collection-runtime t))
@@ -1324,10 +1225,6 @@ JavaScript property or tag string rather than an Eliscript value."
     (setq portable-functions (nreverse portable-functions))
     (concat
      "// Generated by Eliscript. Do not edit.\n"
-     (if uses-react-runtime
-         (format "import * as %s from \"react/jsx-runtime\";\n"
-                 eliscript-ir-emitter--react-runtime-binding)
-       "")
      (if uses-literal-runtime
          eliscript-ir-emitter--literal-runtime-import
        "")

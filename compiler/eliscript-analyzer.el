@@ -425,16 +425,6 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
       (eliscript-analyzer--fail
        "try requires a catch or finally clause"))))
 
-(defun eliscript-analyzer--analyze-jsx (arguments scope)
-  "Analyze React JSX ARGUMENTS in lexical SCOPE."
-  (when (< (length arguments) 2)
-    (eliscript-analyzer--fail "jsx expects a type, props, and optional children"))
-  (let* ((type (car arguments))
-         (type-value (eliscript-form-value type)))
-    (unless (or (keywordp type-value) (stringp type-value))
-      (eliscript-analyzer--analyze-non-tail type scope)))
-  (eliscript-analyzer--analyze-non-tail-sequence (cdr arguments) scope))
-
 (defun eliscript-analyzer--analyze-call (form scope)
   "Analyze call FORM in SCOPE."
   (let* ((items (eliscript-form-value form))
@@ -494,9 +484,6 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
        (unless arguments
          (eliscript-analyzer--fail "while expects 1+ arguments"))
        (eliscript-analyzer--analyze-non-tail-sequence arguments scope))
-      ('jsx (eliscript-analyzer--analyze-jsx arguments scope))
-      ('fragment
-       (eliscript-analyzer--analyze-non-tail-sequence arguments scope))
       ('quote nil)
       ('js-object
        (eliscript-analyzer--analyze-object
@@ -512,7 +499,7 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
       ((pred (lambda (name)
                (memq name eliscript-analyzer--builtin-operators)))
        (eliscript-analyzer--analyze-non-tail-sequence arguments scope))
-      ((or 'defun 'defn 'defportable 'defasync 'defcomponent 'defvar 'defconst
+      ((or 'defun 'defn 'defportable 'defasync 'defvar 'defconst
            'export 'export-default 'import 'module)
        (eliscript-analyzer--fail "%s is only valid at module top level" operator))
       (_

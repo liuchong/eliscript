@@ -40,7 +40,7 @@ The subset rejects:
 - ordinary `defun`/`defn` dependencies
 - mutable top-level `defvar` state
 - ordinary imported bindings and qualified JavaScript references
-- `js*`, `print`, `put`, `js-call`, `new`, `jsx`, and `fragment`
+- `js*`, `print`, `put`, `js-call`, and `new`
 - assignment to any non-local binding
 
 Validation starts at every `defportable` declaration and walks constants and

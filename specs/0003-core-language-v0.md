@@ -178,7 +178,7 @@ empty object. Higher-level immutable transforms are library code; see
 Imports use these top-level forms:
 
 ```elisp
-(import "react" :default React useState useMemo)
+(import "view-kit" :default View create-state create-memo)
 (import "library" :as Library)
 (import "side-effect-only")
 (import-portable "./object.eli" assoc)

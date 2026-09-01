@@ -101,10 +101,9 @@ without an ordinary user binding they are diagnosed as unbound symbols.
 
 ## Application Lowering
 
-React `jsx` and `fragment` forms lower to dedicated IR nodes. Modules that use
-those nodes receive one automatic `react/jsx-runtime` namespace import and emit
-`jsx`, `jsxs`, and `Fragment` calls directly; ordinary modules remain free of
-React imports.
+UI frameworks use the same explicit ESM imports and ordinary function calls as
+any other host library. The compiler reserves no framework-specific forms,
+introduces no framework-specific IR nodes, and injects no framework runtime.
 
 This application compatibility surface is independent of persistent literal
 semantics and is not a dependency of the compiler or runtime ABI.

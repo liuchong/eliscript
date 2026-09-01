@@ -296,16 +296,6 @@
            (eliscript-lower--node
             'array-literal form nil
             (mapcar #'eliscript-lower-expression arguments)))
-          ('jsx
-           (eliscript-lower--node
-            'react-element form nil
-            (mapcar #'eliscript-lower-expression arguments)
-            (list :child-count (- (length arguments) 2))))
-          ('fragment
-           (eliscript-lower--node
-            'react-fragment form nil
-            (mapcar #'eliscript-lower-expression arguments)
-            (list :child-count (length arguments))))
           ((pred (lambda (name) (memq name eliscript-lower--intrinsics)))
            (eliscript-lower--call-node 'intrinsic form operator arguments))
           ('js-object

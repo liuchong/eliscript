@@ -1254,8 +1254,6 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
              ((eq operator 'js-object) (walk-object arguments))
              ((memq operator '(get put js-call aref object-has? object-assoc))
               (walk-static-key-call arguments 1))
-             ((eq operator 'jsx)
-              (walk-static-key-call arguments 0))
              (t (cl-some #'walk form)))))
          (t nil))))
     (cl-some #'walk forms)))

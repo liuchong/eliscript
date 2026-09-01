@@ -11,7 +11,6 @@
     ir-property)
   (import "./source-map.mjs" create-source-map)
 
-  (defconst react-runtime-binding "__eliscript_react_jsx_runtime")
   (defconst literal-runtime-import
     "import { hashMap as __eliscript_hash_map, hashSet as __eliscript_hash_set, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n")
   (defconst collection-runtime-import
@@ -1067,80 +1066,6 @@
           (text-fragment (json-string (ir-value node)))
         (emit-expression node))))
 
-  (defun react-key-property-p (property)
-    (and (= (ir-kind property) "object-property")
-         (not (ir-property property "computed"))
-         (= (ir-value property) "key")))
-
-  (defun emit-react-type (node)
-    (if (and (= (ir-kind node) "literal")
-             (or (= (literal-kind node) "keyword")
-                 (= (js* "typeof node.value") "string")))
-        (text-fragment (json-string (ir-value node)))
-      (emit-expression node)))
-
-  (defun emit-react-props (props child-nodes omitted-properties)
-    (let* ((empty-props
-            (or (not props)
-                (and (= (ir-kind props) "literal")
-                     (null (ir-value props)))))
-           (props-output
-            (unless empty-props
-              (if (and (> (get omitted-properties :length) 0)
-                       (= (ir-kind props) "object-literal"))
-                  (combine
-                    (js-array "({"
-                     (emit-object-properties
-                       (js-call (children props) :filter
-                         (lambda (property)
-                           (not (js-call omitted-properties :includes property)))))
-                     "})"))
-                (emit-expression props))))
-           (children-output
-            (cond
-              ((= (get child-nodes :length) 0) nil)
-              ((= (get child-nodes :length) 1)
-               (emit-expression (js-nth 0 child-nodes)))
-              (t (combine (js-array "[" (emit-arguments child-nodes) "]"))))))
-      (cond
-        ((and empty-props (not children-output)) (text-fragment "{}"))
-        (empty-props (combine (js-array "{children: " children-output "}")))
-        ((not children-output) (combine (js-array "{...((" props-output ") ?? {})}")))
-        (t
-         (combine
-           (js-array "{...((" props-output ") ?? {}), children: " children-output "}"))))))
-
-  (defun emit-react-element (node)
-    (let* ((fragment (= (ir-kind node) "react-fragment"))
-           (all-children (children node))
-           (type-node (unless fragment (js-nth 0 all-children)))
-           (props (unless fragment (js-nth 1 all-children)))
-           (child-nodes
-            (if fragment all-children (js-call all-children :slice 2)))
-           (key-properties
-            (if (and props (= (ir-kind props) "object-literal"))
-                (js-call (children props) :filter
-                  (lambda (property) (react-key-property-p property)))
-              (js-array)))
-           (key-property
-            (if (> (get key-properties :length) 0)
-                (js-nth (1- (get key-properties :length)) key-properties)
-              nil))
-           (key-output
-            (and key-property
-                 (emit-expression (js-nth 0 (children key-property)))))
-           (runtime-function
-            (if (> (get child-nodes :length) 1) "jsxs" "jsx")))
-      (combine
-        (js-array react-runtime-binding "." runtime-function "("
-         (if fragment
-             (str react-runtime-binding ".Fragment")
-           (emit-react-type type-node))
-         ", "
-         (emit-react-props props child-nodes key-properties)
-         (if key-output (combine (js-array ", " key-output)) "")
-         ")"))))
-
   (defun emit-expression (node)
     (unless (node-p node)
       (fail "expected an IR expression node"))
@@ -1179,8 +1104,6 @@
           ((= kind "short-circuit") (emit-short-circuit nodes (ir-value node)))
           ((= kind "intrinsic") (emit-intrinsic node))
           ((= kind "object-literal") (emit-object node))
-          ((or (= kind "react-element") (= kind "react-fragment"))
-           (emit-react-element node))
           ((= kind "property-read")
            (let ((access
                   (combine
@@ -1305,17 +1228,6 @@
            (combine (js-array (emit-expression (js-nth 0 nodes)) ";")))
           (t (fail (str "IR node is not valid at module top level: " kind)))))))
 
-  (defun node-uses-react-p (node)
-    (if (or (= (ir-kind node) "react-element")
-            (= (ir-kind node) "react-fragment"))
-        t
-      (let ((found false))
-        (js-call (children node) :forEach
-          (lambda (child)
-            (when (node-uses-react-p child)
-              (setq found t))))
-        found)))
-
   (defun node-uses-host-identity-token-p (node)
     (if (and (= (ir-kind node) "intrinsic")
              (= (ir-value node) "host-identity-token"))
@@ -1344,7 +1256,6 @@
         ((or (= kind "property-read")
              (= kind "property-write")
              (= kind "method-call")) 1)
-        ((= kind "react-element") 0)
         ((and (= kind "intrinsic")
               (or (= (ir-value node) "aref")
                   (= (ir-value node) "object-has?")
@@ -1397,14 +1308,6 @@
               (setq found t))))
         found)))
 
-  (defun program-uses-react-p (program)
-    (let ((found false))
-      (js-call (program-body program) :forEach
-        (lambda (node)
-          (when (node-uses-react-p node)
-            (setq found t))))
-      found))
-
   (defun program-uses-host-identity-token-p (program)
     (let ((found false))
       (js-call (program-body program) :forEach
@@ -1439,7 +1342,6 @@
 
   (defun reference-runtime-requirements (program)
     (js-object
-      :react (program-uses-react-p program)
       :hostIdentityToken (program-uses-host-identity-token-p program)
       :literal (program-uses-literal-runtime-p program)
       :collection (program-uses-collection-runtime-p program)
@@ -1459,8 +1361,6 @@
            (static-key-index (literal-runtime-static-key-index node))
           (index 0))
       (cond
-        ((or (= kind "react-element") (= kind "react-fragment"))
-         (put requirements :react t))
         ((and (not suppress-literal)
               (or (= kind "persistent-list-literal")
                   (= kind "persistent-vector-literal")
@@ -1496,7 +1396,6 @@
   (defun runtime-requirements (program)
     (let ((requirements
            (js-object
-             :react false
              :hostIdentityToken false
              :literal false
              :collection false
@@ -1560,10 +1459,6 @@
               "\n\n")))
       (combine
         (js-array "// Generated by Eliscript. Do not edit.\n"
-         (if (get requirements :react)
-             (str "import * as " react-runtime-binding
-                  " from \"react/jsx-runtime\";\n")
-           "")
          (if (get requirements :literal)
              literal-runtime-import
            "")
