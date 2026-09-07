@@ -123,18 +123,20 @@ compatible with the existing conformance fixtures. The Bun driver serializes
 attached compiler diagnostics and creates `ELI-C0001` only when an error has no
 compiler-owned record.
 
-The current shared stable scope requires matching format, version, code,
-severity, phase, message, file, start, and end coordinates for analyzer
-failures. Other code categories become dual-generation requirements as their
-corresponding portable phases gain public host entry points.
+The shared stable scope requires matching format, version, code, severity,
+phase, message, file, start, and end coordinates for every maintained negative
+reader, expander, and analyzer conformance case. Other code categories become
+dual-generation requirements as their corresponding portable phases gain
+public host entry points.
 
 ## Acceptance Evidence
 
-- ERT proves a seed analyzer condition preserves exact human text and exposes
-  the complete structured object and source span.
+- ERT proves seed reader, expander, and analyzer conditions preserve exact
+  human text and expose complete structured objects and source spans.
 - CLI integration proves seed compiler and project-builder JSON failures,
   including the unlocated CLI fallback.
 - The fixed-point compiler test proves the self-hosted CLI emits the same
   analyzer schema while Generations 1 through 3 remain reproducible.
-- Existing reader, expander, analyzer, and bootstrap fixtures retain their
-  exact historical human diagnostics.
+- The reader, expander, and analyzer bootstrap suites prove exact seed and
+  self-hosted diagnostic parity for all 89 maintained negative cases while the
+  fixtures retain their exact historical human diagnostics.

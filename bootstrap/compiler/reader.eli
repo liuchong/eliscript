@@ -43,7 +43,7 @@
       (get state :column)))
   (defun fail-at
     (state position message &optional width)
-    (let ((span-width (or width 0)))
+    (let ((span-width (or width 1)))
       (fail
         (js-object
           :format
@@ -164,7 +164,9 @@
         ((js-call token :startsWith ":")
           (let ((name (js-call token :slice 1)))
             (unless (valid-keyword-name-p name)
-              (fail-at state start (str "invalid keyword literal: " token)))
+              (fail-at
+                state start (str "invalid keyword literal: " token)
+                (- (get state :offset) (get start :offset))))
             (keyword-node name span)))
         ((number-token-p token) (literal-node (funcall (js* "Number") token) span))
         (t (symbol-node token span)))))
@@ -216,7 +218,9 @@
         (cond
           ((= kind "map")
             (when (= (% (get items :length) 2) 1)
-              (fail-at state start "map literal must contain an even number of forms"))
+              (fail-at
+                state start "map literal must contain an even number of forms"
+                (- (get state :offset) (get start :offset))))
             (let ((form-items (js-array (symbol-node "hash-map" opening-span))))
               (js-call items :forEach (lambda (item) (js-call form-items :push item)))
               (collection-node "list" form-items span)))

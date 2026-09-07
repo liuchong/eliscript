@@ -154,7 +154,10 @@
                         forms)))))
       (eliscript-read-error
        `((name . ,name) (status . "error")
-         (message . ,(cadr error-data)))))))
+         (message . ,(cadr error-data))
+         (diagnostic . ,(eliscript-diagnostic-to-alist
+                         (eliscript-diagnostic-from-condition
+                          error-data))))))))
 
 (defun eliscript-bootstrap-tests-reader-results (&optional fixture-file)
   "Return normalized seed results for reader FIXTURE-FILE."
@@ -179,7 +182,10 @@
           `((name . ,name) (status . "ok")))
       ((eliscript-read-error eliscript-analyze-error)
        `((name . ,name) (status . "error")
-         (message . ,(cadr error-data)))))))
+         (message . ,(cadr error-data))
+         (diagnostic . ,(eliscript-diagnostic-to-alist
+                         (eliscript-diagnostic-from-condition
+                          error-data))))))))
 
 (defun eliscript-bootstrap-tests-analyzer-results (&optional fixture-file)
   "Return normalized seed results for analyzer FIXTURE-FILE."
@@ -211,7 +217,10 @@
                         forms)))))
       ((eliscript-read-error eliscript-expand-error)
        `((name . ,name) (status . "error")
-         (message . ,(cadr error-data)))))))
+         (message . ,(cadr error-data))
+         (diagnostic . ,(eliscript-diagnostic-to-alist
+                         (eliscript-diagnostic-from-condition
+                          error-data))))))))
 
 (defun eliscript-bootstrap-tests-expander-results (&optional fixture-file)
   "Return normalized seed results for expander FIXTURE-FILE."

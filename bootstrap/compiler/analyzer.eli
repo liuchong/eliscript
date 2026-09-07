@@ -26,7 +26,7 @@
   (defconst guard
     (js* "(operation, onError) => { try { return operation(); } catch (error) { return onError(error.message); } }"))
 
-  (defun analyzer-fail (context span message)
+  (defun compiler-fail (context span code phase message)
     (let ((file (or (get context :filename)
                     (and span (get span :filename))
                     "<input>")))
@@ -34,9 +34,9 @@
         (js-object
           :format "eliscript-diagnostic"
           :version 1
-          :code "ELI-A0001"
+          :code code
           :severity "error"
-          :phase "analysis"
+          :phase phase
           :message message
           :location
           (js-object
@@ -51,6 +51,13 @@
               :offset (if span (get span :end) 0)
               :line (if span (get span :endLine) 1)
               :column (if span (get span :endColumn) 1)))))))
+
+  (defun analyzer-fail (context span message)
+    (compiler-fail context span "ELI-A0001" "analysis" message))
+
+  (defun portable-fail (context span message)
+    (compiler-fail
+      context span "ELI-P0001" "portable-analysis" message))
 
   (defun symbol-node-p (node)
     (and node (= (node-kind node) "symbol")))
@@ -944,7 +951,7 @@
     (let ((name (node-name node)))
       (unless (js-call scope :has name)
         (when (qualified-name-p name)
-          (analyzer-fail
+          (portable-fail
             context (node-span node)
             (str "portable function " entry
                  " uses qualified host reference: " name)))
@@ -954,7 +961,7 @@
               (if (or (= kind "portable") (= kind "constant")
                       (= kind "portable-import"))
                   (js-call dependencies :add name)
-                (analyzer-fail
+                (portable-fail
                   context (node-span node)
                   (str "portable function " entry
                        " depends on non-portable " kind ": " name)))))))))
@@ -1031,7 +1038,7 @@
         (let ((name (js-nth index args))
               (value (js-nth (1+ index) args)))
           (unless (js-call scope :has (node-name name))
-            (analyzer-fail
+            (portable-fail
               context (node-span name)
               (str "portable function " entry
                    " may only assign local bindings: " (node-name name))))
@@ -1072,7 +1079,7 @@
                           (node-name operator-node)))
            (args (js-call items :slice 1)))
       (when (js-call portable-forbidden-operators :includes operator)
-        (analyzer-fail
+        (portable-fail
           context (node-span form)
           (str "portable function " entry " cannot use " operator " ("
                (cond
@@ -1181,7 +1188,7 @@
         (lambda (entry)
           (let ((declaration (js-call declarations :get entry)))
             (unless (and declaration (= (get declaration :kind) "portable"))
-              (analyzer-fail
+              (portable-fail
                 context nil
                 (str "portable entry " entry
                      " is not declared with defportable")))
@@ -1193,7 +1200,7 @@
             (let ((declaration (js-call declarations :get name)))
               (when (and (= (get declaration :kind) "portable-import")
                          (not allow-project-imports))
-                (analyzer-fail
+                (portable-fail
                   context (node-span (get declaration :form))
                   (str "portable import " name
                        " requires a project build")))

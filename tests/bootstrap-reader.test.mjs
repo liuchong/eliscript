@@ -105,8 +105,33 @@ function generatedResult(readString, testCase, source) {
       name: testCase.name,
       status: "error",
       message: error.message,
+      diagnostic: error.eliscriptDiagnostic,
     };
   }
+}
+
+function expectDiagnostic(testCase, result) {
+  const match = /^(.*):(\d+):(\d+): (.*)$/s.exec(testCase.error);
+  expect(match).not.toBeNull();
+  expect(result).toMatchObject({
+    status: "error",
+    message: testCase.error,
+    diagnostic: {
+      format: "eliscript-diagnostic",
+      version: 1,
+      code: "ELI-R0001",
+      severity: "error",
+      phase: "reader",
+      message: match[4],
+      location: {
+        file: match[1],
+        start: {
+          line: Number(match[2]),
+          column: Number(match[3]),
+        },
+      },
+    },
+  });
 }
 
 async function caseSource(testCase) {
@@ -146,6 +171,9 @@ test("bootstrapped reader matches normalized seed syntax and diagnostics", async
     }
 
     expect(generated).toEqual(await seedResults());
+    fixture.invalid.forEach((testCase, index) => {
+      expectDiagnostic(testCase, generated[fixture.valid.length + index]);
+    });
     expect(firstArtifacts.get("reader.mjs.map"))
       .toContain("bootstrap/compiler/reader.eli");
   } finally {

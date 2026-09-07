@@ -15,6 +15,13 @@ const oraclePath = resolve(
   "tests/bootstrap-analyzer-oracle.el",
 );
 const emacs = process.env.EMACS ?? "emacs";
+const portableDiagnostics = new Set([
+  "portable-ordinary-function",
+  "portable-mutable-state",
+  "portable-host-interop",
+  "portable-async-function",
+  "portable-throw",
+]);
 
 async function run(command, options) {
   const child = Bun.spawn(command, {
@@ -74,8 +81,34 @@ function generatedResult(readString, analyzeModule, testCase, source) {
       name: testCase.name,
       status: "error",
       message: error.message,
+      diagnostic: error.eliscriptDiagnostic,
     };
   }
+}
+
+function expectDiagnostic(testCase, result) {
+  const match = /^(.*):(\d+):(\d+): (.*)$/s.exec(testCase.error);
+  const portable = portableDiagnostics.has(testCase.name);
+  expect(match).not.toBeNull();
+  expect(result).toMatchObject({
+    status: "error",
+    message: testCase.error,
+    diagnostic: {
+      format: "eliscript-diagnostic",
+      version: 1,
+      code: portable ? "ELI-P0001" : "ELI-A0001",
+      severity: "error",
+      phase: portable ? "portable-analysis" : "analysis",
+      message: match[4],
+      location: {
+        file: match[1],
+        start: {
+          line: Number(match[2]),
+          column: Number(match[3]),
+        },
+      },
+    },
+  });
 }
 
 test("bootstrapped analyzer matches seed acceptance and diagnostics", async () => {
@@ -106,6 +139,9 @@ test("bootstrapped analyzer matches seed acceptance and diagnostics", async () =
     }
 
     expect(generated).toEqual(await seedResults());
+    fixture.invalid.forEach((testCase, index) => {
+      expectDiagnostic(testCase, generated[fixture.valid.length + index]);
+    });
     expect(await Bun.file(resolve(directory, "analyzer.mjs.map")).text())
       .toContain("bootstrap/compiler/analyzer.eli");
   } finally {

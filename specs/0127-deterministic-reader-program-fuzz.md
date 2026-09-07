@@ -43,7 +43,7 @@ For version 1 and the default case count, these identities are normative:
 | --- | --- |
 | Corpus | `4b49f0e21a825e41344fc29387b5298462d17cd1140b2f1f06076a18fe1f8cab` |
 | Self-hosted reader results | `31961b6ffb8ce276a67db1b7cce2b723cf512b6c1518f8023985606535c69e7e` |
-| Self-hosted compiler results | `66d9e62d42cd2d448093fd375379f576489bcb20aa7311f109a8190a61523851` |
+| Self-hosted compiler results | `af90ba331d5427987ce5420e57304e4361f040fbc78240a191dd0161b5b35295` |
 
 An intentional corpus or semantic change must revise the fuzz contract and its
 checked identities together. Host timing and temporary paths never enter an

@@ -80,8 +80,33 @@ function generatedResult(reader, expander, testCase, source) {
       name: testCase.name,
       status: "error",
       message: error.message,
+      diagnostic: error.eliscriptDiagnostic,
     };
   }
+}
+
+function expectDiagnostic(testCase, result) {
+  const match = /^(.*):(\d+):(\d+): (.*)$/s.exec(testCase.error);
+  expect(match).not.toBeNull();
+  expect(result).toMatchObject({
+    status: "error",
+    message: testCase.error,
+    diagnostic: {
+      format: "eliscript-diagnostic",
+      version: 1,
+      code: "ELI-X0001",
+      severity: "error",
+      phase: "expansion",
+      message: match[4],
+      location: {
+        file: match[1],
+        start: {
+          line: Number(match[2]),
+          column: Number(match[3]),
+        },
+      },
+    },
+  });
 }
 
 test("bootstrapped expander matches seed syntax, spans, and diagnostics", async () => {
@@ -115,6 +140,9 @@ test("bootstrapped expander matches seed syntax, spans, and diagnostics", async 
     }
 
     expect(generated).toEqual(await seedResults());
+    fixture.invalid.forEach((testCase, index) => {
+      expectDiagnostic(testCase, generated[fixture.valid.length + index]);
+    });
     for (const result of generated.slice(0, fixture.valid.length)) {
       expect(() => analyzer.analyze_module(result.forms, result.name))
         .not.toThrow();
