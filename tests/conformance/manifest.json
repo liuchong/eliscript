@@ -2269,6 +2269,47 @@
           "contains": "core documentation rejects application inventory substitution"
         }
       ]
+    },
+    {
+      "id": "quality.final-acceptance-artifacts",
+      "title": "Versioned final acceptance artifacts",
+      "status": "accepted",
+      "spec": "0138",
+      "contracts": [
+        "Generates canonical machine-readable and human-readable 1.0 acceptance artifacts from one verified source run",
+        "Records source environment commands criteria artifact digests evidence summaries defects and applications",
+        "Requires complete test fuzz benchmark scale and soak evidence groups bound by the source run",
+        "Derives final acceptance from complete criteria operational success evidence completeness and blocking defects",
+        "Rejects missing source evidence changed reports blocking defects and forged final results",
+        "Keeps application status separate and non-contributing while final core acceptance remains incomplete"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/final-acceptance.test.mjs",
+          "contains": "canonical final artifacts derive every gate from the retained local run"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/final-acceptance.test.mjs",
+          "contains": "blocking defects cannot be hidden by otherwise valid artifacts"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/final-acceptance.test.mjs",
+          "contains": "final artifact contract rejects evidence absent from the source run"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/final-acceptance.test.mjs",
+          "contains": "final acceptance rejects a forged pass result"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/final-acceptance.test.mjs",
+          "contains": "canonical final manifest and report remain byte exact"
+        }
+      ]
     }
   ]
 }

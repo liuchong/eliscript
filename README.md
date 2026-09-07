@@ -32,7 +32,7 @@ in **M8: Language Contract Closure**, **M9: Compiler and Build Convergence**,
 Libraries**, and **M12: Reliability, Security, and Performance**. Final
 stability and acceptance remain open.
 
-M13 has completed 4 of 5 implementation units. The versioned
+M13 has completed all 5 implementation units. The versioned
 [core acceptance corpus](specs/0134-versioned-core-acceptance-corpus.md)
 derives all 35 mandatory AC/PD criteria from their normative specifications,
 runs the complete core suite and strict Emacs byte compilation from a clean
@@ -51,8 +51,11 @@ replacement transitions. It excludes application evidence and leaves the final
 AC-02 corpus closure open. The [complete core documentation set](docs/README.md)
 now covers all eleven AC-23 categories, validates every local link, and executes
 five marked language, macro, interop, configuration, and REPL examples directly
-through maintained local commands. Only the final M13 acceptance-artifact unit
-remains open.
+through maintained local commands. Canonical
+[`acceptance/manifest.json`](acceptance/manifest.json) and
+[`acceptance/report.md`](acceptance/report.md) now provide the final artifact
+shape and preserve the current incomplete result. AC-24 and final 1.0
+acceptance remain open until every mandatory criterion passes together.
 
 M9 compiler convergence is complete: it includes canonical project requests,
 graph planning, IR serialization, build reports, v1-to-v2 cache migration,
@@ -637,6 +640,7 @@ The versioned project contracts are:
 | [`contracts/compatibility-baseline.json`](contracts/compatibility-baseline.json) | [0046: M7 Compatibility Baseline](specs/0046-m7-compatibility-baseline.md) |
 | [`contracts/compatibility-rehearsal.json`](contracts/compatibility-rehearsal.json) | [0136: Local Compatibility Migration Rehearsal](specs/0136-local-compatibility-migration-rehearsal.md) |
 | [`contracts/documentation.json`](contracts/documentation.json) | [0137: Complete Core Documentation Set](specs/0137-complete-core-documentation.md) |
+| [`contracts/final-acceptance.json`](contracts/final-acceptance.json) | [0138: Versioned Final Acceptance Artifacts](specs/0138-versioned-final-acceptance-artifacts.md) |
 | [`contracts/repository-integrity.json`](contracts/repository-integrity.json) | [0132: Repository Integrity Audits](specs/0132-repository-integrity-audits.md) |
 
 Run warning-as-error Emacs byte compilation with:

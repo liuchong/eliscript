@@ -1112,12 +1112,13 @@ Emacs acceleration contract is accepted independently by AC-16 and AC-17.
 clean, traceable acceptance run. Application validation status is reported but
 cannot block or satisfy this gate.
 
-**M13 implementation status:** In progress, 4/5 units. Specification
+**M13 implementation status:** Complete, 5/5 units. Specification
 [0134-versioned-core-acceptance-corpus.md](0134-versioned-core-acceptance-corpus.md)
 derives the complete AC/PD inventory from normative headings, maps every
 criterion to bounded probes and tracked evidence, and retains one clean audit
-with every mandatory criterion classified and zero failed criteria. This completes the
-corpus-and-report implementation unit without claiming final acceptance.
+with every mandatory criterion classified and zero failed criteria. This
+completes the corpus-and-report implementation unit without claiming final
+acceptance.
 Specification [0135-local-onboarding.md](0135-local-onboarding.md) records the
 six-step local onboarding run and completes AC-22. Specification
 [0136-local-compatibility-migration-rehearsal.md](0136-local-compatibility-migration-rehearsal.md)
@@ -1125,8 +1126,11 @@ records the direct local compatibility rehearsal without claiming final AC-02
 closure. Specification
 [0137-complete-core-documentation.md](0137-complete-core-documentation.md)
 closes the exact eleven-document core inventory, local-link validation, and
-executable snippet gate, completing AC-23. Only final 1.0 acceptance artifacts
-remain open.
+executable snippet gate, completing AC-23. Specification
+[0138-versioned-final-acceptance-artifacts.md](0138-versioned-final-acceptance-artifacts.md)
+provides the canonical manifest, report, evidence summaries, and blocking-defect
+gate. The implementation plan is complete, but AC-24 and the final 1.0 decision
+remain open until all mandatory criteria pass in one source-bound run.
 
 ## Construction Protocol
 
@@ -1451,6 +1455,12 @@ The acceptance directory contains:
 The final goal is reached only when every MUST criterion and PD-01 through
 PD-11 read `pass` in the same manifest and the repository is clean after
 reproducing that result.
+
+**Status:** Partial. Specification 0138 provides the canonical manifest,
+report, five evidence summaries, unresolved-defect register, and deterministic
+final gate. The current candidate remains non-final until every mandatory
+criterion passes in one source-bound run and no severity-1 or severity-2 defect
+remains.
 
 ## Optional Application Validation
 

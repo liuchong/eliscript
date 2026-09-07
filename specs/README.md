@@ -29,20 +29,20 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 137 specifications.
+The registry currently contains 138 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 105 |
+| Accepted design | 106 |
 | Stable design | 30 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 133 |
+| Implemented | 134 |
 | Superseded implementation | 1 |
 
 Compatibility Baseline 2 separately classifies 30 specifications as stable,
-103 as provisional, 3 as planning, and 1 as superseded. That baseline is
+104 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -158,7 +158,7 @@ budgets. Repository integrity checks dependency boundaries, regenerated
 artifacts, and every benchmark source binding. The final M12 exit audit remains
 formal acceptance work.
 
-M13 has completed 4/5 implementation units through specification 0137. Its
+M13 has completed all 5/5 implementation units through specification 0138. Its
 versioned corpus derives all 35 mandatory AC/PD criteria from normative
 headings, maps each criterion to bounded probes and tracked evidence, and
 retains one clean audit with 19 pass, 16 incomplete, and zero failed criteria.
@@ -167,9 +167,12 @@ source-bound onboarding exercise for M13-02 with all six steps passing within
 the active-step budget. Specification 0136 records the passing direct local
 migration rehearsal for M13-03 while explicitly leaving AC-02 incomplete.
 Specification 0137 completes M13-04 and AC-23 with an exact eleven-document
-core inventory, checked local links, and five executable examples. Application
-and publishing documentation remains outside the core gate. Only the final
-acceptance-artifact unit remains open.
+core inventory, checked local links, and five executable examples. Specification
+0138 adds canonical machine-readable and human-readable acceptance artifacts,
+five evidence summaries, a blocking-defect gate, and deterministic rejection
+of forged final results. Application and publishing documentation remains
+outside the core gate. AC-24 and final acceptance remain open because 16
+mandatory criteria are still incomplete.
 
 ## Reading Paths
 
@@ -468,6 +471,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0135 | [Traceable Local Onboarding Exercise](0135-local-onboarding.md) | Accepted | Implemented |
 | 0136 | [Local Compatibility Migration Rehearsal](0136-local-compatibility-migration-rehearsal.md) | Accepted | Implemented |
 | 0137 | [Complete Core Documentation Set](0137-complete-core-documentation.md) | Accepted | Implemented |
+| 0138 | [Versioned Final Acceptance Artifacts](0138-versioned-final-acceptance-artifacts.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

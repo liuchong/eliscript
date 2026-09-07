@@ -1,0 +1,164 @@
+# Eliscript 1.0 Acceptance Report
+
+- Source commit: `27d3c6608553fd9361927726574e05b9772b5045`
+- Source tree: `f4590ce7020d7dfbfd4bc95b4098037e5798f957`
+- Contract: `contracts/final-acceptance.json` (`fc7760bdccc644b014b3513e4020f3647e3128e54676481d1515504967f2651d`)
+- Generated: 2026-09-07T21:08:11.809Z
+- Environment: Darwin 25.6.0; arm64; Bun 1.4.0; Node v26.8.1; Emacs 31.1
+- Corpus complete: yes
+- Operational success: yes
+- Evidence complete: yes
+- Blocking defects: 0
+- Final acceptance: not reached
+
+This is the canonical candidate report. It does not declare Eliscript 1.0 accepted while mandatory criteria remain incomplete.
+
+## Mandatory Criteria
+
+Results: 19 pass, 16 incomplete, 0 fail, 35 total.
+
+| Criterion | Result | Declared state | Remaining work |
+| --- | --- | --- | --- |
+| AC-01 Stable specification coverage | incomplete | partial | Promote every final public language and core library contract to stable with complete evidence. |
+| AC-02 Stable corpus compatibility | incomplete | partial | Freeze and execute the complete final compatibility corpus. |
+| AC-03 Deterministic diagnostics | incomplete | partial | Close exact diagnostic parity over every final negative conformance case. |
+| AC-04 Reproducible fixed point | incomplete | partial | Record the final fixed point on every required matrix cell in one acceptance run. |
+| AC-05 Compiler parity | incomplete | partial | Close seed and self-hosted parity over the final complete shared corpus. |
+| AC-06 Self-hosted authority | pass | complete | - |
+| AC-07 Repeated determinism | incomplete | partial | Run and retain twenty clean identity-equivalent acceptance builds. |
+| AC-08 Clean project workflow | incomplete | partial | Close the documented clean configured check, format-check, build, run, and watch workflow. |
+| AC-09 Correct incremental builds | pass | complete | - |
+| AC-10 Host portability | incomplete | partial | Run the final stable corpus and core CLI fixtures on every supported Bun and Node host. |
+| AC-11 Formatter | pass | complete | - |
+| AC-12 Emacs mode | incomplete | partial | Close the complete maintained mode suite on Emacs 29 and 30 in the final matrix. |
+| AC-13 Interactive evaluation | incomplete | partial | Close documented REPL behavior and restart recovery in the final supported matrix. |
+| AC-14 Source-level debugging evidence | incomplete | partial | Cover every required compiler, runtime, async, and worker failure with exact source spans. |
+| AC-15 Stable library contract | incomplete | partial | Stabilize every core export and close PD-01 through PD-07. |
+| AC-16 Worker correctness and recovery | pass | complete | - |
+| AC-17 End-to-end performance value | pass | complete | - |
+| AC-18 Fuzz robustness | pass | complete | - |
+| AC-19 Scale and soak | pass | complete | - |
+| AC-20 Boundary security | pass | complete | - |
+| AC-21 Supported environment matrix | incomplete | partial | Record the final full suite on all required operating system, Emacs, Bun, and Node cells. |
+| AC-22 Documented local onboarding | pass | complete | - |
+| AC-23 Complete documentation set | pass | complete | - |
+| AC-24 Acceptance audit | incomplete | open | Produce one clean final acceptance manifest and report with every mandatory result. |
+| PD-01 Persistent Semantics | incomplete | partial | Run at least 100000 generated operation sequences for every persistent collection family. |
+| PD-02 Vector Structural Bounds | pass | complete | - |
+| PD-03 HAMT Structural Bounds | pass | complete | - |
+| PD-04 Hash and Equality | pass | complete | - |
+| PD-05 Transient Safety | pass | complete | - |
+| PD-06 Transformation Efficiency | pass | complete | - |
+| PD-07 Host Interop | incomplete | partial | Add the maintained JavaScript package fixture and pass the full supported matrix. |
+| PD-08 Emacs Codec | pass | complete | - |
+| PD-09 Accelerated Operation Correctness | pass | complete | - |
+| PD-10 Emacs Performance Reinvestment | pass | complete | - |
+| PD-11 State Discipline | pass | complete | - |
+
+## Evidence Summaries
+
+| Group | Complete | Criteria | Artifacts |
+| --- | --- | ---: | ---: |
+| benchmark | yes | 3 | 2 |
+| fuzz | yes | 1 | 1 |
+| scale | yes | 4 | 1 |
+| soak | yes | 2 | 2 |
+| test | yes | 35 | 1 |
+
+## Unresolved Defects
+
+No unresolved defects are recorded.
+
+## Application Validation
+
+| Criterion | Result | Core contribution |
+| --- | --- | --- |
+| AV-01 Maintained application validation | not-run | no |
+| AV-02 Browser publishing validation | not-run | no |
+
+## Commands
+
+| Probe | Command | Result | Exit | Duration (ms) | Output SHA-256 |
+| --- | --- | --- | ---: | ---: | --- |
+| core-suite | `make test-core` | pass | 0 | 445422.087 | `56a287fe4ad3742deadff3ed399ed40dd7aae41a75103d1e03388c227a036f61` |
+| strict-byte-compile | `make byte-compile` | pass | 0 | 1111.49 | `4110c50ff8be0d96e678ed5ef31967a2aca72a86558181796ef5f14b5a350c3e` |
+
+## Artifact Digests
+
+| File | SHA-256 |
+| --- | --- |
+| `.github/workflows/compatibility.yml` | `45a2c3941d06adc6d745b4490197beb2a86266fda2685a69a88aeaa6afacfb90` |
+| `acceptance/runs/m13-02.json` | `de2767587a9c5b2ff4280c7a1005d88274f0dc9f6c327edd89a2944d67053355` |
+| `benchmarks/emacs-analysis-macos-arm64.json` | `bc56d58470fb7f60b4e550e7f601716f8670107a8e6c88a14930516359f508db` |
+| `benchmarks/transient-builder-macos-arm64.json` | `68ac7c6e701d58bd91e491b5eb3008136c9d341512ec3207d1614bcf5ac9f6f7` |
+| `benchmarks/worker-lifecycle-soak-macos-arm64.json` | `d722ad3c53c9f632d7a1036fba764e4eb52a66d3fa905ee09abe7ab7b08dd307` |
+| `benchmarks/worker-value-stream-macos-arm64.json` | `0293a6bc1bebbf1d2a969ad90ae32d01a7d3fcc9965e9f54f6acb52e17d39f52` |
+| `contracts/compatibility-baseline.json` | `0ac6c73601b65fbc58674a84a899c1eca2145cda97153ec00b5c612a1587a626` |
+| `contracts/compatibility-matrix.json` | `cb8ef575762f556a13a2ad8113ba56448ea5c14113ca438184e2527ee1eeb38d` |
+| `contracts/core-acceptance-corpus.json` | `14bf087ee7e860cd2d5130aacbcbb42b4ab6064b5c9054864f1ec14c8ea31b54` |
+| `contracts/documentation.json` | `c105c0470f71c66c409651f9152f69fc74a9de8595ed743fe98f8c1d26bf9de8` |
+| `contracts/library-api.json` | `0129e79484f858d59ca7d351cbd955c21115858a12766f8e2b04144cc62f0e62` |
+| `contracts/maturity-progress.json` | `3e8bddef2bd483c14f729ffb2c59151d88f5fb553c6f9526edce72d1cec8f13f` |
+| `contracts/repository-integrity.json` | `44ceeab03e9d268e38ca1abe6a16c3e537e9ac67bced82a782ffb83e731731ef` |
+| `docs/getting-started.md` | `e62e787d11a7d0c7025e1e6e13c8c62dedf6e7c77f68cad8c9681e3bef6460fd` |
+| `editor/eliscript-mode.el` | `ecaa7f3cc14fdd7d2a3e790e869cb3caa5bd863bba5cc0f5c17671882d0a37ab` |
+| `specs/0009-source-maps.md` | `815a59fb934326d33bd765b82001536bce84b6d10ea0ecb28ef8901911c1aea9` |
+| `specs/0019-self-hosted-compiler.md` | `760654f8dfa5bbfd3ff2777110576ea2d5f88eed8b42f6c77873ebe8df8fbe89` |
+| `specs/0040-maturity-roadmap.md` | `6fac926828854a7c347eb07d630273d485796f7ad1bfaf48c34e09583044e408` |
+| `specs/0041-host-symbiosis-and-persistent-data.md` | `01626fa1c762989ae008213f4a9044b6c8f3fa2585ae0fb896d43d04d9b2432f` |
+| `specs/0043-structured-diagnostics.md` | `746bed62e9c34c1c20bb60c7b2c19519f691906e1cbb6f6a43d75609a5fba5c3` |
+| `specs/0048-value-equality-and-hashing.md` | `18c4a40f98490a2e173b5da2d9536b8a155a51f2598d3249b2dceecfe72c4784` |
+| `specs/0072-atomic-state-references.md` | `18f9a7fbd42e5c12cad67dbcfdd6be0c009cad61d9d2fde19fe231bc3c06970c` |
+| `specs/0073-native-javascript-container-interop.md` | `13880ce43bd5ce4fb4ef867e8ef74483b41e23d3243e9cc4669ed297d402a2e0` |
+| `specs/0078-persistent-collection-core-exit-audit.md` | `8b072692a0c5aa2ff28ca6d2d292925da7a211d06efe2271eb0c1f6591b1daa7` |
+| `specs/0093-static-transient-ownership-analysis.md` | `fa82e7c3860cd1611a3f52193b7202bd99faba7cef4863b15dcf66cbb2ceda96` |
+| `specs/0104-accelerated-emacs-operation-service.md` | `88de328860ac1b3ce243f3a37b883184beca4e59462775f2ff04a8556e4a596e` |
+| `specs/0105-emacs-analysis-performance-reinvestment.md` | `5edf7204e0fb30e6b473f7ae5d661d3c2eb5b7b12d43f164184318ab393b76d7` |
+| `specs/0112-unified-self-hosted-build-operation.md` | `42efd18488b36b794c04e37e4556d6bc09aa003418d0dd33516f41827864aedb` |
+| `specs/0114-deterministic-concrete-syntax-formatter.md` | `e5366273f4f086be96da7c6f10d2f914337e728eb4b4ebb560cba434515b148b` |
+| `specs/0120-interactive-terminal-repl.md` | `f408c8beba9ef8dbefa8239d9909b330364a558c3ba48c5305e1cf48932f98fe` |
+| `specs/0127-deterministic-reader-program-fuzz.md` | `1892469b6da46f0bc3ff5007da401b4fa3735ed166459cfb01c741b8360110d2` |
+| `specs/0128-project-scale-invalidation.md` | `7c62b058147263cfa954bf50e1a24c574fc9d6bb0ebb76559fea924df55189d5` |
+| `specs/0130-hostile-boundary-security.md` | `f1f24c4ddf55a78641d2ebe9557573c19e0e843718e9eb6224c8dff16b5434f5` |
+| `specs/0135-local-onboarding.md` | `b618aca083da1c337f502b185a44048b41b0d064ca15653fc9036f97eb020a04` |
+| `specs/index.json` | `fa42dfab5adbb47cd3442f78587433960ff6d74eae2b527a64b2915e5ea60a11` |
+| `tests/api-index.test.mjs` | `b18dec01c02807f490019bc28d01491c835d2c1943013b539f7a7b1c949f8246` |
+| `tests/atom.test.mjs` | `1403c404bf1c49c2532899a3ffe306536cf2affc7400d08d785439a9d5dcc296` |
+| `tests/bootstrap-analyzer.test.mjs` | `9e844ab90404cda65b61fca365bb25a61247f9e1b13eb2367e33274ef7f10066` |
+| `tests/bootstrap-compiler.test.mjs` | `6725cb92b5ef5dca952f94e3ae3002c1e0b770fb7ba7e35ff3470fb8755a8d40` |
+| `tests/bootstrap-emitter.test.mjs` | `bc037864bd2389d17b906033d2b474a53fd07ae1074108a74cd338cd744197ca` |
+| `tests/bootstrap-evaluation.test.mjs` | `08db27a96004401e3085387eb3d959f79e87317f9e67f449bed98faae29052c0` |
+| `tests/bootstrap-formatter.test.mjs` | `eca99f473e1e83384c078b13e3c4e33a1e32ba00752e086afdbc86b71361f85e` |
+| `tests/bootstrap-ir.test.mjs` | `049355f3ed1766d4e01e08e4a951e59fc700b6e1b6c7e12c64c3b602fe537265` |
+| `tests/bootstrap-project.test.mjs` | `4e7e0b217e2c0655acd266190ca1c7f15960170d6efb62579281976479dd4a8c` |
+| `tests/boundary-security.test.mjs` | `1d63fcc782b15b8a72c451fc5354b457945779ef0882b5b11856cfe6f9be3650` |
+| `tests/ci-contract.test.mjs` | `56ed36c60aa1af5d51ee105ea2d5854cf9a6d37749eb03a7cc322bf54d3ca09e` |
+| `tests/conformance.test.mjs` | `22c1a6b22caa24cdd2dd65617c10b97d5fea85bf3306e846c7c7c8c2a0a9901f` |
+| `tests/conformance/manifest.json` | `2d5afaa3d3f40e4d04f19a7f842e2bac67fdac0d54c8ffbfa7e72547b876e6c2` |
+| `tests/core-stdlib.test.mjs` | `333371f1c51d66ae8ea38d019c6289941cd516ce9f9bae04193def8a07b03f80` |
+| `tests/eliscript-mode-tests.el` | `5e7e22d28c8cf6472cb80778fd8790df2a6963b457ef5300ce4b984b068791e9` |
+| `tests/eliscript-repl-tests.el` | `68f9f92967aabcf26ef9bd2d605368f5df062e524698dd031407c2ca783ac54e` |
+| `tests/emacs-analysis-evidence.test.mjs` | `17b1f280f4df04d1cfd2a6f9c35f1e89a04c9189fb38ff3294c97596050e3d57` |
+| `tests/esm-imports.test.mjs` | `73db20c832401a1930f6d4e686f0fd9d28a2553bf6ad25f3ea3cc8bee55c2d5f` |
+| `tests/format-cli-test.sh` | `21cfbe2fd3de2fd908e5bfb01c9e3f8fa874c6b0e6d3c6b4539e4532567a6999` |
+| `tests/interop-js.test.mjs` | `f76f8aeb7ca895b44732a6c07716ee5cf6657023cbf6bc6e28c7583db65d35f0` |
+| `tests/local-onboarding.test.mjs` | `759ccfa512954e46ca1743f99e9d1f28cbdaffe5933c82546e48a6b1f7f2d099` |
+| `tests/onboarding-docs.test.mjs` | `c9d6613c2c739e0daf0d584d6dea94176148ea2a02cf6d7df766d69d4b6d9612` |
+| `tests/persistent-core-exit.test.mjs` | `5d11be51f0a16955444cc3b602b50b045222e2d93b5629bd8883d0d6ef45332f` |
+| `tests/persistent-list.test.mjs` | `d5984bb76486e4dd62fa1014b57e5b9112a533920f8172a07b6ab13d07173ed1` |
+| `tests/persistent-map.test.mjs` | `9fe586b9d5a490b3dad9cc05a047ea2ca8110c29228fe45232ec43058dd4315f` |
+| `tests/persistent-set.test.mjs` | `8441b04e8b0537882d0c2f3c14a721b5e1ab7f5bb03090de1a372036c3193af0` |
+| `tests/persistent-vector.test.mjs` | `2b041cc00f1c55d84ec051f9e8f33e71f30c4d74532b7e477b615afb50c21bb2` |
+| `tests/project-cli-test.sh` | `8ae6ed64eec2426316ae2df6d615febe80916fc48e1231eb5cd9324011b638ad` |
+| `tests/project-scale.test.mjs` | `99a42aedd7c492c2d4879be162b971975cb82a4c4fd98b5a7a7a6aae773101fb` |
+| `tests/reader-program-fuzz.test.mjs` | `25cce0d793718ba62c4eaf6a4a274c26f89d5cd1c1572fddd9b1d12720e10e90` |
+| `tests/transducer.test.mjs` | `19574e782a24dca32be074ccf555fb41598491e975fcbc8cf76e694ade8c4974` |
+| `tests/transient-builder-benchmark.test.mjs` | `e1022dab110a6eee6a3e196da73c29aee89494e1908b03e41a4909cc1e4e64d8` |
+| `tests/transient.test.mjs` | `92571f68ce457c35f8a95cbebad0a464ee445c14283831760aac9d8af77a26af` |
+| `tests/value-semantics.test.mjs` | `b93063dd3e8a0dfe657240c6aea8039104d5e8103038c7f1955ae9361483e901` |
+| `tests/watch.test.mjs` | `241c2117f6e1856e5afb0dbea9135d92d5d7895bc6cd3b84dd66fb73b7ca407a` |
+| `tests/worker-lifecycle-soak.test.mjs` | `c4e38de152c6f3692ccd09797ed3f38cc1f4465b46a61d1445b332aa2e305f05` |
+| `tests/worker-runtime.test.mjs` | `10d3f6bac937312d09ec9fd878f5f781ac8b92aa8401d05156216de4c53bd98e` |
+| `tests/worker-value-stream-probe.test.mjs` | `19dac4fabbf7878afbaef9120bb91a5e3c413fd706fc65e4c7d0f5e6930c30b0` |
+| `tools/documentation/check.mjs` | `eb19276b62b18c4d8aaa443b97ec5a9252bfd4d0acc744c5762aedcac9bc6447` |
+| `tools/integrity/check.mjs` | `90e25918f18a212424ac2e81d5c1a89081ba6be7b0b58c7ddb11b83ea46a1ac3` |

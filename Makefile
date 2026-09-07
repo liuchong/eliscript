@@ -29,6 +29,7 @@ test-core: check-contracts
 		tests/core-performance-benchmark.test.mjs \
 		tests/maturity-progress.test.mjs \
 		tests/core-acceptance-corpus.test.mjs \
+		tests/final-acceptance.test.mjs \
 		tests/esm-imports.test.mjs \
 		tests/ci-contract.test.mjs \
 		tests/collection-layout-benchmark.test.mjs \
@@ -101,6 +102,7 @@ ifneq ($(ELISCRIPT_SKIP_RETAINED_ACCEPTANCE),1)
 	$(BUN) tools/acceptance/check.mjs \
 		--verify-run acceptance/runs/m13-01.json \
 		--verify-markdown acceptance/runs/m13-01.md
+	$(BUN) tools/acceptance/finalize.mjs --verify
 endif
 	$(BUN) tools/surface/check.mjs
 	$(BUN) tools/surface/generate-api.mjs --check

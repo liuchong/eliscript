@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "format": "eliscript-final-acceptance-contract",
+  "version": 1,
+  "source": {
+    "run": "acceptance/runs/m13-01.json",
+    "report": "acceptance/runs/m13-01.md"
+  },
+  "defects": "acceptance/defects.json",
+  "outputs": {
+    "manifest": "acceptance/manifest.json",
+    "report": "acceptance/report.md"
+  },
+  "blockingSeverities": [1, 2],
+  "evidenceGroups": [
+    {
+      "id": "benchmark",
+      "criteria": ["AC-17", "PD-06", "PD-10"],
+      "artifacts": [
+        "benchmarks/emacs-analysis-macos-arm64.json",
+        "benchmarks/transient-builder-macos-arm64.json"
+      ]
+    },
+    {
+      "id": "fuzz",
+      "criteria": ["AC-18"],
+      "artifacts": ["tests/reader-program-fuzz.test.mjs"]
+    },
+    {
+      "id": "scale",
+      "criteria": ["AC-09", "AC-19", "PD-02", "PD-03"],
+      "artifacts": ["tests/project-scale.test.mjs"]
+    },
+    {
+      "id": "soak",
+      "criteria": ["AC-19", "PD-08"],
+      "artifacts": [
+        "benchmarks/worker-lifecycle-soak-macos-arm64.json",
+        "benchmarks/worker-value-stream-macos-arm64.json"
+      ]
+    },
+    {
+      "id": "test",
+      "criteria": ["*"],
+      "artifacts": ["contracts/core-acceptance-corpus.json"]
+    }
+  ]
+}

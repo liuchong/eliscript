@@ -33,11 +33,11 @@ test("maturity progress is derived from explicit core acceptance units", async (
     format: "eliscript-maturity-progress-report",
     version: 1,
     implementation: {
-      completed: 41,
+      completed: 42,
       total: 42,
-      completedPercent: 97.6,
-      remaining: 1,
-      remainingPercent: 2.4,
+      completedPercent: 100,
+      remaining: 0,
+      remainingPercent: 0,
       milestones: {
         M7: { completed: 6, total: 6, completedPercent: 100, remaining: 0, remainingPercent: 0 },
         M8: { completed: 7, total: 7, completedPercent: 100, remaining: 0, remainingPercent: 0 },
@@ -45,11 +45,9 @@ test("maturity progress is derived from explicit core acceptance units", async (
         M10: { completed: 6, total: 6, completedPercent: 100, remaining: 0, remainingPercent: 0 },
         M11: { completed: 6, total: 6, completedPercent: 100, remaining: 0, remainingPercent: 0 },
         M12: { completed: 6, total: 6, completedPercent: 100, remaining: 0, remainingPercent: 0 },
-        M13: { completed: 4, total: 5, completedPercent: 80, remaining: 1, remainingPercent: 20 },
+        M13: { completed: 5, total: 5, completedPercent: 100, remaining: 0, remainingPercent: 0 },
       },
-      incomplete: [
-        "M13-05",
-      ],
+      incomplete: [],
       blocked: [],
     },
     verification: {
@@ -68,11 +66,11 @@ test("maturity progress is derived from explicit core acceptance units", async (
     },
     stabilization: {
       completed: 28,
-      total: 131,
-      completedPercent: 21.4,
-      remaining: 103,
-      remainingPercent: 78.6,
-      provisional: 103,
+      total: 132,
+      completedPercent: 21.2,
+      remaining: 104,
+      remainingPercent: 78.8,
+      provisional: 104,
       excludedFeatureIds: ["publishing.org-adapter", "tooling.vite-adapter"],
     },
     applications: {
