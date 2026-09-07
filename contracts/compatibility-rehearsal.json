@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "format": "eliscript-compatibility-rehearsal",
+  "version": 1,
+  "environment": {
+    "provider": "local",
+    "requiredCommands": ["bun", "emacs", "git", "node"]
+  },
+  "scope": {
+    "kind": "migration-rehearsal",
+    "completesAc02": false,
+    "applicationEvidence": false
+  },
+  "stablePrograms": [
+    {
+      "id": "stable-core-values",
+      "source": "tests/fixtures/compatibility/stable-core-values.eli",
+      "expectedStdout": "tests/fixtures/compatibility/stable-core-values.stdout",
+      "compilers": ["seed", "self-hosted"],
+      "runtimes": ["bun", "node"]
+    }
+  ],
+  "migrations": [
+    {
+      "id": "framework-neutral-core",
+      "kind": "contract-replacement",
+      "fromSpec": "0010",
+      "toSpec": "0118",
+      "applicationEvidence": false
+    },
+    {
+      "id": "native-container-aliases",
+      "kind": "source-rewrite",
+      "fromSpec": "0073",
+      "toSpec": "0095",
+      "legacySource": "tests/fixtures/compatibility/native-containers-v1.eli",
+      "currentSource": "tests/fixtures/compatibility/native-containers-v2.eli",
+      "expectedStdout": "tests/fixtures/compatibility/native-containers-v2.stdout",
+      "expectedLegacyDiagnostic": {
+        "code": "ELI-A0001",
+        "phase": "analysis",
+        "message": "unbound symbol: array"
+      }
+    },
+    {
+      "id": "project-cache-v1-to-v2",
+      "kind": "automatic",
+      "fromSpec": "0031",
+      "toSpec": "0110",
+      "ertTest": "eliscript-project-migrates-legacy-cache-on-successful-read"
+    }
+  ],
+  "sourceFiles": [
+    "contracts/compatibility-baseline.json",
+    "contracts/compatibility-rehearsal.json",
+    "specs/0010-react-elements.md",
+    "specs/0031-incremental-project-builds.md",
+    "specs/0073-native-javascript-container-interop.md",
+    "specs/0095-stable-persistent-host-container-boundary.md",
+    "specs/0110-self-hosted-incremental-project-cache.md",
+    "specs/0118-framework-neutral-library-interop.md",
+    "specs/0136-local-compatibility-migration-rehearsal.md",
+    "specs/index.json",
+    "tests/compatibility-rehearsal.test.mjs",
+    "tests/fixtures/compatibility/native-containers-v1.eli",
+    "tests/fixtures/compatibility/native-containers-v2.eli",
+    "tests/fixtures/compatibility/native-containers-v2.stdout",
+    "tests/fixtures/compatibility/stable-core-values.eli",
+    "tests/fixtures/compatibility/stable-core-values.stdout",
+    "tools/compatibility/rehearse.mjs"
+  ]
+}

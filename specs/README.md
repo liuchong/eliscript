@@ -28,20 +28,20 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 135 specifications.
+The registry currently contains 136 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 103 |
+| Accepted design | 104 |
 | Stable design | 30 |
 | Superseded design | 1 |
-| Implementation in progress | 3 |
+| Implementation in progress | 4 |
 | Implemented | 131 |
 | Superseded implementation | 1 |
 
 Compatibility Baseline 2 separately classifies 30 specifications as stable,
-101 as provisional, 3 as planning, and 1 as superseded. That baseline is
+101 as provisional, 4 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -163,7 +163,8 @@ headings, maps each criterion to bounded probes and tracked evidence, and
 retains one clean audit with 18 pass, 17 incomplete, and zero failed criteria.
 The final acceptance flag remains false. Specification 0135 records the local,
 source-bound onboarding exercise for M13-02 with all six steps passing within
-the active-step budget.
+the active-step budget. Specification 0136 defines the direct local migration
+rehearsal for M13-03; completion awaits a clean retained run.
 
 ## Reading Paths
 
@@ -460,6 +461,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0133 | [Verified Installation and Daily Development Guide](0133-verified-onboarding-documentation.md) | Accepted | Implemented |
 | 0134 | [Versioned Core Acceptance Corpus and Truthful Audit Run](0134-versioned-core-acceptance-corpus.md) | Accepted | Implemented |
 | 0135 | [Traceable Local Onboarding Exercise](0135-local-onboarding.md) | Accepted | Implemented |
+| 0136 | [Local Compatibility Migration Rehearsal](0136-local-compatibility-migration-rehearsal.md) | Accepted | In progress |
 
 ## Adding a Specification
 
