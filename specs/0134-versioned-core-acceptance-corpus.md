@@ -109,14 +109,14 @@ bun tools/acceptance/check.mjs --verify-run acceptance/runs/m13-01.json \
   --verify-markdown acceptance/runs/m13-01.md
 ```
 
-## Initial Retained Run
+## Current Retained Run
 
-The first retained run evaluates source commit `8b2149357a7726fad0eb0fd0636044cec49230dd`
-and Git tree `21a2121bba0177380814e2c3bc092466e5e4065d` on macOS arm64 with
-Bun 1.4.0, Node 26.8.1, and Emacs 31.1. Both the complete suite and strict byte
+The retained run evaluates source commit `b72f214bbd0065723ea2f9710f26629f1dc4c114`
+and Git tree `8201ee0bdcc3f0f07135de45b0c433aebe486c93` on macOS arm64 with
+Bun 1.4.0, Node 26.8.1, and Emacs 31.1. Both the core suite and strict byte
 compilation pass, and the checkout remains clean before and after the probes.
 
-All 35 mandatory criteria receive a result: 17 pass, 18 remain incomplete, and
+All 35 mandatory criteria receive a result: 18 pass, 17 remain incomplete, and
 none fail. `corpusComplete` and `operationalSuccess` are true while
 `acceptancePass` is false. AV-01 and AV-02 are explicitly `not-run` and remain
 non-contributing. The exact command and artifact digests are retained under
