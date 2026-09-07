@@ -69,7 +69,7 @@ now grant only named host authority, inject request-scoped progress and
 cancellation into the real worker, and re-export the canonical worker codecs.
 Compatibility stabilization and the final M11 exit audit remain open.
 
-M12 reliability work now has five of six implementation units complete. The
+M12 reliability work now has all six implementation units complete. The
 deterministic reader/program fuzz suite replays 100,000 grammar-aware and
 complete-module mutation inputs with seed/self-hosted parity, recursive spans,
 formatter round trips, structured diagnostics, and fixed identities. The
@@ -89,8 +89,13 @@ across Emacs seed, Bun, and Node paths while preserving protected inputs. See
 performance corpus now retains three independent compiler, project-build, real
 Emacs worker, and persistent-data workload runs with exact correctness
 identities and fixed regression budgets. See
-[0131](specs/0131-source-bound-core-performance-baseline.md). Only the
-dependency and generated-artifact audit unit remains open.
+[0131](specs/0131-source-bound-core-performance-baseline.md). The closed
+repository-integrity contract now pins dependency boundaries, requires zero
+third-party packages in core roots, reproduces generated outputs, checks
+generator-owned API and workflow files, and validates the exact source-bound
+benchmark inventory. See
+[0132](specs/0132-repository-integrity-audits.md). The final quantitative M12
+exit audit remains separate from implementation completion.
 
 Run `bun run progress` for the current evidence-derived core progress report.
 It reports implementation, verification, and stabilization independently;

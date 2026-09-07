@@ -442,6 +442,11 @@ under Bun and Node.
 
 ## Benchmarks, Projects, and Worker
 
+`repository-integrity.test.mjs` runs the complete dependency and artifact audit
+against the real tracked repository. Negative cases prove that package boundary
+violations, undeclared packages, stale benchmark digests, missing generated
+module registrations, and missing benchmark registrations fail closed.
+
 Collection-layout benchmark tests execute equivalent real HAMT node operations,
 smoke-test the Bun and Node host adapters, and validate the committed
 Bun/Node/Chrome baseline. They recompute its source digest and 32/24 threshold

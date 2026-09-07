@@ -1021,7 +1021,7 @@ input, large projects, long-lived use, and hostile project boundaries.
 **Exit gate:** All quantitative reliability and performance requirements in
 the final acceptance matrix pass without an unexplained waiver.
 
-**M12 implementation status:** In progress, 5/6 units. Specification
+**M12 implementation status:** Complete, 6/6 units. Specification
 [0127-deterministic-reader-program-fuzz.md](0127-deterministic-reader-program-fuzz.md)
 completes the grammar-aware and complete-module mutation suite with 100,000
 deterministic inputs, fixed replay identities, seed/self-hosted reader
@@ -1044,8 +1044,14 @@ the Emacs seed, Bun, and Node paths. Specification
 [0131-source-bound-core-performance-baseline.md](0131-source-bound-core-performance-baseline.md)
 adds three independent, source-bound compiler, project-build, real Emacs worker,
 and persistent-data workload runs with correctness identities, raw samples,
-declared host metadata, and fixed median, any-run, and spread budgets. Only the
-dependency and generated-artifact audit remains open.
+declared host metadata, and fixed median, any-run, and spread budgets.
+Specification
+[0132-repository-integrity-audits.md](0132-repository-integrity-audits.md)
+closes package and static import boundaries, requires zero third-party package
+imports in core roots, reproduces generated compiler and derived artifacts, and
+validates the exact source-bound benchmark inventory. The final quantitative
+M12 exit audit remains part of formal acceptance rather than implementation
+credit.
 
 ### M13: Core Acceptance and Application Validation (5 implementation units)
 
