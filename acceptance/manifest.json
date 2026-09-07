@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "format": "eliscript-1.0-acceptance-manifest",
   "version": 1,
-  "generatedAt": "2026-09-07T23:03:19.604Z",
+  "generatedAt": "2026-09-07T23:46:26.546Z",
   "source": {
-    "commit": "cc6dbe9cd19dc0dfa45a84fa9fd9b076c47c6ea1",
-    "tree": "25ba97438e758afca8a2da888ccc4d83a65020f0",
+    "commit": "3ac39c74760482116e7cbffa88ffc54d85fe2ee1",
+    "tree": "67d66265a0fcbcba0f467fbe33bd3a19a222c540",
     "cleanBefore": true,
     "cleanAfter": true
   },
@@ -24,9 +24,9 @@
   },
   "sourceRun": {
     "json": "acceptance/runs/m13-01.json",
-    "jsonSha256": "614f5f0e31087c5f6d12a9537d0b09e339ddb6a6dcd313f0b3433824be6436ff",
+    "jsonSha256": "cc8aed287fdef53b6a62371bd5d41f8d29755c57f8e8094e56b2163686f0ebd0",
     "markdown": "acceptance/runs/m13-01.md",
-    "markdownSha256": "388d44396aeff42e5f41545ed435e7d857124f2728d6468539efe2de88dc0830"
+    "markdownSha256": "e4f29be7ae239c544f28824bee4a32c2829123e6e7da7ba87f37a8d513495aca"
   },
   "commands": [
     {
@@ -39,9 +39,9 @@
       "status": "pass",
       "exitCode": 0,
       "timedOut": false,
-      "durationMs": 455325.777,
-      "outputSha256": "f585899cbb41565195a979565e93fa00792800c3a8cdd0e7020466e7c486aef5",
-      "summary": "0 fail | 1031559 expect() calls | Ran 302 tests across 84 files. [436.18s]"
+      "durationMs": 472165.791,
+      "outputSha256": "99c6da355fb766188ac4b38cef5020916864aa84c8e4ce399def847d0903bf07",
+      "summary": "0 fail | 1031813 expect() calls | Ran 302 tests across 84 files. [452.78s]"
     },
     {
       "id": "strict-byte-compile",
@@ -53,7 +53,7 @@
       "status": "pass",
       "exitCode": 0,
       "timedOut": false,
-      "durationMs": 930.42,
+      "durationMs": 1011.984,
       "outputSha256": "4110c50ff8be0d96e678ed5ef31967a2aca72a86558181796ef5f14b5a350c3e",
       "summary": "EMACS=\"emacs\" ./tools/ci/strict-byte-compile.sh"
     }
@@ -100,6 +100,9 @@
       ],
       "evidence": [
         "specs/0043-structured-diagnostics.md",
+        "tests/bootstrap-analyzer.test.mjs",
+        "tests/bootstrap-expander.test.mjs",
+        "tests/bootstrap-reader.test.mjs",
         "tests/conformance.test.mjs"
       ],
       "remaining": "Close exact diagnostic parity over every final negative conformance case."
@@ -605,11 +608,11 @@
     },
     {
       "file": "acceptance/manifest.json",
-      "sha256": "76aeaa658c154933835f485165ff4adbd17e1e23464a5d5cdc0bf0983eaf0fb4"
+      "sha256": "bdafe135e45bff31ec68b97c81f9e5fe6046abbaecb5a4d7e6be3a5136b2a783"
     },
     {
       "file": "acceptance/report.md",
-      "sha256": "f2a3edba1d17916edd2f3541f8b0d9feab710e92ef9704de712ab4201d72a3df"
+      "sha256": "66f6ee6d48c241399c4704712dff8843fa8533f9287037d554286e68517367aa"
     },
     {
       "file": "acceptance/runs/m13-02.json",
@@ -641,7 +644,7 @@
     },
     {
       "file": "contracts/core-acceptance-corpus.json",
-      "sha256": "77e13f6e5c3ee4b9ddb3720b640ea22b60cb91814a3f2a301fe7af0a0e38313c"
+      "sha256": "dfff11aceb40d62dd06ec53d43c0d4e27b39b2a7a70cb1607dd44bb0525f728b"
     },
     {
       "file": "contracts/documentation.json",
@@ -689,7 +692,7 @@
     },
     {
       "file": "specs/0043-structured-diagnostics.md",
-      "sha256": "746bed62e9c34c1c20bb60c7b2c19519f691906e1cbb6f6a43d75609a5fba5c3"
+      "sha256": "e3860092d05169c19ce58a461067556e26b478a062365c81acc2313facfe6ccf"
     },
     {
       "file": "specs/0048-value-equality-and-hashing.md",
@@ -733,7 +736,7 @@
     },
     {
       "file": "specs/0127-deterministic-reader-program-fuzz.md",
-      "sha256": "1892469b6da46f0bc3ff5007da401b4fa3735ed166459cfb01c741b8360110d2"
+      "sha256": "2beb745f7ccf537fff47feeae46924d35fa3e4fe142aed0ced6adf15b926a16d"
     },
     {
       "file": "specs/0128-project-scale-invalidation.md",
@@ -769,7 +772,7 @@
     },
     {
       "file": "tests/bootstrap-analyzer.test.mjs",
-      "sha256": "9e844ab90404cda65b61fca365bb25a61247f9e1b13eb2367e33274ef7f10066"
+      "sha256": "d348d2ce436664663211a9b9ae7407dd60819bb8a83beab899d5dbcfad05ac0b"
     },
     {
       "file": "tests/bootstrap-compiler.test.mjs",
@@ -784,6 +787,10 @@
       "sha256": "08db27a96004401e3085387eb3d959f79e87317f9e67f449bed98faae29052c0"
     },
     {
+      "file": "tests/bootstrap-expander.test.mjs",
+      "sha256": "905da4acf5bb6be21cf4928b31620eb04049d5a37a3794c1d57e771a73235db9"
+    },
+    {
       "file": "tests/bootstrap-formatter.test.mjs",
       "sha256": "eca99f473e1e83384c078b13e3c4e33a1e32ba00752e086afdbc86b71361f85e"
     },
@@ -794,6 +801,10 @@
     {
       "file": "tests/bootstrap-project.test.mjs",
       "sha256": "4e7e0b217e2c0655acd266190ca1c7f15960170d6efb62579281976479dd4a8c"
+    },
+    {
+      "file": "tests/bootstrap-reader.test.mjs",
+      "sha256": "2cc277bd6692093186edb62fa2b6193cf5e0648dba8c30c6ce07338004d346a8"
     },
     {
       "file": "tests/boundary-security.test.mjs",
@@ -889,7 +900,7 @@
     },
     {
       "file": "tests/reader-program-fuzz.test.mjs",
-      "sha256": "25cce0d793718ba62c4eaf6a4a274c26f89d5cd1c1572fddd9b1d12720e10e90"
+      "sha256": "c568f59570a55e4b95fd75833ee262a042bb285bc113fee6ba6ab8eec1a6424e"
     },
     {
       "file": "tests/transducer.test.mjs",
@@ -981,7 +992,7 @@
       "artifacts": [
         {
           "file": "tests/reader-program-fuzz.test.mjs",
-          "sha256": "25cce0d793718ba62c4eaf6a4a274c26f89d5cd1c1572fddd9b1d12720e10e90"
+          "sha256": "c568f59570a55e4b95fd75833ee262a042bb285bc113fee6ba6ab8eec1a6424e"
         }
       ]
     },
@@ -1185,7 +1196,7 @@
       "artifacts": [
         {
           "file": "contracts/core-acceptance-corpus.json",
-          "sha256": "77e13f6e5c3ee4b9ddb3720b640ea22b60cb91814a3f2a301fe7af0a0e38313c"
+          "sha256": "dfff11aceb40d62dd06ec53d43c0d4e27b39b2a7a70cb1607dd44bb0525f728b"
         }
       ]
     }
