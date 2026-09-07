@@ -12,6 +12,9 @@ import {
 } from "../tools/acceptance/check.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const retainedReportTest = process.env.ELISCRIPT_SKIP_RETAINED_ACCEPTANCE === "1"
+  ? test.skip
+  : test;
 
 async function contract() {
   return JSON.parse(
@@ -89,33 +92,39 @@ test("core acceptance corpus keeps applications outside core evidence", async ()
   );
 });
 
-test("retained M13 audit is complete operational evidence without a final claim", async () => {
-  const report = await verifyAcceptanceRun("acceptance/runs/m13-01.json", {
-    root: ROOT,
-    markdownFile: "acceptance/runs/m13-01.md",
-  });
+retainedReportTest(
+  "retained M13 audit is complete operational evidence without a final claim",
+  async () => {
+    const report = await verifyAcceptanceRun("acceptance/runs/m13-01.json", {
+      root: ROOT,
+      markdownFile: "acceptance/runs/m13-01.md",
+    });
 
-  expect(report.summary).toEqual({
-    criteria: { pass: 17, incomplete: 18, fail: 0, total: 35 },
-    corpusComplete: true,
-    operationalSuccess: true,
-    acceptancePass: false,
-  });
-  expect(report.source).toMatchObject({ cleanBefore: true, cleanAfter: true });
-  expect(report.applications.every((entry) =>
-    entry.result === "not-run" && entry.contributesToCore === false)).toBe(true);
-});
+    expect(report.summary).toEqual({
+      criteria: { pass: 17, incomplete: 18, fail: 0, total: 35 },
+      corpusComplete: true,
+      operationalSuccess: true,
+      acceptancePass: false,
+    });
+    expect(report.source).toMatchObject({ cleanBefore: true, cleanAfter: true });
+    expect(report.applications.every((entry) =>
+      entry.result === "not-run" && entry.contributesToCore === false)).toBe(true);
+  },
+);
 
-test("retained M13 audit rejects a forged final acceptance result", async () => {
-  const report = JSON.parse(
-    await readFile(path.join(ROOT, "acceptance/runs/m13-01.json"), "utf8"),
-  );
-  report.summary.acceptancePass = true;
+retainedReportTest(
+  "retained M13 audit rejects a forged final acceptance result",
+  async () => {
+    const report = JSON.parse(
+      await readFile(path.join(ROOT, "acceptance/runs/m13-01.json"), "utf8"),
+    );
+    report.summary.acceptancePass = true;
 
-  await expect(verifyAcceptanceRun("unused.json", {
-    root: ROOT,
-    report,
-  })).rejects.toMatchObject({
-    errors: ["run summary is not derived from recorded results"],
-  });
-});
+    await expect(verifyAcceptanceRun("unused.json", {
+      root: ROOT,
+      report,
+    })).rejects.toMatchObject({
+      errors: ["run summary is not derived from recorded results"],
+    });
+  },
+);
