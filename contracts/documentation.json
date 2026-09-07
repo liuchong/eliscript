@@ -1,52 +1,94 @@
 {
   "schemaVersion": 1,
   "format": "eliscript-documentation-contract",
-  "version": 1,
-  "guides": [
+  "version": 2,
+  "documents": [
     {
       "id": "getting-started",
       "file": "docs/getting-started.md",
-      "requiredSections": [
-        "Supported Environment",
-        "Install from a Checkout",
-        "Create a Project",
-        "Check Format Build and Run",
-        "Unsaved Source and Diagnostics",
-        "Terminal REPL",
-        "Emacs Setup",
-        "Project Watch",
-        "Troubleshooting",
-        "Verification Boundaries"
-      ],
-      "requiredLiterals": [
-        "ELISCRIPT_JS_RUNTIME=node",
-        "M-x eliscript-mode-stop-watch",
-        "M-x eliscript-mode-watch-project",
-        "bun install --frozen-lockfile",
-        "bun run check:contracts",
-        "bun run check:integrity",
-        "bun run test",
-        "eliscript-build --config eliscript.json",
-        "eliscript-check --json --config eliscript.json",
-        "eliscript-eval --repl --root",
-        "eliscript-format --check",
-        "eliscript-watch --config eliscript.json --json",
-        "make byte-compile"
-      ]
+      "requiredSections": ["Supported Environment", "Install from a Checkout", "Create a Project", "Check Format Build and Run", "Unsaved Source and Diagnostics", "Terminal REPL", "Emacs Setup", "Project Watch", "Troubleshooting", "Verification Boundaries"],
+      "requiredLiterals": ["ELISCRIPT_JS_RUNTIME=node", "M-x eliscript-mode-stop-watch", "M-x eliscript-mode-watch-project", "bun install --frozen-lockfile", "bun run check:contracts", "bun run check:integrity", "bun run test", "eliscript-build --config eliscript.json", "eliscript-check --json --config eliscript.json", "eliscript-eval --repl --root", "eliscript-format --check", "eliscript-watch --config eliscript.json --json", "make byte-compile"]
+    },
+    {
+      "id": "language-reference",
+      "file": "docs/language-reference.md",
+      "requiredSections": ["Source Model", "Values And Collections", "Bindings And Functions", "Control Flow", "Modules", "Diagnostics And Source Maps", "Compatibility Status"],
+      "requiredLiterals": ["defportable", "eliscript-diagnostic", "hash-map", "js-array", "recur"]
+    },
+    {
+      "id": "macros",
+      "file": "docs/macros.md",
+      "requiredSections": ["Expansion Model", "Quote And Quasiquote", "Generated Names", "Declared File Inputs", "Diagnostics", "Design Boundary"],
+      "requiredLiterals": ["defmacro", "gensym", "&body", "macro dependency"]
+    },
+    {
+      "id": "javascript-interop",
+      "file": "docs/javascript-interop.md",
+      "requiredSections": ["Explicit Imports", "Native Containers", "Properties And Calls", "Persistent Conversion", "Host Capabilities"],
+      "requiredLiterals": ["js-array", "js-object", "js-call", "object-assoc"]
+    },
+    {
+      "id": "project-configuration",
+      "file": "docs/project-configuration.md",
+      "requiredSections": ["Configuration File", "Paths And Containment", "Check And Build", "Overrides", "Incremental Cache", "Watch"],
+      "requiredLiterals": ["eliscript.json", "schemaVersion", "sourceRoot", "--stdin-file"]
+    },
+    {
+      "id": "compiler-architecture",
+      "file": "compiler/README.md",
+      "requiredSections": ["Modules", "Project Requests", "Pipeline", "Persistent Literal Linking", "Source Discipline"],
+      "requiredLiterals": ["eliscript-ir", "Source Map v3", "self-hosted"]
+    },
+    {
+      "id": "emacs-mode",
+      "file": "editor/README.md",
+      "requiredSections": ["Installation", "Editing", "Project Diagnostics And Builds", "Evaluation And REPL", "Session Recovery", "Project Watch"],
+      "requiredLiterals": ["eliscript-mode", "Flymake", "eliscript-watch"]
+    },
+    {
+      "id": "terminal-repl",
+      "file": "docs/repl.md",
+      "requiredSections": ["Starting A Session", "Persistent State", "Input And Commands", "Output And Diagnostics", "Recovery"],
+      "requiredLiterals": ["eliscript-eval", "--no-prompt", ":reset", ":quit"]
+    },
+    {
+      "id": "worker",
+      "file": "tools/worker/README.md",
+      "requiredSections": ["Service Boundary", "Worker Transport", "Persistent Value Transport", "Performance Reinvestment"],
+      "requiredLiterals": ["eliscript-service", "eliscript-worker", "value-codec"]
+    },
+    {
+      "id": "troubleshooting",
+      "file": "docs/troubleshooting.md",
+      "requiredSections": ["Command Not Found", "Bootstrap Failure", "Configuration And Path Errors", "Compiler Diagnostics", "Formatting", "Cache And Build Output", "REPL And Watch Recovery", "Worker Failures", "Verification"],
+      "requiredLiterals": ["--diagnostic-format json", "--no-cache", "make test-core"]
+    },
+    {
+      "id": "contributing",
+      "file": "CONTRIBUTING.md",
+      "requiredSections": ["Scope", "Design First", "Change Workflow", "Required Checks", "Documentation", "Compatibility And Evidence"],
+      "requiredLiterals": ["make byte-compile", "make test-core", "signed commit"]
     }
   ],
+  "snippets": [
+    { "id": "language-values", "document": "language-reference", "language": "elisp", "kind": "module", "expectedStdout": "2:3\n", "runtimes": ["bun", "node"] },
+    { "id": "macro-expansion", "document": "macros", "language": "elisp", "kind": "module", "expectedStdout": "2\n", "runtimes": ["bun", "node"] },
+    { "id": "host-containers", "document": "javascript-interop", "language": "elisp", "kind": "module", "expectedStdout": "{\"kind\":\"host\",\"values\":[1,2,3]}\n", "runtimes": ["bun", "node"] },
+    { "id": "project-config", "document": "project-configuration", "language": "json", "kind": "project-config" },
+    { "id": "persistent-repl", "document": "terminal-repl", "language": "text", "kind": "repl", "expectedStdout": "42\n42\n" }
+  ],
   "entryPoints": [
-    {
-      "file": "README.md",
-      "literal": "docs/getting-started.md"
-    },
-    {
-      "file": "editor/README.md",
-      "literal": "../docs/getting-started.md"
-    },
-    {
-      "file": "examples/README.md",
-      "literal": "getting-started/README.md"
-    }
+    { "file": "README.md", "literal": "docs/README.md" },
+    { "file": "docs/README.md", "literal": "getting-started.md" },
+    { "file": "docs/README.md", "literal": "language-reference.md" },
+    { "file": "docs/README.md", "literal": "macros.md" },
+    { "file": "docs/README.md", "literal": "javascript-interop.md" },
+    { "file": "docs/README.md", "literal": "project-configuration.md" },
+    { "file": "docs/README.md", "literal": "../compiler/README.md" },
+    { "file": "docs/README.md", "literal": "../editor/README.md" },
+    { "file": "docs/README.md", "literal": "repl.md" },
+    { "file": "docs/README.md", "literal": "../tools/worker/README.md" },
+    { "file": "docs/README.md", "literal": "troubleshooting.md" },
+    { "file": "docs/README.md", "literal": "../CONTRIBUTING.md" }
   ]
 }

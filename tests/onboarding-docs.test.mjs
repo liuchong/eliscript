@@ -73,11 +73,15 @@ test("onboarding guide covers every maintained workflow and failure class", asyn
   expect(report).toEqual({
     schemaVersion: 1,
     format: "eliscript-documentation-report",
-    version: 1,
-    guides: 1,
-    sections: 10,
-    requiredLiterals: 13,
-    entryPoints: 3,
+    version: 2,
+    documents: 11,
+    sections: 69,
+    requiredLiterals: 49,
+    localLinks: 46,
+    snippets: 5,
+    executions: 8,
+    entryPoints: 12,
+    applicationsContribute: false,
   });
 
   const guide = await readFile(path.join(ROOT, "docs/getting-started.md"), "utf8");
@@ -92,36 +96,64 @@ test("onboarding guide covers every maintained workflow and failure class", asyn
 
   const contract = await readJson("contracts/documentation.json");
   const missingSection = structuredClone(contract);
-  missingSection.guides[0].requiredSections[0] = "Missing installation stage";
+  missingSection.documents[0].requiredSections[0] = "Missing installation stage";
   expect(await documentationErrors(missingSection)).toContain(
     "docs/getting-started.md is missing section: Missing installation stage",
   );
 
   const reorderedSections = structuredClone(contract);
-  [reorderedSections.guides[0].requiredSections[0],
-    reorderedSections.guides[0].requiredSections[1]] =
-    [reorderedSections.guides[0].requiredSections[1],
-      reorderedSections.guides[0].requiredSections[0]];
+  [reorderedSections.documents[0].requiredSections[0],
+    reorderedSections.documents[0].requiredSections[1]] =
+    [reorderedSections.documents[0].requiredSections[1],
+      reorderedSections.documents[0].requiredSections[0]];
   expect(await documentationErrors(reorderedSections)).toContain(
     "docs/getting-started.md section is out of contract order: Supported Environment",
   );
 
   const missingText = structuredClone(contract);
-  missingText.guides[0].requiredLiterals[0] = "missing-public-command";
+  missingText.documents[0].requiredLiterals[0] = "missing-public-command";
   expect(await documentationErrors(missingText)).toContain(
     "docs/getting-started.md is missing required text: missing-public-command",
   );
 
-  const unreadableGuide = structuredClone(contract);
-  unreadableGuide.guides[0].file = "docs/missing-guide.md";
-  expect((await documentationErrors(unreadableGuide))[0]).toContain(
-    "docs/missing-guide.md cannot be read: ENOENT",
+  const replacedDocument = structuredClone(contract);
+  replacedDocument.documents[0].file = "docs/missing-guide.md";
+  expect((await documentationErrors(replacedDocument))[0]).toContain(
+    "documents must contain the exact ordered AC-23 core inventory",
   );
 
   const missingEntryPoint = structuredClone(contract);
   missingEntryPoint.entryPoints[0].literal = "missing-guide-link";
   expect(await documentationErrors(missingEntryPoint)).toContain(
     "README.md is missing documentation entry point: missing-guide-link",
+  );
+});
+
+test("core documentation rejects broken links and changed executable snippets", async () => {
+  const languageFile = "docs/language-reference.md";
+  const language = await readFile(path.join(ROOT, languageFile), "utf8");
+  await expect(checkDocumentation({
+    root: ROOT,
+    sourceOverrides: {
+      [languageFile]: `${language}\n[missing](missing-reference.md)\n`,
+    },
+  })).rejects.toThrow(
+    `${languageFile} has broken local link: missing-reference.md`,
+  );
+
+  await expect(checkDocumentation({
+    root: ROOT,
+    sourceOverrides: {
+      [languageFile]: language.replace("(nth 1 values)", "(nth 0 values)"),
+    },
+  })).rejects.toThrow("language-values/bun failed");
+});
+
+test("core documentation rejects application inventory substitution", async () => {
+  const contract = await readJson("contracts/documentation.json");
+  contract.documents[1].file = "examples/README.md";
+  expect(await documentationErrors(contract)).toContain(
+    "documents must contain the exact ordered AC-23 core inventory",
   );
 });
 

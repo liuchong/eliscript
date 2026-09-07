@@ -1112,15 +1112,21 @@ Emacs acceleration contract is accepted independently by AC-16 and AC-17.
 clean, traceable acceptance run. Application validation status is reported but
 cannot block or satisfy this gate.
 
-**M13 implementation status:** In progress, 2/5 units. Specification
+**M13 implementation status:** In progress, 4/5 units. Specification
 [0134-versioned-core-acceptance-corpus.md](0134-versioned-core-acceptance-corpus.md)
 derives the complete AC/PD inventory from normative headings, maps every
 criterion to bounded probes and tracked evidence, and retains one clean audit
-with 18 pass, 17 incomplete, and zero failed criteria. This completes the
+with every mandatory criterion classified and zero failed criteria. This completes the
 corpus-and-report implementation unit without claiming final acceptance.
 Specification [0135-local-onboarding.md](0135-local-onboarding.md) records the
-six-step local onboarding run and completes AC-22. Compatibility migration
-rehearsal, the complete documentation set, and final 1.0 artifacts remain open.
+six-step local onboarding run and completes AC-22. Specification
+[0136-local-compatibility-migration-rehearsal.md](0136-local-compatibility-migration-rehearsal.md)
+records the direct local compatibility rehearsal without claiming final AC-02
+closure. Specification
+[0137-complete-core-documentation.md](0137-complete-core-documentation.md)
+closes the exact eleven-document core inventory, local-link validation, and
+executable snippet gate, completing AC-23. Only final 1.0 acceptance artifacts
+remain open.
 
 ## Construction Protocol
 
@@ -1424,6 +1430,11 @@ worker, troubleshooting, and contribution documents. Optional application,
 publishing, and framework-adapter documentation is maintained outside the core
 documentation gate. Links and executable snippets in the required set pass
 automated checks.
+
+**Status:** Complete. Specification 0137 versions the exact eleven-document
+inventory, documentation entry points, local-link integrity, and five marked
+examples that execute or validate through maintained local commands. Optional
+application and publishing documents are explicitly excluded from core credit.
 
 **AC-24 MUST - Acceptance audit**
 

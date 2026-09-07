@@ -23,14 +23,16 @@ unsaved-source diagnostics, terminal evaluation, Emacs configuration, source
 watching, troubleshooting, and verification boundaries.
 
 Required workflow stages, command text, and repository entry points are owned
-by `contracts/documentation.json` and checked by the default contract gate. A
-separate end-to-end test creates a temporary real project and executes the
-documented compiler, host, REPL, and editor paths. Documentation coverage and
-behavioral execution are therefore independent evidence.
+by the version 2 `contracts/documentation.json` contract and checked by the
+default contract gate. A separate end-to-end test creates a temporary real
+project and executes the documented compiler, host, REPL, and editor paths.
+Documentation coverage and behavioral execution are therefore independent
+evidence.
 
 This specification completes the M10 installation and troubleshooting
-documentation implementation unit. It does not claim the separate M13 clean
-machine exercise, final compatibility matrix, or complete documentation and
+documentation implementation unit. Specification 0137 separately owns the
+complete AC-23 document inventory, local-link integrity, and executable snippet
+gate. This specification does not claim the M13 final compatibility matrix or
 acceptance audit.
 
 ## Guide Contract
@@ -49,12 +51,12 @@ sections follow the reader's actual workflow order:
 9. troubleshooting
 10. verification boundaries
 
-The contract requires literal public commands for dependency setup, all daily
-project operations, both explicit Emacs watch commands, warning-as-error byte
-compilation, contract checks, repository-integrity checks, and the complete
-suite. It also requires discoverable links from the project and editor guides.
-A missing section, reordered section, removed command, unreadable guide, or
-missing entry point fails before tests proceed.
+The onboarding portion of the contract requires literal public commands for
+dependency setup, all daily project operations, both explicit Emacs watch
+commands, warning-as-error byte compilation, contract checks,
+repository-integrity checks, and the complete suite. The complete document-set
+checks defined by specification 0137 add the documentation hub, local-link
+integrity, and executable examples without changing this guide's workflow.
 
 ## Executable Workflow
 

@@ -15,6 +15,10 @@ and evaluated through the declared core probes. It is not the final 1.0
 `manifest.json` and `report.md`: incomplete criteria remain visible and the
 final acceptance flag remains false.
 
+The current retained core audit records 19 passing, 16 incomplete, and zero
+failed mandatory criteria. It was produced directly on the recorded local
+toolchain without a hosted provider, container, or virtual machine.
+
 Verify the retained pair with:
 
 ```sh

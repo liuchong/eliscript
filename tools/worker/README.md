@@ -5,6 +5,8 @@
 [Operation service 0104](../../specs/0104-accelerated-emacs-operation-service.md) |
 [Performance reinvestment 0105](../../specs/0105-emacs-analysis-performance-reinvestment.md)
 
+## Service Boundary
+
 `eliscript-service.el` is the package-facing API. It declares generated
 modules and dual-path operations, selects reference or accelerated execution
 by workload threshold, optionally verifies worker results, and owns buffer
@@ -140,6 +142,8 @@ bun run benchmark:worker
 Tune it with `ELISCRIPT_BENCHMARK_SIZE`, `ELISCRIPT_BENCHMARK_ROUNDS`, and
 `ELISCRIPT_BENCHMARK_ITERATIONS`. The report is JSON so repeated runs can be
 captured and compared without parsing display text.
+
+## Performance Reinvestment
 
 `eliscript-analysis.el` is the maintained performance reinvestment package. It
 keeps a revisioned document snapshot in one worker generation, routes small

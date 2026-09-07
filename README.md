@@ -11,7 +11,8 @@ Eliscript is an Emacs Lisp-flavored language that compiles to modern
 JavaScript. The seed compiler runs in plain Emacs, emits standard ECMAScript
 modules, and bootstraps a compiler written in Eliscript itself.
 
-[Website](docs/index.html) | [Specifications](specs/README.md) |
+[Website](docs/index.html) | [Core documentation](docs/README.md) |
+[Specifications](specs/README.md) |
 [Getting started](docs/getting-started.md) |
 [Library API](docs/pages/api.html) |
 [1.0 roadmap](specs/0040-maturity-roadmap.md) |
@@ -31,12 +32,12 @@ in **M8: Language Contract Closure**, **M9: Compiler and Build Convergence**,
 Libraries**, and **M12: Reliability, Security, and Performance**. Final
 stability and acceptance remain open.
 
-M13 has completed 3 of 5 implementation units. The versioned
+M13 has completed 4 of 5 implementation units. The versioned
 [core acceptance corpus](specs/0134-versioned-core-acceptance-corpus.md)
 derives all 35 mandatory AC/PD criteria from their normative specifications,
 runs the complete core suite and strict Emacs byte compilation from a clean
 commit, and retains machine-readable and human-readable evidence. The initial
-audit records 18 passing, 17 incomplete, and zero failed criteria; its final
+audit records 19 passing, 16 incomplete, and zero failed criteria; its final
 acceptance flag is therefore false. Application validations are listed
 separately and contribute no core result.
 
@@ -47,7 +48,11 @@ The [local compatibility migration rehearsal](specs/0136-local-compatibility-mig
 rebuilds frozen core source with both compiler generations, executes it under
 Bun and Node, and verifies source-rewrite, automatic cache, and contract
 replacement transitions. It excludes application evidence and leaves the final
-AC-02 corpus closure open.
+AC-02 corpus closure open. The [complete core documentation set](docs/README.md)
+now covers all eleven AC-23 categories, validates every local link, and executes
+five marked language, macro, interop, configuration, and REPL examples directly
+through maintained local commands. Only the final M13 acceptance-artifact unit
+remains open.
 
 M9 compiler convergence is complete: it includes canonical project requests,
 graph planning, IR serialization, build reports, v1-to-v2 cache migration,
@@ -631,7 +636,7 @@ The versioned project contracts are:
 | [`contracts/compatibility-matrix.json`](contracts/compatibility-matrix.json) | [0045: Continuous Compatibility Matrix](specs/0045-continuous-compatibility-matrix.md) |
 | [`contracts/compatibility-baseline.json`](contracts/compatibility-baseline.json) | [0046: M7 Compatibility Baseline](specs/0046-m7-compatibility-baseline.md) |
 | [`contracts/compatibility-rehearsal.json`](contracts/compatibility-rehearsal.json) | [0136: Local Compatibility Migration Rehearsal](specs/0136-local-compatibility-migration-rehearsal.md) |
-| [`contracts/documentation.json`](contracts/documentation.json) | [0133: Verified Installation and Daily Development Guide](specs/0133-verified-onboarding-documentation.md) |
+| [`contracts/documentation.json`](contracts/documentation.json) | [0137: Complete Core Documentation Set](specs/0137-complete-core-documentation.md) |
 | [`contracts/repository-integrity.json`](contracts/repository-integrity.json) | [0132: Repository Integrity Audits](specs/0132-repository-integrity-audits.md) |
 
 Run warning-as-error Emacs byte compilation with:

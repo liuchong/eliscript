@@ -5,7 +5,8 @@ language, compiler, runtime, toolchain, and integrations. This page is the
 human-readable catalog; [`index.json`](index.json) is the machine-readable
 registry.
 
-[Project README](../README.md) | [1.0 roadmap](0040-maturity-roadmap.md) |
+[Project README](../README.md) | [Core documentation](../docs/README.md) |
+[1.0 roadmap](0040-maturity-roadmap.md) |
 [Persistent data and Emacs design](0041-host-symbiosis-and-persistent-data.md)
 
 ## How to Read a Specification
@@ -28,20 +29,20 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 136 specifications.
+The registry currently contains 137 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 104 |
+| Accepted design | 105 |
 | Stable design | 30 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 132 |
+| Implemented | 133 |
 | Superseded implementation | 1 |
 
 Compatibility Baseline 2 separately classifies 30 specifications as stable,
-102 as provisional, 3 as planning, and 1 as superseded. That baseline is
+103 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -157,14 +158,18 @@ budgets. Repository integrity checks dependency boundaries, regenerated
 artifacts, and every benchmark source binding. The final M12 exit audit remains
 formal acceptance work.
 
-M13 has completed 3/5 implementation units through specification 0136. Its
+M13 has completed 4/5 implementation units through specification 0137. Its
 versioned corpus derives all 35 mandatory AC/PD criteria from normative
 headings, maps each criterion to bounded probes and tracked evidence, and
-retains one clean audit with 18 pass, 17 incomplete, and zero failed criteria.
+retains one clean audit with 19 pass, 16 incomplete, and zero failed criteria.
 The final acceptance flag remains false. Specification 0135 records the local,
 source-bound onboarding exercise for M13-02 with all six steps passing within
 the active-step budget. Specification 0136 records the passing direct local
 migration rehearsal for M13-03 while explicitly leaving AC-02 incomplete.
+Specification 0137 completes M13-04 and AC-23 with an exact eleven-document
+core inventory, checked local links, and five executable examples. Application
+and publishing documentation remains outside the core gate. Only the final
+acceptance-artifact unit remains open.
 
 ## Reading Paths
 
@@ -462,6 +467,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0134 | [Versioned Core Acceptance Corpus and Truthful Audit Run](0134-versioned-core-acceptance-corpus.md) | Accepted | Implemented |
 | 0135 | [Traceable Local Onboarding Exercise](0135-local-onboarding.md) | Accepted | Implemented |
 | 0136 | [Local Compatibility Migration Rehearsal](0136-local-compatibility-migration-rehearsal.md) | Accepted | Implemented |
+| 0137 | [Complete Core Documentation Set](0137-complete-core-documentation.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

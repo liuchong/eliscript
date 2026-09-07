@@ -6,16 +6,22 @@
 [`eliscript-mode.el`](eliscript-mode.el) provides the maintained Emacs major
 mode for `.eli` source. Add this directory to `load-path` and require the mode:
 
+## Installation
+
 ```elisp
 (add-to-list 'load-path "/path/to/eliscript/editor")
 (require 'eliscript-mode)
 ```
+
+## Editing
 
 The mode supplies syntax-aware comments and movement, two-space structural
 indentation, semantic font locking, Imenu, definition navigation, project
 discovery, and `C-c C-f` buffer formatting. The formatter command defaults to
 `eliscript-format`; customize `eliscript-mode-format-command` when the public
 command is not on `PATH`.
+
+## Project Diagnostics And Builds
 
 Project discovery prefers the nearest `eliscript.json` and then falls back to
 the current `project.el` project. `C-c C-k` starts the asynchronous
@@ -31,6 +37,8 @@ and `C-c C-r` navigate located build failures. Customize
 `eliscript-mode-build-command` or the unconfigured
 `eliscript-mode-build-directory` when needed.
 
+## Evaluation And REPL
+
 `C-c C-e` evaluates the complete form preceding point, `C-c C-l` loads the
 current unsaved buffer as the project namespace, and `C-M-x` reloads that
 namespace while point is inside a definition. Values and captured standard
@@ -39,9 +47,13 @@ use normal compilation navigation. `C-c C-q` stops and forgets the session.
 Customize `eliscript-mode-eval-command` when `eliscript-eval` is not on
 `PATH`.
 
+## Session Recovery
+
 Each project owns one persistent process. If it exits unexpectedly, the mode
 fails unacknowledged work, starts one replacement, restores only acknowledged
 namespace requests, and then accepts new evaluation.
+
+## Project Watch
 
 `M-x eliscript-mode-watch-project` starts or reuses one `eliscript-watch`
 process for the project. Versioned change events refresh Flymake for matching
