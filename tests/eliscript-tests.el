@@ -1090,6 +1090,50 @@
              output))
     (should (string-match-p "function group_by(key_function, values)" output))))
 
+(ert-deftest eliscript-file-output-isolation-rejects-physical-aliases ()
+  (let* ((directory (make-temp-file "eliscript-output-isolation-" t))
+         (source (expand-file-name "main.eli" directory))
+         (linked-output (expand-file-name "linked.mjs" directory))
+         (mapped-output (expand-file-name "mapped.mjs" directory))
+         (mapped-map (concat mapped-output ".map"))
+         (aliased-output (expand-file-name "aliased.mjs" directory))
+         (aliased-map (concat aliased-output ".map"))
+         (source-text
+          "(defportable answer () 42)\n(export answer)\n"))
+    (unwind-protect
+        (progn
+          (with-temp-file source (insert source-text))
+          (should-error (eliscript-compile-file source source))
+          (should-error
+           (eliscript-compile-portable-file source '(answer) source))
+          (should (equal (with-temp-buffer
+                           (insert-file-contents source)
+                           (buffer-string))
+                         source-text))
+
+          (make-symbolic-link source linked-output)
+          (should-error (eliscript-compile-file source linked-output))
+          (should (equal (with-temp-buffer
+                           (insert-file-contents source)
+                           (buffer-string))
+                         source-text))
+
+          (make-symbolic-link source mapped-map)
+          (should-error
+           (eliscript-compile-file-with-source-map
+            source mapped-output mapped-map))
+          (should (equal (with-temp-buffer
+                           (insert-file-contents source)
+                           (buffer-string))
+                         source-text))
+
+          (with-temp-file aliased-output (insert "existing output\n"))
+          (add-name-to-file aliased-output aliased-map)
+          (should-error
+           (eliscript-compile-portable-file-with-source-map
+            source '(answer) aliased-output aliased-map)))
+      (delete-directory directory t))))
+
 (ert-deftest eliscript-portable-functions-reject-non-portable-dependencies ()
   (dolist (source
            '("(defun helper () 1) (defportable work () (helper))"

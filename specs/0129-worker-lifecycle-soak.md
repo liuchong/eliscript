@@ -106,10 +106,10 @@ final median of generation 1 with generation 5 to reject retained client growth
 across restarts. The absolute peak gates additionally reject a bounded-window
 result that still consumes excessive memory.
 
-The committed macOS arm64 report records 100,000 unique responses in 6,977 ms,
-with observed Emacs, worker, and combined peaks of 57,808 KiB, 65,152 KiB, and
-122,624 KiB. Its generation 1-to-5 final-window deltas were 312 KiB for Emacs
-and -1,280 KiB for the worker. These observations are evidence for the declared
+The committed macOS arm64 report records 100,000 unique responses in 6,916 ms,
+with observed Emacs, worker, and combined peaks of 57,984 KiB, 65,408 KiB, and
+123,376 KiB. Its generation 1-to-5 final-window deltas were 912 KiB for Emacs
+and -648 KiB for the worker. These observations are evidence for the declared
 host, not portable timing promises; the limits and algorithms are the contract.
 
 ## Evidence and Reproduction

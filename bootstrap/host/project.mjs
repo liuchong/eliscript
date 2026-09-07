@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -146,6 +147,82 @@ function macroDependencyRecords(dependencies, root) {
 function outputFor(source, root, outDir) {
   const sourcePath = relative(root, source);
   return resolve(outDir, `${sourcePath.slice(0, -4)}.mjs`);
+}
+
+function physicalWritePath(path) {
+  const expanded = resolve(path);
+  const suffix = [];
+  let cursor = expanded;
+  while (true) {
+    try {
+      lstatSync(cursor);
+      let canonical;
+      try {
+        canonical = realpathSync(cursor);
+      } catch {
+        projectError(`generated artifact contains an unresolved symlink: ${expanded}`);
+      }
+      return resolve(canonical, ...suffix.reverse());
+    } catch (error) {
+      if (error?.eliscriptDiagnostic) throw error;
+      if (error?.code !== "ENOENT") {
+        projectError(`generated artifact path cannot be resolved: ${expanded}`);
+      }
+      const parent = dirname(cursor);
+      if (parent === cursor) {
+        projectError(`generated artifact path cannot be resolved: ${expanded}`);
+      }
+      suffix.push(basename(cursor));
+      cursor = parent;
+    }
+  }
+}
+
+function existingFileIdentity(path) {
+  try {
+    const attributes = statSync(path);
+    return attributes.isFile() ? `${attributes.dev}:${attributes.ino}` : null;
+  } catch {
+    return null;
+  }
+}
+
+function validateOutputIsolation({ sources, macroDependencies, root, outDir }) {
+  const protectedPaths = [
+    ...sources,
+    ...macroDependencies.map(({ source }) => source),
+  ];
+  const protectedCanonical = new Set(protectedPaths.map((path) =>
+    realpathSync(path)));
+  const protectedIdentities = new Set(protectedPaths
+    .map(existingFileIdentity)
+    .filter((identity) => identity !== null));
+  const artifacts = [
+    ...sources.flatMap((source) => {
+      const output = outputFor(source, root, outDir);
+      return [output, `${output}.map`];
+    }),
+    resolve(outDir, manifestFilename),
+  ];
+  const artifactCanonical = new Set();
+  const artifactIdentities = new Set();
+  for (const artifact of artifacts) {
+    const physical = physicalWritePath(artifact);
+    const identity = existingFileIdentity(artifact);
+    if (!insideRoot(outDir, physical)) {
+      projectError(`generated artifact escapes output directory: ${artifact}`);
+    }
+    if (protectedCanonical.has(physical) ||
+        (identity !== null && protectedIdentities.has(identity))) {
+      projectError(`generated artifact would overwrite an input: ${artifact}`);
+    }
+    if (artifactCanonical.has(physical) ||
+        (identity !== null && artifactIdentities.has(identity))) {
+      projectError(`generated artifacts resolve to the same file: ${artifact}`);
+    }
+    artifactCanonical.add(physical);
+    if (identity !== null) artifactIdentities.add(identity);
+  }
 }
 
 function localSourceImport(specifier) {
@@ -902,6 +979,12 @@ export async function buildProject(options) {
       macro.dependencies,
     );
   validateSourceOverrides(sourceOverrides, plan);
+  validateOutputIsolation({
+    sources: plan.modules.map(({ id }) => id),
+    macroDependencies: macro.dependencies,
+    root,
+    outDir,
+  });
   const normalizedPortableEntries = plan.mode === "portable"
     ? [...plan.entries[0].entries]
     : [];

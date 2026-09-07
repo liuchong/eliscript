@@ -79,9 +79,37 @@ files recorded in the source map.  The return value is an `eliscript-emission'."
     input-file)
    input-file))
 
+(defun eliscript--same-file-path-p (left right)
+  "Return non-nil when LEFT and RIGHT name the same physical file."
+  (or (string-equal (file-truename left) (file-truename right))
+      (and (file-exists-p left)
+           (file-exists-p right)
+           (condition-case nil
+               (file-equal-p left right)
+             (file-error nil)))))
+
+(defun eliscript--validate-file-output-paths (input paths)
+  "Reject PATHS that alias INPUT or one another before writing files."
+  (let ((input-path (expand-file-name input))
+        validated)
+    (dolist (path paths)
+      (let ((output-path (expand-file-name path)))
+        (when (eliscript--same-file-path-p input-path output-path)
+          (error "generated artifact must not overwrite input file: %s"
+                 output-path))
+        (dolist (previous validated)
+          (when (eliscript--same-file-path-p previous output-path)
+            (error "generated artifact paths must be physically distinct: %s and %s"
+                   previous output-path)))
+        (push output-path validated)))))
+
 (defun eliscript-compile-portable-file (input-file entries &optional output-file)
   "Compile portable ENTRIES from INPUT-FILE, optionally to OUTPUT-FILE."
   (let* ((input-path (expand-file-name input-file))
+         (_validated
+          (when output-file
+            (eliscript--validate-file-output-paths
+             input-path (list output-file))))
          (source
           (with-temp-buffer
             (insert-file-contents input-path)
@@ -103,6 +131,9 @@ files recorded in the source map.  The return value is an `eliscript-emission'."
          (output-path (expand-file-name output-file))
          (map-path
           (expand-file-name (or source-map-file (concat output-path ".map"))))
+         (_validated
+          (eliscript--validate-file-output-paths
+           input-path (list output-path map-path)))
          (map-directory (file-name-directory map-path))
          (source
           (with-temp-buffer
@@ -118,8 +149,6 @@ files recorded in the source map.  The return value is an `eliscript-emission'."
          (javascript
           (concat (eliscript-emission-javascript emission)
                   "//# sourceMappingURL=" map-url "\n")))
-    (when (string-equal output-path map-path)
-      (error "source map path must differ from output path"))
     (setq emission
           (eliscript-emission-create
            :javascript javascript
@@ -136,8 +165,13 @@ files recorded in the source map.  The return value is an `eliscript-emission'."
   "Compile INPUT-FILE and optionally write it to OUTPUT-FILE.
 
 Return the generated ECMAScript source."
-  (let ((output (eliscript-emit-ir-module
-                 (eliscript-compile-ir-file input-file))))
+  (let* ((input-path (expand-file-name input-file))
+         (_validated
+          (when output-file
+            (eliscript--validate-file-output-paths
+             input-path (list output-file))))
+         (output (eliscript-emit-ir-module
+                  (eliscript-compile-ir-file input-path))))
     (when output-file
       (make-directory (file-name-directory (expand-file-name output-file)) t)
       (with-temp-file output-file
@@ -159,6 +193,10 @@ an external `sourceMappingURL' comment.  Return an `eliscript-emission'."
           (and output-path
                (expand-file-name (or source-map-file
                                      (concat output-path ".map")))))
+         (_validated
+          (when output-path
+            (eliscript--validate-file-output-paths
+             input-path (list output-path map-path))))
          (source
           (with-temp-buffer
             (insert-file-contents input-path)
@@ -175,8 +213,6 @@ an external `sourceMappingURL' comment.  Return an `eliscript-emission'."
          (emission
           (eliscript-compile-string-with-source-map
            source input-path generated-name source-name)))
-    (when (and output-path (string-equal output-path map-path))
-      (error "source map path must differ from output path"))
     (when output-path
       (let* ((map-url
               (file-relative-name

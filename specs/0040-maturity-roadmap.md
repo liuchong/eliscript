@@ -1021,7 +1021,7 @@ input, large projects, long-lived use, and hostile project boundaries.
 **Exit gate:** All quantitative reliability and performance requirements in
 the final acceptance matrix pass without an unexplained waiver.
 
-**M12 implementation status:** In progress, 3/6 units. Specification
+**M12 implementation status:** In progress, 4/6 units. Specification
 [0127-deterministic-reader-program-fuzz.md](0127-deterministic-reader-program-fuzz.md)
 completes the grammar-aware and complete-module mutation suite with 100,000
 deterministic inputs, fixed replay identities, seed/self-hosted reader
@@ -1035,7 +1035,12 @@ Specification [0129-worker-lifecycle-soak.md](0129-worker-lifecycle-soak.md)
 completes 100,000 uniquely accounted real Emacs worker requests across
 cancellation, explicit restart, module replacement, blocking timeout, in-flight
 process death, automatic recovery, bounded RSS trends, clean shutdown, and PID
-reclamation. Boundary security, complete benchmark thresholds, and artifact
+reclamation. Specification
+[0130-hostile-boundary-security.md](0130-hostile-boundary-security.md)
+completes the hostile-boundary matrix across project-root containment,
+declared macro and worker authority, closed configuration and protocol schemas,
+and physical output isolation for modules, source maps, and manifests under
+the Emacs seed, Bun, and Node paths. Complete benchmark thresholds and artifact
 audits remain open.
 
 ### M13: Core Acceptance and Application Validation (5 implementation units)
@@ -1355,6 +1360,12 @@ Automated cases prove project-root containment across direct paths and
 symlinks, deny undeclared macro and worker capabilities, reject protocol and
 configuration schema mismatches, and prevent generated output from overwriting
 source inputs.
+
+**Status:** Complete. Specification 0130 executes the complete hostile-boundary
+matrix in the default suite, including direct and symbolic root escapes,
+capability denial, closed schema and protocol mismatches, symbolic and hard-link
+output aliases, parent-directory escapes, full-plan preflight, and unchanged
+protected inputs across the Emacs seed, Bun, and Node paths.
 
 **AC-21 MUST - Supported environment matrix**
 

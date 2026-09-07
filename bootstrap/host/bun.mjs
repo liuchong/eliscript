@@ -1,7 +1,14 @@
 #!/usr/bin/env bun
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, relative, resolve } from "node:path";
+import {
+  lstat,
+  mkdir,
+  readFile,
+  realpath,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { basename, dirname, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const commandName = process.env.ELISCRIPT_COMMAND_NAME ?? "eliscript-portable";
@@ -121,6 +128,71 @@ export async function loadCompiler(moduleDirectory) {
   return import(pathToFileURL(resolve(directory, "compiler.mjs")).href);
 }
 
+async function physicalWritePath(path) {
+  let existing = resolve(path);
+  const missing = [];
+
+  while (true) {
+    try {
+      const metadata = await lstat(existing);
+      if (metadata.isSymbolicLink()) {
+        try {
+          const target = await realpath(existing);
+          return resolve(target, ...missing.reverse());
+        } catch (error) {
+          if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
+            throw new Error(
+              `generated artifact path contains an unresolved symbolic link: ${path}`,
+            );
+          }
+          throw error;
+        }
+      }
+      return resolve(await realpath(existing), ...missing.reverse());
+    } catch (error) {
+      if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") throw error;
+      const parent = dirname(existing);
+      if (parent === existing) throw error;
+      missing.push(basename(existing));
+      existing = parent;
+    }
+  }
+}
+
+async function existingFileIdentity(path) {
+  try {
+    const metadata = await stat(path);
+    return `${metadata.dev}:${metadata.ino}`;
+  } catch (error) {
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return undefined;
+    throw error;
+  }
+}
+
+async function validateFileOutputPaths(inputPath, outputPaths) {
+  const inputPhysical = await realpath(inputPath);
+  const inputIdentity = await existingFileIdentity(inputPath);
+  const artifacts = [];
+
+  for (const outputPath of outputPaths) {
+    const physical = await physicalWritePath(outputPath);
+    const identity = await existingFileIdentity(outputPath);
+    if (physical === inputPhysical ||
+        (identity !== undefined && identity === inputIdentity)) {
+      throw new Error(`generated artifact must not overwrite input file: ${outputPath}`);
+    }
+    for (const artifact of artifacts) {
+      if (physical === artifact.physical ||
+          (identity !== undefined && identity === artifact.identity)) {
+        throw new Error(
+          `generated artifacts must be physically distinct: ${artifact.path} and ${outputPath}`,
+        );
+      }
+    }
+    artifacts.push({ path: outputPath, physical, identity });
+  }
+}
+
 export async function compileFile(options) {
   const compiler = options.compiler ?? await loadCompiler(options.moduleDirectory);
   const request = compiler.build_operation_request({
@@ -132,6 +204,12 @@ export async function compileFile(options) {
   });
   const inputPath = resolve(request.input);
   const outputPath = request.output ? resolve(request.output) : undefined;
+  if (outputPath) {
+    await validateFileOutputPaths(
+      inputPath,
+      request.sourceMap ? [outputPath, `${outputPath}.map`] : [outputPath],
+    );
+  }
   const source = await readFile(inputPath, "utf8");
 
   if (!request.sourceMap) {

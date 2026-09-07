@@ -2019,6 +2019,48 @@
           "contains": "committed worker lifecycle soak report matches its measured sources"
         }
       ]
+    },
+    {
+      "id": "quality.hostile-boundary-security",
+      "title": "Hostile project and process boundary security",
+      "status": "accepted",
+      "spec": "0130",
+      "contracts": [
+        "Rejects direct and symbolic source paths that escape the canonical project root",
+        "Requires explicit declared macro file authority and unforgeable worker capability packages",
+        "Rejects incompatible closed configuration and worker protocol schemas before execution",
+        "Preflights every module source map and manifest against source and macro inputs before writing",
+        "Detects symbolic links hard links artifact aliases and symbolic parent-directory escapes",
+        "Preserves protected input bytes across Emacs seed Bun and Node rejection paths",
+        "Keeps application frameworks bundlers publishing systems and development servers outside core evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/boundary-security.test.mjs",
+          "contains": "boundary matrix rejects direct and symbolic project-root escapes"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/boundary-security.test.mjs",
+          "contains": "boundary matrix denies undeclared macro and worker capabilities"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/boundary-security.test.mjs",
+          "contains": "boundary matrix rejects configuration and worker protocol mismatches"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/boundary-security.test.mjs",
+          "contains": "boundary matrix prevents generated artifacts from overwriting inputs"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-file-output-isolation-rejects-physical-aliases"
+        }
+      ]
     }
   ]
 }

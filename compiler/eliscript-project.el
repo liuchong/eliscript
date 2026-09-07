@@ -552,6 +552,78 @@ FILENAME and SPAN identify the import responsible for PATH."
      (concat (string-remove-suffix ".eli" relative) ".mjs")
      out-dir)))
 
+(defun eliscript-project--same-file-path-p (left right)
+  "Return non-nil when LEFT and RIGHT name the same physical file."
+  (or (string-equal (file-truename left) (file-truename right))
+      (and (file-exists-p left)
+           (file-exists-p right)
+           (condition-case nil
+             (file-equal-p left right)
+             (file-error nil)))))
+
+(defun eliscript-project--path-contained-p (root candidate)
+  "Return non-nil when CANDIDATE is lexically contained below canonical ROOT."
+  (let ((relative
+         (file-relative-name candidate (file-name-as-directory root))))
+    (and (not (file-name-absolute-p relative))
+         (not (string-equal relative ".."))
+         (not (string-prefix-p (file-name-as-directory "..") relative)))))
+
+(defun eliscript-project--validate-output-isolation
+    (sources macro-dependencies root out-dir)
+  "Validate every generated path before writing SOURCES below OUT-DIR.
+
+MACRO-DEPENDENCIES and SOURCES are protected inputs.  ROOT maps source paths
+to output paths.  Existing symbolic and hard links cannot redirect generated
+artifacts onto an input, another artifact, or outside OUT-DIR."
+  (let* ((protected
+          (append
+           sources
+           (mapcar #'eliscript-project-macro-dependency-source
+                   macro-dependencies)))
+         (artifacts
+          (append
+           (apply
+            #'append
+            (mapcar
+             (lambda (source)
+               (let ((output
+                      (eliscript-project--source-output
+                       source root out-dir)))
+                 (list output (concat output ".map"))))
+             sources))
+           (list (expand-file-name
+                  eliscript-project-manifest-filename out-dir))))
+         validated)
+    (dolist (artifact artifacts)
+      (let ((physical
+             (condition-case nil
+                 (file-truename artifact)
+               (file-error
+                (eliscript-project--fail
+                 artifact nil
+                 "generated artifact path cannot be resolved: %s"
+                 artifact)))))
+        (unless (eliscript-project--path-contained-p out-dir physical)
+          (eliscript-project--fail
+           artifact nil "generated artifact escapes output directory: %s"
+           artifact))
+        (when (cl-some
+               (lambda (input)
+                 (eliscript-project--same-file-path-p artifact input))
+               protected)
+          (eliscript-project--fail
+           artifact nil "generated artifact would overwrite an input: %s"
+           artifact))
+        (when (cl-some
+               (lambda (previous)
+                 (eliscript-project--same-file-path-p artifact previous))
+               validated)
+          (eliscript-project--fail
+           artifact nil "generated artifacts resolve to the same file: %s"
+           artifact))
+        (push artifact validated)))))
+
 (defun eliscript-project--relative-import (target importer)
   "Return an ESM import from IMPORTER to TARGET."
   (let ((relative
@@ -1285,6 +1357,7 @@ unchanged."
           (eliscript-project--elapsed-ms cache-started-at))
          (cache (eliscript-project-cache-lookup-cache cache-lookup))
          (states (make-hash-table :test #'equal))
+         pending-writes
          modules)
     (unless (= (length canonical-entries)
                (length (delete-dups (copy-sequence canonical-entries))))
@@ -1361,16 +1434,22 @@ unchanged."
                     (dolist (dependency dependencies)
                       (visit dependency))
                     (push
-                     (eliscript-project--write-module
+                     (list
                       program source source-text output-path dependencies
                       macro-dependencies nil
                       (if cache
                           (eliscript-project-cache-decision-reason decision)
 			(eliscript-project-cache-lookup-reason cache-lookup)))
-                     modules)))
+                     pending-writes)))
 		(puthash source 'done states))))))
       (dolist (entry canonical-entries)
         (visit entry)))
+    (let (sources)
+      (maphash (lambda (source _state) (push source sources)) states)
+      (eliscript-project--validate-output-isolation
+       sources macro-dependencies root-path output-directory))
+    (dolist (pending (nreverse pending-writes))
+      (push (apply #'eliscript-project--write-module pending) modules))
     (setq modules
           (sort modules
                 (lambda (left right)
@@ -1516,6 +1595,8 @@ only the requested declarations, immutable constants, and portable imports."
                        (enqueue dependency imported-name))))))))
          (let (sources)
            (maphash (lambda (source _names) (push source sources)) requests)
+           (eliscript-project--validate-output-isolation
+            sources macro-dependencies root-path output-directory)
            (dolist (source (sort sources #'string-lessp))
              (let* ((source-requests (gethash source requests))
                     names

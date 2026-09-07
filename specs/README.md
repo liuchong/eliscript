@@ -28,20 +28,20 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 129 specifications.
+The registry currently contains 130 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 97 |
+| Accepted design | 98 |
 | Stable design | 30 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 125 |
+| Implemented | 126 |
 | Superseded implementation | 1 |
 
 Compatibility Baseline 2 separately classifies 30 specifications as stable,
-95 as provisional, 3 as planning, and 1 as superseded. That baseline is
+96 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -137,8 +137,8 @@ inject request-scoped progress and cancellation into the real worker, and keep
 frameworks outside core evidence. M11 compatibility stabilization and its
 final exit audit remain open.
 
-M12 now has 3/6 implementation units complete through specifications 0127,
-0128, and 0129. The fixed 100,000-input corpus checks seed/self-hosted reader agreement,
+M12 now has 4/6 implementation units complete through specifications 0127,
+0128, 0129, and 0130. The fixed 100,000-input corpus checks seed/self-hosted reader agreement,
 structured diagnostics, recursive spans, formatter round trips, and compiler
 behavior. The fixed 1,000-module chain, diamond, cycle, and shared-dependency
 graph checks exact no-op and mutation sets, evaluated propagation through
@@ -146,7 +146,10 @@ reused importers, complete clean-build equivalence, and bounded resources. The
 100,000-request real Emacs worker soak adds exact response accounting across
 five generations, cancellation, replacement, timeout, process-death recovery,
 bounded peak and steady-state RSS, clean shutdown, and PID reclamation. AC-18,
-AC-09, and AC-19 are complete.
+AC-09, and AC-19 are complete. The hostile-boundary matrix checks direct and
+symbolic root containment, declared macro and worker authority, closed schemas
+and protocols, and physical output isolation across Emacs seed, Bun, and Node.
+AC-20 is complete.
 
 ## Reading Paths
 
@@ -232,6 +235,7 @@ number.
 52. [0127: Deterministic Reader and Program Fuzzing](0127-deterministic-reader-program-fuzz.md)
 53. [0128: Deterministic Project Scale and Invalidation](0128-project-scale-invalidation.md)
 54. [0129: Worker Lifecycle Soak and Recovery](0129-worker-lifecycle-soak.md)
+55. [0130: Hostile Boundary Security](0130-hostile-boundary-security.md)
 
 ### Application Validation (Non-core)
 
@@ -436,6 +440,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0127 | [Deterministic Reader and Program Fuzzing](0127-deterministic-reader-program-fuzz.md) | Accepted | Implemented |
 | 0128 | [Deterministic Project Scale and Invalidation](0128-project-scale-invalidation.md) | Accepted | Implemented |
 | 0129 | [Worker Lifecycle Soak and Recovery](0129-worker-lifecycle-soak.md) | Accepted | Implemented |
+| 0130 | [Hostile Boundary Security](0130-hostile-boundary-security.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

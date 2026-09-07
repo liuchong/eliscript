@@ -54,6 +54,13 @@ process death, five-generation recovery, forty RSS checkpoints, peak and
 steady-state budgets, clean shutdown, temporary cleanup, and PID reclamation.
 It separately validates the committed source-bound reference report.
 
+`boundary-security.test.mjs` executes the M12 hostile-boundary matrix across
+the self-hosted Bun and Node project hosts, the Emacs seed project command, and
+the real worker protocol. It rejects direct and symbolic source escapes,
+undeclared macro and worker authority, closed-schema mismatches, symbolic and
+hard-link output aliases, and symbolic parent-directory escapes before any
+generated write. ERT independently covers the Emacs single-file output APIs.
+
 ## Default Suite
 
 `make test` runs the ERT suite, invokes the public CLI, compares the generated

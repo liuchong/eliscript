@@ -69,7 +69,7 @@ now grant only named host authority, inject request-scoped progress and
 cancellation into the real worker, and re-export the canonical worker codecs.
 Compatibility stabilization and the final M11 exit audit remain open.
 
-M12 reliability work now has three of six implementation units complete. The
+M12 reliability work now has four of six implementation units complete. The
 deterministic reader/program fuzz suite replays 100,000 grammar-aware and
 complete-module mutation inputs with seed/self-hosted parity, recursive spans,
 formatter round trips, structured diagnostics, and fixed identities. The
@@ -81,8 +81,12 @@ and [0128](specs/0128-project-scale-invalidation.md). The real Emacs worker now
 also completes 100,000 uniquely verified requests across five generations with
 cancellation, module replacement, timeout, process-death recovery, bounded peak
 and steady-state RSS, clean shutdown, and complete PID reclamation. See
-[0129](specs/0129-worker-lifecycle-soak.md). Security, benchmark, and
-artifact-audit units remain open.
+[0129](specs/0129-worker-lifecycle-soak.md). The hostile-boundary security
+matrix now rejects direct and symbolic source-root escapes, undeclared macro
+and worker authority, closed-schema mismatches, and generated output aliases
+across Emacs seed, Bun, and Node paths while preserving protected inputs. See
+[0130](specs/0130-hostile-boundary-security.md). Benchmark and artifact-audit
+units remain open.
 
 Run `bun run progress` for the current evidence-derived core progress report.
 It reports implementation, verification, and stabilization independently;
