@@ -69,13 +69,15 @@ rewritten thresholds, and stale source evidence without rerunning timings.
 
 ## Default Suite
 
-`make test` runs the ERT suite, invokes the public CLI, compares the generated
-ESM with its snapshot, validates and decodes Source Map v3 output, and executes
-ordinary, source-mapped, and React server-rendered modules with Bun. It also
-tests the Vite transform adapter and builds the browser counter with bundled
-Eliscript source maps. Org publishing tests cover metadata, deterministic HTML,
-draft and duplicate handling, the watched Vite content module, direct ESM
-execution, and the production Org site bundle.
+`make test` runs the explicit `test-core` and `test-applications` targets.
+`test-core` runs the framework-neutral ERT, Bun, and public CLI suites; it
+compares generated ESM with snapshots, validates Source Map v3 output, and
+executes ordinary and source-mapped modules under maintained JavaScript hosts.
+`test-applications` separately runs React rendering, the Vite transform and
+production builds, and Org publishing coverage for metadata, deterministic
+HTML, drafts, duplicate handling, watched content, direct ESM execution, and
+the production site bundle. Application failures remain visible in the
+aggregate developer suite without becoming core acceptance evidence.
 
 Worker tests separately exercise the versioned persistent-value codec and its
 chunked framing. Bun unit tests cover every value category, malformed events,

@@ -1,24 +1,25 @@
 EMACS ?= emacs
 BUN ?= bun
 
-.PHONY: test check-contracts byte-compile
-test: check-contracts
+.PHONY: test test-core test-applications check-contracts byte-compile
+test: test-core test-applications
+
+test-core: check-contracts
 	$(EMACS) --batch -Q -L compiler -L editor -L tools/org -L tools/worker -L tests \
 		-l tests/eliscript-tests.el \
 		-l tests/eliscript-evaluation-tests.el \
 		-l tests/eliscript-project-tests.el \
 		-l tests/eliscript-mode-tests.el \
 		-l tests/eliscript-repl-tests.el \
-		-l tests/eliscript-org-tests.el \
 		-l tests/eliscript-worker-tests.el \
 		-l tests/eliscript-service-tests.el \
 		-l tests/eliscript-analysis-tests.el \
 		-l tests/bootstrap-tests.el \
 		-f ert-run-tests-batch-and-exit
-	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
-		tests/conformance.test.mjs tests/public-surface.test.mjs \
+	$(BUN) test tests/conformance.test.mjs tests/public-surface.test.mjs \
 		tests/api-index.test.mjs \
 		tests/onboarding-docs.test.mjs \
+		tests/test-partition.test.mjs \
 		tests/repository-integrity.test.mjs \
 		tests/platform-capabilities.test.mjs \
 		tests/reader-program-fuzz.test.mjs \
@@ -83,6 +84,13 @@ test: check-contracts
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/project-cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/check-cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/format-cli-test.sh
+
+test-applications:
+	$(EMACS) --batch -Q -L tools/org -L tests \
+		-l tests/eliscript-org-tests.el \
+		-f ert-run-tests-batch-and-exit
+	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs
+	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/application-cli-test.sh
 
 check-contracts:
 	$(BUN) tools/conformance/check.mjs
