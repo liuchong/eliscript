@@ -20,6 +20,7 @@ test-core: check-contracts
 		tests/api-index.test.mjs \
 		tests/compatibility-rehearsal.test.mjs \
 		tests/onboarding-docs.test.mjs \
+		tests/clean-project-workflow.test.mjs \
 		tests/local-onboarding.test.mjs \
 		tests/test-partition.test.mjs \
 		tests/repository-integrity.test.mjs \

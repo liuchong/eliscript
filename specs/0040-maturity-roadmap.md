@@ -1288,6 +1288,12 @@ Public commands can check, format-check, build, run, and watch a configured
 multi-module project from a clean checkout. CLI flags and `eliscript.json`
 precedence are documented and covered by integration tests.
 
+**Status:** Complete. Specification
+[0140-clean-configured-project-workflow.md](0140-clean-configured-project-workflow.md)
+executes the complete public workflow in one bounded temporary multi-module
+project, proves command-line precedence, restores source bytes, reclaims the
+watch process, and enters the source-bound clean acceptance suite.
+
 **AC-09 MUST - Correct incremental builds**
 
 For the 1,000-module acceptance graph, a no-op rebuild reuses 100 percent of

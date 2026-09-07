@@ -144,6 +144,12 @@ Run `eliscript-format --write FILE` to apply canonical formatting atomically.
 Run `eliscript-build --json --config eliscript.json` to inspect exact compiled
 and reused module decisions.
 
+With `--config`, an explicit `ENTRY`, `--root`, `--out-dir`, or repeated
+`--portable` values replace their configured counterparts; `--no-cache` only
+disables reuse. Relative paths written in `eliscript.json` resolve from the
+configuration directory, while relative command-line paths resolve from the
+current working directory.
+
 ## Unsaved Source and Diagnostics
 
 Editor integrations can check the current contents of an existing source path

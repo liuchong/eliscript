@@ -76,7 +76,7 @@ test("onboarding guide covers every maintained workflow and failure class", asyn
     version: 2,
     documents: 11,
     sections: 69,
-    requiredLiterals: 49,
+    requiredLiterals: 50,
     localLinks: 46,
     snippets: 5,
     executions: 8,

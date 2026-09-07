@@ -29,20 +29,20 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 139 specifications.
+The registry currently contains 140 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 107 |
+| Accepted design | 108 |
 | Stable design | 30 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 135 |
+| Implemented | 136 |
 | Superseded implementation | 1 |
 
 Compatibility Baseline 2 separately classifies 30 specifications as stable,
-105 as provisional, 3 as planning, and 1 as superseded. That baseline is
+106 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -161,7 +161,7 @@ formal acceptance work.
 M13 has completed all 5/5 implementation units through specification 0138. Its
 versioned corpus derives all 35 mandatory AC/PD criteria from normative
 headings, maps each criterion to bounded probes and tracked evidence, and
-retains one clean audit with 20 pass, 15 incomplete, and zero failed criteria.
+retains one clean audit with 21 pass, 14 incomplete, and zero failed criteria.
 The final acceptance flag remains false. Specification 0135 records the local,
 source-bound onboarding exercise for M13-02 with all six steps passing within
 the active-step budget. Specification 0136 records the passing direct local
@@ -171,14 +171,16 @@ core inventory, checked local links, and five executable examples. Specification
 0138 adds canonical machine-readable and human-readable acceptance artifacts,
 five evidence summaries, a blocking-defect gate, and deterministic rejection
 of forged final results. Application and publishing documentation remains
-outside the core gate. AC-24 and final acceptance remain open because 15
+outside the core gate. AC-24 and final acceptance remain open because 14
 mandatory criteria are still incomplete.
 
 Post-M13 verification now closes PD-01 through specification 0139. Its fixed
 cross-host corpus executes 100,000 independently replayable operation
 sequences for each persistent collection family, freezes exact semantic
 summaries, and proves every retained older version unchanged after later
-updates.
+updates. Specification 0140 closes AC-08 through one clean configured project
+workflow covering public format-check, check, build, standard ESM execution,
+watch lifecycle, and command-line precedence.
 
 ## Reading Paths
 
@@ -479,6 +481,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0137 | [Complete Core Documentation Set](0137-complete-core-documentation.md) | Accepted | Implemented |
 | 0138 | [Versioned Final Acceptance Artifacts](0138-versioned-final-acceptance-artifacts.md) | Accepted | Implemented |
 | 0139 | [Deterministic Persistent Semantics Corpus](0139-deterministic-persistent-semantics-corpus.md) | Accepted | Implemented |
+| 0140 | [Clean Configured Project Workflow](0140-clean-configured-project-workflow.md) | Accepted | Implemented |
 
 ## Adding a Specification
 
