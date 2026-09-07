@@ -28,28 +28,29 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 123 specifications.
+The registry currently contains 124 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
 | Accepted design | 92 |
-| Stable design | 29 |
+| Stable design | 30 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 119 |
+| Implemented | 120 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 29 specifications as stable,
+Compatibility Baseline 2 separately classifies 30 specifications as stable,
 90 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
-M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
+M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
 implementations, shared value semantics, open protocol dispatch, collection
 capabilities, immutable collection construction, single-pass transducers,
 owner-token transient Vector, Map, and Set builders, and protocol-driven core
 sequence/data algorithms, stack-safe recurrence, deterministic macro-generated
-names, Lisp-named protocol/collection/transducer/transient modules, and
+names and declared, digest-tracked macro file inputs, Lisp-named
+protocol/collection/transducer/transient modules, and
 Eliscript-maintained core algorithm bodies, first-class immutable Keyword and
 Symbol values, root-shared immutable metadata, portable identifier values, and
 canonical runtime plus portable List/collection data text, including an
@@ -404,6 +405,7 @@ The schemas and change workflow are defined by specifications
 | 0121 | [Host-neutral Project Watch Events](0121-host-neutral-project-watch.md) | Accepted | Implemented |
 | 0122 | [Evidence-derived Maturity Progress](0122-evidence-derived-maturity-progress.md) | Accepted | Implemented |
 | 0123 | [Stable ECMAScript Module Import Contract](0123-stable-esm-import-contract.md) | Stable | Implemented |
+| 0124 | [Declared Macro File Dependencies](0124-declared-macro-file-dependencies.md) | Stable | Implemented |
 
 ## Adding a Specification
 

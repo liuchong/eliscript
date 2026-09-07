@@ -29,7 +29,9 @@
 (cl-defstruct (eliscript-macro-eval--context
                (:constructor eliscript-macro-eval--context-create))
   counter
-  reserved-names)
+  reserved-names
+  capabilities
+  files)
 
 (defconst eliscript-macro-eval--missing (make-symbol "missing")
   "Sentinel that distinguishes an absent value from source `undefined'.")
@@ -110,12 +112,42 @@
      operator (eliscript-macro-eval--display value)))
   value)
 
-(defun eliscript-macro-eval--make-context (&optional reserved-names)
-  "Return a deterministic generated-name context using RESERVED-NAMES."
+(defun eliscript-macro-eval--make-context
+    (&optional reserved-names capabilities files)
+  "Return a deterministic macro context.
+
+RESERVED-NAMES controls generated-name allocation.  CAPABILITIES and FILES
+are string-keyed hash tables supplied by the compiler host."
   (eliscript-macro-eval--context-create
    :counter 0
    :reserved-names
-   (or reserved-names (make-hash-table :test #'equal))))
+   (or reserved-names (make-hash-table :test #'equal))
+   :capabilities
+   (or capabilities (make-hash-table :test #'equal))
+   :files
+   (or files (make-hash-table :test #'equal))))
+
+(defun eliscript-macro-eval--read-file (arguments scope)
+  "Read one declared macro file from ARGUMENTS in SCOPE."
+  (unless (= (length arguments) 1)
+    (eliscript-macro-eval--fail "macro-read-file expects 1 argument"))
+  (let* ((specifier (eliscript-macro-eval--eval (car arguments) scope))
+         (context (eliscript-macro-eval--scope-context scope)))
+    (unless (and (stringp specifier) (not (string-empty-p specifier)))
+      (eliscript-macro-eval--fail
+       "macro-read-file expects a non-empty string"))
+    (unless (gethash "read-file"
+                     (eliscript-macro-eval--context-capabilities context))
+      (eliscript-macro-eval--fail
+       "macro capability is not enabled: read-file"))
+    (let ((content
+           (gethash specifier
+                    (eliscript-macro-eval--context-files context)
+                    eliscript-macro-eval--missing)))
+      (when (eq content eliscript-macro-eval--missing)
+        (eliscript-macro-eval--fail
+         "macro file dependency is not declared: %s" specifier))
+      content)))
 
 (defun eliscript-macro-eval--make-scope (&optional parent context)
   "Return an empty evaluator scope with optional PARENT and CONTEXT."
@@ -645,6 +677,8 @@
 	  (if arguments
 	      (eliscript-macro-eval--eval (car arguments) scope)
 	    "G")))
+	('macro-read-file
+	 (eliscript-macro-eval--read-file arguments scope))
 	(_
 	 (let* ((values (eliscript-macro-eval--eval-args arguments scope))
 		(list-result

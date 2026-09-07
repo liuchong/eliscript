@@ -19,9 +19,11 @@ the existing graph compiler is selected.
 This is the first M9 configuration and service convergence slice. Version 1
 intentionally describes one graph root and one entry because the current
 public build artifact has one entry identity. Multi-entry graph identity,
-source-map policy, build profiles, declared macro capabilities, namespaced
-host options, and self-hosted parsing require later versioned specifications;
-they are not accepted as ignored version 1 fields.
+source-map policy, build profiles, namespaced host options, and self-hosted
+parsing require later versioned specifications; they are not accepted as
+ignored version 1 fields. Specification 0124 subsequently adds optional,
+closed macro capability and file-input fields without changing version 1
+single-entry meaning.
 
 Application frameworks, bundlers, publishing tools, sites, hosting systems,
 and development servers are replaceable consumers. They do not define this
@@ -37,6 +39,8 @@ The in-memory request contains:
 | `root` | source containment root |
 | `out-dir` | generated ESM directory |
 | `portable-entries` | empty for an ordinary graph, otherwise portable names |
+| `macro-capabilities` | explicit compile-time capability names |
+| `macro-file-dependencies` | exact project-relative macro input paths |
 | `use-cache` | whether verified incremental artifacts may be reused |
 | `configuration` | optional source configuration identity |
 
@@ -58,6 +62,8 @@ not part of version 1.
   "entry": "main.eli",
   "outDir": "dist",
   "portableEntries": [],
+  "macroCapabilities": [],
+  "macroFileDependencies": [],
   "cache": true
 }
 ```
@@ -65,7 +71,9 @@ not part of version 1.
 `schemaVersion`, `entry`, and `outDir` are required. `sourceRoot` defaults to
 `.` relative to the configuration directory. `portableEntries` defaults to an
 empty array and must contain unique non-empty strings. `cache` defaults to
-true and must be a JSON boolean.
+true and must be a JSON boolean. `macroCapabilities` and
+`macroFileDependencies` also default to empty arrays. Their closed capability,
+path-containment, UTF-8, and digest behavior is specified in 0124.
 
 `sourceRoot`, `entry`, and `outDir` are non-empty relative paths. Absolute
 paths and any `..` component reject before filesystem traversal. `sourceRoot`

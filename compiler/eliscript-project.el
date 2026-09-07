@@ -19,6 +19,13 @@
 	      "Eliscript project build error"
 	      'eliscript-compile-error)
 
+(cl-defstruct (eliscript-project-macro-dependency
+               (:constructor eliscript-project-macro-dependency-create))
+  specifier
+  source
+  digest
+  content)
+
 (cl-defstruct (eliscript-project-module
                (:constructor eliscript-project-module-create))
   source
@@ -28,6 +35,7 @@
   output-digest
   source-map-digest
   dependencies
+  macro-dependencies
   portable-entries
   reused
   reason)
@@ -80,6 +88,8 @@
   out-dir
   root
   portable-entries
+  macro-capabilities
+  macro-file-dependencies
   use-cache
   configuration)
 
@@ -114,15 +124,20 @@
   "Conventional filename for an Eliscript project request.")
 
 (defconst eliscript-project--configuration-keys-v1
-  '(schemaVersion sourceRoot entry outDir portableEntries cache)
+  '(schemaVersion sourceRoot entry outDir portableEntries
+    macroCapabilities macroFileDependencies cache)
   "Complete top-level key set accepted by configuration version 1.")
 
 (defconst eliscript-project--configuration-keys-v2
-  '(schemaVersion sourceRoot entries outDir portableEntries cache)
+  '(schemaVersion sourceRoot entries outDir portableEntries
+    macroCapabilities macroFileDependencies cache)
   "Complete top-level key set accepted by configuration version 2.")
 
 (defvar eliscript-project-use-cache t
   "When non-nil, project builds may reuse verified manifest artifacts.")
+
+(defconst eliscript-project--macro-capabilities '("read-file")
+  "Macro capabilities implemented by the project host.")
 
 (defconst eliscript-project--compiler-directory
   (file-name-directory (or load-file-name buffer-file-name))
@@ -249,6 +264,12 @@ FILENAME and KEY identify invalid values in diagnostics."
            (portable-entries
             (eliscript-project--configuration-field
              configuration 'portableEntries nil))
+           (macro-capabilities
+            (eliscript-project--configuration-field
+             configuration 'macroCapabilities nil))
+           (macro-file-dependencies
+            (eliscript-project--configuration-field
+             configuration 'macroFileDependencies nil))
            (cache
             (eliscript-project--configuration-field
              configuration 'cache t)))
@@ -263,6 +284,41 @@ FILENAME and KEY identify invalid values in diagnostics."
                  (length (delete-dups (copy-sequence portable-entries))))
         (eliscript-project--configuration-fail
          canonical "portableEntries must not contain duplicates"))
+      (unless (and (listp macro-capabilities)
+                   (cl-every
+                    (lambda (name)
+                      (and (stringp name) (not (string-empty-p name))))
+                    macro-capabilities))
+        (eliscript-project--configuration-fail
+         canonical "macroCapabilities must be an array of non-empty strings"))
+      (unless (= (length macro-capabilities)
+                 (length (delete-dups (copy-sequence macro-capabilities))))
+        (eliscript-project--configuration-fail
+         canonical "macroCapabilities must not contain duplicates"))
+      (let ((unsupported
+             (cl-find-if
+              (lambda (name)
+                (not (member name eliscript-project--macro-capabilities)))
+              macro-capabilities)))
+        (when unsupported
+          (eliscript-project--configuration-fail
+           canonical "unsupported macro capability: %s" unsupported)))
+      (unless (and (listp macro-file-dependencies)
+                   (cl-every #'eliscript-project--safe-relative-path-p
+                             macro-file-dependencies))
+        (eliscript-project--configuration-fail
+         canonical
+         "macroFileDependencies must contain only contained relative paths"))
+      (unless (= (length macro-file-dependencies)
+                 (length
+                  (delete-dups (copy-sequence macro-file-dependencies))))
+        (eliscript-project--configuration-fail
+         canonical "macroFileDependencies must not contain duplicates"))
+      (when (and macro-file-dependencies
+                 (not (member "read-file" macro-capabilities)))
+        (eliscript-project--configuration-fail
+         canonical
+         "macroFileDependencies require the read-file macro capability"))
       (unless (memq cache '(t :false))
         (eliscript-project--configuration-fail
          canonical "cache must be a boolean"))
@@ -308,6 +364,9 @@ FILENAME and KEY identify invalid values in diagnostics."
          :out-dir output-path
          :root root
          :portable-entries portable-entries
+         :macro-capabilities (sort macro-capabilities #'string-lessp)
+         :macro-file-dependencies
+         (sort macro-file-dependencies #'string-lessp)
          :use-cache (eq cache t)
          :configuration canonical)))))
 
@@ -322,6 +381,10 @@ FILENAME and KEY identify invalid values in diagnostics."
          (root (eliscript-project-request-root request))
          (portable-entries
           (eliscript-project-request-portable-entries request))
+         (macro-capabilities
+          (eliscript-project-request-macro-capabilities request))
+         (macro-file-dependencies
+          (eliscript-project-request-macro-file-dependencies request))
          (eliscript-project-use-cache
           (eliscript-project-request-use-cache request)))
     (unless (and entries
@@ -350,10 +413,44 @@ FILENAME and KEY identify invalid values in diagnostics."
       (eliscript-project--fail
        (car entries) nil
        "multi-entry portable project requests are not supported"))
+    (unless (and (listp macro-capabilities)
+                 (cl-every
+                  (lambda (name)
+                    (member name eliscript-project--macro-capabilities))
+                  macro-capabilities))
+      (eliscript-project--fail
+       (car entries) nil "project request macro capabilities are invalid"))
+    (unless (= (length macro-capabilities)
+               (length (delete-dups (copy-sequence macro-capabilities))))
+      (eliscript-project--fail
+       (car entries) nil
+       "project request macro capabilities must not contain duplicates"))
+    (unless (and (listp macro-file-dependencies)
+                 (cl-every #'eliscript-project--safe-relative-path-p
+                           macro-file-dependencies))
+      (eliscript-project--fail
+       (car entries) nil "project request macro file dependencies are invalid"))
+    (unless (= (length macro-file-dependencies)
+               (length
+                (delete-dups (copy-sequence macro-file-dependencies))))
+      (eliscript-project--fail
+       (car entries) nil
+       "project request macro file dependencies must not contain duplicates"))
+    (when (and macro-file-dependencies
+               (not (member "read-file" macro-capabilities)))
+      (eliscript-project--fail
+       (car entries) nil
+       "macro file dependencies require the read-file macro capability"))
+    (setq macro-capabilities
+          (sort (copy-sequence macro-capabilities) #'string-lessp)
+          macro-file-dependencies
+          (sort (copy-sequence macro-file-dependencies) #'string-lessp))
     (if portable-entries
         (eliscript-project-build-portable
-         (car entries) portable-entries out-dir root)
-      (eliscript-project--build-many entries out-dir root))))
+         (car entries) portable-entries out-dir root
+         macro-capabilities macro-file-dependencies)
+      (eliscript-project--build-many
+       entries out-dir root macro-capabilities macro-file-dependencies))))
 
 (defun eliscript-project--canonical-directory (directory label)
   "Return canonical DIRECTORY with a trailing slash, or fail using LABEL."
@@ -375,6 +472,78 @@ FILENAME and SPAN identify the import responsible for PATH."
         (eliscript-project--fail
          filename span "local Eliscript module escapes project root: %s" path))
       canonical)))
+
+(defun eliscript-project--macro-dependencies (specifiers root filename)
+  "Resolve declared macro file SPECIFIERS below ROOT for FILENAME."
+  (let ((dependencies
+         (mapcar
+          (lambda (specifier)
+            (let ((expanded (expand-file-name specifier root)))
+              (unless (file-regular-p expanded)
+                (eliscript-project--fail
+                 filename nil
+                 "macro file dependency does not exist: %s" specifier))
+              (let ((source (file-truename expanded)))
+                (unless (file-in-directory-p source root)
+                  (eliscript-project--fail
+                   filename nil
+                   "macro file dependency escapes project root: %s" specifier))
+                (let ((snapshot
+                       (eliscript-project--read-utf8-input source specifier)))
+                  (eliscript-project-macro-dependency-create
+                   :specifier specifier
+                   :source source
+                   :digest (car snapshot)
+                   :content (cdr snapshot))))))
+          specifiers)))
+    (unless (= (length dependencies)
+               (length
+                (delete-dups
+                 (mapcar #'eliscript-project-macro-dependency-source
+                         dependencies))))
+      (eliscript-project--fail
+       filename nil "macro file dependencies resolve to duplicates"))
+    dependencies))
+
+(defun eliscript-project--read-utf8-input (filename specifier)
+  "Return FILENAME's SHA-256 digest and UTF-8 text for macro SPECIFIER."
+  (let (bytes decoded)
+    (with-temp-buffer
+      (set-buffer-multibyte nil)
+      (insert-file-contents-literally filename)
+      (setq bytes (buffer-string)))
+    (setq decoded (decode-coding-string bytes 'utf-8-unix))
+    (unless (and (not (cl-some (lambda (character)
+                                (> character #x10ffff))
+                              decoded))
+                 (equal bytes
+                        (encode-coding-string decoded 'utf-8-unix t)))
+      (eliscript-project--fail
+       filename nil "macro file dependency is not valid UTF-8: %s" specifier))
+    (cons (secure-hash 'sha256 bytes) decoded)))
+
+(defun eliscript-project--macro-context (capabilities dependencies)
+  "Create a compiler macro context from CAPABILITIES and DEPENDENCIES."
+  (let ((capability-table (make-hash-table :test #'equal))
+        (file-table (make-hash-table :test #'equal)))
+    (dolist (capability capabilities)
+      (puthash capability t capability-table))
+    (dolist (dependency dependencies)
+      (puthash
+       (eliscript-project-macro-dependency-specifier dependency)
+       (eliscript-project-macro-dependency-content dependency)
+       file-table))
+    (list :capabilities capability-table :files file-table)))
+
+(defun eliscript-project--macro-dependency-records (dependencies root)
+  "Return stable manifest records for macro DEPENDENCIES below ROOT."
+  (vconcat
+   (mapcar
+    (lambda (dependency)
+      `((path . ,(file-relative-name
+                  (eliscript-project-macro-dependency-source dependency) root))
+        (digest . ,(eliscript-project-macro-dependency-digest dependency))))
+    dependencies)))
 
 (defun eliscript-project--source-output (source root out-dir)
   "Map Eliscript SOURCE below ROOT into its ESM path below OUT-DIR."
@@ -454,6 +623,10 @@ FILENAME and SPAN identify the import responsible for PATH."
          (mapcar (lambda (dependency)
                    (file-relative-name dependency root))
                  (or (eliscript-project-module-dependencies module) nil))))
+    ,@(when (eliscript-project-module-macro-dependencies module)
+        `((macroDependencies
+           . ,(eliscript-project--macro-dependency-records
+               (eliscript-project-module-macro-dependencies module) root))))
     (portableEntries
      . ,(vconcat
          (or (eliscript-project-module-portable-entries module) nil)))))
@@ -462,7 +635,19 @@ FILENAME and SPAN identify the import responsible for PATH."
   "Normalize parsed cache RECORD for deterministic digest verification."
   `((source . ,(alist-get 'source record))
     (dependencies . ,(vconcat (alist-get 'dependencies record)))
+    ,@(when (assq 'macroDependencies record)
+        `((macroDependencies
+           . ,(vconcat (alist-get 'macroDependencies record)))))
     (portableEntries . ,(vconcat (alist-get 'portableEntries record)))))
+
+(defun eliscript-project--manifest-identity-module (record)
+  "Normalize parsed public manifest RECORD for digest verification."
+  (mapcar
+   (lambda (entry)
+     (if (eq (car entry) 'macroDependencies)
+         (cons 'macroDependencies (vconcat (cdr entry)))
+       entry))
+   record))
 
 (defun eliscript-project--cache-version-kind (cache)
   "Return the supported version kind of CACHE, or nil."
@@ -543,11 +728,19 @@ FILENAME and SPAN identify the import responsible for PATH."
                          `((format . ,(alist-get 'format manifest))
                            (version . 1)
                            (entry . ,(alist-get 'entry manifest))
-                           (modules . ,(vconcat identity-modules)))
+                           (modules
+                            . ,(vconcat
+                                (mapcar
+                                 #'eliscript-project--manifest-identity-module
+                                 identity-modules))))
                        `((format . ,(alist-get 'format manifest))
                          (version . 2)
                          (entries . ,(vconcat (alist-get 'entries manifest)))
-                         (modules . ,(vconcat identity-modules))))))
+                         (modules
+                          . ,(vconcat
+                              (mapcar
+                               #'eliscript-project--manifest-identity-module
+                               identity-modules)))))))
                 (not (equal (alist-get 'digest manifest)
                             (eliscript-project--json-digest graph-identity))))
               (eliscript-project--cache-miss "graph-digest-invalid"))
@@ -607,11 +800,13 @@ FILENAME and SPAN identify the import responsible for PATH."
          (eliscript-project--cache-miss "manifest-unreadable")))))))
 
 (defun eliscript-project--cache-decision
-    (source root out-dir cache &optional expected-portable-entries)
+    (source root out-dir cache
+            &optional expected-portable-entries expected-macro-dependencies)
   "Return the cache decision for SOURCE.
 
 EXPECTED-PORTABLE-ENTRIES is a sorted string list. The symbol `any' accepts
-the entries recorded by CACHE for complete-graph reuse."
+the entries recorded by CACHE for complete-graph reuse.  Macro dependencies
+must match their current project-relative paths and content digests."
   (if (not cache)
       (eliscript-project-cache-decision-create :reason "not-cached")
     (condition-case nil
@@ -626,6 +821,13 @@ the entries recorded by CACHE for complete-graph reuse."
                (source-map (concat output ".map"))
                (portable-entries
                 (alist-get 'portableEntries metadata))
+               (macro-dependency-records
+                (append (alist-get 'macroDependencies metadata) nil))
+               (expected-macro-records
+                (append
+                 (eliscript-project--macro-dependency-records
+                  expected-macro-dependencies root)
+                 nil))
                reason)
           (setq reason
                 (cond
@@ -640,6 +842,9 @@ the entries recorded by CACHE for complete-graph reuse."
                            (equal portable-entries
                                   expected-portable-entries)))
                   "portable-entries-changed")
+                 ((not (equal macro-dependency-records
+                              expected-macro-records))
+                  "macro-dependencies-changed")
                  ((not (equal (alist-get 'sourceDigest identity)
                               (eliscript-project--file-digest source)))
                   "source-changed")
@@ -671,6 +876,7 @@ the entries recorded by CACHE for complete-graph reuse."
                     :output-digest (alist-get 'outputDigest identity)
                     :source-map-digest (alist-get 'sourceMapDigest identity)
                     :dependencies dependencies
+                    :macro-dependencies expected-macro-dependencies
                     :portable-entries portable-entries
                     :reused t
                     :reason "verified")
@@ -683,7 +889,8 @@ the entries recorded by CACHE for complete-graph reuse."
         :reason "artifact-unreadable")))))
 
 (defun eliscript-project--cached-build-result
-    (root out-dir entries cache mode portable-entries started-at cache-read-ms)
+    (root out-dir entries cache mode portable-entries macro-dependencies
+          started-at cache-read-ms)
   "Return a fully reused result for ENTRIES from CACHE, or nil.
 
 STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
@@ -697,7 +904,8 @@ STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
                (decision
                 (and (file-regular-p source)
                      (eliscript-project--cache-decision
-                      (file-truename source) root out-dir cache 'any)))
+                      (file-truename source) root out-dir cache 'any
+                      macro-dependencies)))
                (module
                 (and decision
                      (eliscript-project-cache-decision-module decision))))
@@ -748,7 +956,8 @@ STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
            :total-ms total-ms))))))
 
 (defun eliscript-project--write-module
-    (program source source-text output-path dependencies portable-entries reason)
+    (program source source-text output-path dependencies macro-dependencies
+             portable-entries reason)
   "Emit PROGRAM for SOURCE and write it to OUTPUT-PATH with a source map."
   (let* ((map-path (concat output-path ".map"))
          (map-directory (file-name-directory map-path))
@@ -775,6 +984,7 @@ STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
      :output-digest (eliscript-project--file-digest output-path)
      :source-map-digest (eliscript-project--file-digest map-path)
      :dependencies dependencies
+     :macro-dependencies macro-dependencies
      :portable-entries portable-entries
      :reused nil
      :reason reason)))
@@ -790,7 +1000,11 @@ STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
     (sourceDigest . ,(eliscript-project-module-source-digest module))
     (outputDigest . ,(eliscript-project-module-output-digest module))
     (sourceMapDigest
-     . ,(eliscript-project-module-source-map-digest module))))
+     . ,(eliscript-project-module-source-map-digest module))
+    ,@(when (eliscript-project-module-macro-dependencies module)
+        `((macroDependencies
+           . ,(eliscript-project--macro-dependency-records
+               (eliscript-project-module-macro-dependencies module) root))))))
 
 (defun eliscript-project--write-manifest
     (root out-dir entry-outputs modules mode portable-entries compiler-digest)
@@ -1000,6 +1214,11 @@ STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
                         (file-relative-name dependency root))
                       (or (eliscript-project-module-dependencies module)
                           nil))))
+                ,@(when (eliscript-project-module-macro-dependencies module)
+                    `((macroDependencies
+                       . ,(eliscript-project--macro-dependency-records
+                           (eliscript-project-module-macro-dependencies module)
+                           root))))
                 (portableEntries
                  . ,(vconcat
                      (or (eliscript-project-module-portable-entries module)
@@ -1010,7 +1229,8 @@ STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
   "Compile the local Eliscript graph rooted at ENTRY into OUT-DIR."
   (eliscript-project--build-many (list entry) out-dir root))
 
-(defun eliscript-project--build-many (entries out-dir &optional root)
+(defun eliscript-project--build-many
+    (entries out-dir &optional root macro-capabilities macro-file-dependencies)
   "Compile local Eliscript graphs rooted at ENTRIES into OUT-DIR.
 
 ROOT defaults to the only entry's directory.  Relative `.eli' imports are
@@ -1040,6 +1260,12 @@ unchanged."
                entry-path root-path entry-path nil))
             entry-paths)
            #'string-lessp))
+         (macro-dependencies
+          (eliscript-project--macro-dependencies
+           macro-file-dependencies root-path (car canonical-entries)))
+         (macro-context
+          (eliscript-project--macro-context
+           macro-capabilities macro-dependencies))
          (resolved-out-dir (file-truename (expand-file-name out-dir)))
          (output-directory
           (file-name-as-directory resolved-out-dir))
@@ -1085,8 +1311,9 @@ unchanged."
                       (eliscript-project--source-output
                        source root-path output-directory))
                      (decision
-                      (eliscript-project--cache-decision
-                       source root-path output-directory cache nil))
+                     (eliscript-project--cache-decision
+                       source root-path output-directory cache nil
+                       macro-dependencies))
                      (cached
                       (eliscript-project-cache-decision-module decision)))
 		(if cached
@@ -1097,7 +1324,9 @@ unchanged."
                       (push cached modules))
                   (let* ((source-text
                           (eliscript-project--read-source source))
-                         (program (eliscript-compile-ir-file source))
+                         (program
+                          (eliscript-compile-ir-string
+                           source-text source macro-context))
                          dependencies)
                     (eliscript-ir-walk
                      program
@@ -1133,7 +1362,8 @@ unchanged."
                       (visit dependency))
                     (push
                      (eliscript-project--write-module
-                      program source source-text output-path dependencies nil
+                      program source source-text output-path dependencies
+                      macro-dependencies nil
                       (if cache
                           (eliscript-project-cache-decision-reason decision)
 			(eliscript-project-cache-lookup-reason cache-lookup)))
@@ -1168,7 +1398,9 @@ Each description has the shape (SPECIFIER NAMES SPAN)."
            imports))))
     (nreverse imports)))
 
-(defun eliscript-project-build-portable (entry entries out-dir &optional root)
+(defun eliscript-project-build-portable
+    (entry entries out-dir
+           &optional root macro-capabilities macro-file-dependencies)
   "Compile portable ENTRIES and their local module graph from ENTRY.
 
 Every `import-portable' edge must name a relative `.eli' module below ROOT.
@@ -1184,6 +1416,12 @@ only the requested declarations, immutable constants, and portable imports."
          (canonical-entry
           (eliscript-project--canonical-source
            entry-path root-path entry-path nil))
+         (macro-dependencies
+          (eliscript-project--macro-dependencies
+           macro-file-dependencies root-path canonical-entry))
+         (macro-context
+          (eliscript-project--macro-context
+           macro-capabilities macro-dependencies))
          (resolved-out-dir (file-truename (expand-file-name out-dir)))
          (output-directory (file-name-as-directory resolved-out-dir))
          (portable-entry-names
@@ -1203,7 +1441,8 @@ only the requested declarations, immutable constants, and portable imports."
          (cached-result
           (eliscript-project--cached-build-result
            root-path output-directory (list canonical-entry) cache
-           "portable" portable-entry-names started-at cache-read-ms))
+           "portable" portable-entry-names macro-dependencies
+           started-at cache-read-ms))
          (forms-by-source (make-hash-table :test #'equal))
          (texts-by-source (make-hash-table :test #'equal))
          (requests (make-hash-table :test #'equal))
@@ -1224,7 +1463,9 @@ only the requested declarations, immutable constants, and portable imports."
               (source)
               (or (gethash source forms-by-source)
                   (let* ((text (eliscript-project--read-source source))
-                         (forms (eliscript--analyzed-string text source)))
+                         (forms
+                          (eliscript--analyzed-string
+                           text source macro-context)))
                     (puthash source text texts-by-source)
                     (puthash source forms forms-by-source)
                     forms)))
@@ -1303,7 +1544,8 @@ only the requested declarations, immutable constants, and portable imports."
                        (mapcar #'symbol-name names))
                       (decision
                        (eliscript-project--cache-decision
-                        source root-path output-directory cache entry-names))
+                        source root-path output-directory cache entry-names
+                        macro-dependencies))
                       (cached
                        (eliscript-project-cache-decision-module decision)))
                  (if cached
@@ -1328,7 +1570,7 @@ only the requested declarations, immutable constants, and portable imports."
                      (push
                       (eliscript-project--write-module
                        program source (gethash source texts-by-source)
-                       output-path dependencies entry-names
+                       output-path dependencies macro-dependencies entry-names
                        (if cache
                            (eliscript-project-cache-decision-reason decision)
                          (eliscript-project-cache-lookup-reason cache-lookup)))

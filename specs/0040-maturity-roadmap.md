@@ -486,7 +486,7 @@ then freeze the core surface against accidental changes.
 question in the complete core corpus, and seed/self-hosted results match across
 that corpus. Application frameworks cannot add requirements to this gate.
 
-**M8 status:** Underway since 2026-08-28. The first provisional slice is the
+**M8 status:** Completed on 2026-09-07. The first provisional slice was the
 32-way persistent vector trie in
 [0047-persistent-vector-prototype.md](0047-persistent-vector-prototype.md),
 including generated reference-model checks and one-million-value structural
@@ -769,6 +769,17 @@ evidence selects a conservative 16,000-character threshold, while a
 200-request one-generation soak applies 100 stable buffer results and discards
 100 stale results. No application framework, bundler, publishing tool, site,
 hosting system, or development server contributes to this completion.
+Declared macro file inputs complete the final M8 implementation unit in
+[0124-declared-macro-file-dependencies.md](0124-declared-macro-file-dependencies.md).
+The seed and self-hosted compilers expose no ambient macro capabilities;
+project versions 1 and 2 may explicitly grant `read-file` for an exact,
+root-contained UTF-8 dependency set. Ordered SHA-256 records enter public
+manifest, report, and cache identity, changed inputs conservatively invalidate
+every project module, and Bun/Node plus seed/self-hosted evidence agrees. With
+the stable ESM import contract in 0123, deterministic names and capture rules
+in 0065, and the complete retained language corpus, all seven M8 implementation
+units are complete. Final 1.0 acceptance and broader stabilization remain
+tracked independently; application tooling contributes no M8 maturity credit.
 
 ### M9: Compiler and Build Convergence (6 implementation units)
 

@@ -43,20 +43,28 @@ frozen version 1 value:
   "outDir": "/project/dist",
   "root": "/project",
   "portableEntries": ["group-by"],
+  "macroCapabilities": [],
+  "macroFileDependencies": [],
   "useCache": true
 }
 ```
 
 Portable names are non-empty strings, deduplicated, and sorted. Entry and
 output paths are non-empty strings, root is a non-empty string or null, and
-cache intent is boolean. Invalid requests fail with `ELI-B0001` in the
-`project-build` phase.
+cache intent is boolean. Specification 0124 subsequently adds the two optional
+empty-by-default macro arrays shown above. Invalid requests fail with
+`ELI-B0001` in the `project-build` phase.
 
 Configuration normalization accepts the closed version 1 key set from
 specification 0106, applies defaults, validates contained relative paths, and
 returns a frozen normalized value. Unsupported versions, unknown keys,
 duplicate portable names, invalid booleans, and unsafe paths fail with
 `ELI-B0002` in the `project-config` phase.
+
+The extended closed key set includes `macroCapabilities` and
+`macroFileDependencies` under specification 0124. It rejects unsupported
+capabilities, undeclared capability use, invalid UTF-8, and canonical path
+escape before macro expansion.
 
 ## Host Boundary
 

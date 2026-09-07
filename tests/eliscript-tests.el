@@ -1614,6 +1614,40 @@
    (eliscript-compile-string "(print __eliscript_private/value)")
    :type 'eliscript-analyze-error))
 
+(ert-deftest eliscript-macros-read-only-declared-context-files ()
+  (let ((capabilities (make-hash-table :test #'equal))
+        (files (make-hash-table :test #'equal))
+        (source
+         "(defmacro configured-value () (macro-read-file \"build-value.txt\"))
+(defconst value (configured-value))
+(export value)"))
+    (puthash "read-file" t capabilities)
+    (puthash "build-value.txt" "forty-two" files)
+    (let ((output
+           (eliscript-emit-ir-module
+            (eliscript-compile-ir-string
+             source "macro-context.eli"
+             (list :capabilities capabilities :files files)))))
+      (should (string-match-p
+               (regexp-quote "const value = \"forty-two\";") output)))
+    (let ((disabled
+           (should-error
+            (eliscript-compile-ir-string source "macro-context.eli")
+            :type 'eliscript-expand-error)))
+      (should (string-match-p
+               "macro capability is not enabled: read-file"
+               (error-message-string disabled))))
+    (clrhash files)
+    (let ((undeclared
+           (should-error
+            (eliscript-compile-ir-string
+             source "macro-context.eli"
+             (list :capabilities capabilities :files files))
+            :type 'eliscript-expand-error)))
+      (should (string-match-p
+               "macro file dependency is not declared: build-value.txt"
+               (error-message-string undeclared))))))
+
 (provide 'eliscript-tests)
 
 ;;; eliscript-tests.el ends here

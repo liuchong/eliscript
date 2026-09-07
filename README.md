@@ -23,8 +23,8 @@ compiler, self-hosted multi-file graph planning and incremental reuse,
 persistent values, protocols, and a long-lived Emacs-to-JavaScript worker. The
 repository also carries React, Org, and
 optional bundler probes as replaceable application-level evidence. The project
-continues the remaining **M8: Language Contract Closure** audit, has completed
-**M9: Compiler and Build Convergence**, and has started **M10: Daily
+has completed **M8: Language Contract Closure** and **M9: Compiler and Build
+Convergence**, and has started **M10: Daily
 Development Experience**.
 
 M9 compiler convergence is complete: it includes canonical project requests,
@@ -62,7 +62,7 @@ Run `bun run progress` for the current evidence-derived core progress report.
 It reports implementation, verification, and stabilization independently;
 application examples do not contribute to any core percentage.
 
-The current M8 work provides:
+The completed M8 language contract provides:
 
 - immutable persistent List, Vector, Map, and Set implementations written in
   portable Eliscript
@@ -104,6 +104,9 @@ The current M8 work provides:
   default-plus-namespace ESM imports with seed/self-hosted and Bun/Node parity
 - deterministic macro-generated symbols through `gensym` and trailing `$`
   template names, with explicit caller-capture and quote boundaries
+- declared, root-contained UTF-8 macro file inputs with explicit read
+  capability, SHA-256 build identity, deterministic cache invalidation, and
+  seed/self-hosted Bun/Node parity
 - first-class unqualified and qualified source Keyword values with canonical
   interning, hashing, persistent-Map keys, and explicit host-property syntax
 - first-class quoted persistent List/Vector data and Symbol/Keyword values,

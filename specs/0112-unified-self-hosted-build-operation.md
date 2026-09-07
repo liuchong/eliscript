@@ -61,11 +61,15 @@ A normalized project operation is:
   "outDir": "dist",
   "root": null,
   "portableEntries": [],
+  "macroCapabilities": [],
+  "macroFileDependencies": [],
   "useCache": true
 }
 ```
 
 Project fields delegate to the existing version 1 project-request contract.
+The optional macro arrays were subsequently added by specification 0124 and
+remain project-only; single-file operations keep their original shape.
 All normalized operation records and nested portable arrays are frozen.
 Malformed or unsupported operations fail with `ELI-B0001` in the
 `project-build` phase. Command-line parsing retains `ELI-C0001` for malformed

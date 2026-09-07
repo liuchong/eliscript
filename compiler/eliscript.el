@@ -14,23 +14,24 @@
 (require 'eliscript-ir-emitter)
 (require 'eliscript-portable)
 
-(defun eliscript--analyzed-string (source filename)
+(defun eliscript--analyzed-string (source filename &optional macro-context)
   "Read, expand, and analyze SOURCE from FILENAME."
   (eliscript-analyze-module
    (eliscript-expand-module
     (eliscript-read-located-string source filename)
-    filename)
+    filename macro-context)
    filename))
 
-(defun eliscript-compile-ir-string (source &optional filename)
+(defun eliscript-compile-ir-string (source &optional filename macro-context)
   "Compile Eliscript SOURCE from FILENAME into an IR program."
   (eliscript-lower-module
-   (eliscript--analyzed-string source filename)
+   (eliscript--analyzed-string source filename macro-context)
    filename))
 
-(defun eliscript-compile-portable-ir-string (source entries &optional filename)
+(defun eliscript-compile-portable-ir-string
+    (source entries &optional filename macro-context)
   "Compile portable ENTRIES from Eliscript SOURCE into an IR program."
-  (let ((forms (eliscript--analyzed-string source filename)))
+  (let ((forms (eliscript--analyzed-string source filename macro-context)))
     (eliscript-lower-module
      (eliscript-portable-select-module forms entries filename)
      filename)))

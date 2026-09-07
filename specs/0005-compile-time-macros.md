@@ -91,12 +91,14 @@ language rules, so macros cannot bypass semantic checks.
 ## Deferred Work
 
 - macro expansion traces in diagnostics
-- explicit compiler context and declared file dependencies
 - a standard macro library shared by the seed and self-hosted implementations
 
 The portable evaluator and its exact compatibility boundary are specified in
 [0016-portable-macro-expander.md](0016-portable-macro-expander.md). The seed
 migration is specified in
 [0035-deterministic-seed-macros.md](0035-deterministic-seed-macros.md).
+The explicit `read-file` compiler context and declared dependency contract are
+specified in
+[0124-declared-macro-file-dependencies.md](0124-declared-macro-file-dependencies.md).
 Generated symbols and caller-capture rules are specified in
 [0065-deterministic-macro-generated-names.md](0065-deterministic-macro-generated-names.md).

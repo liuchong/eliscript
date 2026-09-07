@@ -190,6 +190,5 @@ every binding introduced by a macro.
 ## Next Slice
 
 Use generated names in portable standard-library macros that introduce local
-bindings. Remaining language-closure work includes persistent literal
-integration, explicit host conversion, metadata and printing, portable
-protocol dispatch internals, and declared macro dependency capabilities.
+bindings. The separate declared macro file dependency contract is completed in
+[0124-declared-macro-file-dependencies.md](0124-declared-macro-file-dependencies.md).

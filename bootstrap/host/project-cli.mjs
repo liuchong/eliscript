@@ -215,6 +215,8 @@ export async function readProjectConfiguration(filename, compiler) {
     outDir: resolve(directory, configuration.outDir),
     root,
     portableEntries: [...configuration.portableEntries],
+    macroCapabilities: [...configuration.macroCapabilities],
+    macroFileDependencies: [...configuration.macroFileDependencies],
     useCache: configuration.cache,
     configuration: canonical,
   };
@@ -247,6 +249,8 @@ export async function execute(arguments_, options = {}) {
       outDir: parsed.outDir,
       root: parsed.root,
       portableEntries: parsed.portableEntries,
+      macroCapabilities: [],
+      macroFileDependencies: [],
       useCache: parsed.useCache,
     };
   }

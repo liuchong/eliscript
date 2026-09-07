@@ -745,6 +745,95 @@
                      "project entries resolve to duplicate sources"
                      (error-message-string error-data)))))))))
 
+(ert-deftest eliscript-project-tracks-declared-macro-file-digests ()
+  (eliscript-project-tests--with-directory root
+    (let* ((entry (expand-file-name "main.eli" root))
+           (dependency (expand-file-name "build-value.txt" root))
+           (out-dir (expand-file-name "build" root))
+           (request
+            (eliscript-project-request-create
+             :entry entry
+             :out-dir out-dir
+             :root root
+             :portable-entries nil
+             :macro-capabilities '("read-file")
+             :macro-file-dependencies '("build-value.txt")
+             :use-cache t)))
+      (eliscript-project-tests--write
+       entry
+       "(defmacro configured-value () (macro-read-file \"build-value.txt\"))
+(defconst value (configured-value))
+(export value)\n")
+      (eliscript-project-tests--write dependency "first-value")
+      (let* ((first (eliscript-project-execute request))
+             (module (car (eliscript-project-build-result-modules first)))
+             (report-module
+              (car (append
+                    (alist-get 'modules
+                               (eliscript-project-build-report first))
+                    nil)))
+             (macro-record
+              (car (append (alist-get 'macroDependencies report-module) nil))))
+        (should (= (eliscript-project-build-result-compiled-count first) 1))
+        (should (string-match-p
+                 (regexp-quote "const value = \"first-value\";")
+                 (eliscript-project-tests--read
+                  (eliscript-project-module-output module))))
+        (should (equal (alist-get 'path macro-record) "build-value.txt"))
+        (should (equal (alist-get 'digest macro-record)
+                       (eliscript-project-tests--digest dependency))))
+      (let ((second (eliscript-project-execute request)))
+        (should (= (eliscript-project-build-result-compiled-count second) 0))
+        (should (= (eliscript-project-build-result-reused-count second) 1)))
+      (eliscript-project-tests--write dependency "second-value")
+      (let* ((third (eliscript-project-execute request))
+             (module (car (eliscript-project-build-result-modules third))))
+        (should (= (eliscript-project-build-result-compiled-count third) 1))
+        (should (equal (eliscript-project-module-reason module)
+                       "macro-dependencies-changed"))
+        (should (string-match-p
+                 (regexp-quote "const value = \"second-value\";")
+                 (eliscript-project-tests--read
+                  (eliscript-project-module-output module)))))
+      (let* ((duplicate-request
+              (eliscript-project-request-create
+               :entry entry
+               :out-dir out-dir
+               :root root
+               :portable-entries nil
+               :macro-capabilities '("read-file")
+               :macro-file-dependencies
+               '("build-value.txt" "./build-value.txt")
+               :use-cache nil))
+             (error-data
+              (should-error
+               (eliscript-project-execute duplicate-request)
+               :type 'eliscript-project-error)))
+        (should (string-match-p
+                 "macro file dependencies resolve to duplicates"
+                 (error-message-string error-data))))
+      (let* ((invalid (expand-file-name "invalid.txt" root))
+             (invalid-request
+              (eliscript-project-request-create
+               :entry entry
+               :out-dir out-dir
+               :root root
+               :portable-entries nil
+               :macro-capabilities '("read-file")
+               :macro-file-dependencies '("invalid.txt")
+               :use-cache nil)))
+        (with-temp-buffer
+          (set-buffer-multibyte nil)
+          (insert (unibyte-string #xff))
+          (write-region (point-min) (point-max) invalid nil 'silent))
+        (let ((error-data
+               (should-error
+                (eliscript-project-execute invalid-request)
+                :type 'eliscript-project-error)))
+          (should (string-match-p
+                   "macro file dependency is not valid UTF-8"
+                   (error-message-string error-data))))))))
+
 (provide 'eliscript-project-tests)
 
 ;;; eliscript-project-tests.el ends here

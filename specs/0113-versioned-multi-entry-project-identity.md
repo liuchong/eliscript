@@ -38,6 +38,8 @@ The normalized multi-entry project request has this shape:
   "outDir": "dist",
   "root": "src",
   "portableEntries": [],
+  "macroCapabilities": [],
+  "macroFileDependencies": [],
   "useCache": true
 }
 ```
@@ -51,6 +53,8 @@ The corresponding configuration is:
   "entries": ["admin.eli", "main.eli"],
   "outDir": "dist",
   "portableEntries": [],
+  "macroCapabilities": [],
+  "macroFileDependencies": [],
   "cache": true
 }
 ```
@@ -63,6 +67,11 @@ require an explicit project root so containment and output identity are not
 derived from an arbitrary first argument. Distinct path spellings that resolve
 to the same canonical source reject instead of silently changing entry count or
 manifest version.
+
+Specification 0124 subsequently adds the optional empty-by-default macro
+arrays shown above to both project versions. They do not alter entry-set
+meaning; non-empty declarations enter each module's public and private build
+identity through ordered path and digest records.
 
 The version 2 build-operation record carries the same frozen `entries` array
 and has version 2. Single-entry project and single-file operations retain

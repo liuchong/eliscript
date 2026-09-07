@@ -14,6 +14,8 @@ export async function executeBuild(options) {
     outDir: request.outDir,
     root: request.root,
     portableEntries: request.portableEntries,
+    macroCapabilities: request.macroCapabilities,
+    macroFileDependencies: request.macroFileDependencies,
     useCache: request.useCache,
     sourceOverrides: options.sourceOverrides,
     moduleDirectory: options.moduleDirectory,

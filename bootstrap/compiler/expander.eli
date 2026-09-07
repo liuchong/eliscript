@@ -710,6 +710,23 @@
              (if (= (get args :length) 0)
                  (literal-node "G" nil)
                (eval-form (js-nth 0 args) scope))))
+          ((= operator "macro-read-file")
+           (unless (= (get args :length) 1)
+             (raise-error "macro-read-file expects 1 argument"))
+           (let* ((specifier-node (eval-form (js-nth 0 args) scope))
+                  (context (get scope :context)))
+             (unless (and (literal-node-p specifier-node)
+                          (= (js* "typeof specifier_node.value") "string")
+                          (> (get (node-value specifier-node) :length) 0))
+               (raise-error "macro-read-file expects a non-empty string"))
+             (let ((specifier (node-value specifier-node)))
+               (unless (js-call (get context :capabilities) :has "read-file")
+                 (raise-error "macro capability is not enabled: read-file"))
+               (unless (js-call (get context :files) :has specifier)
+                 (raise-error
+                   (str "macro file dependency is not declared: " specifier)))
+               (literal-node
+                 (js-call (get context :files) :get specifier) nil))))
           (t
            (let* ((values (eval-args args scope))
                   (list-result (eval-list-operation operator values))
@@ -1171,7 +1188,7 @@
          (lambda (item) (collect-symbol-names item names)))))
     names)
 
-  (defun expand-module (forms filename)
+  (defun expand-module (forms filename &optional macro-context)
     (let ((reserved-names (new (js* "Set"))))
       (js-call forms :forEach
         (lambda (form) (collect-symbol-names form reserved-names)))
@@ -1182,6 +1199,14 @@
         (js-object
           :filename filename
           :gensymCounter 0
-          :reservedNames reserved-names))))
+          :reservedNames reserved-names
+          :capabilities
+          (if macro-context
+              (get macro-context :capabilities)
+            (new (js* "Set")))
+          :files
+          (if macro-context
+              (get macro-context :files)
+            (new (js* "Map")))))))
 
   (export expand-module))

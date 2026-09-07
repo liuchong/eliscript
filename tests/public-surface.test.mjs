@@ -38,8 +38,8 @@ test("repository public surface matches every tracked implementation", async () 
     standardLibrary: { modules: 29, exports: 304 },
     emacs: {
       functions: 155,
-      records: 46,
-      publicRecords: 27,
+      records: 47,
+      publicRecords: 28,
       internalRecords: 19,
     },
   });

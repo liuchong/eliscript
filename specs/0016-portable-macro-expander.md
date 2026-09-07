@@ -57,9 +57,9 @@ collision avoidance, and caller-capture rules are specified in
 [0065-deterministic-macro-generated-names.md](0065-deterministic-macro-generated-names.md).
 
 The portable subset is intentionally smaller than Emacs Lisp. A macro cannot
-depend on buffers, files, environment variables, process state, or an unlisted
-host function until an explicit compiler context API or portable library
-defines that capability and its dependency evidence.
+depend on buffers, environment variables, process state, or an unlisted host
+function. Specification 0124 adds one explicit compiler-context capability for
+exactly declared file snapshots; it does not grant ambient filesystem access.
 
 ## Expansion Walk
 

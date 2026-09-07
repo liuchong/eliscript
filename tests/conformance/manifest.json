@@ -1816,6 +1816,43 @@
           "contains": "namespace-and-named-import"
         }
       ]
+    },
+    {
+      "id": "macro.declared-file-dependencies",
+      "title": "Declared macro file dependencies",
+      "status": "stable",
+      "spec": "0124",
+      "contracts": [
+        "Keeps macro evaluation capability-free by default",
+        "Reads only exact immutable files declared through the read-file capability",
+        "Rejects unsafe paths, symbolic-link escapes, canonical duplicates, and invalid UTF-8",
+        "Records ordered path and SHA-256 inputs in manifests, reports, and cache identity",
+        "Invalidates all project modules when a declared macro file changes",
+        "Produces matching seed and self-hosted artifacts under Bun and Node",
+        "Excludes application frameworks and tooling from core evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-macros-read-only-declared-context-files"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-project-tests.el",
+          "contains": "eliscript-project-tracks-declared-macro-file-digests"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/macro-file-dependencies.test.mjs",
+          "contains": "self-hosted macros read only declared context files"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/macro-file-dependencies.test.mjs",
+          "contains": "declared macro files drive deterministic project builds and cache invalidation"
+        }
+      ]
     }
   ]
 }

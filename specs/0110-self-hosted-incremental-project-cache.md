@@ -38,7 +38,10 @@ New manifests write a private cache object with an explicit family identity:
       {
         "source": "src/main.eli",
         "dependencies": ["src/value.eli"],
-        "portableEntries": []
+        "portableEntries": [],
+        "macroDependencies": [
+          {"path": "build-value.txt", "digest": "<sha256>"}
+        ]
       }
     ],
     "digest": "<sha256>"
@@ -48,8 +51,10 @@ New manifests write a private cache object with an explicit family identity:
 
 The cache digest covers `format`, `version`, compiler identity, mode,
 normalized portable roots, and canonical module metadata before `digest` is
-added. Public graph identity remains version 1 and does not include private
-cache mechanics.
+added. When present, canonical module metadata includes the ordered declared
+macro input paths and digests. Public graph identity remains versioned
+independently and does not expose private cache mechanics, but specification
+0124 places the same macro input records in public module identity.
 
 Version 1 cache records without `format` remain readable. They are never
 written. A successful standard reuse rewrites the manifest as version 2. A
@@ -75,7 +80,8 @@ Manifest lookup checks public schema and entry identity, public graph digest,
 private cache family and digest, compiler identity, build mode, normalized
 portable roots, and one-to-one identity/metadata records. Module decisions
 check output paths, portable entry identity, readable artifacts, source and
-artifact digests, and resolvable dependency metadata.
+artifact digests, resolvable dependency metadata, and exact declared macro
+input records. A changed macro input produces `macro-dependencies-changed`.
 
 An unreadable artifact takes precedence over digest comparisons because a
 partial set of host facts cannot prove a source or output change. Stable reason

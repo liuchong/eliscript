@@ -39,6 +39,7 @@ test: check-contracts
 		tests/watch.test.mjs \
 		tests/loop-recur.test.mjs \
 		tests/macro-generated-names.test.mjs \
+		tests/macro-file-dependencies.test.mjs \
 		tests/worker-runtime.test.mjs \
 		tests/worker-value-codec.test.mjs \
 		tests/worker-value-stream.test.mjs \

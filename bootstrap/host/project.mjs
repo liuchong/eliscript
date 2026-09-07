@@ -83,6 +83,66 @@ function canonicalSource(path, root, importer) {
   return canonical;
 }
 
+function macroDependency(specifier, root, importer) {
+  const expanded = resolve(root, specifier);
+  let attributes;
+  try {
+    attributes = statSync(expanded);
+  } catch {
+    projectError(`macro file dependency does not exist: ${specifier}`, importer);
+  }
+  if (!attributes.isFile()) {
+    projectError(`macro file dependency does not exist: ${specifier}`, importer);
+  }
+  const source = realpathSync(expanded);
+  if (!insideRoot(root, source)) {
+    projectError(
+      `macro file dependency escapes project root: ${specifier}`,
+      importer,
+    );
+  }
+  const bytes = readFileSync(source);
+  return {
+    specifier,
+    source,
+    digest: createHash("sha256").update(bytes).digest("hex"),
+    content: (() => {
+      try {
+        return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      } catch {
+        projectError(
+          `macro file dependency is not valid UTF-8: ${specifier}`,
+          importer,
+        );
+      }
+    })(),
+  };
+}
+
+function macroInputs(request, root, importer) {
+  const dependencies = [...request.macroFileDependencies]
+    .map((specifier) => macroDependency(specifier, root, importer));
+  const canonical = new Set(dependencies.map(({ source }) => source));
+  if (canonical.size !== dependencies.length) {
+    projectError("macro file dependencies resolve to duplicates", importer);
+  }
+  return {
+    dependencies,
+    context: {
+      capabilities: new Set(request.macroCapabilities),
+      files: new Map(dependencies.map(({ specifier, content }) =>
+        [specifier, content])),
+    },
+  };
+}
+
+function macroDependencyRecords(dependencies, root) {
+  return dependencies.map(({ source, digest }) => ({
+    path: relative(root, source),
+    digest,
+  }));
+}
+
 function outputFor(source, root, outDir) {
   const sourcePath = relative(root, source);
   return resolve(outDir, `${sourcePath.slice(0, -4)}.mjs`);
@@ -214,6 +274,7 @@ function writeModule({
   root,
   outDir,
   dependencies,
+  macroDependencies,
   portableEntries,
   reason,
   sourceMapReference,
@@ -241,6 +302,7 @@ function writeModule({
     outputDigest: digestFile(output),
     sourceMapDigest: digestFile(sourceMap),
     dependencies,
+    macroDependencies,
     portableEntries,
     reused: false,
     reason,
@@ -255,6 +317,9 @@ function reportModule(module, root, outDir) {
     status: module.reused ? "reused" : "compiled",
     reason: module.reason,
     dependencies: module.dependencies.map((dependency) => relative(root, dependency)),
+    ...(module.macroDependencies.length > 0
+      ? { macroDependencies: macroDependencyRecords(module.macroDependencies, root) }
+      : {}),
     portableEntries: [...module.portableEntries],
   };
 }
@@ -267,6 +332,9 @@ function manifestRecord(module, root, outDir) {
     sourceDigest: module.sourceDigest,
     outputDigest: module.outputDigest,
     sourceMapDigest: module.sourceMapDigest,
+    ...(module.macroDependencies.length > 0
+      ? { macroDependencies: macroDependencyRecords(module.macroDependencies, root) }
+      : {}),
   };
 }
 
@@ -274,6 +342,9 @@ function cacheMetadataRecord(module, root) {
   return {
     source: relative(root, module.source),
     dependencies: module.dependencies.map((dependency) => relative(root, dependency)),
+    ...(module.macroDependencies.length > 0
+      ? { macroDependencies: macroDependencyRecords(module.macroDependencies, root) }
+      : {}),
     portableEntries: [...module.portableEntries],
   };
 }
@@ -282,6 +353,9 @@ function cacheIdentityModule(record) {
   return {
     source: record.source,
     dependencies: record.dependencies,
+    ...(record.macroDependencies === undefined
+      ? {}
+      : { macroDependencies: record.macroDependencies }),
     portableEntries: record.portableEntries,
   };
 }
@@ -427,6 +501,7 @@ function cachedModule({
   outDir,
   record,
   expectedPortableEntries,
+  expectedMacroDependencies = [],
 }) {
   const output = outputFor(source, root, outDir);
   const sourceMap = `${output}.map`;
@@ -447,6 +522,11 @@ function cachedModule({
   }
   let dependencies = [];
   let dependenciesValid = true;
+  const expectedMacroRecords = macroDependencyRecords(
+    expectedMacroDependencies,
+    root,
+  );
+  let macroDependenciesMatch = false;
   try {
     if (!Array.isArray(record?.metadata?.dependencies) ||
         !Array.isArray(record?.metadata?.portableEntries)) {
@@ -454,6 +534,10 @@ function cachedModule({
     }
     dependencies = record.metadata.dependencies.map((dependency) =>
       canonicalSource(resolve(root, dependency), root, source));
+    const recordedMacroDependencies = record.metadata.macroDependencies ?? [];
+    macroDependenciesMatch =
+      JSON.stringify(recordedMacroDependencies) ===
+      JSON.stringify(expectedMacroRecords);
   } catch {
     dependenciesValid = false;
   }
@@ -462,6 +546,7 @@ function cachedModule({
     output: relative(outDir, output),
     sourceMap: relative(outDir, sourceMap),
     expectedPortableEntries,
+    macroDependenciesMatch,
     sourceDigest,
     outputExists,
     sourceMapExists,
@@ -481,6 +566,7 @@ function cachedModule({
           outputDigest,
           sourceMapDigest,
           dependencies,
+          macroDependencies: expectedMacroDependencies,
           portableEntries: [...record.metadata.portableEntries],
           reused: true,
           reason: "verified",
@@ -499,6 +585,8 @@ function standardPlan(
   records,
   decisions,
   sourceOverrides,
+  macroContext,
+  macroDependencies,
 ) {
   return compiler.project_plan(entries, (source) => {
     const cached = cachedModule({
@@ -508,11 +596,12 @@ function standardPlan(
       outDir,
       record: records.get(relative(root, source)),
       expectedPortableEntries: [],
+      expectedMacroDependencies: macroDependencies,
     });
     decisions.set(source, cached);
     if (cached.module !== undefined) return cached.module.dependencies;
     const sourceText = sourceOverrides.get(source) ?? readFileSync(source, "utf8");
-    const program = compiler.compile_ir_string(sourceText, source);
+    const program = compiler.compile_ir_string(sourceText, source, macroContext);
     sourceCache.set(source, sourceText);
     programCache.set(source, program);
     return projectImports(program, source, root, false)
@@ -528,6 +617,7 @@ function portablePlan(
   sourceCache,
   programCache,
   sourceOverrides,
+  macroContext,
 ) {
   return compiler.portable_project_plan([{ id: entry, entries }],
     (source, requestedEntries) => {
@@ -536,6 +626,7 @@ function portablePlan(
         sourceText,
         requestedEntries,
         source,
+        macroContext,
       );
       sourceCache.set(source, sourceText);
       programCache.set(source, program);
@@ -578,10 +669,16 @@ function validateSourceOverrides(sourceOverrides, plan) {
   }
 }
 
-function checkStandardPlan(compiler, entries, root, sourceOverrides) {
+function checkStandardPlan(
+  compiler,
+  entries,
+  root,
+  sourceOverrides,
+  macroContext,
+) {
   return compiler.project_plan(entries, (source) => {
     const sourceText = sourceOverrides.get(source) ?? readFileSync(source, "utf8");
-    const program = compiler.compile_ir_string(sourceText, source);
+    const program = compiler.compile_ir_string(sourceText, source, macroContext);
     return projectImports(program, source, root, false)
       .map(({ dependency }) => dependency);
   });
@@ -593,6 +690,7 @@ function checkPortablePlan(
   entries,
   root,
   sourceOverrides,
+  macroContext,
 ) {
   return compiler.portable_project_plan([{ id: entry, entries }],
     (source, requestedEntries) => {
@@ -601,6 +699,7 @@ function checkPortablePlan(
         sourceText,
         requestedEntries,
         source,
+        macroContext,
       );
       return projectImports(program, source, root, true).map((dependency) => ({
         id: dependency.dependency,
@@ -623,6 +722,8 @@ export async function checkProject(options) {
     entries: options.entries,
     root: options.root ?? null,
     portableEntries: options.portableEntries ?? [],
+    macroCapabilities: options.macroCapabilities ?? [],
+    macroFileDependencies: options.macroFileDependencies ?? [],
   });
   const entryPaths = request.entries.map((entry) =>
     resolve(pathOption(entry, "entry")));
@@ -645,6 +746,7 @@ export async function checkProject(options) {
   if (new Set(entries).size !== entries.length) {
     projectError("project entries resolve to duplicate sources");
   }
+  const macro = macroInputs(request, root, entries[0]);
   const sourceOverrides = sourceOverridesOption(options.sourceOverrides, root);
   const portableEntries = [...request.portableEntries];
   const plan = portableEntries.length > 0
@@ -654,8 +756,15 @@ export async function checkProject(options) {
       portableEntries,
       root,
       sourceOverrides,
+      macro.context,
     )
-    : checkStandardPlan(compiler, entries, root, sourceOverrides);
+    : checkStandardPlan(
+      compiler,
+      entries,
+      root,
+      sourceOverrides,
+      macro.context,
+    );
   validateSourceOverrides(sourceOverrides, plan);
   const mode = plan.mode;
   const modules = plan.modules.map((record) => ({
@@ -678,6 +787,8 @@ export async function checkProject(options) {
     entries: Object.freeze(entries),
     mode,
     portableEntries: Object.freeze(portableEntries),
+    macroCapabilities: request.macroCapabilities,
+    macroFileDependencies: Object.freeze(macro.dependencies),
     report,
     plan,
   });
@@ -701,6 +812,8 @@ export async function buildProject(options) {
     outDir: options.outDir,
     root: options.root ?? null,
     portableEntries: options.portableEntries ?? [],
+    macroCapabilities: options.macroCapabilities ?? [],
+    macroFileDependencies: options.macroFileDependencies ?? [],
     useCache: options.useCache === undefined ? true : options.useCache,
   });
   const requestedEntries = request.version === 2
@@ -727,6 +840,7 @@ export async function buildProject(options) {
   if (new Set(entries).size !== entries.length) {
     projectError("project entries resolve to duplicate sources");
   }
+  const macro = macroInputs(request, root, entries[0]);
   const sourceOverrides = sourceOverridesOption(options.sourceOverrides, root);
   const requestedOutDir = resolve(pathOption(request.outDir, "output"));
   try {
@@ -772,6 +886,7 @@ export async function buildProject(options) {
       sourceCache,
       programCache,
       sourceOverrides,
+      macro.context,
     )
     : standardPlan(
       compiler,
@@ -783,6 +898,8 @@ export async function buildProject(options) {
       records,
       decisions,
       sourceOverrides,
+      macro.context,
+      macro.dependencies,
     );
   validateSourceOverrides(sourceOverrides, plan);
   const normalizedPortableEntries = plan.mode === "portable"
@@ -803,6 +920,7 @@ export async function buildProject(options) {
         outDir,
         record: records.get(relative(root, record.id)),
         expectedPortableEntries: modulePortableEntries,
+        expectedMacroDependencies: macro.dependencies,
       });
     if (cached?.module !== undefined) return cached.module;
     return writeModule({
@@ -813,6 +931,7 @@ export async function buildProject(options) {
       root,
       outDir,
       dependencies,
+      macroDependencies: macro.dependencies,
       portableEntries: modulePortableEntries,
       reason: cacheLookup.cache === null
         ? cacheLookup.reason
@@ -867,6 +986,8 @@ export async function buildProject(options) {
     entryOutputs: Object.freeze(entryOutputs),
     mode: plan.mode,
     portableEntries: Object.freeze(normalizedPortableEntries),
+    macroCapabilities: request.macroCapabilities,
+    macroFileDependencies: Object.freeze(macro.dependencies),
     modules: Object.freeze(modules.map((module) => Object.freeze(module))),
     manifest: manifestData.manifest,
     digest: manifestData.digest,

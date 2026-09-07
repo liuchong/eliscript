@@ -71,9 +71,9 @@ sandbox. Macro expansion still has the existing 100-call recursion limit, and
 the language intentionally omits loops, recursion, and host callbacks from the
 compile-time subset.
 
-Because current macros have no external capabilities, incremental compilation
-does not need undeclared macro dependency evidence. File access, if added later,
-must arrive through an explicit compiler context that records every input.
+Macros still have no ambient external capabilities. Specification 0124 adds
+only an explicit `read-file` compiler context whose complete declared input set
+is recorded in project identity; undeclared file access remains impossible.
 
 ## Acceptance Evidence
 

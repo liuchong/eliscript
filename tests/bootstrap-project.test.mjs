@@ -222,6 +222,8 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
       outDir: "/project/dist",
       root: null,
       portableEntries: ["alpha", "zeta"],
+      macroCapabilities: [],
+      macroFileDependencies: [],
       useCache: true,
     });
     expect(Object.isFrozen(request)).toBeTrue();
@@ -232,6 +234,8 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
       outDir: request.outDir,
       root: request.root,
       portableEntries: request.portableEntries,
+      macroCapabilities: request.macroCapabilities,
+      macroFileDependencies: request.macroFileDependencies,
       useCache: request.useCache,
     });
     expect(projectOperation).toEqual({
@@ -242,6 +246,8 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
       outDir: request.outDir,
       root: request.root,
       portableEntries: request.portableEntries,
+      macroCapabilities: request.macroCapabilities,
+      macroFileDependencies: request.macroFileDependencies,
       useCache: request.useCache,
     });
     expect(Object.isFrozen(projectOperation)).toBeTrue();
@@ -250,6 +256,8 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
       outDir: "/project/dist",
       root: "/project",
       portableEntries: [],
+      macroCapabilities: [],
+      macroFileDependencies: [],
       useCache: true,
     });
     expect(multiRequest).toEqual({
@@ -259,6 +267,8 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
       outDir: "/project/dist",
       root: "/project",
       portableEntries: [],
+      macroCapabilities: [],
+      macroFileDependencies: [],
       useCache: true,
     });
     expect(Object.isFrozen(multiRequest.entries)).toBeTrue();
@@ -282,6 +292,8 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
       entries: ["/project/src/a.eli", "/project/src/z.eli"],
       root: "/project",
       portableEntries: [],
+      macroCapabilities: [],
+      macroFileDependencies: [],
     });
     expect(compiler.project_check_report({
       mode: "standard",
@@ -365,6 +377,8 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
       entry: "src/main.eli",
       outDir: "dist",
       portableEntries: [],
+      macroCapabilities: [],
+      macroFileDependencies: [],
       cache: true,
     });
     expect(Object.isFrozen(configuration)).toBeTrue();
@@ -382,13 +396,46 @@ test("self-hosted project planning reaches deterministic graph fixed points", as
       entries: ["a.eli", "z.eli"],
       outDir: "dist",
       portableEntries: [],
+      macroCapabilities: [],
+      macroFileDependencies: [],
       cache: true,
     });
+    const macroConfiguration = compiler.project_configuration({
+      schemaVersion: 1,
+      sourceRoot: "src",
+      entry: "main.eli",
+      outDir: "dist",
+      macroCapabilities: ["read-file"],
+      macroFileDependencies: ["z.txt", "a.txt"],
+    }, "/project/eliscript.json");
+    expect(macroConfiguration.macroCapabilities).toEqual(["read-file"]);
+    expect(macroConfiguration.macroFileDependencies).toEqual(["a.txt", "z.txt"]);
+    expect(Object.isFrozen(macroConfiguration.macroCapabilities)).toBeTrue();
+    expect(Object.isFrozen(macroConfiguration.macroFileDependencies)).toBeTrue();
     for (const invalid of [
       { ...configuration, schemaVersion: 1, undeclared: true },
       { schemaVersion: 1, entry: "../main.eli", outDir: "dist" },
       { schemaVersion: 1, entry: "main.eli", outDir: "dist", cache: "yes" },
       { schemaVersion: 2, entries: [], outDir: "dist" },
+      {
+        schemaVersion: 1,
+        entry: "main.eli",
+        outDir: "dist",
+        macroCapabilities: ["network"],
+      },
+      {
+        schemaVersion: 1,
+        entry: "main.eli",
+        outDir: "dist",
+        macroFileDependencies: ["build.txt"],
+      },
+      {
+        schemaVersion: 1,
+        entry: "main.eli",
+        outDir: "dist",
+        macroCapabilities: ["read-file"],
+        macroFileDependencies: ["../build.txt"],
+      },
     ]) {
       try {
         compiler.project_configuration(invalid, "/project/eliscript.json");

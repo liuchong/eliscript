@@ -40,10 +40,13 @@
     (js* "(message, filename) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-B0002', severity: 'error', phase: 'project-config', message, ...(filename ? { location: { file: filename } } : {}) }; throw error; }"))
   (defconst project-configuration-keys-v1
     (js-array "schemaVersion" "sourceRoot" "entry" "outDir"
-              "portableEntries" "cache"))
+              "portableEntries" "macroCapabilities"
+              "macroFileDependencies" "cache"))
   (defconst project-configuration-keys-v2
     (js-array "schemaVersion" "sourceRoot" "entries" "outDir"
-              "portableEntries" "cache"))
+              "portableEntries" "macroCapabilities"
+              "macroFileDependencies" "cache"))
+  (defconst supported-macro-capabilities (js-array "read-file"))
 
   (defun require-string (value label)
     (unless (and (= (js* "typeof value") "string")
@@ -111,7 +114,43 @@
                   "project request portable entries are invalid"))
               (normalize-strings
                 portable-input "project request portable entries" false)))
+           (macro-capabilities-input
+            (object-field input "macroCapabilities" (js-array)))
+           (macro-file-dependencies-input
+            (object-field input "macroFileDependencies" (js-array)))
+           (macro-capabilities
+            (normalize-strings
+              macro-capabilities-input
+              "project request macro capabilities"
+              false))
+           (macro-file-dependencies
+            (normalize-strings
+              macro-file-dependencies-input
+              "project request macro file dependencies"
+              false))
            (use-cache (get input :useCache)))
+      (unless (= (get macro-capabilities :length)
+                 (get macro-capabilities-input :length))
+        (project-request-fail
+          "project request macro capabilities must not contain duplicates"))
+      (js-call macro-capabilities :forEach
+        (lambda (capability)
+          (unless (js-call supported-macro-capabilities :includes capability)
+            (project-request-fail
+              (str "unsupported macro capability: " capability)))))
+      (unless (= (get macro-file-dependencies :length)
+                 (get macro-file-dependencies-input :length))
+        (project-request-fail
+          "project request macro file dependencies must not contain duplicates"))
+      (js-call macro-file-dependencies :forEach
+        (lambda (dependency)
+          (unless (safe-relative-path-p dependency)
+            (project-request-fail
+              "project request macro file dependencies are invalid"))))
+      (when (and (> (get macro-file-dependencies :length) 0)
+                 (not (js-call macro-capabilities :includes "read-file")))
+        (project-request-fail
+          "macro file dependencies require the read-file macro capability"))
       (when (and multi (not (undefined? entry)))
         (project-request-fail "project request cannot contain entry and entries"))
       (when multi
@@ -150,6 +189,8 @@
           (project-request-fail
             "multi-entry portable project requests are not supported"))
         (js-call globalThis.Object :freeze portable-entries)
+        (js-call globalThis.Object :freeze macro-capabilities)
+        (js-call globalThis.Object :freeze macro-file-dependencies)
         (js-call globalThis.Object :freeze entries)
         (if multi
             (js-call globalThis.Object :freeze
@@ -160,6 +201,8 @@
                 :outDir out-dir
                 :root root
                 :portableEntries portable-entries
+                :macroCapabilities macro-capabilities
+                :macroFileDependencies macro-file-dependencies
                 :useCache use-cache))
           (js-call globalThis.Object :freeze
             (js-object
@@ -169,6 +212,8 @@
               :outDir out-dir
               :root root
               :portableEntries portable-entries
+              :macroCapabilities macro-capabilities
+              :macroFileDependencies macro-file-dependencies
               :useCache use-cache))))))
 
   (defun build-operation-request (input)
@@ -232,6 +277,8 @@
                    :outDir (get request :outDir)
                    :root (get request :root)
                    :portableEntries (get request :portableEntries)
+                   :macroCapabilities (get request :macroCapabilities)
+                   :macroFileDependencies (get request :macroFileDependencies)
                    :useCache (get request :useCache)))
              (js-call globalThis.Object :freeze
                (js-object
@@ -242,6 +289,8 @@
                  :outDir (get request :outDir)
                  :root (get request :root)
                  :portableEntries (get request :portableEntries)
+                 :macroCapabilities (get request :macroCapabilities)
+                 :macroFileDependencies (get request :macroFileDependencies)
                  :useCache (get request :useCache))))))
         (t
          (project-request-fail "unsupported build operation mode")))))
@@ -258,6 +307,10 @@
                 :root (object-field input "root" (js* "null"))
                 :portableEntries
                 (object-field input "portableEntries" (js-array))
+                :macroCapabilities
+                (object-field input "macroCapabilities" (js-array))
+                :macroFileDependencies
+                (object-field input "macroFileDependencies" (js-array))
                 :useCache false)))
            (entries
             (if (= (get request :version) project-request-multi-version)
@@ -271,7 +324,9 @@
           :mode "project"
           :entries entries
           :root (get request :root)
-          :portableEntries (get request :portableEntries)))))
+          :portableEntries (get request :portableEntries)
+          :macroCapabilities (get request :macroCapabilities)
+          :macroFileDependencies (get request :macroFileDependencies)))))
 
   (defun project-configuration (input filename)
     (unless (funcall object-p input)
@@ -306,6 +361,10 @@
            (out-dir (object-field input "outDir" (js* "undefined")))
            (portable-input
             (object-field input "portableEntries" (js-array)))
+           (macro-capabilities-input
+            (object-field input "macroCapabilities" (js-array)))
+           (macro-file-dependencies-input
+            (object-field input "macroFileDependencies" (js-array)))
            (cache (object-field input "cache" t)))
       (unless (and (funcall array-p portable-input)
                    (js-call portable-input :every
@@ -317,6 +376,16 @@
       (let* ((portable-entries
               (normalize-strings
                 portable-input "configuration portable entries" false))
+             (macro-capabilities
+              (normalize-strings
+                macro-capabilities-input
+                "configuration macro capabilities"
+                false))
+             (macro-file-dependencies
+              (normalize-strings
+                macro-file-dependencies-input
+                "configuration macro file dependencies"
+                false))
              (entries
               (if (= schema-version project-configuration-multi-version)
                   (progn
@@ -336,6 +405,31 @@
                    (get portable-input :length))
           (project-configuration-fail
             "portableEntries must not contain duplicates" filename))
+        (unless (= (get macro-capabilities :length)
+                   (get macro-capabilities-input :length))
+          (project-configuration-fail
+            "macroCapabilities must not contain duplicates" filename))
+        (js-call macro-capabilities :forEach
+          (lambda (capability)
+            (unless (js-call supported-macro-capabilities :includes capability)
+              (project-configuration-fail
+                (str "unsupported macro capability: " capability)
+                filename))))
+        (unless (= (get macro-file-dependencies :length)
+                   (get macro-file-dependencies-input :length))
+          (project-configuration-fail
+            "macroFileDependencies must not contain duplicates" filename))
+        (js-call macro-file-dependencies :forEach
+          (lambda (dependency)
+            (unless (safe-relative-path-p dependency)
+              (project-configuration-fail
+                "macroFileDependencies must contain only contained relative paths"
+                filename))))
+        (when (and (> (get macro-file-dependencies :length) 0)
+                   (not (js-call macro-capabilities :includes "read-file")))
+          (project-configuration-fail
+            "macroFileDependencies require the read-file macro capability"
+            filename))
         (unless (funcall boolean-p cache)
           (project-configuration-fail "cache must be a boolean" filename))
         (unless (funcall safe-relative-path-p source-root)
@@ -364,6 +458,8 @@
           (project-configuration-fail
             "outDir must be a contained relative path" filename))
         (js-call globalThis.Object :freeze portable-entries)
+        (js-call globalThis.Object :freeze macro-capabilities)
+        (js-call globalThis.Object :freeze macro-file-dependencies)
         (js-call globalThis.Object :freeze entries)
         (if (= schema-version project-configuration-multi-version)
             (js-call globalThis.Object :freeze
@@ -374,6 +470,8 @@
                 :entries entries
                 :outDir out-dir
                 :portableEntries portable-entries
+                :macroCapabilities macro-capabilities
+                :macroFileDependencies macro-file-dependencies
                 :cache cache))
           (js-call globalThis.Object :freeze
             (js-object
@@ -383,6 +481,8 @@
               :entry entry
               :outDir out-dir
               :portableEntries portable-entries
+              :macroCapabilities macro-capabilities
+              :macroFileDependencies macro-file-dependencies
               :cache cache))))))
 
   (defun freeze-request (request)
@@ -702,6 +802,8 @@
            (expected-portable-entries (get input :expectedPortableEntries))
            (recorded-portable-entries
             (and (funcall object-p metadata) (get metadata :portableEntries)))
+           (macro-dependencies-match
+            (object-field input "macroDependenciesMatch" t))
            (reason
             (cond
               ((not (and (funcall object-p identity)
@@ -716,6 +818,8 @@
                            recorded-portable-entries
                            expected-portable-entries)))
                "portable-entries-changed")
+              ((not (= macro-dependencies-match t))
+               "macro-dependencies-changed")
               ((and (not (undefined? (get input :artifactFailure)))
                     (not (nil? (get input :artifactFailure))))
                (get input :artifactFailure))
@@ -746,42 +850,62 @@
         (lambda (module)
           (unless (funcall object-p module)
             (fail "build report modules must contain only objects"))
-          (let ((status (require-string
-                          (get module :status)
-                          "build report module status")))
+          (let* ((status (require-string
+                           (get module :status)
+                           "build report module status"))
+                 (macro-dependencies
+                  (object-field module "macroDependencies" (js-array))))
+            (unless (funcall array-p macro-dependencies)
+              (fail "build report macro dependencies must be an array"))
+            (js-call macro-dependencies :forEach
+              (lambda (dependency)
+                (unless (and (funcall object-p dependency)
+                             (= (js* "typeof dependency.path") "string")
+                             (> (get (get dependency :path) :length) 0)
+                             (= (js* "typeof dependency.digest") "string")
+                             (js-call (js* "/^[0-9a-f]{64}$/")
+                               :test (get dependency :digest)))
+                  (fail "build report macro dependency is invalid"))))
+            (js-call macro-dependencies :sort
+              (lambda (left right)
+                (js-call (get left :path) :localeCompare (get right :path))))
+            (js-call globalThis.Object :freeze macro-dependencies)
             (unless (or (= status "compiled") (= status "reused"))
               (fail "build report module status must be compiled or reused"))
             (if (= status "compiled")
                 (setq compiled (1+ compiled))
               (setq reused (1+ reused)))
-            (js-call result :push
-              (js-call globalThis.Object :freeze
-                (js-object
-                  :source
-                  (require-string
-                    (get module :source) "build report module source")
-                  :output
-                  (require-string
-                    (get module :output) "build report module output")
-                  :sourceMap
-                  (require-string
-                    (get module :sourceMap) "build report module source map")
-                  :status status
-                  :reason
-                  (require-string
-                    (get module :reason) "build report module reason")
-                  :dependencies
-                  (js-call globalThis.Object :freeze
-                    (normalize-strings
-                      (get module :dependencies)
-                      "build report module dependencies"
-                      false))
-                  :portableEntries
-                  (js-call globalThis.Object :freeze
-                    (normalize-strings
-                      (get module :portableEntries)
-                      "build report module portable entries"
-                      false))))))))
+            (let ((normalized-module
+                   (js-object
+                     :source
+                     (require-string
+                       (get module :source) "build report module source")
+                     :output
+                     (require-string
+                       (get module :output) "build report module output")
+                     :sourceMap
+                     (require-string
+                       (get module :sourceMap) "build report module source map")
+                     :status status
+                     :reason
+                     (require-string
+                       (get module :reason) "build report module reason")
+                     :dependencies
+                     (js-call globalThis.Object :freeze
+                       (normalize-strings
+                         (get module :dependencies)
+                         "build report module dependencies"
+                         false))
+                     :portableEntries
+                     (js-call globalThis.Object :freeze
+                       (normalize-strings
+                         (get module :portableEntries)
+                         "build report module portable entries"
+                         false)))))
+              (when (> (get macro-dependencies :length) 0)
+                (put normalized-module :macroDependencies macro-dependencies))
+              (js-call result :push
+                (js-call globalThis.Object :freeze normalized-module))))))
       (js-call result :sort
         (lambda (left right)
           (js-call (get left :source) :localeCompare (get right :source))))

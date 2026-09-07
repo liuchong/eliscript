@@ -373,14 +373,20 @@
                     form environment depth))
                  forms)))
 
-(defun eliscript-expand-module (forms &optional filename)
-  "Expand compile-time macros in module FORMS read from FILENAME."
+(defun eliscript-expand-module (forms &optional filename macro-context)
+  "Expand compile-time macros in module FORMS read from FILENAME.
+
+MACRO-CONTEXT is a plist containing string-keyed `:capabilities' and `:files'
+hash tables.  An omitted context exposes no host capabilities."
   (let ((reserved-names (make-hash-table :test #'equal)))
     (dolist (form forms)
       (eliscript-expander--collect-symbol-names form reserved-names))
     (let ((eliscript-expander--filename filename)
           (eliscript-expander--macro-context
-           (eliscript-macro-eval--make-context reserved-names))
+           (eliscript-macro-eval--make-context
+            reserved-names
+            (plist-get macro-context :capabilities)
+            (plist-get macro-context :files)))
           (environment (make-hash-table :test #'eq)))
       (eliscript-expander--expand-top-level-sequence forms environment 0))))
 

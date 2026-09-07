@@ -87,6 +87,6 @@ invalidate a module or restart a worker generation.
 ## Next Slice
 
 Per-module or compiler-pass profiling should be added only when a measured
-workload needs it. External macro dependency evidence requires an explicit
-compile-time capability contract first; the current pure macro evaluator has no
-filesystem or network dependency to record.
+workload needs it. Specification 0124 now records explicitly declared macro
+file inputs in module identity while keeping build timings outside persisted
+identity. Network and other ambient host capabilities remain unavailable.

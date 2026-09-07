@@ -62,10 +62,10 @@
   (defconst evaluation-positive-integer-p
     (js* "(value) => Number.isSafeInteger(value) && value >= 1"))
   (defun compile-ir-string
-    (source filename)
+    (source filename &optional macro-context)
     (let*
       ((read-forms (read-string source filename))
-        (expanded-forms (expand-module read-forms filename)))
+        (expanded-forms (expand-module read-forms filename macro-context)))
       (analyze-module expanded-forms filename)
       (lower-module expanded-forms filename)))
   (defun evaluation-object-field
@@ -377,17 +377,17 @@
     (source filename)
     (emit-module (compile-ir-string source filename)))
   (defun compile-portable-ir-string
-    (source entries filename)
+    (source entries filename &optional macro-context)
     (let*
       ((read-forms (read-string source filename))
-        (expanded-forms (expand-module read-forms filename)))
+        (expanded-forms (expand-module read-forms filename macro-context)))
       (analyze-module expanded-forms filename)
       (lower-module (select-portable-module expanded-forms entries filename) filename)))
   (defun compile-project-portable-ir-string
-    (source entries filename)
+    (source entries filename &optional macro-context)
     (let*
       ((read-forms (read-string source filename))
-        (expanded-forms (expand-module read-forms filename)))
+        (expanded-forms (expand-module read-forms filename macro-context)))
       (analyze-module expanded-forms filename)
       (lower-module (select-portable-module expanded-forms entries filename t) filename)))
   (defun emit-ir-string (program) (emit-module program))
