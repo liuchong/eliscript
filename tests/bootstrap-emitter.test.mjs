@@ -78,11 +78,12 @@ test("bootstrapped emitter matches seed ESM and Source Map output", async () => 
     const module = async (name) => import(
       `${pathToFileURL(resolve(directory, `${name}.mjs`)).href}?test`
     );
-    const [reader, expander, analyzer, lower, emitter, sourceMap] =
+    const [reader, expander, analyzer, ir, lower, emitter, sourceMap] =
       await Promise.all([
         module("reader"),
         module("expander"),
         module("analyzer"),
+        module("ir"),
         module("lower"),
         module("emitter"),
         module("source-map"),
@@ -112,6 +113,19 @@ test("bootstrapped emitter matches seed ESM and Source Map output", async () => 
     }
 
     expect(generated).toEqual(await seedResults());
+    const invalidImport = ir.make_node(
+      "import-declaration",
+      null,
+      "invalid",
+      [
+        ir.make_node("import-namespace", null, "Namespace", [], null),
+        ir.make_node("import-named", null, "named", [], null),
+      ],
+      null,
+    );
+    expect(() => emitter.emit_module(
+      ir.make_program("invalid-import.eli", [invalidImport]),
+    )).toThrow("namespace and named imports cannot be combined");
     expect([
       sourceMap.encode_vlq(0),
       sourceMap.encode_vlq(1),

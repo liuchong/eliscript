@@ -714,7 +714,8 @@
     (let ((bindings (js-array))
           (index 1)
           (default-seen false)
-          (namespace-seen false))
+          (namespace-seen false)
+          (named-seen false))
       (while (< index (get args :length))
         (let ((specifier (js-nth index args)))
           (cond
@@ -749,6 +750,7 @@
              (setq index (1+ index))
              (js-call bindings :push (js-nth index args)))
             ((symbol-node-p specifier)
+             (setq named-seen t)
              (js-call bindings :push specifier))
             (t
              (analyzer-fail
@@ -756,6 +758,10 @@
                (str "invalid import specifier: "
                     (node-display specifier)))))
           (setq index (1+ index))))
+      (when (and namespace-seen named-seen)
+        (analyzer-fail
+          context form-span
+          "namespace and named imports cannot be combined"))
       (when (and portable (= (get bindings :length) 0))
         (analyzer-fail
           context form-span

@@ -28,19 +28,19 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 122 specifications.
+The registry currently contains 123 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
 | Accepted design | 92 |
-| Stable design | 28 |
+| Stable design | 29 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 118 |
+| Implemented | 119 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 28 specifications as stable,
+Compatibility Baseline 2 separately classifies 29 specifications as stable,
 90 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
@@ -403,6 +403,7 @@ The schemas and change workflow are defined by specifications
 | 0120 | [Interactive Terminal REPL](0120-interactive-terminal-repl.md) | Accepted | Implemented |
 | 0121 | [Host-neutral Project Watch Events](0121-host-neutral-project-watch.md) | Accepted | Implemented |
 | 0122 | [Evidence-derived Maturity Progress](0122-evidence-derived-maturity-progress.md) | Accepted | Implemented |
+| 0123 | [Stable ECMAScript Module Import Contract](0123-stable-esm-import-contract.md) | Stable | Implemented |
 
 ## Adding a Specification
 

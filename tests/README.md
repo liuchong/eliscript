@@ -186,6 +186,11 @@ million function recurrences, one million binding-loop recurrences,
 simultaneous swaps, vector-pattern rebinding, nested targets, conditional and
 short-circuit tails, and awaited recurrence without JavaScript stack growth.
 
+The ESM import suite covers side-effect, named, default, namespace,
+default-plus-named, and default-plus-namespace declarations. It compares seed
+and self-hosted JavaScript and Source Maps byte-for-byte, then executes both
+artifacts under Bun and Node against a real ESM provider.
+
 ## Standard Library and Portable Collections
 
 Standard-library tests compile bit, sequence, text, object, and data modules

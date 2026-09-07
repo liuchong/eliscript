@@ -634,16 +634,46 @@
      (equal (eliscript-compile-string source "comparison.eli")
             (eliscript-tests--legacy-compile-string source "comparison.eli")))))
 
-(ert-deftest eliscript-emits-esm-imports-and-exports ()
+(ert-deftest eliscript-enforces-complete-esm-import-contract ()
   (let ((output
          (eliscript-compile-string
-          "(import \"view-kit\" :default View createView)\n(export View createView)")))
+          "(import \"side-effect\")
+(import \"named\" createView createViews)
+(import \"default\" :default View)
+(import \"default-named\" :default App render)
+(import \"namespace\" :as Runtime)
+(import \"default-namespace\" :default Main :as Bundle)
+(export View App Main createView createViews render Runtime Bundle)")))
     (should (string-match-p
-             (regexp-quote "import View, {createView} from \"view-kit\";")
+             (regexp-quote "import \"side-effect\";")
              output))
     (should (string-match-p
-             (regexp-quote "export {View, createView};")
-             output))))
+             (regexp-quote "import {createView, createViews} from \"named\";")
+             output))
+    (should (string-match-p
+             (regexp-quote "import View from \"default\";")
+             output))
+    (should (string-match-p
+             (regexp-quote "import App, {render} from \"default-named\";")
+             output))
+    (should (string-match-p
+             (regexp-quote "import * as Runtime from \"namespace\";")
+             output))
+    (should (string-match-p
+             (regexp-quote
+              "import Main, * as Bundle from \"default-namespace\";")
+             output)))
+  (let ((error
+         (should-error
+          (eliscript-compile-string
+           "(import \"invalid\" :as Runtime createView)"
+           "invalid-import.eli")
+          :type 'eliscript-compile-error)))
+    (should
+     (string-match-p
+      (regexp-quote
+       "invalid-import.eli:1:1: namespace and named imports cannot be combined")
+      (error-message-string error)))))
 
 (ert-deftest eliscript-emits-javascript-interop ()
   (should

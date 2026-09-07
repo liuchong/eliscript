@@ -1165,6 +1165,8 @@
               ((= kind "import-namespace") (setq namespace-binding name))
               ((= kind "import-named") (js-call named-bindings :push name))
               (t (fail (str "invalid IR import specifier: " kind)))))))
+      (when (and namespace-binding (> (get named-bindings :length) 0))
+        (fail "namespace and named imports cannot be combined"))
       (let ((clauses (js-array)))
         (when default-binding (js-call clauses :push default-binding))
         (when namespace-binding

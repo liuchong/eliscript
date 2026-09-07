@@ -18,6 +18,7 @@ test: check-contracts
 	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
 		tests/conformance.test.mjs tests/public-surface.test.mjs \
 		tests/maturity-progress.test.mjs \
+		tests/esm-imports.test.mjs \
 		tests/ci-contract.test.mjs \
 		tests/collection-layout-benchmark.test.mjs \
 		tests/transient-builder-benchmark.test.mjs \

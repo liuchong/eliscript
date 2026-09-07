@@ -543,7 +543,8 @@ When PORTABLE is non-nil, accept named imports only."
   (let ((specifiers (cdr arguments))
         bindings
         default-seen
-        namespace-seen)
+        namespace-seen
+        named-seen)
     (while specifiers
       (let* ((specifier-form (pop specifiers))
              (specifier (eliscript-form-value specifier-form)))
@@ -568,9 +569,14 @@ When PORTABLE is non-nil, accept named imports only."
              (eliscript-analyzer--fail ":as requires a namespace binding"))
            (setq namespace-seen t)
            (push (pop specifiers) bindings))
-          ((pred symbolp) (push specifier-form bindings))
+          ((pred symbolp)
+           (setq named-seen t)
+           (push specifier-form bindings))
           (_ (eliscript-analyzer--fail
               "invalid import specifier: %S" specifier)))))
+    (when (and namespace-seen named-seen)
+      (eliscript-analyzer--fail
+       "namespace and named imports cannot be combined"))
     (when (and portable (null bindings))
       (eliscript-analyzer--fail
        "import-portable expects one or more bindings"))

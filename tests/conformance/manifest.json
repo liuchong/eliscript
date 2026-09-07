@@ -1784,6 +1784,38 @@
           "contains": "maturity progress rejects application evidence in core units"
         }
       ]
+    },
+    {
+      "id": "language.esm-import-contract",
+      "title": "Stable ECMAScript module imports",
+      "status": "stable",
+      "spec": "0123",
+      "contracts": [
+        "Supports side-effect, named, default, and namespace imports",
+        "Supports default plus named and default plus namespace imports",
+        "Rejects namespace plus named imports before lowering",
+        "Retains defensive rejection at the IR emission boundary",
+        "Emits byte-identical JavaScript and Source Maps from seed and self-hosted compilers",
+        "Executes equivalent real ESM modules under Bun and Node",
+        "Keeps portable imports restricted to non-empty named dependencies"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-enforces-complete-esm-import-contract"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/esm-imports.test.mjs",
+          "contains": "complete ESM imports are identical and executable across compilers and hosts"
+        },
+        {
+          "kind": "fixture",
+          "file": "tests/fixtures/bootstrap-analyzer.json",
+          "contains": "namespace-and-named-import"
+        }
+      ]
     }
   ]
 }

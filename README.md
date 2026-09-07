@@ -100,6 +100,8 @@ The current M8 work provides:
   ordinary Object, persistent/native Map, and external capability types
 - stack-safe `loop`/`recur` for functions and lexical binding loops, including
   tail-position diagnostics, simultaneous pattern rebinding, and async support
+- stable side-effect, named, default, namespace, default-plus-named, and
+  default-plus-namespace ESM imports with seed/self-hosted and Bun/Node parity
 - deterministic macro-generated symbols through `gensym` and trailing `$`
   template names, with explicit caller-capture and quote boundaries
 - first-class unqualified and qualified source Keyword values with canonical

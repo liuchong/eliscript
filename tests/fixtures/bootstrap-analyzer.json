@@ -16,6 +16,11 @@
       "source": "(import \"view-runtime\" :default View create-view)\n(defun render (ready items)\n  (cond\n    (ready (create-view \"main\" (js-object :className \"ready\") items))\n    (t (create-view View (js-object :state \"waiting\" :items items)))))\n(export View create-view render)"
     },
     {
+      "name": "complete-esm-import-forms",
+      "filename": "imports.eli",
+      "source": "(import \"side-effect\")\n(import \"named\" first second)\n(import \"default\" :default Default)\n(import \"default-named\" :default Main render)\n(import \"namespace\" :as Runtime)\n(import \"default-namespace\" :default Entry :as Bundle)\n(export first second Default Main render Runtime Entry Bundle)"
+    },
+    {
       "name": "expression-surface",
       "filename": "surface.eli",
       "source": "(defun exercise (target key)\n  (let ((plain 1))\n    (vector\n      (lambda (value) (put target key value))\n      (get target key false)\n      (js-call target :run plain)\n      (js-object key plain)\n      (quote missing)\n      (js* \"globalThis\"))))\n(export exercise)"
@@ -404,6 +409,12 @@
       "filename": "import.eli",
       "source": "(import \"pkg\" :default First :default Second)",
       "error": "import.eli:1:1: duplicate :default import"
+    },
+    {
+      "name": "namespace-and-named-import",
+      "filename": "import-combination.eli",
+      "source": "(import \"pkg\" :as Package named)",
+      "error": "import-combination.eli:1:1: namespace and named imports cannot be combined"
     },
     {
       "name": "portable-default-import",
