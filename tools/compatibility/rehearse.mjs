@@ -5,7 +5,6 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -435,7 +434,7 @@ export async function runCompatibilityRehearsal(options = {}) {
     tree: (await git(root, ["rev-parse", "HEAD^{tree}"])).stdout.trim(),
   };
   const environment = await environmentReport(root);
-  const directory = await mkdtemp(path.join(tmpdir(), "eliscript-compatibility-"));
+  const directory = await mkdtemp(path.join(root, ".eliscript-compatibility-"));
   const cases = [];
   let compilerBuild;
   try {
