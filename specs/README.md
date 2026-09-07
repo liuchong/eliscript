@@ -28,20 +28,20 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 118 specifications.
+The registry currently contains 122 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 88 |
+| Accepted design | 92 |
 | Stable design | 28 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 114 |
+| Implemented | 118 |
 | Superseded implementation | 1 |
 
 Compatibility Baseline 2 separately classifies 28 specifications as stable,
-86 as provisional, 3 as planning, and 1 as superseded. That baseline is
+90 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 is complete. M8 is underway, with persistent List, Vector, Map, and Set
@@ -402,6 +402,7 @@ The schemas and change workflow are defined by specifications
 | 0119 | [Self-hosted Persistent Evaluation](0119-self-hosted-persistent-evaluation.md) | Accepted | Implemented |
 | 0120 | [Interactive Terminal REPL](0120-interactive-terminal-repl.md) | Accepted | Implemented |
 | 0121 | [Host-neutral Project Watch Events](0121-host-neutral-project-watch.md) | Accepted | Implemented |
+| 0122 | [Evidence-derived Maturity Progress](0122-evidence-derived-maturity-progress.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

@@ -1758,6 +1758,32 @@
           "contains": "eliscript-mode-consumes-public-project-watch-events"
         }
       ]
+    },
+    {
+      "id": "quality.evidence-derived-maturity-progress",
+      "title": "Evidence-derived maturity progress",
+      "status": "accepted",
+      "spec": "0122",
+      "contracts": [
+        "Counts 42 explicit M7-M13 implementation units",
+        "Counts exactly AC-01 through AC-24 and PD-01 through PD-11",
+        "Derives stabilization from current core conformance feature status",
+        "Reports independent implementation, verification, and stabilization percentages",
+        "Rejects missing units, unsupported claims, unknown evidence, and application leakage",
+        "Excludes application criteria and features from every core progress calculation"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/maturity-progress.test.mjs",
+          "contains": "maturity progress is derived from explicit core acceptance units"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/maturity-progress.test.mjs",
+          "contains": "maturity progress rejects application evidence in core units"
+        }
+      ]
     }
   ]
 }

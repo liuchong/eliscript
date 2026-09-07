@@ -29,6 +29,10 @@ Compatibility Baseline 1 then requires every specification and feature to be
 classified as stable, provisional, or planning, with stable ownership and
 feature status agreeing in both directions.
 
+The maturity-progress test derives implementation, verification, and
+stabilization percentages from explicit core acceptance units. Application
+demonstrations are validated separately and cannot raise core progress.
+
 ## Default Suite
 
 `make test` runs the ERT suite, invokes the public CLI, compares the generated

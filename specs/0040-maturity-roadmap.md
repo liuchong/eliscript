@@ -362,16 +362,17 @@ in parallel, but each has one owner in the architecture.
 | Libraries | portable and platform APIs | hidden compiler behavior |
 | Quality | matrices, fuzzing, scale, performance, acceptance evidence | feature design |
 
-## Delivery Horizon
+## Progress Accounting
 
-The plan is sized for roughly 12 to 24 months of sustained development. The
-dates are directional; milestone exit gates, not calendar dates, control
-progress. Tooling and documentation work can overlap with compiler convergence
-after the relevant contracts are stable.
+Human duration is not a project-progress measure. Specification 0122 defines
+the versioned evidence-derived report over 42 milestone deliverable units, 35
+mandatory AC/PD criteria, and the current core conformance feature set.
+`bun run progress` is the authoritative current snapshot. Milestones may
+advance in parallel, but only complete units enter a numerator.
 
 ## Milestone Plan
 
-### M7: Contract Baseline (4-6 weeks)
+### M7: Contract Baseline (6 implementation units)
 
 **Objective:** Convert the current implementation history into an explicit,
 testable compatibility baseline.
@@ -448,7 +449,7 @@ declared remote matrix cells. These results satisfy the M7 exit gate. See
 **M7 status:** Completed on 2026-08-28. M8 work may now change only provisional
 surfaces unless it follows the stable compatibility-change process.
 
-### M8: Language Contract Closure (8-12 weeks)
+### M8: Language Contract Closure (7 implementation units)
 
 **Objective:** Finish the small, general-purpose hosted language contract,
 then freeze the core surface against accidental changes.
@@ -769,7 +770,7 @@ evidence selects a conservative 16,000-character threshold, while a
 100 stale results. No application framework, bundler, publishing tool, site,
 hosting system, or development server contributes to this completion.
 
-### M9: Compiler and Build Convergence (8-12 weeks)
+### M9: Compiler and Build Convergence (6 implementation units)
 
 **Objective:** Make the self-hosted compiler the normal complete toolchain
 implementation while preserving the seed as a trustworthy bootstrap.
@@ -827,7 +828,7 @@ seed is no longer the only implementation of a user-facing build capability.
 single-entry project, and multi-entry project builds through compiler-owned
 versioned operations.
 
-### M10: Daily Development Experience (10-14 weeks)
+### M10: Daily Development Experience (6 implementation units)
 
 **Objective:** Make Eliscript comfortable for sustained daily development,
 especially inside Emacs.
@@ -921,7 +922,7 @@ compiler-owned multiline input and Bun/Node evidence. Host-neutral project
 watch events and their Emacs consumer are implemented; onboarding, the full
 AC-12 matrix, and the exit gate remain open.
 
-### M11: Standard and Platform Libraries (8-12 weeks)
+### M11: Standard and Platform Libraries (6 implementation units)
 
 **Objective:** Supply a coherent small library surface justified by language
 semantics, compiler needs, portable workloads, and reusable host boundaries
@@ -968,7 +969,7 @@ classification and exact safe-integer operations land in
 Naming and behavior remain provisional until the complete M11 core-library
 audit; broader mathematics, platform, and API-metadata work remains open.
 
-### M12: Reliability, Security, and Performance (8-12 weeks)
+### M12: Reliability, Security, and Performance (6 implementation units)
 
 **Objective:** Demonstrate that the toolchain remains correct under malformed
 input, large projects, long-lived use, and hostile project boundaries.
@@ -1002,7 +1003,7 @@ input, large projects, long-lived use, and hostile project boundaries.
 **Exit gate:** All quantitative reliability and performance requirements in
 the final acceptance matrix pass without an unexplained waiver.
 
-### M13: Core Acceptance and Application Validation (6-10 weeks)
+### M13: Core Acceptance and Application Validation (5 implementation units)
 
 **Objective:** Perform the formal language-core maturity audit, then exercise
 the public boundaries through separately reported application validation.

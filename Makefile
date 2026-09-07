@@ -17,6 +17,7 @@ test: check-contracts
 		-f ert-run-tests-batch-and-exit
 	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
 		tests/conformance.test.mjs tests/public-surface.test.mjs \
+		tests/maturity-progress.test.mjs \
 		tests/ci-contract.test.mjs \
 		tests/collection-layout-benchmark.test.mjs \
 		tests/transient-builder-benchmark.test.mjs \
@@ -73,6 +74,7 @@ test: check-contracts
 
 check-contracts:
 	$(BUN) tools/conformance/check.mjs
+	$(BUN) tools/progress/check.mjs
 	$(BUN) tools/surface/check.mjs
 	$(BUN) tools/ci/render-workflow.mjs --check
 

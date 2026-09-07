@@ -13,7 +13,8 @@ modules, and bootstraps a compiler written in Eliscript itself.
 
 [Website](docs/index.html) | [Specifications](specs/README.md) |
 [1.0 roadmap](specs/0040-maturity-roadmap.md) |
-[Host and persistent-data design](specs/0041-host-symbiosis-and-persistent-data.md)
+[Host and persistent-data design](specs/0041-host-symbiosis-and-persistent-data.md) |
+[Evidence-derived progress](specs/0122-evidence-derived-maturity-progress.md)
 
 ## Project Status
 
@@ -56,6 +57,10 @@ prompt control. A separate `eliscript-watch` stream now reports canonical
 content-level project changes under Bun and Node, and Emacs shares one watcher
 per project to refresh Flymake diagnostics. Onboarding and the complete M10
 exit gate remain future work.
+
+Run `bun run progress` for the current evidence-derived core progress report.
+It reports implementation, verification, and stabilization independently;
+application examples do not contribute to any core percentage.
 
 The current M8 work provides:
 
