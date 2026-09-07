@@ -14,6 +14,7 @@ directory is required by the compiler core.
 | [`collections/`](collections/) | Bun, Node, and browser HAMT layout measurements |
 | [`fuzz/`](fuzz/) | Deterministic reader and complete-program robustness corpus |
 | [`project/`](project/README.md) | Project scale, invalidation, resource, and clean-equivalence evidence |
+| [`performance/`](performance/README.md) | Source-bound compiler, build, worker, and persistent workload baseline |
 | [`conformance/`](conformance/) | Specification registry and evidence validation |
 | [`surface/`](surface/) | Public-surface and compatibility-baseline validation |
 | [`ci/`](ci/) | Deterministic compatibility workflow generation |

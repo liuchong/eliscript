@@ -8,6 +8,25 @@ committed report records raw samples or bounded peak observations, host
 fingerprints, correctness checks, parameters, and a digest of the source files
 that determine the measurement.
 
+## Core Performance Baseline
+
+Run the unified compiler, project-build, Emacs worker, and persistent-data
+corpus with:
+
+```sh
+bun run benchmark:core -- \
+  --output benchmarks/core-performance-macos-arm64.json
+```
+
+The command rebuilds the self-hosted compiler and launches three fresh Bun
+measurement processes. Each run validates output identities before retaining
+cold timings and seven-sample warm medians. The committed report records all
+raw samples, exact build decisions, worker equivalence, workload hashes,
+reference-host metadata, fixed median/maximum/spread budgets, and a SHA-256
+inventory of every measurement-defining source. Default tests validate this
+evidence without rerunning wall-clock timings. See
+[specification 0131](../specs/0131-source-bound-core-performance-baseline.md).
+
 ## Transient Bulk Builders
 
 Run the source-bound Vector, Map, and Set comparison with:

@@ -1,0 +1,843 @@
+{
+  "format": "eliscript-core-performance-benchmark",
+  "version": 1,
+  "generatedAt": "2026-09-07T15:32:35.605Z",
+  "host": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "operatingSystem": "Darwin 25.6.0",
+    "bunVersion": "1.4.0",
+    "emacsVersion": "31.1"
+  },
+  "parameters": {
+    "baselineRuns": 3,
+    "warmupRounds": 2,
+    "timingSamples": 7,
+    "workerSize": 10000,
+    "workerRounds": 10,
+    "workloadSize": 100000,
+    "workloadKeyCount": 1000
+  },
+  "thresholds": {
+    "compiler.moduleLoad": {
+      "maximumMedianMs": 8,
+      "maximumRunMs": 15,
+      "maximumSpreadRatio": 2
+    },
+    "compiler.coldCorpus": {
+      "maximumMedianMs": 200,
+      "maximumRunMs": 300,
+      "maximumSpreadRatio": 1.5
+    },
+    "compiler.warmCorpus": {
+      "maximumMedianMs": 125,
+      "maximumRunMs": 180,
+      "maximumSpreadRatio": 1.5
+    },
+    "build.clean": {
+      "maximumMedianMs": 25,
+      "maximumRunMs": 40,
+      "maximumSpreadRatio": 2
+    },
+    "build.noOp": {
+      "maximumMedianMs": 4,
+      "maximumRunMs": 8,
+      "maximumSpreadRatio": 2.5
+    },
+    "build.incremental": {
+      "maximumMedianMs": 5,
+      "maximumRunMs": 10,
+      "maximumSpreadRatio": 2.5
+    },
+    "worker.startup": {
+      "maximumMedianMs": 35,
+      "maximumRunMs": 60,
+      "maximumSpreadRatio": 2
+    },
+    "worker.coldEndToEnd": {
+      "maximumMedianMs": 20,
+      "maximumRunMs": 35,
+      "maximumSpreadRatio": 2
+    },
+    "worker.warmEndToEnd": {
+      "maximumMedianMs": 6,
+      "maximumRunMs": 10,
+      "maximumSpreadRatio": 2
+    },
+    "workload.cold": {
+      "maximumMedianMs": 35,
+      "maximumRunMs": 60,
+      "maximumSpreadRatio": 1.75
+    },
+    "workload.warm": {
+      "maximumMedianMs": 25,
+      "maximumRunMs": 40,
+      "maximumSpreadRatio": 1.75
+    }
+  },
+  "runs": [
+    {
+      "compiler": {
+        "sourceCount": 13,
+        "outputBytes": 902171,
+        "outputDigest": "147eca7cfdbb1864e816dd2d20757552ea98b651190d3abfac88a24c604fd396",
+        "moduleLoadMs": 3.242000000000001,
+        "coldCorpusMs": 122.32104199999999,
+        "warmSamplesMs": [
+          76.34229199999999,
+          73.53699999999998,
+          74.18124999999998,
+          85.59191600000008,
+          74.00320899999997,
+          76.07966699999997,
+          78.09379100000001
+        ],
+        "warmMedianMs": 76.07966699999997,
+        "deterministic": true
+      },
+      "build": {
+        "moduleCount": 4,
+        "cleanMs": 8.560707999999977,
+        "noOpSamplesMs": [
+          1.5286250000000337,
+          1.0792089999999916,
+          1.041832999999997,
+          1.024458999999979,
+          1.0504999999999427,
+          1.054124999999999,
+          1.0490419999999858
+        ],
+        "noOpMedianMs": 1.0504999999999427,
+        "incrementalSamplesMs": [
+          1.723416000000043,
+          1.68425000000002,
+          2.2652080000000296,
+          1.5378749999999854,
+          1.3668340000000399,
+          1.3004159999999274,
+          1.2887090000000399
+        ],
+        "incrementalMedianMs": 1.5378749999999854,
+        "exactDecisions": true
+      },
+      "worker": {
+        "checksum": 455649481,
+        "compileMs": 4.027128219604492,
+        "startupMs": 16.013145446777344,
+        "emacsSamplesMs": [
+          15.135049819946289,
+          14.683961868286133,
+          20.45893669128418,
+          15.321969985961914,
+          20.560026168823242,
+          14.966011047363281,
+          21.081924438476562
+        ],
+        "emacsMedianMs": 15.321969985961914,
+        "coldEndToEndMs": 7.282018661499023,
+        "coldWorkerMs": 5.625959000000002,
+        "coldModuleLoadMs": 2.5796660000000013,
+        "coldExecutionMs": 2.7253749999999997,
+        "warmEndToEndSamplesMs": [
+          2.7070045471191406,
+          2.466917037963867,
+          2.379894256591797,
+          2.3119449615478516,
+          2.485990524291992,
+          1.9769668579101562,
+          1.7948150634765625
+        ],
+        "warmEndToEndMedianMs": 2.379894256591797,
+        "warmWorkerMedianMs": 2.130167,
+        "warmExecutionMedianMs": 2.116333000000001,
+        "warmTransportAndClientMedianMs": 0.24972725659179673,
+        "warmSerializationMedianMs": 0.0006660000000024979,
+        "warmExecutionSpeedup": 7.23986725433186,
+        "warmEndToEndSpeedup": 6.438088559406933,
+        "equivalentToEmacs": true
+      },
+      "workload": {
+        "name": "persistent-frequencies",
+        "inputCount": 100000,
+        "keyCount": 1000,
+        "countPerKey": 100,
+        "resultHash": 1700863892,
+        "coldMs": 15.862875000000031,
+        "warmSamplesMs": [
+          11.786583000000064,
+          11.324500000000171,
+          11.378166999999848,
+          11.453290999999808,
+          11.581957999999986,
+          11.856250000000045,
+          11.273374999999987
+        ],
+        "warmMedianMs": 11.453290999999808,
+        "deterministic": true
+      }
+    },
+    {
+      "compiler": {
+        "sourceCount": 13,
+        "outputBytes": 902171,
+        "outputDigest": "147eca7cfdbb1864e816dd2d20757552ea98b651190d3abfac88a24c604fd396",
+        "moduleLoadMs": 3.3417499999999993,
+        "coldCorpusMs": 123.322959,
+        "warmSamplesMs": [
+          77.53916699999996,
+          75.97679199999999,
+          78.82900000000001,
+          80.51583400000004,
+          77.705917,
+          74.96283300000005,
+          75.25924999999995
+        ],
+        "warmMedianMs": 77.53916699999996,
+        "deterministic": true
+      },
+      "build": {
+        "moduleCount": 4,
+        "cleanMs": 9.158500000000004,
+        "noOpSamplesMs": [
+          1.4595829999999523,
+          1.2267910000000484,
+          1.0631670000000213,
+          1.0033339999999953,
+          1.149000000000001,
+          1.0318750000000136,
+          1.7089589999999362
+        ],
+        "noOpMedianMs": 1.149000000000001,
+        "incrementalSamplesMs": [
+          1.9129580000000033,
+          1.7863749999999072,
+          1.6453749999999445,
+          1.5633749999999509,
+          1.5929170000000568,
+          1.4449170000000322,
+          1.3872919999998885
+        ],
+        "incrementalMedianMs": 1.5929170000000568,
+        "exactDecisions": true
+      },
+      "worker": {
+        "checksum": 455649481,
+        "compileMs": 4.07099723815918,
+        "startupMs": 16.20793342590332,
+        "emacsSamplesMs": [
+          15.053033828735352,
+          14.924049377441406,
+          21.008014678955078,
+          14.995098114013672,
+          20.740985870361328,
+          15.252113342285156,
+          20.861148834228516
+        ],
+        "emacsMedianMs": 15.252113342285156,
+        "coldEndToEndMs": 7.395029067993164,
+        "coldWorkerMs": 5.694541999999998,
+        "coldModuleLoadMs": 2.5902910000000006,
+        "coldExecutionMs": 2.7820420000000006,
+        "warmEndToEndSamplesMs": [
+          2.9239654541015625,
+          2.454996109008789,
+          2.4340152740478516,
+          2.460002899169922,
+          2.4399757385253906,
+          2.0308494567871094,
+          1.895904541015625
+        ],
+        "warmEndToEndMedianMs": 2.4399757385253906,
+        "warmWorkerMedianMs": 2.1573749999999983,
+        "warmExecutionMedianMs": 2.146666999999997,
+        "warmTransportAndClientMedianMs": 0.28260073852539236,
+        "warmSerializationMedianMs": 0.0007500000000000284,
+        "warmExecutionSpeedup": 7.105020640036473,
+        "warmEndToEndSpeedup": 6.250928278288059,
+        "equivalentToEmacs": true
+      },
+      "workload": {
+        "name": "persistent-frequencies",
+        "inputCount": 100000,
+        "keyCount": 1000,
+        "countPerKey": 100,
+        "resultHash": 1700863892,
+        "coldMs": 15.177708000000166,
+        "warmSamplesMs": [
+          11.010291999999936,
+          12.396874999999909,
+          11.140125000000126,
+          11.23849999999993,
+          12.30904099999998,
+          11.481082999999899,
+          10.995625000000018
+        ],
+        "warmMedianMs": 11.23849999999993,
+        "deterministic": true
+      }
+    },
+    {
+      "compiler": {
+        "sourceCount": 13,
+        "outputBytes": 902171,
+        "outputDigest": "147eca7cfdbb1864e816dd2d20757552ea98b651190d3abfac88a24c604fd396",
+        "moduleLoadMs": 3.2480829999999994,
+        "coldCorpusMs": 122.491791,
+        "warmSamplesMs": [
+          80.90004200000004,
+          77.66616700000003,
+          73.13850000000002,
+          77.13433300000008,
+          77.29833299999996,
+          77.10749999999996,
+          75.38424999999995
+        ],
+        "warmMedianMs": 77.13433300000008,
+        "deterministic": true
+      },
+      "build": {
+        "moduleCount": 4,
+        "cleanMs": 10.33800000000008,
+        "noOpSamplesMs": [
+          1.4476249999999027,
+          1.069541000000072,
+          1.025957999999946,
+          1.043666999999914,
+          1.052208999999948,
+          1.0062090000000126,
+          1.0508330000000115
+        ],
+        "noOpMedianMs": 1.0508330000000115,
+        "incrementalSamplesMs": [
+          1.7314999999999827,
+          1.7735830000000306,
+          1.6226250000000846,
+          1.5031249999999545,
+          2.1791670000000067,
+          1.4382920000000468,
+          1.5213750000000346
+        ],
+        "incrementalMedianMs": 1.6226250000000846,
+        "exactDecisions": true
+      },
+      "worker": {
+        "checksum": 455649481,
+        "compileMs": 4.029989242553711,
+        "startupMs": 16.26896858215332,
+        "emacsSamplesMs": [
+          14.724016189575195,
+          14.681100845336914,
+          20.43890953063965,
+          14.765024185180664,
+          20.247936248779297,
+          14.925956726074219,
+          20.601987838745117
+        ],
+        "emacsMedianMs": 14.925956726074219,
+        "coldEndToEndMs": 7.330179214477539,
+        "coldWorkerMs": 5.641582999999999,
+        "coldModuleLoadMs": 2.463666999999999,
+        "coldExecutionMs": 2.8498749999999973,
+        "warmEndToEndSamplesMs": [
+          2.8731822967529297,
+          2.610921859741211,
+          2.5730133056640625,
+          2.5348663330078125,
+          2.4771690368652344,
+          2.103090286254883,
+          1.920938491821289
+        ],
+        "warmEndToEndMedianMs": 2.5348663330078125,
+        "warmWorkerMedianMs": 2.3009590000000024,
+        "warmExecutionMedianMs": 2.2877919999999996,
+        "warmTransportAndClientMedianMs": 0.23390733300781008,
+        "warmSerializationMedianMs": 0.0008330000000000837,
+        "warmExecutionSpeedup": 6.524175592044304,
+        "warmEndToEndSpeedup": 5.888261851015802,
+        "equivalentToEmacs": true
+      },
+      "workload": {
+        "name": "persistent-frequencies",
+        "inputCount": 100000,
+        "keyCount": 1000,
+        "countPerKey": 100,
+        "resultHash": 1700863892,
+        "coldMs": 15.120000000000118,
+        "warmSamplesMs": [
+          11.237791000000016,
+          11.65645799999993,
+          10.983457999999928,
+          10.67141700000002,
+          11.47629199999983,
+          11.085125000000062,
+          10.746250000000146
+        ],
+        "warmMedianMs": 11.085125000000062,
+        "deterministic": true
+      }
+    }
+  ],
+  "summary": {
+    "compiler.moduleLoad": {
+      "samplesMs": [
+        3.242000000000001,
+        3.3417499999999993,
+        3.2480829999999994
+      ],
+      "medianMs": 3.2480829999999994,
+      "minimumMs": 3.242000000000001,
+      "maximumMs": 3.3417499999999993,
+      "spreadRatio": 1.030768044417026,
+      "passed": true
+    },
+    "compiler.coldCorpus": {
+      "samplesMs": [
+        122.32104199999999,
+        123.322959,
+        122.491791
+      ],
+      "medianMs": 122.491791,
+      "minimumMs": 122.32104199999999,
+      "maximumMs": 123.322959,
+      "spreadRatio": 1.0081908801921422,
+      "passed": true
+    },
+    "compiler.warmCorpus": {
+      "samplesMs": [
+        76.07966699999997,
+        77.53916699999996,
+        77.13433300000008
+      ],
+      "medianMs": 77.13433300000008,
+      "minimumMs": 76.07966699999997,
+      "maximumMs": 77.53916699999996,
+      "spreadRatio": 1.0191838379103315,
+      "passed": true
+    },
+    "build.clean": {
+      "samplesMs": [
+        8.560707999999977,
+        9.158500000000004,
+        10.33800000000008
+      ],
+      "medianMs": 9.158500000000004,
+      "minimumMs": 8.560707999999977,
+      "maximumMs": 10.33800000000008,
+      "spreadRatio": 1.2076103985791955,
+      "passed": true
+    },
+    "build.noOp": {
+      "samplesMs": [
+        1.0504999999999427,
+        1.149000000000001,
+        1.0508330000000115
+      ],
+      "medianMs": 1.0508330000000115,
+      "minimumMs": 1.0504999999999427,
+      "maximumMs": 1.149000000000001,
+      "spreadRatio": 1.0937648738696464,
+      "passed": true
+    },
+    "build.incremental": {
+      "samplesMs": [
+        1.5378749999999854,
+        1.5929170000000568,
+        1.6226250000000846
+      ],
+      "medianMs": 1.5929170000000568,
+      "minimumMs": 1.5378749999999854,
+      "maximumMs": 1.6226250000000846,
+      "spreadRatio": 1.055108510119548,
+      "passed": true
+    },
+    "worker.startup": {
+      "samplesMs": [
+        16.013145446777344,
+        16.20793342590332,
+        16.26896858215332
+      ],
+      "medianMs": 16.20793342590332,
+      "minimumMs": 16.013145446777344,
+      "maximumMs": 16.26896858215332,
+      "spreadRatio": 1.0159758203799654,
+      "passed": true
+    },
+    "worker.coldEndToEnd": {
+      "samplesMs": [
+        7.282018661499023,
+        7.395029067993164,
+        7.330179214477539
+      ],
+      "medianMs": 7.330179214477539,
+      "minimumMs": 7.282018661499023,
+      "maximumMs": 7.395029067993164,
+      "spreadRatio": 1.0155191042137315,
+      "passed": true
+    },
+    "worker.warmEndToEnd": {
+      "samplesMs": [
+        2.379894256591797,
+        2.4399757385253906,
+        2.5348663330078125
+      ],
+      "medianMs": 2.4399757385253906,
+      "minimumMs": 2.379894256591797,
+      "maximumMs": 2.5348663330078125,
+      "spreadRatio": 1.0651172109797635,
+      "passed": true
+    },
+    "workload.cold": {
+      "samplesMs": [
+        15.862875000000031,
+        15.177708000000166,
+        15.120000000000118
+      ],
+      "medianMs": 15.177708000000166,
+      "minimumMs": 15.120000000000118,
+      "maximumMs": 15.862875000000031,
+      "spreadRatio": 1.0491319444444382,
+      "passed": true
+    },
+    "workload.warm": {
+      "samplesMs": [
+        11.453290999999808,
+        11.23849999999993,
+        11.085125000000062
+      ],
+      "medianMs": 11.23849999999993,
+      "minimumMs": 11.085125000000062,
+      "maximumMs": 11.453290999999808,
+      "spreadRatio": 1.0332126160056603,
+      "passed": true
+    }
+  },
+  "decision": {
+    "baselineRuns": 3,
+    "correct": true,
+    "stable": true,
+    "withinRegressionBudgets": true,
+    "passed": true
+  },
+  "source": {
+    "algorithm": "sha256",
+    "digest": "50dbab7cf84431d3e68cf728362942191729109623409fa331db50fc0cc0a543",
+    "files": [
+      {
+        "file": "bootstrap/compiler/analyzer.eli",
+        "sha256": "24f86c66ec22e6a8df75e308b7fe773414bcad13296a5bb97ae441018cccac05"
+      },
+      {
+        "file": "bootstrap/compiler/compiler.eli",
+        "sha256": "8e7c2da63b860dca837adcb834e6134241160ec9a99ee5a1e2c40eb5d9ce4fab"
+      },
+      {
+        "file": "bootstrap/compiler/emitter.eli",
+        "sha256": "4e178ed3f8065b38fd0bb8750bcf29843f502163b579f3811e12486ec05021cd"
+      },
+      {
+        "file": "bootstrap/compiler/expander.eli",
+        "sha256": "7b7d67689b2289ab98bf47a5761b54f214cc992ebcf456f245742b413d717d29"
+      },
+      {
+        "file": "bootstrap/compiler/formatter.eli",
+        "sha256": "3909391a67a3a420fccf32c4eb25ab37dcda796629eb479c26c56378d2edc97b"
+      },
+      {
+        "file": "bootstrap/compiler/ir.eli",
+        "sha256": "2e0b0dee9da40fcc8f5e8881ecc0fa9895c3bd2dd94ea1eef124ac04b91c892f"
+      },
+      {
+        "file": "bootstrap/compiler/lower.eli",
+        "sha256": "b11719d676e5b2b633a441dc3a2746ad2c7827b7c73e11d59d43584fdf6683f8"
+      },
+      {
+        "file": "bootstrap/compiler/project.eli",
+        "sha256": "068f8c7836947853b11b2813becf385522f092e1cccfe97e487996e4b8132797"
+      },
+      {
+        "file": "bootstrap/compiler/reader.eli",
+        "sha256": "778e5a4b7a51fba3c502234181c4e6a8e56c3ae3a2870ebe9df268a6388fa3f6"
+      },
+      {
+        "file": "bootstrap/compiler/source-map.eli",
+        "sha256": "8ac85cbf38b0f2b0bab3512fc02991c89945a70e240bc6d7a1de61744579afa9"
+      },
+      {
+        "file": "bootstrap/compiler/symbol.eli",
+        "sha256": "cf43e027a44fa419f8934255b3847263585c3d3b9651f983c738666abdefcf38"
+      },
+      {
+        "file": "bootstrap/compiler/syntax.eli",
+        "sha256": "b64225ce5ac44c20aa190594906fc242c5c192aa4d64bf5dad80a9cfcb48a0f0"
+      },
+      {
+        "file": "bootstrap/compiler/transient-analysis.eli",
+        "sha256": "98ecad346572d204d2c8c1e46713aa91e29252655b4a5c2bd41cf1c7d9d08f83"
+      },
+      {
+        "file": "bootstrap/host/build.mjs",
+        "sha256": "241c8d52fb9c91d64a426d644d7feb13784d5bb67535466b5db9bb8eb38be2b9"
+      },
+      {
+        "file": "bootstrap/host/bun.mjs",
+        "sha256": "90f6b4e6a5bf25fcdf198f6faf2d4d06569f148d4377fc13ee6447bdd37e58e3"
+      },
+      {
+        "file": "bootstrap/host/project.mjs",
+        "sha256": "bebd491648ba65edc4b600f5ddddd9d5e98a719d9c031ed806ac4e779edd7282"
+      },
+      {
+        "file": "compiler/eliscript-analyzer.el",
+        "sha256": "9d1ef992363f1cf6d9fcbb8e9f1972d846b94a5e283c776ecfb8efd867e317e8"
+      },
+      {
+        "file": "compiler/eliscript-cli.el",
+        "sha256": "8af43f91c6934888214b14021b70deeb1501afbcfe203b927154f4e3f6891b02"
+      },
+      {
+        "file": "compiler/eliscript-diagnostic.el",
+        "sha256": "6e720411abd3f2f10e86203edd659adf669ca4dfbb97cce120b79e559c5a0802"
+      },
+      {
+        "file": "compiler/eliscript-emitter.el",
+        "sha256": "98a36c2424c1f2c76e2314001bf9dc9e11cf64c7080793e9ab92424c4a207ac0"
+      },
+      {
+        "file": "compiler/eliscript-evaluation.el",
+        "sha256": "0d5074a90ba24db97c50300093b59e545aee173efbe92b6cc06568c9b94dfb78"
+      },
+      {
+        "file": "compiler/eliscript-expander.el",
+        "sha256": "bc7766f464769cc01a244d4fcdc5c7fba36bec7dfdf0f2454a47c099037d0c22"
+      },
+      {
+        "file": "compiler/eliscript-form.el",
+        "sha256": "4c63862e7cddae7f19d91f56b1e804bddccc2ad1d1d1d11fe0ee77ae2382d317"
+      },
+      {
+        "file": "compiler/eliscript-ir-emitter.el",
+        "sha256": "1cd864450b90babde75a7f38bde72de2f672783b2477c36ea817d0d9b473f99d"
+      },
+      {
+        "file": "compiler/eliscript-ir.el",
+        "sha256": "ce443862b6b68032dc1f1e78169d795649e94e96f1b432d4488619e22eac0052"
+      },
+      {
+        "file": "compiler/eliscript-lower.el",
+        "sha256": "5a431852768181cd9590e0764b42ddf4061e14ae322f9c964067f81dd0c5a9f9"
+      },
+      {
+        "file": "compiler/eliscript-macro-eval.el",
+        "sha256": "5d0266c6466eecf54792ff1a27ca34e2dae0b1aae87e30bcfe2fe7cd1dc5ec6e"
+      },
+      {
+        "file": "compiler/eliscript-parameters.el",
+        "sha256": "6baad0f8ee3763056fa06976b1ce6a88eb5b577d5e40722bc6d8406e87d935a4"
+      },
+      {
+        "file": "compiler/eliscript-portable.el",
+        "sha256": "7779890efc73a06d82d7537f7b1b42bcdc9eebb8ea99ac1fc83e9e147e2c2ce6"
+      },
+      {
+        "file": "compiler/eliscript-project-cli.el",
+        "sha256": "eccf30ceb6c4f53d1d56263e81b475ed5d67e73db540bb63acedb5941ab2c3c1"
+      },
+      {
+        "file": "compiler/eliscript-project.el",
+        "sha256": "1d767a74e616bec794e09d37d75cecf4d9e6daccf98303b2e31d057e2dca6afc"
+      },
+      {
+        "file": "compiler/eliscript-reader.el",
+        "sha256": "35b7eefcf3785db6f9737106e20af98f74ef0cc665c95a4052a01619ea36b510"
+      },
+      {
+        "file": "compiler/eliscript-source-map.el",
+        "sha256": "9e810d51cce160ceac7bcb00f503f7701baad9a4405cd2cd8aff603c48c5f4ce"
+      },
+      {
+        "file": "compiler/eliscript-symbol.el",
+        "sha256": "05b4dc7e703c92efb4d71e0f5d2a9b10f4bda5ef4373eea7df2be6b5f4c2516f"
+      },
+      {
+        "file": "compiler/eliscript-transient-analysis.el",
+        "sha256": "670ee2ee69d586562f20a621cef795225c0c6fe11630a8cf3e4c9257868c9505"
+      },
+      {
+        "file": "compiler/eliscript.el",
+        "sha256": "e07d31e6c4cb4574200e3f37f3ee05a1bc1bd940ceff213e180f444190806416"
+      },
+      {
+        "file": "examples/stdlib-cli/main.eli",
+        "sha256": "f97688cd4f8c67dce161944c51f1fbcaf558d3497d83e44038abeb70d7977086"
+      },
+      {
+        "file": "platform/worker.mjs",
+        "sha256": "76de32c429aed767bea76fb4825e77955a852b720c7fb365bc5c1569d94377b7"
+      },
+      {
+        "file": "runtime/core/collection-internals.mjs",
+        "sha256": "9fd56b7875411cb99598314dcc3731c1525d7852abcd6fc07fd063195f68917a"
+      },
+      {
+        "file": "runtime/core/collection.mjs",
+        "sha256": "21880434fe78fdc2a6c74bcc488d5db2508489e07e4357722afdb157595f44a3"
+      },
+      {
+        "file": "runtime/core/data-text.mjs",
+        "sha256": "fc6d880dfd247cc86de1d0564985b71dfe71ad3c84f60695a3f3da6b712ccd46"
+      },
+      {
+        "file": "runtime/core/data.mjs",
+        "sha256": "dee35a3630700b3bbf61463c63e0e90168b6a40d94443c55b34f9ffd25b92877"
+      },
+      {
+        "file": "runtime/core/identifier.mjs",
+        "sha256": "f590c5a2889af7f1fc76ba9c42e6ec0eb9395b5646f3011eac705ef38c045cd4"
+      },
+      {
+        "file": "runtime/core/list-internals.mjs",
+        "sha256": "75db0f379b7296d00a591dec46088bba3b02d23a3a1835ed3a56444504a24026"
+      },
+      {
+        "file": "runtime/core/list.mjs",
+        "sha256": "22d90b3dd477207f29f5331b59e61ff0a75dfc08e5bc4519291081dc5921bca9"
+      },
+      {
+        "file": "runtime/core/map-internals.mjs",
+        "sha256": "84ce1a108ca09ebd6d15a07619ef3149d2fbd7881f50dc17b7ccd4c8e76e73f0"
+      },
+      {
+        "file": "runtime/core/map.mjs",
+        "sha256": "a5b8d05e40cc8c9aadd71e8237b8c89258d8b4540a75faede5e814b349bc866a"
+      },
+      {
+        "file": "runtime/core/metadata-internals.mjs",
+        "sha256": "5a649ecf5428dd7799a10094c96df49d3e6be7556b9126819be24a4efd893343"
+      },
+      {
+        "file": "runtime/core/metadata.mjs",
+        "sha256": "ddb403d5b089b5f3224da7fd8c2de74afc0116b3d3a9634cb10fb7a30300ca9d"
+      },
+      {
+        "file": "runtime/core/object-impl.mjs",
+        "sha256": "b5eae0a29e17a75fdbdc46f27b5fa705f62dfce4dbd291ed470b63f59e134899"
+      },
+      {
+        "file": "runtime/core/object.mjs",
+        "sha256": "194049d0fb4d7308b1ac6c59292490bc2cf75d7763433493e71d74a76fa3bc87"
+      },
+      {
+        "file": "runtime/core/protocol-error.mjs",
+        "sha256": "dabd4344c57d189bde666973befd03462a821d184bd857dee045fe846ed8508e"
+      },
+      {
+        "file": "runtime/core/protocol-impl.mjs",
+        "sha256": "86677e2bf2a398c6454817864e2f35c5964a9bde5a78241b140d525aeeb7e0eb"
+      },
+      {
+        "file": "runtime/core/protocol.mjs",
+        "sha256": "d8b52082ee903b8b8215b1b425d2de472ddfa3b14099021d2e05c7bf42f8d6e8"
+      },
+      {
+        "file": "runtime/core/sequence.mjs",
+        "sha256": "6674f189ae679d0ecf09f2053e1098b15da900bb6dbf5728efe9c1b866c3466c"
+      },
+      {
+        "file": "runtime/core/set-internals.mjs",
+        "sha256": "f7284d6490871d5bd87242c3bd6851e1c629d6c5d5e7638c41e7a2543fc62cca"
+      },
+      {
+        "file": "runtime/core/set.mjs",
+        "sha256": "07dd4258c82f281ab6c89ec23a18829bb62c08543e9dfa0ed04352d1d1071dc0"
+      },
+      {
+        "file": "runtime/core/text-impl.mjs",
+        "sha256": "b3606e630bd301e89223560ed016be68a831bbaeb881431ab8d656d9fc2800da"
+      },
+      {
+        "file": "runtime/core/text.mjs",
+        "sha256": "a442fb889600a78cb86318b53c274aa23b7689f7c6b369b3a4723876808c6ff4"
+      },
+      {
+        "file": "runtime/core/transducer.mjs",
+        "sha256": "5f98018db31a19a089be316840e14db4ccc16af92d27b6a093f2016e8401752a"
+      },
+      {
+        "file": "runtime/core/transient-internals.mjs",
+        "sha256": "154d9a3728ad3ef5572475da4f276e7a057587dad7481fced767fe6beed5b454"
+      },
+      {
+        "file": "runtime/core/transient.mjs",
+        "sha256": "5d81f4b36b9a17c99dc633255c3a2baeee356c45c094ceadb809ac5a50095d17"
+      },
+      {
+        "file": "runtime/core/truth.mjs",
+        "sha256": "37635ff75788301afd7f7eaeccde035382ba37c49676e02752ee79c3c117a5f2"
+      },
+      {
+        "file": "runtime/core/value-internals.mjs",
+        "sha256": "5a76cd014dc81b5168248a5b49e4559a79bf8cf39d011d737a46f4ef94302562"
+      },
+      {
+        "file": "runtime/core/value.mjs",
+        "sha256": "dd58ec02539ab15e31276a7269c1d4a7b0063b9587c38aeabf1fe453ce8d7c49"
+      },
+      {
+        "file": "runtime/core/vector-internals.mjs",
+        "sha256": "9b93345715eb41fe1576150efac047ca609ce28bb606657b633eef0ac3499cb7"
+      },
+      {
+        "file": "runtime/core/vector.mjs",
+        "sha256": "4cfc23a4d6e2c37d7063f38603d1a27fe9ca0cd3c8faf463d9c72dda4ec214c4"
+      },
+      {
+        "file": "runtime/worker-value-codec.mjs",
+        "sha256": "4d1d520e6b7e93eb16ebcd8b976c78037ecba56cccb191917cfe2dfd9c098eb6"
+      },
+      {
+        "file": "runtime/worker-value-stream.mjs",
+        "sha256": "2e01218b4d632ef8a72038334c048abb5df98488072460d66d0a38c6cb5383b7"
+      },
+      {
+        "file": "runtime/worker.mjs",
+        "sha256": "a1085a356c7514cf1064c8d9ab6769c23395aff3636e25431b5cb55bd6b1fe38"
+      },
+      {
+        "file": "stdlib/object.eli",
+        "sha256": "9825a519e64d2ef101155031e4a609fcf10fcac60ec67d8db80a42c1d49c09ed"
+      },
+      {
+        "file": "stdlib/sequence.eli",
+        "sha256": "400d4a5371ba802201ba9c3204824658bf6e5edbf4b0c35189f970bcb10a3e59"
+      },
+      {
+        "file": "stdlib/text.eli",
+        "sha256": "7474e54e9bddbd47bf2d2274698129eeb511373649caa14a99e78c21a04aaad4"
+      },
+      {
+        "file": "tests/fixtures/worker.eli",
+        "sha256": "c2fa628dbc50e57e5b085db8089b9f1505d72476eaee307d411d9e8cf6aeb10e"
+      },
+      {
+        "file": "tools/performance/core-benchmark.mjs",
+        "sha256": "713cc8a927649b34a802fff701957444c9e75f4a9a3ee6264cd7c63828c6a916"
+      },
+      {
+        "file": "tools/worker/benchmark.el",
+        "sha256": "309a2f5fcc19641a0f0212a5ad79df2e34630620552ba9d5e646d17cb1e5c063"
+      },
+      {
+        "file": "tools/worker/eliscript-value-codec.el",
+        "sha256": "8e62c7247f089a37fedc84b085c45491e9931a3066ceaa3ba48cb79aa8b21339"
+      },
+      {
+        "file": "tools/worker/eliscript-value-stream.el",
+        "sha256": "18d4430d49997c30a9eecd3744045f487193a5c65cfe7f6e8c94399cb703c91d"
+      },
+      {
+        "file": "tools/worker/eliscript-worker.el",
+        "sha256": "e63c195a7ddcda45846aeaff5073dd173bfae39491670d1e94c601ec4abadf03"
+      }
+    ]
+  }
+}

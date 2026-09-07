@@ -21,6 +21,7 @@ test: check-contracts
 		tests/platform-capabilities.test.mjs \
 		tests/reader-program-fuzz.test.mjs \
 		tests/project-scale.test.mjs \
+		tests/core-performance-benchmark.test.mjs \
 		tests/maturity-progress.test.mjs \
 		tests/esm-imports.test.mjs \
 		tests/ci-contract.test.mjs \

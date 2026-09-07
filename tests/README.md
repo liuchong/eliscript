@@ -61,6 +61,12 @@ undeclared macro and worker authority, closed-schema mismatches, symbolic and
 hard-link output aliases, and symbolic parent-directory escapes before any
 generated write. ERT independently covers the Emacs single-file output APIs.
 
+`core-performance-benchmark.test.mjs` validates the retained three-run M12
+compiler, project-build, real Emacs worker, and persistent-data workload
+baseline. It recomputes the complete source digest, checks every fixed budget
+and correctness identity, and rejects missing runs, altered summaries,
+rewritten thresholds, and stale source evidence without rerunning timings.
+
 ## Default Suite
 
 `make test` runs the ERT suite, invokes the public CLI, compares the generated

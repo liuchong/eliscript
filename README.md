@@ -69,7 +69,7 @@ now grant only named host authority, inject request-scoped progress and
 cancellation into the real worker, and re-export the canonical worker codecs.
 Compatibility stabilization and the final M11 exit audit remain open.
 
-M12 reliability work now has four of six implementation units complete. The
+M12 reliability work now has five of six implementation units complete. The
 deterministic reader/program fuzz suite replays 100,000 grammar-aware and
 complete-module mutation inputs with seed/self-hosted parity, recursive spans,
 formatter round trips, structured diagnostics, and fixed identities. The
@@ -85,8 +85,12 @@ and steady-state RSS, clean shutdown, and complete PID reclamation. See
 matrix now rejects direct and symbolic source-root escapes, undeclared macro
 and worker authority, closed-schema mismatches, and generated output aliases
 across Emacs seed, Bun, and Node paths while preserving protected inputs. See
-[0130](specs/0130-hostile-boundary-security.md). Benchmark and artifact-audit
-units remain open.
+[0130](specs/0130-hostile-boundary-security.md). The source-bound core
+performance corpus now retains three independent compiler, project-build, real
+Emacs worker, and persistent-data workload runs with exact correctness
+identities and fixed regression budgets. See
+[0131](specs/0131-source-bound-core-performance-baseline.md). Only the
+dependency and generated-artifact audit unit remains open.
 
 Run `bun run progress` for the current evidence-derived core progress report.
 It reports implementation, verification, and stabilization independently;
@@ -456,6 +460,7 @@ arbitrary Emacs packages in JavaScript.
 | Start the React example | `bun run dev:react-counter` |
 | Start the Org publishing example | `bun run dev:org-site` |
 | Measure the Emacs worker | `bun run benchmark:worker` |
+| Measure the core performance baseline | `bun run benchmark:core -- --output benchmarks/core-performance-macos-arm64.json` |
 | Measure HAMT layouts | `bun run benchmark:hamt-layout` |
 
 The project builder follows relative `.eli` imports after macro expansion,
