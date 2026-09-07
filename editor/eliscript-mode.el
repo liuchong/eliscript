@@ -703,14 +703,60 @@ With COUNT, move that many diagnostics.  RESET starts from the beginning."
          (error-buffer (generate-new-buffer " *eliscript-check-error*"))
          (program (eliscript-mode--check-program))
          (command (cons program (eliscript-mode--check-arguments)))
-         process)
+         process
+         stderr-process
+         finished-process
+         stderr-complete
+         reported
+         finish-fn)
+    (setq
+     finish-fn
+     (lambda ()
+       (when (and finished-process stderr-complete (not reported))
+         (setq reported t)
+         (unwind-protect
+             (when (buffer-live-p source-buffer)
+               (with-current-buffer source-buffer
+                 (when (and
+                        (eq finished-process
+                            eliscript-mode--flymake-process)
+                        (= generation (buffer-chars-modified-tick)))
+                   (setq eliscript-mode--flymake-process nil)
+                   (if (and
+                        (eq (process-status finished-process) 'exit)
+                        (zerop (process-exit-status finished-process)))
+                       (funcall report-fn nil)
+                     (let* ((json-source
+                             (with-current-buffer error-buffer
+                               (string-trim (buffer-string))))
+                            (diagnostic
+                             (eliscript-mode--diagnostic-from-json
+                              json-source)))
+                       (funcall report-fn
+                                (if diagnostic (list diagnostic) nil)))))))
+           (when (buffer-live-p output-buffer)
+             (kill-buffer output-buffer))
+           (when (buffer-live-p error-buffer)
+             (kill-buffer error-buffer))))))
     (condition-case error-data
         (progn
+          (setq stderr-process
+                (make-pipe-process
+                 :name "eliscript-check-stderr"
+                 :buffer error-buffer
+                 :coding 'utf-8-unix
+                 :noquery t
+                 :sentinel
+                 (lambda (finished _event)
+                   (when (memq (process-status finished)
+                               '(exit signal closed failed))
+                     (setq stderr-complete t)
+                     (funcall finish-fn)))))
           (setq process
                 (make-process
                  :name "eliscript-check"
                  :buffer output-buffer
-                 :stderr error-buffer
+                 :stderr stderr-process
                  :command command
                  :connection-type 'pipe
                  :coding 'utf-8-unix
@@ -718,33 +764,8 @@ With COUNT, move that many diagnostics.  RESET starts from the beginning."
                  :sentinel
                  (lambda (finished _event)
                    (when (memq (process-status finished) '(exit signal))
-                     (unwind-protect
-                         (when (buffer-live-p source-buffer)
-                           (with-current-buffer source-buffer
-                             (when (and
-                                    (eq finished
-                                        eliscript-mode--flymake-process)
-                                    (= generation
-                                       (buffer-chars-modified-tick)))
-                               (setq eliscript-mode--flymake-process nil)
-                               (if (and
-                                    (eq (process-status finished) 'exit)
-                                    (zerop (process-exit-status finished)))
-                                   (funcall report-fn nil)
-                                 (let* ((json-source
-                                         (with-current-buffer error-buffer
-                                           (string-trim (buffer-string))))
-                                        (diagnostic
-                                         (eliscript-mode--diagnostic-from-json
-                                          json-source)))
-                                   (funcall report-fn
-                                            (if diagnostic
-                                                (list diagnostic)
-                                              nil)))))))
-                       (when (buffer-live-p output-buffer)
-                         (kill-buffer output-buffer))
-                       (when (buffer-live-p error-buffer)
-                         (kill-buffer error-buffer)))))))
+                     (setq finished-process finished)
+                     (funcall finish-fn)))))
           (setq eliscript-mode--flymake-process process)
           (save-restriction
             (widen)
@@ -753,6 +774,9 @@ With COUNT, move that many diagnostics.  RESET starts from the beginning."
       (error
        (setq eliscript-mode--flymake-process nil)
        (when (process-live-p process) (kill-process process))
+       (when (and (processp stderr-process)
+                  (process-live-p stderr-process))
+         (delete-process stderr-process))
        (when (buffer-live-p output-buffer) (kill-buffer output-buffer))
        (when (buffer-live-p error-buffer) (kill-buffer error-buffer))
        (signal (car error-data) (cdr error-data))))))
