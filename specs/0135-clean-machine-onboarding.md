@@ -1,0 +1,117 @@
+# 0135: Traceable Clean-machine Onboarding Exercise
+
+- Status: Accepted
+- Implementation: In Progress
+- Date: 2026-09-08
+- Depends on: 0040 Project Maturity Roadmap and 1.0 Acceptance Contract,
+  0133 Verified Installation and Daily Development Guide,
+  0134 Versioned Core Acceptance Corpus and Truthful Audit Run
+
+## Summary
+
+M13 requires stronger evidence than a temporary project inside an already
+prepared checkout. Eliscript therefore executes its complete documented
+onboarding path on a fresh GitHub-hosted Ubuntu runner. The runner begins with
+only a repository checkout plus explicitly installed Git, Emacs, and Bun. The
+Eliscript-owned runner installs locked dependencies, discovers the public
+command, builds the bootstrap compiler, executes the documented two-module
+project, byte-compiles maintained Emacs Lisp, and runs the framework-neutral
+core suite.
+
+The exercise emits machine-readable and generated human-readable evidence
+bound to one Git commit, tree, Actions run, environment, ordered command set,
+and complete source digest inventory. Dependency installation is measured but
+excluded from the 15-minute active-step budget defined by AC-22. Application
+tests remain outside the exercise and cannot satisfy or block it.
+
+This specification remains in progress until one passing report from the
+declared fresh runner is downloaded, verified against its source commit, and
+retained under `acceptance/runs/`.
+
+## Environment Contract
+
+The first retained exercise uses one GitHub-hosted `ubuntu-24.04` x64 runner,
+Bun 1.4.0, and Emacs 30.2. The report must prove GitHub Actions execution from
+the same commit named by `GITHUB_SHA`; a local checkout, container inside an
+already prepared checkout, or hand-authored report cannot claim M13-02.
+
+GitHub installs the declared toolchain on a newly provisioned runner. After
+that minimal host setup, `tools/onboarding/check.mjs` owns every project step.
+It rejects the wrong provider, OS, architecture, Ubuntu release, Bun version,
+Emacs version, dirty tracked checkout, altered command sequence, application
+test leakage, or active duration above 900,000 milliseconds.
+
+## Ordered Exercise
+
+The versioned contract runs these steps exactly once and in order:
+
+1. install the frozen Bun lockfile dependencies
+2. discover the public `eliscript` command
+3. build the bootstrap compiler through its public package command
+4. execute the documented two-module project and Emacs mode setup
+5. byte-compile all maintained Emacs Lisp with warnings as errors
+6. run `make test-core`
+
+The dependency step records its own duration but does not contribute to the
+active-step total. Every other step contributes. The exercise stops after the
+first failed step and records later steps as `not-run`; it still writes a
+failure report when possible so CI evidence is diagnosable.
+
+## Test Partition
+
+`make test-core` is the only test target accepted by this exercise. React,
+Vite, Org publishing, browser builds, and their CLI validation live under
+`make test-applications`. `make test` remains the aggregate developer command
+and invokes both explicit partitions, so separating acceptance does not hide
+application regressions.
+
+The onboarding checker validates the partition structurally before a run. No
+application test filename or application target may occur in the core target
+or onboarding command sequence.
+
+## Evidence
+
+The JSON report records:
+
+- source commit and Git tree
+- GitHub repository, run identifier, attempt, SHA, and immutable run URL
+- operating-system release, architecture, CPU, Git, Bun, Node, and Emacs
+  versions
+- argument vector, timeout, exit status, duration, bounded summary, and
+  separate stdout/stderr SHA-256 for every step
+- clean tracked state before and after the ordered exercise
+- install duration, active duration, fixed budget, and derived final result
+- SHA-256 for every source file as it existed in the audited commit
+
+Verification reads source bytes from the recorded commit instead of silently
+substituting the current checkout. The Markdown report must be byte-identical
+to a fresh rendering of the JSON report.
+
+## Commands
+
+```sh
+bun tools/onboarding/check.mjs
+gh workflow run clean-machine-onboarding.yml --ref master
+bun tools/onboarding/check.mjs \
+  --verify-run acceptance/runs/m13-02.json \
+  --verify-markdown acceptance/runs/m13-02.md
+```
+
+## Acceptance Criteria
+
+- **CMO-01:** The exercise can pass only on the declared fresh GitHub-hosted
+  Ubuntu runner and exact Bun and Emacs versions.
+- **CMO-02:** The ordered run begins from a clean tracked checkout and performs
+  frozen dependency installation itself.
+- **CMO-03:** Public command discovery, compiler build, documented project,
+  strict byte compilation, and the complete core suite all pass.
+- **CMO-04:** Dependency download time is separate; all active steps complete
+  within 900,000 milliseconds.
+- **CMO-05:** Core and application test targets are mechanically disjoint,
+  while the aggregate developer target still runs both.
+- **CMO-06:** Every command result and source artifact is bound by SHA-256 to
+  the exact audited commit.
+- **CMO-07:** Machine and human reports are deterministic, mutually verified,
+  and identify the originating Actions run.
+- **CMO-08:** Failed, incomplete, locally produced, dirty, over-budget, or
+  application-contaminated evidence cannot complete M13-02 or AC-22.

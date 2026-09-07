@@ -28,20 +28,20 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 134 specifications.
+The registry currently contains 135 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 102 |
+| Accepted design | 103 |
 | Stable design | 30 |
 | Superseded design | 1 |
-| Implementation in progress | 3 |
+| Implementation in progress | 4 |
 | Implemented | 130 |
 | Superseded implementation | 1 |
 
 Compatibility Baseline 2 separately classifies 30 specifications as stable,
-96 as provisional, 3 as planning, and 1 as superseded. That baseline is
+100 as provisional, 4 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -161,7 +161,9 @@ M13 has completed 1/5 implementation units through specification 0134. Its
 versioned corpus derives all 35 mandatory AC/PD criteria from normative
 headings, maps each criterion to bounded probes and tracked evidence, and
 retains one clean audit with 17 pass, 18 incomplete, and zero failed criteria.
-The final acceptance flag remains false.
+The final acceptance flag remains false. Specification 0135 defines the fresh
+GitHub-hosted Ubuntu exercise for M13-02; it remains in progress until a
+passing source-bound report is retained.
 
 ## Reading Paths
 
@@ -457,6 +459,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0132 | [Repository Dependency and Generated-artifact Audits](0132-repository-integrity-audits.md) | Accepted | Implemented |
 | 0133 | [Verified Installation and Daily Development Guide](0133-verified-onboarding-documentation.md) | Accepted | Implemented |
 | 0134 | [Versioned Core Acceptance Corpus and Truthful Audit Run](0134-versioned-core-acceptance-corpus.md) | Accepted | Implemented |
+| 0135 | [Traceable Clean-machine Onboarding Exercise](0135-clean-machine-onboarding.md) | Accepted | In Progress |
 
 ## Adding a Specification
 

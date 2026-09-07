@@ -17,6 +17,33 @@ The maintained development baseline requires:
 - Emacs 29 or newer for the seed compiler and editor integration
 - Bun 1.4 or newer for the default JavaScript host and development commands
 
+On Ubuntu 24.04, install the host prerequisites and Bun with:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y git emacs unzip curl
+curl -fsSL https://bun.com/install | bash
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
+```
+
+On macOS with Homebrew, use:
+
+```sh
+brew install git emacs
+curl -fsSL https://bun.com/install | bash
+export BUN_INSTALL="$HOME/.bun"
+export PATH="$BUN_INSTALL/bin:$PATH"
+```
+
+Confirm the active tools before cloning:
+
+```sh
+git --version
+emacs --version
+bun --version
+```
+
 Node.js is a maintained alternate host for generated compiler and project
 operations. Bun remains the default host and is required for dependency setup
 and the repository test command. The final operating-system and host acceptance
@@ -31,6 +58,7 @@ git clone git@github.com:liuchong/eliscript.git
 cd eliscript
 bun install --frozen-lockfile
 ./bin/eliscript --help
+bun run build:bootstrap
 ```
 
 Keep the checkout as the command home. The public scripts locate the compiler
@@ -242,14 +270,23 @@ Verify a checkout in increasing scope:
 make byte-compile
 bun run check:contracts
 bun run check:integrity
-bun run test
+make test-core
+make test-applications
 ```
 
 `make byte-compile` checks maintained Emacs Lisp with warnings as errors.
 `check:contracts` validates specification, API, compatibility, documentation,
 and repository-integrity contracts. `check:integrity` can be run separately to
-diagnose dependency or artifact drift. `bun run test` executes the complete
-local ERT, Bun, host-equivalence, scale, security, and CLI suite.
+diagnose dependency or artifact drift. `make test-core` executes the complete
+framework-neutral ERT, Bun, host-equivalence, scale, security, and CLI suite.
+`make test-applications` separately verifies maintained Vite, React, and Org
+consumers. The aggregate `bun run test` command runs both partitions.
+
+The documented project path has its own bounded executable check:
+
+```sh
+bun test tests/onboarding-docs.test.mjs
+```
 
 Passing this documented workflow proves the current checkout and local tool
 chain. It does not by itself prove the final clean-machine exercise, every

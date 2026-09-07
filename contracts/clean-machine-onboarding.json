@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "format": "eliscript-clean-machine-onboarding",
+  "version": 1,
+  "environment": {
+    "provider": "github-actions",
+    "runnerOs": "Linux",
+    "runnerArchitecture": "X64",
+    "ubuntuVersion": "24.04",
+    "bunVersion": "1.4.0",
+    "emacsVersion": "30.2",
+    "maximumActiveDurationMs": 900000
+  },
+  "steps": [
+    {
+      "id": "locked-dependencies",
+      "argv": ["bun", "install", "--frozen-lockfile"],
+      "timeoutMs": 300000,
+      "countsTowardActiveDuration": false
+    },
+    {
+      "id": "command-discovery",
+      "argv": ["./bin/eliscript", "--help"],
+      "timeoutMs": 60000,
+      "countsTowardActiveDuration": true
+    },
+    {
+      "id": "compiler-build",
+      "argv": ["bun", "run", "build:bootstrap"],
+      "timeoutMs": 300000,
+      "countsTowardActiveDuration": true
+    },
+    {
+      "id": "documented-project",
+      "argv": ["bun", "test", "tests/onboarding-docs.test.mjs"],
+      "timeoutMs": 120000,
+      "countsTowardActiveDuration": true
+    },
+    {
+      "id": "strict-byte-compile",
+      "argv": ["make", "byte-compile"],
+      "timeoutMs": 300000,
+      "countsTowardActiveDuration": true
+    },
+    {
+      "id": "core-suite",
+      "argv": ["make", "test-core"],
+      "timeoutMs": 900000,
+      "countsTowardActiveDuration": true
+    }
+  ],
+  "requiredDocumentation": [
+    "sudo apt-get install -y git emacs unzip curl",
+    "brew install git emacs",
+    "curl -fsSL https://bun.com/install | bash",
+    "bun install --frozen-lockfile",
+    "./bin/eliscript --help",
+    "bun run build:bootstrap",
+    "bun test tests/onboarding-docs.test.mjs",
+    "make byte-compile",
+    "make test-core"
+  ],
+  "sourceFiles": [
+    ".github/workflows/clean-machine-onboarding.yml",
+    "Makefile",
+    "bun.lock",
+    "contracts/clean-machine-onboarding.json",
+    "docs/getting-started.md",
+    "examples/getting-started/eliscript.json",
+    "examples/getting-started/src/main.eli",
+    "examples/getting-started/src/math.eli",
+    "package.json",
+    "specs/0135-clean-machine-onboarding.md",
+    "tests/onboarding-docs.test.mjs",
+    "tests/test-partition.test.mjs",
+    "tools/onboarding/check.mjs"
+  ]
+}

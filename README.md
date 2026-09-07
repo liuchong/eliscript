@@ -40,6 +40,10 @@ audit records 17 passing, 18 incomplete, and zero failed criteria; its final
 acceptance flag is therefore false. Application validations are listed
 separately and contribute no core result.
 
+The [clean-machine onboarding exercise](specs/0135-clean-machine-onboarding.md)
+is implemented as a GitHub-hosted Ubuntu runner contract and remains in
+progress until its first passing report is retained.
+
 M9 compiler convergence is complete: it includes canonical project requests,
 graph planning, IR serialization, build reports, v1-to-v2 cache migration,
 selective recompilation, cross-host Bun/Node cache reuse, and self-hosted public

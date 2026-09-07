@@ -19,6 +19,7 @@ test-core: check-contracts
 	$(BUN) test tests/conformance.test.mjs tests/public-surface.test.mjs \
 		tests/api-index.test.mjs \
 		tests/onboarding-docs.test.mjs \
+		tests/clean-machine-onboarding.test.mjs \
 		tests/test-partition.test.mjs \
 		tests/repository-integrity.test.mjs \
 		tests/platform-capabilities.test.mjs \
@@ -102,6 +103,7 @@ check-contracts:
 	$(BUN) tools/surface/generate-api.mjs --check
 	$(BUN) tools/ci/render-workflow.mjs --check
 	$(BUN) tools/documentation/check.mjs
+	$(BUN) tools/onboarding/check.mjs
 	$(BUN) tools/integrity/check.mjs
 
 byte-compile:
