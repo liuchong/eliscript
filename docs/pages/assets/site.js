@@ -63,6 +63,29 @@ document.querySelectorAll("[data-language-tab]").forEach((button) => {
   });
 });
 
+const apiSearch = document.querySelector("[data-api-search]");
+if (apiSearch) {
+  const modules = [...document.querySelectorAll("[data-api-module]")];
+  const sections = [...document.querySelectorAll("[data-api-section]")];
+  const count = document.querySelector("[data-api-count]");
+  const empty = document.querySelector("[data-api-empty]");
+  const updateApiFilter = () => {
+    const query = apiSearch.value.trim().toLowerCase();
+    let visible = 0;
+    for (const module of modules) {
+      const matches = module.dataset.apiSearchable.includes(query);
+      module.hidden = !matches;
+      if (matches) visible += 1;
+    }
+    for (const section of sections) {
+      section.hidden = !section.querySelector("[data-api-module]:not([hidden])");
+    }
+    count.textContent = `${visible} ${visible === 1 ? "module" : "modules"}`;
+    empty.hidden = visible !== 0;
+  };
+  apiSearch.addEventListener("input", updateApiFilter);
+}
+
 document.querySelectorAll("[data-year]").forEach((element) => {
   element.textContent = new Date().getFullYear();
 });

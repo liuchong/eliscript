@@ -17,6 +17,7 @@ test: check-contracts
 		-f ert-run-tests-batch-and-exit
 	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
 		tests/conformance.test.mjs tests/public-surface.test.mjs \
+		tests/api-index.test.mjs \
 		tests/maturity-progress.test.mjs \
 		tests/esm-imports.test.mjs \
 		tests/ci-contract.test.mjs \
@@ -78,6 +79,7 @@ check-contracts:
 	$(BUN) tools/conformance/check.mjs
 	$(BUN) tools/progress/check.mjs
 	$(BUN) tools/surface/check.mjs
+	$(BUN) tools/surface/generate-api.mjs --check
 	$(BUN) tools/ci/render-workflow.mjs --check
 
 byte-compile:

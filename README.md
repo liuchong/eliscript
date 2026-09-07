@@ -12,6 +12,7 @@ JavaScript. The seed compiler runs in plain Emacs, emits standard ECMAScript
 modules, and bootstraps a compiler written in Eliscript itself.
 
 [Website](docs/index.html) | [Specifications](specs/README.md) |
+[Library API](docs/pages/api.html) |
 [1.0 roadmap](specs/0040-maturity-roadmap.md) |
 [Host and persistent-data design](specs/0041-host-symbiosis-and-persistent-data.md) |
 [Evidence-derived progress](specs/0122-evidence-derived-maturity-progress.md)
@@ -57,6 +58,14 @@ prompt control. A separate `eliscript-watch` stream now reports canonical
 content-level project changes under Bun and Node, and Emacs shares one watcher
 per project to refresh Flymake diagnostics. Onboarding and the complete M10
 exit gate remain future work.
+
+M11 now has an exact generated library index. Reviewed metadata classifies all
+29 standard-library modules by role and owning specification; the generated
+[API page](docs/pages/api.html) and machine-readable
+[API index](docs/pages/api-index.json) expose all 304 checked exports. The
+default contract gate rejects metadata, implementation, stability, or generated
+artifact drift. Explicit host capability packages and the M11 exit gate remain
+open.
 
 Run `bun run progress` for the current evidence-derived core progress report.
 It reports implementation, verification, and stabilization independently;
@@ -511,6 +520,7 @@ Start with the document that matches the question:
 | How does self-hosting work? | [Bootstrap Compiler Guide](bootstrap/README.md) |
 | What runtime APIs exist? | [Runtime Guide](runtime/README.md) |
 | Which portable libraries exist? | [Standard Library Guide](stdlib/README.md) |
+| What are the exact current library exports? | [Generated Library API](docs/pages/api.html) |
 | What does the test suite prove? | [Test Guide](tests/README.md) |
 | How are benchmark claims reviewed? | [Benchmark Guide](benchmarks/README.md) |
 
@@ -546,6 +556,7 @@ The versioned project contracts are:
 | Contract | Design specification |
 | --- | --- |
 | [`contracts/public-surface.json`](contracts/public-surface.json) | [0044: Public Surface Registry](specs/0044-public-surface-registry.md) |
+| [`contracts/library-api.json`](contracts/library-api.json) | [0125: Generated Library API Index](specs/0125-generated-library-api-index.md) |
 | [`contracts/compatibility-matrix.json`](contracts/compatibility-matrix.json) | [0045: Continuous Compatibility Matrix](specs/0045-continuous-compatibility-matrix.md) |
 | [`contracts/compatibility-baseline.json`](contracts/compatibility-baseline.json) | [0046: M7 Compatibility Baseline](specs/0046-m7-compatibility-baseline.md) |
 

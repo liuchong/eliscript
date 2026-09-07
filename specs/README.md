@@ -28,20 +28,20 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 124 specifications.
+The registry currently contains 125 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 92 |
+| Accepted design | 93 |
 | Stable design | 30 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 120 |
+| Implemented | 121 |
 | Superseded implementation | 1 |
 
 Compatibility Baseline 2 separately classifies 30 specifications as stable,
-90 as provisional, 3 as planning, and 1 as superseded. That baseline is
+91 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -209,6 +209,7 @@ number.
 47. [0107: Self-hosted Project Graph Planning](0107-self-hosted-project-graph-planning.md)
 48. [0108: Versioned Canonical IR Serialization](0108-versioned-canonical-ir.md)
 49. [0109: Self-hosted Build Decision Reports](0109-self-hosted-build-decision-reports.md)
+50. [0125: Generated Library API Index](0125-generated-library-api-index.md)
 
 ### Application Validation (Non-core)
 
@@ -247,6 +248,7 @@ The contract data is split by responsibility:
 | [`specs/index.json`](index.json) | Specification identity and lifecycle |
 | [`tests/conformance/manifest.json`](../tests/conformance/manifest.json) | Observable features and executable evidence |
 | [`contracts/public-surface.json`](../contracts/public-surface.json) | Public and internal interface inventory |
+| [`contracts/library-api.json`](../contracts/library-api.json) | Standard-library module metadata and generated API ownership |
 | [`contracts/compatibility-matrix.json`](../contracts/compatibility-matrix.json) | Supported Emacs, OS, architecture, and Bun combinations |
 | [`contracts/compatibility-baseline.json`](../contracts/compatibility-baseline.json) | Stable, provisional, and planning boundary |
 
@@ -254,7 +256,8 @@ The schemas and change workflow are defined by specifications
 [0042](0042-specification-registry.md),
 [0044](0044-public-surface-registry.md),
 [0045](0045-continuous-compatibility-matrix.md), and
-[0046](0046-m7-compatibility-baseline.md).
+[0046](0046-m7-compatibility-baseline.md). Generated library API behavior is
+defined by [0125](0125-generated-library-api-index.md).
 
 ## Specification Catalog
 
@@ -406,6 +409,7 @@ The schemas and change workflow are defined by specifications
 | 0122 | [Evidence-derived Maturity Progress](0122-evidence-derived-maturity-progress.md) | Accepted | Implemented |
 | 0123 | [Stable ECMAScript Module Import Contract](0123-stable-esm-import-contract.md) | Stable | Implemented |
 | 0124 | [Declared Macro File Dependencies](0124-declared-macro-file-dependencies.md) | Stable | Implemented |
+| 0125 | [Generated Library API Index](0125-generated-library-api-index.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

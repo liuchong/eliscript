@@ -971,14 +971,17 @@ without turning application conveniences into compiler intrinsics.
 **Exit gate:** Every stable export has behavioral and portability evidence and
 is justified independently of any framework, publishing tool, or site.
 
-**M11 early implementation:** Portable Result records and combinators now land
+**M11 status:** In progress. Portable Result records and combinators now land
 in [0075-portable-result-values.md](0075-portable-result-values.md), and the
 strict persistent JSON boundary lands in
 [0076-portable-json-values.md](0076-portable-json-values.md). Portable numeric
 classification and exact safe-integer operations land in
 [0077-portable-numeric-foundation.md](0077-portable-numeric-foundation.md).
-Naming and behavior remain provisional until the complete M11 core-library
-audit; broader mathematics, platform, and API-metadata work remains open.
+Specification [0125-generated-library-api-index.md](0125-generated-library-api-index.md)
+adds exact module stability metadata and deterministic machine-readable and
+user-facing API indexes for all 29 modules and 304 exports. Naming and behavior
+remain provisional until the complete M11 core-library audit; explicit host
+capability packages and the M11 exit gate remain open.
 
 ### M12: Reliability, Security, and Performance (6 implementation units)
 

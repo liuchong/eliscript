@@ -1,7 +1,7 @@
 # Standard Library
 
 [Project README](../README.md) | [Runtime](../runtime/README.md) |
-[Specifications](../specs/README.md)
+[Specifications](../specs/README.md) | [Generated API Index](../docs/pages/api.html)
 
 This directory contains portable Eliscript functions and macros plus focused
 runtime-backed `core/` modules for semantics that need optimized host support.
@@ -11,6 +11,10 @@ special cases embedded throughout the compiler or core standard library.
 Framework integration uses ordinary ESM imports and calls. The standard
 library contains no framework lowering or framework-specific helpers;
 application ergonomics belong in replaceable application packages.
+
+The generated API index is the exact current module/export inventory. Its
+stability labels come from each module's owning specification and remain
+provisional wherever the label is `accepted`.
 
 ## Bit
 

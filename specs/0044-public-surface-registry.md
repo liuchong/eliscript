@@ -17,6 +17,11 @@ The registry records what exists today at `Accepted` maturity. It does not make
 every entry a permanent compatibility promise. Promotion to `Stable` still
 requires the owning specification and conformance feature to be stable.
 
+Specification [0125](0125-generated-library-api-index.md) joins this exact
+standard-library export inventory with explicit module descriptions, roles,
+and stability metadata. The public-surface registry remains the only export
+list; generated API documentation does not duplicate or scrape it.
+
 ## Inventory Domains
 
 Version 1 inventories these domains:
@@ -101,6 +106,13 @@ Run only the public-surface checker with:
 ```sh
 bun tools/surface/check.mjs
 bun tools/surface/check.mjs --json
+```
+
+Generate or verify the derived library API index with:
+
+```sh
+bun run generate:api
+bun tools/surface/generate-api.mjs --check
 ```
 
 ## Change Workflow

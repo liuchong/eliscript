@@ -1853,6 +1853,46 @@
           "contains": "declared macro files drive deterministic project builds and cache invalidation"
         }
       ]
+    },
+    {
+      "id": "quality.generated-library-api-index",
+      "title": "Generated standard-library API index",
+      "status": "accepted",
+      "spec": "0125",
+      "contracts": [
+        "Records explicit source, owner, stability, role, and summary metadata for every standard-library module",
+        "Joins metadata with the exact checked public export inventory without scraping implementation text",
+        "Generates deterministic machine-readable and user-facing API indexes",
+        "Rejects incomplete module coverage, source or owner disagreement, overstated stability, and stale artifacts",
+        "Keeps application frameworks outside core metadata, implementation, and evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/api-index.test.mjs",
+          "contains": "generated library API index matches every declared module and export"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/api-index.test.mjs",
+          "contains": "library API metadata must cover the exact standard-library surface"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/api-index.test.mjs",
+          "contains": "library API metadata cannot overstate specification stability"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/api-index.test.mjs",
+          "contains": "API artifact check rejects missing and byte-stale generated files"
+        },
+        {
+          "kind": "fixture",
+          "file": "docs/pages/api-index.json",
+          "contains": "\"format\": \"eliscript-library-api-index\""
+        }
+      ]
     }
   ]
 }
