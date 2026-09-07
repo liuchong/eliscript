@@ -33,11 +33,11 @@ test("maturity progress is derived from explicit core acceptance units", async (
     format: "eliscript-maturity-progress-report",
     version: 1,
     implementation: {
-      completed: 37,
+      completed: 38,
       total: 42,
-      completedPercent: 88.1,
-      remaining: 5,
-      remainingPercent: 11.9,
+      completedPercent: 90.5,
+      remaining: 4,
+      remainingPercent: 9.5,
       milestones: {
         M7: { completed: 6, total: 6, completedPercent: 100, remaining: 0, remainingPercent: 0 },
         M8: { completed: 7, total: 7, completedPercent: 100, remaining: 0, remainingPercent: 0 },
@@ -45,10 +45,10 @@ test("maturity progress is derived from explicit core acceptance units", async (
         M10: { completed: 6, total: 6, completedPercent: 100, remaining: 0, remainingPercent: 0 },
         M11: { completed: 6, total: 6, completedPercent: 100, remaining: 0, remainingPercent: 0 },
         M12: { completed: 6, total: 6, completedPercent: 100, remaining: 0, remainingPercent: 0 },
-        M13: { completed: 0, total: 5, completedPercent: 0, remaining: 5, remainingPercent: 100 },
+        M13: { completed: 1, total: 5, completedPercent: 20, remaining: 4, remainingPercent: 80 },
       },
       incomplete: [
-        "M13-01", "M13-02", "M13-03", "M13-04", "M13-05",
+        "M13-02", "M13-03", "M13-04", "M13-05",
       ],
       blocked: [],
     },

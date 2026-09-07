@@ -107,7 +107,8 @@ CLI output, and worker loading now identify the union of multiple entry
 closures while preserving version 1 single-entry behavior. Application
 frameworks and publishing infrastructure remain replaceable validation
 outside these core deliverables.
-M10 has begun with specifications 0114 through 0121. The generated compiler owns a
+M10 has all 6/6 implementation units complete through specifications 0114
+through 0121 and 0133. The generated compiler owns a
 comment-preserving deterministic formatter, and the Bun/Node public command
 provides stdout, atomic write, format-check, and structured diagnostics. The
 formatter passes idempotence and generated-ESM equivalence over maintained
@@ -121,14 +122,15 @@ project builds and buffer/file/project compilation through Emacs
 compilation-mode. Versioned seed/self-hosted evaluation descriptors now drive a
 persistent Bun/Node process with canonical value printing, source-mapped
 failures, atomic namespace revisions, output framing, and project-scoped Emacs
-sessions that restore acknowledged state after a host restart. M10 remains in
-progress. The public terminal REPL now adds compiler-owned multiline input
+sessions that restore acknowledged state after a host restart. The public
+terminal REPL adds compiler-owned multiline input
 classification, persistent definitions and macros, load/reload/reset commands,
 recoverable diagnostics, prompt policy, and equivalent Bun/Node behavior.
 A versioned project watch stream now normalizes content-level source changes
 across Bun and Node, while the Emacs mode shares one process per project and
-refreshes matching Flymake buffers. Onboarding, the complete AC-12 matrix, and
-the exit gate remain open.
+refreshes matching Flymake buffers. The verified onboarding guide executes the
+documented project, compiler, host, REPL, and editor path. The complete AC-12
+matrix and M10 exit audit remain formal acceptance work.
 
 M11 has all 6/6 implementation units complete. Its 29-module, 304-export API
 index is generated from explicit metadata and the checked public surface.
@@ -137,8 +139,8 @@ inject request-scoped progress and cancellation into the real worker, and keep
 frameworks outside core evidence. M11 compatibility stabilization and its
 final exit audit remain open.
 
-M12 now has 4/6 implementation units complete through specifications 0127,
-0128, 0129, and 0130. The fixed 100,000-input corpus checks seed/self-hosted reader agreement,
+M12 has all 6/6 implementation units complete through specifications 0127
+through 0132. The fixed 100,000-input corpus checks seed/self-hosted reader agreement,
 structured diagnostics, recursive spans, formatter round trips, and compiler
 behavior. The fixed 1,000-module chain, diamond, cycle, and shared-dependency
 graph checks exact no-op and mutation sets, evaluated propagation through
@@ -149,7 +151,17 @@ bounded peak and steady-state RSS, clean shutdown, and PID reclamation. AC-18,
 AC-09, and AC-19 are complete. The hostile-boundary matrix checks direct and
 symbolic root containment, declared macro and worker authority, closed schemas
 and protocols, and physical output isolation across Emacs seed, Bun, and Node.
-AC-20 is complete.
+AC-20 is complete. Source-bound performance evidence retains three independent
+compiler, project-build, worker, and persistent-data workload runs under fixed
+budgets. Repository integrity checks dependency boundaries, regenerated
+artifacts, and every benchmark source binding. The final M12 exit audit remains
+formal acceptance work.
+
+M13 has completed 1/5 implementation units through specification 0134. Its
+versioned corpus derives all 35 mandatory AC/PD criteria from normative
+headings, maps each criterion to bounded probes and tracked evidence, and
+retains one clean audit with 17 pass, 18 incomplete, and zero failed criteria.
+The final acceptance flag remains false.
 
 ## Reading Paths
 

@@ -477,7 +477,6 @@ export function humanRunReport(report) {
     "| --- | --- |",
     ...report.artifacts.map((artifact) =>
       `| \`${artifact.file}\` | \`${artifact.sha256}\` |`),
-    "",
   ];
   return `${lines.join("\n")}\n`;
 }
@@ -604,6 +603,16 @@ export function humanCorpusReport(checked) {
   ].join("\n");
 }
 
+export function humanVerifiedRunReport(report) {
+  return [
+    `Verified core acceptance run: ${report.source.commit}`,
+    `Criteria: ${report.summary.criteria.pass}/${report.summary.criteria.total} pass, ${report.summary.criteria.incomplete} incomplete, ${report.summary.criteria.fail} fail`,
+    `Corpus complete: ${report.summary.corpusComplete ? "yes" : "no"}`,
+    `Operational success: ${report.summary.operationalSuccess ? "yes" : "no"}`,
+    `Final acceptance: ${report.summary.acceptancePass ? "pass" : "not reached"}`,
+  ].join("\n");
+}
+
 function parseArguments(argv) {
   const options = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -649,7 +658,7 @@ async function main() {
     });
     process.stdout.write(options.json
       ? `${JSON.stringify(report, null, 2)}\n`
-      : humanRunReport(report));
+      : `${humanVerifiedRunReport(report)}\n`);
     return;
   }
   const checked = await checkAcceptanceCorpus();

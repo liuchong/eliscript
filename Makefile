@@ -87,6 +87,9 @@ test: check-contracts
 check-contracts:
 	$(BUN) tools/conformance/check.mjs
 	$(BUN) tools/progress/check.mjs
+	$(BUN) tools/acceptance/check.mjs \
+		--verify-run acceptance/runs/m13-01.json \
+		--verify-markdown acceptance/runs/m13-01.md
 	$(BUN) tools/surface/check.mjs
 	$(BUN) tools/surface/generate-api.mjs --check
 	$(BUN) tools/ci/render-workflow.mjs --check

@@ -16,7 +16,8 @@ modules, and bootstraps a compiler written in Eliscript itself.
 [Library API](docs/pages/api.html) |
 [1.0 roadmap](specs/0040-maturity-roadmap.md) |
 [Host and persistent-data design](specs/0041-host-symbiosis-and-persistent-data.md) |
-[Evidence-derived progress](specs/0122-evidence-derived-maturity-progress.md)
+[Evidence-derived progress](specs/0122-evidence-derived-maturity-progress.md) |
+[Acceptance evidence](acceptance/README.md)
 
 ## Project Status
 
@@ -29,6 +30,15 @@ in **M8: Language Contract Closure**, **M9: Compiler and Build Convergence**,
 **M10: Daily Development Experience**, **M11: Standard and Platform
 Libraries**, and **M12: Reliability, Security, and Performance**. Final
 stability and acceptance remain open.
+
+M13 has completed 1 of 5 implementation units. The versioned
+[core acceptance corpus](specs/0134-versioned-core-acceptance-corpus.md)
+derives all 35 mandatory AC/PD criteria from their normative specifications,
+runs the complete core suite and strict Emacs byte compilation from a clean
+commit, and retains machine-readable and human-readable evidence. The initial
+audit records 17 passing, 18 incomplete, and zero failed criteria; its final
+acceptance flag is therefore false. Application validations are listed
+separately and contribute no core result.
 
 M9 compiler convergence is complete: it includes canonical project requests,
 graph planning, IR serialization, build reports, v1-to-v2 cache migration,

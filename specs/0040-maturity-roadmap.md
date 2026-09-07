@@ -1112,6 +1112,15 @@ Emacs acceleration contract is accepted independently by AC-16 and AC-17.
 clean, traceable acceptance run. Application validation status is reported but
 cannot block or satisfy this gate.
 
+**M13 implementation status:** In progress, 1/5 units. Specification
+[0134-versioned-core-acceptance-corpus.md](0134-versioned-core-acceptance-corpus.md)
+derives the complete AC/PD inventory from normative headings, maps every
+criterion to bounded probes and tracked evidence, and retains one clean audit
+with 17 pass, 18 incomplete, and zero failed criteria. This completes the
+corpus-and-report implementation unit without claiming final acceptance.
+Clean-machine onboarding, compatibility migration rehearsal, the complete
+documentation set, and final 1.0 artifacts remain open.
+
 ## Construction Protocol
 
 Every implementation slice follows this order:

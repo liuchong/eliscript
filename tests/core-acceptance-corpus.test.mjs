@@ -8,6 +8,7 @@ import {
   checkAcceptanceCorpus,
   humanCorpusReport,
   validateAcceptanceCorpus,
+  verifyAcceptanceRun,
 } from "../tools/acceptance/check.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -85,4 +86,35 @@ test("core acceptance corpus keeps applications outside core evidence", async ()
   expect(await validationErrors(value)).toContain(
     "applications must match AV headings and contribute no core evidence",
   );
+});
+
+test("retained M13 audit is complete operational evidence without a final claim", async () => {
+  const report = await verifyAcceptanceRun("acceptance/runs/m13-01.json", {
+    root: ROOT,
+    markdownFile: "acceptance/runs/m13-01.md",
+  });
+
+  expect(report.summary).toEqual({
+    criteria: { pass: 17, incomplete: 18, fail: 0, total: 35 },
+    corpusComplete: true,
+    operationalSuccess: true,
+    acceptancePass: false,
+  });
+  expect(report.source).toMatchObject({ cleanBefore: true, cleanAfter: true });
+  expect(report.applications.every((entry) =>
+    entry.result === "not-run" && entry.contributesToCore === false)).toBe(true);
+});
+
+test("retained M13 audit rejects a forged final acceptance result", async () => {
+  const report = JSON.parse(
+    await readFile(path.join(ROOT, "acceptance/runs/m13-01.json"), "utf8"),
+  );
+  report.summary.acceptancePass = true;
+
+  await expect(verifyAcceptanceRun("unused.json", {
+    root: ROOT,
+    report,
+  })).rejects.toMatchObject({
+    errors: ["run summary is not derived from recorded results"],
+  });
 });
