@@ -51,26 +51,25 @@ test("maturity progress is derived from explicit core acceptance units", async (
       blocked: [],
     },
     verification: {
-      completed: 19,
+      completed: 20,
       total: 35,
-      completedPercent: 54.3,
-      remaining: 16,
-      remainingPercent: 45.7,
+      completedPercent: 57.1,
+      remaining: 15,
+      remainingPercent: 42.9,
       incomplete: [
         "AC-01", "AC-02", "AC-03", "AC-04", "AC-05", "AC-07", "AC-08",
         "AC-10", "AC-12", "AC-13", "AC-14", "AC-15",
-        "AC-21", "AC-24", "PD-01",
-        "PD-07",
+        "AC-21", "AC-24", "PD-07",
       ],
       blocked: [],
     },
     stabilization: {
       completed: 28,
-      total: 132,
-      completedPercent: 21.2,
-      remaining: 104,
-      remainingPercent: 78.8,
-      provisional: 104,
+      total: 133,
+      completedPercent: 21.1,
+      remaining: 105,
+      remainingPercent: 78.9,
+      provisional: 105,
       excludedFeatureIds: ["publishing.org-adapter", "tooling.vite-adapter"],
     },
     applications: {
@@ -80,7 +79,7 @@ test("maturity progress is derived from explicit core acceptance units", async (
     },
   });
   expect(humanReport(report)).toContain(
-    "Verification: 19/35 (54.3% complete, 45.7% remaining)",
+    "Verification: 20/35 (57.1% complete, 42.9% remaining)",
   );
   expect(humanReport(report)).not.toContain("overall");
 });

@@ -25,6 +25,7 @@ test-core: check-contracts
 		tests/repository-integrity.test.mjs \
 		tests/platform-capabilities.test.mjs \
 		tests/reader-program-fuzz.test.mjs \
+		tests/persistent-semantics.test.mjs \
 		tests/project-scale.test.mjs \
 		tests/core-performance-benchmark.test.mjs \
 		tests/maturity-progress.test.mjs \

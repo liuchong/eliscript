@@ -116,7 +116,7 @@ tree. The current run uses macOS arm64 with Bun 1.4.0, Node 26.8.1, and Emacs
 31.1. Both the core suite and strict byte compilation pass, and the checkout
 remains clean before and after the probes.
 
-All 35 mandatory criteria receive a result: 19 pass, 16 remain incomplete, and
+All 35 mandatory criteria receive a result: 20 pass, 15 remain incomplete, and
 none fail. `corpusComplete` and `operationalSuccess` are true while
 `acceptancePass` is false. AV-01 and AV-02 are explicitly `not-run` and remain
 non-contributing. The exact command and artifact digests are retained under

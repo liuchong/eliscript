@@ -2310,6 +2310,32 @@
           "contains": "canonical final manifest and report remain byte exact"
         }
       ]
+    },
+    {
+      "id": "quality.deterministic-persistent-semantics",
+      "title": "Deterministic persistent collection semantics corpus",
+      "status": "accepted",
+      "spec": "0139",
+      "contracts": [
+        "Runs exactly 100000 independently replayable operation sequences for each persistent collection family",
+        "Checks every current List Vector Map and Set value against a simple reference model after every update",
+        "Rechecks all retained previous versions after every later update with exactly 3600000 history checks per family",
+        "Covers every sequence-relevant state-changing and observer operation including collision nullish NaN and signed-zero cases",
+        "Freezes exact operation counts and SHA-256 summaries with complete-report equality under Bun and Node",
+        "Bounds state output process lifetime and failure traces without persistent side effects or application dependencies"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-semantics.test.mjs",
+          "contains": "400000 generated persistent collection sequences preserve semantics and history"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-semantics.test.mjs",
+          "contains": "one persistent sequence can be replayed independently"
+        }
+      ]
     }
   ]
 }

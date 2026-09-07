@@ -37,7 +37,7 @@ M13 has completed all 5 implementation units. The versioned
 derives all 35 mandatory AC/PD criteria from their normative specifications,
 runs the complete core suite and strict Emacs byte compilation from a clean
 commit, and retains machine-readable and human-readable evidence. The initial
-audit records 19 passing, 16 incomplete, and zero failed criteria; its final
+audit records 20 passing, 15 incomplete, and zero failed criteria; its final
 acceptance flag is therefore false. Application validations are listed
 separately and contribute no core result.
 
@@ -216,7 +216,11 @@ into persistent values and emits deterministic string-key order with Result
 errors, cycle detection, and resource bounds. Portable numeric functions now
 make Number, NaN, infinity, safe-integer, signed division, and checked-overflow
 semantics explicit without host Math calls. The persistent collection core now
-passes its complete cross-host million-value exit audit. Protocol dispatch and
+passes its complete cross-host million-value exit audit. Its deterministic
+semantics corpus additionally executes 100,000 independently replayable
+operation sequences for each of List, Vector, Map, and Set under Bun and Node,
+checks 3,200,000 updates against reference models, and rechecks 14,400,000
+retained histories. Protocol dispatch and
 text/object algorithms are now maintained in Eliscript and checked against
 generated production artifacts. Persistent `(vector ...)`, square-bracket
 Vector literals, `(hash-map ...)`, brace Map literals, `(hash-set ...)`, and
@@ -356,6 +360,13 @@ Run the fixed 100,000-input reliability corpus directly with:
 
 ```sh
 bun run fuzz:reader-program
+```
+
+Run the fixed persistent semantics corpus with 100,000 operation sequences per
+collection family:
+
+```sh
+bun run fuzz:persistent-semantics
 ```
 
 Run the fixed 1,000-module scale and invalidation suite with:

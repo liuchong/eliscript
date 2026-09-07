@@ -825,8 +825,13 @@ errors, resource limits, generated round trips, and Bun/Node evidence.
 Portable identifiers and the matching List/Vector/Map/Set implementation in
 [0070-portable-identifier-values.md](0070-portable-identifier-values.md) and
 [0071-canonical-portable-data-text.md](0071-canonical-portable-data-text.md)
-complete construction step 4 with common-subset byte parity. Existing
-reference-model and million-scale suites cover construction step 5.
+complete construction step 4 with common-subset byte parity. The deterministic
+corpus in
+[0139-deterministic-persistent-semantics-corpus.md](0139-deterministic-persistent-semantics-corpus.md)
+closes construction step 5 with 100,000 independently replayable operation
+sequences per collection family, exact Bun/Node identities, and 14,400,000
+checks that every retained older version remains unchanged. The million-scale
+suite continues to supply the separate structural bounds.
 Process-local opaque host identity hashing in
 [0074-process-local-host-identity-hashing.md](0074-process-local-host-identity-hashing.md)
 removes the portable core's type-wide Map/Set collision fallback. The final
@@ -1119,6 +1124,13 @@ These criteria supplement the final 1.0 contract in 0040.
 All list, vector, map, and set operations match simple reference models across
 at least 100,000 generated operation sequences. Previous versions remain
 unchanged after every update.
+
+**Status:** Complete on 2026-09-08 through specification
+[0139-deterministic-persistent-semantics-corpus.md](0139-deterministic-persistent-semantics-corpus.md).
+The fixed corpus runs 100,000 independent eight-update sequences for each of
+List, Vector, Map, and Set under both Bun and Node. It freezes all operation
+counts and SHA-256 summaries while rechecking 3,600,000 retained histories per
+family.
 
 ### PD-02: Vector Structural Bounds
 

@@ -19,7 +19,7 @@ acceptance flag remains false. The canonical candidate
 projections of that verified run plus [`defects.json`](defects.json). They are
 the final artifact shape, not a declaration that the current candidate passed.
 
-The current retained core audit records 19 passing, 16 incomplete, and zero
+The current retained core audit records 20 passing, 15 incomplete, and zero
 failed mandatory criteria. It was produced directly on the recorded local
 toolchain without a hosted provider, container, or virtual machine.
 
