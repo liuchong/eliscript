@@ -210,6 +210,24 @@ source digest, validates the aggregate digest, and runs a smaller subprocess
 probe. A measurement-source change invalidates the committed report until the
 full acceptance command is rerun and reviewed.
 
+## Worker Lifecycle Soak
+
+Run the fixed full acceptance workload with:
+
+```sh
+bun run soak:worker-lifecycle
+```
+
+Set `ELISCRIPT_WORKER_SOAK_OUTPUT` to intentionally refresh
+[`worker-lifecycle-soak-macos-arm64.json`](worker-lifecycle-soak-macos-arm64.json).
+The report records exactly 100,000 unique result-checked requests across five
+worker generations, all injected recovery outcomes, forty fixed RSS
+checkpoints, denser observed peaks, per-generation and global steady-state
+windows, clean protocol shutdown, and reclamation of every owned PID and
+temporary artifact. It binds the compiler, runtime, Emacs client, and runner by
+SHA-256. Unlike wall-clock microbenchmarks, the default suite reruns this exact
+acceptance workload and then independently validates the committed report.
+
 ## Emacs Analysis Reinvestment
 
 Run the maintained three-candidate benchmark with:

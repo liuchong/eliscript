@@ -69,7 +69,7 @@ now grant only named host authority, inject request-scoped progress and
 cancellation into the real worker, and re-export the canonical worker codecs.
 Compatibility stabilization and the final M11 exit audit remain open.
 
-M12 reliability work now has two of six implementation units complete. The
+M12 reliability work now has three of six implementation units complete. The
 deterministic reader/program fuzz suite replays 100,000 grammar-aware and
 complete-module mutation inputs with seed/self-hosted parity, recursive spans,
 formatter round trips, structured diagnostics, and fixed identities. The
@@ -77,8 +77,12 @@ formatter round trips, structured diagnostics, and fixed identities. The
 fan-out topology; 100 percent no-op reuse; one-module leaf and shared
 invalidation; evaluated propagation; resource bounds; and complete clean-build
 byte equivalence. See [0127](specs/0127-deterministic-reader-program-fuzz.md)
-and [0128](specs/0128-project-scale-invalidation.md). Soak, security, benchmark,
-and artifact-audit units remain open.
+and [0128](specs/0128-project-scale-invalidation.md). The real Emacs worker now
+also completes 100,000 uniquely verified requests across five generations with
+cancellation, module replacement, timeout, process-death recovery, bounded peak
+and steady-state RSS, clean shutdown, and complete PID reclamation. See
+[0129](specs/0129-worker-lifecycle-soak.md). Security, benchmark, and
+artifact-audit units remain open.
 
 Run `bun run progress` for the current evidence-derived core progress report.
 It reports implementation, verification, and stabilization independently;

@@ -103,6 +103,16 @@ command and budgets. The JSON report includes exact request/response chunk
 counts, SHA-256 correctness, timing, memory peaks, host versions, and measured
 source digests.
 
+`lifecycle-soak.el` is the complete long-lived worker acceptance runner. Run
+`bun run soak:worker-lifecycle` to execute 100,000 uniquely checked requests in
+batches of at most 64 while the same Emacs client crosses cancellation,
+explicit restart, module replacement, blocking timeout, in-flight process
+death, automatic recovery, and clean shutdown. It records forty fixed RSS
+checkpoints plus denser peak observations, enforces absolute and steady-state
+growth limits, and verifies all owned PIDs and temporary artifacts are gone.
+Smaller `ELISCRIPT_WORKER_SOAK_REQUESTS` values are diagnostic only and cannot
+qualify the acceptance report defined by specification 0129.
+
 `eliscript-index.el` is the representative high-level integration. It compiles
 the portable kernel in `examples/emacs-index/`, declares the generated module
 and scoring operation, and lets the service own its worker while tokenized

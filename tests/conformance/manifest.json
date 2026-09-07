@@ -1992,6 +1992,33 @@
           "contains": "1000-module graph has exact incremental invalidation and clean equivalence"
         }
       ]
+    },
+    {
+      "id": "worker.lifecycle-soak-recovery",
+      "title": "Worker lifecycle soak and recovery",
+      "status": "accepted",
+      "spec": "0129",
+      "contracts": [
+        "Completes exactly 100000 correct uniquely accounted real Emacs worker requests in bounded concurrent batches",
+        "Exercises cooperative cancellation explicit restart module replacement blocking timeout and in-flight process death",
+        "Recovers automatically across five worker generations with exact callback and pending-state accounting",
+        "Records high-frequency peaks and forty fixed RSS checkpoints under absolute and steady-state growth budgets",
+        "Performs clean protocol shutdown and verifies every owned process and temporary artifact is reclaimed",
+        "Binds the compiler runtime Emacs client and soak implementation to the retained report by SHA-256",
+        "Keeps application frameworks bundlers publishing systems and development servers outside core evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/worker-lifecycle-soak.test.mjs",
+          "contains": "100000 real Emacs worker requests survive bounded lifecycle recovery"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/worker-lifecycle-soak.test.mjs",
+          "contains": "committed worker lifecycle soak report matches its measured sources"
+        }
+      ]
     }
   ]
 }

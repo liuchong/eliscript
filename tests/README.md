@@ -46,6 +46,14 @@ and shared-dependency edge; exact no-op, leaf, and shared invalidation sets;
 evaluated propagation through reused ESM importers; complete clean-build byte
 equivalence; and hard time, memory, stream, disk, child, and cleanup bounds.
 
+`worker-lifecycle-soak.test.mjs` starts a real Emacs client and executes the
+complete 100,000-request M12 worker soak on every default suite run. It checks
+unique response accounting, deterministic results, bounded concurrency,
+cancellation, explicit restart, module replacement, blocking timeout, in-flight
+process death, five-generation recovery, forty RSS checkpoints, peak and
+steady-state budgets, clean shutdown, temporary cleanup, and PID reclamation.
+It separately validates the committed source-bound reference report.
+
 ## Default Suite
 
 `make test` runs the ERT suite, invokes the public CLI, compares the generated

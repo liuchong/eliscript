@@ -18,8 +18,8 @@ and requires incremental artifacts and graph identities to equal forced clean
 builds.
 
 This specification completes M12-02 and AC-09. It supplies the project-scale
-half of AC-19; the independent long-lived worker soak remains required before
-AC-19 can complete.
+half of AC-19; specification 0129 independently supplies the worker soak and
+completes the combined criterion.
 
 ## Fixed Graph
 

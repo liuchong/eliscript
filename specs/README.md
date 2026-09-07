@@ -28,20 +28,20 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 128 specifications.
+The registry currently contains 129 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 96 |
+| Accepted design | 97 |
 | Stable design | 30 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 124 |
+| Implemented | 125 |
 | Superseded implementation | 1 |
 
 Compatibility Baseline 2 separately classifies 30 specifications as stable,
-94 as provisional, 3 as planning, and 1 as superseded. That baseline is
+95 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -137,13 +137,16 @@ inject request-scoped progress and cancellation into the real worker, and keep
 frameworks outside core evidence. M11 compatibility stabilization and its
 final exit audit remain open.
 
-M12 now has 2/6 implementation units complete through specifications 0127 and
-0128. The fixed 100,000-input corpus checks seed/self-hosted reader agreement,
+M12 now has 3/6 implementation units complete through specifications 0127,
+0128, and 0129. The fixed 100,000-input corpus checks seed/self-hosted reader agreement,
 structured diagnostics, recursive spans, formatter round trips, and compiler
 behavior. The fixed 1,000-module chain, diamond, cycle, and shared-dependency
 graph checks exact no-op and mutation sets, evaluated propagation through
-reused importers, complete clean-build equivalence, and bounded resources.
-AC-18 and AC-09 are complete; AC-19 is partial until the worker soak closes.
+reused importers, complete clean-build equivalence, and bounded resources. The
+100,000-request real Emacs worker soak adds exact response accounting across
+five generations, cancellation, replacement, timeout, process-death recovery,
+bounded peak and steady-state RSS, clean shutdown, and PID reclamation. AC-18,
+AC-09, and AC-19 are complete.
 
 ## Reading Paths
 
@@ -228,6 +231,7 @@ number.
 51. [0126: Explicit Browser and Worker Capability Packages](0126-explicit-host-capability-packages.md)
 52. [0127: Deterministic Reader and Program Fuzzing](0127-deterministic-reader-program-fuzz.md)
 53. [0128: Deterministic Project Scale and Invalidation](0128-project-scale-invalidation.md)
+54. [0129: Worker Lifecycle Soak and Recovery](0129-worker-lifecycle-soak.md)
 
 ### Application Validation (Non-core)
 
@@ -431,6 +435,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0126 | [Explicit Browser and Worker Capability Packages](0126-explicit-host-capability-packages.md) | Accepted | Implemented |
 | 0127 | [Deterministic Reader and Program Fuzzing](0127-deterministic-reader-program-fuzz.md) | Accepted | Implemented |
 | 0128 | [Deterministic Project Scale and Invalidation](0128-project-scale-invalidation.md) | Accepted | Implemented |
+| 0129 | [Worker Lifecycle Soak and Recovery](0129-worker-lifecycle-soak.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

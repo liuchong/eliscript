@@ -48,6 +48,7 @@ test: check-contracts
 		tests/worker-value-codec.test.mjs \
 		tests/worker-value-stream.test.mjs \
 		tests/worker-value-stream-probe.test.mjs \
+		tests/worker-lifecycle-soak.test.mjs \
 		tests/worker-benchmark.test.mjs \
 		tests/emacs-analysis-evidence.test.mjs \
 		tests/stdlib-sequence.test.mjs \
