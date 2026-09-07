@@ -410,6 +410,7 @@ core/json        JSON encoding, decoding, and conversion diagnostics
 state/atom       explicit changing identity over immutable values
 interop/js       native constructors, predicates, and conversion
 application/ui   replaceable props, children, and event boundary adapters
+platform/browser explicit document, network, clock, randomness, and timers
 platform/worker  capabilities and value-codec helpers
 ```
 
@@ -431,6 +432,13 @@ It exposes the actual binary64 Number categories, restricts exact integer
 algorithms to the safe interval, distinguishes truncating quotient,
 dividend-signed remainder, and divisor-signed modulo, and keeps GCD/LCM
 iterative and dependency-prunable.
+
+The explicit host package layer now lands in
+[0126-explicit-host-capability-packages.md](0126-explicit-host-capability-packages.md).
+Browser and worker operations require frozen, request-local tokens backed by
+private operation tables. Neither package reads ambient host authority during
+construction, and application frameworks remain outside their implementation
+and conformance evidence.
 
 Public functions target protocols wherever that produces a real abstraction.
 Representation-specific functions remain in their owning modules. A function
@@ -1054,8 +1062,8 @@ input and output backpressure, progress and result streams, and cancellation
 during upload and traversal. Specification
 [0090-large-worker-value-memory-probe.md](0090-large-worker-value-memory-probe.md)
 adds the source-bound 256 MiB round-trip report: 1,058 chunks in each
-direction, 1,260.90625 MiB Emacs peak RSS, 681.34375 MiB Bun peak RSS, and
-1,942.25 MiB simultaneous combined peak. All remain within the documented
+direction, 1,191.046875 MiB Emacs peak RSS, 678.46875 MiB Bun peak RSS, and
+1,869.515625 MiB simultaneous combined peak. All remain within the documented
 2,048/1,024/2,560 MiB budgets, completing PD-08 and the P5 exit.
 
 ### P6: Accelerated Emacs API
@@ -1095,7 +1103,7 @@ faster path produces byte- or value-equivalent results.
 **Status:** Complete on 2026-09-01 through specification
 [0105-emacs-analysis-performance-reinvestment.md](0105-emacs-analysis-performance-reinvestment.md).
 Three equivalent candidates are maintained in one Emacs package. Search and
-statistics are selected at 9.142x and 8.237x median warm end-to-end speedup
+statistics are selected at 9.679x and 8.267x median warm end-to-end speedup
 over 30 runs, with cold startup, one-time indexing, segmented timing, and a
 16,000-character crossover threshold retained in a source-bound report. A
 200-request one-generation soak applies 100 stable buffer results and discards
@@ -1187,8 +1195,8 @@ data model contributes directly to useful editor performance.
 
 **Status:** Complete on 2026-09-01 through specification 0105. Maintained
 search and statistics workflows use transducers and persistent Vector
-construction, preserve exact Emacs Lisp references, and record 9.142x and
-8.237x median warm end-to-end speedups over 30 measured primary runs.
+construction, preserve exact Emacs Lisp references, and record 9.679x and
+8.267x median warm end-to-end speedups over 30 measured primary runs.
 
 ### PD-11: State Discipline
 

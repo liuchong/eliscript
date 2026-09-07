@@ -84,6 +84,12 @@ JavaScript-backed operations can call `context.progress(value)` and inspect
 `context.signal`; ordinary generated functions safely ignore the extra
 argument.
 
+Specification [0126](0126-explicit-host-capability-packages.md) additionally
+exposes the same request-owned operations through the frozen
+`context.capabilities` token and adds `operation-capabilities-v1` to ready
+negotiation. The direct fields remain compatible views; neither form grants
+filesystem, process, network, clock, randomness, or module authority.
+
 ```json
 {"version":1,"type":"progress","id":"7","value":{"stage":"indexing"}}
 {"version":1,"type":"cancel","id":"7"}

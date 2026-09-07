@@ -6,6 +6,7 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { workerCapabilities } from "../platform/worker.mjs";
 import {
   decodeWorkerValues,
   encodeWorkerValue,
@@ -20,21 +21,30 @@ import {
 
 export const protocolVersion = 1;
 const runtimeDirectory = dirname(fileURLToPath(import.meta.url));
-const runtimeSpecifierPrefix = "eliscript/runtime/";
+const packageDirectories = new Map([
+  ["eliscript/platform/", resolve(runtimeDirectory, "../platform")],
+  ["eliscript/runtime/", runtimeDirectory],
+]);
 
-function installRuntimeResolver() {
+function installPackageResolver() {
   Bun.plugin({
-    name: "eliscript-worker-runtime",
+    name: "eliscript-worker-package",
     setup(build) {
       build.onResolve(
-        { filter: /^eliscript\/runtime\// },
+        { filter: /^eliscript\/(?:platform|runtime)\// },
         ({ path: specifier }) => {
-          const suffix = specifier.slice(runtimeSpecifierPrefix.length);
-          const target = resolve(runtimeDirectory, suffix);
-          const local = relative(runtimeDirectory, target);
+          const [prefix, directory] = [...packageDirectories].find(
+            ([candidate]) => specifier.startsWith(candidate),
+          );
+          const suffix = specifier.slice(prefix.length);
+          const target = resolve(directory, suffix);
+          const local = relative(directory, target);
           if (suffix.length === 0 || isAbsolute(local) ||
               local === ".." || local.startsWith(`..${sep}`)) {
-            throw new Error(`worker runtime import escapes package runtime: ${specifier}`);
+            const area = prefix.split("/")[1];
+            throw new Error(
+              `worker ${area} import escapes package ${area}: ${specifier}`,
+            );
           }
           return { namespace: "file", path: target };
         },
@@ -43,9 +53,9 @@ function installRuntimeResolver() {
   });
 }
 
-installRuntimeResolver();
+installPackageResolver();
 
-export const capabilities = [
+export const capabilities = Object.freeze([
   "request",
   "progress",
   "cancel",
@@ -53,12 +63,13 @@ export const capabilities = [
   "shutdown",
   "module-cache",
   "module-version",
+  "operation-capabilities-v1",
   "project-manifest",
   "portable-manifest",
   "runtime-resolution",
   "value-codec-v1",
   "value-chunks-v1",
-];
+]);
 
 const maximumLineBytes = 16 * 1024 * 1024;
 const maximumValueChunkLineBytes = workerValueStreamLimits.maxChunkBytes + 4096;
@@ -723,23 +734,28 @@ async function executeRequest(message, entry, streamedArguments = undefined) {
       : usesValueCodec
         ? decodeWorkerValues(message.arguments)
         : message.arguments;
-    const context = {
-      signal: entry.controller.signal,
-      progress(value) {
-        if (entry.controller.signal.aborted) return;
-        if (usesValueChunks) return queueProgress(entry, value);
-        const response = {
-          version: protocolVersion,
-          type: "progress",
-          id: message.id,
-          value: usesValueCodec
-            ? encodeWorkerValue(value)
-            : jsonValue(value, "progress value"),
-        };
-        if (usesValueCodec) response.valueEncoding = workerValueEncoding;
-        writeMessage(response);
-      },
+    const progress = (value) => {
+      if (entry.controller.signal.aborted) return;
+      if (usesValueChunks) return queueProgress(entry, value);
+      const response = {
+        version: protocolVersion,
+        type: "progress",
+        id: message.id,
+        value: usesValueCodec
+          ? encodeWorkerValue(value)
+          : jsonValue(value, "progress value"),
+      };
+      if (usesValueCodec) response.valueEncoding = workerValueEncoding;
+      writeMessage(response);
     };
+    const context = Object.freeze({
+      signal: entry.controller.signal,
+      progress,
+      capabilities: workerCapabilities(
+        { signal: entry.controller.signal, progress },
+        ["cancellation", "progress"],
+      ),
+    });
     executionStartedAt = performance.now();
     const operationPromise = Promise.resolve(
       operation(...arguments_, context),

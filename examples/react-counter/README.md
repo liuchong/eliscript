@@ -23,4 +23,7 @@ bun run build:react-counter
 
 `browser.eli` is the browser entry point. Vite compiles both `.eli` modules,
 preserves their source maps, bundles the existing logo and CSS, and applies
-React Fast Refresh during development.
+React Fast Refresh during development. The entry imports the framework-neutral
+browser platform package and explicitly grants only `document` authority before
+mounting; this remains application validation rather than core maturity
+evidence.

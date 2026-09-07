@@ -204,6 +204,85 @@ async function receiveChunkedValue(client, id, channel) {
   }
 }
 
+test("worker injects explicit operation capabilities from its platform package", async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), "eliscript-platform-worker-"));
+  const modulePath = resolve(directory, "capabilities.mjs");
+  const escapePath = resolve(directory, "platform-escape.mjs");
+  let client;
+  try {
+    await writeFile(modulePath, [
+      "import { workerCancelled, workerCapabilityDescriptor, workerProgress, workerSignal } from 'eliscript/platform/worker.mjs';",
+      "export function inspect(value, context) {",
+      "  workerProgress(context.capabilities, { value, cancelled: workerCancelled(context.capabilities) });",
+      "  return {",
+      "    descriptor: workerCapabilityDescriptor(context.capabilities),",
+      "    cancelled: workerCancelled(context.capabilities),",
+      "    contextFrozen: Object.isFrozen(context),",
+      "    signalMatches: workerSignal(context.capabilities) === context.signal,",
+      "  };",
+      "}",
+      "",
+    ].join("\n"));
+    await writeFile(
+      escapePath,
+      "import value from 'eliscript/platform/../package.json';\n" +
+        "export function run() { return value; }\n",
+    );
+
+    client = createWorkerClient();
+    const ready = await client.next((message) => message.type === "ready");
+    expect(ready.capabilities).toContain("operation-capabilities-v1");
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "platform-capabilities",
+      module: modulePath,
+      export: "inspect",
+      arguments: [42],
+    });
+    expect(await client.next(
+      (message) => message.id === "platform-capabilities" &&
+        message.type === "progress",
+    )).toMatchObject({ value: { value: 42, cancelled: false } });
+    expect(await client.next(
+      (message) => message.id === "platform-capabilities" &&
+        message.type === "response",
+    )).toMatchObject({
+      ok: true,
+      value: {
+        descriptor: {
+          format: "eliscript-worker-capabilities",
+          version: 1,
+          grants: ["cancellation", "progress"],
+        },
+        cancelled: false,
+        contextFrozen: true,
+        signalMatches: true,
+      },
+    });
+
+    client.send({
+      version: 1,
+      type: "request",
+      id: "platform-escape",
+      module: escapePath,
+      export: "run",
+      arguments: [],
+    });
+    const escape = await client.next(
+      (message) => message.id === "platform-escape",
+    );
+    expect(escape).toMatchObject({ ok: false });
+    expect(escape.error.message).toContain(
+      "worker platform import escapes package platform",
+    );
+  } finally {
+    if (client) await client.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("worker negotiates the persistent value codec without changing JSON mode", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "eliscript-codec-worker-"));
   const modulePath = resolve(directory, "codec.mjs");

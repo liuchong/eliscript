@@ -82,13 +82,13 @@ After three warmups, 30 alternating samples produced:
 
 | Workflow | Emacs median | Eliscript median | Warm speedup |
 | --- | ---: | ---: | ---: |
-| Search | 106.678 ms | 11.670 ms | 9.142x |
-| Statistics | 89.021 ms | 10.807 ms | 8.237x |
-| Frequencies, candidate only | 103.450 ms | 34.915 ms | 2.963x |
+| Search | 95.888 ms | 9.906 ms | 9.679x |
+| Statistics | 80.992 ms | 9.797 ms | 8.267x |
+| Frequencies, candidate only | 93.284 ms | 32.091 ms | 2.907x |
 
 The selected medians separately report worker, execution, serialization, and
-transport/decode/application time. Service startup was 41.370 ms and the
-one-time primary snapshot transfer was 670.110 ms; neither is hidden inside a
+transport/decode/application time. Service startup was 38.432 ms and the
+one-time primary snapshot transfer was 591.388 ms; neither is hidden inside a
 warm claim.
 
 Six 30-sample crossover corpora cover 774, 3,939, 7,869, 11,813, 15,754, and

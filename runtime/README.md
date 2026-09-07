@@ -206,3 +206,7 @@ real-process probe binds its 256 MiB memory report to these runtime sources.
 The worker also confines generated
 `eliscript/runtime/` imports to this package runtime, so temporary portable
 builds do not depend on their output directory for runtime resolution.
+Request contexts now include a frozen `capabilities` token from
+`platform/worker.mjs`, granting only progress and cancellation. The same
+confined resolver accepts package-owned `eliscript/platform/` imports and
+rejects traversal outside that directory.

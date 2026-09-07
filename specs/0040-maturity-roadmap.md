@@ -763,7 +763,7 @@ Specification
 [0105-emacs-analysis-performance-reinvestment.md](0105-emacs-analysis-performance-reinvestment.md)
 then completes P7 and PD-10 with three maintained Emacs Lisp/Eliscript text
 analysis candidates. Search and statistics use transducers plus persistent
-Vector construction and record 9.142x and 8.237x median warm end-to-end
+Vector construction and record 9.679x and 8.267x median warm end-to-end
 speedups across 30 runs. Source-bound cold, warm, segmented, and crossover
 evidence selects a conservative 16,000-character threshold, while a
 200-request one-generation soak applies 100 stable buffer results and discards
@@ -971,7 +971,8 @@ without turning application conveniences into compiler intrinsics.
 **Exit gate:** Every stable export has behavioral and portability evidence and
 is justified independently of any framework, publishing tool, or site.
 
-**M11 status:** In progress. Portable Result records and combinators now land
+**M11 implementation status:** Complete, 6/6 units. Portable Result records
+and combinators now land
 in [0075-portable-result-values.md](0075-portable-result-values.md), and the
 strict persistent JSON boundary lands in
 [0076-portable-json-values.md](0076-portable-json-values.md). Portable numeric
@@ -979,9 +980,12 @@ classification and exact safe-integer operations land in
 [0077-portable-numeric-foundation.md](0077-portable-numeric-foundation.md).
 Specification [0125-generated-library-api-index.md](0125-generated-library-api-index.md)
 adds exact module stability metadata and deterministic machine-readable and
-user-facing API indexes for all 29 modules and 304 exports. Naming and behavior
-remain provisional until the complete M11 core-library audit; explicit host
-capability packages and the M11 exit gate remain open.
+user-facing API indexes for all 29 modules and 304 exports. Specification
+[0126-explicit-host-capability-packages.md](0126-explicit-host-capability-packages.md)
+adds explicit browser and request-scoped worker authority without ambient
+globals or application dependencies. All six M11 implementation units are now
+complete. Naming and behavior remain provisional until the complete M11
+compatibility stabilization and exit audit.
 
 ### M12: Reliability, Security, and Performance (6 implementation units)
 

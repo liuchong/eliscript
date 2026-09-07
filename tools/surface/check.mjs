@@ -214,6 +214,47 @@ async function validateAdapters(root, adapters, specs, cache, errors) {
   return { adapters: adapters.length, exports: exportCount };
 }
 
+async function validatePlatformPackages(root, packages, specs, cache, errors) {
+  if (!Array.isArray(packages)) {
+    errors.push("platformPackages must be an array");
+    return { packages: 0, exports: 0 };
+  }
+  const ids = [];
+  let exportCount = 0;
+  for (const [index, package_] of packages.entries()) {
+    const label = `platform package ${index}`;
+    if (!isPlainObject(package_)) {
+      errors.push(`${label} must be an object`);
+      continue;
+    }
+    ids.push(package_.id);
+    validateSpec(specs, package_.spec, package_.id, errors);
+    if (package_.host !== "browser" && package_.host !== "worker") {
+      errors.push(`${package_.id} has invalid platform host ${JSON.stringify(package_.host)}`);
+    }
+    const spec = specs.get(package_.spec);
+    if (spec && package_.stability !== spec.status) {
+      errors.push(
+        `${package_.id} stability must match specification ${package_.spec} status ${spec.status}`,
+      );
+    }
+    const expected = sortedUniqueStrings(
+      package_.namedExports, `${package_.id} named exports`, errors,
+    );
+    const source = await readSurfaceFile(root, package_.file, cache, errors);
+    const actual = extractJsExports(source);
+    compareInventory(
+      `${package_.id} export inventory`, expected, actual.named, errors,
+    );
+    if (package_.defaultExport !== actual.defaultExport) {
+      errors.push(`${package_.id} default export does not match its implementation`);
+    }
+    exportCount += expected.length + (package_.defaultExport ? 1 : 0);
+  }
+  sortedUniqueStrings(ids, "platform package ids", errors);
+  return { packages: packages.length, exports: exportCount };
+}
+
 async function validateRuntimeModules(root, modules, specs, cache, errors) {
   if (!Array.isArray(modules)) {
     errors.push("runtimeModules must be an array");
@@ -447,6 +488,9 @@ export async function checkPublicSurface(options = {}) {
   const adapters = await validateAdapters(
     root, surface.adapters, specs, cache, errors,
   );
+  const platformPackages = await validatePlatformPackages(
+    root, surface.platformPackages, specs, cache, errors,
+  );
   const runtimeModules = await validateRuntimeModules(
     root, surface.runtimeModules, specs, cache, errors,
   );
@@ -465,6 +509,7 @@ export async function checkPublicSurface(options = {}) {
     commands,
     schemas: { total: schemas },
     adapters,
+    platformPackages,
     runtimeModules,
     standardLibrary,
     emacs,
@@ -479,6 +524,7 @@ export function humanSurfaceReport(report) {
     `  Commands       ${report.commands.commands} commands / ${report.commands.options} options`,
     `  Schemas        ${report.schemas.total} versioned schemas`,
     `  Adapters       ${report.adapters.adapters} adapters / ${report.adapters.exports} exports`,
+    `  Platform       ${report.platformPackages.packages} packages / ${report.platformPackages.exports} exports`,
     `  Runtime        ${report.runtimeModules.modules} modules / ${report.runtimeModules.exports} exports`,
     `  Standard lib   ${report.standardLibrary.modules} modules / ${report.standardLibrary.exports} exports`,
     `  Emacs API      ${report.emacs.functions} functions / ${report.emacs.records} records`,

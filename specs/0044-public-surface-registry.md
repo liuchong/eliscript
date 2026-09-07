@@ -32,6 +32,8 @@ Version 1 inventories these domains:
 - every shipped command and long option
 - every versioned project, diagnostic, build-report, and worker schema
 - named and default JavaScript adapter exports
+- explicit browser and worker platform packages, including host classification,
+  inherited stability, and exact named/default exports
 - named and default JavaScript runtime-module exports, with public or internal
   visibility
 - every exported portable standard-library binding
@@ -70,7 +72,8 @@ has an authoritative enumerable source:
 
 - `eliscript-ir-node-kinds` for IR
 - quoted long options in each CLI parser
-- JavaScript `export` declarations for adapters and runtime modules
+- JavaScript `export` declarations for adapters, platform packages, and runtime
+  modules
 - the terminal `export` form in each standard-library module
 - non-private `defun` and `cl-defun` declarations under compiler and tool roots
 - every `cl-defstruct` declaration under those roots
@@ -90,7 +93,7 @@ The default contract target prints two generated matrices:
 
 1. conformance features and evidence counts grouped by feature domain
 2. public-surface counts grouped by language, IR, command, schema, adapter,
-   runtime-module, standard-library, and Emacs API domain
+   platform-package, runtime-module, standard-library, and Emacs API domain
 
 The matrices are generated from validated data; they are not checked-in output.
 `--json` on either checker returns the same counts for automation.

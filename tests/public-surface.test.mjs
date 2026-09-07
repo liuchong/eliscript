@@ -34,6 +34,7 @@ test("repository public surface matches every tracked implementation", async () 
     commands: { commands: 9, options: 47 },
     schemas: { total: 27 },
     adapters: { adapters: 9, exports: 32 },
+    platformPackages: { packages: 2, exports: 36 },
     runtimeModules: { modules: 29, exports: 219, public: 20, internal: 9 },
     standardLibrary: { modules: 29, exports: 304 },
     emacs: {
@@ -76,6 +77,26 @@ test("public surface checker rejects adapter export drift", async () => {
   surface.adapters.find(({ id }) => id === "vite").namedExports.shift();
   expect(await validationErrors(surface)).toContain(
     "vite export inventory is missing current entries: compileEliscript",
+  );
+});
+
+test("public surface checker rejects platform classification and export drift", async () => {
+  const surface = await surfaceDocument();
+  const package_ = surface.platformPackages.find(
+    ({ id }) => id === "browser-capabilities",
+  );
+  package_.host = "ambient";
+  package_.stability = "stable";
+  package_.namedExports.shift();
+  const errors = await validationErrors(surface);
+  expect(errors).toContain(
+    'browser-capabilities has invalid platform host "ambient"',
+  );
+  expect(errors).toContain(
+    "browser-capabilities stability must match specification 0126 status accepted",
+  );
+  expect(errors).toContain(
+    "browser-capabilities export inventory is missing current entries: BrowserCapabilityError",
   );
 });
 

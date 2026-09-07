@@ -28,20 +28,20 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 125 specifications.
+The registry currently contains 126 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 93 |
+| Accepted design | 94 |
 | Stable design | 30 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 121 |
+| Implemented | 122 |
 | Superseded implementation | 1 |
 
 Compatibility Baseline 2 separately classifies 30 specifications as stable,
-91 as provisional, 3 as planning, and 1 as superseded. That baseline is
+92 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -89,8 +89,8 @@ continuous result verification, module generations, cancellation, stale-buffer
 rejection, and transactional application. Its maintained index integration
 and real-worker tests complete PD-09 without application-framework evidence.
 P7 and PD-10 now close through a maintained Emacs analysis package: three
-equivalent candidates, two selected transducer-backed workflows at 9.142x and
-8.237x median warm end-to-end speedup, a source-bound 16,000-character
+equivalent candidates, two selected transducer-backed workflows at 9.679x and
+8.267x median warm end-to-end speedup, a source-bound 16,000-character
 crossover decision, and a 200-request stable/stale buffer soak. No application
 framework contributes to this result.
 M9 is complete with closed, versioned single-entry and multi-entry project
@@ -129,6 +129,13 @@ A versioned project watch stream now normalizes content-level source changes
 across Bun and Node, while the Emacs mode shares one process per project and
 refreshes matching Flymake buffers. Onboarding, the complete AC-12 matrix, and
 the exit gate remain open.
+
+M11 has all 6/6 implementation units complete. Its 29-module, 304-export API
+index is generated from explicit metadata and the checked public surface.
+Browser and worker platform packages now expose only named host authority,
+inject request-scoped progress and cancellation into the real worker, and keep
+frameworks outside core evidence. M11 compatibility stabilization and its
+final exit audit remain open.
 
 ## Reading Paths
 
@@ -210,6 +217,7 @@ number.
 48. [0108: Versioned Canonical IR Serialization](0108-versioned-canonical-ir.md)
 49. [0109: Self-hosted Build Decision Reports](0109-self-hosted-build-decision-reports.md)
 50. [0125: Generated Library API Index](0125-generated-library-api-index.md)
+51. [0126: Explicit Browser and Worker Capability Packages](0126-explicit-host-capability-packages.md)
 
 ### Application Validation (Non-core)
 
@@ -410,6 +418,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0123 | [Stable ECMAScript Module Import Contract](0123-stable-esm-import-contract.md) | Stable | Implemented |
 | 0124 | [Declared Macro File Dependencies](0124-declared-macro-file-dependencies.md) | Stable | Implemented |
 | 0125 | [Generated Library API Index](0125-generated-library-api-index.md) | Accepted | Implemented |
+| 0126 | [Explicit Browser and Worker Capability Packages](0126-explicit-host-capability-packages.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

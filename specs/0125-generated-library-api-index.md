@@ -75,8 +75,8 @@ must never promote a module beyond its owning specification.
 This index covers the 29 maintained modules under `stdlib/` that are already
 tracked by the public-surface contract. Runtime JavaScript facades, compiler
 internals, commands, editor APIs, optional integrations, and application
-frameworks are outside this index. Host capability packages remain a separate
-M11-04 concern.
+frameworks are outside this index. Host capability packages are specified
+separately by [0126](0126-explicit-host-capability-packages.md).
 
 The static documentation page is an output consumer. It contributes no new
 language forms, runtime semantics, library dependencies, or maturity evidence

@@ -4,6 +4,8 @@
   (import "react-dom/client" createRoot)
   (import "./main.eli" :default Counter)
   (import "../../stdlib/sequence.eli" map)
+  (import "../../platform/browser.mjs"
+          browserCapabilities browserDocument)
   (import "./counter.css")
   (import "../../docs/pages/assets/eliscript-logo.png" :default logo-url)
   (defun ui-props
@@ -22,7 +24,10 @@
     (type props key &rest children)
     (let ((resolved (ui-props props children)))
       (if (> (length children) 1) (jsxs type resolved key) (jsx type resolved key))))
-  (defconst mount-node (document/getElementById "app"))
+  (defconst browser-capabilities
+    (browserCapabilities (js* "globalThis") (js-array "document")))
+  (defconst mount-node
+    (js-call (browserDocument browser-capabilities) :getElementById "app"))
   (defconst root (or (get mount-node :eliscriptRoot) (createRoot mount-node)))
   (put mount-node :eliscriptRoot root)
   (js-call

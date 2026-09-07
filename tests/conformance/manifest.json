@@ -1893,6 +1893,57 @@
           "contains": "\"format\": \"eliscript-library-api-index\""
         }
       ]
+    },
+    {
+      "id": "platform.explicit-host-capability-packages",
+      "title": "Explicit browser and worker host capabilities",
+      "status": "accepted",
+      "spec": "0126",
+      "contracts": [
+        "Requires an explicit host object and exact grant list without reading ambient globals",
+        "Keeps executable authority behind original frozen tokens and exposes data-only descriptors",
+        "Provides closed browser document network clock randomness and timer grants",
+        "Provides request-scoped worker progress and cancellation grants plus canonical codec exports",
+        "Injects capabilities through the real worker and confines package resolution",
+        "Keeps application frameworks bundlers and publishing systems outside platform core evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/platform-capabilities.test.mjs",
+          "contains": "browser capabilities expose only explicitly granted host authority"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/platform-capabilities.test.mjs",
+          "contains": "browser capabilities reject ambient unavailable and forged authority"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/platform-capabilities.test.mjs",
+          "contains": "worker capabilities preserve progress cancellation and codec boundaries"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/platform-capabilities.test.mjs",
+          "contains": "platform capability behavior is identical under Bun and Node"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/platform-capabilities.test.mjs",
+          "contains": "platform packages have no ambient global or application dependency"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/worker-runtime.test.mjs",
+          "contains": "worker injects explicit operation capabilities from its platform package"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/public-surface.test.mjs",
+          "contains": "public surface checker rejects platform classification and export drift"
+        }
+      ]
     }
   ]
 }

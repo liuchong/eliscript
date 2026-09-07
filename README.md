@@ -59,13 +59,15 @@ content-level project changes under Bun and Node, and Emacs shares one watcher
 per project to refresh Flymake diagnostics. Onboarding and the complete M10
 exit gate remain future work.
 
-M11 now has an exact generated library index. Reviewed metadata classifies all
+M11's six implementation units are complete. Reviewed metadata classifies all
 29 standard-library modules by role and owning specification; the generated
 [API page](docs/pages/api.html) and machine-readable
 [API index](docs/pages/api-index.json) expose all 304 checked exports. The
 default contract gate rejects metadata, implementation, stability, or generated
-artifact drift. Explicit host capability packages and the M11 exit gate remain
-open.
+artifact drift. Explicit [browser and worker capability packages](platform/README.md)
+now grant only named host authority, inject request-scoped progress and
+cancellation into the real worker, and re-export the canonical worker codecs.
+Compatibility stabilization and the final M11 exit audit remain open.
 
 Run `bun run progress` for the current evidence-derived core progress report.
 It reports implementation, verification, and stabilization independently;
@@ -181,7 +183,7 @@ buffer versions, transactional application, cancellation, timeout, and worker
 restart. The maintained Emacs index workflow uses this boundary, completing P6
 and PD-09 without adding an application-framework dependency. The persistent
 analysis package now keeps revisioned documents in one worker generation,
-selects search and statistics at 9.142x and 8.237x median warm end-to-end
+selects search and statistics at 9.679x and 8.267x median warm end-to-end
 speedup over 30 runs, and discards intentionally stale buffer results. This
 completes P7 and PD-10 without application-framework evidence. The persistent
 Vector/Map/Set literal family is now complete;
@@ -520,6 +522,7 @@ Start with the document that matches the question:
 | How does self-hosting work? | [Bootstrap Compiler Guide](bootstrap/README.md) |
 | What runtime APIs exist? | [Runtime Guide](runtime/README.md) |
 | Which portable libraries exist? | [Standard Library Guide](stdlib/README.md) |
+| How is browser or worker authority granted? | [Platform Package Guide](platform/README.md) |
 | What are the exact current library exports? | [Generated Library API](docs/pages/api.html) |
 | What does the test suite prove? | [Test Guide](tests/README.md) |
 | How are benchmark claims reviewed? | [Benchmark Guide](benchmarks/README.md) |
