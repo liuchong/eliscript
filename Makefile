@@ -105,7 +105,9 @@ endif
 	$(BUN) tools/surface/generate-api.mjs --check
 	$(BUN) tools/ci/render-workflow.mjs --check
 	$(BUN) tools/documentation/check.mjs
-	$(BUN) tools/onboarding/check.mjs
+	$(BUN) tools/onboarding/check.mjs \
+		--verify-run acceptance/runs/m13-02.json \
+		--verify-markdown acceptance/runs/m13-02.md
 	$(BUN) tools/integrity/check.mjs
 
 byte-compile:

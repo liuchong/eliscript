@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 1,
+  "format": "eliscript-local-onboarding-run",
+  "version": 1,
+  "generatedAt": "2026-09-07T19:22:37.064Z",
+  "contractSha256": "7eed27c684cfe1ee420194b206dd8cd0153ca3b8e708690eda95c9cd7a1b8c7f",
+  "source": {
+    "commit": "ca5bee07526be8b08e5e2fbb80d6417ae7c44a0a",
+    "tree": "2a7838b3475dd95d0fc859983bd2ebdbe5ce2a02"
+  },
+  "execution": {
+    "provider": "local",
+    "sourceCommit": "ca5bee07526be8b08e5e2fbb80d6417ae7c44a0a"
+  },
+  "environment": {
+    "provider": "local",
+    "operatingSystem": "Darwin 25.6.0",
+    "architecture": "arm64",
+    "cpu": "Apple M5 Max",
+    "gitVersion": "git version 2.50.1 (Apple Git-155)",
+    "bunVersion": "1.4.0",
+    "nodeVersion": "v26.3.0",
+    "emacsVersion": "31.1"
+  },
+  "steps": [
+    {
+      "id": "locked-dependencies",
+      "argv": [
+        "bun",
+        "install",
+        "--frozen-lockfile"
+      ],
+      "timeoutMs": 300000,
+      "countsTowardActiveDuration": false,
+      "status": "pass",
+      "exitCode": 0,
+      "timedOut": false,
+      "durationMs": 13.489,
+      "stdoutSha256": "cfd2050d5fbd797735d3c109d43bdf3db5674a41d731976dc450ca218be94ec4",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": "bun install v1.4.0 (34cbb9a40) | Checked 20 installs across 45 packages (no changes) [9.00ms]"
+    },
+    {
+      "id": "command-discovery",
+      "argv": [
+        "./bin/eliscript",
+        "--help"
+      ],
+      "timeoutMs": 60000,
+      "countsTowardActiveDuration": true,
+      "status": "pass",
+      "exitCode": 0,
+      "timedOut": false,
+      "durationMs": 17.923,
+      "stdoutSha256": "8bb9e7c8da423ebb3bc938768b23fbea9bc55d2425baeb62c2e55f4b99fe009c",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": "--diagnostic-format human|json | Select human-readable or JSON failures | -h, --help         Show this help"
+    },
+    {
+      "id": "compiler-build",
+      "argv": [
+        "bun",
+        "run",
+        "build:bootstrap"
+      ],
+      "timeoutMs": 300000,
+      "countsTowardActiveDuration": true,
+      "status": "pass",
+      "exitCode": 0,
+      "timedOut": false,
+      "durationMs": 4354.758,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSha256": "cefedb0e09c1d8504ec1953686d74f8b4f99062c2f2b0c1ffb563f52a49bcc2b",
+      "summary": "$ ./bin/eliscript-bootstrap"
+    },
+    {
+      "id": "documented-project",
+      "argv": [
+        "bun",
+        "test",
+        "tests/onboarding-docs.test.mjs"
+      ],
+      "timeoutMs": 120000,
+      "countsTowardActiveDuration": true,
+      "status": "pass",
+      "exitCode": 0,
+      "timedOut": false,
+      "durationMs": 399.249,
+      "stdoutSha256": "335ab4d3d0d98d4c3b3478fa50c807da6d2740deb186a27fa4aed967dcd71e94",
+      "stderrSha256": "dad51b4037b54ec241a09cf38e177c459e4614783d7198ade14cdce84c84525d",
+      "summary": "0 fail | 27 expect() calls | Ran 2 tests across 1 file. [395.00ms]"
+    },
+    {
+      "id": "strict-byte-compile",
+      "argv": [
+        "make",
+        "byte-compile"
+      ],
+      "timeoutMs": 300000,
+      "countsTowardActiveDuration": true,
+      "status": "pass",
+      "exitCode": 0,
+      "timedOut": false,
+      "durationMs": 916.471,
+      "stdoutSha256": "bfa62c4b8f1acfe3b1e870b754ae7bba0519cb74d4dfbcea4b50009dec17b542",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": "EMACS=\"emacs\" ./tools/ci/strict-byte-compile.sh"
+    },
+    {
+      "id": "core-suite",
+      "argv": [
+        "make",
+        "test-core"
+      ],
+      "timeoutMs": 900000,
+      "countsTowardActiveDuration": true,
+      "status": "pass",
+      "exitCode": 0,
+      "timedOut": false,
+      "durationMs": 444051.218,
+      "stdoutSha256": "9368191c553a03b6a1a678dd62989825e4fe0e92605d24e6ecc9f06bf15e854e",
+      "stderrSha256": "b9ad70ea311660a392c780bbbc4094a1e03ccd5dc18acc795828e109ce9ce348",
+      "summary": "0 fail | 1031385 expect() calls | Ran 284 tests across 80 files. [425.77s]"
+    }
+  ],
+  "artifacts": [
+    {
+      "file": "Makefile",
+      "sha256": "a324f31f30f82e9567972d3508147655e74303390c3ddf3324cd039091d199ec"
+    },
+    {
+      "file": "bun.lock",
+      "sha256": "0849101cd5dc5020ff50772201642f92683655c1b34632ccd8b354432fb30624"
+    },
+    {
+      "file": "contracts/local-onboarding.json",
+      "sha256": "7eed27c684cfe1ee420194b206dd8cd0153ca3b8e708690eda95c9cd7a1b8c7f"
+    },
+    {
+      "file": "docs/getting-started.md",
+      "sha256": "e62e787d11a7d0c7025e1e6e13c8c62dedf6e7c77f68cad8c9681e3bef6460fd"
+    },
+    {
+      "file": "examples/getting-started/eliscript.json",
+      "sha256": "606f94ad9c6a3f645bd3d453520336be506153614f0c2555c3455d82f28287ea"
+    },
+    {
+      "file": "examples/getting-started/src/main.eli",
+      "sha256": "a32681c3b11416c6f98401f2b6da047a8715abc8b33d9b19743e2a8bc58281e0"
+    },
+    {
+      "file": "examples/getting-started/src/math.eli",
+      "sha256": "7e19bbb1d7ea72a02aa35e5a5a6b03344b29de04b33d8ac600dceb4882906d45"
+    },
+    {
+      "file": "package.json",
+      "sha256": "fc984edb028b724f2d444fe8eeae54624d66afd92979ca19004020c39f6b7fb7"
+    },
+    {
+      "file": "specs/0135-local-onboarding.md",
+      "sha256": "dbbb8739b0a519e20ed57c31d07ac9a22a5186f3c1bfc7e05904e599abef9c0f"
+    },
+    {
+      "file": "tests/onboarding-docs.test.mjs",
+      "sha256": "451f393483fd79be853bf7b0382fed9d3e2ae649499c684d46e62e2b4e725b46"
+    },
+    {
+      "file": "tests/test-partition.test.mjs",
+      "sha256": "1bd1555a3767b0e69fa7b00b789faeadf1881e137c43ba984c6a1617c281eb9b"
+    },
+    {
+      "file": "tools/onboarding/check.mjs",
+      "sha256": "f5b540f1a32e208c88547174ce1ff9968a548686bfe64ef611608bed7da340f3"
+    }
+  ],
+  "summary": {
+    "required": 6,
+    "passed": 6,
+    "failed": 0,
+    "notRun": 0,
+    "installDurationMs": 13.489,
+    "activeDurationMs": 449739.619,
+    "maximumActiveDurationMs": 900000,
+    "withinActiveBudget": true,
+    "cleanBefore": true,
+    "cleanAfter": true,
+    "applicationsExecuted": false,
+    "validationPass": true
+  }
+}

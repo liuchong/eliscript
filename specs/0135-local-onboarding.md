@@ -1,7 +1,7 @@
 # 0135: Traceable Local Onboarding Exercise
 
 - Status: Accepted
-- Implementation: In Progress
+- Implementation: Implemented
 - Date: 2026-09-08
 - Depends on: 0040 Project Maturity Roadmap and 1.0 Acceptance Contract,
   0133 Verified Installation and Daily Development Guide,
@@ -23,8 +23,8 @@ tests remain outside the exercise and cannot satisfy or block it.
 
 The exercise deliberately makes no claim that the host is newly provisioned or
 isolated. It proves the supported workflow on the recorded local toolchain;
-cross-platform coverage remains AC-21. This specification remains in progress
-until one passing report is verified and retained under `acceptance/runs/`.
+cross-platform coverage remains AC-21. The retained passing report lives under
+`acceptance/runs/`.
 
 ## Environment Contract
 
@@ -113,3 +113,12 @@ bun tools/onboarding/check.mjs \
   and identify the exact local source revision.
 - **CMO-08:** Failed, incomplete, dirty, over-budget, or
   application-contaminated evidence cannot complete M13-02 or AC-22.
+
+## Retained Run
+
+`acceptance/runs/m13-02.json` and `acceptance/runs/m13-02.md` record the passing
+local run from commit `ca5bee07526be8b08e5e2fbb80d6417ae7c44a0a` on Darwin
+ARM64 with Bun 1.4.0 and Emacs 31.1. All six steps passed, the tracked checkout
+was clean before and after execution, application validation was not executed,
+and 449,739.619 milliseconds of active work stayed within the 900,000
+millisecond budget.

@@ -36,12 +36,12 @@ The registry currently contains 135 specifications.
 | Accepted design | 103 |
 | Stable design | 30 |
 | Superseded design | 1 |
-| Implementation in progress | 4 |
-| Implemented | 130 |
+| Implementation in progress | 3 |
+| Implemented | 131 |
 | Superseded implementation | 1 |
 
 Compatibility Baseline 2 separately classifies 30 specifications as stable,
-100 as provisional, 4 as planning, and 1 as superseded. That baseline is
+101 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -157,13 +157,13 @@ budgets. Repository integrity checks dependency boundaries, regenerated
 artifacts, and every benchmark source binding. The final M12 exit audit remains
 formal acceptance work.
 
-M13 has completed 1/5 implementation units through specification 0134. Its
+M13 has completed 2/5 implementation units through specification 0135. Its
 versioned corpus derives all 35 mandatory AC/PD criteria from normative
 headings, maps each criterion to bounded probes and tracked evidence, and
-retains one clean audit with 17 pass, 18 incomplete, and zero failed criteria.
-The final acceptance flag remains false. Specification 0135 defines the local,
-source-bound onboarding exercise for M13-02; it remains in progress until a
-passing report is retained.
+retains one clean audit with 18 pass, 17 incomplete, and zero failed criteria.
+The final acceptance flag remains false. Specification 0135 records the local,
+source-bound onboarding exercise for M13-02 with all six steps passing within
+the active-step budget.
 
 ## Reading Paths
 
@@ -459,7 +459,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0132 | [Repository Dependency and Generated-artifact Audits](0132-repository-integrity-audits.md) | Accepted | Implemented |
 | 0133 | [Verified Installation and Daily Development Guide](0133-verified-onboarding-documentation.md) | Accepted | Implemented |
 | 0134 | [Versioned Core Acceptance Corpus and Truthful Audit Run](0134-versioned-core-acceptance-corpus.md) | Accepted | Implemented |
-| 0135 | [Traceable Local Onboarding Exercise](0135-local-onboarding.md) | Accepted | In Progress |
+| 0135 | [Traceable Local Onboarding Exercise](0135-local-onboarding.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

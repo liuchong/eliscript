@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   checkOnboarding,
   OnboardingValidationError,
+  verifyRun,
 } from "../tools/onboarding/check.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -74,4 +75,44 @@ test("local onboarding contract rejects an unsupported provider", async () => {
   expect(await validationErrors(candidate)).toContain(
     "environment must match the version 1 local inventory",
   );
+});
+
+test("retained local onboarding run is complete and source-bound", async () => {
+  const report = await verifyRun({
+    root: ROOT,
+    runFile: "acceptance/runs/m13-02.json",
+    markdownFile: "acceptance/runs/m13-02.md",
+  });
+
+  expect(report.execution).toEqual({
+    provider: "local",
+    sourceCommit: report.source.commit,
+  });
+  expect(report.summary).toMatchObject({
+    required: 6,
+    passed: 6,
+    failed: 0,
+    notRun: 0,
+    withinActiveBudget: true,
+    cleanBefore: true,
+    cleanAfter: true,
+    applicationsExecuted: false,
+    validationPass: true,
+  });
+});
+
+test("retained local onboarding run rejects forged provenance", async () => {
+  const report = JSON.parse(await readFile(
+    path.join(ROOT, "acceptance/runs/m13-02.json"),
+    "utf8",
+  ));
+  report.execution.provider = "remote";
+  report.environment.provider = "remote";
+
+  await expect(verifyRun({ root: ROOT, report })).rejects.toMatchObject({
+    errors: [
+      "run must identify local execution at its source commit",
+      "run environment must use the local provider",
+    ],
+  });
 });

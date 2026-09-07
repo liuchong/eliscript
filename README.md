@@ -31,18 +31,18 @@ in **M8: Language Contract Closure**, **M9: Compiler and Build Convergence**,
 Libraries**, and **M12: Reliability, Security, and Performance**. Final
 stability and acceptance remain open.
 
-M13 has completed 1 of 5 implementation units. The versioned
+M13 has completed 2 of 5 implementation units. The versioned
 [core acceptance corpus](specs/0134-versioned-core-acceptance-corpus.md)
 derives all 35 mandatory AC/PD criteria from their normative specifications,
 runs the complete core suite and strict Emacs byte compilation from a clean
 commit, and retains machine-readable and human-readable evidence. The initial
-audit records 17 passing, 18 incomplete, and zero failed criteria; its final
+audit records 18 passing, 17 incomplete, and zero failed criteria; its final
 acceptance flag is therefore false. Application validations are listed
 separately and contribute no core result.
 
 The [local onboarding exercise](specs/0135-local-onboarding.md)
-runs the documented core workflow directly on the recorded host toolchain and
-remains in progress until its first passing report is retained.
+runs the documented core workflow directly on the recorded host toolchain. Its
+retained report records all six steps passing within the active-step budget.
 
 M9 compiler convergence is complete: it includes canonical project requests,
 graph planning, IR serialization, build reports, v1-to-v2 cache migration,

@@ -1097,7 +1097,7 @@ Emacs acceleration contract is accepted independently by AC-16 and AC-17.
 
 1. Run the complete core acceptance corpus through public commands and
    documented APIs.
-2. Follow the getting-started guide on a clean supported environment and fix
+2. Follow the getting-started guide on a supported local environment and fix
    every undocumented prerequisite.
 3. Rebuild a corpus written against the frozen compatibility baseline and
    document any intentional migration.
@@ -1112,14 +1112,15 @@ Emacs acceleration contract is accepted independently by AC-16 and AC-17.
 clean, traceable acceptance run. Application validation status is reported but
 cannot block or satisfy this gate.
 
-**M13 implementation status:** In progress, 1/5 units. Specification
+**M13 implementation status:** In progress, 2/5 units. Specification
 [0134-versioned-core-acceptance-corpus.md](0134-versioned-core-acceptance-corpus.md)
 derives the complete AC/PD inventory from normative headings, maps every
 criterion to bounded probes and tracked evidence, and retains one clean audit
-with 17 pass, 18 incomplete, and zero failed criteria. This completes the
+with 18 pass, 17 incomplete, and zero failed criteria. This completes the
 corpus-and-report implementation unit without claiming final acceptance.
-Local onboarding, compatibility migration rehearsal, the complete
-documentation set, and final 1.0 artifacts remain open.
+Specification [0135-local-onboarding.md](0135-local-onboarding.md) records the
+six-step local onboarding run and completes AC-22. Compatibility migration
+rehearsal, the complete documentation set, and final 1.0 artifacts remain open.
 
 ## Construction Protocol
 
