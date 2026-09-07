@@ -8,8 +8,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const CONTRACT_FILE = "contracts/clean-machine-onboarding.json";
-const WORKFLOW_FILE = ".github/workflows/clean-machine-onboarding.yml";
+const CONTRACT_FILE = "contracts/local-onboarding.json";
 const GUIDE_FILE = "docs/getting-started.md";
 const EXPECTED_STEPS = [
   ["locked-dependencies", ["bun", "install", "--frozen-lockfile"], 300_000, false],
@@ -31,20 +30,23 @@ const EXPECTED_DOCUMENTATION = [
   "make test-core",
 ];
 const EXPECTED_SOURCE_FILES = [
-  ".github/workflows/clean-machine-onboarding.yml",
   "Makefile",
   "bun.lock",
-  "contracts/clean-machine-onboarding.json",
+  "contracts/local-onboarding.json",
   "docs/getting-started.md",
   "examples/getting-started/eliscript.json",
   "examples/getting-started/src/main.eli",
   "examples/getting-started/src/math.eli",
   "package.json",
-  "specs/0135-clean-machine-onboarding.md",
+  "specs/0135-local-onboarding.md",
   "tests/onboarding-docs.test.mjs",
   "tests/test-partition.test.mjs",
   "tools/onboarding/check.mjs",
 ];
+const EXPECTED_ENVIRONMENT = {
+  provider: "local",
+  requiredCommands: ["git", "bun", "emacs", "make"],
+};
 const APPLICATION_TESTS = [
   "tests/eliscript-org-tests.el",
   "tests/vite-plugin.test.mjs",
@@ -54,7 +56,7 @@ const APPLICATION_TESTS = [
 
 export class OnboardingValidationError extends Error {
   constructor(errors) {
-    super(`clean-machine onboarding validation failed:\n- ${errors.join("\n- ")}`);
+    super(`local onboarding validation failed:\n- ${errors.join("\n- ")}`);
     this.name = "OnboardingValidationError";
     this.errors = errors;
   }
@@ -108,28 +110,12 @@ function targetSource(makefile, name) {
   return `${lines[start]}\n${body.join("\n")}`;
 }
 
-function validateEnvironmentContract(environment, errors) {
-  const expected = {
-    provider: "github-actions",
-    runnerOs: "Linux",
-    runnerArchitecture: "X64",
-    ubuntuVersion: "24.04",
-    bunVersion: "1.4.0",
-    emacsVersion: "30.2",
-    maximumActiveDurationMs: 900_000,
-  };
-  if (!isPlainObject(environment)) {
-    errors.push("environment must be an object");
-    return;
+function validateEnvironmentContract(contract, errors) {
+  if (JSON.stringify(contract.environment) !== JSON.stringify(EXPECTED_ENVIRONMENT)) {
+    errors.push("environment must match the version 1 local inventory");
   }
-  for (const [key, value] of Object.entries(expected)) {
-    if (environment[key] !== value) {
-      errors.push(`environment.${key} must be ${JSON.stringify(value)}`);
-    }
-  }
-  const unknown = Object.keys(environment).filter((key) => !(key in expected));
-  if (unknown.length > 0) {
-    errors.push(`environment has unknown fields: ${unknown.join(", ")}`);
+  if (contract.maximumActiveDurationMs !== 900_000) {
+    errors.push("maximumActiveDurationMs must be 900000");
   }
 }
 
@@ -209,11 +195,11 @@ export async function checkOnboarding(options = {}) {
   const contract = options.contract ?? await readJson(path.join(root, CONTRACT_FILE));
   const errors = [];
   if (!isPlainObject(contract) || contract.schemaVersion !== 1 ||
-      contract.format !== "eliscript-clean-machine-onboarding" ||
+      contract.format !== "eliscript-local-onboarding" ||
       contract.version !== 1) {
-    errors.push("contract must use eliscript-clean-machine-onboarding version 1");
+    errors.push("contract must use eliscript-local-onboarding version 1");
   }
-  validateEnvironmentContract(contract.environment, errors);
+  validateEnvironmentContract(contract, errors);
   validateSteps(contract.steps, errors);
 
   if (!Array.isArray(contract.requiredDocumentation) ||
@@ -243,10 +229,9 @@ export async function checkOnboarding(options = {}) {
     errors.push("sourceFiles must match the version 1 inventory");
   }
 
-  const [guide, makefile, workflow] = await Promise.all([
+  const [guide, makefile] = await Promise.all([
     readFile(path.join(root, GUIDE_FILE), "utf8"),
     readFile(path.join(root, "Makefile"), "utf8"),
-    readFile(path.join(root, WORKFLOW_FILE), "utf8"),
   ]);
   for (const literal of contract.requiredDocumentation ?? []) {
     if (!guide.includes(literal)) {
@@ -273,32 +258,16 @@ export async function checkOnboarding(options = {}) {
     }
   }
 
-  const workflowLiterals = [
-    "runs-on: ubuntu-24.04",
-    "version: \"30.2\"",
-    "bun-version: 1.4.0",
-    "bun tools/onboarding/check.mjs --run",
-    "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd",
-    "purcell/setup-emacs@34c6ded44899fd1bf74d2889558befd1750e61a7",
-    "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6",
-    "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
-  ];
-  for (const literal of workflowLiterals) {
-    if (!workflow.includes(literal)) {
-      errors.push(`${WORKFLOW_FILE} is missing required text: ${literal}`);
-    }
-  }
-
   if (errors.length > 0) throw new OnboardingValidationError(errors);
   return {
     schemaVersion: 1,
-    format: "eliscript-clean-machine-onboarding-contract-report",
+    format: "eliscript-local-onboarding-contract-report",
     version: 1,
     steps: contract.steps.length,
     activeSteps: contract.steps.filter((step) =>
       step.countsTowardActiveDuration).length,
     sourceFiles: contract.sourceFiles.length,
-    maximumActiveDurationMs: contract.environment.maximumActiveDurationMs,
+    maximumActiveDurationMs: contract.maximumActiveDurationMs,
     environment: contract.environment,
     contract,
   };
@@ -319,7 +288,10 @@ async function runStep(root, step) {
   try {
     child = Bun.spawn(step.argv, {
       cwd: root,
-      env: process.env,
+      env: {
+        ...process.env,
+        ELISCRIPT_SKIP_RETAINED_ACCEPTANCE: "1",
+      },
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
@@ -393,20 +365,10 @@ async function commandText(root, argv) {
   return stdout.trim();
 }
 
-function ubuntuVersion() {
-  return readFile("/etc/os-release", "utf8").then((source) => {
-    const line = source.split("\n").find((entry) => entry.startsWith("VERSION_ID="));
-    return line?.slice("VERSION_ID=".length).replaceAll('"', "") ?? "unknown";
-  });
-}
-
 async function environmentReport(root) {
   const emacs = await commandText(root, ["emacs", "--version"]);
   return {
-    provider: "github-actions",
-    runnerOs: process.env.RUNNER_OS ?? "",
-    runnerArchitecture: process.env.RUNNER_ARCH ?? "",
-    ubuntuVersion: await ubuntuVersion(),
+    provider: "local",
     operatingSystem: `${os.type()} ${os.release()}`,
     architecture: os.arch(),
     cpu: os.cpus()[0]?.model ?? "unknown",
@@ -418,20 +380,22 @@ async function environmentReport(root) {
 }
 
 function validateLiveEnvironment(environment, contract, errors) {
-  if (process.env.GITHUB_ACTIONS !== "true") {
-    errors.push("run requires GITHUB_ACTIONS=true");
+  if (environment.provider !== contract.environment.provider) {
+    errors.push("run must use the local provider");
   }
-  for (const key of ["GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_SHA",
-    "GITHUB_REPOSITORY", "GITHUB_SERVER_URL"]) {
-    if (!process.env[key]) errors.push(`run requires ${key}`);
-  }
-  for (const key of ["runnerOs", "runnerArchitecture", "ubuntuVersion",
-    "bunVersion", "emacsVersion"]) {
-    if (environment[key] !== contract.environment[key]) {
-      errors.push(`live ${key} ${JSON.stringify(environment[key])} does not match ` +
-        JSON.stringify(contract.environment[key]));
+  for (const key of ["operatingSystem", "architecture", "cpu", "gitVersion",
+    "bunVersion", "nodeVersion", "emacsVersion"]) {
+    if (typeof environment[key] !== "string" || environment[key].length === 0) {
+      errors.push(`local environment is missing ${key}`);
     }
   }
+}
+
+function executionProvenance(source) {
+  return {
+    provider: "local",
+    sourceCommit: source.commit,
+  };
 }
 
 async function cleanTrackedState(root) {
@@ -450,11 +414,6 @@ export async function runOnboarding(options = {}) {
   const root = path.resolve(options.root ?? ROOT);
   const checked = await checkOnboarding({ root });
   const errors = [];
-  if (process.env.GITHUB_ACTIONS !== "true") {
-    throw new OnboardingValidationError([
-      "run requires a fresh GitHub Actions environment",
-    ]);
-  }
   const cleanBefore = await cleanTrackedState(root);
   if (!cleanBefore) errors.push("tracked checkout must be clean before the run");
   const source = {
@@ -463,9 +422,7 @@ export async function runOnboarding(options = {}) {
   };
   const environment = await environmentReport(root);
   validateLiveEnvironment(environment, checked.contract, errors);
-  if (process.env.GITHUB_SHA && source.commit !== process.env.GITHUB_SHA) {
-    errors.push("GITHUB_SHA does not match the checked out commit");
-  }
+  const execution = executionProvenance(source);
   if (errors.length > 0) throw new OnboardingValidationError(errors);
 
   const steps = [];
@@ -501,26 +458,17 @@ export async function runOnboarding(options = {}) {
   const failed = steps.filter((step) => step.status === "fail").length;
   const notRun = steps.filter((step) => step.status === "not-run").length;
   const withinActiveBudget = activeDurationMs <=
-    checked.contract.environment.maximumActiveDurationMs;
-  const acceptancePass = passed === steps.length && failed === 0 && notRun === 0 &&
+    checked.contract.maximumActiveDurationMs;
+  const validationPass = passed === steps.length && failed === 0 && notRun === 0 &&
     cleanBefore && cleanAfter && withinActiveBudget;
-  const repository = process.env.GITHUB_REPOSITORY;
-  const runId = process.env.GITHUB_RUN_ID;
   const report = {
     schemaVersion: 1,
-    format: "eliscript-clean-machine-onboarding-run",
+    format: "eliscript-local-onboarding-run",
     version: 1,
     generatedAt: new Date().toISOString(),
     contractSha256: sha256(await readFile(path.join(root, CONTRACT_FILE))),
     source,
-    ci: {
-      provider: "github-actions",
-      repository,
-      runId,
-      runAttempt: process.env.GITHUB_RUN_ATTEMPT,
-      sha: process.env.GITHUB_SHA,
-      runUrl: `${process.env.GITHUB_SERVER_URL}/${repository}/actions/runs/${runId}`,
-    },
+    execution,
     environment,
     steps,
     artifacts: await sourceArtifacts(root, checked.contract.sourceFiles),
@@ -531,12 +479,12 @@ export async function runOnboarding(options = {}) {
       notRun,
       installDurationMs,
       activeDurationMs,
-      maximumActiveDurationMs: checked.contract.environment.maximumActiveDurationMs,
+      maximumActiveDurationMs: checked.contract.maximumActiveDurationMs,
       withinActiveBudget,
       cleanBefore,
       cleanAfter,
       applicationsExecuted: false,
-      acceptancePass,
+      validationPass,
     },
   };
   return report;
@@ -548,17 +496,17 @@ function markdownCell(value) {
 
 export function humanRunReport(report) {
   const lines = [
-    "# Clean-machine Onboarding Run",
+    "# Local Onboarding Run",
     "",
     `- Source commit: \`${report.source.commit}\``,
     `- Source tree: \`${report.source.tree}\``,
-    `- GitHub Actions run: [${report.ci.runId}](${report.ci.runUrl})`,
+    `- Execution: ${report.execution.provider}`,
     `- Generated: ${report.generatedAt}`,
-    `- Environment: Ubuntu ${report.environment.ubuntuVersion}; ${report.environment.architecture}; Bun ${report.environment.bunVersion}; Node ${report.environment.nodeVersion}; Emacs ${report.environment.emacsVersion}`,
+    `- Environment: ${report.environment.operatingSystem}; ${report.environment.architecture}; Bun ${report.environment.bunVersion}; Node ${report.environment.nodeVersion}; Emacs ${report.environment.emacsVersion}`,
     `- Tracked checkout clean: ${report.summary.cleanBefore && report.summary.cleanAfter ? "yes" : "no"}`,
     `- Active duration: ${report.summary.activeDurationMs} / ${report.summary.maximumActiveDurationMs} ms`,
     `- Application validation executed: ${report.summary.applicationsExecuted ? "yes" : "no"}`,
-    `- Clean-machine acceptance: ${report.summary.acceptancePass ? "pass" : "fail"}`,
+    `- Local validation: ${report.summary.validationPass ? "pass" : "fail"}`,
     "",
     "Dependency installation is measured separately and excluded from the active",
     "duration. Application validations cannot contribute to this result.",
@@ -591,9 +539,9 @@ export async function verifyRun(options) {
   const report = options.report ?? await readJson(path.resolve(root, options.runFile));
   const errors = [];
   if (!isPlainObject(report) || report.schemaVersion !== 1 ||
-      report.format !== "eliscript-clean-machine-onboarding-run" ||
+      report.format !== "eliscript-local-onboarding-run" ||
       report.version !== 1) {
-    errors.push("run must use eliscript-clean-machine-onboarding-run version 1");
+    errors.push("run must use eliscript-local-onboarding-run version 1");
   }
   if (!/^[0-9a-f]{40}$/.test(report.source?.commit ?? "") ||
       !/^[0-9a-f]{40}$/.test(report.source?.tree ?? "")) {
@@ -608,16 +556,20 @@ export async function verifyRun(options) {
   if (tree.exitCode !== 0 || tree.stdout.trim() !== report.source?.tree) {
     errors.push("run source tree does not match its commit");
   }
-  if (report.ci?.provider !== checked.environment.provider ||
-      !/^\d+$/.test(report.ci?.runId ?? "") ||
-      report.ci?.sha !== report.source?.commit ||
-      report.ci?.runUrl !== `https://github.com/${report.ci?.repository}/actions/runs/${report.ci?.runId}`) {
-    errors.push("run must contain coherent GitHub Actions identity");
+  if (JSON.stringify(report.execution) !== JSON.stringify({
+    provider: "local",
+    sourceCommit: report.source?.commit,
+  })) {
+    errors.push("run must identify local execution at its source commit");
   }
-  for (const key of ["runnerOs", "runnerArchitecture", "ubuntuVersion",
-    "bunVersion", "emacsVersion"]) {
-    if (report.environment?.[key] !== checked.environment[key]) {
-      errors.push(`run environment.${key} does not match the contract`);
+  if (report.environment?.provider !== "local") {
+    errors.push("run environment must use the local provider");
+  }
+  for (const key of ["operatingSystem", "architecture", "cpu", "gitVersion",
+    "bunVersion", "nodeVersion", "emacsVersion"]) {
+    if (typeof report.environment?.[key] !== "string" ||
+        report.environment[key].length === 0) {
+      errors.push(`run environment is missing ${key}`);
     }
   }
   if (!Array.isArray(report.steps) || report.steps.length !== checked.steps) {
@@ -686,7 +638,7 @@ export async function verifyRun(options) {
     cleanBefore: true,
     cleanAfter: true,
     applicationsExecuted: false,
-    acceptancePass: true,
+    validationPass: true,
   };
   if (JSON.stringify(report.summary) !== JSON.stringify(expectedSummary)) {
     errors.push("run summary is not the derived passing result");
@@ -706,9 +658,9 @@ export async function verifyRun(options) {
 
 function contractSummary(checked) {
   return [
-    "Clean-machine onboarding contract:",
-    `  Environment  Ubuntu ${checked.environment.ubuntuVersion} ${checked.environment.runnerArchitecture}`,
-    `  Toolchain    Bun ${checked.environment.bunVersion}, Emacs ${checked.environment.emacsVersion}`,
+    "Local onboarding contract:",
+    `  Provider     ${checked.environment.provider}`,
+    `  Commands     ${checked.environment.requiredCommands.join(", ")}`,
     `  Steps        ${checked.steps} total, ${checked.activeSteps} active`,
     `  Active limit ${checked.maximumActiveDurationMs} ms`,
     `  Sources      ${checked.sourceFiles}`,
@@ -717,12 +669,13 @@ function contractSummary(checked) {
 
 function runSummary(report) {
   return [
-    `Clean-machine onboarding run: ${report.source.commit}`,
+    `Local onboarding run: ${report.source.commit}`,
+    `Provider: ${report.execution.provider}`,
     `Steps: ${report.summary.passed}/${report.summary.required} pass`,
     `Active duration: ${report.summary.activeDurationMs}/${report.summary.maximumActiveDurationMs} ms`,
     `Tracked checkout clean: ${report.summary.cleanBefore && report.summary.cleanAfter ? "yes" : "no"}`,
     `Application validation executed: ${report.summary.applicationsExecuted ? "yes" : "no"}`,
-    `Acceptance: ${report.summary.acceptancePass ? "pass" : "fail"}`,
+    `Validation: ${report.summary.validationPass ? "pass" : "fail"}`,
   ].join("\n");
 }
 
@@ -758,7 +711,7 @@ export async function main(argv = process.argv.slice(2)) {
       `${JSON.stringify(report, null, 2)}\n`);
     await writeFile(path.resolve(ROOT, options.markdownOutput), humanRunReport(report));
     process.stdout.write(`${runSummary(report)}\n`);
-    if (!report.summary.acceptancePass) process.exitCode = 1;
+    if (!report.summary.validationPass) process.exitCode = 1;
     return report;
   }
   if (options.verifyRun) {

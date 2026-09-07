@@ -41,6 +41,7 @@ test("core acceptance corpus is complete and specification-derived", async () =>
     id: "PD-11",
     title: "State Discipline",
   });
+  expect(checked.contract.commands[0].argv).toEqual(["make", "test-core"]);
   expect(checked.applications.map((entry) => entry.id)).toEqual(["AV-01", "AV-02"]);
   expect(humanCorpusReport(checked)).toContain("35 mandatory criteria");
 });

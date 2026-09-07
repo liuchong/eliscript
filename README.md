@@ -40,9 +40,9 @@ audit records 17 passing, 18 incomplete, and zero failed criteria; its final
 acceptance flag is therefore false. Application validations are listed
 separately and contribute no core result.
 
-The [clean-machine onboarding exercise](specs/0135-clean-machine-onboarding.md)
-is implemented as a GitHub-hosted Ubuntu runner contract and remains in
-progress until its first passing report is retained.
+The [local onboarding exercise](specs/0135-local-onboarding.md)
+runs the documented core workflow directly on the recorded host toolchain and
+remains in progress until its first passing report is retained.
 
 M9 compiler convergence is complete: it includes canonical project requests,
 graph planning, IR serialization, build reports, v1-to-v2 cache migration,
@@ -76,7 +76,7 @@ per project to refresh Flymake diagnostics. The verified
 [installation and daily development guide](docs/getting-started.md) now runs a
 real framework-neutral project through format, check, build, Bun/Node execution,
 diagnostics, terminal REPL, and Emacs mode discovery. The complete M10 matrix,
-clean-machine exercise, and exit audit remain formal acceptance work.
+local onboarding exercise, and exit audit remain formal acceptance work.
 
 M11's six implementation units are complete. Reviewed metadata classifies all
 29 standard-library modules by role and owning specification; the generated

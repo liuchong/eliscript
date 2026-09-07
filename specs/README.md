@@ -161,9 +161,9 @@ M13 has completed 1/5 implementation units through specification 0134. Its
 versioned corpus derives all 35 mandatory AC/PD criteria from normative
 headings, maps each criterion to bounded probes and tracked evidence, and
 retains one clean audit with 17 pass, 18 incomplete, and zero failed criteria.
-The final acceptance flag remains false. Specification 0135 defines the fresh
-GitHub-hosted Ubuntu exercise for M13-02; it remains in progress until a
-passing source-bound report is retained.
+The final acceptance flag remains false. Specification 0135 defines the local,
+source-bound onboarding exercise for M13-02; it remains in progress until a
+passing report is retained.
 
 ## Reading Paths
 
@@ -459,7 +459,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0132 | [Repository Dependency and Generated-artifact Audits](0132-repository-integrity-audits.md) | Accepted | Implemented |
 | 0133 | [Verified Installation and Daily Development Guide](0133-verified-onboarding-documentation.md) | Accepted | Implemented |
 | 0134 | [Versioned Core Acceptance Corpus and Truthful Audit Run](0134-versioned-core-acceptance-corpus.md) | Accepted | Implemented |
-| 0135 | [Traceable Clean-machine Onboarding Exercise](0135-clean-machine-onboarding.md) | Accepted | In Progress |
+| 0135 | [Traceable Local Onboarding Exercise](0135-local-onboarding.md) | Accepted | In Progress |
 
 ## Adding a Specification
 

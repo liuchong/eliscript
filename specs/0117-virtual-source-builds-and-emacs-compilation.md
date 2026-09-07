@@ -112,7 +112,7 @@ project root as `default-directory`, and do not save the current buffer.
 This specification completes public virtual-source project builds and Emacs
 buffer, file, and project compilation with source navigation. It does not claim
 interactive evaluation, persistent REPL sessions, runtime stack remapping,
-host-neutral watch events, clean-machine onboarding, the complete AC-12 gate,
+host-neutral watch events, local onboarding, the complete AC-12 gate,
 or the M10 exit gate.
 
 ## Acceptance Criteria

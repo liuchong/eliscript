@@ -942,7 +942,7 @@ restart recovery are implemented. The terminal REPL is implemented with
 compiler-owned multiline input and Bun/Node evidence. Host-neutral project
 watch events and their Emacs consumer are implemented. Installation, daily
 project workflows, and troubleshooting are documented and executable. The
-full AC-12 matrix, final clean-machine exercise, and M10 exit audit remain
+full AC-12 matrix, final local onboarding exercise, and M10 exit audit remain
 formal acceptance work rather than implementation credit.
 
 ### M11: Standard and Platform Libraries (6 implementation units)
@@ -1073,7 +1073,7 @@ the public boundaries through separately reported application validation.
 **Deliverables:**
 
 - a complete core acceptance corpus and report
-- one clean-machine onboarding exercise
+- one recorded local onboarding exercise
 - one compatibility migration rehearsal
 - complete architecture, language, tools, library, and troubleshooting docs
 - machine-readable and human-readable 1.0 acceptance reports
@@ -1118,7 +1118,7 @@ derives the complete AC/PD inventory from normative headings, maps every
 criterion to bounded probes and tracked evidence, and retains one clean audit
 with 17 pass, 18 incomplete, and zero failed criteria. This completes the
 corpus-and-report implementation unit without claiming final acceptance.
-Clean-machine onboarding, compatibility migration rehearsal, the complete
+Local onboarding, compatibility migration rehearsal, the complete
 documentation set, and final 1.0 artifacts remain open.
 
 ## Construction Protocol
@@ -1406,13 +1406,14 @@ the acceptance manifest.
 
 ### H. Documentation and Sustainability
 
-**AC-22 MUST - Clean-machine onboarding**
+**AC-22 MUST - Documented local onboarding**
 
 A new user following only repository documentation can install prerequisites,
 build the compiler, compile and run a basic program, and run the core test suite
-in 15 minutes of active steps, excluding dependency download time. Every core
-prerequisite and command is documented. Application examples have separate,
-non-blocking onboarding instructions.
+on a supported local development machine in 15 minutes of active steps,
+excluding dependency download time. The run records its source revision and
+toolchain. Every core prerequisite and command is documented. Application
+examples have separate, non-blocking onboarding instructions.
 
 **AC-23 MUST - Complete documentation set**
 

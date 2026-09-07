@@ -62,9 +62,10 @@ async function trackedFiles(root) {
   return new Set(result.stdout.split("\0").filter(Boolean));
 }
 
-async function capture(argv, root, timeoutMs) {
+async function capture(argv, root, timeoutMs, env = process.env) {
   const child = Bun.spawn(argv, {
     cwd: root,
+    env,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -264,7 +265,10 @@ function outputSummary(stdout, stderr) {
 
 async function runProbe(command, root) {
   const started = performance.now();
-  const result = await capture(command.argv, root, command.timeoutMs);
+  const result = await capture(command.argv, root, command.timeoutMs, {
+    ...process.env,
+    ELISCRIPT_SKIP_RETAINED_ACCEPTANCE: "1",
+  });
   const output = `${result.stdout}\n${result.stderr}`;
   return {
     id: command.id,

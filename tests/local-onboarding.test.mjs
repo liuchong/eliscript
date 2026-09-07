@@ -12,7 +12,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 async function contract() {
   return JSON.parse(await readFile(
-    path.join(ROOT, "contracts/clean-machine-onboarding.json"),
+    path.join(ROOT, "contracts/local-onboarding.json"),
     "utf8",
   ));
 }
@@ -27,28 +27,24 @@ async function validationErrors(candidate) {
   throw new Error("expected onboarding validation to fail");
 }
 
-test("clean-machine contract binds a fresh core-only onboarding run", async () => {
+test("local onboarding contract binds the core-only validation run", async () => {
   const report = await checkOnboarding({ root: ROOT });
   expect(report).toMatchObject({
     schemaVersion: 1,
-    format: "eliscript-clean-machine-onboarding-contract-report",
+    format: "eliscript-local-onboarding-contract-report",
     version: 1,
     steps: 6,
     activeSteps: 5,
-    sourceFiles: 13,
+    sourceFiles: 12,
     maximumActiveDurationMs: 900_000,
     environment: {
-      provider: "github-actions",
-      runnerOs: "Linux",
-      runnerArchitecture: "X64",
-      ubuntuVersion: "24.04",
-      bunVersion: "1.4.0",
-      emacsVersion: "30.2",
+      provider: "local",
+      requiredCommands: ["git", "bun", "emacs", "make"],
     },
   });
 });
 
-test("clean-machine contract rejects missing prerequisite documentation", async () => {
+test("local onboarding contract rejects missing prerequisite documentation", async () => {
   const candidate = await contract();
   candidate.requiredDocumentation[0] = "missing prerequisite command";
   expect(await validationErrors(candidate)).toContain(
@@ -56,7 +52,7 @@ test("clean-machine contract rejects missing prerequisite documentation", async 
   );
 });
 
-test("clean-machine contract rejects application tests in the core exercise", async () => {
+test("local onboarding contract rejects application tests in the core exercise", async () => {
   const candidate = await contract();
   candidate.steps.at(-1).argv = ["make", "test-applications"];
   const errors = await validationErrors(candidate);
@@ -64,7 +60,7 @@ test("clean-machine contract rejects application tests in the core exercise", as
   expect(errors).toContain("core-suite must execute make test-core");
 });
 
-test("clean-machine contract rejects a weakened compiler-build step", async () => {
+test("local onboarding contract rejects a weakened compiler-build step", async () => {
   const candidate = await contract();
   candidate.steps[2].argv = ["true"];
   expect(await validationErrors(candidate)).toContain(
@@ -72,10 +68,10 @@ test("clean-machine contract rejects a weakened compiler-build step", async () =
   );
 });
 
-test("clean-machine contract rejects an unsupported environment", async () => {
+test("local onboarding contract rejects an unsupported provider", async () => {
   const candidate = await contract();
-  candidate.environment.runnerOs = "macOS";
+  candidate.environment.provider = "remote";
   expect(await validationErrors(candidate)).toContain(
-    'environment.runnerOs must be "Linux"',
+    "environment must match the version 1 local inventory",
   );
 });

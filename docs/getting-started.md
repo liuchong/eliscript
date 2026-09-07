@@ -289,6 +289,6 @@ bun test tests/onboarding-docs.test.mjs
 ```
 
 Passing this documented workflow proves the current checkout and local tool
-chain. It does not by itself prove the final clean-machine exercise, every
+chain. It does not by itself prove the final recorded onboarding exercise, every
 supported CI matrix cell, stable public compatibility, or the complete 1.0
 acceptance report; those remain separate acceptance artifacts.

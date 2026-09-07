@@ -1,16 +1,12 @@
 {
   "schemaVersion": 1,
-  "format": "eliscript-clean-machine-onboarding",
+  "format": "eliscript-local-onboarding",
   "version": 1,
   "environment": {
-    "provider": "github-actions",
-    "runnerOs": "Linux",
-    "runnerArchitecture": "X64",
-    "ubuntuVersion": "24.04",
-    "bunVersion": "1.4.0",
-    "emacsVersion": "30.2",
-    "maximumActiveDurationMs": 900000
+    "provider": "local",
+    "requiredCommands": ["git", "bun", "emacs", "make"]
   },
+  "maximumActiveDurationMs": 900000,
   "steps": [
     {
       "id": "locked-dependencies",
@@ -61,16 +57,15 @@
     "make test-core"
   ],
   "sourceFiles": [
-    ".github/workflows/clean-machine-onboarding.yml",
     "Makefile",
     "bun.lock",
-    "contracts/clean-machine-onboarding.json",
+    "contracts/local-onboarding.json",
     "docs/getting-started.md",
     "examples/getting-started/eliscript.json",
     "examples/getting-started/src/main.eli",
     "examples/getting-started/src/math.eli",
     "package.json",
-    "specs/0135-clean-machine-onboarding.md",
+    "specs/0135-local-onboarding.md",
     "tests/onboarding-docs.test.mjs",
     "tests/test-partition.test.mjs",
     "tools/onboarding/check.mjs"

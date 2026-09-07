@@ -98,7 +98,7 @@ tooling.
 
 This specification completes the host-neutral watch API and maintained Emacs
 consumer when every acceptance item has default-suite evidence. M10 remains in
-progress until clean-machine onboarding, troubleshooting documentation, the
+progress until local onboarding, troubleshooting documentation, the
 complete AC-12 compatibility matrix, and the milestone exit gate are closed.
 
 ## Acceptance Criteria

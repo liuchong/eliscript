@@ -19,7 +19,7 @@ test-core: check-contracts
 	$(BUN) test tests/conformance.test.mjs tests/public-surface.test.mjs \
 		tests/api-index.test.mjs \
 		tests/onboarding-docs.test.mjs \
-		tests/clean-machine-onboarding.test.mjs \
+		tests/local-onboarding.test.mjs \
 		tests/test-partition.test.mjs \
 		tests/repository-integrity.test.mjs \
 		tests/platform-capabilities.test.mjs \
@@ -96,9 +96,11 @@ test-applications:
 check-contracts:
 	$(BUN) tools/conformance/check.mjs
 	$(BUN) tools/progress/check.mjs
+ifneq ($(ELISCRIPT_SKIP_RETAINED_ACCEPTANCE),1)
 	$(BUN) tools/acceptance/check.mjs \
 		--verify-run acceptance/runs/m13-01.json \
 		--verify-markdown acceptance/runs/m13-01.md
+endif
 	$(BUN) tools/surface/check.mjs
 	$(BUN) tools/surface/generate-api.mjs --check
 	$(BUN) tools/ci/render-workflow.mjs --check

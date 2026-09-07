@@ -127,5 +127,5 @@ includes documentation validation in the default repository contract gate.
 - **VOD-11:** A real temporary project executes the documented format, check,
   build, Bun, Node, diagnostic, evaluation, REPL, and Emacs mode path.
 - **VOD-12:** Documentation completion contributes no application-framework
-  evidence and does not claim the separate clean-machine, matrix, stability,
+  evidence and does not claim the separate recorded onboarding, matrix, stability,
   or final acceptance gates.

@@ -1,4 +1,4 @@
-# 0135: Traceable Clean-machine Onboarding Exercise
+# 0135: Traceable Local Onboarding Exercise
 
 - Status: Accepted
 - Implementation: In Progress
@@ -9,37 +9,33 @@
 
 ## Summary
 
-M13 requires stronger evidence than a temporary project inside an already
-prepared checkout. Eliscript therefore executes its complete documented
-onboarding path on a fresh GitHub-hosted Ubuntu runner. The runner begins with
-only a repository checkout plus explicitly installed Git, Emacs, and Bun. The
-Eliscript-owned runner installs locked dependencies, discovers the public
-command, builds the bootstrap compiler, executes the documented two-module
-project, byte-compiles maintained Emacs Lisp, and runs the framework-neutral
-core suite.
+M13 requires executable evidence that the documented onboarding path works as
+written. Eliscript therefore runs that path directly in the current local
+checkout: it installs locked dependencies, discovers the public command, builds
+the bootstrap compiler, executes the documented two-module project,
+byte-compiles maintained Emacs Lisp, and runs the framework-neutral core suite.
 
 The exercise emits machine-readable and generated human-readable evidence
-bound to one Git commit, tree, Actions run, environment, ordered command set,
+bound to one Git commit, tree, local environment, ordered command set,
 and complete source digest inventory. Dependency installation is measured but
 excluded from the 15-minute active-step budget defined by AC-22. Application
 tests remain outside the exercise and cannot satisfy or block it.
 
-This specification remains in progress until one passing report from the
-declared fresh runner is downloaded, verified against its source commit, and
-retained under `acceptance/runs/`.
+The exercise deliberately makes no claim that the host is newly provisioned or
+isolated. It proves the supported workflow on the recorded local toolchain;
+cross-platform coverage remains AC-21. This specification remains in progress
+until one passing report is verified and retained under `acceptance/runs/`.
 
 ## Environment Contract
 
-The first retained exercise uses one GitHub-hosted `ubuntu-24.04` x64 runner,
-Bun 1.4.0, and Emacs 30.2. The report must prove GitHub Actions execution from
-the same commit named by `GITHUB_SHA`; a local checkout, container inside an
-already prepared checkout, or hand-authored report cannot claim M13-02.
+The run uses the local host and requires `git`, `bun`, `emacs`, and `make`.
+Their actual versions, operating system, architecture, and CPU are recorded in
+the report instead of being hidden behind a provider-specific runner label.
 
-GitHub installs the declared toolchain on a newly provisioned runner. After
-that minimal host setup, `tools/onboarding/check.mjs` owns every project step.
-It rejects the wrong provider, OS, architecture, Ubuntu release, Bun version,
-Emacs version, dirty tracked checkout, altered command sequence, application
-test leakage, or active duration above 900,000 milliseconds.
+`tools/onboarding/check.mjs` owns every project step. It rejects a dirty tracked
+checkout, altered command sequence, application test leakage, incomplete tool
+metadata, or active duration above 900,000 milliseconds. No cloud token,
+hosted runner, container, or virtual machine is part of this contract.
 
 ## Ordered Exercise
 
@@ -55,7 +51,7 @@ The versioned contract runs these steps exactly once and in order:
 The dependency step records its own duration but does not contribute to the
 active-step total. Every other step contributes. The exercise stops after the
 first failed step and records later steps as `not-run`; it still writes a
-failure report when possible so CI evidence is diagnosable.
+failure report when possible so the result is diagnosable.
 
 ## Test Partition
 
@@ -74,7 +70,7 @@ or onboarding command sequence.
 The JSON report records:
 
 - source commit and Git tree
-- GitHub repository, run identifier, attempt, SHA, and immutable run URL
+- local execution marker and source commit
 - operating-system release, architecture, CPU, Git, Bun, Node, and Emacs
   versions
 - argument vector, timeout, exit status, duration, bounded summary, and
@@ -91,7 +87,9 @@ to a fresh rendering of the JSON report.
 
 ```sh
 bun tools/onboarding/check.mjs
-gh workflow run clean-machine-onboarding.yml --ref master
+bun tools/onboarding/check.mjs --run \
+  --json-output acceptance/runs/m13-02.json \
+  --markdown-output acceptance/runs/m13-02.md
 bun tools/onboarding/check.mjs \
   --verify-run acceptance/runs/m13-02.json \
   --verify-markdown acceptance/runs/m13-02.md
@@ -99,8 +97,8 @@ bun tools/onboarding/check.mjs \
 
 ## Acceptance Criteria
 
-- **CMO-01:** The exercise can pass only on the declared fresh GitHub-hosted
-  Ubuntu runner and exact Bun and Emacs versions.
+- **CMO-01:** The exercise runs directly on the local host and records its
+  operating system, architecture, Git, Bun, Node, and Emacs versions.
 - **CMO-02:** The ordered run begins from a clean tracked checkout and performs
   frozen dependency installation itself.
 - **CMO-03:** Public command discovery, compiler build, documented project,
@@ -112,6 +110,6 @@ bun tools/onboarding/check.mjs \
 - **CMO-06:** Every command result and source artifact is bound by SHA-256 to
   the exact audited commit.
 - **CMO-07:** Machine and human reports are deterministic, mutually verified,
-  and identify the originating Actions run.
-- **CMO-08:** Failed, incomplete, locally produced, dirty, over-budget, or
+  and identify the exact local source revision.
+- **CMO-08:** Failed, incomplete, dirty, over-budget, or
   application-contaminated evidence cannot complete M13-02 or AC-22.

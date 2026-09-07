@@ -112,7 +112,7 @@ and leaves no process behind.
 ## M10 Status
 
 This specification delivers the first source-mapped persistent evaluation
-slice. It does not claim host-neutral file watching, clean-machine onboarding,
+slice. It does not claim host-neutral file watching, local onboarding,
 the complete interactive terminal REPL experience, the complete AC-12 or AC-13
 gate, or the M10 exit gate until every acceptance criterion below has executable
 evidence.

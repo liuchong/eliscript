@@ -67,8 +67,8 @@ criterion must have both executable and file evidence. Optional applications
 are listed separately with `contributesToCore: false` and cannot be used by an
 AC or PD criterion.
 
-The initial command set uses the complete public repository suite plus strict
-Emacs byte compilation. Criterion-specific evidence points to the relevant
+The initial command set uses the complete framework-neutral core suite plus
+strict Emacs byte compilation. Criterion-specific evidence points to the relevant
 specification, contract, test, or source-bound benchmark. A later matrix run
 may add environment-specific probe records without changing language
 semantics.
