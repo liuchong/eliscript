@@ -79,7 +79,7 @@ migration note before 1.0.
 Three specifications remain planning work:
 
 - 0001 is the still-evolving top-level language and toolchain boundary
-- 0040 remains in progress until AC-01 through AC-26 pass
+- 0040 remains in progress until AC-01 through AC-24 pass
 - 0041 remains pending until persistent values, protocols, transducers, and
   Emacs performance reinvestment are implemented and PD-01 through PD-11 pass
 

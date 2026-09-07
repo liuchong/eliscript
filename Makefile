@@ -25,6 +25,7 @@ test: check-contracts
 		tests/project-scale.test.mjs \
 		tests/core-performance-benchmark.test.mjs \
 		tests/maturity-progress.test.mjs \
+		tests/core-acceptance-corpus.test.mjs \
 		tests/esm-imports.test.mjs \
 		tests/ci-contract.test.mjs \
 		tests/collection-layout-benchmark.test.mjs \

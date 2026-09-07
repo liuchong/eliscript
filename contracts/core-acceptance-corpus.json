@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "format": "eliscript-core-acceptance-corpus",
+  "version": 1,
+  "sources": {
+    "acceptance": "specs/0040-maturity-roadmap.md",
+    "persistentData": "specs/0041-host-symbiosis-and-persistent-data.md",
+    "progress": "contracts/maturity-progress.json"
+  },
+  "commands": [
+    {
+      "id": "core-suite",
+      "argv": ["make", "test"],
+      "timeoutMs": 900000
+    },
+    {
+      "id": "strict-byte-compile",
+      "argv": ["make", "byte-compile"],
+      "timeoutMs": 300000
+    }
+  ],
+  "criteria": [
+    { "id": "AC-01", "sourceSpec": "0040", "title": "Stable specification coverage", "probes": ["core-suite"], "evidence": ["specs/index.json", "tests/conformance/manifest.json"] },
+    { "id": "AC-02", "sourceSpec": "0040", "title": "Stable corpus compatibility", "probes": ["core-suite"], "evidence": ["contracts/compatibility-baseline.json", "tests/conformance/manifest.json"] },
+    { "id": "AC-03", "sourceSpec": "0040", "title": "Deterministic diagnostics", "probes": ["core-suite"], "evidence": ["specs/0043-structured-diagnostics.md", "tests/conformance.test.mjs"] },
+    { "id": "AC-04", "sourceSpec": "0040", "title": "Reproducible fixed point", "probes": ["core-suite"], "evidence": ["specs/0019-self-hosted-compiler.md", "tests/bootstrap-compiler.test.mjs"] },
+    { "id": "AC-05", "sourceSpec": "0040", "title": "Compiler parity", "probes": ["core-suite"], "evidence": ["tests/bootstrap-analyzer.test.mjs", "tests/bootstrap-compiler.test.mjs", "tests/bootstrap-emitter.test.mjs", "tests/bootstrap-ir.test.mjs"] },
+    { "id": "AC-06", "sourceSpec": "0040", "title": "Self-hosted authority", "probes": ["core-suite"], "evidence": ["specs/0112-unified-self-hosted-build-operation.md", "tests/bootstrap-project.test.mjs"] },
+    { "id": "AC-07", "sourceSpec": "0040", "title": "Repeated determinism", "probes": ["core-suite"], "evidence": ["specs/0019-self-hosted-compiler.md", "tests/bootstrap-compiler.test.mjs"] },
+    { "id": "AC-08", "sourceSpec": "0040", "title": "Clean project workflow", "probes": ["core-suite"], "evidence": ["docs/getting-started.md", "tests/onboarding-docs.test.mjs", "tests/watch.test.mjs"] },
+    { "id": "AC-09", "sourceSpec": "0040", "title": "Correct incremental builds", "probes": ["core-suite"], "evidence": ["specs/0128-project-scale-invalidation.md", "tests/project-scale.test.mjs"] },
+    { "id": "AC-10", "sourceSpec": "0040", "title": "Host portability", "probes": ["core-suite"], "evidence": ["contracts/compatibility-matrix.json", "tests/esm-imports.test.mjs", "tests/project-cli-test.sh"] },
+    { "id": "AC-11", "sourceSpec": "0040", "title": "Formatter", "probes": ["core-suite"], "evidence": ["specs/0114-deterministic-concrete-syntax-formatter.md", "tests/bootstrap-formatter.test.mjs", "tests/format-cli-test.sh"] },
+    { "id": "AC-12", "sourceSpec": "0040", "title": "Emacs mode", "probes": ["core-suite", "strict-byte-compile"], "evidence": ["editor/eliscript-mode.el", "tests/eliscript-mode-tests.el"] },
+    { "id": "AC-13", "sourceSpec": "0040", "title": "Interactive evaluation", "probes": ["core-suite"], "evidence": ["specs/0120-interactive-terminal-repl.md", "tests/bootstrap-evaluation.test.mjs", "tests/eliscript-repl-tests.el"] },
+    { "id": "AC-14", "sourceSpec": "0040", "title": "Source-level debugging evidence", "probes": ["core-suite"], "evidence": ["specs/0009-source-maps.md", "tests/bootstrap-evaluation.test.mjs", "tests/bootstrap-project.test.mjs"] },
+    { "id": "AC-15", "sourceSpec": "0040", "title": "Stable library contract", "probes": ["core-suite"], "evidence": ["contracts/library-api.json", "tests/api-index.test.mjs", "tests/core-stdlib.test.mjs"] },
+    { "id": "AC-16", "sourceSpec": "0040", "title": "Worker correctness and recovery", "probes": ["core-suite"], "evidence": ["specs/0104-accelerated-emacs-operation-service.md", "tests/worker-lifecycle-soak.test.mjs", "tests/worker-runtime.test.mjs"] },
+    { "id": "AC-17", "sourceSpec": "0040", "title": "End-to-end performance value", "probes": ["core-suite"], "evidence": ["benchmarks/emacs-analysis-macos-arm64.json", "specs/0105-emacs-analysis-performance-reinvestment.md", "tests/emacs-analysis-evidence.test.mjs"] },
+    { "id": "AC-18", "sourceSpec": "0040", "title": "Fuzz robustness", "probes": ["core-suite"], "evidence": ["specs/0127-deterministic-reader-program-fuzz.md", "tests/reader-program-fuzz.test.mjs"] },
+    { "id": "AC-19", "sourceSpec": "0040", "title": "Scale and soak", "probes": ["core-suite"], "evidence": ["benchmarks/worker-lifecycle-soak-macos-arm64.json", "tests/project-scale.test.mjs", "tests/worker-lifecycle-soak.test.mjs"] },
+    { "id": "AC-20", "sourceSpec": "0040", "title": "Boundary security", "probes": ["core-suite"], "evidence": ["specs/0130-hostile-boundary-security.md", "tests/boundary-security.test.mjs"] },
+    { "id": "AC-21", "sourceSpec": "0040", "title": "Supported environment matrix", "probes": ["core-suite"], "evidence": [".github/workflows/compatibility.yml", "contracts/compatibility-matrix.json", "tests/ci-contract.test.mjs"] },
+    { "id": "AC-22", "sourceSpec": "0040", "title": "Clean-machine onboarding", "probes": ["core-suite"], "evidence": ["docs/getting-started.md", "tests/onboarding-docs.test.mjs"] },
+    { "id": "AC-23", "sourceSpec": "0040", "title": "Complete documentation set", "probes": ["core-suite"], "evidence": ["contracts/documentation.json", "tools/documentation/check.mjs"] },
+    { "id": "AC-24", "sourceSpec": "0040", "title": "Acceptance audit", "probes": ["core-suite"], "evidence": ["contracts/repository-integrity.json", "specs/0040-maturity-roadmap.md", "tools/integrity/check.mjs"] },
+    { "id": "PD-01", "sourceSpec": "0041", "title": "Persistent Semantics", "probes": ["core-suite"], "evidence": ["tests/persistent-list.test.mjs", "tests/persistent-map.test.mjs", "tests/persistent-set.test.mjs", "tests/persistent-vector.test.mjs"] },
+    { "id": "PD-02", "sourceSpec": "0041", "title": "Vector Structural Bounds", "probes": ["core-suite"], "evidence": ["specs/0078-persistent-collection-core-exit-audit.md", "tests/persistent-core-exit.test.mjs"] },
+    { "id": "PD-03", "sourceSpec": "0041", "title": "HAMT Structural Bounds", "probes": ["core-suite"], "evidence": ["specs/0078-persistent-collection-core-exit-audit.md", "tests/persistent-core-exit.test.mjs"] },
+    { "id": "PD-04", "sourceSpec": "0041", "title": "Hash and Equality", "probes": ["core-suite"], "evidence": ["specs/0048-value-equality-and-hashing.md", "tests/value-semantics.test.mjs"] },
+    { "id": "PD-05", "sourceSpec": "0041", "title": "Transient Safety", "probes": ["core-suite"], "evidence": ["specs/0093-static-transient-ownership-analysis.md", "tests/transient.test.mjs"] },
+    { "id": "PD-06", "sourceSpec": "0041", "title": "Transformation Efficiency", "probes": ["core-suite"], "evidence": ["benchmarks/transient-builder-macos-arm64.json", "tests/transducer.test.mjs", "tests/transient-builder-benchmark.test.mjs"] },
+    { "id": "PD-07", "sourceSpec": "0041", "title": "Host Interop", "probes": ["core-suite"], "evidence": ["specs/0073-native-javascript-container-interop.md", "tests/interop-js.test.mjs"] },
+    { "id": "PD-08", "sourceSpec": "0041", "title": "Emacs Codec", "probes": ["core-suite"], "evidence": ["benchmarks/worker-value-stream-macos-arm64.json", "tests/worker-value-stream-probe.test.mjs"] },
+    { "id": "PD-09", "sourceSpec": "0041", "title": "Accelerated Operation Correctness", "probes": ["core-suite"], "evidence": ["specs/0104-accelerated-emacs-operation-service.md", "tests/emacs-analysis-evidence.test.mjs"] },
+    { "id": "PD-10", "sourceSpec": "0041", "title": "Emacs Performance Reinvestment", "probes": ["core-suite"], "evidence": ["benchmarks/emacs-analysis-macos-arm64.json", "specs/0105-emacs-analysis-performance-reinvestment.md"] },
+    { "id": "PD-11", "sourceSpec": "0041", "title": "State Discipline", "probes": ["core-suite"], "evidence": ["specs/0072-atomic-state-references.md", "tests/atom.test.mjs"] }
+  ],
+  "applications": [
+    { "id": "AV-01", "title": "Maintained application validation", "contributesToCore": false },
+    { "id": "AV-02", "title": "Browser publishing validation", "contributesToCore": false }
+  ]
+}

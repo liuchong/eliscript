@@ -377,7 +377,7 @@ protocols and transducers, compiler/build convergence, project configuration,
 formatter and Emacs mode, interactive evaluation, cross-platform reliability,
 real applications, and a formal all-or-nothing acceptance audit.
 
-The complete staged construction plan and AC-01-through-AC-26 final gate are in
+The complete staged construction plan and AC-01-through-AC-24 final gate are in
 [0040-maturity-roadmap.md](0040-maturity-roadmap.md). The 32-way persistent
 vector trie, HAMT maps and sets, transient builders, collection protocols,
 value codec, and measured reinvestment into Emacs are designed in

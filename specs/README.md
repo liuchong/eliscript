@@ -28,16 +28,16 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 130 specifications.
+The registry currently contains 134 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 98 |
+| Accepted design | 102 |
 | Stable design | 30 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 126 |
+| Implemented | 130 |
 | Superseded implementation | 1 |
 
 Compatibility Baseline 2 separately classifies 30 specifications as stable,
@@ -444,6 +444,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0131 | [Source-bound Core Performance Baseline](0131-source-bound-core-performance-baseline.md) | Accepted | Implemented |
 | 0132 | [Repository Dependency and Generated-artifact Audits](0132-repository-integrity-audits.md) | Accepted | Implemented |
 | 0133 | [Verified Installation and Daily Development Guide](0133-verified-onboarding-documentation.md) | Accepted | Implemented |
+| 0134 | [Versioned Core Acceptance Corpus and Truthful Audit Run](0134-versioned-core-acceptance-corpus.md) | Accepted | Implemented |
 
 ## Adding a Specification
 
