@@ -1944,6 +1944,32 @@
           "contains": "public surface checker rejects platform classification and export drift"
         }
       ]
+    },
+    {
+      "id": "quality.deterministic-reader-program-fuzz",
+      "title": "Deterministic reader and program fuzzing",
+      "status": "accepted",
+      "spec": "0127",
+      "contracts": [
+        "Generates and replays 100000 deterministic grammar-aware and complete-module mutation inputs",
+        "Requires seed and self-hosted reader decisions and accepted syntax trees to agree",
+        "Validates deterministic self-hosted diagnostics recursive spans and formatter round trips",
+        "Requires every mutated program to compile identically after formatting or return a structured diagnostic",
+        "Bounds source size corpus bytes subprocess duration temporary storage and child lifetime",
+        "Keeps application frameworks and publishing tools outside core implementation and evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/reader-program-fuzz.test.mjs",
+          "contains": "100000 deterministic reader and program mutations preserve every invariant"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-reader-columns-count-source-characters"
+        }
+      ]
     }
   ]
 }

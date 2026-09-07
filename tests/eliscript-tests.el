@@ -138,6 +138,23 @@
                    '((defconst answer 42)
                      (defun broken () missing))))))
 
+(ert-deftest eliscript-reader-columns-count-source-characters ()
+  (let* ((source (concat "\t" (string #x1f600)))
+         (form (car (eliscript-read-located-string source "columns.eli")))
+         (span (eliscript-form-span form)))
+    (should (= (eliscript-source-span-start span) 1))
+    (should (= (eliscript-source-span-end span) 2))
+    (should (= (eliscript-source-span-column span) 2))
+    (should (= (eliscript-source-span-end-column span) 3)))
+  (let* ((source (concat "\t" (string #x1f600) ")"))
+         (error-data
+          (should-error
+           (eliscript-read-located-string source "columns.eli")
+           :type 'eliscript-read-error)))
+    (should (string-match-p
+             (regexp-quote "columns.eli:1:3: Invalid read syntax")
+             (error-message-string error-data)))))
+
 (ert-deftest eliscript-emits-literals-and-data ()
   (should (equal (eliscript-emitter-emit-expression nil) "null"))
   (should (equal (eliscript-emitter-emit-expression t) "true"))

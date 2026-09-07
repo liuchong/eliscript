@@ -64,10 +64,10 @@ reader has produced a list."
     (save-excursion
       (goto-char start)
       (setq line (line-number-at-pos)
-            column (1+ (current-column)))
+            column (1+ (- start (line-beginning-position))))
       (goto-char end)
       (setq end-line (line-number-at-pos)
-            end-column (1+ (current-column))))
+            end-column (1+ (- end (line-beginning-position)))))
     (eliscript-source-span-create
      :filename filename
      :start (1- start)

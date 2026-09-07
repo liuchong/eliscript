@@ -28,20 +28,20 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 126 specifications.
+The registry currently contains 127 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 94 |
+| Accepted design | 95 |
 | Stable design | 30 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 122 |
+| Implemented | 123 |
 | Superseded implementation | 1 |
 
 Compatibility Baseline 2 separately classifies 30 specifications as stable,
-92 as provisional, 3 as planning, and 1 as superseded. That baseline is
+93 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -137,6 +137,12 @@ inject request-scoped progress and cancellation into the real worker, and keep
 frameworks outside core evidence. M11 compatibility stabilization and its
 final exit audit remain open.
 
+M12 has begun with specification 0127. Its first of six implementation units
+executes a fixed 100,000-input grammar-aware and complete-module mutation
+corpus, checks seed/self-hosted reader agreement, deterministic structured
+diagnostics, recursive spans, formatter round trips, and compiler behavior.
+AC-18 is complete; scale, soak, security, benchmark, and audit work remains.
+
 ## Reading Paths
 
 For the shortest route through the design, read by intent rather than by file
@@ -218,6 +224,7 @@ number.
 49. [0109: Self-hosted Build Decision Reports](0109-self-hosted-build-decision-reports.md)
 50. [0125: Generated Library API Index](0125-generated-library-api-index.md)
 51. [0126: Explicit Browser and Worker Capability Packages](0126-explicit-host-capability-packages.md)
+52. [0127: Deterministic Reader and Program Fuzzing](0127-deterministic-reader-program-fuzz.md)
 
 ### Application Validation (Non-core)
 
@@ -419,6 +426,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0124 | [Declared Macro File Dependencies](0124-declared-macro-file-dependencies.md) | Stable | Implemented |
 | 0125 | [Generated Library API Index](0125-generated-library-api-index.md) | Accepted | Implemented |
 | 0126 | [Explicit Browser and Worker Capability Packages](0126-explicit-host-capability-packages.md) | Accepted | Implemented |
+| 0127 | [Deterministic Reader and Program Fuzzing](0127-deterministic-reader-program-fuzz.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

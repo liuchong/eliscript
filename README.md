@@ -69,6 +69,14 @@ now grant only named host authority, inject request-scoped progress and
 cancellation into the real worker, and re-export the canonical worker codecs.
 Compatibility stabilization and the final M11 exit audit remain open.
 
+M12 reliability work has begun. The deterministic reader/program fuzz suite
+now replays 100,000 grammar-aware and complete-module mutation inputs, checks
+seed/self-hosted acceptance parity, recursive spans, formatter round trips,
+structured diagnostics, and byte-identical compilation after formatting. The
+fixed corpus and result digests are specified in
+[0127](specs/0127-deterministic-reader-program-fuzz.md). The remaining M12
+scale, soak, security, benchmark, and artifact-audit units are still open.
+
 Run `bun run progress` for the current evidence-derived core progress report.
 It reports implementation, verification, and stabilization independently;
 application examples do not contribute to any core percentage.
@@ -290,6 +298,12 @@ Run the default verification suite:
 
 ```sh
 bun run test
+```
+
+Run the fixed 100,000-input reliability corpus directly with:
+
+```sh
+bun run fuzz:reader-program
 ```
 
 ## Language Tour

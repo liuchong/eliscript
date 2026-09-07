@@ -33,6 +33,13 @@ The maturity-progress test derives implementation, verification, and
 stabilization percentages from explicit core acceptance units. Application
 demonstrations are validated separately and cannot raise core progress.
 
+`reader-program-fuzz.test.mjs` runs the fixed 100,000-input M12 reliability
+corpus. Half of the inputs are recursively generated reader forms and half are
+complete-module mutations. The test checks seed/self-hosted reader decisions,
+accepted syntax trees, deterministic structured diagnostics, recursive source
+spans, formatter round trips, compiler outcomes, corpus replay, and fixed
+SHA-256 identities under explicit source, corpus, process, and timeout bounds.
+
 ## Default Suite
 
 `make test` runs the ERT suite, invokes the public CLI, compares the generated
