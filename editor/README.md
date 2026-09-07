@@ -1,5 +1,8 @@
 # Emacs Editor Integration
 
+[Getting started](../docs/getting-started.md) | [Project README](../README.md) |
+[Specifications](../specs/README.md)
+
 [`eliscript-mode.el`](eliscript-mode.el) provides the maintained Emacs major
 mode for `.eli` source. Add this directory to `load-path` and require the mode:
 

@@ -442,6 +442,13 @@ under Bun and Node.
 
 ## Benchmarks, Projects, and Worker
 
+`onboarding-docs.test.mjs` checks the versioned installation and daily-workflow
+guide, rejects missing required stages, and executes a temporary two-module
+project through formatting, graph checking, self-hosted Bun and Node builds,
+structured unsaved-source diagnostics, evaluation, persistent terminal state,
+and Emacs mode discovery. This is executable documentation evidence, not the
+separate final clean-machine acceptance exercise.
+
 `repository-integrity.test.mjs` runs the complete dependency and artifact audit
 against the real tracked repository. Negative cases prove that package boundary
 violations, undeclared packages, stale benchmark digests, missing generated

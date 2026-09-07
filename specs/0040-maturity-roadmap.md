@@ -924,14 +924,26 @@ projects behave equivalently under Bun and Node, and the Emacs mode shares one
 process per project, validates framed events, refreshes matching Flymake
 buffers, and stops ownership explicitly.
 
-**M10 status:** In progress. Formatter, single-file format-check, the
-foundational Emacs major mode, project-aware check, unsaved-buffer validation,
+Specification
+[0133-verified-onboarding-documentation.md](0133-verified-onboarding-documentation.md)
+completes the installation and troubleshooting slice. One versioned guide
+covers checkout setup, a real configured project, format, check, build,
+Bun/Node execution, unsaved diagnostics, terminal REPL, Emacs setup, watch, and
+failure recovery. The default documentation contract checks every required
+stage and entry point, while an end-to-end test executes the framework-neutral
+workflow through public commands and the maintained Emacs mode.
+
+**M10 implementation status:** Complete, 6/6 units. Formatter, single-file
+format-check, the foundational Emacs major mode, project-aware check,
+unsaved-buffer validation,
 diagnostic navigation, virtual-source builds, and buffer/file/project compile
 commands are implemented. Persistent source-mapped evaluation and Emacs
 restart recovery are implemented. The terminal REPL is implemented with
 compiler-owned multiline input and Bun/Node evidence. Host-neutral project
-watch events and their Emacs consumer are implemented; onboarding, the full
-AC-12 matrix, and the exit gate remain open.
+watch events and their Emacs consumer are implemented. Installation, daily
+project workflows, and troubleshooting are documented and executable. The
+full AC-12 matrix, final clean-machine exercise, and M10 exit audit remain
+formal acceptance work rather than implementation credit.
 
 ### M11: Standard and Platform Libraries (6 implementation units)
 

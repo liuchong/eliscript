@@ -16,6 +16,7 @@ directory is required by the compiler core.
 | [`project/`](project/README.md) | Project scale, invalidation, resource, and clean-equivalence evidence |
 | [`performance/`](performance/README.md) | Source-bound compiler, build, worker, and persistent workload baseline |
 | [`integrity/`](integrity/README.md) | Closed dependency boundaries and deterministic generated-artifact audits |
+| [`documentation/`](documentation/README.md) | Required guide coverage and repository documentation entry points |
 | [`conformance/`](conformance/) | Specification registry and evidence validation |
 | [`surface/`](surface/) | Public-surface and compatibility-baseline validation |
 | [`ci/`](ci/) | Deterministic compatibility workflow generation |

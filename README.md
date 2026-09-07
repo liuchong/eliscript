@@ -12,6 +12,7 @@ JavaScript. The seed compiler runs in plain Emacs, emits standard ECMAScript
 modules, and bootstraps a compiler written in Eliscript itself.
 
 [Website](docs/index.html) | [Specifications](specs/README.md) |
+[Getting started](docs/getting-started.md) |
 [Library API](docs/pages/api.html) |
 [1.0 roadmap](specs/0040-maturity-roadmap.md) |
 [Host and persistent-data design](specs/0041-host-symbiosis-and-persistent-data.md) |
@@ -22,11 +23,12 @@ modules, and bootstraps a compiler written in Eliscript itself.
 Eliscript has a working Emacs Lisp seed compiler, a reproducible self-hosted
 compiler, self-hosted multi-file graph planning and incremental reuse,
 persistent values, protocols, and a long-lived Emacs-to-JavaScript worker. The
-repository also carries React, Org, and
-optional bundler probes as replaceable application-level evidence. The project
-has completed **M8: Language Contract Closure** and **M9: Compiler and Build
-Convergence**, and has started **M10: Daily
-Development Experience**.
+repository also carries React, Org, and optional bundler probes as replaceable
+application-level evidence. The project has completed all implementation units
+in **M8: Language Contract Closure**, **M9: Compiler and Build Convergence**,
+**M10: Daily Development Experience**, **M11: Standard and Platform
+Libraries**, and **M12: Reliability, Security, and Performance**. Final
+stability and acceptance remain open.
 
 M9 compiler convergence is complete: it includes canonical project requests,
 graph planning, IR serialization, build reports, v1-to-v2 cache migration,
@@ -35,7 +37,7 @@ single-file, single-entry project, and multi-entry project builds through one
 versioned operation boundary. Version 2 project identity, reports, cache
 validation, and worker loading preserve the version 1 single-entry contract.
 
-The first seven M10 slices are complete. The self-hosted compiler now owns a
+M10's six implementation units are complete. The self-hosted compiler owns a
 comment-preserving concrete-syntax formatter with fixed two-space/88-column
 layout, byte-idempotence and ESM-semantic corpus evidence, plus one Bun/Node
 `eliscript-format` command for stdout, atomic `--write`, and non-mutating
@@ -56,8 +58,11 @@ compiler-owned multiline input classification, persistent definitions and
 macros, load/reload/reset commands, recoverable errors, and deterministic
 prompt control. A separate `eliscript-watch` stream now reports canonical
 content-level project changes under Bun and Node, and Emacs shares one watcher
-per project to refresh Flymake diagnostics. Onboarding and the complete M10
-exit gate remain future work.
+per project to refresh Flymake diagnostics. The verified
+[installation and daily development guide](docs/getting-started.md) now runs a
+real framework-neutral project through format, check, build, Bun/Node execution,
+diagnostics, terminal REPL, and Emacs mode discovery. The complete M10 matrix,
+clean-machine exercise, and exit audit remain formal acceptance work.
 
 M11's six implementation units are complete. Reviewed metadata classifies all
 29 standard-library modules by role and owning specification; the generated
@@ -546,6 +551,7 @@ Start with the document that matches the question:
 
 | Question | Document |
 | --- | --- |
+| How do I install Eliscript and complete the daily workflow? | [Installation and Daily Development](docs/getting-started.md) |
 | What is the final project goal? | [Project Maturity Roadmap](specs/0040-maturity-roadmap.md) |
 | How do persistent values and Emacs acceleration fit together? | [Host Symbiosis and Persistent Data](specs/0041-host-symbiosis-and-persistent-data.md) |
 | Where is measured Emacs performance reinvestment specified? | [Emacs Analysis Performance Reinvestment](specs/0105-emacs-analysis-performance-reinvestment.md) |
@@ -594,6 +600,8 @@ The contract checker validates:
 - the public and internal surface inventory
 - the stable, provisional, and planning compatibility baseline
 - the generated GitHub Actions compatibility matrix
+- required onboarding sections, commands, and documentation entry points
+- dependency boundaries and deterministic generated-artifact integrity
 
 The versioned project contracts are:
 
@@ -603,6 +611,8 @@ The versioned project contracts are:
 | [`contracts/library-api.json`](contracts/library-api.json) | [0125: Generated Library API Index](specs/0125-generated-library-api-index.md) |
 | [`contracts/compatibility-matrix.json`](contracts/compatibility-matrix.json) | [0045: Continuous Compatibility Matrix](specs/0045-continuous-compatibility-matrix.md) |
 | [`contracts/compatibility-baseline.json`](contracts/compatibility-baseline.json) | [0046: M7 Compatibility Baseline](specs/0046-m7-compatibility-baseline.md) |
+| [`contracts/documentation.json`](contracts/documentation.json) | [0133: Verified Installation and Daily Development Guide](specs/0133-verified-onboarding-documentation.md) |
+| [`contracts/repository-integrity.json`](contracts/repository-integrity.json) | [0132: Repository Integrity Audits](specs/0132-repository-integrity-audits.md) |
 
 Run warning-as-error Emacs byte compilation with:
 

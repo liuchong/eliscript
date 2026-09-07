@@ -18,6 +18,7 @@ test: check-contracts
 	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
 		tests/conformance.test.mjs tests/public-surface.test.mjs \
 		tests/api-index.test.mjs \
+		tests/onboarding-docs.test.mjs \
 		tests/repository-integrity.test.mjs \
 		tests/platform-capabilities.test.mjs \
 		tests/reader-program-fuzz.test.mjs \
@@ -88,6 +89,7 @@ check-contracts:
 	$(BUN) tools/surface/check.mjs
 	$(BUN) tools/surface/generate-api.mjs --check
 	$(BUN) tools/ci/render-workflow.mjs --check
+	$(BUN) tools/documentation/check.mjs
 	$(BUN) tools/integrity/check.mjs
 
 byte-compile:

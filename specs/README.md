@@ -443,6 +443,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0130 | [Hostile Boundary Security](0130-hostile-boundary-security.md) | Accepted | Implemented |
 | 0131 | [Source-bound Core Performance Baseline](0131-source-bound-core-performance-baseline.md) | Accepted | Implemented |
 | 0132 | [Repository Dependency and Generated-artifact Audits](0132-repository-integrity-audits.md) | Accepted | Implemented |
+| 0133 | [Verified Installation and Daily Development Guide](0133-verified-onboarding-documentation.md) | Accepted | Implemented |
 
 ## Adding a Specification
 
