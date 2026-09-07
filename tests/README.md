@@ -40,6 +40,12 @@ accepted syntax trees, deterministic structured diagnostics, recursive source
 spans, formatter round trips, compiler outcomes, corpus replay, and fixed
 SHA-256 identities under explicit source, corpus, process, and timeout bounds.
 
+`project-scale.test.mjs` runs the fixed 1,000-module M12 project graph through
+the public self-hosted build command. It checks every chain, diamond, cycle,
+and shared-dependency edge; exact no-op, leaf, and shared invalidation sets;
+evaluated propagation through reused ESM importers; complete clean-build byte
+equivalence; and hard time, memory, stream, disk, child, and cleanup bounds.
+
 ## Default Suite
 
 `make test` runs the ERT suite, invokes the public CLI, compares the generated

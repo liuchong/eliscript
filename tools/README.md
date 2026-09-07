@@ -12,6 +12,8 @@ directory is required by the compiler core.
 | [`org/`](org/README.md) | Pure Emacs Org-to-ESM export and Vite virtual modules |
 | [`worker/`](worker/README.md) | Emacs operation service, worker lifecycle, indexing adapter, and measurement probe |
 | [`collections/`](collections/) | Bun, Node, and browser HAMT layout measurements |
+| [`fuzz/`](fuzz/) | Deterministic reader and complete-program robustness corpus |
+| [`project/`](project/README.md) | Project scale, invalidation, resource, and clean-equivalence evidence |
 | [`conformance/`](conformance/) | Specification registry and evidence validation |
 | [`surface/`](surface/) | Public-surface and compatibility-baseline validation |
 | [`ci/`](ci/) | Deterministic compatibility workflow generation |

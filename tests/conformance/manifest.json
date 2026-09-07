@@ -1970,6 +1970,28 @@
           "contains": "eliscript-reader-columns-count-source-characters"
         }
       ]
+    },
+    {
+      "id": "quality.project-scale-invalidation",
+      "title": "Deterministic project scale and invalidation",
+      "status": "accepted",
+      "spec": "0128",
+      "contracts": [
+        "Generates one fixed reachable 1000-module graph with chains diamonds cycles and 299 shared-dependency importers",
+        "Validates every dependency edge and fixed topology and source-tree identity",
+        "Requires a no-op build to reuse all modules without changing any artifact byte",
+        "Requires leaf and shared-dependency edits to compile exactly their changed source while propagating runtime behavior",
+        "Requires both incremental states to equal forced clean artifact trees graph digests and evaluated values",
+        "Bounds build duration maximum RSS captured output source artifacts temporary storage and child lifetime",
+        "Keeps application frameworks bundlers publishing systems and development servers outside core evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/project-scale.test.mjs",
+          "contains": "1000-module graph has exact incremental invalidation and clean equivalence"
+        }
+      ]
     }
   ]
 }

@@ -69,13 +69,16 @@ now grant only named host authority, inject request-scoped progress and
 cancellation into the real worker, and re-export the canonical worker codecs.
 Compatibility stabilization and the final M11 exit audit remain open.
 
-M12 reliability work has begun. The deterministic reader/program fuzz suite
-now replays 100,000 grammar-aware and complete-module mutation inputs, checks
-seed/self-hosted acceptance parity, recursive spans, formatter round trips,
-structured diagnostics, and byte-identical compilation after formatting. The
-fixed corpus and result digests are specified in
-[0127](specs/0127-deterministic-reader-program-fuzz.md). The remaining M12
-scale, soak, security, benchmark, and artifact-audit units are still open.
+M12 reliability work now has two of six implementation units complete. The
+deterministic reader/program fuzz suite replays 100,000 grammar-aware and
+complete-module mutation inputs with seed/self-hosted parity, recursive spans,
+formatter round trips, structured diagnostics, and fixed identities. The
+1,000-module project suite adds exact chain, diamond, cycle, and 299-importer
+fan-out topology; 100 percent no-op reuse; one-module leaf and shared
+invalidation; evaluated propagation; resource bounds; and complete clean-build
+byte equivalence. See [0127](specs/0127-deterministic-reader-program-fuzz.md)
+and [0128](specs/0128-project-scale-invalidation.md). Soak, security, benchmark,
+and artifact-audit units remain open.
 
 Run `bun run progress` for the current evidence-derived core progress report.
 It reports implementation, verification, and stabilization independently;
@@ -304,6 +307,12 @@ Run the fixed 100,000-input reliability corpus directly with:
 
 ```sh
 bun run fuzz:reader-program
+```
+
+Run the fixed 1,000-module scale and invalidation suite with:
+
+```sh
+bun run scale:project
 ```
 
 ## Language Tour

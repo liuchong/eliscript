@@ -1021,13 +1021,18 @@ input, large projects, long-lived use, and hostile project boundaries.
 **Exit gate:** All quantitative reliability and performance requirements in
 the final acceptance matrix pass without an unexplained waiver.
 
-**M12 implementation status:** In progress, 1/6 units. Specification
+**M12 implementation status:** In progress, 2/6 units. Specification
 [0127-deterministic-reader-program-fuzz.md](0127-deterministic-reader-program-fuzz.md)
 completes the grammar-aware and complete-module mutation suite with 100,000
 deterministic inputs, fixed replay identities, seed/self-hosted reader
 agreement, recursive span checks, formatter round trips, and structured
-compiler diagnostics. Project scale, worker soak, boundary security, complete
-benchmark thresholds, and artifact audits remain open.
+compiler diagnostics. Specification
+[0128-project-scale-invalidation.md](0128-project-scale-invalidation.md)
+completes the fixed 1,000-module chain, diamond, cycle, and shared-dependency
+graph with exact no-op and mutation decisions, evaluated behavior, clean-build
+equivalence, and bounded duration, memory, output, disk, and child lifetime.
+Worker soak, boundary security, complete benchmark thresholds, and artifact
+audits remain open.
 
 ### M13: Core Acceptance and Application Validation (5 implementation units)
 
@@ -1239,6 +1244,12 @@ modules. A leaf change rebuilds only the leaf and semantically affected closure;
 a shared dependency change rebuilds every and only affected module. Output is
 equivalent to a clean rebuild.
 
+**Status:** Complete. Specification 0128 fixes the 1,000-module topology,
+validates every reported edge, proves 100 percent no-op reuse, compiles exactly
+the changed leaf or shared dependency under the stable-path ESM cache model,
+evaluates propagation through reused importers, and compares complete artifact
+trees and graph identities with forced clean builds.
+
 **AC-10 MUST - Host portability**
 
 The stable conformance corpus and core command-line fixtures execute on the
@@ -1326,6 +1337,11 @@ The 1,000-module graph completes clean and incremental builds within documented
 resource limits. The worker completes an eight-hour or 100,000-request soak,
 whichever is reached first, with no lost response, deadlock, orphan process,
 or unbounded memory trend. Peak and steady-state memory are recorded.
+
+**Status:** Partial. Specification 0128 completes the 1,000-module clean and
+incremental scale half with explicit duration, maximum RSS, stream, source,
+artifact, temporary-storage, and child-lifecycle bounds. The required worker
+soak and its peak plus steady-state memory evidence remain open.
 
 **AC-20 MUST - Boundary security**
 

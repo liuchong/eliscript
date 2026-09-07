@@ -33,36 +33,36 @@ test("maturity progress is derived from explicit core acceptance units", async (
     format: "eliscript-maturity-progress-report",
     version: 1,
     implementation: {
-      completed: 31,
+      completed: 32,
       total: 42,
-      completedPercent: 73.8,
-      remaining: 11,
-      remainingPercent: 26.2,
+      completedPercent: 76.2,
+      remaining: 10,
+      remainingPercent: 23.8,
       milestones: {
         M7: { completed: 6, total: 6, completedPercent: 100, remaining: 0, remainingPercent: 0 },
         M8: { completed: 7, total: 7, completedPercent: 100, remaining: 0, remainingPercent: 0 },
         M9: { completed: 6, total: 6, completedPercent: 100, remaining: 0, remainingPercent: 0 },
         M10: { completed: 5, total: 6, completedPercent: 83.3, remaining: 1, remainingPercent: 16.7 },
         M11: { completed: 6, total: 6, completedPercent: 100, remaining: 0, remainingPercent: 0 },
-        M12: { completed: 1, total: 6, completedPercent: 16.7, remaining: 5, remainingPercent: 83.3 },
+        M12: { completed: 2, total: 6, completedPercent: 33.3, remaining: 4, remainingPercent: 66.7 },
         M13: { completed: 0, total: 5, completedPercent: 0, remaining: 5, remainingPercent: 100 },
       },
       incomplete: [
         "M10-06",
-        "M12-02", "M12-03", "M12-04", "M12-05", "M12-06",
+        "M12-03", "M12-04", "M12-05", "M12-06",
         "M13-01", "M13-02", "M13-03", "M13-04", "M13-05",
       ],
       blocked: [],
     },
     verification: {
-      completed: 14,
+      completed: 15,
       total: 35,
-      completedPercent: 40,
-      remaining: 21,
-      remainingPercent: 60,
+      completedPercent: 42.9,
+      remaining: 20,
+      remainingPercent: 57.1,
       incomplete: [
         "AC-01", "AC-02", "AC-03", "AC-04", "AC-05", "AC-07", "AC-08",
-        "AC-09", "AC-10", "AC-12", "AC-13", "AC-14", "AC-15",
+        "AC-10", "AC-12", "AC-13", "AC-14", "AC-15",
         "AC-19", "AC-20", "AC-21", "AC-22", "AC-23", "AC-24", "PD-01",
         "PD-07",
       ],
@@ -70,11 +70,11 @@ test("maturity progress is derived from explicit core acceptance units", async (
     },
     stabilization: {
       completed: 28,
-      total: 121,
-      completedPercent: 23.1,
-      remaining: 93,
-      remainingPercent: 76.9,
-      provisional: 93,
+      total: 122,
+      completedPercent: 23,
+      remaining: 94,
+      remainingPercent: 77,
+      provisional: 94,
       excludedFeatureIds: ["publishing.org-adapter", "tooling.vite-adapter"],
     },
     applications: {
@@ -84,7 +84,7 @@ test("maturity progress is derived from explicit core acceptance units", async (
     },
   });
   expect(humanReport(report)).toContain(
-    "Verification: 14/35 (40% complete, 60% remaining)",
+    "Verification: 15/35 (42.9% complete, 57.1% remaining)",
   );
   expect(humanReport(report)).not.toContain("overall");
 });
@@ -101,13 +101,13 @@ test("maturity progress rejects a missing mandatory criterion", async () => {
 test("maturity progress rejects unsupported completion claims", async () => {
   const contract = await readJson("contracts/maturity-progress.json");
   const criterion = contract.verification.criteria.find(
-    (candidate) => candidate.id === "AC-19",
+    (candidate) => candidate.id === "AC-22",
   );
   criterion.status = "complete";
   delete criterion.remaining;
   const errors = await validationErrors(contract);
   expect(errors).toContain(
-    "verification criterion AC-19 complete status requires core feature evidence",
+    "verification criterion AC-22 complete status requires core feature evidence",
   );
 });
 
