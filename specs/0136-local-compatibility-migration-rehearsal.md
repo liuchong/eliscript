@@ -1,7 +1,7 @@
 # 0136: Local Compatibility Migration Rehearsal
 
 - Status: Accepted
-- Implementation: In progress
+- Implementation: Implemented
 - Date: 2026-09-08
 - Depends on: 0040 Project Maturity Roadmap and 1.0 Acceptance Contract,
   0046 M7 Compatibility Baseline,
@@ -94,3 +94,13 @@ bun tools/compatibility/rehearse.mjs \
   all results and source artifacts to one exact local revision.
 - **CMR-07:** Machine and human reports are mutually verified and cannot claim
   completion of AC-02.
+
+## Retained Run
+
+`acceptance/runs/m13-03.json` and `acceptance/runs/m13-03.md` retain the passing
+local rehearsal from commit `f1f6ec1a7b5a2c86b4ca91517c689ae69cfbef23`.
+Both compiler generations produced identical artifacts for the frozen program
+and migrated host-container source, all eight Bun/Node executions matched their
+expected stdout, both legacy compiler paths returned the frozen diagnostic, and
+the named cache migration ERT test passed. The checkout was clean before and
+after the run; application evidence was excluded and AC-02 remains incomplete.

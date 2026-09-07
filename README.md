@@ -31,7 +31,7 @@ in **M8: Language Contract Closure**, **M9: Compiler and Build Convergence**,
 Libraries**, and **M12: Reliability, Security, and Performance**. Final
 stability and acceptance remain open.
 
-M13 has completed 2 of 5 implementation units. The versioned
+M13 has completed 3 of 5 implementation units. The versioned
 [core acceptance corpus](specs/0134-versioned-core-acceptance-corpus.md)
 derives all 35 mandatory AC/PD criteria from their normative specifications,
 runs the complete core suite and strict Emacs byte compilation from a clean
@@ -43,6 +43,11 @@ separately and contribute no core result.
 The [local onboarding exercise](specs/0135-local-onboarding.md)
 runs the documented core workflow directly on the recorded host toolchain. Its
 retained report records all six steps passing within the active-step budget.
+The [local compatibility migration rehearsal](specs/0136-local-compatibility-migration-rehearsal.md)
+rebuilds frozen core source with both compiler generations, executes it under
+Bun and Node, and verifies source-rewrite, automatic cache, and contract
+replacement transitions. It excludes application evidence and leaves the final
+AC-02 corpus closure open.
 
 M9 compiler convergence is complete: it includes canonical project requests,
 graph planning, IR serialization, build reports, v1-to-v2 cache migration,
@@ -625,6 +630,7 @@ The versioned project contracts are:
 | [`contracts/library-api.json`](contracts/library-api.json) | [0125: Generated Library API Index](specs/0125-generated-library-api-index.md) |
 | [`contracts/compatibility-matrix.json`](contracts/compatibility-matrix.json) | [0045: Continuous Compatibility Matrix](specs/0045-continuous-compatibility-matrix.md) |
 | [`contracts/compatibility-baseline.json`](contracts/compatibility-baseline.json) | [0046: M7 Compatibility Baseline](specs/0046-m7-compatibility-baseline.md) |
+| [`contracts/compatibility-rehearsal.json`](contracts/compatibility-rehearsal.json) | [0136: Local Compatibility Migration Rehearsal](specs/0136-local-compatibility-migration-rehearsal.md) |
 | [`contracts/documentation.json`](contracts/documentation.json) | [0133: Verified Installation and Daily Development Guide](specs/0133-verified-onboarding-documentation.md) |
 | [`contracts/repository-integrity.json`](contracts/repository-integrity.json) | [0132: Repository Integrity Audits](specs/0132-repository-integrity-audits.md) |
 

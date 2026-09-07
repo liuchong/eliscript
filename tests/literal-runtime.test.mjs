@@ -271,6 +271,9 @@ test("explicit host-only modules do not link the persistent runtime", async () =
 
 test("maintained Eliscript sources use explicit host constructors", async () => {
   const roots = ["bootstrap", "stdlib", "examples", "tests/fixtures"];
+  const intentionalNegativeFixtures = new Set([
+    "compatibility/native-containers-v1.eli",
+  ]);
   const retired = /\((?:array|object)(?=[\s)])/g;
   const violations = [];
   for (const sourceRoot of roots) {
@@ -279,6 +282,10 @@ test("maintained Eliscript sources use explicit host constructors", async () => 
       cwd: resolve(ROOT, sourceRoot),
       onlyFiles: true,
     })) {
+      if (sourceRoot === "tests/fixtures" &&
+          intentionalNegativeFixtures.has(relative)) {
+        continue;
+      }
       const file = resolve(ROOT, sourceRoot, relative);
       const source = await Bun.file(file).text();
       for (const match of source.matchAll(retired)) {

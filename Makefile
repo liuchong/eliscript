@@ -18,6 +18,7 @@ test-core: check-contracts
 		-f ert-run-tests-batch-and-exit
 	$(BUN) test tests/conformance.test.mjs tests/public-surface.test.mjs \
 		tests/api-index.test.mjs \
+		tests/compatibility-rehearsal.test.mjs \
 		tests/onboarding-docs.test.mjs \
 		tests/local-onboarding.test.mjs \
 		tests/test-partition.test.mjs \
@@ -108,6 +109,9 @@ endif
 	$(BUN) tools/onboarding/check.mjs \
 		--verify-run acceptance/runs/m13-02.json \
 		--verify-markdown acceptance/runs/m13-02.md
+	$(BUN) tools/compatibility/rehearse.mjs \
+		--verify-run acceptance/runs/m13-03.json \
+		--verify-markdown acceptance/runs/m13-03.md
 	$(BUN) tools/integrity/check.mjs
 
 byte-compile:

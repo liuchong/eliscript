@@ -7,6 +7,7 @@ import {
   checkCompatibilityRehearsal,
   CompatibilityRehearsalError,
   humanCompatibilityReport,
+  verifyCompatibilityRun,
 } from "../tools/compatibility/rehearse.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -26,6 +27,16 @@ async function errorsFor(value) {
     return error.errors;
   }
   throw new Error("expected compatibility rehearsal validation to fail");
+}
+
+async function verificationErrors(report) {
+  try {
+    await verifyCompatibilityRun({ root: ROOT, report });
+  } catch (error) {
+    expect(error).toBeInstanceOf(CompatibilityRehearsalError);
+    return error.errors;
+  }
+  throw new Error("expected compatibility rehearsal verification to fail");
 }
 
 test("compatibility rehearsal contract freezes local core transitions", async () => {
@@ -88,4 +99,33 @@ test("compatibility rehearsal human report preserves evidence boundaries", () =>
   expect(output).toContain("Application evidence: no");
   expect(output).toContain("Completes AC-02: no");
   expect(output).toContain("Local rehearsal: pass");
+});
+
+test("retained compatibility rehearsal is source-bound local evidence", async () => {
+  const report = await verifyCompatibilityRun({
+    root: ROOT,
+    runFile: "acceptance/runs/m13-03.json",
+    markdownFile: "acceptance/runs/m13-03.md",
+  });
+  expect(report.summary).toMatchObject({
+    required: 4,
+    passed: 4,
+    failed: 0,
+    cleanBefore: true,
+    cleanAfter: true,
+    applicationEvidence: false,
+    completesAc02: false,
+    validationPass: true,
+  });
+});
+
+test("retained compatibility rehearsal rejects a forged AC-02 claim", async () => {
+  const report = JSON.parse(await readFile(
+    path.join(ROOT, "acceptance/runs/m13-03.json"),
+    "utf8",
+  ));
+  report.summary.completesAc02 = true;
+  expect(await verificationErrors(report)).toContain(
+    "run summary must be a passing non-application rehearsal without AC-02 completion",
+  );
 });
