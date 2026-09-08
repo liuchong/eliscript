@@ -29,19 +29,19 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 145 specifications.
+The registry currently contains 146 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
 | Accepted design | 3 |
-| Stable design | 140 |
+| Stable design | 141 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 141 |
+| Implemented | 142 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 140 specifications as stable,
+Compatibility Baseline 2 separately classifies 141 specifications as stable,
 1 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
@@ -186,6 +186,10 @@ watch lifecycle, and command-line precedence. Specification 0141 defines the
 AC-07 proof as twenty direct local compiler builds and complete core acceptance
 executions with one versioned identity. Retained run `m13-04` completes the
 criterion with twenty clean, operational, identity-equivalent executions.
+Specification 0146 closes AC-05 with a source-bound compiler parity corpus over
+61 stable compiler-relevant features, 115 valid fixtures, 89 diagnostics, all
+13 bootstrap modules, all 55 public IR kinds, and seven observable parity
+dimensions. Ten mandatory criteria remain incomplete.
 
 ## Reading Paths
 
@@ -313,6 +317,7 @@ The contract data is split by responsibility:
 | [`contracts/library-api.json`](../contracts/library-api.json) | Standard-library module metadata and generated API ownership |
 | [`contracts/compatibility-matrix.json`](../contracts/compatibility-matrix.json) | Supported Emacs, OS, architecture, and Bun combinations |
 | [`contracts/compatibility-baseline.json`](../contracts/compatibility-baseline.json) | Stable, provisional, and planning boundary |
+| [`contracts/compiler-parity-corpus.json`](../contracts/compiler-parity-corpus.json) | Complete seed and self-hosted compiler parity inventory |
 
 The schemas and change workflow are defined by specifications
 [0042](0042-specification-registry.md),
@@ -492,6 +497,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0143 | [Complete Negative Diagnostic Corpus](0143-complete-negative-diagnostic-corpus.md) | Stable | Implemented |
 | 0144 | [Source-level Failure Mapping](0144-source-level-failure-mapping.md) | Stable | Implemented |
 | 0145 | [Language Value Equality](0145-language-value-equality.md) | Stable | Implemented |
+| 0146 | [Complete Compiler Parity Corpus](0146-complete-compiler-parity-corpus.md) | Stable | Implemented |
 
 ## Adding a Specification
 

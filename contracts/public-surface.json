@@ -264,6 +264,30 @@
       ]
     },
     {
+      "id": "compiler-parity-corpus",
+      "spec": "0146",
+      "format": "eliscript-compiler-parity-corpus",
+      "version": 1,
+      "evidence": [
+        {
+          "file": "contracts/compiler-parity-corpus.json",
+          "contains": [
+            "\"format\": \"eliscript-compiler-parity-corpus\"",
+            "\"version\": 1",
+            "\"identity\":"
+          ]
+        },
+        {
+          "file": "tools/parity/check.mjs",
+          "contains": [
+            "contract.format !== \"eliscript-compiler-parity-corpus\"",
+            "contract.version !== 1",
+            "checkCompilerParityCorpus"
+          ]
+        }
+      ]
+    },
+    {
       "id": "evaluation-form",
       "spec": "0119",
       "format": "eliscript-evaluation-form",

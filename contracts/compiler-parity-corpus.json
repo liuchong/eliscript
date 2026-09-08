@@ -1,0 +1,213 @@
+{
+  "schemaVersion": 1,
+  "format": "eliscript-compiler-parity-corpus",
+  "version": 1,
+  "featureDomains": [
+    "bootstrap",
+    "compiler",
+    "language",
+    "macro",
+    "portable",
+    "project"
+  ],
+  "featureIds": [
+    "language.core",
+    "compiler.lexical-analysis",
+    "compiler.compile-time-macros",
+    "compiler.source-locations",
+    "compiler.explicit-ir",
+    "compiler.direct-ir-emission",
+    "compiler.source-maps",
+    "bootstrap.symbol-foundation",
+    "bootstrap.portable-reader",
+    "bootstrap.portable-analyzer",
+    "bootstrap.portable-expander",
+    "bootstrap.portable-ir",
+    "bootstrap.portable-emitter",
+    "bootstrap.self-hosted-driver",
+    "portable.function-closure",
+    "project.multi-file-build",
+    "portable.module-composition",
+    "portable.indexing-composition",
+    "project.graph-manifest",
+    "project.incremental-builds",
+    "project.decision-reports",
+    "project.phase-timings",
+    "language.nullish-values",
+    "macro.deterministic-seed",
+    "language.function-parameters",
+    "language.async-await",
+    "language.exception-control-flow",
+    "language.vector-binding-patterns",
+    "compiler.structured-diagnostics",
+    "language.portable-32-bit-operations",
+    "language.stack-safe-loop-recur",
+    "macro.deterministic-generated-names",
+    "language.keyword-symbol-values",
+    "language.immutable-metadata",
+    "language.canonical-runtime-data-text",
+    "language.portable-identifier-values",
+    "language.default-persistent-vector-literals",
+    "language.persistent-map-source-syntax",
+    "language.first-class-source-keyword-values",
+    "language.first-class-quoted-persistent-data",
+    "language.persistent-set-source-syntax",
+    "compiler.static-transient-ownership",
+    "language.persistent-list-semantics",
+    "language.persistent-host-container-boundary",
+    "compiler.profile-guided-runtime-scan",
+    "compiler.constant-time-ir-kind",
+    "compiler.source-map-aware-indentation",
+    "compiler.ordered-source-mark-location",
+    "compiler.binary-comparison-emission",
+    "compiler.reader-character-classification",
+    "compiler.source-map-cursors",
+    "bootstrap.self-hosted-project-planning",
+    "bootstrap.canonical-ir-serialization",
+    "bootstrap.self-hosted-build-reports",
+    "bootstrap.self-hosted-incremental-cache",
+    "bootstrap.self-hosted-project-command",
+    "bootstrap.unified-build-operation",
+    "language.framework-neutral-library-interop",
+    "language.esm-import-contract",
+    "macro.declared-file-dependencies",
+    "language.value-equality"
+  ],
+  "fixtures": [
+    {
+      "id": "reader",
+      "file": "tests/fixtures/bootstrap-reader.json",
+      "valid": 21,
+      "invalid": 16
+    },
+    {
+      "id": "expander",
+      "file": "tests/fixtures/bootstrap-expander.json",
+      "valid": 37,
+      "invalid": 16
+    },
+    {
+      "id": "analyzer",
+      "file": "tests/fixtures/bootstrap-analyzer.json",
+      "valid": 30,
+      "invalid": 57
+    },
+    {
+      "id": "ir",
+      "file": "tests/fixtures/bootstrap-ir.json",
+      "valid": 27,
+      "invalid": 0
+    }
+  ],
+  "bootstrapSources": [
+    "bootstrap/compiler/analyzer.eli",
+    "bootstrap/compiler/compiler.eli",
+    "bootstrap/compiler/emitter.eli",
+    "bootstrap/compiler/expander.eli",
+    "bootstrap/compiler/formatter.eli",
+    "bootstrap/compiler/ir.eli",
+    "bootstrap/compiler/lower.eli",
+    "bootstrap/compiler/project.eli",
+    "bootstrap/compiler/reader.eli",
+    "bootstrap/compiler/source-map.eli",
+    "bootstrap/compiler/symbol.eli",
+    "bootstrap/compiler/syntax.eli",
+    "bootstrap/compiler/transient-analysis.eli"
+  ],
+  "irKindCount": 55,
+  "diagnosticCaseCount": 89,
+  "dimensions": [
+    {
+      "id": "acceptance",
+      "evidence": [
+        {
+          "file": "tests/bootstrap-reader.test.mjs",
+          "contains": "bootstrapped reader matches normalized seed syntax and diagnostics"
+        },
+        {
+          "file": "tests/bootstrap-expander.test.mjs",
+          "contains": "bootstrapped expander matches seed syntax, spans, and diagnostics"
+        },
+        {
+          "file": "tests/bootstrap-analyzer.test.mjs",
+          "contains": "bootstrapped analyzer matches seed acceptance and diagnostics"
+        }
+      ]
+    },
+    {
+      "id": "diagnostics",
+      "evidence": [
+        {
+          "file": "tests/diagnostic-corpus.test.mjs",
+          "contains": "complete negative diagnostic corpus is frozen and source-derived"
+        },
+        {
+          "file": "tests/bootstrap-analyzer.test.mjs",
+          "contains": "bootstrapped analyzer matches seed acceptance and diagnostics"
+        }
+      ]
+    },
+    {
+      "id": "canonical-ir",
+      "evidence": [
+        {
+          "file": "tests/bootstrap-ir.test.mjs",
+          "contains": "bootstrapped lowerer matches complete seed IR trees and spans"
+        },
+        {
+          "file": "tests/bootstrap-ir-serialization.test.mjs",
+          "contains": "canonical IR v1 is lossless, strict, and host reproducible"
+        }
+      ]
+    },
+    {
+      "id": "emitted-esm",
+      "evidence": [
+        {
+          "file": "tests/bootstrap-emitter.test.mjs",
+          "contains": "bootstrapped emitter matches seed ESM and Source Map output"
+        },
+        {
+          "file": "tests/esm-imports.test.mjs",
+          "contains": "complete ESM imports are identical and executable across compilers and hosts"
+        }
+      ]
+    },
+    {
+      "id": "source-maps",
+      "evidence": [
+        {
+          "file": "tests/bootstrap-emitter.test.mjs",
+          "contains": "bootstrapped emitter matches seed ESM and Source Map output"
+        },
+        {
+          "file": "tests/source-debugging.test.mjs",
+          "contains": "source debugging corpus is complete and rejects evidence drift"
+        }
+      ]
+    },
+    {
+      "id": "portable-closures",
+      "evidence": [
+        {
+          "file": "tests/esm-imports.test.mjs",
+          "contains": "complete ESM imports are identical and executable across compilers and hosts"
+        },
+        {
+          "file": "tests/macro-file-dependencies.test.mjs",
+          "contains": "declared macro files drive deterministic project builds and cache invalidation"
+        }
+      ]
+    },
+    {
+      "id": "project-graphs",
+      "evidence": [
+        {
+          "file": "tests/bootstrap-project.test.mjs",
+          "contains": "self-hosted project service matches seed output under Bun and Node"
+        }
+      ]
+    }
+  ],
+  "identity": "3542c417d4376cbaa4c281114b465df890f6088f1dc98ce50de76fa53e9b8017"
+}
