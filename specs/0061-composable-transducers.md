@@ -9,11 +9,12 @@
 
 ## Summary
 
-This specification adds the first destination-independent collection
-transformation layer. `mapping`, `filtering`, and `taking` construct reusable
-transducers; `composeTransducers` combines them in one declared-order
-reduction; `transduce` executes the resulting reducing function; and `into`
-constructs a target only through `IEmptyable`, `IConj`, and `IReduce`.
+This specification adds the destination-independent collection transformation
+layer. Stateless mapping/filtering, run-local indexed/keep/prefix/dedupe
+transforms, and nested cat/mapcat transforms construct reusable transducers;
+`composeTransducers` combines them in one declared-order reduction;
+`transduce` executes the resulting reducing function; and `into` constructs a
+target only through `IEmptyable`, `IConj`, and `IReduce`.
 
 The transformation pipeline allocates no intermediate collection. A
 transducer knows neither the input representation nor the destination. It is a
@@ -30,8 +31,9 @@ changing the observable API or results defined here.
 `runtime/core/transducer.mjs` exports:
 
 - reducing-function construction: `completing`
-- transducer constructors: `mapping`, `filtering`, `removing`, `taking`,
-  `dropping`
+- transducer constructors: `mapping`, `mappingIndexed`, `keeping`, `filtering`,
+  `removing`, `taking`, `dropping`, `takingWhile`, `droppingWhile`, `deduping`,
+  `catting`, and `mapcatting`
 - composition: `composeTransducers`
 - execution: `transduce`, `into`
 
@@ -104,6 +106,50 @@ retains this property when any built-in stage admits no input.
 applied reducing function, so reusing the transducer starts each reduction
 with fresh state.
 
+### Indexed Mapping and Keeping
+
+`mappingIndexed(transform)` calls `transform(index, input)` with a zero-based
+index for every value reaching the stage. The index belongs to the applied
+reducing function, so reusing the transducer starts every run at zero.
+
+`keeping(transform)` calls its transform once and suppresses only an exact
+`nil`/JavaScript `null` result. `false`, `undefined`, zero, and the empty string
+remain ordinary output values. This preserves the distinction between the
+language's nil value and other falsey host values.
+
+### Predicate-controlled Prefixes
+
+`takingWhile(predicate)` passes values while the predicate is
+Eliscript-truthy. It consumes but does not pass the first rejected value, wraps
+the current result as reduced, and closes an acquired iterator through normal
+reduction termination.
+
+`droppingWhile(predicate)` suppresses the longest truthy prefix. On the first
+falsey result it passes that input and every later input downstream without
+calling the predicate again. Both predicates and all stage state are allocated
+or validated before traversal as appropriate.
+
+### Adjacent Deduplication
+
+`deduping()` suppresses only consecutive equivalent values. Equality uses the
+shared Eliscript value contract rather than JavaScript identity, so separately
+allocated equal persistent values collapse while a repeated value after a
+different value remains visible. A private sentinel allows `undefined` to be a
+normal first or previous value.
+
+### Cat and Mapcat
+
+`catting()` reduces each input collection through the downstream reducer and
+flattens exactly one level. Inputs require only `IReduce`; they need not expose
+an iterator or concrete collection representation. A downstream reduced value
+stops the nested reduction and is rewrapped after the generic reduce boundary
+so the outer source also terminates before another input is consumed.
+
+`mapcatting(transform)` composes one validated mapping stage with `catting`.
+It therefore maps each outer input once, flattens the returned reducible value,
+and preserves the same nested early-termination behavior without allocating an
+intermediate flattened collection.
+
 ## Composition
 
 `composeTransducers(first, second, ...)` executes stages left to right for each
@@ -164,11 +210,12 @@ one source reduction and constructs no mapped or filtered intermediate value.
 
 ## Complexity and Allocation
 
-For `n` consumed inputs and constant-time user transforms, `transduce` is O(n)
-time with O(s) reducing state, where `s` is the number of composed stateful
-stages. `mapping` and `filtering` have no per-run counter; `taking` uses one
-integer. Composition depth is fixed before traversal and does not grow the
-JavaScript call stack per input.
+For `n` consumed scalar inputs and constant-time user transforms, `transduce`
+is O(n) time with O(s) reducing state, where `s` is the number of composed
+stateful stages. Indexed mapping, prefix control, and adjacent dedupe use one
+counter, flag, or previous value per application. Cat/mapcat is O(n + m), where
+`m` is the number of nested values actually consumed. Composition depth is
+fixed before traversal and does not grow the JavaScript call stack per input.
 
 `into` inherits the logical target update cost. Owner-token persistent Vector,
 Map, and Set builders copy each selected path once per owner and then reuse it.
@@ -203,10 +250,12 @@ does not weaken the runtime transducer semantics defined here.
 
 `removing` and `dropping` were added with the maintained sequence algorithms in
 [0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md).
-This surface does not yet provide `mapcat`, partitioning, async transducers,
-parallel fold, or implicit completion initializers. These operations require
-concrete maintained use cases and their own completion or resource contracts
-before joining the public surface.
+Indexed mapping, keeping, predicate-controlled prefixes, adjacent dedupe, and
+cat/mapcat are compatible additive extensions to the same stable contract.
+This surface does not yet provide partitioning, global distinctness, async
+transducers, parallel fold, or implicit completion initializers. Those
+operations require concrete maintained use cases and their own completion or
+resource contracts before joining the public surface.
 
 ## Acceptance Criteria
 
@@ -237,6 +286,13 @@ before joining the public surface.
   accepted count and builds no intermediate transformed collection.
 - **TRD-12:** Existing collection, protocol, persistent-value, public-surface,
   conformance, compatibility, and complete repository suites remain green.
+- **TRD-13:** Indexed mapping, keeping, take-while, and drop-while allocate
+  fresh state per execution and preserve the exact nil/truth contracts.
+- **TRD-14:** Adjacent dedupe uses Eliscript value equality, handles
+  `undefined` as data, and preserves non-consecutive repeats.
+- **TRD-15:** Cat and mapcat accept arbitrary reducible nested values and
+  propagate downstream reduced termination to the outer source without an
+  intermediate collection.
 
 ## Continuation
 

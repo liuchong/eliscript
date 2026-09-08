@@ -1,9 +1,16 @@
 import {
+  catting,
   composeTransducers,
+  deduping,
+  droppingWhile,
   filtering,
   into,
+  keeping,
+  mapcatting,
   mapping,
+  mappingIndexed,
   taking,
+  takingWhile,
   transduce,
 } from "../../runtime/core/transducer.mjs";
 import { persistentHashMap } from "../../runtime/core/map.mjs";
@@ -29,4 +36,31 @@ console.log(JSON.stringify({
     transduce(taking(2), (result, value) => [...result, value], [], [1, 2, 3]),
     transduce(taking(2), (result, value) => [...result, value], [], [1, 2, 3]),
   ],
+  stateful: transduce(
+    composeTransducers(
+      deduping(),
+      mappingIndexed((index, value) => [index, value]),
+      keeping(([index, value]) => value === null ? null : `${index}:${value}`),
+      droppingWhile((value) => value.endsWith(":skip")),
+      takingWhile((value) => !value.endsWith(":stop")),
+    ),
+    (result, value) => [...result, value],
+    [],
+    ["skip", "skip", null, "left", "left", "right", "stop", "unreachable"],
+  ),
+  flattened: transduce(
+    composeTransducers(
+      mapcatting((value) => [value, value * 10]),
+      taking(3),
+    ),
+    (result, value) => [...result, value],
+    [],
+    [1, 2, 3],
+  ),
+  concatenated: transduce(
+    catting(),
+    (result, value) => [...result, value],
+    [],
+    [["left"], ["right"]],
+  ),
 }));

@@ -266,7 +266,12 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "function persistent_BANG_(collection)",
       ]],
       ["stdlib/core/transducer.eli", [
+        "function catting()",
         "function compose_transducers(...transducers)",
+        "function deduping()",
+        "function mapping_indexed(transform)",
+        "function mapcatting(transform)",
+        "function taking_while(predicate)",
         "function transduce(transducer, reducer, initial, collection)",
       ]],
       ["stdlib/core/seq.eli", [

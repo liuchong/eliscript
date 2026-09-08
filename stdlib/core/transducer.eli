@@ -10,6 +10,18 @@
   (defun mapping (transform)
     (Runtime/mapping transform))
 
+  (defun mapping-indexed (transform)
+    (Runtime/mappingIndexed transform))
+
+  (defun keeping (transform)
+    (Runtime/keeping transform))
+
+  (defun catting ()
+    (Runtime/catting))
+
+  (defun mapcatting (transform)
+    (Runtime/mapcatting transform))
+
   (defun filtering (predicate)
     (Runtime/filtering predicate))
 
@@ -22,11 +34,21 @@
   (defun dropping (limit)
     (Runtime/dropping limit))
 
+  (defun taking-while (predicate)
+    (Runtime/takingWhile predicate))
+
+  (defun dropping-while (predicate)
+    (Runtime/droppingWhile predicate))
+
+  (defun deduping ()
+    (Runtime/deduping))
+
   (defun transduce (transducer reducer initial collection)
     (Runtime/transduce transducer reducer initial collection))
 
   (defun into (target &rest arguments)
     (apply Runtime/into (js-cons target arguments)))
 
-  (export completing compose-transducers dropping filtering into mapping
-          removing taking transduce))
+  (export catting completing compose-transducers deduping dropping
+          dropping-while filtering into keeping mapcatting mapping
+          mapping-indexed removing taking taking-while transduce))

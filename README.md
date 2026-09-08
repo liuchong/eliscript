@@ -159,8 +159,9 @@ The completed M8 language contract provides:
   dispatch identities without transferring functions or extension state
 - generic collection lookup, traversal, reduction, construction, association,
   and key-presence operations
-- reusable mapping, filtering, removing, taking, and dropping transducers with
-  protocol-driven `transduce` and `into`
+- reusable mapping, indexed mapping, keeping, filtering, removing, prefix
+  take/drop, value-semantic deduplication, cat/mapcat, and bounded transducers
+  with protocol-driven `transduce` and `into`
 - owner-token transient Vector, Map, and Set builders with deterministic
   completion invalidation and transient-backed persistent `into`, with
   source-bound 12.329933x/17.486689x/17.937565x Vector/Map/Set builder evidence

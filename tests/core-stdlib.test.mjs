@@ -589,6 +589,10 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect([...api.report["vector-appended"]]).toEqual([1, 2, 3, 4]);
     expect([...api.report["vector-empty"]]).toEqual([]);
     expect([...api.report.transformed]).toEqual([6, 8]);
+    expect([...api.report["stateful-transformed"]].map((value) => [...value]))
+      .toEqual([[2, 2], [3, 4]]);
+    expect([...api.report.flattened]).toEqual([1, 10, 2, 20]);
+    expect([...api.report.concatenated]).toEqual(["left", "right"]);
 
     class SourceRange {
       constructor(end, observe) {
@@ -642,6 +646,8 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
       "if (api.report['number-description'] !== 'number:7') process.exit(1);",
       "if (JSON.stringify([...api.report['vector-appended']]) !== '[1,2,3,4]') process.exit(1);",
       "if (JSON.stringify([...seq.map((value) => value * 3, [1,2,3])]) !== '[3,6,9]') process.exit(1);",
+      "if (JSON.stringify([...api.report['stateful-transformed']].map((value) => [...value])) !== '[[2,2],[3,4]]') process.exit(1);",
+      "if (JSON.stringify([...api.report.flattened]) !== '[1,10,2,20]') process.exit(1);",
       "if (String(identifier.keyword('article/title')) !== ':article/title') process.exit(1);",
       "if (metadata.meta(api.report['vector-appended']) !== null) process.exit(1);",
     ].join("");

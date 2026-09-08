@@ -14,9 +14,11 @@ import {
   transient,
 } from "./transient.mjs";
 import { isTruthy } from "./truth.mjs";
+import { equalValues } from "./value.mjs";
 
 const REDUCING_FUNCTION = Symbol("eliscript.transducer.reducing-function");
 const ZERO_INPUT = Symbol("eliscript.transducer.zero-input");
+const NO_PREVIOUS_VALUE = Symbol("eliscript.transducer.no-previous-value");
 
 function identity(value) {
   return value;
@@ -81,6 +83,72 @@ export function mapping(transform) {
       (result) => downstream(result),
     );
   });
+}
+
+export function mappingIndexed(transform) {
+  requireFunction(transform, "mapping-indexed transform");
+  return makeTransducer((reducingFunction) => {
+    const downstream = asReducingFunction(
+      reducingFunction,
+      "mapping-indexed reducing function",
+    );
+    let index = 0;
+    return completing(
+      (result, input) => {
+        const currentIndex = index;
+        index += 1;
+        return downstream(result, transform(currentIndex, input));
+      },
+      (result) => downstream(result),
+    );
+  });
+}
+
+export function keeping(transform) {
+  requireFunction(transform, "keeping transform");
+  return makeTransducer((reducingFunction) => {
+    const downstream = asReducingFunction(
+      reducingFunction,
+      "keeping reducing function",
+    );
+    return completing(
+      (result, input) => {
+        const value = transform(input);
+        return value === null ? result : downstream(result, value);
+      },
+      (result) => downstream(result),
+    );
+  });
+}
+
+export function catting() {
+  return makeTransducer((reducingFunction) => {
+    const downstream = asReducingFunction(
+      reducingFunction,
+      "catting reducing function",
+    );
+    return completing(
+      (result, input) => {
+        let stopped = false;
+        const flattened = reduce(
+          input,
+          (nestedResult, value) => {
+            const stepped = downstream(nestedResult, value);
+            if (isReduced(stepped)) stopped = true;
+            return stepped;
+          },
+          result,
+        );
+        return stopped ? reduced(flattened) : flattened;
+      },
+      (result) => downstream(result),
+    );
+  });
+}
+
+export function mapcatting(transform) {
+  requireFunction(transform, "mapcatting transform");
+  return composeTransducers(mapping(transform), catting());
 }
 
 export function filtering(predicate) {
@@ -157,6 +225,61 @@ export function dropping(limit) {
           remaining -= 1;
           return result;
         }
+        return downstream(result, input);
+      },
+      (result) => downstream(result),
+    );
+  });
+}
+
+export function takingWhile(predicate) {
+  requireFunction(predicate, "taking-while predicate");
+  return makeTransducer((reducingFunction) => {
+    const downstream = asReducingFunction(
+      reducingFunction,
+      "taking-while reducing function",
+    );
+    return completing(
+      (result, input) => isTruthy(predicate(input))
+        ? downstream(result, input)
+        : reduced(result),
+      (result) => downstream(result),
+    );
+  });
+}
+
+export function droppingWhile(predicate) {
+  requireFunction(predicate, "dropping-while predicate");
+  return makeTransducer((reducingFunction) => {
+    const downstream = asReducingFunction(
+      reducingFunction,
+      "dropping-while reducing function",
+    );
+    let dropping = true;
+    return completing(
+      (result, input) => {
+        if (dropping && isTruthy(predicate(input))) return result;
+        dropping = false;
+        return downstream(result, input);
+      },
+      (result) => downstream(result),
+    );
+  });
+}
+
+export function deduping() {
+  return makeTransducer((reducingFunction) => {
+    const downstream = asReducingFunction(
+      reducingFunction,
+      "deduping reducing function",
+    );
+    let previous = NO_PREVIOUS_VALUE;
+    return completing(
+      (result, input) => {
+        if (previous !== NO_PREVIOUS_VALUE && equalValues(previous, input)) {
+          return result;
+        }
+        previous = input;
         return downstream(result, input);
       },
       (result) => downstream(result),

@@ -35,7 +35,9 @@ Four new Eliscript API modules expose the runtime substrate:
   generic count, empty, construction, lookup, membership, indexed access,
   sequence, reduction, and reduced-value operations.
 - `stdlib/core/transducer.eli` exports reducer completion, composition,
-  mapping, filtering, removing, taking, dropping, transduction, and `into`.
+  mapping, indexed mapping, keeping, filtering, removing, bounded and
+  predicate-controlled take/drop, adjacent deduplication, cat/mapcat,
+  transduction, and `into`.
 - `stdlib/core/transient.eli` exports editable capabilities and `transient`,
   `conj!`, `assoc!`, `dissoc!`, and `persistent!`.
 

@@ -12,12 +12,19 @@ import {
   unreduced,
 } from "../runtime/core/collection.mjs";
 import {
+  catting,
   completing,
   composeTransducers,
+  deduping,
+  droppingWhile,
   filtering,
   into,
+  keeping,
+  mapcatting,
   mapping,
+  mappingIndexed,
   taking,
+  takingWhile,
   transduce,
 } from "../runtime/core/transducer.mjs";
 import { persistentHashMap } from "../runtime/core/map.mjs";
@@ -142,6 +149,100 @@ test("taking terminates exactly and allocates fresh state for every run", () => 
   expect(zeroCompletions).toBe(1);
 });
 
+test("stateful transforms allocate fresh indexed keep and prefix state per run", () => {
+  const indexed = mappingIndexed((index, value) => `${index}:${value}`);
+  expect(transduce(indexed, (values, value) => [...values, value], [], ["a", "b"]))
+    .toEqual(["0:a", "1:b"]);
+  expect(transduce(indexed, (values, value) => [...values, value], [], ["c"]))
+    .toEqual(["0:c"]);
+
+  const kept = keeping((value) => {
+    if (value === 1) return null;
+    if (value === 2) return false;
+    if (value === 3) return undefined;
+    return value * 10;
+  });
+  expect(transduce(kept, (values, value) => [...values, value], [], [1, 2, 3, 4]))
+    .toEqual([false, undefined, 40]);
+
+  let takePulls = 0;
+  let takePredicates = 0;
+  let takeCloses = 0;
+  const source = sequenceView(() => (function* values() {
+    try {
+      for (let value = 0; value < 10; value += 1) {
+        takePulls += 1;
+        yield value;
+      }
+    } finally {
+      takeCloses += 1;
+    }
+  })(), 10);
+  const prefix = takingWhile((value) => {
+    takePredicates += 1;
+    return value < 3;
+  });
+  expect(transduce(prefix, (values, value) => [...values, value], [], source))
+    .toEqual([0, 1, 2]);
+  expect([takePulls, takePredicates, takeCloses]).toEqual([4, 4, 1]);
+  expect(transduce(prefix, (values, value) => [...values, value], [], [0, 1, 4]))
+    .toEqual([0, 1]);
+
+  let dropPredicates = 0;
+  const suffix = droppingWhile((value) => {
+    dropPredicates += 1;
+    return value < 3;
+  });
+  expect(transduce(suffix, (values, value) => [...values, value], [], [0, 1, 3, 2, 4]))
+    .toEqual([3, 2, 4]);
+  expect(dropPredicates).toBe(3);
+  expect(transduce(suffix, (values, value) => [...values, value], [], [1, 5]))
+    .toEqual([5]);
+});
+
+test("deduping uses Eliscript value equality and preserves separated repeats", () => {
+  const left = persistentVector(1, 2);
+  const equal = persistentVector(1, 2);
+  const different = persistentVector(2, 1);
+  const transducer = deduping();
+
+  expect(transduce(
+    transducer,
+    (values, value) => [...values, value],
+    [],
+    [undefined, undefined, left, equal, different, left],
+  )).toEqual([undefined, left, different, left]);
+  expect(transduce(transducer, (values, value) => [...values, value], [], [1, 1, 2]))
+    .toEqual([1, 2]);
+});
+
+test("catting and mapcatting flatten reducible values and propagate termination", () => {
+  expect(transduce(
+    catting(),
+    (values, value) => [...values, value],
+    [],
+    [[1, 2], persistentVector(3, 4)],
+  )).toEqual([1, 2, 3, 4]);
+
+  let outerPulls = 0;
+  const outer = sequenceView(() => (function* values() {
+    for (const value of [1, 2, 3]) {
+      outerPulls += 1;
+      yield value;
+    }
+  })(), 3);
+  expect(transduce(
+    composeTransducers(
+      mapcatting((value) => persistentVector(value, value * 10)),
+      taking(3),
+    ),
+    (values, value) => [...values, value],
+    [],
+    outer,
+  )).toEqual([1, 10, 2]);
+  expect(outerPulls).toBe(2);
+});
+
 test("transduce preserves reduced termination and completion semantics", () => {
   let completions = 0;
   const reducer = completing(
@@ -258,7 +359,20 @@ test("transducer boundaries reject malformed operations before traversal", () =>
     "reducing completion must be a function",
   );
   expect(() => mapping(null)).toThrow("mapping transform must be a function");
+  expect(() => mappingIndexed(null)).toThrow(
+    "mapping-indexed transform must be a function",
+  );
+  expect(() => keeping(null)).toThrow("keeping transform must be a function");
+  expect(() => mapcatting(null)).toThrow(
+    "mapcatting transform must be a function",
+  );
   expect(() => filtering(null)).toThrow("filtering predicate must be a function");
+  expect(() => takingWhile(null)).toThrow(
+    "taking-while predicate must be a function",
+  );
+  expect(() => droppingWhile(null)).toThrow(
+    "dropping-while predicate must be a function",
+  );
   expect(() => taking(-1)).toThrow(
     "taking limit must be a non-negative safe integer",
   );
@@ -292,6 +406,9 @@ test("transducers agree under Bun and Node and stay single-pass at scale", async
     sum: 36,
     entries: [["key-1", 10], ["key-2", 20]],
     reused: [[1, 2], [1, 2]],
+    stateful: ["2:left", "3:right"],
+    flattened: [1, 10, 2],
+    concatenated: ["left", "right"],
   });
 
   let pulls = 0;

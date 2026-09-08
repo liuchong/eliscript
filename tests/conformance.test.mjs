@@ -40,7 +40,7 @@ test("repository specifications have complete conformance evidence", async () =>
     },
     features: {
       total: 144,
-      evidence: 548,
+      evidence: 551,
       domains: {
         acceleration: { features: 1, evidence: 2 },
         bootstrap: { features: 13, evidence: 36 },
@@ -53,7 +53,7 @@ test("repository specifications have complete conformance evidence", async () =>
         project: { features: 5, evidence: 7 },
         publishing: { features: 1, evidence: 2 },
         quality: { features: 24, evidence: 79 },
-        runtime: { features: 16, evidence: 99 },
+        runtime: { features: 16, evidence: 102 },
         stdlib: { features: 21, evidence: 85 },
         toolchain: { features: 5, evidence: 20 },
         tooling: { features: 1, evidence: 2 },

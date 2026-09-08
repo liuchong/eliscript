@@ -372,8 +372,9 @@ is needed.
 ### Reduction and Transducers
 
 Collection-native `reduce` is the primary algorithmic primitive. `map`,
-`filter`, `remove`, `take`, `drop`, `mapcat`, and value transforms are expressed
-as reducing-function transformations where practical.
+indexed map, keep, `filter`, `remove`, prefix take/drop, adjacent dedupe,
+`mapcat`, and value transforms are expressed as reducing-function
+transformations where practical.
 
 A transducer is a pure function from one reducing function to another. It does
 not know the input source or output destination. `transduce` combines:
@@ -755,8 +756,9 @@ reduced-value early termination. The construction side then continues in
 persistent updates, truthful partial Set membership, and immutable native
 copies. Composable reducing transformations follow in
 [0061-composable-transducers.md](0061-composable-transducers.md): mapping,
-filtering, bounded taking, completion, reduced termination, and
-protocol-driven `into` now execute without intermediate collections.
+indexed mapping, keeping, filtering, bounded and predicate-controlled
+take/drop, adjacent deduplication, cat/mapcat, completion, reduced termination,
+and protocol-driven `into` now execute without intermediate collections.
 Owner-token runtime builders and transient-backed `into` follow in
 [0062-owner-token-transient-collections.md](0062-owner-token-transient-collections.md).
 Protocol-driven sequence and keyed-data algorithms continue in
