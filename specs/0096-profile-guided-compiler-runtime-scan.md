@@ -1,6 +1,6 @@
 # 0096: Profile-guided Compiler Runtime Requirement Scan
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0018 Portable ESM and Source Map Emission,
@@ -88,12 +88,19 @@ in the SHA-256 source digest. Default tests recompute the digest and validate
 the reviewed report without making wall-clock timing a normal CI gate. A source
 change invalidates the report until the benchmark is rerun and reviewed.
 
+## Compatibility Freeze
+
+The one-pass requirement result, static-key exception, conditional runtime
+imports, and independent reference agreement are stable compiler contracts.
+Future optimizations may replace internal traversal machinery only when they
+preserve those observations, the complete fixed point, and a source-bound
+report meeting the declared decision floor.
+
 ## P4 Status
 
 This slice satisfies the compiler profiling and portable reference review for
-runtime requirement discovery. It does not by itself close all P4 work.
-Additional compiler or standard-library optimizations still require their own
-profile evidence, semantic reference, and observable performance gain.
+runtime requirement discovery. It did not by itself close P4; specification
+0103 records the completed P4 exit after the remaining reviewed slices.
 
 ## Acceptance Criteria
 

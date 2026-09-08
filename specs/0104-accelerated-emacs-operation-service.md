@@ -1,6 +1,6 @@
 # 0104: Accelerated Emacs Operation Service
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0022 Emacs Worker Integration,
@@ -96,6 +96,14 @@ The conformance suite uses a real compiled fixture and real worker process. It
 covers threshold routing, forced paths, twenty deterministic generated score
 cases, deliberate disagreement, progress, cancellation, timeout, restart,
 post-restart reuse, stale-buffer suppression, and transactional rollback.
+
+## Compatibility Freeze
+
+Module, operation, service, and request records; threshold and forced routing;
+reference verification; generation invalidation; cancellation; stale-buffer
+suppression; and atomic application are stable Emacs integration contracts.
+Protocol framing remains owned by the worker layer, and callers remain free of
+transport construction details.
 
 ## P6 and PD-09 Completion
 

@@ -32,7 +32,7 @@ defined by specification 0118. Baseline 1 remains historical evidence; baseline
 
 ## Stable Contract
 
-Baseline 2 currently classifies 83 specifications and their 83 conformance
+Baseline 2 currently classifies 93 specifications and their 93 conformance
 features as stable. The stable set covers these externally meaningful areas:
 
 - lexical binding, deterministic macro behavior, source locations, and Source
@@ -60,6 +60,11 @@ features as stable. The stable set covers these externally meaningful areas:
   transport-safe protocol definitions, and static transient ownership
 - versioned Emacs persistent-value encoding, bounded chunk framing, and the
   source-bound 256 MiB real-process memory contract
+- seven profile-guided compiler optimizations with independent semantic
+  references, fixed-point preservation, and source-bound performance decisions
+- transient bulk-builder performance floors, the accelerated Emacs operation
+  service, and two maintained warm workflows exceeding the 2.0x end-to-end
+  acceptance floor
 - specification, diagnostic, public-surface, continuous compatibility, and
   compatibility-baseline schemas
 
@@ -70,7 +75,7 @@ other explicitly non-identity observations remain implementation details.
 
 ## Provisional Contract
 
-Fifty-eight implemented specifications and features remain provisional. They
+Forty-eight implemented specifications and features remain provisional. They
 cover the broad pre-1.0 language, compiler internals, remaining standard-library
 modules, editor tooling, host interop, compatibility-matrix closure, and final
 acceptance evidence whose public contracts may still change before the 1.0

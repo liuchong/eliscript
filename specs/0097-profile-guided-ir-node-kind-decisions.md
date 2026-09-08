@@ -1,6 +1,6 @@
 # 0097: Profile-guided Constant-time IR Node-kind Decisions
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0007 Explicit Compiler Intermediate Representation,
@@ -100,12 +100,18 @@ site generators, publishing tools, and development servers remain application
 or integration experiments. None participates in this compiler optimization,
 its dependency graph, its benchmark corpus, or its acceptance evidence.
 
+## Compatibility Freeze
+
+The frozen node-kind registry, exact non-coercing membership decision,
+`node-p` short-circuit behavior, and unknown-kind diagnostics are stable
+compiler contracts. The module-private index may evolve only with preserved
+reference agreement, fixed-point output, and source-bound performance evidence.
+
 ## P4 Status
 
 This slice adds a second profile-guided compiler optimization with an
-executable reference and source-bound evidence. It does not close P4: broader
-compiler and standard-library hot paths still require profiling, semantic
-oracles, and measured gains.
+executable reference and source-bound evidence. It did not alone close P4;
+specification 0103 records the completed P4 exit.
 
 ## Acceptance Criteria
 

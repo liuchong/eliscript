@@ -1,6 +1,6 @@
 # 0105: Emacs Analysis Performance Reinvestment
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0040 Project Maturity Roadmap,
@@ -17,7 +17,7 @@ generation-aware resynchronization, synchronous calls, and asynchronous buffer
 application. Its generated Eliscript module owns document search,
 per-document statistics, and corpus term-frequency candidates.
 
-The selected search and statistics workflows each exceed the AC-19 2.0x warm
+The selected search and statistics workflows each exceed the AC-17 2.0x warm
 end-to-end requirement over 30 measured runs. Both construct immutable result
 Vectors through transducers and owner-token persistent builders. The third
 term-frequency candidate uses a persistent Map and remains maintained, but its
@@ -109,6 +109,14 @@ operations across stable and intentionally modified temporary buffers. Exactly
 100 stable results apply atomically, exactly 100 stale results are discarded,
 and the recorded application count is exactly 100. The worker remains live in
 the original generation throughout.
+
+## Compatibility Freeze
+
+The maintained search and statistics operations, exact Emacs Lisp references,
+worker snapshot revision checks, 16,000-character crossover, result digests,
+and at least 2.0x warm end-to-end acceptance floor are stable Emacs-first
+performance contracts. New candidates may be added without weakening these
+selected workflows or counting application-framework evidence as core proof.
 
 ## Acceptance Criteria
 

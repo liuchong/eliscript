@@ -1,6 +1,6 @@
 # 0099: Profile-guided Ordered Source-mark Location
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0009 Source Map v3 Emission,
@@ -140,13 +140,19 @@ not participate in the implementation, corpus, performance decision, roadmap
 credit, or acceptance evidence. They may only consume public Eliscript output
 as application-level utility validation.
 
+## Compatibility Freeze
+
+Ordered-mark interpretation, original-fragment identity cases, exact parent
+mark insertion, and input immutability are stable compiler contracts. Internal
+specialization may change only while it agrees with the complete-scan
+reference, preserves fixed-point output, and retains source-bound evidence at
+or above the declared floor.
+
 ## P4 Status
 
 This is the fourth profile-guided compiler slice with an executable semantic
-reference and source-bound report. It removes source-mark location from the
-dominant profile entries, but does not close P4. Remaining compiler and
-standard-library hot paths require their own profile evidence, independent
-reference, and measured gain.
+reference and source-bound report. It removed source-mark location from the
+dominant profile entries; specification 0103 records the completed P4 exit.
 
 ## Acceptance Criteria
 

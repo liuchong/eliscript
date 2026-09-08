@@ -1,6 +1,6 @@
 # 0101: Profile-guided Reader Character Classification
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0004 Lexical Analysis and Binding Diagnostics,
@@ -82,12 +82,19 @@ server.
 Those tools may consume generated ESM in replaceable application-level probes.
 They cannot supply evidence for this optimization or any language-core goal.
 
+## Compatibility Freeze
+
+The exact whitespace and delimiter code-point sets, boolean result contract,
+end-of-input handling, and unchanged reader spans and diagnostics are stable
+compiler contracts. Private predicates may evolve only with exhaustive
+reference agreement, byte-identical compiler artifacts, and source-bound
+complete-compiler evidence.
+
 ## P4 Status
 
-This is the sixth profile-guided compiler slice. It removes a measured reader
+This is the sixth profile-guided compiler slice. It removed a measured reader
 hot path while preserving an executable semantic reference and exact compiler
-output, but it does not close P4. Broader compiler and standard-library hot
-paths still require independent profile evidence and measured decisions.
+output; specification 0103 records the completed P4 exit.
 
 ## Acceptance Criteria
 
@@ -100,7 +107,7 @@ paths still require independent profile evidence and measured decisions.
 - **RCC-04:** Reader cursor, token, span, diagnostic, and Unicode-width behavior
   remains unchanged across the complete reader conformance corpus.
 - **RCC-05:** The benchmark accepts only the exact pre-specialization baseline
-  and compiles the same current eleven-module compiler corpus with both paths.
+  and compiles the same current thirteen-module compiler corpus with both paths.
 - **RCC-06:** Baseline and optimized compiler ESM plus Source Maps agree exactly
   before timings are recorded.
 - **RCC-07:** The reviewed report contains source and host fingerprints, raw

@@ -34,15 +34,15 @@ The registry currently contains 145 specifications.
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 60 |
-| Stable design | 83 |
+| Accepted design | 50 |
+| Stable design | 93 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
 | Implemented | 141 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 83 specifications as stable,
-58 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 93 specifications as stable,
+48 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -440,16 +440,16 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0093 | [Static Transient Ownership Analysis](0093-static-transient-ownership-analysis.md) | Stable | Implemented |
 | 0094 | [Persistent List Language Semantics and Explicit Host Cons](0094-persistent-list-language-semantics.md) | Stable | Implemented |
 | 0095 | [Stable Persistent Value and Explicit Host Container Boundary](0095-stable-persistent-host-container-boundary.md) | Stable | Implemented |
-| 0096 | [Profile-guided Compiler Runtime Requirement Scan](0096-profile-guided-compiler-runtime-scan.md) | Accepted | Implemented |
-| 0097 | [Profile-guided Constant-time IR Node-kind Decisions](0097-profile-guided-ir-node-kind-decisions.md) | Accepted | Implemented |
-| 0098 | [Profile-guided Source-map-aware Emitter Indentation](0098-profile-guided-emitter-indentation.md) | Accepted | Implemented |
-| 0099 | [Profile-guided Ordered Source-mark Location](0099-profile-guided-source-mark-location.md) | Accepted | Implemented |
-| 0100 | [Profile-guided Binary Comparison Emission](0100-profile-guided-binary-comparison-emission.md) | Accepted | Implemented |
-| 0101 | [Profile-guided Reader Character Classification](0101-profile-guided-reader-character-classification.md) | Accepted | Implemented |
-| 0102 | [Profile-guided Ordered Source Map Cursors](0102-profile-guided-source-map-cursors.md) | Accepted | Implemented |
-| 0103 | [Transient Bulk Builder Performance](0103-transient-bulk-builder-performance.md) | Accepted | Implemented |
-| 0104 | [Accelerated Emacs Operation Service](0104-accelerated-emacs-operation-service.md) | Accepted | Implemented |
-| 0105 | [Emacs Analysis Performance Reinvestment](0105-emacs-analysis-performance-reinvestment.md) | Accepted | Implemented |
+| 0096 | [Profile-guided Compiler Runtime Requirement Scan](0096-profile-guided-compiler-runtime-scan.md) | Stable | Implemented |
+| 0097 | [Profile-guided Constant-time IR Node-kind Decisions](0097-profile-guided-ir-node-kind-decisions.md) | Stable | Implemented |
+| 0098 | [Profile-guided Source-map-aware Emitter Indentation](0098-profile-guided-emitter-indentation.md) | Stable | Implemented |
+| 0099 | [Profile-guided Ordered Source-mark Location](0099-profile-guided-source-mark-location.md) | Stable | Implemented |
+| 0100 | [Profile-guided Binary Comparison Emission](0100-profile-guided-binary-comparison-emission.md) | Stable | Implemented |
+| 0101 | [Profile-guided Reader Character Classification](0101-profile-guided-reader-character-classification.md) | Stable | Implemented |
+| 0102 | [Profile-guided Ordered Source Map Cursors](0102-profile-guided-source-map-cursors.md) | Stable | Implemented |
+| 0103 | [Transient Bulk Builder Performance](0103-transient-bulk-builder-performance.md) | Stable | Implemented |
+| 0104 | [Accelerated Emacs Operation Service](0104-accelerated-emacs-operation-service.md) | Stable | Implemented |
+| 0105 | [Emacs Analysis Performance Reinvestment](0105-emacs-analysis-performance-reinvestment.md) | Stable | Implemented |
 | 0106 | [Versioned Project Request Configuration](0106-versioned-project-request.md) | Accepted | Implemented |
 | 0107 | [Self-hosted Project Graph Planning](0107-self-hosted-project-graph-planning.md) | Accepted | Implemented |
 | 0108 | [Versioned Canonical IR Serialization](0108-versioned-canonical-ir.md) | Accepted | Implemented |

@@ -1,6 +1,6 @@
 # 0100: Profile-guided Binary Comparison Emission
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0003 Implemented Core Language,
@@ -125,12 +125,19 @@ not participate in the implementation, goals, evidence, dependencies, or
 maturity credit. They may observe smaller and faster generated code only as
 application-level utility validation.
 
+## Compatibility Freeze
+
+Direct binary comparison emission, strict left-to-right single evaluation, and
+the eager semantics of comparisons with three or more arguments are stable
+language and compiler contracts. Future emitter work must preserve seed and
+self-hosted parity, Source Maps, side-effect evidence, and the source-bound
+complete-compiler decision.
+
 ## P4 Status
 
-This is the fifth profile-guided compiler slice. It removes a pervasive
-generated closure pattern and demonstrates a complete-compiler improvement,
-but does not close P4. Remaining compiler and standard-library hot paths still
-require profile evidence and measured changes with explicit semantic bounds.
+This is the fifth profile-guided compiler slice. It removed a pervasive
+generated closure pattern and demonstrated a complete-compiler improvement;
+specification 0103 records the completed P4 exit.
 
 ## Acceptance Criteria
 

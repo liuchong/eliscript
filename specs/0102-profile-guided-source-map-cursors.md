@@ -1,6 +1,6 @@
 # 0102: Profile-guided Ordered Source Map Cursors
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0006 Located Forms and Diagnostic Positions,
@@ -89,12 +89,19 @@ blog or site generator, publishing tool, Pages host, or development server.
 Application integrations may consume the unchanged Source Maps only as
 replaceable public-output validation. They cannot prove this core criterion.
 
+## Compatibility Freeze
+
+Generated-mark ordering, duplicate handling, UTF-16 columns, sorted source
+targets, and the existing empty-source and EOF boundaries are stable Source Map
+contracts. Cursor implementations may evolve only with complete reference
+agreement, byte-identical artifacts, fixed-point output, and source-bound
+performance evidence.
+
 ## P4 Status
 
-This is the seventh profile-guided compiler slice. It addresses the two largest
-remaining Source Map preparation entries in the post-0101 profile. It does not
-alone close P4; a fresh profile and broader compiler/standard-library review
-remain required.
+This is the seventh profile-guided compiler slice. It addressed the two largest
+remaining Source Map preparation entries in the post-0101 profile;
+specification 0103 records the subsequent review and completed P4 exit.
 
 ## Acceptance Criteria
 
@@ -109,7 +116,7 @@ remain required.
 - **SMC-05:** Empty-source offset zero and nonempty-source EOF behavior remain
   exactly compatible with the previous implementation.
 - **SMC-06:** The benchmark accepts only the exact pre-specialization revision
-  and compiles the same current eleven-module source corpus with both paths.
+  and compiles the same current thirteen-module source corpus with both paths.
 - **SMC-07:** Baseline and optimized ESM plus Source Maps are byte-identical
   before timings are recorded.
 - **SMC-08:** The reviewed combined cursor median speedup is at least 1.5x and

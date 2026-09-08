@@ -1,6 +1,6 @@
 # 0098: Profile-guided Source-map-aware Emitter Indentation
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0009 Source Map v3 Emission,
@@ -112,13 +112,20 @@ Application frameworks, React integrations, Vite adapters, bundlers, blog or
 site generators, publishing tools, and development servers do not participate
 in its dependencies, corpus, performance decision, or acceptance evidence.
 
+## Compatibility Freeze
+
+The byte-level indentation rules, ordered mark translation, duplicate-mark
+behavior, UTF-16 offsets, and source-end handling are stable compiler
+contracts. Production may change its internal segmentation only while the
+independent character reference, fixed point, and source-bound decision remain
+fully satisfied.
+
 ## P4 Status
 
 This is the third profile-guided compiler slice with an executable semantic
-reference and source-bound report. It removes indentation from the dominant
-profile entries, but does not close P4. Remaining compiler and standard-library
-hot paths require their own profile evidence, independent reference, and
-measured gain.
+reference and source-bound report. It removed indentation from the dominant
+profile entries; specification 0103 records the completed P4 exit after the
+remaining reviewed slices.
 
 ## Acceptance Criteria
 

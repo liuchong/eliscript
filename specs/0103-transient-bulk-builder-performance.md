@@ -1,6 +1,6 @@
 # 0103: Transient Bulk Builder Performance
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
@@ -72,6 +72,14 @@ Default tests validate source identity, raw sample completeness, equality,
 hashes, observations, allocation bounds, completion counts, thresholds, and
 the committed decision without making wall-clock timing part of every test
 run.
+
+## Compatibility Freeze
+
+Public `into` construction for persistent Vector, Map, and Set retains exact
+value and hash equivalence, one-way transient completion, and the declared
+allocation and median-speedup floors. Timing samples remain host-specific, but
+the source-bound measurement protocol and rejection of semantic or structural
+regressions are stable project contracts.
 
 ## Compiler Review and P4 Exit
 

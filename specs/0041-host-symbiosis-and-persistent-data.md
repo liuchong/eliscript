@@ -1203,7 +1203,7 @@ failure rolls buffer edits back atomically.
 
 ### PD-10: Emacs Performance Reinvestment
 
-At least two real Emacs workflows satisfy AC-19 from 0040. One must use the
+At least two real Emacs workflows satisfy AC-17 from 0040. One must use the
 persistent collection/transducer layer, proving that the language's richer
 data model contributes directly to useful editor performance.
 
