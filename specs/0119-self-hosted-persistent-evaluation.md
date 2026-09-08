@@ -1,6 +1,6 @@
 # 0119: Self-hosted Persistent Evaluation
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0019 Self-Hosted Compiler Driver,
@@ -111,11 +111,21 @@ and leaves no process behind.
 
 ## M10 Status
 
-This specification delivers the first source-mapped persistent evaluation
-slice. It does not claim host-neutral file watching, local onboarding,
+This specification delivered the source-mapped persistent evaluation slice.
+At that point it did not claim host-neutral file watching, local onboarding,
 the complete interactive terminal REPL experience, the complete AC-12 or AC-13
-gate, or the M10 exit gate until every acceptance criterion below has executable
-evidence.
+gate, or the M10 exit gate. Specifications 0120, 0121, and 0133 subsequently
+completed the remaining M10 implementation and audit contracts. AC-12 and
+AC-13 remain separate final matrix criteria.
+
+## Compatibility Freeze
+
+The three version 1 evaluation descriptors, immutable namespace revision
+semantics, live expression identity, atomic load and definition replacement,
+canonical value printing, captured output framing, source-mapped diagnostics,
+acknowledged-state Emacs recovery, and explicit session shutdown are stable.
+New evaluation modes require an explicit version rather than ambiguous fields
+or replay behavior.
 
 ## Acceptance Criteria
 

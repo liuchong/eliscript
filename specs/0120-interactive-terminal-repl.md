@@ -1,6 +1,6 @@
 # 0120: Interactive Terminal REPL
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0019 Self-Hosted Compiler Driver,
@@ -99,11 +99,19 @@ artifact may remain after the command returns.
 
 ## M10 Status
 
-This specification completes the terminal portion of AC-13 when its default
-tests pass under the maintained compatibility matrix. M10 remains in progress
-until host-neutral watch events, installation and troubleshooting onboarding,
-the complete AC-12 matrix, and the milestone exit gate are independently
-closed.
+This specification completed the terminal REPL implementation portion of M10.
+Specification 0121 subsequently supplied host-neutral watch events, and
+specification 0133 completed the installation audit and M10 exit audit. AC-13
+remains a separate final supported-matrix criterion; stabilizing this version 1
+contract does not claim that final matrix result.
+
+## Compatibility Freeze
+
+The version 1 interactive input classifier, multiline accumulation, persistent
+session state, terminal commands, canonical value and output ordering,
+recoverable diagnostics, prompt policy, EOF behavior, Bun/Node equivalence,
+and cleanup requirements are stable. Terminal presentation cannot change the
+machine NDJSON protocol or compiler-owned input classification.
 
 ## Acceptance Criteria
 

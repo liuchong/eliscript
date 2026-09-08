@@ -1,6 +1,6 @@
 # 0122: Evidence-derived Maturity Progress
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-07
 - Depends on: 0040 Project Maturity Roadmap and 1.0 Acceptance Contract,
@@ -85,6 +85,12 @@ support a core implementation or verification unit. A complete or partial unit
 must identify at least one current core feature. An open unit may have no
 feature evidence but must state what remains.
 
+The conformance checker uses the same excluded feature identifiers to enforce
+test partitions. Evidence for a core feature must execute through
+`make test-core`; evidence for an excluded application feature must execute
+through `make test-applications`. Inclusion only in the aggregate
+`make test` target cannot turn application validation into core evidence.
+
 The progress contract is a conservative acceptance inventory, not a place to
 record optimism. A unit moves to complete only when the complete wording of its
 roadmap deliverable or acceptance criterion is proven. Narrow tests, planned
@@ -110,6 +116,14 @@ must update this specification, the progress contract, checker expectations,
 and tests. Adding a criterion increases the denominator; silently deleting or
 merging an open criterion to inflate progress is forbidden.
 
+## Compatibility Freeze
+
+The version 1 implementation, verification, and stabilization denominators;
+whole-unit counting; one-decimal percentages; open and blocked reporting; and
+zero-contribution application boundary are stable. Progress must continue to
+derive from current machine-readable evidence, and application-only tests
+cannot support core features or acceptance units.
+
 ## Acceptance Criteria
 
 - **EMP-01:** The contract contains exactly M7-M13 and their 42 declared
@@ -117,7 +131,8 @@ merging an open criterion to inflate progress is forbidden.
 - **EMP-02:** The contract contains exactly AC-01 through AC-24 and PD-01
   through PD-11.
 - **EMP-03:** Complete and partial units reference existing core conformance
-  features; application-validation features are rejected.
+  features; application-validation features and application-only test evidence
+  are rejected.
 - **EMP-04:** Every partial or open unit states concrete remaining work, and
   every blocked unit additionally states its blocker.
 - **EMP-05:** Implementation percentage counts only complete milestone units.
@@ -130,4 +145,5 @@ merging an open criterion to inflate progress is forbidden.
 - **EMP-09:** Application criteria and application features contribute zero to
   every core denominator and numerator.
 - **EMP-10:** The default contract suite rejects missing units, unsupported
-  completion claims, unknown evidence, and application leakage.
+  completion claims, unknown evidence, application feature leakage, and
+  application-only evidence attached to core features.

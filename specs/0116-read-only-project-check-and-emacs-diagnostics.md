@@ -1,6 +1,6 @@
 # 0116: Read-only Project Check and Emacs Diagnostics
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0040 Mature Project Roadmap,
@@ -126,10 +126,21 @@ demand.
 
 ## M10 Status
 
-This specification completes project-aware source checking and structured
-diagnostic navigation. It does not claim compile commands, source-mapped
-evaluation, interactive evaluation, REPL sessions, watch events, onboarding,
-the complete AC-12 editor gate, or the M10 exit gate.
+This specification completed project-aware source checking and structured
+diagnostic navigation. At that slice it did not claim compile commands,
+source-mapped evaluation, interactive evaluation, REPL sessions, watch events,
+onboarding, the complete AC-12 editor gate, or the M10 exit gate.
+Specifications 0117 through 0121 and 0133 subsequently supplied the remaining
+M10 implementation and audit contracts. AC-12 remains independently gated by
+the final supported-editor matrix.
+
+## Compatibility Freeze
+
+The version 1 check request and report, read-only graph traversal, virtual
+stdin override, Bun/Node report identity, structured diagnostic preservation,
+and asynchronous stale-safe Flymake integration are stable. Checking cannot
+create build artifacts or cache state, and application tooling cannot enter
+the request or its evidence.
 
 ## Acceptance Criteria
 

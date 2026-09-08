@@ -1,6 +1,6 @@
 # 0117: Virtual-source Builds and Emacs Compilation Commands
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0040 Mature Project Roadmap,
@@ -109,11 +109,21 @@ project root as `default-directory`, and do not save the current buffer.
 
 ## M10 Status
 
-This specification completes public virtual-source project builds and Emacs
-buffer, file, and project compilation with source navigation. It does not claim
-interactive evaluation, persistent REPL sessions, runtime stack remapping,
-host-neutral watch events, local onboarding, the complete AC-12 gate,
-or the M10 exit gate.
+This specification completed public virtual-source project builds and Emacs
+buffer, file, and project compilation with source navigation. At that slice it
+did not claim interactive evaluation, persistent REPL sessions, runtime stack
+remapping, host-neutral watch events, local onboarding, the complete AC-12
+gate, or the M10 exit gate. Specifications 0119 through 0121, 0133, and 0144
+subsequently supplied those separate implementation and debugging contracts.
+AC-12 remains independently gated by the final supported-editor matrix.
+
+## Compatibility Freeze
+
+The single virtual-source host boundary, exact source identity and digest,
+cache-disable rule, Source Map content, `--stdin-file` behavior, located
+diagnostics, and Emacs buffer/file/project compilation commands are stable.
+Multiple virtual sources require an explicit framed protocol rather than a
+reinterpretation of this command.
 
 ## Acceptance Criteria
 

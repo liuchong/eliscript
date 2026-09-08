@@ -1,6 +1,6 @@
 # 0121: Host-neutral Project Watch Events
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0040 Project Maturity Roadmap and 1.0 Acceptance Contract,
@@ -96,10 +96,18 @@ tooling.
 
 ## M10 Status
 
-This specification completes the host-neutral watch API and maintained Emacs
-consumer when every acceptance item has default-suite evidence. M10 remains in
-progress until local onboarding, troubleshooting documentation, the
-complete AC-12 compatibility matrix, and the milestone exit gate are closed.
+This specification completed the host-neutral watch API and maintained Emacs
+consumer with default-suite evidence. Specification 0133 subsequently
+completed local onboarding, troubleshooting verification, and the M10 exit
+audit. AC-12 remains a separate final supported-editor matrix criterion.
+
+## Compatibility Freeze
+
+The `eliscript-watch-event` version 1 envelope, content-derived snapshots,
+sorted create/modify/delete changes, configured-project resolution, bounded
+polling, Bun/Node event equivalence, signal cleanup, and shared Emacs consumer
+lifecycle are stable. Native watcher details, timestamps, and application
+development servers cannot enter event identity or core evidence.
 
 ## Acceptance Criteria
 

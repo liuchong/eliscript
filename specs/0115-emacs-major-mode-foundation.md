@@ -1,6 +1,6 @@
 # 0115: Emacs Major Mode Foundation
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0040 Mature Project Roadmap,
@@ -104,11 +104,22 @@ does not save the buffer or mutate the visited file.
 
 ## M10 Status
 
-This specification completes the foundational major-mode editing behavior and
-its formatter integration. It does not claim project-aware checking, Flymake
-or compilation diagnostics, compile buffer/file/project commands,
-source-mapped evaluation, REPL sessions, watch events, installation audit, the
-complete AC-12 editor gate, or the M10 exit gate.
+This specification completed the foundational major-mode editing behavior and
+its formatter integration. At that slice it did not claim project-aware
+checking, Flymake or compilation diagnostics, compile buffer/file/project
+commands, source-mapped evaluation, REPL sessions, watch events, installation
+audit, the complete AC-12 editor gate, or the M10 exit gate. Specifications
+0116 through 0121 and 0133 subsequently completed the remaining M10
+implementation units and exit audit. AC-12 remains a separate final matrix
+criterion and is not implied by this compatibility status.
+
+## Compatibility Freeze
+
+The `.eli` mode association, syntax table, two-space structural indentation,
+semantic font locking, Imenu and balanced definition navigation, project-root
+discovery order, public formatter invocation, and transactional buffer
+replacement are stable. New editor capabilities may compose with these
+behaviors but cannot redefine language syntax or formatter version 1.
 
 ## Acceptance Criteria
 

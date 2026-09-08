@@ -75,6 +75,12 @@ scripts rather than repeating their assertions in the manifest. Renaming or
 removing the evidence breaks the contract check until the manifest is updated
 to a valid replacement.
 
+The application feature identifiers excluded by
+`contracts/maturity-progress.json` also define evidence partitions. Core
+feature evidence must execute through `make test-core`; excluded application
+feature evidence must execute through `make test-applications`. Presence only
+in the aggregate target is insufficient.
+
 ## Checker
 
 `tools/conformance/check.mjs` validates both documents without third-party
@@ -86,6 +92,7 @@ dependencies. It checks:
 - feature ownership by an accepted, implemented specification
 - existence and exact content of every evidence file
 - execution of every non-fixture evidence file by the default test target
+- execution of core and application evidence in their declared test partition
 - complete feature coverage for every implemented specification
 
 Run it directly with:
@@ -98,10 +105,10 @@ Use `bun tools/conformance/check.mjs --json` for a machine-readable summary.
 The default `make test` target runs the human-readable check before compiler
 tests.
 
-## Current Baseline
+## Historical Initial Baseline
 
-The initial registry contains all 42 specifications. Thirty-nine implemented
-specifications own 39 conformance features with 67 evidence links. The roadmap
+The initial registry contained all 42 specifications. Thirty-nine implemented
+specifications owned 39 conformance features with 67 evidence links. The roadmap
 and persistent-data design remain accepted work with independent implementation
 states rather than being misreported as completed features.
 
@@ -131,7 +138,7 @@ only `accepted`.
 - The repository contract check reports complete implemented-spec coverage.
 - Bun tests prove the current registry and manifest pass.
 - Negative tests prove title drift, missing evidence locators, evidence outside
-  the default suite, and uncovered implemented specifications fail with
-  targeted errors.
+  the default suite, application-only evidence attached to core features, and
+  uncovered implemented specifications fail with targeted errors.
 - The default test target runs the checker before all compiler and integration
   suites.

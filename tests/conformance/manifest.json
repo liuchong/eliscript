@@ -387,8 +387,12 @@
       "title": "Specification registry and conformance evidence",
       "status": "stable",
       "spec": "0042",
-      "contracts": ["Indexes every numbered specification with separate design and implementation status", "Requires every implemented specification to own executable conformance evidence"],
-      "evidence": [{ "kind": "bun-test", "file": "tests/conformance.test.mjs", "contains": "repository specifications have complete conformance evidence" }]
+      "contracts": ["Indexes every numbered specification with separate design and implementation status", "Requires every implemented specification to own executable conformance evidence", "Enforces core and application evidence through their declared test partitions"],
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/conformance.test.mjs", "contains": "repository specifications have complete conformance evidence" },
+        { "kind": "bun-test", "file": "tests/conformance.test.mjs", "contains": "contract checker rejects application-only evidence for core features" },
+        { "kind": "bun-test", "file": "tests/conformance.test.mjs", "contains": "contract checker rejects core-only evidence for application features" }
+      ]
     },
     {
       "id": "compiler.structured-diagnostics",
@@ -1514,14 +1518,14 @@
     {
       "id": "editor.emacs-major-mode-foundation",
       "title": "Emacs major mode foundation",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0115",
       "contracts": [
         "Associates .eli source with a maintained Emacs major mode and complete syntax table",
         "Provides deterministic two-space indentation, semantic font locking, Imenu, and balanced definition navigation",
         "Discovers configured and VCS-backed projects without running a build",
         "Formats buffers transactionally through the public self-hosted formatter command",
-        "Leaves checking, compiler diagnostics, evaluation, REPL, watch, AC-12, and the M10 exit gate open",
+        "Records the foundational editor slice separately from later checking, evaluation, REPL, watch, and final matrix contracts",
         "Keeps application integrations outside core implementation, dependencies, evidence, and maturity credit"
       ],
       "evidence": [
@@ -1570,7 +1574,7 @@
     {
       "id": "editor.project-check-diagnostics",
       "title": "Read-only project check and Emacs diagnostics",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0116",
       "contracts": [
         "Normalizes self-hosted check operations and deterministic successful reports",
@@ -1616,7 +1620,7 @@
     {
       "id": "editor.virtual-source-compilation",
       "title": "Virtual-source builds and Emacs compilation commands",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0117",
       "contracts": [
         "Builds one in-memory source under its canonical project identity",
@@ -1652,11 +1656,13 @@
     {
       "id": "language.framework-neutral-library-interop",
       "title": "Framework-neutral library interoperation",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0118",
       "contracts": [
-        "Keeps framework names as ordinary bindings",
-        "Uses explicit ESM without framework-specific IR or runtime injection"
+        "Keeps framework-associated names as ordinary user bindings without privileged syntax or IR",
+        "Uses explicit ESM imports and ordinary calls without compiler-owned host-library injection",
+        "Produces equivalent generic ESM artifacts across seed and self-hosted compilers under Bun and Node",
+        "Keeps application adapters and framework execution outside core dependencies, evidence, and maturity credit"
       ],
       "evidence": [
         {
@@ -1665,16 +1671,21 @@
           "contains": "eliscript-framework-names-are-ordinary-bindings"
         },
         {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-ui-library-interop-uses-ordinary-esm"
+        },
+        {
           "kind": "bun-test",
-          "file": "tests/vite-plugin.test.mjs",
-          "contains": "Vite remains an application adapter outside language core"
+          "file": "tests/esm-imports.test.mjs",
+          "contains": "complete ESM imports are identical and executable across compilers and hosts"
         }
       ]
     },
     {
       "id": "editor.persistent-evaluation",
       "title": "Self-hosted persistent evaluation",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0119",
       "contracts": [
         "Normalizes evaluation operations and source descriptors in seed and self-hosted compilers",
@@ -1710,7 +1721,7 @@
     {
       "id": "toolchain.interactive-terminal-repl",
       "title": "Interactive terminal REPL",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0120",
       "contracts": [
         "Classifies empty, incomplete, complete, and invalid interactive input in seed and self-hosted compilers",
@@ -1746,7 +1757,7 @@
     {
       "id": "toolchain.host-neutral-project-watch",
       "title": "Host-neutral project watch events",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0121",
       "contracts": [
         "Emits versioned ready and sorted content-level source change events",
@@ -1788,14 +1799,14 @@
     {
       "id": "quality.evidence-derived-maturity-progress",
       "title": "Evidence-derived maturity progress",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0122",
       "contracts": [
         "Counts 42 explicit M7-M13 implementation units",
         "Counts exactly AC-01 through AC-24 and PD-01 through PD-11",
         "Derives stabilization from current core conformance feature status",
         "Reports independent implementation, verification, and stabilization percentages",
-        "Rejects missing units, unsupported claims, unknown evidence, and application leakage",
+        "Rejects missing units, unsupported claims, unknown evidence, application features, and application-only evidence on core features",
         "Excludes application criteria and features from every core progress calculation"
       ],
       "evidence": [

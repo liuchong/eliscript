@@ -34,15 +34,15 @@ The registry currently contains 145 specifications.
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 41 |
-| Stable design | 102 |
+| Accepted design | 33 |
+| Stable design | 110 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
 | Implemented | 141 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 102 specifications as stable,
-39 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 110 specifications as stable,
+31 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -459,14 +459,14 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0112 | [Unified Self-hosted Build Operation](0112-unified-self-hosted-build-operation.md) | Stable | Implemented |
 | 0113 | [Versioned Multi-entry Project Identity](0113-versioned-multi-entry-project-identity.md) | Stable | Implemented |
 | 0114 | [Deterministic Concrete-syntax Formatter](0114-deterministic-concrete-syntax-formatter.md) | Stable | Implemented |
-| 0115 | [Emacs Major Mode Foundation](0115-emacs-major-mode-foundation.md) | Accepted | Implemented |
-| 0116 | [Read-only Project Check and Emacs Diagnostics](0116-read-only-project-check-and-emacs-diagnostics.md) | Accepted | Implemented |
-| 0117 | [Virtual-source Builds and Emacs Compilation Commands](0117-virtual-source-builds-and-emacs-compilation.md) | Accepted | Implemented |
-| 0118 | [Framework-neutral Library Interoperation](0118-framework-neutral-library-interop.md) | Accepted | Implemented |
-| 0119 | [Self-hosted Persistent Evaluation](0119-self-hosted-persistent-evaluation.md) | Accepted | Implemented |
-| 0120 | [Interactive Terminal REPL](0120-interactive-terminal-repl.md) | Accepted | Implemented |
-| 0121 | [Host-neutral Project Watch Events](0121-host-neutral-project-watch.md) | Accepted | Implemented |
-| 0122 | [Evidence-derived Maturity Progress](0122-evidence-derived-maturity-progress.md) | Accepted | Implemented |
+| 0115 | [Emacs Major Mode Foundation](0115-emacs-major-mode-foundation.md) | Stable | Implemented |
+| 0116 | [Read-only Project Check and Emacs Diagnostics](0116-read-only-project-check-and-emacs-diagnostics.md) | Stable | Implemented |
+| 0117 | [Virtual-source Builds and Emacs Compilation Commands](0117-virtual-source-builds-and-emacs-compilation.md) | Stable | Implemented |
+| 0118 | [Framework-neutral Library Interoperation](0118-framework-neutral-library-interop.md) | Stable | Implemented |
+| 0119 | [Self-hosted Persistent Evaluation](0119-self-hosted-persistent-evaluation.md) | Stable | Implemented |
+| 0120 | [Interactive Terminal REPL](0120-interactive-terminal-repl.md) | Stable | Implemented |
+| 0121 | [Host-neutral Project Watch Events](0121-host-neutral-project-watch.md) | Stable | Implemented |
+| 0122 | [Evidence-derived Maturity Progress](0122-evidence-derived-maturity-progress.md) | Stable | Implemented |
 | 0123 | [Stable ECMAScript Module Import Contract](0123-stable-esm-import-contract.md) | Stable | Implemented |
 | 0124 | [Declared Macro File Dependencies](0124-declared-macro-file-dependencies.md) | Stable | Implemented |
 | 0125 | [Generated Library API Index](0125-generated-library-api-index.md) | Accepted | Implemented |

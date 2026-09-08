@@ -1,6 +1,6 @@
 # 0118: Framework-neutral Library Interoperation
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Supersedes: 0010
@@ -95,3 +95,29 @@ historical description, while baseline 2 is the current compatibility target.
 - A UI example compiles and renders after importing its runtime explicitly.
 - `jsx`, `fragment`, and `defcomponent` can be declared and called as ordinary
   user bindings.
+
+Application execution remains separate validation. Core conformance uses
+ordinary binding tests and a generic local ESM provider executed across the
+seed and self-hosted compilers under Bun and Node.
+
+## Compatibility Freeze
+
+Framework-associated names remain ordinary user bindings. Host libraries are
+accessed only through explicit ESM imports, ordinary calls, and the general
+JavaScript interop surface; the compiler does not reserve framework syntax,
+create framework IR, inject runtimes, or require application tooling. Any
+future ergonomic layer must remain replaceable application code or define a
+separate framework-neutral language contract.
+
+## Acceptance Criteria
+
+- **FNL-01:** Framework-associated names compile as ordinary definitions and
+  calls without privileged reader, analyzer, IR, or emitter behavior.
+- **FNL-02:** Generic explicit ESM imports produce equivalent seed and
+  self-hosted artifacts and execute identically under Bun and Node.
+- **FNL-03:** Core compiler, runtime, and standard-library sources contain no
+  application-framework dependency or runtime injection.
+- **FNL-04:** Application adapters and framework execution remain outside core
+  dependencies, conformance evidence, and maturity credit.
+- **FNL-05:** The conformance checker rejects application-only test evidence
+  attached to a core feature.

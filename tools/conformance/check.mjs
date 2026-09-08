@@ -70,6 +70,19 @@ async function readJson(filename) {
   return JSON.parse(await readFile(filename, "utf8"));
 }
 
+function makeTargetSource(makefile, name) {
+  const lines = makefile.split("\n");
+  const start = lines.findIndex((line) => line.startsWith(`${name}:`));
+  if (start === -1) return "";
+
+  const body = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^[A-Za-z0-9_.-]+:/u.test(line)) break;
+    body.push(line);
+  }
+  return `${lines[start]}\n${body.join("\n")}`;
+}
+
 async function readSpecMetadata(filename) {
   const source = await readFile(filename, "utf8");
   const heading = source.match(/^# (\d{4}): (.+)$/mu);
@@ -204,7 +217,13 @@ function validateFeatureShape(feature, index, errors) {
   }
 }
 
-async function validateManifest(root, manifest, specsById, errors) {
+async function validateManifest(
+  root,
+  manifest,
+  specsById,
+  applicationFeatureIds,
+  errors,
+) {
   if (!isPlainObject(manifest) || manifest.schemaVersion !== 1) {
     errors.push("conformance manifest must use schemaVersion 1");
     return { features: 0, evidence: 0, coveredSpecs: new Set() };
@@ -219,6 +238,10 @@ async function validateManifest(root, manifest, specsById, errors) {
   const sourceCache = new Map();
   const domains = new Map();
   const testDriver = await readFile(path.join(root, "Makefile"), "utf8");
+  const coreTestDriver = makeTargetSource(testDriver, "test-core");
+  const applicationTestDriver = makeTargetSource(testDriver, "test-applications");
+  if (!coreTestDriver) errors.push("Makefile must define test-core");
+  if (!applicationTestDriver) errors.push("Makefile must define test-applications");
   let evidenceCount = 0;
   let previousSpec = "";
 
@@ -294,6 +317,18 @@ async function validateManifest(root, manifest, specsById, errors) {
           errors.push(
             `${label} file ${evidence.file} is not executed by the default test target`,
           );
+        }
+        if (evidence.kind !== "fixture") {
+          const applicationEvidence = applicationFeatureIds.has(feature.id);
+          const partition = applicationEvidence
+            ? applicationTestDriver
+            : coreTestDriver;
+          const target = applicationEvidence ? "test-applications" : "test-core";
+          if (!partition.includes(evidence.file)) {
+            errors.push(
+              `${label} file ${evidence.file} is not executed by ${target}`,
+            );
+          }
         }
       } catch (error) {
         errors.push(`${label} cannot read ${evidence.file}: ${error.message}`);
@@ -473,9 +508,23 @@ export async function checkContracts(options = {}) {
   const baseline =
     options.baseline ??
     (await readJson(path.join(root, "contracts/compatibility-baseline.json")));
+  const maturity =
+    options.maturity ??
+    (await readJson(path.join(root, "contracts/maturity-progress.json")));
+  const applicationFeatureIds = new Set(validateSortedStrings(
+    maturity?.stabilization?.excludedFeatureIds,
+    "core conformance application exclusions",
+    errors,
+  ));
 
   const specsById = await validateSpecIndex(root, specIndex, errors);
-  const manifestReport = await validateManifest(root, manifest, specsById, errors);
+  const manifestReport = await validateManifest(
+    root,
+    manifest,
+    specsById,
+    applicationFeatureIds,
+    errors,
+  );
   const baselineReport = validateCompatibilityBaseline(
     baseline,
     specsById,

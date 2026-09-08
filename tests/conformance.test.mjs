@@ -30,7 +30,7 @@ test("repository specifications have complete conformance evidence", async () =>
     schemaVersion: 1,
     specifications: {
       total: 145,
-      statuses: { draft: 1, accepted: 41, stable: 102, superseded: 1 },
+      statuses: { draft: 1, accepted: 33, stable: 110, superseded: 1 },
       implementations: {
         "in-progress": 3,
         implemented: 141,
@@ -40,19 +40,19 @@ test("repository specifications have complete conformance evidence", async () =>
     },
     features: {
       total: 141,
-      evidence: 503,
+      evidence: 506,
       domains: {
         acceleration: { features: 1, evidence: 1 },
         bootstrap: { features: 13, evidence: 30 },
         compiler: { features: 15, evidence: 41 },
         editor: { features: 4, evidence: 22 },
-        language: { features: 22, evidence: 85 },
+        language: { features: 22, evidence: 86 },
         macro: { features: 3, evidence: 9 },
         portable: { features: 3, evidence: 5 },
         platform: { features: 1, evidence: 7 },
         project: { features: 5, evidence: 7 },
         publishing: { features: 1, evidence: 2 },
-        quality: { features: 22, evidence: 58 },
+        quality: { features: 22, evidence: 60 },
         runtime: { features: 16, evidence: 98 },
         stdlib: { features: 21, evidence: 85 },
         toolchain: { features: 5, evidence: 20 },
@@ -61,12 +61,12 @@ test("repository specifications have complete conformance evidence", async () =>
       },
     },
     baseline: {
-      stableSpecifications: 102,
-      provisionalSpecifications: 39,
+      stableSpecifications: 110,
+      provisionalSpecifications: 31,
       planningSpecifications: 3,
       supersededSpecifications: 1,
-      stableFeatures: 102,
-      provisionalFeatures: 39,
+      stableFeatures: 110,
+      provisionalFeatures: 31,
     },
   });
 });
@@ -100,6 +100,42 @@ test("contract checker rejects evidence outside the default test suite", async (
   const errors = await validationErrors({ manifest });
   expect(errors).toContain(
     "acceleration.measurement-probe evidence 0 file README.md is not executed by the default test target",
+  );
+});
+
+test("contract checker rejects application-only evidence for core features", async () => {
+  const manifest = await readJson("tests/conformance/manifest.json");
+  const feature = manifest.features.find(
+    (candidate) => candidate.id === "language.framework-neutral-library-interop",
+  );
+  feature.evidence[0] = {
+    kind: "bun-test",
+    file: "tests/vite-plugin.test.mjs",
+    contains: "Vite remains an application adapter outside language core",
+  };
+
+  const errors = await validationErrors({ manifest });
+  expect(errors).toContain(
+    "language.framework-neutral-library-interop evidence 0 file " +
+      "tests/vite-plugin.test.mjs is not executed by test-core",
+  );
+});
+
+test("contract checker rejects core-only evidence for application features", async () => {
+  const manifest = await readJson("tests/conformance/manifest.json");
+  const feature = manifest.features.find(
+    (candidate) => candidate.id === "tooling.vite-adapter",
+  );
+  feature.evidence[0] = {
+    kind: "bun-test",
+    file: "tests/esm-imports.test.mjs",
+    contains: "complete ESM imports are identical and executable across compilers and hosts",
+  };
+
+  const errors = await validationErrors({ manifest });
+  expect(errors).toContain(
+    "tooling.vite-adapter evidence 0 file " +
+      "tests/esm-imports.test.mjs is not executed by test-applications",
   );
 });
 

@@ -64,12 +64,12 @@ test("maturity progress is derived from explicit core acceptance units", async (
       blocked: [],
     },
     stabilization: {
-      completed: 100,
+      completed: 108,
       total: 139,
-      completedPercent: 71.9,
-      remaining: 39,
-      remainingPercent: 28.1,
-      provisional: 39,
+      completedPercent: 77.7,
+      remaining: 31,
+      remainingPercent: 22.3,
+      provisional: 31,
       excludedFeatureIds: ["publishing.org-adapter", "tooling.vite-adapter"],
     },
     applications: {
