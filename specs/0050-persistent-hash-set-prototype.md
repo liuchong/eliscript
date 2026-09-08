@@ -1,6 +1,6 @@
 # 0050: Persistent Hash Set Prototype
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
@@ -9,16 +9,16 @@
 
 ## Summary
 
-This specification defines the provisional M8 persistent hash set. The set is
-an immutable value-semantic view over the 0049 hash array mapped trie: members
-are map keys and every key maps to one private sentinel. Set construction,
-membership, insertion, removal, traversal, and set algebra therefore use the
-same value equality, complete-hash collision handling, path copying, and
-sparse/dense transitions as the persistent map.
+This specification defines the stable JavaScript runtime persistent hash set.
+The set is an immutable value-semantic view over the 0049 hash array mapped
+trie: members are map keys and every key maps to one private sentinel. Set
+construction, membership, insertion, removal, traversal, and set algebra
+therefore use the same value equality, complete-hash collision handling, path
+copying, and sparse/dense transitions as the persistent map.
 
-The implementation remains an isolated JavaScript runtime prototype. It does
-not change set literals, compiler IR, reader behavior, or native JavaScript Set
-interop. Those changes wait for the full collection and conversion contracts.
+The implementation is the JavaScript runtime reference. Set literals, compiler
+IR, reader behavior, and native JavaScript Set interop remain separately
+versioned language contracts.
 
 ## Runtime Surface
 
@@ -33,7 +33,7 @@ interop. Those changes wait for the full collection and conversion contracts.
 an existing persistent hash set returns it unchanged. Direct construction is
 rejected so callers cannot supply a malformed backing map or sentinel.
 
-The provisional operation surface is:
+The stable operation surface is:
 
 - `count` and `size`
 - `has(value)`
@@ -65,7 +65,7 @@ This representation has three consequences:
 
 1. no second hash trie implementation can drift from Map collision behavior
 2. measured Map promotion at 32 branches and demotion at 24 apply unchanged
-3. future transient Set can share the transient HAMT owner-token machinery
+3. transient Set shares the transient HAMT owner-token machinery
    rather than inventing a Set-specific node family
 
 The wrapper does allocate one persistent Map value and one persistent Set
@@ -106,9 +106,9 @@ No-op union, intersection, and difference return the receiver when the result
 is observably unchanged. Operations with several arguments apply from left to
 right, but their resulting membership does not depend on traversal order.
 
-These operations currently use persistent updates. The protocol/transducer
-layer will later route profitable bulk results through invalidatable transient
-builders while retaining this contract as the reference behavior.
+These operations use persistent updates. The protocol/transducer layer routes
+profitable bulk results through invalidatable transient builders while
+retaining this contract as the reference behavior.
 
 ## Traversal and Reduction
 
@@ -149,7 +149,8 @@ Eliscript value lookup for independently built equal persistent values,
 because native Set compares object identity.
 
 Deep `to-js`/`from-js`, cycle diagnostics, and recursive collection conversion
-remain later interop work. No implicit conversion occurs at JavaScript calls.
+are owned by the later interop contract. No implicit conversion occurs at
+JavaScript calls.
 
 ## Complexity
 
@@ -209,17 +210,15 @@ The generated model uses scalar values because native Set is only a valid
 reference for that domain. Separate vector and collision cases prove the
 stronger Eliscript semantics that native Set cannot model.
 
-## Compatibility and Remaining Work
+## Compatibility and Extensions
 
-This specification and feature are provisional in Compatibility Baseline 1.
-Existing syntax and native JavaScript Set behavior are unchanged.
+This specification and feature are stable in Compatibility Baseline 2. The
+public class, constructors, operations, value semantics, set algebra, frozen
+hash results, collision behavior, and structural bounds cannot change
+incompatibly without a superseding specification and migration fixture.
 
-The prototype completes the Map-backed Set component of the initial HAMT
-runtime, but it does not complete the 0041 P0/P1 exits. Remaining work includes:
-
-- transient owner-token vector, map, and set builders
-- persistent list, keyword, and Eliscript symbol values
-- metadata and reader/printer round trips
-- property-generated collection operations at the final PD-01 volume
-- portable Eliscript implementation after integer bit operations are exposed
-- literal, protocol, compiler, standard-library, and interop migration
+Owner-token transients, persistent List and identifier values, metadata,
+reader/printer round trips, portable implementation, literals, protocols, and
+interop are layered by later specifications. They extend this contract without
+weakening its retained correctness, sharing, collision, or million-scale
+evidence.

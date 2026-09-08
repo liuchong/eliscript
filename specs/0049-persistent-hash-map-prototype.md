@@ -1,6 +1,6 @@
 # 0049: Persistent Hash Map Trie Prototype
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
@@ -8,17 +8,16 @@
 
 ## Summary
 
-This specification defines the provisional M8 persistent hash map. It is a
-32-way hash array mapped trie with sparse bitmap nodes, dense array nodes, and
-dedicated full-hash collision nodes. Keys use the value equality and hash
-contract from 0048; updates preserve previous map versions and copy only the
-selected trie path.
+This specification defines the stable JavaScript runtime persistent hash map.
+It is a 32-way hash array mapped trie with sparse bitmap nodes, dense array
+nodes, and dedicated full-hash collision nodes. Keys use the value equality
+and hash contract from 0048; updates preserve previous map versions and copy
+only the selected trie path.
 
-The implementation is an isolated JavaScript runtime prototype. It does not
-change map literals, native object forms, compiler IR, or standard-library
-object behavior. A future language integration slice must first complete
-explicit host conversion, reader/printer behavior, and compiler support. The
-Map-backed Set layer is specified separately by 0050.
+The implementation is the JavaScript runtime reference. Map literals, native
+object forms, compiler IR, reader/printer behavior, and host conversion remain
+separately versioned language contracts. The Map-backed Set layer is specified
+separately by 0050.
 
 ## Runtime Surface
 
@@ -34,7 +33,7 @@ are themselves iterable pairs of exactly two values. Passing an existing
 persistent hash map returns it unchanged. Invalid or non-pair entries fail
 before they can create a malformed trie.
 
-The provisional operation surface is:
+The stable operation surface is:
 
 - `count` and `size`
 - `get(key[, notFound])`
@@ -241,21 +240,17 @@ The one-million-key suite permits at most nine visited nodes. This covers the
 seven 5-bit hash segments plus the documented collision/implementation margin
 from PD-03.
 
-## Compatibility and Remaining Work
+## Compatibility and Extensions
 
-This specification and feature are provisional in Compatibility Baseline 1.
-Existing object and map literal behavior is unchanged.
+This specification and feature are stable in Compatibility Baseline 2. The
+public class, constructors, operations, key semantics, frozen hash results,
+32/24 node transitions, collision behavior, and structural bounds cannot
+change incompatibly without a superseding specification and migration fixture.
 
-The prototype satisfies the core persistent Map correctness, collision,
-sharing, and million-scale structural requirements, but does not complete the
-0041 P0/P1 exits. Remaining work includes:
-
-- transient owner-token variants
-- keyword and Eliscript symbol values
-- metadata and reader/printer round trips
-- property-generated operation sequences at the final PD-01 volume
-- portable Eliscript implementation after integer bit operations are exposed
-- literal, protocol, compiler, standard-library, and interop migration
+Owner-token transients, identifiers, metadata, reader/printer round trips,
+portable implementation, literals, protocols, and interop are layered by
+later specifications. They extend this contract without weakening its retained
+correctness, sharing, collision, or million-scale evidence.
 
 The persistent Set over this key layer is implemented and specified by
 [0050-persistent-hash-set-prototype.md](0050-persistent-hash-set-prototype.md).

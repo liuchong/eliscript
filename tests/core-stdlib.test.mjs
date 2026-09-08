@@ -140,6 +140,63 @@ async function runBuiltCoreProjectHost(command, outputRoot) {
   ]));
 }
 
+async function runBuiltPersistentValueProjectHost(command, outputRoot) {
+  const moduleUrl = (name) => JSON.stringify(pathToFileURL(
+    resolve(outputRoot, `${name}.mjs`),
+  ).href);
+  const source = [
+    `const bit = await import(${moduleUrl("bit")});`,
+    `const list = await import(${moduleUrl("persistent-list")});`,
+    `const vector = await import(${moduleUrl("persistent-vector")});`,
+    `const map = await import(${moduleUrl("persistent-map")});`,
+    `const set = await import(${moduleUrl("persistent-set")});`,
+    `const value = await import(${moduleUrl("value")});`,
+    "const sourceVector = vector.persistent_vector_from_array([1, 2, 3]);",
+    "const changedVector = vector.persistent_vector_assoc(sourceVector, 1, 20);",
+    "const sourceList = list.persistent_list_from_array(['a', 'b', 'c']);",
+    "const equalKey = () => vector.persistent_vector_from_array(['key']);",
+    "const valueMap = value.value_map_from_entries([",
+    "  [equalKey(), sourceList],",
+    "  ['undefined', undefined],",
+    "]);",
+    "const valueSet = value.value_set_from_array([",
+    "  equalKey(),",
+    "  sourceList,",
+    "  equalKey(),",
+    "]);",
+    "const foundList = map.persistent_map_get(valueMap, equalKey(), null);",
+    "const equivalentVector = vector.persistent_vector_from_array([1, 2, 3]);",
+    "console.log(JSON.stringify({",
+    "  bit: [bit.bit_count(4042322160), bit.rotate_left(1, 1),",
+    "    bit.rotate_right(1, 1)],",
+    "  vector: [",
+    "    vector.persistent_vector_to_array(sourceVector),",
+    "    vector.persistent_vector_to_array(changedVector),",
+    "  ],",
+    "  list: list.persistent_list_to_array(foundList),",
+    "  map: [",
+    "    map.persistent_map_count(valueMap),",
+    "    map.persistent_map_has_QMARK_(valueMap, 'undefined'),",
+    "    map.persistent_map_get(valueMap, 'undefined', 'missing') === undefined,",
+    "  ],",
+    "  set: [",
+    "    set.persistent_set_count(valueSet),",
+    "    set.persistent_set_has_QMARK_(valueSet, equalKey()),",
+    "  ],",
+    "  value: [",
+    "    value.value_equal_QMARK_(sourceVector, equivalentVector),",
+    "    value.value_hash(sourceVector) === value.value_hash(equivalentVector),",
+    "  ],",
+    "}));",
+  ].join("\n");
+  return JSON.parse(await runSuccessful([
+    command,
+    "--input-type=module",
+    "--eval",
+    source,
+  ]));
+}
+
 test("sequence algorithms use protocols and Eliscript truthiness", () => {
   class Range {
     constructor(start, end, observe = () => {}) {
@@ -508,6 +565,65 @@ test("stable core protocol library builds as one project and executes under Bun 
     expect(await runBuiltCoreProjectHost(process.execPath, outputRoot))
       .toEqual(expected);
     expect(await runBuiltCoreProjectHost(
+      process.env.NODE_BINARY ?? "node",
+      outputRoot,
+    )).toEqual(expected);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 60_000);
+
+test("persistent value library builds as one project and executes under Bun and Node", async () => {
+  const directory = await mkdtemp(resolve(ROOT, ".eliscript-value-project-"));
+  const outputRoot = resolve(directory, "stdlib");
+  const sourceNames = [
+    "bit",
+    "persistent-list",
+    "persistent-vector",
+    "persistent-map",
+    "persistent-set",
+    "value",
+  ];
+  const sources = sourceNames.map((name) => resolve(ROOT, `stdlib/${name}.eli`));
+  try {
+    await symlink(resolve(ROOT, "runtime"), resolve(directory, "runtime"), "dir");
+    const report = JSON.parse(await runSuccessful([
+      resolve(ROOT, "bin/eliscript-build"),
+      "--json",
+      "--root",
+      resolve(ROOT, "stdlib"),
+      "--out-dir",
+      outputRoot,
+      "--no-cache",
+      ...sources,
+    ]));
+    expect(report).toMatchObject({
+      format: "eliscript-build-report",
+      version: 2,
+      mode: "standard",
+      entries: sourceNames.map((name) => `${name}.eli`).sort(),
+      counts: { modules: 6, compiled: 6, reused: 0 },
+      cache: { enabled: false, status: "disabled", reason: "cache-disabled" },
+    });
+    for (const name of sourceNames) {
+      const sourceMap = JSON.parse(await readFile(
+        resolve(outputRoot, `${name}.mjs.map`),
+        "utf8",
+      ));
+      expect(sourceMap.sourcesContent[0])
+        .toContain(`(module eliscript.${name}`);
+    }
+    const expected = {
+      bit: [16, 2, 2_147_483_648],
+      vector: [[1, 2, 3], [1, 20, 3]],
+      list: ["a", "b", "c"],
+      map: [2, true, true],
+      set: [2, true],
+      value: [true, true],
+    };
+    expect(await runBuiltPersistentValueProjectHost(process.execPath, outputRoot))
+      .toEqual(expected);
+    expect(await runBuiltPersistentValueProjectHost(
       process.env.NODE_BINARY ?? "node",
       outputRoot,
     )).toEqual(expected);

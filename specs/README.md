@@ -34,15 +34,15 @@ The registry currently contains 145 specifications.
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 101 |
-| Stable design | 42 |
+| Accepted design | 92 |
+| Stable design | 51 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
 | Implemented | 141 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 42 specifications as stable,
-99 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 51 specifications as stable,
+90 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -391,17 +391,17 @@ defined by [0125](0125-generated-library-api-index.md).
 
 | ID | Specification | Status | Implementation |
 | --- | --- | --- | --- |
-| 0047 | [Persistent Vector Trie Prototype](0047-persistent-vector-prototype.md) | Accepted | Implemented |
+| 0047 | [Persistent Vector Trie Prototype](0047-persistent-vector-prototype.md) | Stable | Implemented |
 | 0048 | [Value Equality and Deterministic Hashing](0048-value-equality-and-hashing.md) | Stable | Implemented |
-| 0049 | [Persistent Hash Map Trie Prototype](0049-persistent-hash-map-prototype.md) | Accepted | Implemented |
-| 0050 | [Persistent Hash Set Prototype](0050-persistent-hash-set-prototype.md) | Accepted | Implemented |
+| 0049 | [Persistent Hash Map Trie Prototype](0049-persistent-hash-map-prototype.md) | Stable | Implemented |
+| 0050 | [Persistent Hash Set Prototype](0050-persistent-hash-set-prototype.md) | Stable | Implemented |
 | 0051 | [HAMT Layout Benchmark and Threshold Selection](0051-hamt-layout-benchmark.md) | Accepted | Implemented |
-| 0052 | [Portable 32-bit Integer Operations](0052-portable-32-bit-operations.md) | Accepted | Implemented |
-| 0053 | [Eliscript-authored Persistent Vector Trie](0053-eliscript-persistent-vector.md) | Accepted | Implemented |
-| 0054 | [Eliscript-authored Persistent List](0054-eliscript-persistent-list.md) | Accepted | Implemented |
-| 0055 | [Eliscript-authored Persistent HAMT Map](0055-eliscript-persistent-map.md) | Accepted | Implemented |
-| 0056 | [Eliscript-authored Persistent Map-backed Set](0056-eliscript-persistent-set.md) | Accepted | Implemented |
-| 0057 | [Portable Value Semantics Core](0057-portable-value-semantics.md) | Accepted | Implemented |
+| 0052 | [Portable 32-bit Integer Operations](0052-portable-32-bit-operations.md) | Stable | Implemented |
+| 0053 | [Eliscript-authored Persistent Vector Trie](0053-eliscript-persistent-vector.md) | Stable | Implemented |
+| 0054 | [Eliscript-authored Persistent List](0054-eliscript-persistent-list.md) | Stable | Implemented |
+| 0055 | [Eliscript-authored Persistent HAMT Map](0055-eliscript-persistent-map.md) | Stable | Implemented |
+| 0056 | [Eliscript-authored Persistent Map-backed Set](0056-eliscript-persistent-set.md) | Stable | Implemented |
+| 0057 | [Portable Value Semantics Core](0057-portable-value-semantics.md) | Stable | Implemented |
 | 0058 | [Open Protocol Dispatch Core](0058-open-protocol-dispatch.md) | Stable | Implemented |
 | 0059 | [Collection Capability Protocols and Reduction Foundation](0059-collection-capability-protocols.md) | Stable | Implemented |
 | 0060 | [Collection Construction Protocols](0060-collection-construction-protocols.md) | Stable | Implemented |

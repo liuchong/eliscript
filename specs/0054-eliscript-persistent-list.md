@@ -1,6 +1,6 @@
 # 0054: Eliscript-authored Persistent List
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0021 Portable Functions and Dependency Closure,
@@ -26,7 +26,7 @@ Maps, and both outputs execute identically under Bun and Node.js.
 
 ## Public Surface
 
-The provisional module exports:
+The stable module exports:
 
 - `empty-persistent-list()`
 - `persistent-list?(value)`
@@ -46,16 +46,16 @@ The provisional module exports:
 - `persistent-list-to-array(list)`
 - `persistent-list-from-array(values)`
 
-`cons` and `conj` both add at the front. This establishes the collection
-meaning needed by a later generic `conj` protocol while retaining an explicit
-List constructor operation. `peek` is equivalent to `first`, and `pop` is the
-non-fallback form of `rest`.
+`cons` and `conj` both add at the front. This is the List meaning used by the
+generic `conj` protocol while retaining an explicit List constructor
+operation. `peek` is equivalent to `first`, and `pop` is the non-fallback form
+of `rest`.
 
 Empty `first`, `rest`, and `peek` return their explicit `not-found` argument.
 Empty `pop` returns `nil`. Invalid `nth` indices return `not-found`. These
-total provisional operations avoid host exceptions inside portable code; the
-stable protocol phase may replace invalid-operation values with diagnosed
-errors consistently across all collection types.
+total low-level operations avoid host exceptions inside portable code and are
+part of the stable module contract; higher-level protocols may diagnose
+invalid operations separately.
 
 Count is capped at 2,147,483,647. Prepending at the cap returns `nil`.
 
@@ -74,9 +74,9 @@ kind, count, empty = false, value, rest, metadata
 ```
 
 `rest` points to a valid List with count one smaller. Persistent operations do
-not mutate any object. As in 0053, host freezing is not yet a portable
-primitive, so callers must not mutate this provisional private representation.
-Stable opacity and runtime branding belong to the later value protocol.
+not mutate any object. Host freezing is not a portable primitive, so callers
+must not mutate this private representation. The stable contract is expressed
+through the public operations and logical value brand.
 
 The empty List is a value category rather than a required singleton. Separate
 empty values are observably equivalent through the public operations, but
@@ -94,9 +94,9 @@ values front-to-back and always uses the supplied initial value. `reverse`
 reduces into a fresh List and therefore changes order without modifying the
 source.
 
-Stored values are opaque. The List neither freezes them nor defines recursive
-equality or hashing in this slice. Shared equality, hashing, metadata, and
-printing will be composed across List, Vector, Map, and Set later in P1.
+Stored values are opaque. The List does not freeze them. Shared equality and
+hashing are supplied by 0057, metadata by 0068, and canonical printing by the
+later data-text layer without changing this representation.
 
 ## Complexity and Sharing
 
@@ -121,28 +121,33 @@ copy its growing intermediate array. This does not affect List traversal or
 persistence complexity; the later host-conversion layer may use a private
 bounded mutable builder while preserving public value semantics.
 
-## P1 Role
+## Persistent Core Role
 
-P1 now has two independent Eliscript-authored persistent structures:
+The portable core has four independent Eliscript-authored persistent
+structures. Within that set:
 
 - List proves constant-time front construction and complete suffix sharing.
 - Vector proves bounded tail copying and logarithmic indexed path sharing.
 
-Their contrasting capabilities provide the concrete receivers needed to
-design focused count, lookup, stack, and reduction protocols. Map, Set, shared
-value semantics, protocols, and metadata now exist; printer/reader round trips
-and the complete cross-family P1 audit remain before persistent literal
-migration. Root metadata and its navigation rules are defined by
+Their contrasting capabilities provide concrete receivers for focused count,
+lookup, stack, and reduction protocols. Map, Set, shared value semantics,
+protocols, metadata, reader/printer round trips, persistent literals, and the
+cross-family semantics audit are now layered around them. Root metadata and
+its navigation rules are defined by
 [0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).
 
 ## Compatibility
 
-This module, representation, names, and invalid-operation values are
-provisional during M8. It does not change reader list data, quoted forms,
-JavaScript arrays, vector literals, or macro evaluator values.
+This module and specification are stable in Compatibility Baseline 2. Public
+exports, argument conventions, failure values, logical representation,
+constant-time prepend, and suffix-sharing guarantees cannot change
+incompatibly without a superseding specification and migration fixture.
 
-No existing stable language or toolchain behavior changes. The module is
-listed in the public-surface registry so further API changes remain visible.
+The default suite retains seed/self-hosted byte parity, Source Maps, generated
+histories, exact suffix identity, and one-million-node iterative traversal.
+The public multi-entry build test also compiles the complete persistent value
+library, verifies every generated Source Map, and executes List construction
+and lookup directly under Bun and Node.
 
 ## Acceptance Criteria
 

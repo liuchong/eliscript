@@ -1,6 +1,6 @@
 # 0056: Eliscript-authored Persistent Map-backed Set
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
@@ -28,7 +28,7 @@ shared constructors from
 
 ## Public Surface
 
-The provisional module exports:
+The stable module exports:
 
 - `empty-persistent-set(hash-function, key-equal-function)`
 - `persistent-set?(value)`
@@ -73,9 +73,10 @@ or hash fragments. Association, removal, sparse/dense conversion, full-hash
 collision resolution, and structural sharing remain solely owned by 0055.
 This ownership is enforced by the module dependency rather than copied source.
 
-The representation is provisional and private. Host freezing is not yet a
-portable primitive, so callers must not mutate the wrapper or its Map. Tests
-may inspect the Map root to prove reuse and path sharing.
+The representation is private. Host freezing is not a portable primitive, so
+callers must not mutate the wrapper or its Map. Tests may inspect the Map root
+to prove reuse and path sharing; application code uses only the stable public
+functions.
 
 ## Policy Compatibility
 
@@ -89,9 +90,10 @@ For incompatible Sets:
 - union, intersection, and difference return `nil`
 - subset, superset, disjointness, and equality return false
 
-The later common `hash` and `equal?` protocol removes this constructor-level
-policy distinction for ordinary Eliscript values. Until then, explicit
-failure prevents asymmetric equality or membership errors.
+The common value constructors from 0057 remove this constructor-level policy
+distinction for ordinary Eliscript values. Explicit low-level policy mismatch
+still fails deterministically, preventing asymmetric equality or membership
+errors.
 
 ## Set Algebra
 
@@ -149,13 +151,12 @@ persistent layout:
 - associative HAMT Map
 - Map-backed Set
 
-This completes P1 construction step 1 but not the P1 exit. The portable value
-layer in [0057-portable-value-semantics.md](0057-portable-value-semantics.md)
-subsequently completed step 2 with common equality/hashing, ordinary Map/Set
-constructors, and cross-family properties. Open protocols and immutable
-metadata are now implemented; printer/reader round trips remain required
-before persistent literal migration. Metadata propagation through Set algebra
-is defined by
+The portable value layer in
+[0057-portable-value-semantics.md](0057-portable-value-semantics.md) supplies
+common equality/hashing, ordinary Map/Set constructors, and cross-family
+properties. Open protocols, immutable metadata, printer/reader round trips,
+and persistent literal integration are separately versioned layers. Metadata
+propagation through Set algebra is defined by
 [0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).
 
 ## Emacs Reinvestment
@@ -173,12 +174,17 @@ cancellation, generation guards, and transactional application.
 
 ## Compatibility
 
-The module, names, constructor policies, representation, traversal order, and
-incompatible-policy results are provisional during M8. It does not change Set
-literals, JavaScript `Set`, or the existing JavaScript runtime prototype.
+This module and specification are stable in Compatibility Baseline 2. Public
+exports, constructor compatibility policy, failure values, Map reuse, set
+algebra, traversal contract, and structural bounds cannot change incompatibly
+without a superseding specification and migration fixture.
 
-No stable language or toolchain behavior changes. The public-surface and
-compatibility registries make future API changes explicit.
+The default suite retains seed/self-hosted byte parity, Source Maps, generated
+value-key histories, algebra, collisions, exact 32/24 transitions, and
+one-million-member path sharing. The public multi-entry build test also
+compiles the complete persistent value library, verifies every generated
+Source Map, and executes value-semantic Set membership and deduplication
+directly under Bun and Node.
 
 ## Acceptance Criteria
 

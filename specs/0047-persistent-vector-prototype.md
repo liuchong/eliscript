@@ -1,6 +1,6 @@
 # 0047: Persistent Vector Trie Prototype
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
@@ -10,13 +10,12 @@
 
 This specification defines the first M8 persistent collection prototype: an
 immutable indexed vector backed by a 32-way bit-partitioned trie and a short
-tail. It establishes executable semantics and structural evidence before
-vector literals change from provisional native JavaScript arrays.
+tail. It established executable semantics and structural evidence before
+persistent vector literals became the language default.
 
-The prototype is a provisional runtime API. It does not change reader,
-compiler IR, emitted literal, destructuring, or JavaScript interop behavior.
-Those language changes require the remaining collection value model and the
-migration work described by 0041.
+The JavaScript-facing runtime API is stable. Reader, compiler IR, literal,
+destructuring, and JavaScript interop behavior are owned by their later
+specifications and do not alter the runtime operations frozen here.
 
 ## Runtime Surface
 
@@ -44,11 +43,12 @@ The initial operation surface is:
 - `toArray()` and synchronous JavaScript iteration
 
 Protocol functions, metadata, transient builders, printing, and reader round
-trips remain later M8 slices. Recursive equality and deterministic hashing are
-implemented by
-[0048-value-equality-and-hashing.md](0048-value-equality-and-hashing.md), but
-method names in this provisional module do not yet constitute the stable
-collection protocol surface.
+trips are owned by later specifications. Recursive equality and deterministic
+hashing are implemented by
+[0048-value-equality-and-hashing.md](0048-value-equality-and-hashing.md). The
+methods listed here are the stable JavaScript runtime surface; generic
+collection dispatch is the separate stable protocol surface defined by 0059
+and 0060.
 
 ## Representation
 
@@ -157,18 +157,19 @@ The test suite covers:
 - equivalent module behavior under Bun and Node.js
 
 These counters are structural evidence rather than timing claims. Engine
-layout benchmarks and transient owner tokens remain separate work.
+layout benchmarks and transient owner tokens retain separate specifications
+and evidence suites.
 
 ## Compatibility
 
-This specification and its conformance feature are provisional in
-Compatibility Baseline 1. The implementation may evolve while M8 completes
-the remaining value families, protocols, transients, literals, and host
-conversion.
+This specification and its conformance feature are stable in Compatibility
+Baseline 2. The public class, constructors, operations, index semantics,
+structural-sharing bounds, and value behavior cannot change incompatibly
+without a superseding specification and migration fixture.
 
-Stable M7 behavior is unaffected: existing vector literals continue to emit
-native JavaScript arrays, and existing destructuring and interop fixtures keep
-their current semantics.
+Internal helpers and allocation strategies may evolve while preserving the
+declared representation invariants and structural bounds. Persistent literal,
+destructuring, protocol, and interop contracts remain independently versioned.
 
 ## Exit Evidence
 
@@ -182,7 +183,6 @@ The slice is implemented when:
 4. one-million-value lookup and update remain inside the measured depth bound
 5. the module participates in the default local and compatibility test suite
 
-This is the first P0 prototype from 0041. It does not by itself complete the
-0041 P0 exit gate, which still requires frozen equality and hash semantics,
-integer bit-operation support, HAMT prototypes, and cross-engine layout
-measurements.
+This was the first P0 prototype from 0041. The later equality, hashing, HAMT,
+portable integer, protocol, transient, literal, and interop slices now retain
+this suite as the executable JavaScript runtime reference.

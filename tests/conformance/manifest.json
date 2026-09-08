@@ -425,7 +425,7 @@
       "title": "Stable and provisional compatibility baseline",
       "status": "stable",
       "spec": "0046",
-      "contracts": ["Classifies every specification and conformance feature exactly once", "Requires stable specification and feature statuses to agree", "Keeps persistent literal and pre-protocol library behavior explicitly provisional"],
+      "contracts": ["Classifies every specification and conformance feature exactly once", "Requires stable specification and feature statuses to agree", "Requires every promotion to retain explicit compatibility evidence"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/conformance.test.mjs", "contains": "repository specifications have complete conformance evidence" },
         { "kind": "fixture", "file": "contracts/compatibility-baseline.json", "contains": "\"format\": \"eliscript-compatibility-baseline\"" }
@@ -434,7 +434,7 @@
     {
       "id": "runtime.persistent-vector-prototype",
       "title": "Persistent 32-way vector trie prototype",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0047",
       "contracts": ["Preserves previous versions through indexed updates and stack operations", "Copies only selected trie paths and shares every untouched node", "Keeps lookup and update work within measured trie-depth bounds at one million values", "Produces equivalent observable results under Bun and Node.js"],
       "evidence": [
@@ -461,7 +461,7 @@
     {
       "id": "runtime.persistent-hash-map-prototype",
       "title": "Persistent 32-way hash map trie prototype",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0049",
       "contracts": ["Stores value-equal and host-identity keys under the 0048 contract", "Uses bitmap, dense array, and full-hash collision nodes", "Promotes at measured occupancy 32 and demotes at measured occupancy 24", "Copies only changed paths and shares untouched nodes", "Defines insertion-order-independent equality and hashing", "Keeps million-key operations within the declared HAMT bound"],
       "evidence": [
@@ -478,7 +478,7 @@
     {
       "id": "runtime.persistent-hash-set-prototype",
       "title": "Persistent Map-backed hash set prototype",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0050",
       "contracts": ["Uses the 0049 HAMT without duplicating its node implementation", "Stores value-equal and host-identity members under the 0048 contract", "Preserves previous versions and returns receiver identity for no-op updates", "Defines value-semantic union, intersection, difference, and relation predicates", "Defines insertion-order-independent equality and Set-domain hashing", "Keeps million-member operations within the declared HAMT bound"],
       "evidence": [
@@ -509,70 +509,75 @@
     {
       "id": "language.portable-32-bit-operations",
       "title": "Portable exact 32-bit integer operations",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0052",
       "contracts": ["Defines ten exact-arity 32-bit Number intrinsics", "Preserves signed, unsigned, multiplication, and shift semantics under Bun and Node", "Keeps seed and self-hosted IR and emission equivalent", "Implements population count and rotations in portable Eliscript"],
       "evidence": [
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-portable-32-bit-operations" },
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-rejects-invalid-32-bit-operation-arities" },
         { "kind": "bun-test", "file": "tests/stdlib-bit.test.mjs", "contains": "portable 32-bit operations and algorithms agree under Bun and Node" },
-        { "kind": "fixture", "file": "tests/fixtures/bootstrap-ir.json", "contains": "portable-bit-operations" }
+        { "kind": "fixture", "file": "tests/fixtures/bootstrap-ir.json", "contains": "portable-bit-operations" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "persistent value library builds as one project and executes under Bun and Node" }
       ]
     },
     {
       "id": "stdlib.persistent-vector-prototype",
       "title": "Eliscript-authored persistent vector trie",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0053",
       "contracts": ["Implements the 32-way trie and tail entirely in portable Eliscript", "Keeps seed and self-hosted ESM and Source Maps byte-identical", "Preserves generated histories and exact path sharing at one million values", "Produces equivalent reports under Bun and Node.js"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/portable-persistent-vector.test.mjs", "contains": "Eliscript-authored persistent vector compiles and agrees across hosts" },
         { "kind": "bun-test", "file": "tests/portable-persistent-vector.test.mjs", "contains": "Eliscript-authored persistent vector preserves generated history" },
-        { "kind": "bun-test", "file": "tests/portable-persistent-vector.test.mjs", "contains": "Eliscript-authored persistent vector keeps million-value trie bounds" }
+        { "kind": "bun-test", "file": "tests/portable-persistent-vector.test.mjs", "contains": "Eliscript-authored persistent vector keeps million-value trie bounds" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "persistent value library builds as one project and executes under Bun and Node" }
       ]
     },
     {
       "id": "stdlib.persistent-list-prototype",
       "title": "Eliscript-authored persistent List",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0054",
       "contracts": ["Implements immutable List nodes entirely in portable Eliscript", "Keeps seed and self-hosted ESM and Source Maps byte-identical", "Preserves generated histories through exact suffix identity", "Keeps million-node traversal iterative and stack safe under Bun and Node.js"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/portable-persistent-list.test.mjs", "contains": "Eliscript-authored persistent list compiles and agrees across hosts" },
         { "kind": "bun-test", "file": "tests/portable-persistent-list.test.mjs", "contains": "Eliscript-authored persistent list preserves generated history" },
-        { "kind": "bun-test", "file": "tests/portable-persistent-list.test.mjs", "contains": "Eliscript-authored persistent list shares a million-node suffix" }
+        { "kind": "bun-test", "file": "tests/portable-persistent-list.test.mjs", "contains": "Eliscript-authored persistent list shares a million-node suffix" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "persistent value library builds as one project and executes under Bun and Node" }
       ]
     },
     {
       "id": "stdlib.persistent-map-prototype",
       "title": "Eliscript-authored persistent HAMT Map",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0055",
       "contracts": ["Implements bitmap, array, collision, and entry nodes entirely in portable Eliscript", "Keeps seed and self-hosted ESM and Source Maps byte-identical", "Preserves value-key model histories, complete-hash collisions, and measured 32/24 transitions", "Shares every million-key item outside the selected update path"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/portable-persistent-map.test.mjs", "contains": "Eliscript-authored HAMT Map compiles and agrees across hosts" },
         { "kind": "bun-test", "file": "tests/portable-persistent-map.test.mjs", "contains": "Eliscript-authored HAMT Map preserves generated value-key histories" },
         { "kind": "bun-test", "file": "tests/portable-persistent-map.test.mjs", "contains": "Eliscript-authored HAMT Map promotes and demotes measured layouts" },
-        { "kind": "bun-test", "file": "tests/portable-persistent-map.test.mjs", "contains": "Eliscript-authored HAMT Map shares the million-key update path" }
+        { "kind": "bun-test", "file": "tests/portable-persistent-map.test.mjs", "contains": "Eliscript-authored HAMT Map shares the million-key update path" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "persistent value library builds as one project and executes under Bun and Node" }
       ]
     },
     {
       "id": "stdlib.persistent-set-prototype",
       "title": "Eliscript-authored persistent Map-backed Set",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0056",
       "contracts": ["Reuses the portable HAMT Map without duplicating node algorithms", "Keeps seed and self-hosted Set/Map ESM and Source Maps byte-identical", "Preserves generated value-key histories, Set algebra, collisions, and measured transitions", "Shares every million-member trie item outside the selected insertion path"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/portable-persistent-set.test.mjs", "contains": "Eliscript-authored persistent Set compiles and agrees across hosts" },
         { "kind": "bun-test", "file": "tests/portable-persistent-set.test.mjs", "contains": "Eliscript-authored persistent Set preserves generated value-key histories" },
         { "kind": "bun-test", "file": "tests/portable-persistent-set.test.mjs", "contains": "Eliscript-authored persistent Set preserves algebra and HAMT layouts" },
-        { "kind": "bun-test", "file": "tests/portable-persistent-set.test.mjs", "contains": "Eliscript-authored persistent Set shares the million-member update path" }
+        { "kind": "bun-test", "file": "tests/portable-persistent-set.test.mjs", "contains": "Eliscript-authored persistent Set shares the million-member update path" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "persistent value library builds as one project and executes under Bun and Node" }
       ]
     },
     {
       "id": "stdlib.value-semantics-core",
       "title": "Portable shared value semantics",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0057",
       "contracts": ["Implements scalar and four-family persistent equality and hashing in portable Eliscript", "Keeps seed and self-hosted dependency-graph ESM and Source Maps byte-identical", "Preserves undefined, insertion-order independence, and complete-collision discipline", "Supplies ordinary Map and Set constructors with one shared value policy"],
       "evidence": [
@@ -581,7 +586,8 @@
         { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics compile and agree across hosts" },
         { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "portable persistent collections preserve nested undefined values" },
         { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics preserve generated cross-family invariants" },
-        { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value hashing traverses one million persistent values" }
+        { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value hashing traverses one million persistent values" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "persistent value library builds as one project and executes under Bun and Node" }
       ]
     },
     {

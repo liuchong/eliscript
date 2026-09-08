@@ -32,8 +32,8 @@ defined by specification 0118. Baseline 1 remains historical evidence; baseline
 
 ## Stable Contract
 
-Baseline 2 promotes 28 specifications and their 28 conformance features. The
-stable set covers these externally meaningful areas:
+Baseline 2 currently classifies 51 specifications and their 51 conformance
+features as stable. The stable set covers these externally meaningful areas:
 
 - lexical binding, deterministic macro behavior, source locations, and Source
   Map v3 output
@@ -46,6 +46,9 @@ stable set covers these externally meaningful areas:
   reports, and phase timings
 - nullish values, optional/rest parameters, async/await, exceptions, and
   vector binding patterns
+- deterministic value equality and hashing, 32-bit operations, persistent
+  List/Vector/Map/Set implementations, collection protocols, transducers, and
+  owner-token transient builders
 - specification, diagnostic, public-surface, continuous compatibility, and
   compatibility-baseline schemas
 
@@ -56,18 +59,11 @@ other explicitly non-identity observations remain implementation details.
 
 ## Provisional Contract
 
-Fifteen implemented specifications and features remain provisional:
-
-- the broad core-language specification, because vector and map literal values
-  still use native mutable JavaScript containers
-- explicit IR and direct IR emission, because persistent literal nodes and
-  versioned phase schemas are not yet integrated
-- portable reader, analyzer, expander, lowerer, emitter, and bootstrap symbol
-  internals, which may adopt persistent compiler values during M8 and M9
-- sequence, text, object, and keyed-data modules, whose public algorithms must
-  be audited and rebuilt over protocols in M11
-- the composed indexing proof and acceleration measurement probe, which are
-  evidence-bearing experiments rather than final performance contracts
+Ninety implemented specifications and features remain provisional. They cover
+the broad pre-1.0 language, compiler internals, remaining standard-library
+modules, editor tooling, host interop, compatibility-matrix closure, and final
+acceptance evidence whose public contracts may still change before the 1.0
+freeze.
 
 Provisional does not mean untested. Every item continues to own executable
 evidence and remains in the public-surface inventory where applicable. It
@@ -151,9 +147,9 @@ agree in one change.
 | generated coverage matrices | conformance, public-surface, and compatibility reports before every suite |
 | stable/provisional boundary | `contracts/compatibility-baseline.json` and baseline parity checks |
 
-The complete local suite passes with the pinned minimum Bun host. The remote
-matrix passes on Ubuntu 24.04 x64 and macOS 15 arm64 with Emacs 29.4 and 30.2,
-including strict warning-as-error byte compilation in every cell.
+The M7 evidence recorded a complete local suite and the then-current four-cell
+compatibility matrix. Final 1.0 acceptance requires fresh source-bound evidence
+for every supported cell; historical M7 results do not satisfy that gate.
 
 M7 completion does not imply M8 language closure or 1.0 completion. It means
 the existing project now has an explicit, enforceable boundary from which
@@ -167,5 +163,5 @@ those changes can proceed without accidental compatibility claims.
 - Negative tests reject missing baseline entries and partially promoted
   stable contracts.
 - The default local suite and the four-cell remote compatibility matrix pass.
-- Persistent literal and standard-library surfaces remain explicitly
-  provisional for their planned M8 and M11 work.
+- Every later promotion remains explicit in the owning specification,
+  conformance manifest, public-surface registry, and versioned baseline.

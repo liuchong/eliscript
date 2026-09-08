@@ -1,6 +1,6 @@
 # 0052: Portable 32-bit Integer Operations
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0003 Implemented Core Language,
@@ -12,7 +12,7 @@
 
 ## Summary
 
-This specification defines the provisional 32-bit integer operations needed
+This specification defines the stable 32-bit integer operations needed
 to express persistent vector addressing, HAMT bitmap navigation, population
 counting, and deterministic hash mixing directly in Eliscript.
 
@@ -40,8 +40,8 @@ operations:
 - signed results use the range -2147483648 through 2147483647
 - unsigned results use the range 0 through 4294967295
 
-The accepted contract covers Number operands. BigInt and non-number operands
-are not portable 32-bit inputs and are not part of this provisional language
+The stable contract covers Number operands. BigInt and non-number operands
+are not portable 32-bit inputs and are not part of this language
 surface.
 
 Every operand expression is evaluated exactly once, from left to right.
@@ -138,13 +138,20 @@ integer behavior.
 
 ## Compatibility Status
 
-This specification is accepted and provisional during M8. The names, exact
-arities, Number conversions, and signed/unsigned result categories may become
-stable only together with the persistent collection language contract.
+This specification is stable in Compatibility Baseline 2. The names, exact
+arities, Number conversions, signed/unsigned result categories, evaluation
+order, and emitted ECMAScript mechanisms cannot change incompatibly without a
+superseding specification and migration fixture.
 
 Generated ESM uses standard syntax and requires no runtime package. Supported
 hosts must provide `Math.imul`, which is part of the ECMAScript baseline used
 by every declared Eliscript host.
+
+The default suite checks every compiler stage, invalid arity, edge value,
+portable library algorithm, and Bun/Node result. The public multi-entry build
+test additionally compiles `bit.eli` with the complete persistent value
+library, verifies its Source Map, and executes the generated module directly
+under both supported JavaScript host families.
 
 ## Acceptance Criteria
 

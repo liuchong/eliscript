@@ -1,6 +1,6 @@
 # 0053: Eliscript-authored Persistent Vector Trie
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0021 Portable Functions and Dependency Closure,
@@ -22,13 +22,13 @@ Emacs Lisp seed compiler and the self-hosted Eliscript compiler produce
 byte-identical ESM and Source Maps from the same source. The generated module
 then behaves identically under Bun and Node.js.
 
-This is the P0 implementation-language proof required by 0041. It does not
-change vector literal behavior, replace the provisional JavaScript runtime,
-or freeze the eventual collection protocol API.
+This was the P0 implementation-language proof required by 0041. Later slices
+completed persistent vector literals and the generic collection protocol while
+retaining this portable module as the independently compiled semantic core.
 
 ## Public Surface
 
-The provisional module exports:
+The stable module exports:
 
 - `empty-persistent-vector()`
 - `persistent-vector?(value)`
@@ -47,8 +47,8 @@ The provisional module exports:
 The explicit fallback parameters keep lookup and peek total inside portable
 code. Invalid `nth` indices return `not-found`. Invalid `assoc` indices and
 `pop` on an empty vector return `nil`; association at `count` appends. These
-provisional failure values may be replaced by diagnosed errors when the stable
-collection protocol and literal migration land.
+total low-level failure values are part of this stable module contract;
+higher-level protocols may provide diagnosed operations separately.
 
 The module accepts non-negative signed 31-bit integer indices and caps count
 at 2,147,483,647. Appending at the cap returns `nil`.
@@ -68,9 +68,9 @@ The tail contains zero to 32 final values.
 
 Arrays and objects are treated as private immutable implementation values.
 Every operation constructs replacements and never applies host mutation. The
-prototype does not freeze generated objects because host freezing is not a
+module does not freeze generated objects because host freezing is not a
 portable Eliscript primitive; callers must use the exported operations rather
-than mutate the provisional representation.
+than mutate the private representation.
 
 ## Algorithm
 
@@ -128,15 +128,18 @@ and structural evidence.
 
 ## Compatibility
 
-This module and specification are provisional during M8. Existing vector
-literals still emit native JavaScript arrays, and `runtime/core/vector.mjs`
-continues to own the richer provisional JavaScript-facing API from 0047.
+This module and specification are stable in Compatibility Baseline 2. Public
+exports, argument conventions, failure values, 32-way layout, count limit,
+and structural bounds cannot change incompatibly without a superseding
+specification and migration fixture. `runtime/core/vector.mjs` remains the
+stable JavaScript-facing counterpart from 0047.
 
-P0 in 0041 is complete after this slice: equality and hashing are frozen,
-vector and HAMT layouts are implemented and measured, portable bit operations
-exist, and a real trie is authored in Eliscript. P1 remains open for printing,
-reading, and complete property evidence across all collection families. Root
-metadata and its equality/hash exclusion are now defined by
+The default suite retains seed/self-hosted byte parity, Source Maps, generated
+histories, exact path sharing, and one-million-value bounds. The public
+multi-entry build test also compiles the complete persistent value library,
+verifies every generated Source Map, and executes representative immutable
+updates directly under Bun and Node. Root metadata and its equality/hash
+exclusion are defined by
 [0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).
 
 ## Acceptance Criteria

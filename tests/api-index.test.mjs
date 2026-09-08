@@ -46,7 +46,7 @@ test("generated library API index matches every declared module and export", asy
     source: "stdlib/persistent-vector.eli",
     spec: "0053",
     specFile: "specs/0053-eliscript-persistent-vector.md",
-    stability: "accepted",
+    stability: "stable",
     role: "portable",
     summary: "Persistent 32-way vectors with tail optimization and structural sharing.",
     exports: [
@@ -89,10 +89,10 @@ test("library API metadata requires an explicit normalized module name", async (
 
 test("library API metadata cannot overstate specification stability", async () => {
   const metadata = await readJson("contracts/library-api.json");
-  metadata.modules.find(({ module }) => module === "persistent-vector")
+  metadata.modules.find(({ module }) => module === "sequence")
     .stability = "stable";
   expect(await validationErrors(metadata)).toContain(
-    "persistent-vector stability must match specification 0053 status accepted",
+    "sequence stability must match specification 0023 status accepted",
   );
 });
 

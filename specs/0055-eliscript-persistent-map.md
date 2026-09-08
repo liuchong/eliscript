@@ -1,6 +1,6 @@
 # 0055: Eliscript-authored Persistent HAMT Map
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
@@ -23,14 +23,14 @@ under Bun and Node.js, while the Bun structural suite exercises one million
 keys without collection-size copying.
 
 Map construction receives hash, key-equality, and value-equality functions
-explicitly. This keeps the trie algorithm independent from the still-evolving
-global value protocol while making every semantic dependency visible and
-testable. A later P1 slice will bind these parameters to the common Eliscript
-`hash` and `equal?` contract.
+explicitly. This keeps the trie algorithm independent from the common value
+protocol while making every semantic dependency visible and testable. The
+ordinary constructors in 0057 bind these parameters to Eliscript value
+equality and hashing.
 
 ## Public Surface
 
-The provisional module exports:
+The stable module exports:
 
 - `empty-persistent-map(hash-function, key-equal-function, value-equal-function)`
 - `persistent-map?(value)`
@@ -92,10 +92,10 @@ fills all 32 branches. A dense node remains dense at 25 branches and packs
 back to a bitmap node when deletion leaves 24. These 32/24 thresholds are the
 measured M8 layout contract.
 
-The representation is provisional and private. Host freezing is not yet a
-portable primitive, so callers must not inspect or mutate node objects. Test
-evidence may inspect roots to prove shape and sharing; application code uses
-only the public functions.
+The representation is private. Host freezing is not a portable primitive, so
+callers must not inspect or mutate node objects. Test evidence may inspect
+roots to prove shape and sharing; application code uses only the stable public
+functions.
 
 ## Association
 
@@ -155,19 +155,20 @@ arrays, so this conversion is not used in million-key complexity evidence.
 A future transient builder can optimize conversion without changing Map
 semantics.
 
-## P1 Role
+## Persistent Core Role
 
-P1 now owns three independent portable persistent representations:
+This slice established the third independent portable persistent
+representation:
 
 - List proves constant-time front construction and complete suffix sharing.
 - Vector proves bounded indexed trie updates and logarithmic path sharing.
 - Map proves value-directed associative lookup, collision correctness,
   sparse/dense adaptation, and path-copying removal.
 
-The next collection slice can implement Set as a thin Map-backed value while
-the common hash/equality protocol replaces the injected constructor functions.
-Metadata, printing, reading, transients, generic protocols, and literal
-migration remain separate P1-P4 work.
+Set is implemented as a thin Map-backed value, and the common value layer owns
+ordinary constructors. Metadata, printing, reading, transients, generic
+protocols, and literal integration remain separately versioned layers over
+this stable low-level Map.
 
 ## Emacs Reinvestment
 
@@ -192,13 +193,16 @@ engine speed alone is not acceptance evidence.
 
 ## Compatibility
 
-The module, representation, constructor parameters, traversal order, and
-invalid-operation values are provisional during M8. It does not change map
-literals, plain JavaScript objects, compiler tables, or the existing
-JavaScript runtime prototype.
+This module and specification are stable in Compatibility Baseline 2. Public
+exports, constructor policies, argument conventions, failure values, HAMT
+layout, traversal contract, collision behavior, and structural bounds cannot
+change incompatibly without a superseding specification and migration fixture.
 
-No stable language or toolchain behavior changes. The module is listed in the
-public-surface registry so every future API change remains reviewable.
+The default suite retains seed/self-hosted byte parity, Source Maps, generated
+value-key histories, exact 32/24 transitions, complete collisions, no-op
+identity, and one-million-key path sharing. The public multi-entry build test
+also compiles the complete persistent value library, verifies every generated
+Source Map, and executes value-semantic Map lookup directly under Bun and Node.
 
 ## Acceptance Criteria
 

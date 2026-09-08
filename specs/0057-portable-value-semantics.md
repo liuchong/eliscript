@@ -1,6 +1,6 @@
 # 0057: Portable Value Semantics Core
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0034 Nullish Values,
@@ -27,9 +27,10 @@ inspection primitives. Seed and self-hosted compilers emit byte-identical ESM
 and Source Maps for the complete dependency graph, and Bun and Node.js execute
 the same frozen and generated semantics.
 
-This slice completes P1 construction step 2 from 0041. It does not complete
-the open protocol, metadata, printer/reader, persistent literal, transient, or
-Emacs value-codec work.
+This slice completed P1 construction step 2 from 0041. Open protocols,
+metadata, printer/reader behavior, persistent literals, transients, and the
+Emacs value codec are separately versioned layers that retain these value
+semantics.
 
 ## Portable Inspection Primitives
 
@@ -56,7 +57,7 @@ normally calls `value-equal?` and `value-hash`.
 
 ## Public Surface
 
-The provisional `stdlib/value.eli` module exports:
+The stable `stdlib/value.eli` module exports:
 
 - `value-equal?(left, right)`
 - `value-hash(value)`
@@ -176,9 +177,9 @@ protocol extension defines their value contract.
 The portable `.eli` implementation dispatches directly over the four core
 persistent representations. The JavaScript reference runtime now uses the
 open `IEquiv` and `IHash` protocol core specified by
-[0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md). Bringing the
-portable collection algorithms onto the broader collection protocols remains
-later P2 work.
+[0058-open-protocol-dispatch.md](0058-open-protocol-dispatch.md). Broader
+collection operations dispatch through the stable capabilities in 0059 and
+0060 while this low-level value module retains direct representation access.
 
 ## Hosted-Language Role
 
@@ -192,7 +193,7 @@ form:
 3. JavaScript engines execute the generated compiler and collection code.
 4. Exact dual-compiler and dual-host evidence prevents self-hosting from
    becoming self-validation.
-5. The same immutable values later cross the Emacs worker boundary and power
+5. The same immutable values cross the Emacs worker boundary and power
    accelerated indexes, dependency graphs, transforms, and searches.
 
 The performance return to Emacs is therefore not merely "JavaScript runs
@@ -203,23 +204,31 @@ bridge and the measured end-to-end proof.
 
 ## Compatibility
 
-This module, its six exports, the four inspection forms, collection tags,
-hash constants, and current dispatch set are provisional during M8. The
-Keyword/Symbol extension is specified by 0067. Frozen
-scalar, Vector, Map, and Set hash outputs agree with 0048-0050; List hashes are
-newly frozen here. Process-local opaque identity hashing extends this contract
-through [0074](0074-process-local-host-identity-hashing.md).
+This module and specification are stable in Compatibility Baseline 2. Its six
+exports, four inspection forms, collection tags, hash constants, supported
+dispatch categories, equality rules, and deterministic hash results cannot
+change incompatibly without a superseding specification and migration fixture.
+The Keyword/Symbol extension is specified by 0067. Frozen scalar, Vector, Map,
+and Set hash outputs agree with 0048-0050; List hashes are frozen here.
+Process-local opaque identity hashing extends this contract through
+[0074](0074-process-local-host-identity-hashing.md).
 
-No literal changes occurred in this slice. Native JavaScript arrays, objects,
-Maps, and Sets retain their host behavior. Specification 0083 later completes
-persistent Vector literal migration; Map/Set syntax and transport integration
-remain P3 work.
+Native JavaScript arrays, objects, Maps, and Sets retain their host behavior.
+Specification 0083 owns persistent Vector literal migration; Map/Set syntax
+and transport integration remain independently versioned concerns.
 
 Portable persistent metadata now layers on these values through
 [0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).
 `value-equal?` and `value-hash` intentionally continue to inspect logical
 collection contents only, so annotated and unannotated roots remain equal and
 hash-identical.
+
+The default suite retains seed/self-hosted byte parity for the complete
+dependency graph, Source Maps, frozen Bun/Node fixtures, generated cross-family
+properties, collision discipline, nullish preservation, and one-million-value
+iterative hashing. The public multi-entry build test additionally compiles the
+six-module persistent value library, verifies every generated Source Map, and
+executes nested Map/Set key semantics directly under Bun and Node.
 
 ## Acceptance Criteria
 
