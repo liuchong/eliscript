@@ -34,15 +34,15 @@ The registry currently contains 145 specifications.
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 81 |
-| Stable design | 62 |
+| Accepted design | 77 |
+| Stable design | 66 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
 | Implemented | 141 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 62 specifications as stable,
-79 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 66 specifications as stable,
+75 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -422,10 +422,10 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0075 | [Portable Result Values](0075-portable-result-values.md) | Stable | Implemented |
 | 0076 | [Portable JSON Values](0076-portable-json-values.md) | Stable | Implemented |
 | 0077 | [Portable Numeric Foundation](0077-portable-numeric-foundation.md) | Stable | Implemented |
-| 0078 | [Persistent Collection Core Exit Audit](0078-persistent-collection-core-exit-audit.md) | Accepted | Implemented |
-| 0079 | [Eliscript-authored Protocol Dispatch Policy](0079-eliscript-protocol-dispatch-policy.md) | Accepted | Implemented |
-| 0080 | [Canonical Generated Protocol Runtime](0080-canonical-generated-protocol-runtime.md) | Accepted | Implemented |
-| 0081 | [Protocol-driven Text and Keyed Object Algorithms](0081-protocol-driven-text-object.md) | Accepted | Implemented |
+| 0078 | [Persistent Collection Core Exit Audit](0078-persistent-collection-core-exit-audit.md) | Stable | Implemented |
+| 0079 | [Eliscript-authored Protocol Dispatch Policy](0079-eliscript-protocol-dispatch-policy.md) | Stable | Implemented |
+| 0080 | [Canonical Generated Protocol Runtime](0080-canonical-generated-protocol-runtime.md) | Stable | Implemented |
+| 0081 | [Protocol-driven Text and Keyed Object Algorithms](0081-protocol-driven-text-object.md) | Stable | Implemented |
 | 0082 | [Persistent Literal Runtime ABI and Explicit Host Containers](0082-persistent-literal-runtime-abi.md) | Accepted | Implemented |
 | 0083 | [Default Persistent Vector Literals and Explicit Host Access](0083-default-persistent-vector-literals.md) | Accepted | Implemented |
 | 0084 | [Persistent Map Source Syntax](0084-persistent-map-source-syntax.md) | Accepted | Implemented |

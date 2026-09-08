@@ -1,6 +1,6 @@
 # 0079: Eliscript-authored Protocol Dispatch Policy
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0058 Open Protocol Dispatch Core,
@@ -98,6 +98,13 @@ rejection, exact-subclass exclusion, and native prototype preservation cases.
 The execution corpus also performs one million direct dispatches. This is a
 bounded semantic stability gate rather than a wall-clock benchmark; hardware
 timing remains benchmark evidence and must not redefine correctness.
+
+## Compatibility
+
+The dispatch order, extension validation, immutable metadata, host-category
+set, structured failure reasons, and public operation names are stable.
+Compatible additions remain possible, but changing those observations
+requires the compatibility process rather than an in-place policy rewrite.
 
 ## Acceptance Criteria
 

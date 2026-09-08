@@ -725,7 +725,7 @@
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-symbol-mapping-avoids-strict-mode-bindings" },
         { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" },
         { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" },
-        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "stable core protocol library builds as one project and executes under Bun and Node" }
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "stable protocol and core algorithms build as one project across Bun and Node" }
       ]
     },
     {
@@ -877,7 +877,7 @@
     {
       "id": "runtime.persistent-collection-core-exit",
       "title": "Persistent collection core all-host exit audit",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0078",
       "contracts": ["Retains immutable List, Vector, Map, and Set histories against reference models", "Resolves collisions by equality while preserving deterministic value semantics and metadata exclusion", "Shares every unchanged branch with bounded List, vector-trie, and HAMT paths at one million values", "Produces identical million-value structural reports under Bun and Node"],
       "evidence": [
@@ -891,37 +891,40 @@
     {
       "id": "stdlib.eliscript-protocol-dispatch-policy",
       "title": "Eliscript-authored open protocol dispatch policy",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0079",
       "contracts": ["Authors protocol definition, registration, dispatch, and implementation queries in Eliscript", "Preserves direct, exact-prototype, host-category, default, and structured missing behavior", "Validates extensions atomically without invoking accessors or modifying host prototypes", "Matches seed and self-hosted artifacts plus million-dispatch Bun and Node reports"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/eliscript-protocol.test.mjs", "contains": "Eliscript-authored protocol policy preserves open dispatch semantics" },
-        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" }
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "stable protocol and core algorithms build as one project across Bun and Node" }
       ]
     },
     {
       "id": "runtime.protocol-generated-production",
       "title": "Canonical generated protocol production runtime",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0080",
       "contracts": ["Treats stdlib/core/protocol.eli as the only maintained protocol policy source", "Commits seed-generated ESM and Source Map artifacts with byte-for-byte drift checks", "Keeps runtime/core/protocol.mjs as a policy-free camel-case compatibility facade", "Preserves exact undefined dispatch semantics across generated Bun and Node execution"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/eliscript-protocol.test.mjs", "contains": "Eliscript-authored protocol policy preserves open dispatch semantics" },
         { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "public surface checker follows aliased runtime re-exports" },
-        { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "canonical data text prints scalar and identifier values" }
+        { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "canonical data text prints scalar and identifier values" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "stable protocol and core algorithms build as one project across Bun and Node" }
       ]
     },
     {
       "id": "stdlib.protocol-driven-text-object",
       "title": "Protocol-driven generated text and keyed object algorithms",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0081",
       "contracts": ["Adds UTF-16 String and exact ordinary-Object collection adapters without prototype mutation", "Authors text and keyed algorithms in Eliscript over collection protocols and transducers", "Preserves own string keys, undefined, value-semantic keys, immutable inputs, and safe __proto__ association", "Matches seed, self-hosted, committed, Bun, and Node artifacts with measured transient Map construction"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/collection-protocol.test.mjs", "contains": "generic count, lookup, and indexed access cover persistent and native values" },
         { "kind": "bun-test", "file": "tests/core-text-object.test.mjs", "contains": "external protocol values reuse text and keyed algorithms" },
         { "kind": "bun-test", "file": "tests/core-text-object.test.mjs", "contains": "core text/object production artifacts are fixed-point and cross-host" },
-        { "kind": "bun-test", "file": "tests/core-text-object.test.mjs", "contains": "core object transforms use transient persistent-map construction" }
+        { "kind": "bun-test", "file": "tests/core-text-object.test.mjs", "contains": "core object transforms use transient persistent-map construction" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "stable protocol and core algorithms build as one project across Bun and Node" }
       ]
     },
     {

@@ -1,6 +1,6 @@
 # 0081: Protocol-driven Text and Keyed Object Algorithms
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0059 Collection Capability Protocols and Reduction Foundation,
@@ -88,6 +88,13 @@ They have no dependency on UI frameworks, bundlers, development servers, or
 publishing systems. Such integrations may consume the public ESM modules only
 as application-level evidence and cannot define this contract or its exit
 criteria.
+
+## Compatibility
+
+The String and ordinary-Object adapters, thirteen text operations, eleven
+keyed-object operations, UTF-16 indexing, immutable update behavior, and
+protocol-based extension boundary are stable. Incompatible semantic or export
+changes require the compatibility process.
 
 ## Acceptance Criteria
 

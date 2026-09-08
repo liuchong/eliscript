@@ -1,6 +1,6 @@
 # 0078: Persistent Collection Core Exit Audit
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0053 Eliscript-authored Persistent Vector Trie,
@@ -117,16 +117,15 @@ or browser API and does not claim a browser compiler adapter.
 
 ## Phase Result
 
-P1 is complete. This result means the portable collection foundation is
-strong enough for protocol and literal integration work. It does not make the
-accepted collection specifications stable or freeze their public 1.0
-compatibility surface. Stability still requires the complete compatibility
-and final acceptance process in specification 0040.
+P1 is complete and stable. The audited portable collection specifications,
+their public API, and this exit evidence are part of Compatibility Baseline 2.
+This audit does not freeze compiler literal lowering, native container
+conversion, protocol implementation, transient analysis, or optimized runtime
+representations; those remain independently versioned contracts.
 
-The next language-core construction boundary is portable protocol dispatch,
-followed by protocol-based text/object algorithms and persistent literal
-migration. Standard-library breadth should continue only where it exercises
-or depends on those foundations.
+The stable collection boundary supports protocol-based algorithms and
+persistent literal integration. Standard-library breadth should continue only
+where it exercises or depends on those foundations.
 
 ## Acceptance Criteria
 

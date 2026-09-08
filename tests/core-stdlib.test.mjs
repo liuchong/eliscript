@@ -106,6 +106,8 @@ async function runBuiltCoreProjectHost(command, outputRoot) {
     `const transducer = await import(${moduleUrl("transducer")});`,
     `const sequence = await import(${moduleUrl("seq")});`,
     `const data = await import(${moduleUrl("data")});`,
+    `const text = await import(${moduleUrl("text")});`,
+    `const object = await import(${moduleUrl("object")});`,
     `const vector = await import(${runtimeUrl});`,
     "const named = protocol.define_protocol('Named', ['name']);",
     "protocol.extend_protocol_category(named, 'number',",
@@ -123,6 +125,8 @@ async function runBuiltCoreProjectHost(command, outputRoot) {
     "  sourceValues);",
     "const mapped = sequence.map((value) => value + 1, sourceValues);",
     "const counts = data.frequencies(sourceValues);",
+    "const mappedObject = object.map_values(",
+    "  (value) => value * 10, { left: 1, right: 2 });",
     "console.log(JSON.stringify({",
     "  protocol: name(7),",
     "  count: collection.collection_count(sourceValues),",
@@ -130,6 +134,8 @@ async function runBuiltCoreProjectHost(command, outputRoot) {
     "  transformed: [...transformed],",
     "  mapped: [...mapped],",
     "  frequencies: [counts.get(1), counts.get(2), counts.get(3)],",
+    "  text: [text.slice(1, 4, 'Eliscript'), text.join('-', sourceValues)],",
+    "  object: [mappedObject.left, mappedObject.right],",
     "}));",
   ].join("\n");
   return JSON.parse(await runSuccessful([
@@ -646,7 +652,7 @@ test("protocol standard-library algorithms agree under Bun and Node", async () =
   expect(await runHost(process.env.NODE_BINARY ?? "node")).toEqual(expected);
 });
 
-test("stable core protocol library builds as one project and executes under Bun and Node", async () => {
+test("stable protocol and core algorithms build as one project across Bun and Node", async () => {
   const directory = await mkdtemp(resolve(ROOT, ".eliscript-core-project-"));
   const outputRoot = resolve(directory, "stdlib");
   const sources = [
@@ -656,6 +662,8 @@ test("stable core protocol library builds as one project and executes under Bun 
     "transducer",
     "seq",
     "data",
+    "text",
+    "object",
   ].map((name) => resolve(ROOT, `stdlib/core/${name}.eli`));
   try {
     await symlink(resolve(ROOT, "runtime"), resolve(directory, "runtime"), "dir");
@@ -676,14 +684,33 @@ test("stable core protocol library builds as one project and executes under Bun 
       entries: [
         "core/collection.eli",
         "core/data.eli",
+        "core/object.eli",
         "core/protocol.eli",
         "core/seq.eli",
+        "core/text.eli",
         "core/transducer.eli",
         "core/transient.eli",
       ],
-      counts: { modules: 6, compiled: 6, reused: 0 },
+      counts: { modules: 8, compiled: 8, reused: 0 },
       cache: { enabled: false, status: "disabled", reason: "cache-disabled" },
     });
+    for (const name of [
+      "protocol",
+      "collection",
+      "transient",
+      "transducer",
+      "seq",
+      "data",
+      "text",
+      "object",
+    ]) {
+      const sourceMap = JSON.parse(await readFile(
+        resolve(outputRoot, `core/${name}.mjs.map`),
+        "utf8",
+      ));
+      expect(sourceMap.sourcesContent[0])
+        .toContain(`(module eliscript.core.${name}`);
+    }
     const expected = {
       protocol: "n:7",
       count: 4,
@@ -691,6 +718,8 @@ test("stable core protocol library builds as one project and executes under Bun 
       transformed: [4, 6, 4],
       mapped: [2, 3, 4, 3],
       frequencies: [1, 2, 1],
+      text: ["lis", "1-2-3-2"],
+      object: [10, 20],
     };
     expect(await runBuiltCoreProjectHost(process.execPath, outputRoot))
       .toEqual(expected);
