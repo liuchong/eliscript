@@ -29,20 +29,20 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 140 specifications.
+The registry currently contains 142 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 108 |
-| Stable design | 30 |
+| Accepted design | 109 |
+| Stable design | 31 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 136 |
+| Implemented | 138 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 30 specifications as stable,
-106 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 31 specifications as stable,
+107 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -486,6 +486,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0139 | [Deterministic Persistent Semantics Corpus](0139-deterministic-persistent-semantics-corpus.md) | Accepted | Implemented |
 | 0140 | [Clean Configured Project Workflow](0140-clean-configured-project-workflow.md) | Accepted | Implemented |
 | 0141 | [Repeated Core Determinism Evidence](0141-repeated-core-determinism.md) | Stable | Implemented |
+| 0142 | [Maintained JavaScript Package Interop Fixture](0142-maintained-javascript-package-interop.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

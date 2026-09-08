@@ -76,6 +76,7 @@ test-core: check-contracts
 		tests/portable-json.test.mjs tests/portable-numeric.test.mjs \
 		tests/atom.test.mjs \
 		tests/interop-js.test.mjs \
+		tests/interop-package.test.mjs \
 		tests/identifier.test.mjs tests/metadata.test.mjs \
 		tests/data-text.test.mjs \
 		tests/protocol.test.mjs tests/eliscript-protocol.test.mjs \

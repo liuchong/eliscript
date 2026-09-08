@@ -30,6 +30,10 @@ manifest section, and allowed source prefixes in the integrity contract. Core
 language paths admit no third-party package imports; application adapters and
 examples remain explicitly separated.
 
+Private package fixtures live only under declared local-package roots. Their
+nearest `package.json` owns their dependencies, and those declarations never
+leak into sibling fixtures or the repository root.
+
 The artifact inventory is also closed. Add a deterministic generated module to
 the registry in the same change as its source and output. Add a benchmark report
 to the exact report list and retain its current individual and aggregate SHA-256

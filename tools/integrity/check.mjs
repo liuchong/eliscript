@@ -91,8 +91,11 @@ export function validateIntegrityContract(contract) {
 
   if (!isPlainObject(contract.imports) ||
       !validRoots(contract.imports.eliscriptSourceRoots) ||
-      !validRoots(contract.imports.coreRoots)) {
-    errors.push("import source roots and core roots must be unique sorted path prefixes");
+      !validRoots(contract.imports.coreRoots) ||
+      !validRoots(contract.imports.localPackageRoots)) {
+    errors.push(
+      "import source, core, and local package roots must be unique sorted path prefixes",
+    );
   }
   const special = Array.isArray(contract.imports?.specialSpecifiers)
     ? contract.imports.specialSpecifiers
@@ -276,13 +279,17 @@ function underAllowedRoot(file, roots) {
   return roots.some((root) => file.startsWith(root));
 }
 
+function underPackageDirectory(file, directory) {
+  return file === directory || file.startsWith(`${directory}/`);
+}
+
 function specialPolicy(specifier, policies) {
   return policies.find((policy) =>
     policy.specifier === specifier ||
     (policy.prefix !== undefined && specifier.startsWith(policy.prefix)));
 }
 
-export function validateImportRecords(records, contract) {
+export function validateImportRecords(records, contract, localPackageScopes = []) {
   const errors = [];
   const packages = new Map(contract.packages.map((entry) => [entry.name, entry]));
   let externalImports = 0;
@@ -307,6 +314,18 @@ export function validateImportRecords(records, contract) {
       coreExternalImports += 1;
     }
     const name = packageName(specifier);
+    const localScope = localPackageScopes
+      .filter((scope) => underPackageDirectory(record.file, scope.directory))
+      .sort((left, right) => right.directory.length - left.directory.length)[0];
+    if (localScope) {
+      if (!localScope.packages.includes(name)) {
+        errors.push(
+          `${record.file} imports undeclared package ${specifier} in ` +
+          `${localScope.manifest}`,
+        );
+      }
+      continue;
+    }
     const dependency = packages.get(name);
     if (!dependency) {
       errors.push(`${record.file} imports undeclared package ${specifier}`);
@@ -316,6 +335,48 @@ export function validateImportRecords(records, contract) {
   }
   if (errors.length > 0) throw new RepositoryIntegrityError(errors);
   return { totalImports: records.length, externalImports, coreExternalImports };
+}
+
+async function readLocalPackageScopes(root, trackedFiles, contract) {
+  const roots = contract.imports.localPackageRoots;
+  const manifests = trackedFiles.filter((file) =>
+    file.endsWith("/package.json") && underAllowedRoot(file, roots));
+  const scopes = [];
+  const errors = [];
+  for (const filename of manifests) {
+    let manifest;
+    try {
+      manifest = JSON.parse(await readFile(path.join(root, filename), "utf8"));
+    } catch (error) {
+      errors.push(`${filename} is not valid JSON: ${error.message}`);
+      continue;
+    }
+    if (!isPlainObject(manifest) || manifest.private !== true ||
+        typeof manifest.name !== "string" || manifest.name.length === 0) {
+      errors.push(`${filename} must describe one named private package`);
+      continue;
+    }
+    const packages = [];
+    for (const section of PACKAGE_SECTIONS) {
+      const dependencies = manifest[section];
+      if (dependencies === undefined) continue;
+      if (!isPlainObject(dependencies) ||
+          Object.values(dependencies).some((value) =>
+            typeof value !== "string" || value.length === 0)) {
+        errors.push(`${filename} ${section} must map package names to versions`);
+        continue;
+      }
+      packages.push(...Object.keys(dependencies));
+    }
+    scopes.push({
+      directory: path.posix.dirname(filename),
+      manifest: filename,
+      name: manifest.name,
+      packages: sortedUnique([manifest.name, ...packages]),
+    });
+  }
+  if (errors.length > 0) throw new RepositoryIntegrityError(errors);
+  return scopes;
 }
 
 function exactObject(value) {
@@ -354,6 +415,8 @@ export async function checkDependencyBoundaries(options = {}) {
       "--silent",
     ], root);
   }
+  const localPackageScopes = options.localPackageScopes ??
+    await readLocalPackageScopes(root, trackedFiles, contract);
   const compiler = options.compiler ?? await loadCompiler(root);
   const records = options.importRecords ?? await scanImportRecords(
     root,
@@ -361,9 +424,10 @@ export async function checkDependencyBoundaries(options = {}) {
     contract,
     compiler,
   );
-  const imports = validateImportRecords(records, contract);
+  const imports = validateImportRecords(records, contract, localPackageScopes);
   return {
     packages: contract.packages.length,
+    localPackages: localPackageScopes.length,
     lockfile: options.skipLockfile ? "skipped" : "frozen",
     scannedJavaScript: trackedFiles.filter((file) =>
       file.endsWith(".mjs") || file.endsWith(".js")).length,

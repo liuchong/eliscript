@@ -32,6 +32,8 @@ It contains four independent inventories:
   path prefixes
 - maintained JavaScript and Eliscript source roots plus constrained host,
   self-package, and virtual-module specifiers
+- private nested-package roots whose nearest manifest owns fixture-only
+  dependency declarations
 - deterministic compiler outputs and generator-owned derived outputs
 - the exact set of retained source-bound benchmark reports
 
@@ -52,6 +54,12 @@ match one declared package and one allowed source prefix. Bun host modules,
 Node built-ins, `eliscript/` self-imports, and virtual modules have separate
 explicit boundaries. Every compiler, runtime, editor, platform, and standard
 library source root must retain zero third-party package imports.
+
+Tracked private package fixtures form explicit nested dependency scopes. The
+audit reads the nearest `package.json`, requires a named private package, and
+accepts only dependencies declared by that manifest. A nested fixture cannot
+grant its packages to sibling fixtures or to the repository root, and the root
+manifest cannot silently satisfy a missing declaration inside a fixture.
 
 The dependency contract covers statically declared module specifiers, including
 literal dynamic imports reported by the host scanner. Runtime-computed host
@@ -91,14 +99,15 @@ reclaimed if they do not exit.
 ## Acceptance Criteria
 
 - **RIA-01:** One versioned contract exactly declares package versions,
-  manifest sections, source boundaries, generated outputs, and benchmark
-  reports.
+  manifest sections, source boundaries, nested private-package roots,
+  generated outputs, and benchmark reports.
 - **RIA-02:** A frozen lockfile dry run succeeds without lifecycle scripts or
   repository mutation.
 - **RIA-03:** Every tracked JavaScript module and every maintained Eliscript
   source is scanned through a structured parser or compiler IR.
-- **RIA-04:** Undeclared packages and imports outside their allowed roots fail,
-  while all core roots retain zero third-party package imports.
+- **RIA-04:** Undeclared packages and imports outside their allowed roots fail;
+  nearest private-package manifests isolate fixture dependencies while all
+  core roots retain zero third-party package imports.
 - **RIA-05:** Generated-file markers exactly match the deterministic artifact
   registry; missing and undeclared entries fail.
 - **RIA-06:** Four self-hosted compilation entries reproduce all seven tracked
@@ -107,7 +116,8 @@ reclaimed if they do not exit.
   all three declared derived outputs without rewriting them.
 - **RIA-08:** The exact 14-report benchmark inventory validates all 265 current
   individual and aggregate source bindings.
-- **RIA-09:** Default tests reject an undeclared package, an out-of-boundary
+- **RIA-09:** Default tests reject an undeclared root or nested-package import,
+  a dependency used outside its nearest package boundary, an out-of-boundary
   package, stale benchmark evidence, and incomplete artifact registries.
 - **RIA-10:** React, Vite, publishing, sites, hosting, and development servers
   remain application or tool validation only and contribute no core maturity

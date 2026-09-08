@@ -204,7 +204,7 @@ never copied more than once per distinct source identity.
 Typed arrays, dates, regular expressions, errors, promises, DOM values,
 user-defined conversion protocols, asynchronous streaming, and configurable
 Map-to-object key coercion are outside this specification. They require
-separate loss, identity, and capability contracts. The final PD-07 gate still
-requires maintained package/application evidence under the full supported
-matrix; this specification provides its core conversion and host-boundary
-evidence.
+separate loss, identity, and capability contracts. Specification 0142 supplies
+the maintained JavaScript package fixture. The final PD-07 gate still requires
+that fixture to pass under the full supported matrix; this specification
+provides its core conversion and host-boundary evidence.

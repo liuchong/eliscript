@@ -511,8 +511,9 @@ application evidence, not part of persistent-value semantics.
 Specification 0073 implements this core boundary for Array, plain object, Map,
 and Set. It adds `js-map`, `js-set`, their predicates, `to-js-object`,
 cross-realm recognition, sharing preservation, duplicate value-semantics
-checks, and bounded structured diagnostics. Final PD-07 acceptance still
-requires the maintained package fixture and complete supported host matrix.
+checks, and bounded structured diagnostics. Specification 0142 adds the
+maintained JavaScript package fixture. Final PD-07 acceptance still requires
+that fixture to pass the complete supported host matrix.
 
 ## State and Identity
 
@@ -1172,9 +1173,10 @@ JavaScript package fixtures consume converted native values without persistent
 implementation details leaking across the boundary.
 
 Specification 0073 supplies the core conversion semantics and one plain-object
-application fixture. That fixture is non-normative and replaceable. This gate
-remains open until the maintained JavaScript package fixture and full supported
-compatibility matrix also pass.
+application fixture. Specification 0142 adds a maintained, framework-neutral
+JavaScript package fixture. Both consumers remain replaceable. This gate stays
+open until the maintained package fixture passes the full supported
+compatibility matrix.
 
 ### PD-08: Emacs Codec
 

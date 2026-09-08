@@ -28,6 +28,7 @@ test("repository dependencies and generated artifacts satisfy declared boundarie
     version: 1,
     dependency: {
       packages: 4,
+      localPackages: 2,
       lockfile: "frozen",
       coreExternalImports: 0,
     },
@@ -77,6 +78,38 @@ test("repository integrity rejects undeclared and boundary-crossing imports", as
       language: "javascript",
     },
   ], contract)).toThrow("imports undeclared package");
+});
+
+test("repository integrity isolates declared dependencies at the nearest package boundary", async () => {
+  const contract = await readJson("contracts/repository-integrity.json");
+  const scopes = [{
+    directory: "tests/fixtures/packages/interop-consumer",
+    manifest: "tests/fixtures/packages/interop-consumer/package.json",
+    name: "@eliscript-fixtures/interop-consumer",
+    packages: [
+      "@eliscript-fixtures/interop-consumer",
+      "@eliscript-fixtures/native-container-consumer",
+      "eliscript",
+    ],
+  }];
+  const declared = {
+    file: "tests/fixtures/packages/interop-consumer/index.mjs",
+    specifier: "@eliscript-fixtures/native-container-consumer",
+    kind: "import-statement",
+    language: "javascript",
+  };
+
+  expect(validateImportRecords([declared], contract, scopes)).toMatchObject({
+    externalImports: 1,
+  });
+  expect(() => validateImportRecords([
+    { ...declared, specifier: "undeclared-package" },
+  ], contract, scopes)).toThrow(
+    "in tests/fixtures/packages/interop-consumer/package.json",
+  );
+  expect(() => validateImportRecords([
+    { ...declared, file: "tests/outside-package.mjs" },
+  ], contract, scopes)).toThrow("imports undeclared package");
 });
 
 test("repository integrity rejects stale benchmark source evidence", async () => {
