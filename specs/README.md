@@ -34,15 +34,15 @@ The registry currently contains 145 specifications.
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 73 |
-| Stable design | 70 |
+| Accepted design | 60 |
+| Stable design | 83 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
 | Implemented | 141 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 70 specifications as stable,
-71 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 83 specifications as stable,
+58 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -426,19 +426,19 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0079 | [Eliscript-authored Protocol Dispatch Policy](0079-eliscript-protocol-dispatch-policy.md) | Stable | Implemented |
 | 0080 | [Canonical Generated Protocol Runtime](0080-canonical-generated-protocol-runtime.md) | Stable | Implemented |
 | 0081 | [Protocol-driven Text and Keyed Object Algorithms](0081-protocol-driven-text-object.md) | Stable | Implemented |
-| 0082 | [Persistent Literal Runtime ABI and Explicit Host Containers](0082-persistent-literal-runtime-abi.md) | Accepted | Implemented |
-| 0083 | [Default Persistent Vector Literals and Explicit Host Access](0083-default-persistent-vector-literals.md) | Accepted | Implemented |
-| 0084 | [Persistent Map Source Syntax](0084-persistent-map-source-syntax.md) | Accepted | Implemented |
-| 0085 | [First-class Source Keyword Values](0085-first-class-source-keywords.md) | Accepted | Implemented |
-| 0086 | [Optimized Runtime Persistent List and Canonical Data Text](0086-optimized-runtime-persistent-list.md) | Accepted | Implemented |
-| 0087 | [First-class Quoted Persistent Data](0087-first-class-quoted-persistent-data.md) | Accepted | Implemented |
-| 0088 | [Versioned Emacs Worker Persistent Value Codec](0088-emacs-worker-value-codec.md) | Accepted | Implemented |
-| 0089 | [Chunked Emacs Worker Value Streams](0089-chunked-emacs-worker-values.md) | Accepted | Implemented |
-| 0090 | [Large Emacs Worker Value Stream Memory Probe](0090-large-worker-value-memory-probe.md) | Accepted | Implemented |
-| 0091 | [Transport-safe Protocol Definitions](0091-transport-safe-protocol-definitions.md) | Accepted | Implemented |
-| 0092 | [Persistent Set Source Syntax](0092-persistent-set-source-syntax.md) | Accepted | Implemented |
-| 0093 | [Static Transient Ownership Analysis](0093-static-transient-ownership-analysis.md) | Accepted | Implemented |
-| 0094 | [Persistent List Language Semantics and Explicit Host Cons](0094-persistent-list-language-semantics.md) | Accepted | Implemented |
+| 0082 | [Persistent Literal Runtime ABI and Explicit Host Containers](0082-persistent-literal-runtime-abi.md) | Stable | Implemented |
+| 0083 | [Default Persistent Vector Literals and Explicit Host Access](0083-default-persistent-vector-literals.md) | Stable | Implemented |
+| 0084 | [Persistent Map Source Syntax](0084-persistent-map-source-syntax.md) | Stable | Implemented |
+| 0085 | [First-class Source Keyword Values](0085-first-class-source-keywords.md) | Stable | Implemented |
+| 0086 | [Optimized Runtime Persistent List and Canonical Data Text](0086-optimized-runtime-persistent-list.md) | Stable | Implemented |
+| 0087 | [First-class Quoted Persistent Data](0087-first-class-quoted-persistent-data.md) | Stable | Implemented |
+| 0088 | [Versioned Emacs Worker Persistent Value Codec](0088-emacs-worker-value-codec.md) | Stable | Implemented |
+| 0089 | [Chunked Emacs Worker Value Streams](0089-chunked-emacs-worker-values.md) | Stable | Implemented |
+| 0090 | [Large Emacs Worker Value Stream Memory Probe](0090-large-worker-value-memory-probe.md) | Stable | Implemented |
+| 0091 | [Transport-safe Protocol Definitions](0091-transport-safe-protocol-definitions.md) | Stable | Implemented |
+| 0092 | [Persistent Set Source Syntax](0092-persistent-set-source-syntax.md) | Stable | Implemented |
+| 0093 | [Static Transient Ownership Analysis](0093-static-transient-ownership-analysis.md) | Stable | Implemented |
+| 0094 | [Persistent List Language Semantics and Explicit Host Cons](0094-persistent-list-language-semantics.md) | Stable | Implemented |
 | 0095 | [Stable Persistent Value and Explicit Host Container Boundary](0095-stable-persistent-host-container-boundary.md) | Stable | Implemented |
 | 0096 | [Profile-guided Compiler Runtime Requirement Scan](0096-profile-guided-compiler-runtime-scan.md) | Accepted | Implemented |
 | 0097 | [Profile-guided Constant-time IR Node-kind Decisions](0097-profile-guided-ir-node-kind-decisions.md) | Accepted | Implemented |

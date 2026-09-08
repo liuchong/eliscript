@@ -1,6 +1,6 @@
 # 0083: Default Persistent Vector Literals and Explicit Host Access
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0007 Explicit Intermediate Representation,
@@ -56,8 +56,8 @@ Evaluated Keyword values are specified by 0085, and Map expression syntax by
 
 `(js-array value...)` constructs a native mutable JavaScript Array and lowers
 to `array-literal`. `array-literal` round-trips canonically as `(js-array ...)`;
-it no longer represents square-bracket value syntax. Specification 0095 removes
-the provisional `array` alias and freezes this explicit spelling.
+it no longer represents square-bracket value syntax. Specification 0095 removed
+the provisional `array` alias and froze this explicit spelling.
 
 Host array or string access is explicit:
 
@@ -113,18 +113,17 @@ byte-identical ESM, Source Maps, diagnostics, and complete IR trees.
 
 ## Compatibility Boundary
 
-This is an intentional provisional semantic change. Source that depended on
-square brackets being a native Array must replace the value expression with
-`js-array` and replace direct host access with explicit `js-` operations.
-Binding syntax is unchanged. The compatibility corpus freezes the new
-distinction before the persistent literal family is promoted to stable.
+The persistent Vector meaning of square-bracket value expressions, the
+unchanged binding-pattern meaning, and the explicit `js-array`, `js-nth`, and
+`js-length` host boundary are stable. Source that depended on the pre-freeze
+native Array meaning must use the explicit host forms.
 
 ## P3 Completion
 
-Specifications 0093 and 0094 close static transient ownership analysis and the
-`car`/`cdr`/`cons`/`list` compatibility migration. Specification 0095 removes
-the provisional native `array`/`object` aliases and promotes the complete
-literal/host-container contract to stable.
+Specifications 0093 and 0094 closed static transient ownership analysis and the
+`car`/`cdr`/`cons`/`list` compatibility migration. Specification 0095 removed
+the provisional native `array`/`object` aliases and completed the stable
+literal/host-container contract.
 
 ## Acceptance Criteria
 

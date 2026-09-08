@@ -1,6 +1,6 @@
 # 0090: Large Emacs Worker Value Stream Memory Probe
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0020 Emacs Worker Protocol and Measurement Probe,
@@ -120,6 +120,15 @@ bun run probe:worker-values
 The command owns and stops its worker. Failed, cancelled, timed-out, or
 over-budget runs exit unsuccessfully.
 
+## Compatibility
+
+The report format, exact 256 MiB logical workload, digest verification,
+required request/response chunk counts, per-process and combined RSS budgets,
+source binding, and failure behavior are stable acceptance evidence. Host and
+timing measurements remain recorded context rather than portable semantic
+constants. Final Emacs and operating-system matrix closure remains governed by
+the separate supported-environment acceptance criterion.
+
 ## Acceptance Criteria
 
 - **LVP-01:** A real Emacs process starts the production Bun worker and selects
@@ -149,5 +158,5 @@ Specifications 0088 and 0089 prove supported value-category round trips,
 malformed-input rejection, resource bounds, incremental framing,
 backpressure, and cancellation. This specification supplies the remaining
 large-process memory evidence. Together they satisfy PD-08 and the P5 Emacs
-Value Bridge exit gate. Promotion of these accepted surfaces to stable remains
-a separate compatibility decision.
+Value Bridge exit gate. The value codec, chunk framing, and source-bound memory
+probe are now compatibility-frozen as one transport boundary.

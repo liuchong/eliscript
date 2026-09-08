@@ -1,6 +1,6 @@
 # 0093: Static Transient Ownership Analysis
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0015 Portable Lexical Analyzer, 0037 Async Functions and
@@ -156,6 +156,14 @@ invoke runtime functions without compiling Eliscript.
 The pass deliberately favors a small sound user model over permissive alias
 analysis. New legal ownership forms require a specification before compiler
 heuristics.
+
+## Compatibility
+
+Canonical import provenance, the direct local-owner model, one-way completion,
+conservative control-flow merging, escape rejection boundaries, structured
+diagnostic locations, and the closed trusted-kernel list are stable. General
+borrowing, affine types, effect inference, and async-safe transients remain
+future additions and cannot be introduced by silently weakening this pass.
 
 ## Acceptance Criteria
 

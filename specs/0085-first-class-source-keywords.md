@@ -1,6 +1,6 @@
 # 0085: First-class Source Keyword Values
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0005 Compile-time Macros,
@@ -120,10 +120,9 @@ arbitrary-temporary-directory test.
 
 ## Compatibility Boundary
 
-This is an intentional provisional semantic change. Source Keyword expressions
-previously evaluated to strings without the leading colon. Code that requires
-a native string value must now write a string literal explicitly. Static host
-property and tag syntax retains its prior behavior.
+The first-class Keyword meaning of source Keyword expressions is stable. Code
+that requires the pre-freeze native string value must write a string literal
+explicitly. Static host property and tag syntax retains its prior behavior.
 
 The explicit runtime `keyword` constructors remain valid. Quoted identifiers
 are defined by 0087. Automatic namespace aliases and namespaced Map notation
@@ -131,9 +130,9 @@ remain separate contracts.
 
 ## P3 Completion
 
-Specifications 0093 and 0094 now close static transient ownership analysis and
-legacy List-operation migration. Specification 0095 removes the provisional
-host aliases and promotes the literal/host-container family to stable;
+Specifications 0093 and 0094 closed static transient ownership analysis and
+legacy List-operation migration. Specification 0095 removed the provisional
+host aliases and completed the stable literal/host-container family;
 application clients are not core acceptance evidence.
 
 ## Acceptance Criteria
@@ -165,6 +164,6 @@ application clients are not core acceptance evidence.
 - **SKL-13:** ESM, Source Maps, diagnostics, complete IR, and the compiler
   fixed point remain seed/self-hosted identical.
 - **SKL-14:** Public-surface, compatibility, and conformance registries track
-  the new runtime ABI export and provisional behavior.
+  the stable runtime ABI export and source behavior.
 - **SKL-15:** No application framework, bundler, or publishing adapter is a
   compiler/runtime dependency or core acceptance condition for this feature.

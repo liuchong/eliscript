@@ -1,6 +1,6 @@
 # 0086: Optimized Runtime Persistent List and Canonical Data Text
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
@@ -132,10 +132,12 @@ would add lifecycle complexity without improving the core operation.
 
 ## Compatibility Boundary
 
-This is an additive provisional runtime surface. Existing portable List APIs
-and optimized Vector, Map, and Set representations keep their contracts.
-Specification 0087 now uses this representation for source quote; worker
-transport encoding is provided by 0088.
+The optimized Persistent List representation, public operations, protocol
+capabilities, value/hash semantics, metadata behavior, iterative traversal,
+and constant-time front sharing are stable. Existing portable List APIs and
+optimized Vector, Map, and Set representations keep their contracts.
+Specification 0087 uses this representation for source quote; worker transport
+encoding is provided by 0088.
 
 The persistent literal ABI now uses this runtime value for quoted List data
 through 0087, and 0088 transports the value without changing its category.

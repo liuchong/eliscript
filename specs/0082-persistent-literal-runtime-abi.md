@@ -1,6 +1,6 @@
 # 0082: Persistent Literal Runtime ABI and Explicit Host Containers
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0007 Explicit Intermediate Representation,
@@ -66,8 +66,8 @@ the ABI `hashSet` constructor.
 
 `(js-array value...)` constructs a native mutable JavaScript Array.
 `(js-object key value...)` constructs a native ordinary JavaScript Object,
-retaining literal and computed property-key behavior. Specification 0095 later
-removes the provisional `array` and `object` aliases and makes the explicit
+retaining literal and computed property-key behavior. Specification 0095
+removed the provisional `array` and `object` aliases and made the explicit
 `js-` spellings stable.
 
 At this specification boundary, `array-literal` represented the provisional
@@ -95,17 +95,14 @@ on UI frameworks, bundlers, development servers, publishing systems, or a
 particular JavaScript host. Application tools may consume generated modules,
 but cannot alter literal semantics or runtime resolution.
 
-## P3 Completion
+## Compatibility Freeze
 
-This specification completes P3 construction prerequisites, not the P3 exit.
-Specifications 0083 and 0084 complete default Vector and Map expression
-syntax, maintained-source annotation, protocol collection access, and
-compatibility recording. The following work remains explicit:
-
-Specifications 0093 and 0094 close static transient ownership analysis and the
-legacy List-operation audit. Specification 0095 removes the provisional
-`array`/`object` aliases and promotes the complete persistent literal and
-explicit host-container boundary to stable, satisfying the P3 exit.
+The literal runtime module path, constructor names, dedicated persistent IR
+kinds, explicit host-container forms, conditional import behavior, and
+seed/self-hosted output identity are stable. Specification 0095 completed the
+P3 value and host-container freeze after 0093 and 0094 closed transient
+ownership and legacy List migration. Changes to these observations require the
+compatibility process; internal constructor algorithms remain replaceable.
 
 ## Acceptance Criteria
 

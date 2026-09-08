@@ -1,6 +1,6 @@
 # 0088: Versioned Emacs Worker Persistent Value Codec
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0020 Emacs Worker Protocol and Measurement Probe,
@@ -131,6 +131,14 @@ Portable functions can therefore construct and return persistent values when
 their caller opts into the codec. Legacy JSON callers remain responsible for
 using JSON-compatible values.
 
+## Compatibility
+
+The `eliscript-value-v1` identifier, opt-in negotiation, wire tags, category
+distinctions, deterministic non-streaming ordering, default limits, structured
+failure families, and Emacs record mapping are stable. The legacy protocol-v1
+JSON path remains unchanged. Unsupported executable and host-identity values
+remain outside the codec rather than acquiring a lossy fallback.
+
 ## Acceptance Criteria
 
 - **WVC-01:** Worker protocol version remains 1 and legacy requests preserve
@@ -170,5 +178,6 @@ adds bounded incremental framing, backpressure, and upload-stage cancellation.
 Specification 0091 adds data-only protocol-definition transport, and 0093
 closes static transient ownership analysis. The codec does not transport
 transient collections, Atoms, functions, executable protocol identity, or
-arbitrary host identities. Promotion of the provisional persistent literal and
-worker value surfaces requires the complete M8 compatibility audit.
+arbitrary host identities. The completed M8 audit freezes these exclusions and
+the value boundary; the final supported-host matrix remains a separate
+acceptance criterion.

@@ -1,6 +1,6 @@
 # 0084: Persistent Map Source Syntax
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0005 Compile-time Macros,
@@ -113,17 +113,17 @@ must remain equal.
 
 ## Compatibility Boundary
 
-This is an additive provisional syntax contract. Existing `(hash-map ...)`
-source remains valid. Brace expressions were previously invalid Eliscript, so
-no valid Map expression changes meaning. The feature remains provisional until
-the complete persistent literal and quoted-data family is promoted.
+Brace Map syntax and its equivalence to `(hash-map ...)` are stable. Existing
+constructor source remains valid, and brace expressions were invalid before
+this additive syntax was introduced. Reader diagnostics, source spans,
+left-to-right evaluation, and duplicate-key behavior are compatibility
+observations.
 
 ## P3 Completion
 
-Specifications 0093 and 0094 now close static transient ownership analysis and
-legacy List-operation migration. Specification 0095 removes the provisional
-host aliases and promotes the complete literal/host-container contract to
-stable.
+Specifications 0093 and 0094 closed static transient ownership analysis and
+legacy List-operation migration. Specification 0095 removed the provisional
+host aliases and completed the stable literal/host-container contract.
 
 ## Acceptance Criteria
 
@@ -152,6 +152,6 @@ stable.
 - **MSL-13:** The three-generation compiler fixed point remains reproducible
   and host-independent.
 - **MSL-14:** Compatibility and conformance registries record the feature as
-  provisional with executable evidence.
+  stable with executable evidence.
 - **MSL-15:** No UI framework, bundler, or application adapter appears in the
   compiler/runtime implementation or acceptance evidence for this behavior.

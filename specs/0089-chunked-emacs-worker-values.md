@@ -1,6 +1,6 @@
 # 0089: Chunked Emacs Worker Value Streams
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0020 Emacs Worker Protocol and Measurement Probe,
@@ -142,6 +142,14 @@ never construct raw chunk messages. Existing callbacks receive the same Emacs
 records defined by 0088. Cancellation clears unsent encoder state and prevents
 decoded partial values from reaching application callbacks.
 
+## Compatibility
+
+The `eliscript-value-chunks-v1` framing identifier, event grammar, bounded
+chunk limits, acknowledgement and sequence rules, backpressure behavior,
+cancellation semantics, structured errors, and non-canonical Map/Set byte-order
+warning are stable. The framing remains opt-in and preserves both legacy JSON
+and non-streaming value-codec paths.
+
 ## Acceptance Criteria
 
 - **WVS-01:** Ready negotiation advertises chunk support without changing
@@ -178,8 +186,8 @@ decoded partial values from reaching application callbacks.
 
 ## Large-value Evidence
 
-This specification implements the incremental protocol and bounded framing;
-it does not by itself close PD-08. Specification
+This specification implements the incremental protocol and bounded framing.
+Specification
 [0090-large-worker-value-memory-probe.md](0090-large-worker-value-memory-probe.md)
 adds the maintained 256 MiB real-process probe, source-bound report, measured
-per-process peaks, and approved memory budgets that complete that gate.
+per-process peaks, and approved memory budgets; together they complete PD-08.

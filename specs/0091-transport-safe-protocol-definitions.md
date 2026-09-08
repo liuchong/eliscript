@@ -1,6 +1,6 @@
 # 0091: Transport-safe Protocol Definitions
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0058 Open Protocol Dispatch Core,
@@ -135,10 +135,9 @@ Operation order is definition order and remains stable through extraction,
 JSON text, the worker value codec, and re-import. Re-extracting an imported
 protocol yields the same four-field definition.
 
-The format is provisional during M8. Its format string, version, field set,
-operation order, isolation semantics, 1,024-operation limit, and rejection
-rules are part of this accepted contract. Runtime Symbol descriptions remain
-diagnostic details rather than transport identities.
+The format string, version, field set, operation order, isolation semantics,
+1,024-operation limit, and rejection rules are stable. Runtime Symbol
+descriptions remain diagnostic details rather than transport identities.
 
 No application framework, bundler, browser UI, or publishing adapter is part
 of this implementation or its acceptance evidence.

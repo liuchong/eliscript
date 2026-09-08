@@ -1,6 +1,6 @@
 # 0094: Persistent List Language Semantics and Explicit Host Cons
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0007 Explicit Intermediate Representation,
@@ -67,8 +67,8 @@ A nullish tail is treated as an empty host Array.
 
 `js-cons` joins `js-array`, `js-nth`, and `js-length` as an explicitly
 host-oriented primitive. It does not link the persistent literal runtime or
-the List runtime by itself. Specification 0095 subsequently removes the
-provisional `array` and `object` aliases and promotes the complete persistent
+the List runtime by itself. Specification 0095 subsequently removed the
+provisional `array` and `object` aliases and promoted the complete persistent
 value and explicit host-container boundary.
 
 ## Compiler and Runtime ABI
@@ -117,14 +117,14 @@ quasiquote behavior, or reader proper-list syntax.
 
 ## Compatibility Boundary
 
-This is an intentional provisional semantic change. Source that relied on
-`list`, `car`, `cdr`, or `cons` producing or consuming native Arrays must use
+Persistent List construction and the `car`, `cdr`, and `cons` semantics are
+stable. Source that relied on the pre-freeze native Array behavior must use
 `js-array`, `js-nth`, or `js-cons` explicitly. Generic collection algorithms
 should use collection protocols rather than List-specific operations.
 
-Specification 0093 closes static transient ownership analysis. This
-specification closes the remaining legacy List-operation audit. Specification
-0095 then removes the provisional host-container aliases and completes the P3
+Specification 0093 closed static transient ownership analysis. This
+specification closed the remaining legacy List-operation audit. Specification
+0095 then removed the provisional host-container aliases and completed the P3
 compatibility promotion.
 
 ## Acceptance Criteria

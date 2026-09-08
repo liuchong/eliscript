@@ -1,6 +1,6 @@
 # 0087: First-class Quoted Persistent Data
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0005 Compile-time Macros,
@@ -108,11 +108,11 @@ literal-runtime import.
 
 ## Compatibility Boundary
 
-This is an intentional provisional semantic change. Code that previously used
-quote to obtain native Arrays or strings must use explicit host constructors or
-string literals. Generic iteration continues to work because Persistent List
-and Vector are iterable, but native Array identity, mutation, methods, and JSON
-serialization are no longer implied.
+The persistent List/Vector and first-class Symbol/Keyword meaning of quoted
+data is stable. Code that relied on the pre-freeze native Array or string
+meaning must use explicit host constructors or string literals. Generic
+iteration continues to work, but native Array identity, mutation, methods, and
+JSON serialization are not implied.
 
 Quoted brace forms remain syntax Lists rather than evaluated Maps. Quasiquote
 continues to be a macro-construction facility and is not redefined by this
@@ -155,5 +155,5 @@ runtime-value migration.
 
 The versioned persistent-value codec is implemented by 0088, static transient
 ownership analysis by 0093, and ordinary List construction/operations by
-0094. Specification 0095 removes the provisional host aliases and completes
+0094. Specification 0095 removed the provisional host aliases and completed
 the stable P3 value and host-container boundary.

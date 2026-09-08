@@ -1,6 +1,6 @@
 # 0092: Persistent Set Source Syntax
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0050 Persistent Hash Set Prototype,
@@ -119,13 +119,10 @@ value codec transports the resulting persistent Set without a new wire tag.
 
 ## Compatibility Boundary
 
-This is an additive provisional source contract. `#{` was previously an
-invalid dispatch, so no valid expression changes meaning. `#'` and unknown
+Set source syntax is a stable additive contract. `#{` was previously an invalid
+dispatch, so no earlier valid expression changed meaning. `#'` and unknown
 dispatch diagnostics remain unchanged. Native JavaScript Sets remain explicit
 host values and are not granted source literal syntax by this specification.
-
-The feature remains provisional until the complete persistent literal and
-host-container family passes the P3 compatibility freeze.
 
 ## Architecture Boundary
 
@@ -137,10 +134,9 @@ utility validation; they cannot define, alter, or certify Set semantics.
 
 ## P3 Completion
 
-Specifications 0093 and 0094 now close static transient ownership analysis and
-legacy List-operation migration. Specification 0095 removes the provisional
-host aliases and promotes the complete literal/host-container contract to
-stable.
+Specifications 0093 and 0094 closed static transient ownership analysis and
+legacy List-operation migration. Specification 0095 removed the provisional
+host aliases and completed the stable literal/host-container contract.
 
 ## Acceptance Criteria
 
