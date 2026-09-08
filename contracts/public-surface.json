@@ -422,6 +422,30 @@
       ]
     },
     {
+      "id": "stable-compatibility-corpus",
+      "spec": "0147",
+      "format": "eliscript-stable-compatibility-corpus",
+      "version": 1,
+      "evidence": [
+        {
+          "file": "contracts/stable-compatibility-corpus.json",
+          "contains": [
+            "\"format\": \"eliscript-stable-compatibility-corpus\"",
+            "\"version\": 1",
+            "\"readyForAc02\":"
+          ]
+        },
+        {
+          "file": "tools/compatibility/corpus.mjs",
+          "contains": [
+            "contract.format !== \"eliscript-stable-compatibility-corpus\"",
+            "contract.version !== 1",
+            "checkStableCompatibilityCorpus"
+          ]
+        }
+      ]
+    },
+    {
       "id": "watch-event",
       "spec": "0121",
       "format": "eliscript-watch-event",

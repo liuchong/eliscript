@@ -17,6 +17,7 @@ test-core: check-contracts
 		-l tests/bootstrap-tests.el \
 		-f ert-run-tests-batch-and-exit
 	$(BUN) test tests/conformance.test.mjs tests/compiler-parity-corpus.test.mjs \
+		tests/stable-compatibility-corpus.test.mjs \
 		tests/public-surface.test.mjs \
 		tests/api-index.test.mjs \
 		tests/compatibility-rehearsal.test.mjs \
@@ -105,6 +106,7 @@ test-applications:
 
 check-contracts:
 	$(BUN) tools/conformance/check.mjs
+	$(BUN) tools/compatibility/corpus.mjs
 	$(BUN) tools/progress/check.mjs
 	$(BUN) tools/diagnostics/check.mjs
 	$(BUN) tools/parity/check.mjs

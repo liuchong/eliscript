@@ -29,19 +29,19 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 146 specifications.
+The registry currently contains 147 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
 | Accepted design | 3 |
-| Stable design | 141 |
+| Stable design | 142 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 142 |
+| Implemented | 143 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 141 specifications as stable,
+Compatibility Baseline 2 separately classifies 142 specifications as stable,
 1 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
@@ -190,6 +190,10 @@ Specification 0146 closes AC-05 with a source-bound compiler parity corpus over
 61 stable compiler-relevant features, 115 valid fixtures, 89 diagnostics, all
 13 bootstrap modules, all 55 public IR kinds, and seven observable parity
 dimensions. Ten mandatory criteria remain incomplete.
+Specification 0147 derives a complete stable compatibility corpus over 140
+stable core features, 538 evidence locators, 67 core fixtures, and all three
+migration records. It keeps AC-02 incomplete while the final core feature
+remains provisional.
 
 ## Reading Paths
 
@@ -318,6 +322,7 @@ The contract data is split by responsibility:
 | [`contracts/compatibility-matrix.json`](../contracts/compatibility-matrix.json) | Supported Emacs, OS, architecture, and Bun combinations |
 | [`contracts/compatibility-baseline.json`](../contracts/compatibility-baseline.json) | Stable, provisional, and planning boundary |
 | [`contracts/compiler-parity-corpus.json`](../contracts/compiler-parity-corpus.json) | Complete seed and self-hosted compiler parity inventory |
+| [`contracts/stable-compatibility-corpus.json`](../contracts/stable-compatibility-corpus.json) | Complete stable core behavior and migration inventory |
 
 The schemas and change workflow are defined by specifications
 [0042](0042-specification-registry.md),
@@ -498,6 +503,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0144 | [Source-level Failure Mapping](0144-source-level-failure-mapping.md) | Stable | Implemented |
 | 0145 | [Language Value Equality](0145-language-value-equality.md) | Stable | Implemented |
 | 0146 | [Complete Compiler Parity Corpus](0146-complete-compiler-parity-corpus.md) | Stable | Implemented |
+| 0147 | [Complete Stable Compatibility Corpus](0147-complete-stable-compatibility-corpus.md) | Stable | Implemented |
 
 ## Adding a Specification
 

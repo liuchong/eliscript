@@ -32,7 +32,7 @@ defined by specification 0118. Baseline 1 remains historical evidence; baseline
 
 ## Stable Contract
 
-Baseline 2 currently classifies 141 specifications and their 141 conformance
+Baseline 2 currently classifies 142 specifications and their 142 conformance
 features as stable. The stable set covers these externally meaningful areas:
 
 - the core language, lexical binding, deterministic macro behavior and
