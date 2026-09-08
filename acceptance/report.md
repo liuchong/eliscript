@@ -1,9 +1,9 @@
 # Eliscript 1.0 Acceptance Report
 
-- Source commit: `e934d001ddb4f25dc9b3182473fb2b13913f0ee6`
-- Source tree: `b494bd8469b52f9c7930361712f66c9c9f2fbda4`
+- Source commit: `221bffe6a912c262ed136ffb3c56961382b2671b`
+- Source tree: `c16d4f00134cd36dcb626c7c4f5781012ad3d479`
 - Contract: `contracts/final-acceptance.json` (`fc7760bdccc644b014b3513e4020f3647e3128e54676481d1515504967f2651d`)
-- Generated: 2026-09-08T13:22:19.953Z
+- Generated: 2026-09-08T14:09:33.507Z
 - Environment: Darwin 25.6.0; arm64; Bun 1.4.0; Node v26.8.1; Emacs 31.1
 - Corpus complete: yes
 - Operational success: yes
@@ -80,8 +80,8 @@ No unresolved defects are recorded.
 
 | Probe | Command | Result | Exit | Duration (ms) | Output SHA-256 |
 | --- | --- | --- | ---: | ---: | --- |
-| core-suite | `make test-core` | pass | 0 | 507700.844 | `aa3051fcbf5f8a592b1be3758542e33853249ef078ad97c07886785d561ac418` |
-| strict-byte-compile | `make byte-compile` | pass | 0 | 995.853 | `4110c50ff8be0d96e678ed5ef31967a2aca72a86558181796ef5f14b5a350c3e` |
+| core-suite | `make test-core` | pass | 0 | 496770.669 | `0ff299e721bcc6c098b22689d353a0e0a6be4fa2066c39d686cc616f90dfa5e8` |
+| strict-byte-compile | `make byte-compile` | pass | 0 | 1020.556 | `4110c50ff8be0d96e678ed5ef31967a2aca72a86558181796ef5f14b5a350c3e` |
 
 ## Artifact Digests
 
@@ -89,8 +89,8 @@ No unresolved defects are recorded.
 | --- | --- |
 | `.github/workflows/compatibility.yml` | `45a2c3941d06adc6d745b4490197beb2a86266fda2685a69a88aeaa6afacfb90` |
 | `acceptance/defects.json` | `da4ac30acd7e57ec357e3d30da05c304605d0a2407733137adf1a44f5b137377` |
-| `acceptance/manifest.json` | `4f3f278a3b17a413335f216b17c3bf1e889ab48a23ca2532cda7817ccab5007a` |
-| `acceptance/report.md` | `cc65310227764ab1c1dd613f3a57263cc7d632272fe8399b799e9e69d4ef3c3c` |
+| `acceptance/manifest.json` | `921b712e84cde937fed5576bc2ee7dbe37492f14fbfa2bd52bdea51bd30a436d` |
+| `acceptance/report.md` | `126135de54193b29b937faa177455661862fcd25ebae0db38e77924bd4e10e88` |
 | `acceptance/runs/m13-02.json` | `de2767587a9c5b2ff4280c7a1005d88274f0dc9f6c327edd89a2944d67053355` |
 | `acceptance/runs/m13-04.json` | `47a58aab430e21d26a9fce392283d06bb62b969a90ae5e922307e4dbce58a880` |
 | `acceptance/runs/m13-04.md` | `a9b55996a36aab1d86696ec7a1edd4eb63d297060f0c319e959c1c1090e53411` |
@@ -98,7 +98,7 @@ No unresolved defects are recorded.
 | `benchmarks/transient-builder-macos-arm64.json` | `68ac7c6e701d58bd91e491b5eb3008136c9d341512ec3207d1614bcf5ac9f6f7` |
 | `benchmarks/worker-lifecycle-soak-macos-arm64.json` | `3f08cdd4ec997b9869439794e6a94ed63e0cc483a0d07d450959ac9abce230a2` |
 | `benchmarks/worker-value-stream-macos-arm64.json` | `7fdf64d25067722b265d4a4b377e62b87e8b8c678fe15c045c9a5a8876578dd3` |
-| `contracts/compatibility-baseline.json` | `3bd151729a52c71598ec4f5106e5ab584fef92291b07c7875c21bb98eb7f6c6d` |
+| `contracts/compatibility-baseline.json` | `a7f9d42bb59116a84cc209d3bc7a70ba9277a2a144e3053a1bf413413500ed1d` |
 | `contracts/compatibility-matrix.json` | `cb8ef575762f556a13a2ad8113ba56448ea5c14113ca438184e2527ee1eeb38d` |
 | `contracts/core-acceptance-corpus.json` | `77fcba9f32672005e177bca353965012bc98816021509b8a4436896cf81e2990` |
 | `contracts/diagnostic-corpus.json` | `aa6204f3b444c0fca8f490d0b06555f4bf00f0fdcfc66c9597de62d1af69086d` |
@@ -128,14 +128,14 @@ No unresolved defects are recorded.
 | `specs/0127-deterministic-reader-program-fuzz.md` | `930a691e3545650b31949a9be7aa4f43266ce15e701da4d26814be9eb03dc037` |
 | `specs/0128-project-scale-invalidation.md` | `1e0c82302ae0221a95d5f5f121dbff646599f7ee70c5c1deb3c44d065de1cb78` |
 | `specs/0130-hostile-boundary-security.md` | `d1d192a2ef1b3000ab37c252de2e81f184c042f1ace5603bba36369470728b9b` |
-| `specs/0135-local-onboarding.md` | `b618aca083da1c337f502b185a44048b41b0d064ca15653fc9036f97eb020a04` |
-| `specs/0139-deterministic-persistent-semantics-corpus.md` | `94a15a0f2ed7cc595e066a10b81553f7aaf273285bde7741c891f86f194a6c56` |
-| `specs/0140-clean-configured-project-workflow.md` | `9e67e5c0ad95f2a320a11fb6e1ed37d3430d700e6576bd496c2e138efcb23c81` |
+| `specs/0135-local-onboarding.md` | `37f68fc449b61a2ab90b082f012a433a1808ced117ac7364bb32991a059f7480` |
+| `specs/0139-deterministic-persistent-semantics-corpus.md` | `7baf091143a269eddbf81cf74b85240d7cbf65cf9db23a927e1d25e9dd17911a` |
+| `specs/0140-clean-configured-project-workflow.md` | `3884ec9bfc18a8da6df2bcdbaab7f7f17e96f7aad37be388b194c03547fa1af9` |
 | `specs/0141-repeated-core-determinism.md` | `0d87814a7ad8f601aeff595e310a5cf304c58619cf536259705a252a9ad87ebe` |
 | `specs/0142-maintained-javascript-package-interop.md` | `964106e7c60ed3e36bb31aa0207e6c5d421cef7ba9b1a721ca20aedad29de99e` |
 | `specs/0143-complete-negative-diagnostic-corpus.md` | `15dbca346655c96077c7544daeb73cb4e15049207b777d81aeb68b02d4ff5fdd` |
 | `specs/0144-source-level-failure-mapping.md` | `c3d5531b9bede4737c50e8bee16bec1e530f2c9bc64ea0990631b4043c18fcc3` |
-| `specs/index.json` | `399a1c8f83b137023f83371332fc91c7b0c87079bfe2b66bec54355fef1137f4` |
+| `specs/index.json` | `ccb76d88f58c5783560fa63ca19aa9317cc153396b38306f78985afa875aca6d` |
 | `tests/api-index.test.mjs` | `7854b8be563e67a6c569133cea41f4ccf1758bc3955654234e22d91a82b2ec99` |
 | `tests/atom.test.mjs` | `1403c404bf1c49c2532899a3ffe306536cf2affc7400d08d785439a9d5dcc296` |
 | `tests/bootstrap-analyzer.test.mjs` | `ac2bfaaa29531eb6addab3a526a32b64d4981bba825033204d16703259961287` |
@@ -150,8 +150,8 @@ No unresolved defects are recorded.
 | `tests/boundary-security.test.mjs` | `1d63fcc782b15b8a72c451fc5354b457945779ef0882b5b11856cfe6f9be3650` |
 | `tests/ci-contract.test.mjs` | `56ed36c60aa1af5d51ee105ea2d5854cf9a6d37749eb03a7cc322bf54d3ca09e` |
 | `tests/clean-project-workflow.test.mjs` | `082b8d3262faab8f70e63305dddff63f8bb69d9da9ed6eedb97f7ab21d44ee45` |
-| `tests/conformance.test.mjs` | `9901717bcbf56f73ea59e75935b34cf967f9c104610fe4ef5e4a6cd04c527990` |
-| `tests/conformance/manifest.json` | `b893ae367cdcff908bac31b784114e9ccda413b129b874d90b9b26b440e05347` |
+| `tests/conformance.test.mjs` | `90ae1c7054824edf6cd270b657725c0bab4aa04e7481c834eb1c7d921cca5b60` |
+| `tests/conformance/manifest.json` | `9ee31b27c513aa08a9fa46302791d8d968e0887bd254e2b13f180b56d364eebe` |
 | `tests/core-stdlib.test.mjs` | `e7ce59b7eabbcbbea36e0cd79ca9fa0cf1ff1f3fc9b06a5de41ec4bcf6edfc9b` |
 | `tests/diagnostic-corpus.test.mjs` | `4a5b06adc53786e881fab48e72c39a09737d4a3a0cfd7b4fd7b80f1c20980fdd` |
 | `tests/eliscript-mode-tests.el` | `5e7e22d28c8cf6472cb80778fd8790df2a6963b457ef5300ce4b984b068791e9` |
