@@ -1,6 +1,6 @@
 # 0113: Versioned Multi-entry Project Identity
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0030 Project Graph Manifest,
@@ -148,6 +148,14 @@ implementation of any normal build mode.
 M9 completion does not claim formatter, REPL, editor-mode, standard-library,
 reliability, security, or final 1.0 acceptance work assigned to later
 milestones.
+
+## Compatibility Freeze
+
+Version 1 single-entry compatibility and the version 2 request, configuration,
+operation, manifest, report, cache-validation, CLI-output, and worker-entry
+contracts are stable. Entry arrays remain sorted, unique, frozen, and part of
+graph identity; multi-entry portable selection continues to fail closed until
+a separately versioned per-entry model is defined.
 
 ## Acceptance Criteria
 

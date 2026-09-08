@@ -1,6 +1,6 @@
 # 0109: Self-hosted Build Decision Reports
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0032 Build Decision Reports,
@@ -78,6 +78,13 @@ non-deterministic timing values, their complete report objects must be equal.
 The self-hosted report must have that identity under both Bun and Node. Timings
 are checked structurally and for non-negative finite values rather than compared
 byte-for-byte.
+
+## Compatibility Freeze
+
+The version 1 report identity, canonical module ordering, derived counts,
+cache status and reason policy, three-decimal timing normalization, deep
+immutability, and seed/Bun/Node equivalence are stable. Hosts may supply facts
+and measurements but cannot redefine compiler-owned report semantics.
 
 ## Acceptance Criteria
 

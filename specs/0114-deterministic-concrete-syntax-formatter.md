@@ -1,6 +1,6 @@
 # 0114: Deterministic Concrete-syntax Formatter
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0006 Located Forms and Diagnostic Positions,
@@ -95,8 +95,8 @@ process, editor, watcher, or application work.
 
 `--write` and `--check` are mutually exclusive. Version 1 accepts one input
 file so stdout and diagnostics have one unambiguous source identity. Project
-enumeration belongs to the later project-aware check operation and cannot be
-silently inferred by this command.
+enumeration belongs to the separately versioned project-aware check operation
+defined by specification 0116 and cannot be silently inferred by this command.
 
 An unformatted file fails with diagnostic code `ELI-F0002`, phase `formatter`,
 and the canonical absolute input filename. Reader failures retain their reader
@@ -105,10 +105,20 @@ retain the shared CLI diagnostic fallback.
 
 ## M10 Status
 
-This specification completes only the deterministic formatter and format-check
-deliverable of M10. It does not claim the Emacs major mode, project-aware check,
-interactive evaluation, REPL, watch API, installation audit, or complete M10
-exit gate.
+This specification completed the deterministic formatter and format-check
+deliverable of M10. At that slice it did not claim the Emacs major mode,
+project-aware check, interactive evaluation, REPL, watch API, installation
+audit, or complete M10 exit gate. Specifications 0115 through 0121 and 0133
+subsequently completed those implementation units and the M10 exit audit
+without changing formatter version 1.
+
+## Compatibility Freeze
+
+Formatter version 1 token preservation, fixed two-space and 88-column layout,
+LF and final-newline rules, byte idempotence, generated-ESM equivalence,
+Bun/Node command behavior, atomic write/check semantics, and structured
+diagnostics are stable. Style options cannot reinterpret version 1; an
+incompatible layout requires a separately versioned formatter contract.
 
 ## Acceptance Criteria
 
@@ -134,5 +144,6 @@ exit gate.
   formatter schema, exports, and default-suite evidence.
 - **FMT-11:** Formatter implementation and evidence contain no application
   framework or application-tool dependency.
-- **FMT-12:** M10 remains in progress until all other deliverables and its exit
-  gate are independently proven.
+- **FMT-12:** This formatter slice did not itself complete M10; subsequent
+  specifications independently supplied the remaining deliverables and exit
+  audit without changing formatter version 1.

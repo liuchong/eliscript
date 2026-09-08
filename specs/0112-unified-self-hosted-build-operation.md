@@ -1,6 +1,6 @@
 # 0112: Unified Self-hosted Build Operation
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0019 Self-Hosted Compiler Driver,
@@ -137,10 +137,17 @@ Evidence proves:
 This specification completes normal single-file and project command routing
 through the self-hosted compiler and satisfies the narrow M9 exit statement
 that the seed is no longer the only implementation of a user-facing build
-capability. M9 remains in progress because version 1 project identity still has
-one entry at this specification's boundary. Specification 0113 subsequently
-adds version 2 multi-entry identity and closes M9 without changing this version
-1 operation.
+capability. At this specification's boundary, version 1 project identity still
+had one entry. Specification 0113 subsequently added version 2 multi-entry
+identity and closed M9 without changing this version 1 operation.
+
+## Compatibility Freeze
+
+The `eliscript-build-operation` version 1 single-file and project schemas,
+frozen normalization results, shared host dispatch, public Bun/Node command
+routing, stdout and file outputs, Source Maps, diagnostics, and explicit seed
+bootstrap boundary are stable. Future operation modes or incompatible request
+shapes require a new version.
 
 ## Acceptance Criteria
 
@@ -160,5 +167,6 @@ adds version 2 multi-entry identity and closes M9 without changing this version
   reproducible after public command convergence.
 - **UBO-08:** Application integrations remain outside core implementation,
   dependencies, goals, evidence, and maturity credit.
-- **UBO-09:** This slice does not claim multi-entry project identity or complete
-  M9 delivery.
+- **UBO-09:** This slice did not itself claim multi-entry project identity or
+  complete M9 delivery; specification 0113 subsequently supplied that
+  contract.

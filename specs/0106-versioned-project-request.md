@@ -1,6 +1,6 @@
 # 0106: Versioned Project Request Configuration
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0030 Project Graph Manifest,
@@ -16,12 +16,13 @@ by legacy command-line flags, or from a versioned `eliscript.json` file. Both
 ordinary and portable builds pass through `eliscript-project-execute` before
 the existing graph compiler is selected.
 
-This is the first M9 configuration and service convergence slice. Version 1
-intentionally describes one graph root and one entry because the current
-public build artifact has one entry identity. Multi-entry graph identity,
-source-map policy, build profiles, namespaced host options, and self-hosted
-parsing require later versioned specifications; they are not accepted as
-ignored version 1 fields. Specification 0124 subsequently adds optional,
+This specification introduced the first M9 configuration and service
+convergence slice. Version 1 intentionally describes one graph root and one
+entry because the public build artifact at that slice had one entry identity.
+Multi-entry graph identity, source-map policy, build profiles, namespaced host
+options, and self-hosted parsing require separate versioned specifications;
+they are not accepted as ignored version 1 fields. Specification 0124
+subsequently adds optional,
 closed macro capability and file-input fields without changing version 1
 single-entry meaning.
 
@@ -45,9 +46,10 @@ The in-memory request contains:
 | `configuration` | optional source configuration identity |
 
 `eliscript-project-execute` validates the request shape, binds cache policy,
-and dispatches ordinary or portable compilation. Callers no longer select the
-two project builders themselves. The lower-level builders remain temporarily
-public for compatibility while M9 moves graph discovery into Eliscript.
+and dispatches ordinary or portable compilation. Normal callers do not select
+the two project builders themselves. Lower-level builders remain explicit
+seed and compatibility references after M9 moved graph discovery into
+Eliscript.
 
 ## Configuration Schema Version 1
 
@@ -113,6 +115,15 @@ command into the self-hosted service without changing this version 1 external
 configuration contract. Specifications 0112 and 0113 subsequently implement
 single-file convergence and version 2 multi-entry identity, closing M9 without
 changing configuration version 1.
+
+## Compatibility Freeze
+
+The closed version 1 configuration schema, path semantics, defaults,
+command-line precedence, structured configuration diagnostics, and shared
+project-request entry operation are stable. Compatible additions require a
+new schema version or an already-declared extension contract; unknown version
+1 fields continue to fail closed, and application tooling cannot extend the
+core request implicitly.
 
 ## Acceptance Criteria
 

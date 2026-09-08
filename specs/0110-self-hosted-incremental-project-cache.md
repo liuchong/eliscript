@@ -1,6 +1,6 @@
 # 0110: Self-hosted Incremental Project Cache
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0031 Incremental Project Builds,
@@ -134,6 +134,14 @@ specific reason while clean modules report `verified`.
   that module while reusing the remaining graph.
 - Bootstrap fixed-point and compiler tests prove the policy remains authored
   in Eliscript rather than copied into a frontend integration.
+
+## Compatibility Freeze
+
+The private cache version 2 identity, read-only version 1 migration, verified
+artifact reuse, dependency-edge reuse, portable-closure revalidation,
+cross-host Bun/Node compatibility, and selective repair behavior are stable.
+Future cache layouts require explicit migration and must preserve public
+manifest, report, diagnostic, and generated-artifact semantics.
 
 ## Acceptance Criteria
 

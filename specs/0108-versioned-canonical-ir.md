@@ -1,6 +1,6 @@
 # 0108: Versioned Canonical IR Serialization
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0007 Explicit Compiler Intermediate Representation,
@@ -105,6 +105,14 @@ publishing systems, hosting, and development servers may consume emitted ESM
 or compiler tools built on this API. They are replaceable application
 validation and do not define this protocol, contribute core dependencies, or
 receive language maturity credit.
+
+## Compatibility Freeze
+
+The `eliscript-ir` version 1 envelope, closed record schemas, public node-kind
+coverage, source-span rules, canonical JSON bytes, negative-zero preservation,
+and `ELI-I0001` failure boundary are stable. New node or record layouts require
+an explicit versioned contract; readers must continue rejecting unknown or
+non-canonical version 1 data.
 
 ## Acceptance Criteria
 

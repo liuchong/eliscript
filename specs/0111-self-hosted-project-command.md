@@ -1,6 +1,6 @@
 # 0111: Self-hosted Project Command and Configuration
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0040 Project Maturity Roadmap and 1.0 Acceptance Contract,
@@ -97,9 +97,9 @@ bootstrap and differential verification. It is not the normal project command
 and is not evidence that self-hosting succeeded.
 
 At completion of this specification, `bin/eliscript` still used the seed
-command. Specification 0112 subsequently routes both public commands through a
+command. Specification 0112 subsequently routed both public commands through a
 shared, compiler-owned build-operation boundary while retaining explicit seed
-references. Multi-entry project identity remains open.
+references. Specification 0113 then completed multi-entry project identity.
 
 ## Compatibility
 
@@ -127,6 +127,14 @@ implementation identities.
 - Bootstrap fixed-point tests prove the request logic remains authored in
   Eliscript.
 
+## Compatibility Freeze
+
+The version 1 request/configuration normalization, public Bun/Node project
+command behavior, host-effect boundary, explicit seed reference, path
+resolution, diagnostics, and output contracts are stable. Normal project
+commands continue through the generated service; seed entry points remain
+explicit bootstrap and differential tools.
+
 ## Acceptance Criteria
 
 - **SPC-01:** Versioned project request and configuration normalization are
@@ -143,8 +151,9 @@ implementation identities.
   reference and is not the normal public project implementation.
 - **SPC-07:** Seed, Bun, and Node agree on cache-free generated artifacts and
   public manifest identity.
-- **SPC-08:** This slice does not claim single-file command convergence,
-  multi-entry identity, or the M9 exit gate.
+- **SPC-08:** This slice did not itself claim single-file command convergence,
+  multi-entry identity, or the M9 exit gate; specifications 0112 and 0113
+  subsequently supplied those contracts.
 - **SPC-09:** Application frameworks, bundlers, publishing, blogs, sites,
   hosting, and development servers remain outside core implementation,
   dependencies, goals, acceptance evidence, and maturity credit.

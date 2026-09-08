@@ -32,7 +32,7 @@ defined by specification 0118. Baseline 1 remains historical evidence; baseline
 
 ## Stable Contract
 
-Baseline 2 currently classifies 93 specifications and their 93 conformance
+Baseline 2 currently classifies 102 specifications and their 102 conformance
 features as stable. The stable set covers these externally meaningful areas:
 
 - lexical binding, deterministic macro behavior, source locations, and Source
@@ -65,6 +65,11 @@ features as stable. The stable set covers these externally meaningful areas:
 - transient bulk-builder performance floors, the accelerated Emacs operation
   service, and two maintained warm workflows exceeding the 2.0x end-to-end
   acceptance floor
+- closed project requests, self-hosted graph planning, canonical IR,
+  compiler-owned reports and cache policy, unified public build operations,
+  and versioned multi-entry project identity across Bun and Node
+- the compiler-owned concrete-syntax formatter, fixed version 1 layout,
+  idempotence, ESM equivalence, atomic write/check behavior, and diagnostics
 - specification, diagnostic, public-surface, continuous compatibility, and
   compatibility-baseline schemas
 
@@ -75,7 +80,7 @@ other explicitly non-identity observations remain implementation details.
 
 ## Provisional Contract
 
-Forty-eight implemented specifications and features remain provisional. They
+Thirty-nine implemented specifications and features remain provisional. They
 cover the broad pre-1.0 language, compiler internals, remaining standard-library
 modules, editor tooling, host interop, compatibility-matrix closure, and final
 acceptance evidence whose public contracts may still change before the 1.0

@@ -34,15 +34,15 @@ The registry currently contains 145 specifications.
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 50 |
-| Stable design | 93 |
+| Accepted design | 41 |
+| Stable design | 102 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
 | Implemented | 141 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 93 specifications as stable,
-48 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 102 specifications as stable,
+39 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -450,15 +450,15 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0103 | [Transient Bulk Builder Performance](0103-transient-bulk-builder-performance.md) | Stable | Implemented |
 | 0104 | [Accelerated Emacs Operation Service](0104-accelerated-emacs-operation-service.md) | Stable | Implemented |
 | 0105 | [Emacs Analysis Performance Reinvestment](0105-emacs-analysis-performance-reinvestment.md) | Stable | Implemented |
-| 0106 | [Versioned Project Request Configuration](0106-versioned-project-request.md) | Accepted | Implemented |
-| 0107 | [Self-hosted Project Graph Planning](0107-self-hosted-project-graph-planning.md) | Accepted | Implemented |
-| 0108 | [Versioned Canonical IR Serialization](0108-versioned-canonical-ir.md) | Accepted | Implemented |
-| 0109 | [Self-hosted Build Decision Reports](0109-self-hosted-build-decision-reports.md) | Accepted | Implemented |
-| 0110 | [Self-hosted Incremental Project Cache](0110-self-hosted-incremental-project-cache.md) | Accepted | Implemented |
-| 0111 | [Self-hosted Project Command and Configuration](0111-self-hosted-project-command.md) | Accepted | Implemented |
-| 0112 | [Unified Self-hosted Build Operation](0112-unified-self-hosted-build-operation.md) | Accepted | Implemented |
-| 0113 | [Versioned Multi-entry Project Identity](0113-versioned-multi-entry-project-identity.md) | Accepted | Implemented |
-| 0114 | [Deterministic Concrete-syntax Formatter](0114-deterministic-concrete-syntax-formatter.md) | Accepted | Implemented |
+| 0106 | [Versioned Project Request Configuration](0106-versioned-project-request.md) | Stable | Implemented |
+| 0107 | [Self-hosted Project Graph Planning](0107-self-hosted-project-graph-planning.md) | Stable | Implemented |
+| 0108 | [Versioned Canonical IR Serialization](0108-versioned-canonical-ir.md) | Stable | Implemented |
+| 0109 | [Self-hosted Build Decision Reports](0109-self-hosted-build-decision-reports.md) | Stable | Implemented |
+| 0110 | [Self-hosted Incremental Project Cache](0110-self-hosted-incremental-project-cache.md) | Stable | Implemented |
+| 0111 | [Self-hosted Project Command and Configuration](0111-self-hosted-project-command.md) | Stable | Implemented |
+| 0112 | [Unified Self-hosted Build Operation](0112-unified-self-hosted-build-operation.md) | Stable | Implemented |
+| 0113 | [Versioned Multi-entry Project Identity](0113-versioned-multi-entry-project-identity.md) | Stable | Implemented |
+| 0114 | [Deterministic Concrete-syntax Formatter](0114-deterministic-concrete-syntax-formatter.md) | Stable | Implemented |
 | 0115 | [Emacs Major Mode Foundation](0115-emacs-major-mode-foundation.md) | Accepted | Implemented |
 | 0116 | [Read-only Project Check and Emacs Diagnostics](0116-read-only-project-check-and-emacs-diagnostics.md) | Accepted | Implemented |
 | 0117 | [Virtual-source Builds and Emacs Compilation Commands](0117-virtual-source-builds-and-emacs-compilation.md) | Accepted | Implemented |

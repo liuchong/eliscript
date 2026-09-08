@@ -1,6 +1,6 @@
 # 0107: Self-hosted Project Graph Planning
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-01
 - Depends on: 0019 Self-Hosted Compiler Driver,
@@ -74,9 +74,10 @@ filesystem or editor host can implement the same effect boundary without
 forking language logic.
 
 The service is standards-based and executes under both Bun and Node when given
-the generated compiler module directory. The current project command still
-uses the seed project operation; routing configuration and CLI entry points to
-this service is a later M9 convergence slice.
+the generated compiler module directory. At this specification's original
+slice, the project command still used the seed operation. Specifications 0111
+and 0112 subsequently routed configuration and public CLI entry points through
+this service.
 
 ## Reproducibility
 
@@ -88,6 +89,14 @@ must produce those bytes under Bun and Node.
 Private cache convergence was completed by specifications 0109 and 0110 after
 this planning slice. Graph planning remains independent of cache effects and
 application integrations.
+
+## Compatibility Freeze
+
+The version 1 ordinary and portable planning operations, sorted frozen result
+shape, cycle handling, portable-name fixed-point semantics, structured
+planning diagnostics, and standards-based host boundary are stable. Hosts may
+change effect implementation without changing graph results, ordering, or the
+Eliscript-owned traversal policy.
 
 ## Acceptance Criteria
 
