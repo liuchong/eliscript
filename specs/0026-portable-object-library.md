@@ -1,6 +1,6 @@
 # 0026: Portable Immutable Object Library
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0003 Implemented Core Language,
@@ -21,8 +21,8 @@ Eliscript library code.
 (assoc (js-object :name "Eliscript") :runtime "JavaScript")
 ```
 
-The module works through ordinary ESM imports, Vite source imports, closure-only
-worker builds, and both compiler generations.
+The module works through ordinary ESM imports, project source imports,
+closure-only worker builds, and both compiler generations.
 
 ## Core Primitives
 
@@ -72,16 +72,20 @@ whole-object transforms quadratic in property count. A future internal builder
 may optimize measured large-object workloads, but it must preserve these public
 semantics and must not expose mutation to callers.
 
-## Application Integration
+## Host Integration Boundary
 
-The command-line standard-library example imports sequence, text, and object
-source modules. The pure Emacs project builder emits a four-module ESM graph,
-rewrites every local import, and writes adjacent source maps.
+The project builder emits object and dependent data modules in one ESM graph,
+rewrites every local import, and writes adjacent Source Maps. Application
+adapters may consume the generated modules, but application frameworks and
+bundlers are outside the core contract.
 
-The Org React site imports `assoc` from `object.eli` for browser scroll options.
-Its slug index comes from `data.eli`, which composes with this module through
-the contract in
-[0028-portable-module-composition.md](0028-portable-module-composition.md).
+## Compatibility
+
+The eleven exported function names, own enumerable string-key model,
+right-biased shallow merge, non-mutating association, enumeration ordering,
+and nullish read behavior are stable. Implementations may replace repeated
+copying with an internal builder only when these observations and portable
+closure boundaries remain unchanged.
 
 ## Acceptance Evidence
 
@@ -94,8 +98,8 @@ the contract in
   compiler implementations.
 - The compiler fixed-point test compares complete seed and self-hosted output
   for `object.eli`.
-- Project CLI and the Org React Vite production build use the library through
-  real `.eli` imports.
+- A four-module project build retains object and data sources in their Source
+  Maps and executes their generated imports under Bun and Node.
 
 ## Next Slice
 

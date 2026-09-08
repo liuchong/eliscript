@@ -1,6 +1,6 @@
 # 0023: Portable Sequence Standard Library
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0003 Implemented Core Language,
@@ -20,8 +20,8 @@ build reusable language facilities.
 (map (lambda (value) (* value 2)) (range 1 5))
 ```
 
-Vite can consume `.eli` imports directly. The project builder can also compile
-the complete local source graph and rewrite each generated import to `.mjs`.
+The project builder compiles the complete local source graph and rewrites each
+generated import to `.mjs` for ordinary ESM consumers.
 
 ## Representation and Purity
 
@@ -63,13 +63,18 @@ ECMAScript number behavior, consistent with the core language.
 
 ## Module Integration
 
-The React counter imports `map` from the source `.eli` module and uses it to
-render footer items. Its Vite production build therefore exercises a real
-multi-file Eliscript dependency graph. The bundled source map retains the
-component, browser entry, and standard-library source paths.
+The library compiles as an ordinary source module, participates in multi-file
+project builds, and executes under every supported JavaScript host. It remains
+independent of application frameworks, bundlers, browser state, and Emacs
+editor state.
 
-The library deliberately remains independent of React, browsers, Bun, and
-Emacs editor state.
+## Compatibility
+
+The twelve exported function names, Array input and output categories,
+left-to-right evaluation, input immutability, end-exclusive range behavior,
+and Eliscript truthiness rules are stable. Dependency-pruned portable closures
+remain part of the contract. Internal accumulation strategies and generated
+local names are not compatibility observations.
 
 ## Acceptance Evidence
 
@@ -78,8 +83,9 @@ Emacs editor state.
   external source maps, then executes all exported behaviors.
 - The fixed-point test compiles the complete library with both the Emacs seed
   and Generation 2 compiler and compares their JavaScript byte-for-byte.
-- The React production build resolves `sequence.eli`, renders a mapped footer,
-  and records the standard-library source in the final bundle map.
+- A four-module project build compiles sequence, text, object, and data sources,
+  retains each source in its Source Map, and executes the generated graph under
+  Bun and Node.
 - The project CLI discovers the same source import, emits both modules and
   their maps, rewrites the relative specifier, and runs the entry with Bun.
 

@@ -32,7 +32,7 @@ defined by specification 0118. Baseline 1 remains historical evidence; baseline
 
 ## Stable Contract
 
-Baseline 2 currently classifies 66 specifications and their 66 conformance
+Baseline 2 currently classifies 70 specifications and their 70 conformance
 features as stable. The stable set covers these externally meaningful areas:
 
 - lexical binding, deterministic macro behavior, source locations, and Source
@@ -54,6 +54,8 @@ features as stable. The stable set covers these externally meaningful areas:
   hashing, value-semantic Result records, strict JSON, and checked numeric
   foundations, plus the million-value collection exit contract, generated
   protocol policy/runtime, and protocol-driven text and keyed-object algorithms
+- portable Array/Object compatibility modules for sequence traversal, text,
+  immutable host-object operations, and keyed data indexing
 - specification, diagnostic, public-surface, continuous compatibility, and
   compatibility-baseline schemas
 
@@ -64,7 +66,7 @@ other explicitly non-identity observations remain implementation details.
 
 ## Provisional Contract
 
-Seventy-five implemented specifications and features remain provisional. They
+Seventy-one implemented specifications and features remain provisional. They
 cover the broad pre-1.0 language, compiler internals, remaining standard-library
 modules, editor tooling, host interop, compatibility-matrix closure, and final
 acceptance evidence whose public contracts may still change before the 1.0

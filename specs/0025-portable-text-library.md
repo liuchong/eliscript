@@ -1,6 +1,6 @@
 # 0025: Portable Text Standard Library
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0003 Implemented Core Language,
@@ -21,7 +21,7 @@ or JavaScript global objects.
 (trim "  Eliscript\n")
 ```
 
-The module is suitable for ordinary ESM imports, Vite source imports, and
+The module is suitable for ordinary ESM imports, project source imports, and
 closure-only worker builds.
 
 ## Indexing Model
@@ -64,16 +64,20 @@ Every declaration uses `defportable`. Selecting `blank?` includes `empty?`,
 and `repeat` remain absent. The generated worker manifest keeps the source
 names containing `?` while ECMAScript identifiers remain safely munged.
 
-## Application Integration
+## Host Integration Boundary
 
-The standard-library CLI example imports `sequence.eli`, `text.eli`, and the
-later `object.eli` module. The pure Emacs project builder emits a four-module
-ESM graph with adjacent source maps and rewrites every source import.
+The project builder emits this module in a four-module ESM graph with adjacent
+Source Maps and rewrites every source import. Application adapters may consume
+the resulting ESM, but no application framework or bundler participates in the
+library contract or its core acceptance evidence.
 
-The Org React site imports `strip-prefix`, `map`, and `find` from Eliscript
-source. Hash parsing, article lookup, and list rendering therefore exercise the
-portable libraries inside a real Vite production bundle instead of equivalent
-host string and array methods.
+## Compatibility
+
+The thirteen exported function names, UTF-16 code-unit indexing, end-exclusive
+slice bounds, four-character whitespace set, literal search semantics, and
+string conversion behavior are stable. Search and reconstruction algorithms
+may change when they preserve these observations and the portable dependency
+closure.
 
 ## Acceptance Evidence
 
@@ -83,8 +87,9 @@ host string and array methods.
   text functions.
 - The fixed-point compiler test compares complete seed and self-hosted output
   for `text.eli`.
-- The project CLI emits and runs sequence, text, object, and application modules.
-- The Org production source map retains both standard-library source files.
+- The project CLI emits and runs sequence, text, object, and data modules.
+- A four-module project build retains the text source in its Source Map and
+  executes representative composition under Bun and Node.
 
 ## Next Slice
 

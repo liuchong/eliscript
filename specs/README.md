@@ -34,15 +34,15 @@ The registry currently contains 145 specifications.
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 77 |
-| Stable design | 66 |
+| Accepted design | 73 |
+| Stable design | 70 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
 | Implemented | 141 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 66 specifications as stable,
-75 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 70 specifications as stable,
+71 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -357,11 +357,11 @@ defined by [0125](0125-generated-library-api-index.md).
 
 | ID | Specification | Status | Implementation |
 | --- | --- | --- | --- |
-| 0023 | [Portable Sequence Standard Library](0023-portable-sequence-library.md) | Accepted | Implemented |
+| 0023 | [Portable Sequence Standard Library](0023-portable-sequence-library.md) | Stable | Implemented |
 | 0024 | [Multi-file Project Builds](0024-project-builds.md) | Stable | Implemented |
-| 0025 | [Portable Text Standard Library](0025-portable-text-library.md) | Accepted | Implemented |
-| 0026 | [Portable Immutable Object Library](0026-portable-object-library.md) | Accepted | Implemented |
-| 0027 | [Portable Data Indexing](0027-portable-data-indexing.md) | Accepted | Implemented |
+| 0025 | [Portable Text Standard Library](0025-portable-text-library.md) | Stable | Implemented |
+| 0026 | [Portable Immutable Object Library](0026-portable-object-library.md) | Stable | Implemented |
+| 0027 | [Portable Data Indexing](0027-portable-data-indexing.md) | Stable | Implemented |
 | 0028 | [Portable Module Composition](0028-portable-module-composition.md) | Stable | Implemented |
 | 0029 | [Portable Indexing Composition](0029-portable-indexing-composition.md) | Accepted | Implemented |
 | 0030 | [Project Graph Manifest](0030-project-graph-manifest.md) | Stable | Implemented |

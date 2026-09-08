@@ -146,6 +146,42 @@ async function runBuiltCoreProjectHost(command, outputRoot) {
   ]));
 }
 
+async function runBuiltPortableUtilityProjectHost(command, outputRoot) {
+  const moduleUrl = (name) => JSON.stringify(pathToFileURL(
+    resolve(outputRoot, `${name}.mjs`),
+  ).href);
+  const source = [
+    `const sequence = await import(${moduleUrl("sequence")});`,
+    `const text = await import(${moduleUrl("text")});`,
+    `const object = await import(${moduleUrl("object")});`,
+    `const data = await import(${moduleUrl("data")});`,
+    "const values = [1, 2, 3, 4];",
+    "const sourceObject = { left: 1 };",
+    "const merged = object.merge(sourceObject, { left: 3, right: 2 });",
+    "const grouped = data.group_by((value) => value % 2, values);",
+    "const counted = data.count_by((value) => value % 2, values);",
+    "console.log(JSON.stringify({",
+    "  sequence: [",
+    "    sequence.map((value) => value * 3, values),",
+    "    sequence.reduce((sum, value) => sum + value, 0, values),",
+    "  ],",
+    "  text: [",
+    "    text.trim('  Eliscript\\n'),",
+    "    text.join('-', values),",
+    "    text.contains_QMARK_('script', 'Eliscript'),",
+    "  ],",
+    "  object: [merged.left, merged.right, sourceObject.left],",
+    "  data: [grouped[0], grouped[1], counted[0], counted[1]],",
+    "}));",
+  ].join("\n");
+  return JSON.parse(await runSuccessful([
+    command,
+    "--input-type=module",
+    "--eval",
+    source,
+  ]));
+}
+
 async function runBuiltPersistentValueProjectHost(command, outputRoot) {
   const moduleUrl = (name) => JSON.stringify(pathToFileURL(
     resolve(outputRoot, `${name}.mjs`),
@@ -724,6 +760,58 @@ test("stable protocol and core algorithms build as one project across Bun and No
     expect(await runBuiltCoreProjectHost(process.execPath, outputRoot))
       .toEqual(expected);
     expect(await runBuiltCoreProjectHost(
+      process.env.NODE_BINARY ?? "node",
+      outputRoot,
+    )).toEqual(expected);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 60_000);
+
+test("stable portable utility modules build as one project across Bun and Node", async () => {
+  const directory = await mkdtemp(resolve(ROOT, ".eliscript-utility-project-"));
+  const outputRoot = resolve(directory, "stdlib");
+  const modules = [
+    ["sequence", "eliscript.sequence"],
+    ["text", "eliscript.text"],
+    ["object", "eliscript.object"],
+    ["data", "eliscript.data"],
+  ];
+  try {
+    const report = JSON.parse(await runSuccessful([
+      resolve(ROOT, "bin/eliscript-build"),
+      "--json",
+      "--root",
+      resolve(ROOT, "stdlib"),
+      "--out-dir",
+      outputRoot,
+      "--no-cache",
+      ...modules.map(([name]) => resolve(ROOT, `stdlib/${name}.eli`)),
+    ]));
+    expect(report).toMatchObject({
+      format: "eliscript-build-report",
+      version: 2,
+      mode: "standard",
+      entries: modules.map(([name]) => `${name}.eli`).sort(),
+      counts: { modules: 4, compiled: 4, reused: 0 },
+      cache: { enabled: false, status: "disabled", reason: "cache-disabled" },
+    });
+    for (const [name, declaration] of modules) {
+      const sourceMap = JSON.parse(await readFile(
+        resolve(outputRoot, `${name}.mjs.map`),
+        "utf8",
+      ));
+      expect(sourceMap.sourcesContent[0]).toContain(`(module ${declaration}`);
+    }
+    const expected = {
+      sequence: [[3, 6, 9, 12], 10],
+      text: ["Eliscript", "1-2-3-4", true],
+      object: [3, 2, 1],
+      data: [[2, 4], [1, 3], 2, 2],
+    };
+    expect(await runBuiltPortableUtilityProjectHost(process.execPath, outputRoot))
+      .toEqual(expected);
+    expect(await runBuiltPortableUtilityProjectHost(
       process.env.NODE_BINARY ?? "node",
       outputRoot,
     )).toEqual(expected);

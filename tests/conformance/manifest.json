@@ -215,12 +215,13 @@
     {
       "id": "stdlib.sequence",
       "title": "Portable sequence standard library",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0023",
       "contracts": ["Compiles and executes portable sequence operations", "Supports closure-only selection"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/stdlib-sequence.test.mjs", "contains": "portable sequence library compiles and executes as an ESM module" },
-        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-standard-library-sequence-closure-is-portable" }
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-standard-library-sequence-closure-is-portable" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "stable portable utility modules build as one project across Bun and Node" }
       ]
     },
     {
@@ -237,34 +238,37 @@
     {
       "id": "stdlib.text",
       "title": "Portable text standard library",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0025",
       "contracts": ["Executes documented UTF-16 text operations", "Supports portable closure selection"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/stdlib-text.test.mjs", "contains": "portable text library compiles and executes as an ESM module" },
-        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-standard-library-text-closure-is-portable" }
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-standard-library-text-closure-is-portable" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "stable portable utility modules build as one project across Bun and Node" }
       ]
     },
     {
       "id": "stdlib.object",
       "title": "Portable immutable object library",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0026",
       "contracts": ["Preserves immutable own-property semantics", "Supports dependency-pruned portable builds"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/stdlib-object.test.mjs", "contains": "portable object and data libraries preserve immutable own-property semantics" },
-        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-standard-library-object-closure-is-portable" }
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-standard-library-object-closure-is-portable" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "stable portable utility modules build as one project across Bun and Node" }
       ]
     },
     {
       "id": "stdlib.data-indexing",
       "title": "Portable keyed data indexing",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0027",
       "contracts": ["Provides indexing, grouping, and counting", "Compiles portable imports into named ESM imports"],
       "evidence": [
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-standard-library-data-compiles-portable-imports" },
-        { "kind": "bun-test", "file": "tests/stdlib-object.test.mjs", "contains": "portable object and data libraries preserve immutable own-property semantics" }
+        { "kind": "bun-test", "file": "tests/stdlib-object.test.mjs", "contains": "portable object and data libraries preserve immutable own-property semantics" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "stable portable utility modules build as one project across Bun and Node" }
       ]
     },
     {
@@ -1902,7 +1906,7 @@
         {
           "kind": "bun-test",
           "file": "tests/api-index.test.mjs",
-          "contains": "library API metadata cannot overstate specification stability"
+          "contains": "library API metadata must match specification stability"
         },
         {
           "kind": "bun-test",

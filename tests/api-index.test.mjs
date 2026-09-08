@@ -87,12 +87,12 @@ test("library API metadata requires an explicit normalized module name", async (
   );
 });
 
-test("library API metadata cannot overstate specification stability", async () => {
+test("library API metadata must match specification stability", async () => {
   const metadata = await readJson("contracts/library-api.json");
   metadata.modules.find(({ module }) => module === "sequence")
-    .stability = "stable";
+    .stability = "accepted";
   expect(await validationErrors(metadata)).toContain(
-    "sequence stability must match specification 0023 status accepted",
+    "sequence stability must match specification 0023 status stable",
   );
 });
 

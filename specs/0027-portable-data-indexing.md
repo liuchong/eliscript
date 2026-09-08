@@ -1,6 +1,6 @@
 # 0027: Portable Data Indexing
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0026 Portable Immutable Object Library
@@ -8,9 +8,8 @@
 ## Summary
 
 The `data.eli` library turns ordered values into keyed lookup, grouping, and
-count objects. It composes with immutable primitives from `object.eli`; the Org
-React site drives the slice because its hash router previously scanned every
-article on each navigation event.
+count objects. It composes with immutable primitives from `object.eli` and adds
+no host capability of its own.
 
 ```elisp
 (import "../../stdlib/data.eli" index-by group-by count-by)
@@ -53,12 +52,20 @@ quadratic in the number of distinct keys or values in one group. Optimization
 remains contingent on measured workloads and must preserve the same observable
 semantics.
 
-## Application Integration
+## Host Integration Boundary
 
-The Org React application constructs `articles-by-slug` once when its module is
-evaluated. Hash changes now perform a direct property lookup and retain the
-first published article as the fallback. Article rendering, navigation, and
-the generated UI are otherwise unchanged.
+The data and object modules compile as one portable project graph. Application
+code may use the resulting index, group, and count objects, but application
+behavior is utility validation and does not define or advance this core
+contract.
+
+## Compatibility
+
+The three exported function names, one key-function call per input value,
+left-to-right traversal, right-biased indexing, stable group order, own-property
+safety, and input immutability are stable. The ordinary Object and Array result
+categories remain an explicit compatibility layer distinct from protocol-driven
+persistent collection algorithms.
 
 ## Acceptance Evidence
 
@@ -69,8 +76,8 @@ the generated UI are otherwise unchanged.
   while excluding the other indexing functions.
 - The seed and self-hosted compilers emit byte-identical `object.eli` modules at
   the reproducible fixed point.
-- The Org Vite production bundle retains `object.eli` in its source map and
-  executes the prebuilt slug-index path.
+- A four-module project build retains data and object sources in their Source
+  Maps and executes indexing and grouping under Bun and Node.
 
 ## Composition Update
 

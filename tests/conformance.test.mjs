@@ -30,7 +30,7 @@ test("repository specifications have complete conformance evidence", async () =>
     schemaVersion: 1,
     specifications: {
       total: 145,
-      statuses: { draft: 1, accepted: 77, stable: 66, superseded: 1 },
+      statuses: { draft: 1, accepted: 73, stable: 70, superseded: 1 },
       implementations: {
         "in-progress": 3,
         implemented: 141,
@@ -40,7 +40,7 @@ test("repository specifications have complete conformance evidence", async () =>
     },
     features: {
       total: 141,
-      evidence: 499,
+      evidence: 503,
       domains: {
         acceleration: { features: 1, evidence: 1 },
         bootstrap: { features: 13, evidence: 30 },
@@ -54,19 +54,19 @@ test("repository specifications have complete conformance evidence", async () =>
         publishing: { features: 1, evidence: 2 },
         quality: { features: 22, evidence: 58 },
         runtime: { features: 16, evidence: 98 },
-        stdlib: { features: 21, evidence: 81 },
+        stdlib: { features: 21, evidence: 85 },
         toolchain: { features: 5, evidence: 20 },
         tooling: { features: 1, evidence: 2 },
         worker: { features: 8, evidence: 31 },
       },
     },
     baseline: {
-      stableSpecifications: 66,
-      provisionalSpecifications: 75,
+      stableSpecifications: 70,
+      provisionalSpecifications: 71,
       planningSpecifications: 3,
       supersededSpecifications: 1,
-      stableFeatures: 66,
-      provisionalFeatures: 75,
+      stableFeatures: 70,
+      provisionalFeatures: 71,
     },
   });
 });
