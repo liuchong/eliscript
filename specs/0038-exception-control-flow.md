@@ -41,11 +41,12 @@ the clauses. An empty try, catch, or finally body is valid and has a normal
 value of `nil` where that value is observed. `catch` and `finally` are reserved
 clauses and are rejected as standalone expressions.
 
-The catch binding may be a symbol or vector binding pattern. It is mutable,
+The catch binding may be a symbol, vector pattern, or map pattern. It is mutable,
 visible only in the catch body, may shadow outer names, and participates in
 normal duplicate and output-name collision validation. The finally body uses
 the surrounding scope; catch bindings are not visible there. Vector behavior
-is defined by [0039-vector-binding-patterns.md](0039-vector-binding-patterns.md).
+is defined by [0039-vector-binding-patterns.md](0039-vector-binding-patterns.md)
+and [0148-map-binding-patterns.md](0148-map-binding-patterns.md).
 
 ## Value and Completion Semantics
 

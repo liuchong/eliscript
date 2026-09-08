@@ -1,0 +1,33 @@
+(defun unpack ({:keys [name age note] :or {age 18 note "missing"}})
+  (js-array name age note))
+
+(defun optional-map (&optional {:keys [name] :or {name "anonymous"}})
+  name)
+
+(defun explicit-and-nested ({alias :name {:keys [city]} :profile})
+  (js-array alias city))
+
+(defun lexical-map (value)
+  (let (({:keys [name age] :or {age 18} :as row} value))
+    (js-array name age row)))
+
+(defun countdown (initial)
+  (loop (({:keys [remaining]} initial))
+    (if (= remaining 0)
+        remaining
+      (recur {:remaining (1- remaining)}))))
+
+(defun catch-map ()
+  (try
+    (throw (js-object :code 7 :message "caught"))
+    (catch {:keys [code message]}
+      (js-array code message))))
+
+(defportable portable-name ({:keys [name]}) name)
+
+(defun persistent-map-pattern ()
+  (let (({:keys [name age] :or {age 18}} {:name "Eliscript"}))
+    (js-array name age)))
+
+(export unpack optional-map explicit-and-nested lexical-map countdown catch-map
+        portable-name persistent-map-pattern)

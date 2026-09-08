@@ -121,6 +121,19 @@
             (eliscript-analyzer--fail "%s" message)))))
     (eliscript-analyzer--declare scope name kind mutable)))
 
+(defun eliscript-analyzer--analyze-pattern-defaults (pattern scope)
+  "Analyze map defaults nested in binding PATTERN using lexical SCOPE."
+  (dolist
+      (default
+       (eliscript-binding-defaults
+        pattern
+        (lambda (form message)
+          (let ((eliscript-analyzer--current-span
+                 (or (eliscript-form-span form)
+                     eliscript-analyzer--current-span)))
+            (eliscript-analyzer--fail "%s" message)))))
+    (eliscript-analyzer--analyze-non-tail default scope)))
+
 (defun eliscript-analyzer--lookup (scope name)
   "Resolve NAME from SCOPE or its parents."
   (let (binding)
@@ -206,10 +219,13 @@
           (pcase-let ((`(,name ,value)
                        (eliscript-analyzer--binding-pair binding)))
             (eliscript-analyzer--analyze-non-tail value child)
+            (eliscript-analyzer--analyze-pattern-defaults name child)
             (eliscript-analyzer--declare-pattern child name 'local t)))
       (let ((parsed (mapcar #'eliscript-analyzer--binding-pair bindings)))
         (dolist (binding parsed)
-          (eliscript-analyzer--analyze-non-tail (cadr binding) scope))
+          (eliscript-analyzer--analyze-non-tail (cadr binding) scope)
+          (eliscript-analyzer--analyze-pattern-defaults
+           (car binding) scope))
         (dolist (binding parsed)
           (eliscript-analyzer--declare-pattern
            child (car binding) 'local t))))
@@ -228,6 +244,9 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
                    (or (eliscript-form-span form)
                        eliscript-analyzer--current-span)))
               (eliscript-analyzer--fail "%s" message))))))
+    (dolist (parameter parsed)
+      (eliscript-analyzer--analyze-pattern-defaults
+       (eliscript-parameter-form parameter) scope))
     (let ((child (eliscript-analyzer--make-scope
                   scope (if asynchronous 'async 'sync)))
           (target (eliscript-analyzer--recur-target-create
@@ -267,7 +286,9 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
                 (eliscript-analyzer--binding-pair binding)))
             bindings)))
       (dolist (binding parsed)
-        (eliscript-analyzer--analyze-non-tail (cadr binding) scope))
+        (eliscript-analyzer--analyze-non-tail (cadr binding) scope)
+        (eliscript-analyzer--analyze-pattern-defaults
+         (car binding) scope))
       (dolist (binding parsed)
         (eliscript-analyzer--declare-pattern
          child (car binding) 'loop t))
@@ -400,7 +421,8 @@ When ASYNCHRONOUS is non-nil, allow `await' in this function body."
                      (or (eliscript-form-span argument)
                          eliscript-analyzer--current-span)))
                 (eliscript-analyzer--fail
-                 "catch requires a binding symbol or vector")))
+                 "catch requires a binding symbol, vector, or map")))
+            (eliscript-analyzer--analyze-pattern-defaults binding scope)
             (let ((child (eliscript-analyzer--make-scope scope)))
               (eliscript-analyzer--declare-pattern child binding 'catch t)
               (eliscript-analyzer--analyze-sequence

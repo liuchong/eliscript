@@ -16,6 +16,7 @@
 (require 'eliscript-source-map)
 
 (defvar eliscript-ir-emitter--record-source-spans nil)
+(defvar eliscript-ir-emitter--binding-temporaries nil)
 
 (defconst eliscript-ir-emitter--literal-runtime-import
   "import { hashMap as __eliscript_hash_map, hashSet as __eliscript_hash_set, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n"
@@ -32,6 +33,13 @@
 (defconst eliscript-ir-emitter--value-runtime-import
   "import { equalValues as __eliscript_equal } from \"eliscript/runtime/core/value.mjs\";\n"
   "Generated import for canonical language value equality.")
+
+(defconst eliscript-ir-emitter--binding-runtime
+  (concat
+   "import { get as __eliscript_get } from \"eliscript/runtime/core/collection.mjs\";\n"
+   "const __eliscript_binding_missing = Symbol(\"eliscript.binding.missing\");\n"
+   "const __eliscript_binding_get = (value, key, notFound) => { if (value == null) return notFound; const prototype = typeof value === \"object\" ? Object.getPrototypeOf(value) : undefined; if (prototype === Object.prototype || prototype === null) { const type = key && Object.getOwnPropertyDescriptor(key, Symbol.for(\"eliscript.value.type\")); if (type?.value === \"keyword\") key = key.qualifiedName; } return __eliscript_get(value, key, notFound); };\n")
+  "Generated runtime support for protocol-driven map binding patterns.")
 
 (defun eliscript-ir-emitter--locate (node output)
   "Mark OUTPUT with NODE's source span when source-map recording is active."
@@ -70,6 +78,95 @@
              (string-join (nreverse parts) ", ")
              (if (and last-hole (not rest)) "," "")))))
 
+(defun eliscript-ir-emitter--map-binding-pattern-p (node)
+  "Return non-nil when binding wrapper NODE owns a map pattern."
+  (and (eliscript-ir-property node :pattern)
+       (eq (eliscript-ir-node-kind
+            (car (eliscript-ir-emitter--children node)))
+           'map-binding-pattern)))
+
+(defun eliscript-ir-emitter--binding-temporary (node)
+  "Return the stable generated source binding for map wrapper NODE."
+  (or (cdr (assq node eliscript-ir-emitter--binding-temporaries))
+      (let ((name (eliscript-emitter--fresh-name)))
+        (push (cons node name) eliscript-ir-emitter--binding-temporaries)
+        name)))
+
+(defun eliscript-ir-emitter--emit-map-binding-pattern (node source)
+  "Emit declarations that bind map pattern NODE from SOURCE exactly once."
+  (let* ((children (eliscript-ir-emitter--children node))
+         (entry-count (eliscript-ir-property node :entry-count))
+         (entries (cl-subseq children 0 entry-count))
+         (as (and (eliscript-ir-property node :as)
+                  (nth entry-count children)))
+         parts)
+    (when as
+      (push (format "let %s = %s;"
+                    (eliscript-ir-emitter--emit-binding-name as) source)
+            parts))
+    (dolist (entry entries)
+      (let* ((entry-children (eliscript-ir-emitter--children entry))
+             (target (nth 0 entry-children))
+             (key (nth 1 entry-children))
+             (default (and (eliscript-ir-property entry :default)
+                           (nth 2 entry-children)))
+             (temporary (eliscript-emitter--fresh-name))
+             (resolved
+              (format "(%s === __eliscript_binding_missing ? %s : %s)"
+                      temporary
+                      (if default
+                          (eliscript-ir-emitter-emit-expression default)
+                        "null")
+                      temporary)))
+        (push
+         (format "const %s = __eliscript_binding_get(%s, %s, __eliscript_binding_missing);"
+                 temporary source
+                 (eliscript-ir-emitter-emit-expression key))
+         parts)
+        (push
+         (eliscript-ir-emitter--emit-pattern-setup target resolved)
+         parts)))
+    (string-join (nreverse parts) "\n")))
+
+(defun eliscript-ir-emitter--emit-pattern-setup (pattern source)
+  "Emit mutable bindings for structural PATTERN initialized from SOURCE."
+  (pcase (eliscript-ir-node-kind pattern)
+    ('binding-name
+     (format "let %s = %s;"
+             (eliscript-ir-emitter--emit-binding-name pattern) source))
+    ('array-binding-pattern
+     (format "let %s = %s;"
+             (eliscript-ir-emitter--emit-array-binding-pattern pattern)
+             source))
+    ('map-binding-pattern
+     (eliscript-ir-emitter--emit-map-binding-pattern pattern source))
+    (_ (eliscript-emitter--fail
+        "invalid IR binding setup node: %S"
+        (eliscript-ir-node-kind pattern)))))
+
+(defun eliscript-ir-emitter--emit-binding-setup (binding)
+  "Emit map declarations owned by binding wrapper BINDING."
+  (if (eliscript-ir-emitter--map-binding-pattern-p binding)
+      (eliscript-ir-emitter--emit-map-binding-pattern
+       (car (eliscript-ir-emitter--children binding))
+       (eliscript-ir-emitter--binding-temporary binding))
+    ""))
+
+(defun eliscript-ir-emitter--emit-binding-setups (bindings)
+  "Emit map declarations for BINDINGS, skipping scalar and vector targets."
+  (string-join
+   (cl-remove-if
+    #'string-empty-p
+    (mapcar #'eliscript-ir-emitter--emit-binding-setup bindings))
+   "\n"))
+
+(defun eliscript-ir-emitter--binding-default-value (binding)
+  "Return omitted initializer text for binding wrapper BINDING."
+  (if (and (eliscript-ir-property binding :pattern)
+           (not (eliscript-ir-emitter--map-binding-pattern-p binding)))
+      "[]"
+    "null"))
+
 (defun eliscript-ir-emitter--emit-binding-pattern-node (node)
   "Emit structural binding pattern NODE."
   (pcase (eliscript-ir-node-kind node)
@@ -77,16 +174,21 @@
     ('binding-hole "")
     ('array-binding-pattern
      (eliscript-ir-emitter--emit-array-binding-pattern node))
+    ('map-binding-pattern
+     (eliscript-emitter--fail
+      "map binding patterns require a generated source binding"))
     (_ (eliscript-emitter--fail
         "invalid IR binding pattern node: %S"
         (eliscript-ir-node-kind node)))))
 
 (defun eliscript-ir-emitter--emit-binding-target (node)
   "Emit scalar or structured binding wrapper NODE."
-  (if (eliscript-ir-property node :pattern)
+  (if (eliscript-ir-emitter--map-binding-pattern-p node)
+      (eliscript-ir-emitter--binding-temporary node)
+    (if (eliscript-ir-property node :pattern)
       (eliscript-ir-emitter--emit-binding-pattern-node
        (car (eliscript-ir-emitter--children node)))
-    (eliscript-ir-emitter--emit-binding-name node)))
+      (eliscript-ir-emitter--emit-binding-name node))))
 
 (defun eliscript-ir-emitter--binding-initializer (node)
   "Return lexical binding NODE's initializer child, or nil."
@@ -100,7 +202,11 @@
   (let ((name (eliscript-ir-emitter--emit-binding-target node))
         (pattern (eliscript-ir-property node :pattern)))
     (pcase (eliscript-ir-property node :parameter-kind)
-      ('optional (concat name " = " (if pattern "[]" "null")))
+      ('optional
+       (concat name " = "
+               (if pattern
+                   (eliscript-ir-emitter--binding-default-value node)
+                 "null")))
       ('rest (concat "..." name))
       (_ name))))
 
@@ -316,9 +422,10 @@
                           (eliscript-ir-emitter--binding-initializer binding)))
                      (if initializer
                          (eliscript-ir-emitter-emit-expression initializer)
-                       (if (eliscript-ir-property binding :pattern)
-                           "[]" "null"))))
-           parts))
+                       (eliscript-ir-emitter--binding-default-value binding))))
+           parts)
+          (let ((setup (eliscript-ir-emitter--emit-binding-setup binding)))
+            (unless (string-empty-p setup) (push setup parts))))
       (let ((temporaries
              (mapcar (lambda (_binding) (eliscript-emitter--fresh-name))
                      bindings)))
@@ -331,8 +438,7 @@
                       temporary
                       (if initializer
                           (eliscript-ir-emitter-emit-expression initializer)
-                        (if (eliscript-ir-property binding :pattern)
-                            "[]" "null")))
+                        (eliscript-ir-emitter--binding-default-value binding)))
               parts)))
          bindings temporaries)
         (cl-mapc
@@ -341,7 +447,9 @@
             (format "let %s = %s;"
                     (eliscript-ir-emitter--emit-binding-target binding)
                     temporary)
-            parts))
+            parts)
+           (let ((setup (eliscript-ir-emitter--emit-binding-setup binding)))
+             (unless (string-empty-p setup) (push setup parts))))
          bindings temporaries)))
     (push (eliscript-ir-emitter--emit-tail-body body target) parts)
     (eliscript-ir-emitter--locate
@@ -415,14 +523,23 @@
 
 (defun eliscript-ir-emitter--emit-function-body (parameters body)
   "Emit function BODY with recur-aware PARAMETER rebinding when required."
-  (if (not (eliscript-ir-emitter--contains-recur-target-p body 'function))
-      (eliscript-ir-emitter--emit-returning-body body)
-    (let* ((label (eliscript-emitter--fresh-name))
-           (target (list :kind 'function :bindings parameters :label label)))
-      (format "%s: while (true) {\n%s\n}"
-              label
-              (eliscript-emitter--indent
-               (eliscript-ir-emitter--emit-tail-body body target))))))
+  (let ((setups (eliscript-ir-emitter--emit-binding-setups parameters)))
+    (if (not (eliscript-ir-emitter--contains-recur-target-p body 'function))
+        (string-join
+         (delq nil
+               (list (and (not (string-empty-p setups)) setups)
+                     (eliscript-ir-emitter--emit-returning-body body)))
+         "\n")
+      (let* ((label (eliscript-emitter--fresh-name))
+             (target (list :kind 'function :bindings parameters :label label))
+             (loop-body
+              (string-join
+               (delq nil
+                     (list (and (not (string-empty-p setups)) setups)
+                           (eliscript-ir-emitter--emit-tail-body body target)))
+               "\n")))
+        (format "%s: while (true) {\n%s\n}"
+                label (eliscript-emitter--indent loop-body))))))
 
 (defun eliscript-ir-emitter--emit-if (nodes)
   "Emit conditional child NODES."
@@ -481,7 +598,14 @@
       (eliscript-ir-emitter--emit-binding-target binding)
       ") {\n"
       (eliscript-emitter--indent
-       (eliscript-ir-emitter--emit-returning-body body))
+       (string-join
+        (delq nil
+              (list
+               (let ((setup
+                      (eliscript-ir-emitter--emit-binding-setup binding)))
+                 (and (not (string-empty-p setup)) setup))
+               (eliscript-ir-emitter--emit-returning-body body)))
+        "\n"))
       "\n}"))))
 
 (defun eliscript-ir-emitter--emit-finally (node)
@@ -554,27 +678,31 @@
                           (eliscript-ir-emitter--binding-initializer binding)))
                      (if initializer
                          (eliscript-ir-emitter-emit-expression initializer)
-                       (if (eliscript-ir-property binding :pattern)
-                           "[]"
-                         "null"))))
-                 bindings)))
+                       (eliscript-ir-emitter--binding-default-value binding))))
+                 bindings))
+        (setups (eliscript-ir-emitter--emit-binding-setups bindings)))
     (eliscript-ir-emitter--emit-iife
      (string-join names ", ")
      (eliscript-emitter--indent
-      (if sequential-tail
-          (let* ((tail (car body))
-                 (remaining-bindings (car tail))
-                 (remaining-body (cdr tail)))
-            (concat
-             "return "
-             (if remaining-bindings
-                 (eliscript-ir-emitter--emit-let-parts
-                  (list (car remaining-bindings))
-                  (list (cons (cdr remaining-bindings) remaining-body))
-                  t)
-               (eliscript-ir-emitter--emit-do remaining-body))
-             ";"))
-        (eliscript-ir-emitter--emit-returning-body body)))
+      (string-join
+       (delq nil
+             (list
+              (and (not (string-empty-p setups)) setups)
+              (if sequential-tail
+                  (let* ((tail (car body))
+                         (remaining-bindings (car tail))
+                         (remaining-body (cdr tail)))
+                    (concat
+                     "return "
+                     (if remaining-bindings
+                         (eliscript-ir-emitter--emit-let-parts
+                          (list (car remaining-bindings))
+                          (list (cons (cdr remaining-bindings) remaining-body))
+                          t)
+                       (eliscript-ir-emitter--emit-do remaining-body))
+                     ";"))
+                (eliscript-ir-emitter--emit-returning-body body))))
+       "\n"))
      (string-join values ", ")
      (eliscript-ir-emitter--contains-await-p body))))
 
@@ -631,14 +759,19 @@
                  (lambda (binding)
                    (eliscript-ir-emitter-emit-expression
                     (eliscript-ir-emitter--binding-initializer binding)))
-                 bindings ", ")))
+                 bindings ", "))
+               (setups (eliscript-ir-emitter--emit-binding-setups bindings)))
     (eliscript-ir-emitter--emit-iife
      parameters
      (eliscript-emitter--indent
       (format "%s: while (true) {\n%s\n}"
               label
               (eliscript-emitter--indent
-               (eliscript-ir-emitter--emit-tail-body body target))))
+               (string-join
+                (delq nil
+                      (list (and (not (string-empty-p setups)) setups)
+                            (eliscript-ir-emitter--emit-tail-body body target)))
+                "\n"))))
      initializers
      (eliscript-ir-emitter--contains-await-p body))))
 
@@ -1204,8 +1337,10 @@ JavaScript property or tag string rather than an Eliscript value."
   (unless (eliscript-ir-program-p program)
     (eliscript-emitter--fail "expected an IR program: %S" program))
   (let ((eliscript-emitter--temporary-counter 0)
+        (eliscript-ir-emitter--binding-temporaries nil)
         uses-literal-runtime
         uses-collection-runtime
+        uses-binding-runtime
         uses-list-runtime
         uses-value-runtime
         uses-host-identity-token
@@ -1214,6 +1349,8 @@ JavaScript property or tag string rather than an Eliscript value."
     (eliscript-ir-walk
      program
      (lambda (node)
+       (when (eq (eliscript-ir-node-kind node) 'map-binding-pattern)
+         (setq uses-binding-runtime t))
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (memq (eliscript-ir-node-value node) '(nth length)))
          (setq uses-collection-runtime t))
@@ -1243,6 +1380,9 @@ JavaScript property or tag string rather than an Eliscript value."
        "")
      (if uses-collection-runtime
          eliscript-ir-emitter--collection-runtime-import
+       "")
+     (if uses-binding-runtime
+         eliscript-ir-emitter--binding-runtime
        "")
      (if uses-list-runtime
          eliscript-ir-emitter--list-runtime-import

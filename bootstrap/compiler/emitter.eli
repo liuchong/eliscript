@@ -19,6 +19,8 @@
     "import { cons as __eliscript_cons, first as __eliscript_first, rest as __eliscript_rest } from \"eliscript/runtime/core/list.mjs\";\n")
   (defconst value-runtime-import
     "import { equalValues as __eliscript_equal } from \"eliscript/runtime/core/value.mjs\";\n")
+  (defconst binding-runtime
+    "import { get as __eliscript_get } from \"eliscript/runtime/core/collection.mjs\";\nconst __eliscript_binding_missing = Symbol(\"eliscript.binding.missing\");\nconst __eliscript_binding_get = (value, key, notFound) => { if (value == null) return notFound; const prototype = typeof value === \"object\" ? Object.getPrototypeOf(value) : undefined; if (prototype === Object.prototype || prototype === null) { const type = key && Object.getOwnPropertyDescriptor(key, Symbol.for(\"eliscript.value.type\")); if (type?.value === \"keyword\") key = key.qualifiedName; } return __eliscript_get(value, key, notFound); };\n")
   (defconst host-identity-token-helper
     "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n")
   (defconst fail
@@ -26,6 +28,7 @@
   (defconst native-locate
     (js* "(span, output) => { const fragment = typeof output === \"string\" ? { text: output, marks: [] } : output; const marks = fragment.marks; if (fragment.text.length === 0 || span == null || span === false || (marks.length > 0 && marks[0].offset === 0)) return fragment; return { text: fragment.text, marks: [{ offset: 0, span }, ...marks] }; }"))
   (defvar temporary-counter 0)
+  (defvar binding-temporaries (new globalThis.Map))
 
   (defun make-fragment (text marks)
     (js-object :text text :marks marks))
@@ -207,6 +210,81 @@
           (js-array "[" (join-fragments parts ", ")
            (if (and last-hole (not rest)) "," "") "]")))))
 
+  (defun map-binding-pattern-p (node)
+    (and (ir-property node "pattern")
+         (= (ir-kind (js-nth 0 (children node))) "map-binding-pattern")))
+
+  (defun binding-temporary (node)
+    (if (js-call binding-temporaries :has node)
+        (js-call binding-temporaries :get node)
+      (let ((name (fresh-name)))
+        (js-call binding-temporaries :set node name)
+        name)))
+
+  (defun emit-map-binding-pattern (node source)
+    (let* ((nodes (children node))
+           (entry-count (ir-property node "entryCount"))
+           (entries (js-call nodes :slice 0 entry-count))
+           (as (and (ir-property node "as") (js-nth entry-count nodes)))
+           (parts (js-array)))
+      (when as
+        (js-call parts :push
+          (combine (js-array "let " (emit-binding-name as) " = " source ";"))))
+      (js-call entries :forEach
+        (lambda (entry)
+          (let* ((entry-nodes (children entry))
+                 (target (js-nth 0 entry-nodes))
+                 (key (js-nth 1 entry-nodes))
+                 (default (and (ir-property entry "default")
+                               (js-nth 2 entry-nodes)))
+                 (temporary (fresh-name))
+                 (resolved
+                  (combine
+                    (js-array "(" temporary
+                     " === __eliscript_binding_missing ? "
+                     (if default (emit-expression default) "null")
+                     " : " temporary ")"))))
+            (js-call parts :push
+              (combine
+                (js-array "const " temporary
+                 " = __eliscript_binding_get(" source ", "
+                 (emit-expression key)
+                 ", __eliscript_binding_missing);")))
+            (js-call parts :push (emit-pattern-setup target resolved)))))
+      (join-fragments parts "\n")))
+
+  (defun emit-pattern-setup (pattern source)
+    (let ((kind (ir-kind pattern)))
+      (cond
+        ((= kind "binding-name")
+         (combine (js-array "let " (emit-binding-name pattern) " = " source ";")))
+        ((= kind "array-binding-pattern")
+         (combine
+           (js-array "let " (emit-array-binding-pattern pattern) " = " source ";")))
+        ((= kind "map-binding-pattern")
+         (emit-map-binding-pattern pattern source))
+        (t (fail (str "invalid IR binding setup node: " kind))))))
+
+  (defun emit-binding-setup (binding)
+    (if (map-binding-pattern-p binding)
+        (emit-map-binding-pattern
+          (js-nth 0 (children binding)) (binding-temporary binding))
+      (text-fragment "")))
+
+  (defun emit-binding-setups (bindings)
+    (let ((parts (js-array)))
+      (js-call bindings :forEach
+        (lambda (binding)
+          (when (map-binding-pattern-p binding)
+            (js-call parts :push (emit-binding-setup binding)))))
+      (join-fragments parts "\n")))
+
+  (defun binding-default-value (binding)
+    (if (and (ir-property binding "pattern")
+             (not (map-binding-pattern-p binding)))
+        "[]"
+      "null"))
+
   (defun emit-binding-pattern-node (node)
     (let ((kind (ir-kind node)))
       (cond
@@ -214,12 +292,16 @@
         ((= kind "binding-hole") "")
         ((= kind "array-binding-pattern")
          (emit-array-binding-pattern node))
+        ((= kind "map-binding-pattern")
+         (fail "map binding patterns require a generated source binding"))
         (t (fail (str "invalid IR binding pattern node: " kind))))))
 
   (defun emit-binding-target (node)
-    (if (ir-property node "pattern")
-        (emit-binding-pattern-node (js-nth 0 (children node)))
-      (emit-binding-name node)))
+    (if (map-binding-pattern-p node)
+        (binding-temporary node)
+      (if (ir-property node "pattern")
+          (emit-binding-pattern-node (js-nth 0 (children node)))
+        (emit-binding-name node))))
 
   (defun binding-initializer (node)
     (let ((nodes (children node)))
@@ -234,7 +316,9 @@
           (pattern (ir-property node "pattern")))
       (cond
         ((= kind "optional")
-         (combine (js-array name " = " (if pattern "[]" "null"))))
+         (combine
+           (js-array name " = "
+            (if pattern (binding-default-value node) "null"))))
         ((= kind "rest") (combine (js-array "..." name)))
         (t name))))
 
@@ -420,8 +504,10 @@
                   (js-array "let " (emit-binding-target binding) " = "
                    (if initializer
                        (emit-expression initializer)
-                     (if (ir-property binding "pattern") "[]" "null"))
-                   ";"))))
+                     (binding-default-value binding))
+                   ";")))
+              (when (map-binding-pattern-p binding)
+                (js-call statements :push (emit-binding-setup binding))))
             (setq index (1+ index)))
         (progn
           (while (< index (get bindings :length))
@@ -434,7 +520,7 @@
                   (js-array "const " temporary " = "
                    (if initializer
                        (emit-expression initializer)
-                     (if (ir-property binding "pattern") "[]" "null"))
+                     (binding-default-value binding))
                    ";"))))
             (setq index (1+ index)))
           (setq index 0)
@@ -443,6 +529,9 @@
               (combine
                 (js-array "let " (emit-binding-target (js-nth index bindings)) " = "
                  (js-nth index temporaries) ";")))
+            (when (map-binding-pattern-p (js-nth index bindings))
+              (js-call statements :push
+                (emit-binding-setup (js-nth index bindings))))
             (setq index (1+ index)))))
       (js-call statements :push (emit-tail-body body target))
       (native-locate
@@ -503,15 +592,23 @@
         (t (combine (js-array "return " (emit-expression node) ";"))))))
 
   (defun emit-function-body (parameters body)
-    (if (not (contains-recur-target-p body "function"))
-        (emit-returning-body body)
-      (let* ((label (fresh-name))
+    (let ((setups (emit-binding-setups parameters)))
+      (if (not (contains-recur-target-p body "function"))
+          (if (= (get (get setups :text) :length) 0)
+              (emit-returning-body body)
+            (combine (js-array setups "\n" (emit-returning-body body))))
+        (let* ((label (fresh-name))
              (target
               (js-object
                 :kind "function" :bindings parameters :label label)))
-        (combine
-          (js-array label ": while (true) {\n"
-           (indent (emit-tail-body body target)) "\n}")))))
+          (combine
+            (js-array label ": while (true) {\n"
+             (indent
+               (if (= (get (get setups :text) :length) 0)
+                   (emit-tail-body body target)
+                 (combine
+                   (js-array setups "\n" (emit-tail-body body target)))))
+             "\n}"))))))
 
   (defun emit-if (nodes)
     (combine
@@ -569,7 +666,12 @@
         (ir-span node)
         (combine
           (js-array " catch (" (emit-binding-target binding) ") {\n"
-           (indent (emit-returning-body body))
+           (indent
+             (if (map-binding-pattern-p binding)
+                 (combine
+                   (js-array (emit-binding-setup binding) "\n"
+                    (emit-returning-body body)))
+               (emit-returning-body body)))
            "\n}")))))
 
   (defun emit-finally (node)
@@ -606,9 +708,9 @@
         (lambda (binding)
           (let ((initializer (binding-initializer binding)))
             (js-call result :push
-              (if initializer
+                (if initializer
                   (emit-expression initializer)
-                (if (ir-property binding "pattern") "[]" "null"))))))
+                (binding-default-value binding))))))
       result))
 
   (defun emit-parallel-let (bindings body)
@@ -618,7 +720,13 @@
                 (lambda (binding) (emit-binding-target binding)))
               ", "))
            (values (join-fragments (emit-binding-values bindings) ", "))
-           (body-output (indent (emit-returning-body body))))
+           (setups (emit-binding-setups bindings))
+           (body-output
+            (indent
+              (if (= (get (get setups :text) :length) 0)
+                  (emit-returning-body body)
+                (combine
+                  (js-array setups "\n" (emit-returning-body body)))))))
       (emit-iife names body-output values (contains-await-p body))))
 
   (defun emit-sequential-let (bindings body)
@@ -630,7 +738,13 @@
                (tail (emit-sequential-let (js-call bindings :slice 1) body)))
           (emit-iife
             name
-            (indent (combine (js-array "return " tail ";")))
+            (indent
+              (combine
+                (js-array
+                  (if (map-binding-pattern-p binding)
+                      (combine (js-array (emit-binding-setup binding) "\n"))
+                    "")
+                  "return " tail ";")))
             initializer
             (or
               (contains-await-p (js-call bindings :slice 1))
@@ -699,13 +813,19 @@
               (js-call bindings :map
                 (lambda (binding)
                   (emit-expression (binding-initializer binding))))
-              ", ")))
+              ", "))
+           (setups (emit-binding-setups bindings)))
       (emit-iife
         parameters
         (indent
           (combine
             (js-array label ": while (true) {\n"
-             (indent (emit-tail-body body target)) "\n}")))
+             (indent
+               (if (= (get (get setups :text) :length) 0)
+                   (emit-tail-body body target)
+                 (combine
+                   (js-array setups "\n" (emit-tail-body body target)))))
+             "\n}")))
         initializers
         (contains-await-p body))))
 
@@ -1304,6 +1424,16 @@
               (setq found t))))
         found)))
 
+  (defun node-uses-binding-runtime-p (node)
+    (if (= (ir-kind node) "map-binding-pattern")
+        t
+      (let ((found false))
+        (js-call (children node) :forEach
+          (lambda (child)
+            (when (node-uses-binding-runtime-p child)
+              (setq found t))))
+        found)))
+
   (defun node-uses-list-runtime-p (node)
     (if (and (= (ir-kind node) "intrinsic")
              (or (= (ir-value node) "car")
@@ -1352,6 +1482,14 @@
             (setq found t))))
       found))
 
+  (defun program-uses-binding-runtime-p (program)
+    (let ((found false))
+      (js-call (program-body program) :forEach
+        (lambda (node)
+          (when (node-uses-binding-runtime-p node)
+            (setq found t))))
+      found))
+
   (defun program-uses-list-runtime-p (program)
     (let ((found false))
       (js-call (program-body program) :forEach
@@ -1373,6 +1511,7 @@
       :hostIdentityToken (program-uses-host-identity-token-p program)
       :literal (program-uses-literal-runtime-p program)
       :collection (program-uses-collection-runtime-p program)
+      :binding (program-uses-binding-runtime-p program)
       :list (program-uses-list-runtime-p program)
       :value (program-uses-value-runtime-p program)))
 
@@ -1390,6 +1529,8 @@
            (static-key-index (literal-runtime-static-key-index node))
           (index 0))
       (cond
+        ((= kind "map-binding-pattern")
+         (put requirements :binding t))
         ((and (not suppress-literal)
               (or (= kind "persistent-list-literal")
                   (= kind "persistent-vector-literal")
@@ -1430,6 +1571,7 @@
              :hostIdentityToken false
              :literal false
              :collection false
+             :binding false
              :list false
              :value false)))
       (js-call (program-body program) :forEach
@@ -1483,6 +1625,7 @@
 
   (defun emit-module-artifact (program)
     (setq temporary-counter 0)
+    (setq binding-temporaries (new globalThis.Map))
     (let ((requirements (runtime-requirements program))
           (body
             (join-fragments
@@ -1496,6 +1639,9 @@
            "")
          (if (get requirements :collection)
              collection-runtime-import
+           "")
+         (if (get requirements :binding)
+             binding-runtime
            "")
          (if (get requirements :list)
              list-runtime-import

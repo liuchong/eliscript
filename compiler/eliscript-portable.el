@@ -160,8 +160,9 @@
 
 (defun eliscript-portable--binding-name (binding)
   "Return the target form from lexical BINDING."
-  (let ((value (eliscript-portable--value binding)))
-    (if (or (symbolp value) (vectorp value)) binding (car value))))
+  (if (eliscript-binding-pattern-p binding)
+      binding
+    (car (eliscript-portable--value binding))))
 
 (defun eliscript-portable--add-pattern (pattern scope)
   "Add every name in binding PATTERN to portable SCOPE."
@@ -176,6 +177,16 @@
   "Return the initializer from lexical BINDING, or nil."
   (let ((value (eliscript-portable--value binding)))
     (and (consp value) (cadr value))))
+
+(defun eliscript-portable--pattern-defaults
+    (pattern scope declarations dependencies)
+  "Validate defaults nested in PATTERN using portable lexical SCOPE."
+  (dolist
+      (default
+       (eliscript-binding-defaults
+        pattern
+        (lambda (_form message) (eliscript-portable--fail "%s" message))))
+    (eliscript-portable--expression default scope declarations dependencies)))
 
 (defun eliscript-portable--reference
     (form scope declarations dependencies)
@@ -226,6 +237,12 @@
   "Validate a lambda-like ARGUMENT list."
   (let* ((parameters (eliscript-portable--parameter-forms (car arguments)))
          (child (eliscript-portable--copy-scope scope)))
+    (dolist (parameter
+             (eliscript-parameters-parse
+              (car arguments)
+              (lambda (_form message) (eliscript-portable--fail "%s" message))))
+      (eliscript-portable--pattern-defaults
+       (eliscript-parameter-form parameter) scope declarations dependencies))
     (dolist (parameter parameters)
       (puthash (eliscript-portable--value parameter) t child))
     (eliscript-portable--sequence
@@ -241,12 +258,19 @@
           (eliscript-portable--expression
            (eliscript-portable--binding-value binding)
            child declarations dependencies)
+          (eliscript-portable--pattern-defaults
+           (eliscript-portable--binding-name binding)
+           child declarations dependencies)
           (eliscript-portable--add-pattern
            (eliscript-portable--binding-name binding) child))
       (progn
         (dolist (binding bindings)
           (eliscript-portable--expression
            (eliscript-portable--binding-value binding)
+           scope declarations dependencies))
+        (dolist (binding bindings)
+          (eliscript-portable--pattern-defaults
+           (eliscript-portable--binding-name binding)
            scope declarations dependencies))
         (dolist (binding bindings)
           (eliscript-portable--add-pattern

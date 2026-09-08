@@ -28,8 +28,9 @@ The canonical order is:
 (required* [&optional optional*] [&rest rest])
 ```
 
-Required and optional bindings may be symbols or vector binding patterns; see
-[0039-vector-binding-patterns.md](0039-vector-binding-patterns.md). `&optional`
+Required and optional bindings may be symbols, vector patterns, or map patterns;
+see [0039-vector-binding-patterns.md](0039-vector-binding-patterns.md) and
+[0148-map-binding-patterns.md](0148-map-binding-patterns.md). `&optional`
 may occur at most once and only after required parameters. Top-level `&rest`
 may occur at most once, must be followed by exactly one symbol, and must end the
 list. `&body` remains a macro-only alias for macro rest parameters and is
@@ -54,8 +55,9 @@ JavaScript applies a default to an omitted argument and to an argument whose
 value is explicitly `undefined`. Both therefore become Eliscript `nil`. Other
 false values, including `false`, zero, and an empty string, remain unchanged.
 
-An optional vector pattern defaults to an empty array instead. This makes an
-omitted or explicit `undefined` argument safely destructurable; its individual
+An optional vector pattern defaults to an empty array, while an optional map
+pattern defaults to `nil`. This makes an omitted or explicit `undefined`
+argument safely destructurable; its individual
 names receive JavaScript `undefined`. An explicitly supplied `nil` remains
 `null` and follows native JavaScript's non-iterable error behavior.
 

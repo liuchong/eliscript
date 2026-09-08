@@ -106,9 +106,10 @@ All local bindings are lexical. Function signatures may contain an
 special variables, and declarations are not implemented.
 
 Required and optional function parameters, `let` and `let*` targets, and catch
-bindings may use nested vector patterns. Nil entries consume values without
+bindings may use nested vector or map patterns. Nil vector entries consume values without
 binding, and one final `&rest` captures the remaining array. See
-[0039-vector-binding-patterns.md](0039-vector-binding-patterns.md).
+[0039-vector-binding-patterns.md](0039-vector-binding-patterns.md) and
+[0148-map-binding-patterns.md](0148-map-binding-patterns.md).
 
 A function returns the value of its final body form. An empty function body
 returns `null`.

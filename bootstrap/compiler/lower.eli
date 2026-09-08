@@ -27,6 +27,13 @@
   (defun vector-node-p (node)
     (and node (= (node-kind node) "vector")))
 
+  (defun map-node-p (node)
+    (and node
+         (= (node-kind node) "list")
+         (> (get (node-items node) :length) 0)
+         (symbol-node-p (js-nth 0 (node-items node)))
+         (= (node-name (js-nth 0 (node-items node))) "hash-map")))
+
   (defun string-node-p (node)
     (and node
          (= (node-kind node) "literal")
@@ -87,6 +94,42 @@
        (make-node
          "literal" (node-span form) (node-value form) (js-array) nil))))
 
+  (defun map-binding-spec (pattern)
+    (let ((items (js-call (node-items pattern) :slice 1))
+          (entries (js-array))
+          (defaults (new globalThis.Map))
+          (as undefined)
+          (index 0))
+      (while (< index (get items :length))
+        (let* ((left (js-nth index items))
+               (right (js-nth (1+ index) items))
+               (directive (and (keyword-node-p left) (node-name left))))
+          (cond
+            ((= directive "keys")
+             (js-call (node-items right) :forEach
+               (lambda (name-node)
+                 (js-call entries :push
+                   (js-object :target name-node :keyName (node-name name-node))))))
+            ((= directive "or")
+             (let ((pairs (js-call (node-items right) :slice 1))
+                   (default-index 0))
+               (while (< default-index (get pairs :length))
+                 (js-call defaults :set
+                   (node-name (js-nth default-index pairs))
+                   (js-nth (1+ default-index) pairs))
+                 (setq default-index (+ default-index 2)))))
+            ((= directive "as") (setq as right))
+            (t (js-call entries :push (js-object :target left :key right)))))
+        (setq index (+ index 2)))
+      (js-call entries :forEach
+        (lambda (entry)
+          (let ((target (get entry :target)))
+            (when (and (symbol-node-p target)
+                       (js-call defaults :has (node-name target)))
+              (put entry :default (js-call defaults :get (node-name target)))
+              (put entry :hasDefault t)))))
+      (js-object :entries entries :as as)))
+
   (defun lower-binding-target (pattern)
     (cond
       ((symbol-node-p pattern)
@@ -111,6 +154,38 @@
          (make-node
            "array-binding-pattern" (node-span pattern) nil children
            (if rest (js-object :rest t) nil))))
+      ((map-node-p pattern)
+       (let* ((spec (map-binding-spec pattern))
+              (entries (get spec :entries))
+              (children (js-array)))
+         (js-call entries :forEach
+           (lambda (entry)
+             (let ((entry-children
+                    (js-array (lower-binding-target (get entry :target)))))
+               (js-call entry-children :push
+                 (if (get entry :keyName)
+                     (make-node
+                       "literal" (node-span (get entry :target))
+                       (get entry :keyName) (js-array)
+                       (js-object :literalKind "keyword"))
+                   (lower-expression (get entry :key))))
+               (when (get entry :hasDefault)
+                 (js-call entry-children :push
+                   (lower-expression (get entry :default))))
+               (js-call children :push
+                 (make-node
+                   "map-binding-entry" (node-span (get entry :target))
+                   nil entry-children
+                   (if (get entry :hasDefault)
+                       (js-object :default t) nil))))))
+         (when (get spec :as)
+           (js-call children :push
+             (lower-binding-target (get spec :as))))
+         (make-node
+           "map-binding-pattern" (node-span pattern) nil children
+           (js-object
+             :entryCount (get entries :length)
+             :as (if (get spec :as) t false)))))
       (t (fail "cannot lower invalid binding pattern"))))
 
   (defun lower-parameter-nodes (parameters)
@@ -124,7 +199,7 @@
               ((= name "&optional") (setq mode "optional"))
               ((= name "&rest") (setq mode "rest"))
               (t
-               (if (vector-node-p parameter)
+               (if (or (vector-node-p parameter) (map-node-p parameter))
                    (js-call result :push
                      (make-node
                        "parameter-binding"
@@ -146,7 +221,7 @@
         (make-node
           "lexical-binding" (node-span binding) (node-name binding) (js-array)
           (js-object :style "symbol"))
-      (if (vector-node-p binding)
+      (if (or (vector-node-p binding) (map-node-p binding))
           (make-node
             "lexical-binding" (node-span binding) nil
             (js-array (lower-binding-target binding))
@@ -154,7 +229,7 @@
         (let* ((items (list-items binding))
                (target (js-nth 0 items))
                (children (js-array)))
-          (if (vector-node-p target)
+          (if (or (vector-node-p target) (map-node-p target))
               (progn
                 (js-call children :push (lower-binding-target target))
                 (when (> (get items :length) 1)
@@ -242,7 +317,7 @@
               ((= operator "catch")
                (let ((binding (js-nth 1 items))
                      (children (js-array)))
-                 (if (vector-node-p binding)
+                 (if (or (vector-node-p binding) (map-node-p binding))
                      (js-call children :push
                        (make-node
                          "catch-binding" (node-span binding) nil

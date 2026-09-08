@@ -85,10 +85,10 @@ compiles through the generated compiler under Bun or Node:
 
 Generated files are written below `dist/bootstrap/` and are not source
 artifacts. Shared fixtures cover symbol behavior, reader syntax, macro
-expansion, lexical analysis, all 55 IR node kinds, direct ESM emission, and
+expansion, lexical analysis, all 57 IR node kinds, direct ESM emission, and
 Source Map v3. Oracles compare complete syntax and IR trees, spans, properties,
 acceptance, exact diagnostics, JavaScript bytes, and parsed source maps between
-the seed and generated implementations. Canonical IR round trips all 55 node
+the seed and generated implementations. Canonical IR round trips all 57 node
 kinds and produces identical bytes under Bun and Node. Repeated builds must be
 byte-identical.
 

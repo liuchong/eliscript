@@ -99,7 +99,7 @@ implemented language surface.
 - CLI snapshots remain byte-for-byte stable and Bun executes the emitted ESM.
 - The portable `ir.eli` and `lower.eli` implementations serialize this model
   as ordinary JavaScript objects and arrays. A shared oracle compares complete
-  seed and portable trees for all 55 node kinds and all bootstrap sources.
+  seed and portable trees for all 57 node kinds and all bootstrap sources.
 - The portable compiler's persisted and cross-process representation is the
   closed, versioned canonical schema defined by
   [0108](0108-versioned-canonical-ir.md); ordinary object shape alone is not a
@@ -111,7 +111,7 @@ implemented language surface.
 
 ## Compatibility Freeze
 
-The 55 public node kinds, typed structural children, kind-specific properties,
+The 57 public node kinds, typed structural children, kind-specific properties,
 deterministic preorder traversal, and recursive source spans form the stable IR
 surface. Production compilation lowers through this IR boundary, and the
 canonical persisted form remains governed by specification 0108.

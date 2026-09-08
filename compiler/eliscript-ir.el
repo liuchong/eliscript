@@ -27,7 +27,8 @@
   '(module-declaration import-declaration import-default import-namespace
     import-named variable-declaration function-declaration export-declaration
     export-default expression-statement parameter-binding
-    array-binding-pattern binding-name binding-hole reference literal
+    array-binding-pattern map-binding-pattern map-binding-entry
+    binding-name binding-hole reference literal
     array-literal persistent-list-literal persistent-vector-literal
     persistent-map-literal persistent-set-literal
     quoted-literal function-expression await-expression
@@ -134,6 +135,30 @@
                (append (butlast forms)
                        (list '&rest (car (last forms))))))
        (apply #'vector forms)))
+    ('map-binding-pattern
+     (let* ((children (eliscript-ir-node-children node))
+            (entry-count (eliscript-ir-property node :entry-count))
+            (entries (cl-subseq children 0 entry-count))
+            (as (and (eliscript-ir-property node :as)
+                     (nth entry-count children)))
+            pairs defaults)
+       (dolist (entry entries)
+         (let* ((entry-children (eliscript-ir-node-children entry))
+                (target (eliscript-ir-node-to-form (nth 0 entry-children)))
+                (key (eliscript-ir-node-to-form (nth 1 entry-children))))
+           (setq pairs (append pairs (list target key)))
+           (when (eliscript-ir-property entry :default)
+             (setq defaults
+                   (append defaults
+                           (list target
+                                 (eliscript-ir-node-to-form
+                                  (nth 2 entry-children))))))))
+       (cons 'hash-map
+             (append pairs
+                     (and defaults
+                          (list :or (cons 'hash-map defaults)))
+                     (and as
+                          (list :as (eliscript-ir-node-to-form as)))))))
     ('quoted-literal
      (list 'quote (eliscript-ir-node-value node)))
     ('array-literal

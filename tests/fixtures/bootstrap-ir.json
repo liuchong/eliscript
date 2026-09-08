@@ -46,6 +46,11 @@
       "source": "(defportable pair-sum ([left right]) (+ left right))\n(defun unpack ([first [second nil third] &rest tail] &optional [fallback])\n  (let* (([head &rest rest] tail) ([nested] [fallback]))\n    [first second third tail fallback head rest nested]))\n(defun recover ()\n  (try (throw [7 \"caught\"])\n    (catch [code message] [code message])))\n(export pair-sum unpack recover)"
     },
     {
+      "name": "map-binding-patterns",
+      "filename": "map-patterns.eli",
+      "source": "(defportable map-name ({:keys [name]}) name)\n(defun unpack ({:keys [name age] :or {age 18} :as row})\n  [name age row])\n(defun nested ({alias :name {:keys [city]} :profile}) [alias city])\n(defun recover ()\n  (try (throw (js-object :code 7))\n    (catch {:keys [code]} code)))\n(export map-name unpack nested recover)"
+    },
+    {
       "name": "object-primitives",
       "filename": "objects.eli",
       "source": "(defun objects (value key)\n  [(object-keys value)\n   (object-has? value key)\n   (object-assoc value key 1)])\n(export objects)"

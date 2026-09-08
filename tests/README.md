@@ -144,7 +144,7 @@ current bootstrap sources, including `analyzer.eli` itself.
 
 The IR fixture runs the complete generated front end and lowerer, then compares
 the resulting program with a normalized seed oracle. It covers every one of
-the 55 public IR node kinds, JSON-safe quoted data and literal tags,
+the 57 public IR node kinds, JSON-safe quoted data and literal tags,
 kind-specific properties, complete nested source spans, macro call origins,
 and all thirteen bootstrap compiler modules, including the self-hosted
 concrete-syntax formatter.

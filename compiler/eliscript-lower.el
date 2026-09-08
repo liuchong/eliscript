@@ -49,6 +49,33 @@
         (eliscript-lower--node
          'array-binding-pattern pattern nil (nreverse children)
          (and rest (list :rest t)))))
+     ((eliscript-binding-map-pattern-p pattern)
+      (let* ((spec
+              (eliscript-binding-map-spec
+               pattern (lambda (_form message) (error "%s" message))))
+             (entries (plist-get spec :entries))
+             (as (plist-get spec :as))
+             children)
+        (dolist (entry entries)
+          (let ((default-present (plist-member entry :default)))
+            (push
+             (eliscript-lower--node
+              'map-binding-entry (plist-get entry :target) nil
+              (append
+               (list
+                (eliscript-lower--binding-target (plist-get entry :target))
+                (eliscript-lower-expression (plist-get entry :key)))
+               (and default-present
+                    (list
+                     (eliscript-lower-expression
+                      (plist-get entry :default)))))
+              (and default-present (list :default t)))
+             children)))
+        (eliscript-lower--node
+         'map-binding-pattern pattern nil
+         (append (nreverse children)
+                 (and as (list (eliscript-lower--binding-target as))))
+         (list :entry-count (length entries) :as (and as t)))))
      (t (error "Cannot lower invalid binding pattern: %S"
                (eliscript-form-strip pattern))))))
 
@@ -58,13 +85,14 @@
     (if (symbolp value)
         (eliscript-lower--node
          'lexical-binding binding value nil (list :style 'symbol))
-      (if (vectorp value)
+      (if (eliscript-binding-pattern-p binding)
           (eliscript-lower--node
            'lexical-binding binding nil
            (list (eliscript-lower--binding-target binding))
            (list :style 'symbol :pattern t))
         (let ((target (car value)))
-          (if (vectorp (eliscript-form-value target))
+          (if (or (vectorp (eliscript-form-value target))
+                  (eliscript-binding-map-pattern-p target))
               (eliscript-lower--node
                'lexical-binding binding nil
                (cons
@@ -83,7 +111,7 @@
   (mapcar
    (lambda (parameter)
      (let ((form (eliscript-parameter-form parameter)))
-       (if (vectorp (eliscript-form-value form))
+       (if (not (symbolp (eliscript-form-value form)))
            (eliscript-lower--node
             'parameter-binding form nil
             (list (eliscript-lower--binding-target form))
@@ -163,7 +191,7 @@
               (eliscript-lower--node
                'catch-clause argument nil
                (cons
-                (if (vectorp (eliscript-form-value binding))
+                (if (not (symbolp (eliscript-form-value binding)))
                     (eliscript-lower--node
                      'catch-binding binding nil
                      (list (eliscript-lower--binding-target binding))

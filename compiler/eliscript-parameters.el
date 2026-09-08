@@ -17,19 +17,155 @@
 
 (defconst eliscript-binding--markers '(&optional &rest &body))
 
+(defun eliscript-binding-map-pattern-p (form)
+  "Return non-nil when FORM is a reader map in binding position."
+  (let ((value (eliscript-form-value form)))
+    (and (proper-list-p value)
+         value
+         (eq (eliscript-form-value (car value)) 'hash-map))))
+
 (defun eliscript-binding-pattern-p (form)
   "Return non-nil when FORM can represent a binding pattern."
   (let ((value (eliscript-form-value form)))
     (or (and value
              (symbolp value)
              (not (memq value eliscript-binding--markers)))
-        (vectorp value))))
+        (vectorp value)
+        (eliscript-binding-map-pattern-p form))))
+
+(defun eliscript-binding--keyword-name (form name)
+  "Create a located keyword FORM from binding NAME."
+  (eliscript-form-inherit
+   (intern (concat ":" (symbol-name name))) form))
+
+(defun eliscript-binding-map-spec (pattern fail)
+  "Validate map binding PATTERN and return its normalized specification.
+
+The result contains `:entries', each with `:target', `:key', and optional
+`:default', plus an optional `:as' binding.  FAIL receives the offending form
+and a diagnostic message."
+  (let* ((items (cdr (eliscript-form-value pattern)))
+         entries defaults as
+         keys-seen or-seen as-seen)
+    (unless (= (% (length items) 2) 0)
+      (funcall fail pattern "map binding pattern requires key/value pairs"))
+    (while items
+      (let* ((left (pop items))
+             (right (pop items))
+             (directive (eliscript-form-value left)))
+        (cond
+         ((eq directive :keys)
+          (when keys-seen
+            (funcall fail left "map binding pattern accepts :keys once"))
+          (setq keys-seen t)
+          (let ((names (eliscript-form-value right)))
+            (unless (vectorp names)
+              (funcall fail right "map binding :keys value must be a vector"))
+            (dolist (name-form (append names nil))
+              (let ((name (eliscript-form-value name-form)))
+                (unless (and name
+                             (symbolp name)
+                             (not (keywordp name))
+                             (not (memq name eliscript-binding--markers))
+                             (not (string-match-p "/" (symbol-name name))))
+                  (funcall fail name-form
+                           "map binding :keys entries must be unqualified symbols"))
+                (push (list :target name-form
+                            :key (eliscript-binding--keyword-name name-form name))
+                      entries)))))
+         ((eq directive :or)
+          (when or-seen
+            (funcall fail left "map binding pattern accepts :or once"))
+          (setq or-seen t)
+          (unless (eliscript-binding-map-pattern-p right)
+            (funcall fail right "map binding :or value must be a map"))
+          (let ((pairs (cdr (eliscript-form-value right))))
+            (while pairs
+              (let* ((name-form (pop pairs))
+                     (default (pop pairs))
+                     (name (eliscript-form-value name-form)))
+                (unless (and name
+                             (symbolp name)
+                             (not (keywordp name))
+                             (not (memq name eliscript-binding--markers)))
+                  (funcall fail name-form
+                           "map binding :or keys must be binding symbols"))
+                (when (assq name defaults)
+                  (funcall fail name-form
+                           "duplicate map binding :or default"))
+                (push (cons name default) defaults)))))
+         ((eq directive :as)
+          (when as-seen
+            (funcall fail left "map binding pattern accepts :as once"))
+          (setq as-seen t)
+          (let ((name (eliscript-form-value right)))
+            (unless (and name
+                         (symbolp name)
+                         (not (keywordp name))
+                         (not (memq name eliscript-binding--markers)))
+              (funcall fail right "map binding :as value must be a symbol"))
+            (setq as right)))
+         ((keywordp directive)
+          (funcall fail left
+                   (format "unknown map binding directive: %s" directive)))
+         (t
+          (unless (eliscript-binding-pattern-p left)
+            (funcall fail left "map binding entry target must be a binding pattern"))
+          (let ((key (eliscript-form-value right)))
+            (unless (or (keywordp key) (stringp key) (numberp key))
+              (funcall fail right
+                       "map binding entry key must be a keyword, string, or number")))
+          (push (list :target left :key right) entries)))))
+    (setq entries (nreverse entries))
+    (dolist (default defaults)
+      (let ((entry
+             (cl-find-if
+              (lambda (candidate)
+                (eq (eliscript-form-value (plist-get candidate :target))
+                    (car default)))
+              entries)))
+        (unless entry
+          (funcall fail (cdr default)
+                   (format "map binding :or has no scalar target: %s"
+                           (car default))))
+        (plist-put entry :default (cdr default))))
+    (list :entries entries :as as)))
+
+(defun eliscript-binding-defaults (pattern fail)
+  "Return every default expression nested in binding PATTERN."
+  (let ((value (eliscript-form-value pattern)))
+    (cond
+     ((or (null value) (symbolp value)) nil)
+     ((vectorp value)
+      (apply #'append
+             (mapcar
+              (lambda (element)
+                (let ((element-value (eliscript-form-value element)))
+                  (if (or (null element-value)
+                          (eq element-value '&rest))
+                      nil
+                    (eliscript-binding-defaults element fail))))
+              (append value nil))))
+     ((eliscript-binding-map-pattern-p pattern)
+      (let ((spec (eliscript-binding-map-spec pattern fail)) defaults)
+        (dolist (entry (plist-get spec :entries))
+          (when (plist-member entry :default)
+            (push (plist-get entry :default) defaults))
+          (setq defaults
+                (nconc
+                 (nreverse
+                  (eliscript-binding-defaults
+                   (plist-get entry :target) fail))
+                 defaults)))
+        (nreverse defaults)))
+     (t nil))))
 
 (defun eliscript-binding-names (pattern fail)
   "Validate binding PATTERN and return its bound symbol forms.
 
 FAIL receives the offending form and a diagnostic message.  Vector patterns
-support nested vectors, nil holes, and one final `&rest' symbol."
+support nested vectors, nil holes, and one final `&rest' symbol.  Map patterns
+support explicit entries plus `:keys', `:or', and `:as'."
   (let ((value (eliscript-form-value pattern)))
     (cond
      ((null value) nil)
@@ -73,10 +209,21 @@ support nested vectors, nil holes, and one final `&rest' symbol."
         (when rest-seen
           (funcall fail pattern "vector &rest requires a binding"))
         (nreverse names)))
+     ((eliscript-binding-map-pattern-p pattern)
+      (let* ((spec (eliscript-binding-map-spec pattern fail))
+             (entries (plist-get spec :entries))
+             (as (plist-get spec :as))
+             names)
+        (dolist (entry entries)
+          (setq names
+                (nconc names
+                       (eliscript-binding-names
+                        (plist-get entry :target) fail))))
+        (if as (append names (list as)) names)))
      (t
       (funcall
        fail pattern
-       (format "binding pattern must be a symbol or vector: %S"
+       (format "binding pattern must be a symbol, vector, or map: %S"
                (eliscript-form-strip pattern)))
       nil))))
 
@@ -117,7 +264,7 @@ FAIL receives the offending form and a fully formatted diagnostic message."
             (unless (eliscript-binding-pattern-p parameter)
               (funcall
                fail parameter
-               (format "function arguments must be symbols or vectors: %S"
+               (format "function arguments must be symbols, vectors, or maps: %S"
                        (eliscript-form-strip parameters))))
             (eliscript-binding-names parameter fail)
             (push (eliscript-parameter-create :kind mode :form parameter)

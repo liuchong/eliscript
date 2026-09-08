@@ -17,6 +17,16 @@
   (defun vector-node-p (node)
     (and node (= (node-kind node) "vector")))
 
+  (defun map-node-p (node)
+    (and node
+         (= (node-kind node) "list")
+         (> (get (node-items node) :length) 0)
+         (symbol-node-p (js-nth 0 (node-items node)))
+         (= (node-name (js-nth 0 (node-items node))) "hash-map")))
+
+  (defun keyword-node-p (node)
+    (and node (= (node-kind node) "keyword")))
+
   (defun null-node-p (node)
     (and node
          (= (node-kind node) "literal")
@@ -48,6 +58,25 @@
                               (binding-marker-p (node-name element))))
                (js-call (binding-nodes element context) :forEach
                  (lambda (binding) (js-call result :push binding))))))
+         result))
+      ((map-node-p pattern)
+       (let ((items (js-call (node-items pattern) :slice 1))
+             (result (js-array))
+             (index 0))
+         (while (< index (get items :length))
+           (let* ((left (js-nth index items))
+                  (right (js-nth (1+ index) items))
+                  (directive (and (keyword-node-p left) (node-name left))))
+             (cond
+               ((= directive "keys")
+                (js-call (node-items right) :forEach
+                  (lambda (binding) (js-call result :push binding))))
+               ((= directive "as") (js-call result :push right))
+               ((= directive "or") nil)
+               (t
+                (js-call (binding-nodes left context) :forEach
+                  (lambda (binding) (js-call result :push binding))))))
+           (setq index (+ index 2)))
          result))
       (t (js-array))))
 

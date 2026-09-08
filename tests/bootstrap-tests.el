@@ -299,6 +299,11 @@
        (and (eliscript-ir-property node :pattern) '((pattern . t))))
       ('array-binding-pattern
        (and (eliscript-ir-property node :rest) '((rest . t))))
+      ('map-binding-pattern
+       `((entryCount . ,(eliscript-ir-property node :entry-count))
+         (as . ,(if (eliscript-ir-property node :as) t :false))))
+      ('map-binding-entry
+       (and (eliscript-ir-property node :default) '((default . t))))
       ('object-property
        `((computed . ,(if (eliscript-ir-property node :computed) t :false))))
       (_ nil))))

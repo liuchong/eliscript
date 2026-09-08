@@ -63,7 +63,7 @@ tail-position `recur` targets that function.
 Function recurrence has one slot per parsed parameter. Required, optional,
 and rest parameters each count as one slot. A rest slot receives one
 collection value on recurrence; it is not expanded as a JavaScript argument
-list. Vector parameter patterns also count as one slot and destructure their
+list. Vector and map parameter patterns also count as one slot and destructure their
 replacement value after all recurrence arguments have been evaluated.
 
 A nested function always starts a fresh target stack. It cannot recur to an
@@ -109,8 +109,9 @@ For example, this loop returns `[2 1]`, not `[2 2]`:
     (recur right left (1- remaining))))
 ```
 
-Vector patterns are assigned using JavaScript destructuring assignment after
-temporary capture. A failure while evaluating or destructuring a replacement
+Vector patterns use JavaScript destructuring after temporary capture. Map
+patterns rerun protocol lookup from the captured replacement. A failure while
+evaluating or destructuring a replacement
 value transfers no control and follows normal JavaScript abrupt-completion
 behavior.
 

@@ -36,7 +36,7 @@ compiler, bootstrap, macro, portable, and project feature inventory.
 - the exact ordered stable feature identifiers derived from conformance data
 - the four reader, analyzer, expander, and IR shared fixtures and case counts
 - all thirteen maintained compiler modules under `bootstrap/compiler`
-- all 55 public IR node kinds
+- all 57 public IR node kinds
 - all 89 source-derived negative diagnostic cases
 - the seven required parity dimensions and their executable test locators
 - one SHA-256 identity over the complete derived inventory and every bound
@@ -103,7 +103,7 @@ until their full supported matrices are recorded.
   compiler-relevant conformance domains.
 - **CP-02:** Reader, expander, analyzer, IR, ESM, Source Map, closure, and
   project-graph evidence is present through the seven required dimensions.
-- **CP-03:** Shared fixture counts, all thirteen bootstrap modules, all 55 IR
+- **CP-03:** Shared fixture counts, all thirteen bootstrap modules, all 57 IR
   kinds, and all 89 negative diagnostics match their authoritative sources.
 - **CP-04:** Every evidence locator exists and runs in the default core suite.
 - **CP-05:** One deterministic SHA-256 identity binds the complete inventory

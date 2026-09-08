@@ -118,7 +118,7 @@ non-canonical version 1 data.
 
 - **CIR-01:** The generated compiler exports `eliscript-ir` version 1 identity
   and public serialize/deserialize operations.
-- **CIR-02:** Every valid seed-normalized IR tree across all 55 public node
+- **CIR-02:** Every valid seed-normalized IR tree across all 57 public node
   kinds round-trips without structural loss.
 - **CIR-03:** Serialization is byte-identical under Bun and Node, and a
   serialize-deserialize-serialize cycle is a byte fixed point.

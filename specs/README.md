@@ -99,7 +99,7 @@ requests, a self-hosted
 host-neutral graph planner, strict canonical `eliscript-ir` version 1
 serialization, and an Eliscript-owned `eliscript-build-report` version 1
 operation. Ordinary closure, cycle handling, portable-name fixed points,
-complete 55-node IR round trips, build-decision normalization, and
+complete 57-node IR round trips, build-decision normalization, and
 standards-based Bun/Node execution match seed semantics and reproducible bytes.
 The self-hosted host also owns v2 cache identity policy, v1 migration,
 selective standard recompilation, portable closure revalidation, and cross-host
@@ -188,7 +188,7 @@ executions with one versioned identity. Retained run `m13-04` completes the
 criterion with twenty clean, operational, identity-equivalent executions.
 Specification 0146 closes AC-05 with a source-bound compiler parity corpus over
 61 stable compiler-relevant features, 115 valid fixtures, 89 diagnostics, all
-13 bootstrap modules, all 55 public IR kinds, and seven observable parity
+13 bootstrap modules, all 57 public IR kinds, and seven observable parity
 dimensions. Ten mandatory criteria remain incomplete.
 Specification 0147 derives a complete stable compatibility corpus over 140
 stable core features, 538 evidence locators, 67 core fixtures, and all three
@@ -504,6 +504,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0145 | [Language Value Equality](0145-language-value-equality.md) | Stable | Implemented |
 | 0146 | [Complete Compiler Parity Corpus](0146-complete-compiler-parity-corpus.md) | Stable | Implemented |
 | 0147 | [Complete Stable Compatibility Corpus](0147-complete-stable-compatibility-corpus.md) | Stable | Implemented |
+| 0148 | [Map Binding Patterns](0148-map-binding-patterns.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

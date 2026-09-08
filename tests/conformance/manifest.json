@@ -2690,6 +2690,41 @@
           "contains": "stable compatibility corpus covers every frozen core behavior"
         }
       ]
+    },
+    {
+      "id": "language.map-binding-patterns",
+      "title": "Map binding patterns",
+      "status": "accepted",
+      "spec": "0148",
+      "contracts": [
+        "Destructures persistent maps and native objects through collection lookup",
+        "Supports keys defaults aliases explicit keys and nested targets",
+        "Evaluates each source once and defaults only absent keys",
+        "Works in functions lexical bindings loop recur catch and portable analysis",
+        "Produces identical IR ESM Source Maps and fixed points across compiler generations"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-supports-map-binding-patterns"
+        },
+        {
+          "kind": "shell",
+          "file": "tests/cli-test.sh",
+          "contains": "tests/fixtures/map-patterns.eli"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-ir.test.mjs",
+          "contains": "bootstrapped lowerer matches complete seed IR trees and spans"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-emitter.test.mjs",
+          "contains": "bootstrapped emitter matches seed ESM and Source Map output"
+        }
+      ]
     }
   ]
 }

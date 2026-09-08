@@ -49,7 +49,7 @@ Quoted brace syntax therefore remains a tagged `list` beginning with
 
 ## Lowering Surface
 
-The portable lowerer implements all 55 public IR kinds from specification
+The portable lowerer implements all 57 public IR kinds from specification
 0007. The surface includes modules and imports, declarations and exports,
 functions and lexical bindings, all control forms, assignments, intrinsics,
 native and persistent collection constructors, JavaScript interop, objects,
@@ -87,7 +87,7 @@ host-neutral driver and reproducible self-compilation are implemented in
 
 ## Compatibility Freeze
 
-Portable lowering covers all 55 public IR kinds using ordinary serializable
+Portable lowering covers all 57 public IR kinds using ordinary serializable
 objects, typed children, kind-specific properties, and a source span on every
 semantic and structural node. It preserves source order and operator identity
 without optimization.

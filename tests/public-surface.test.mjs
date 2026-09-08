@@ -30,7 +30,7 @@ test("repository public surface matches every tracked implementation", async () 
   expect(await checkPublicSurface({ root: ROOT })).toEqual({
     schemaVersion: 1,
     language: { groups: 12, entries: 171 },
-    ir: { nodeKinds: 55 },
+    ir: { nodeKinds: 57 },
     commands: { commands: 9, options: 47 },
     schemas: { total: 29 },
     adapters: { adapters: 9, exports: 32 },
@@ -38,7 +38,7 @@ test("repository public surface matches every tracked implementation", async () 
     runtimeModules: { modules: 30, exports: 225, public: 21, internal: 9 },
     standardLibrary: { modules: 29, exports: 304 },
     emacs: {
-      functions: 155,
+      functions: 158,
       records: 47,
       publicRecords: 28,
       internalRecords: 19,

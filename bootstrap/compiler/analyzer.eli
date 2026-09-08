@@ -68,6 +68,13 @@
   (defun vector-node-p (node)
     (and node (= (node-kind node) "vector")))
 
+  (defun map-node-p (node)
+    (and node
+         (= (node-kind node) "list")
+         (> (get (node-items node) :length) 0)
+         (symbol-node-p (js-nth 0 (node-items node)))
+         (= (node-name (js-nth 0 (node-items node))) "hash-map")))
+
   (defun string-node-p (node)
     (and node
          (= (node-kind node) "literal")
@@ -86,6 +93,105 @@
 
   (defun binding-marker-p (name)
     (js-call (js-array "&optional" "&rest" "&body") :includes name))
+
+  (defun map-binding-key-p (node)
+    (or (keyword-node-p node)
+        (and node
+             (= (node-kind node) "literal")
+             (or (= (js* "typeof node.value") "string")
+                 (= (js* "typeof node.value") "number")))))
+
+  (defun map-binding-spec (pattern context)
+    (let ((items (js-call (node-items pattern) :slice 1))
+          (entries (js-array))
+          (defaults (new globalThis.Map))
+          (as undefined)
+          (keys-seen false)
+          (or-seen false)
+          (as-seen false)
+          (index 0))
+      (while (< index (get items :length))
+        (let* ((left (js-nth index items))
+               (right (js-nth (1+ index) items))
+               (directive (and (keyword-node-p left) (node-name left))))
+          (cond
+            ((= directive "keys")
+             (when keys-seen
+               (analyzer-fail context (node-span left)
+                 "map binding pattern accepts :keys once"))
+             (setq keys-seen t)
+             (unless (vector-node-p right)
+               (analyzer-fail context (node-span right)
+                 "map binding :keys value must be a vector"))
+             (js-call (node-items right) :forEach
+               (lambda (name-node)
+                 (let ((name (and (symbol-node-p name-node)
+                                  (node-name name-node))))
+                   (unless (and name
+                                (not (binding-marker-p name))
+                                (not (js-call name :includes "/")))
+                     (analyzer-fail context (node-span name-node)
+                       "map binding :keys entries must be unqualified symbols"))
+                   (js-call entries :push
+                     (js-object :target name-node :keyName name))))) )
+            ((= directive "or")
+             (when or-seen
+               (analyzer-fail context (node-span left)
+                 "map binding pattern accepts :or once"))
+             (setq or-seen t)
+             (unless (map-node-p right)
+               (analyzer-fail context (node-span right)
+                 "map binding :or value must be a map"))
+             (let ((pairs (js-call (node-items right) :slice 1))
+                   (default-index 0))
+               (while (< default-index (get pairs :length))
+                 (let* ((name-node (js-nth default-index pairs))
+                        (default (js-nth (1+ default-index) pairs))
+                        (name (and (symbol-node-p name-node)
+                                   (node-name name-node))))
+                   (unless (and name (not (binding-marker-p name)))
+                     (analyzer-fail context (node-span name-node)
+                       "map binding :or keys must be binding symbols"))
+                   (when (js-call defaults :has name)
+                     (analyzer-fail context (node-span name-node)
+                       "duplicate map binding :or default"))
+                   (js-call defaults :set name default))
+                 (setq default-index (+ default-index 2)))))
+            ((= directive "as")
+             (when as-seen
+               (analyzer-fail context (node-span left)
+                 "map binding pattern accepts :as once"))
+             (setq as-seen t)
+             (unless (and (symbol-node-p right)
+                          (not (binding-marker-p (node-name right))))
+               (analyzer-fail context (node-span right)
+                 "map binding :as value must be a symbol"))
+             (setq as right))
+            (directive
+             (analyzer-fail context (node-span left)
+               (str "unknown map binding directive: :" directive)))
+            (t
+             (unless (binding-pattern-p left)
+               (analyzer-fail context (node-span left)
+                 "map binding entry target must be a binding pattern"))
+             (unless (map-binding-key-p right)
+               (analyzer-fail context (node-span right)
+                 "map binding entry key must be a keyword, string, or number"))
+             (js-call entries :push (js-object :target left :key right)))))
+        (setq index (+ index 2)))
+      (js-call defaults :forEach
+        (lambda (default name)
+          (let ((entry
+                 (js-call entries :find
+                   (lambda (candidate)
+                     (and (symbol-node-p (get candidate :target))
+                          (= (node-name (get candidate :target)) name))))))
+            (unless entry
+              (analyzer-fail context (node-span default)
+                (str "map binding :or has no scalar target: " name)))
+            (put entry :default default)
+            (put entry :hasDefault t))))
+      (js-object :entries entries :as as)))
 
   (defun binding-nodes (pattern context)
     (cond
@@ -130,16 +236,26 @@
              context (node-span pattern)
              "vector &rest requires a binding"))
          result))
+      ((map-node-p pattern)
+       (let* ((spec (map-binding-spec pattern context))
+              (result (js-array)))
+         (js-call (get spec :entries) :forEach
+           (lambda (entry)
+             (js-call (binding-nodes (get entry :target) context) :forEach
+               (lambda (binding) (js-call result :push binding)))))
+         (when (get spec :as) (js-call result :push (get spec :as)))
+         result))
       (t
        (analyzer-fail
          context (and pattern (node-span pattern))
-         (str "binding pattern must be a symbol or vector: "
+         (str "binding pattern must be a symbol, vector, or map: "
               (node-display pattern))))))
 
   (defun binding-pattern-p (node)
     (or (and (symbol-node-p node)
              (not (binding-marker-p (node-name node))))
-        (vector-node-p node)))
+        (vector-node-p node)
+        (map-node-p node)))
 
   (defun function-parameters (parameters context)
     (let ((items (list-items parameters))
@@ -190,7 +306,7 @@
             (t
              (analyzer-fail
                context (node-span parameter)
-               (str "function arguments must be symbols or vectors: "
+               (str "function arguments must be symbols, vectors, or maps: "
                     (node-display parameters))))))
         (setq index (1+ index)))
       (when (= mode "rest")
@@ -326,6 +442,24 @@
       (analyze-expression form scope context)
       (put context :tailPosition tail-position)))
 
+  (defun analyze-pattern-defaults (pattern scope context)
+    (cond
+      ((vector-node-p pattern)
+       (js-call (node-items pattern) :forEach
+         (lambda (element)
+           (unless (or (null-node-p element)
+                       (and (symbol-node-p element)
+                            (= (node-name element) "&rest")))
+             (analyze-pattern-defaults element scope context)))))
+      ((map-node-p pattern)
+       (let ((spec (map-binding-spec pattern context)))
+         (js-call (get spec :entries) :forEach
+           (lambda (entry)
+             (when (get entry :hasDefault)
+               (analyze-non-tail (get entry :default) scope context))
+             (analyze-pattern-defaults
+               (get entry :target) scope context)))))))
+
   (defun analyze-non-tail-sequence (forms scope context)
     (let ((tail-position (get context :tailPosition)))
       (put context :tailPosition false)
@@ -367,6 +501,7 @@
             (lambda (binding)
               (let ((pair (binding-pair binding context)))
                 (analyze-non-tail (js-nth 1 pair) child context)
+                (analyze-pattern-defaults (js-nth 0 pair) child context)
                 (declare-pattern
                   child (js-nth 0 pair) "local" t context))))
         (let ((parsed
@@ -374,7 +509,8 @@
                  (lambda (binding) (binding-pair binding context)))))
           (js-call parsed :forEach
             (lambda (pair)
-              (analyze-non-tail (js-nth 1 pair) scope context)))
+              (analyze-non-tail (js-nth 1 pair) scope context)
+              (analyze-pattern-defaults (js-nth 0 pair) scope context)))
           (js-call parsed :forEach
             (lambda (pair)
               (declare-pattern
@@ -384,6 +520,9 @@
   (defun analyze-function
       (parameters body scope context &optional asynchronous)
     (let ((parameter-items (function-parameters parameters context)))
+      (js-call parameter-items :forEach
+        (lambda (parameter)
+          (analyze-pattern-defaults (get parameter :node) scope context)))
       (let ((child (make-scope
                     scope (if asynchronous "async" "sync"))))
         (js-call parameter-items :forEach
@@ -428,7 +567,8 @@
             (js-call parsed :push (binding-pair binding context)))))
       (js-call parsed :forEach
         (lambda (pair)
-          (analyze-non-tail (js-nth 1 pair) scope context)))
+          (analyze-non-tail (js-nth 1 pair) scope context)
+          (analyze-pattern-defaults (js-nth 0 pair) scope context)))
       (js-call parsed :forEach
         (lambda (pair)
           (declare-pattern child (js-nth 0 pair) "loop" t context)))
@@ -570,7 +710,8 @@
                  (unless (binding-pattern-p binding)
                    (analyzer-fail
                      context (node-span argument)
-                     "catch requires a binding symbol or vector"))
+                     "catch requires a binding symbol, vector, or map"))
+                 (analyze-pattern-defaults binding scope context)
                  (let ((child (make-scope scope)))
                    (declare-pattern child binding "catch" t context)
                    (analyze-sequence

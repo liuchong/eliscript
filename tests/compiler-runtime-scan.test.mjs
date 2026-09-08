@@ -135,6 +135,7 @@ test("optimized compiler runtime scan matches its readable reference", async () 
       collection: true,
       list: true,
       value: true,
+      binding: false,
     });
     expect(emitter.runtime_requirements(staticKeywordProperty)).toEqual({
       hostIdentityToken: false,
@@ -142,6 +143,7 @@ test("optimized compiler runtime scan matches its readable reference", async () 
       collection: false,
       list: false,
       value: false,
+      binding: false,
     });
   } finally {
     await rm(directory, { recursive: true, force: true });

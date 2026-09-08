@@ -183,6 +183,35 @@ if [ "$PATTERNS_OUTPUT" != "$EXPECTED_PATTERNS" ]; then
   exit 1
 fi
 
+MAP_PATTERNS_MODULE="$TEMP_DIR/map-patterns.mjs"
+"$PROJECT_DIR/bin/eliscript" \
+  --source-map \
+  --output "$MAP_PATTERNS_MODULE" \
+  "$PROJECT_DIR/tests/fixtures/map-patterns.eli"
+
+MAP_PATTERNS_OUTPUT=$(ELISCRIPT_MAP_PATTERNS_MODULE="$MAP_PATTERNS_MODULE" bun --eval '
+  const { pathToFileURL } = await import("node:url");
+  const module = await import(pathToFileURL(process.env.ELISCRIPT_MAP_PATTERNS_MODULE));
+  console.log(JSON.stringify([
+    module.unpack({ name: "Ada" }),
+    module.unpack({ name: "Ada", age: null, note: null }),
+    module.optional_map(),
+    module.explicit_and_nested({ name: "Ada", profile: { city: "London" } }),
+    module.lexical_map({ name: "Ada" }),
+    module.countdown({ remaining: 10000 }),
+    module.catch_map(),
+    module.portable_name({ name: "portable" }),
+    module.persistent_map_pattern(),
+  ]));
+')
+
+EXPECTED_MAP_PATTERNS='[["Ada",18,"missing"],["Ada",null,null],"anonymous",["Ada","London"],["Ada",18,{"name":"Ada"}],0,[7,"caught"],"portable",["Eliscript",18]]'
+if [ "$MAP_PATTERNS_OUTPUT" != "$EXPECTED_MAP_PATTERNS" ]; then
+  printf 'expected map pattern output: %s\nactual map pattern output:   %s\n' \
+    "$EXPECTED_MAP_PATTERNS" "$MAP_PATTERNS_OUTPUT" >&2
+  exit 1
+fi
+
 printf '%s\n' '(defun broken () missing)' > "$TEMP_DIR/broken.eli"
 if "$PROJECT_DIR/bin/eliscript" "$TEMP_DIR/broken.eli" \
   > "$TEMP_DIR/broken.out" 2> "$TEMP_DIR/broken.err"; then

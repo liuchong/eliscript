@@ -489,6 +489,56 @@
     (should-error (eliscript-compile-string source "patterns.eli")
                   :type 'eliscript-analyze-error)))
 
+(ert-deftest eliscript-supports-map-binding-patterns ()
+  (let* ((source
+          "(defun unpack ({:keys [name age] :or {age 18} :as row})
+  [name age row])
+(defun nested ({alias :name {:keys [city]} :profile}) [alias city])
+(defun recover ()
+  (try (throw (js-object :code 7))
+    (catch {:keys [code]} code)))")
+         (output (eliscript-compile-string source "map-patterns.eli"))
+         (program (eliscript-compile-ir-string source "map-patterns.eli"))
+         kinds)
+    (eliscript-ir-walk
+     program
+     (lambda (node) (push (eliscript-ir-node-kind node) kinds)))
+    (should (string-match-p
+             (regexp-quote "function unpack(__eliscript_value_1)") output))
+    (should (string-match-p
+             (regexp-quote "__eliscript_binding_get") output))
+    (should (string-match-p
+             (regexp-quote "__eliscript_binding_missing") output))
+    (dolist (kind '(map-binding-pattern map-binding-entry binding-name))
+      (should (memq kind kinds)))
+    (should
+     (equal
+      (eliscript-ir-program-to-forms program)
+      '((defun unpack ((hash-map name :name age :age
+                                :or (hash-map age 18) :as row))
+          (vector name age row))
+        (defun nested ((hash-map alias :name
+                                  (hash-map city :city) :profile))
+          (vector alias city))
+        (defun recover nil
+          (try (throw (js-object :code 7))
+            (catch (hash-map code :code) code)))))))
+  (should
+   (string-match-p
+    (regexp-quote "function portable_name(__eliscript_value_1)")
+    (eliscript-compile-portable-string
+     "(defportable portable-name ({:keys [name]}) name)"
+     '(portable-name)
+     "portable-map-patterns.eli")))
+  (dolist (source
+           '("(defun broken ({:keys name}) name)"
+             "(defun broken ({:keys [name] :keys [other]}) name)"
+             "(defun broken ({:or {missing 1} :keys [name]}) name)"
+             "(defun broken ({:as 1}) nil)"
+             "(defun broken ({:unknown value}) value)"))
+    (should-error (eliscript-compile-string source "map-patterns.eli")
+                  :type 'eliscript-analyze-error)))
+
 (ert-deftest eliscript-supports-async-functions-and-await ()
   (let* ((source
           "(defasync resolve-value (value &optional transform)
