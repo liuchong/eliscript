@@ -37,7 +37,7 @@ M13 has completed all 5 implementation units. The versioned
 derives all 35 mandatory AC/PD criteria from their normative specifications,
 runs the complete core suite and strict Emacs byte compilation from a clean
 commit, and retains machine-readable and human-readable evidence. The current
-audit records 21 passing, 14 incomplete, and zero failed criteria; its final
+audit records 24 passing, 11 incomplete, and zero failed criteria; its final
 acceptance flag is therefore false. Application validations are listed
 separately and contribute no core result.
 

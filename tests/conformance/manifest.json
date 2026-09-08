@@ -731,65 +731,70 @@
     {
       "id": "language.keyword-symbol-values",
       "title": "First-class Keyword and Symbol values",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0067",
       "contracts": ["Defines immutable qualified and unqualified Keyword and Symbol values", "Preserves distinct categories with deterministic value equality and hashing", "Uses reconstructed identifiers as runtime and portable Map keys and Set members", "Matches seed and self-hosted artifacts under Bun and Node"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/identifier.test.mjs", "contains": "keywords are immutable, interned qualified identifiers" },
         { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics compile and agree across hosts" },
         { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" },
-        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "identifier metadata and data text build as one project across Bun and Node" }
       ]
     },
     {
       "id": "language.immutable-metadata",
       "title": "Immutable metadata semantics",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0068",
       "contracts": ["Attaches nil or persistent Map metadata through open protocols", "Replaces only value roots while preserving collection internals and update propagation", "Excludes metadata from equality, hashing, navigation, and logical host conversion", "Matches seed and self-hosted artifacts under Bun and Node"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/metadata.test.mjs", "contains": "metadata protocols cover symbols and persistent runtime collections" },
         { "kind": "bun-test", "file": "tests/metadata.test.mjs", "contains": "persistent updates, empty values, and transients preserve root metadata" },
         { "kind": "bun-test", "file": "tests/portable-metadata.test.mjs", "contains": "Eliscript-authored metadata is byte-identical and portable" },
-        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" }
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "identifier metadata and data text build as one project across Bun and Node" }
       ]
     },
     {
       "id": "language.canonical-runtime-data-text",
       "title": "Canonical runtime data text",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0069",
       "contracts": ["Prints scalar, identifier, persistent collection, and metadata values canonically", "Reads canonical text into equal runtime values with deterministic errors", "Sorts Map and Set text independently of trie traversal order", "Enforces explicit depth, length, and value-count limits across Bun and Node"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "collections print in deterministic logical order" },
         { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "reader rejects malformed, duplicate, and unsupported data" },
         { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "generated nested values retain equality and canonical text" },
-        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" }
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "identifier metadata and data text build as one project across Bun and Node" }
       ]
     },
     {
       "id": "language.portable-identifier-values",
       "title": "Portable Keyword and Symbol values",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0070",
       "contracts": ["Constructs validated identifiers entirely from portable Eliscript", "Shares logical Keyword and Symbol categories with optimized runtime values", "Preserves cross-representation equality, hashing, Map lookup, and Set membership", "Matches self-hosted artifacts and Bun/Node execution"],
       "evidence": [
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-portable-value-inspection-operations" },
         { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics compile and agree across hosts" },
-        { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics preserve generated cross-family invariants" }
+        { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics preserve generated cross-family invariants" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "identifier metadata and data text build as one project across Bun and Node" }
       ]
     },
     {
       "id": "stdlib.canonical-portable-data-text",
       "title": "Canonical portable data text",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0071",
       "contracts": ["Prints and reads scalar, identifier, List, Vector, Map, Set, and metadata values in portable Eliscript", "Returns explicit transportable success and located failure values", "Sorts Map and Set text independently of insertion and trie order", "Matches runtime common-subset bytes and self-hosted Bun/Node execution"],
       "evidence": [
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-portable-value-inspection-operations" },
         { "kind": "bun-test", "file": "tests/portable-data-text.test.mjs", "contains": "portable canonical data text is byte-identical and host-independent" },
         { "kind": "bun-test", "file": "tests/data-text.test.mjs", "contains": "generated nested values retain equality and canonical text" },
-        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "identifier metadata and data text build as one project across Bun and Node" }
       ]
     },
     {

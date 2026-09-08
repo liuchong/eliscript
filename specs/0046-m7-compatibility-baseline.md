@@ -32,7 +32,7 @@ defined by specification 0118. Baseline 1 remains historical evidence; baseline
 
 ## Stable Contract
 
-Baseline 2 currently classifies 51 specifications and their 51 conformance
+Baseline 2 currently classifies 56 specifications and their 56 conformance
 features as stable. The stable set covers these externally meaningful areas:
 
 - lexical binding, deterministic macro behavior, source locations, and Source
@@ -46,9 +46,10 @@ features as stable. The stable set covers these externally meaningful areas:
   reports, and phase timings
 - nullish values, optional/rest parameters, async/await, exceptions, and
   vector binding patterns
-- deterministic value equality and hashing, 32-bit operations, persistent
-  List/Vector/Map/Set implementations, collection protocols, transducers, and
-  owner-token transient builders
+- deterministic value equality and hashing, first-class identifiers, immutable
+  metadata, canonical runtime and portable data text, 32-bit operations,
+  persistent List/Vector/Map/Set implementations, collection protocols,
+  transducers, and owner-token transient builders
 - specification, diagnostic, public-surface, continuous compatibility, and
   compatibility-baseline schemas
 

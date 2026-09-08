@@ -34,15 +34,15 @@ The registry currently contains 145 specifications.
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 92 |
-| Stable design | 51 |
+| Accepted design | 87 |
+| Stable design | 56 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
 | Implemented | 141 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 51 specifications as stable,
-90 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 56 specifications as stable,
+85 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -161,7 +161,7 @@ formal acceptance work.
 M13 has completed all 5/5 implementation units through specification 0138. Its
 versioned corpus derives all 35 mandatory AC/PD criteria from normative
 headings, maps each criterion to bounded probes and tracked evidence, and
-retains one clean audit with 21 pass, 14 incomplete, and zero failed criteria.
+retains one clean audit with 24 pass, 11 incomplete, and zero failed criteria.
 The final acceptance flag remains false. Specification 0135 records the local,
 source-bound onboarding exercise for M13-02 with all six steps passing within
 the active-step budget. Specification 0136 records the passing direct local
@@ -411,11 +411,11 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0064 | [Stack-safe Loop and Recur](0064-stack-safe-loop-recur.md) | Accepted | Implemented |
 | 0065 | [Deterministic Macro-generated Names and Capture Rules](0065-deterministic-macro-generated-names.md) | Accepted | Implemented |
 | 0066 | [Eliscript-authored Core Protocol Surface and Algorithms](0066-eliscript-authored-core-protocol-algorithms.md) | Stable | Implemented |
-| 0067 | [First-class Keyword and Symbol Values](0067-first-class-keyword-symbol-values.md) | Accepted | Implemented |
-| 0068 | [Immutable Metadata Semantics](0068-immutable-metadata-semantics.md) | Accepted | Implemented |
-| 0069 | [Canonical Runtime Data Text](0069-canonical-runtime-data-text.md) | Accepted | Implemented |
-| 0070 | [Portable Keyword and Symbol Values](0070-portable-identifier-values.md) | Accepted | Implemented |
-| 0071 | [Canonical Portable Data Text](0071-canonical-portable-data-text.md) | Accepted | Implemented |
+| 0067 | [First-class Keyword and Symbol Values](0067-first-class-keyword-symbol-values.md) | Stable | Implemented |
+| 0068 | [Immutable Metadata Semantics](0068-immutable-metadata-semantics.md) | Stable | Implemented |
+| 0069 | [Canonical Runtime Data Text](0069-canonical-runtime-data-text.md) | Stable | Implemented |
+| 0070 | [Portable Keyword and Symbol Values](0070-portable-identifier-values.md) | Stable | Implemented |
+| 0071 | [Canonical Portable Data Text](0071-canonical-portable-data-text.md) | Stable | Implemented |
 | 0072 | [Atomic State References](0072-atomic-state-references.md) | Accepted | Implemented |
 | 0073 | [Native JavaScript Container Interop](0073-native-javascript-container-interop.md) | Accepted | Implemented |
 | 0074 | [Process-local Host Identity Hashing](0074-process-local-host-identity-hashing.md) | Accepted | Implemented |

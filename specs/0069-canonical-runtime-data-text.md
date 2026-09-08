@@ -1,6 +1,6 @@
 # 0069: Canonical Runtime Data Text
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0048 Value Equality and Deterministic Hashing,
@@ -18,7 +18,7 @@ reconstructed value produces byte-identical text.
 The format covers nullish and numeric scalar edges, strings, Keyword and Symbol
 values, persistent List/Vector/Map/Set values, and immutable metadata. It is
 separate from the compiler source reader, generated JavaScript serialization,
-the future versioned Emacs value codec, and the portable collection text
+the versioned Emacs value codec, and the portable collection text
 implementation defined by 0071. Specification 0086 extends the original
 runtime grammar with the optimized List category.
 
@@ -148,7 +148,7 @@ throws `RangeError`.
 
 ## Scope and Compatibility
 
-This provisional M8 module covers the optimized runtime family only. It does
+This stable M8 module covers the optimized runtime family only. It does
 not read portable Eliscript collection representations, native JavaScript
 Array/Object/Map/Set values, local JavaScript Symbols, cyclic
 host objects, executable forms, reader macros, or arbitrary tagged literals.
@@ -156,9 +156,9 @@ The matching portable grammar, including Lists, is implemented separately by
 0071.
 
 The compiler source reader remains responsible for `.eli` programs and located
-syntax. The future Emacs value codec must add explicit framing, versioning,
-size/cancellation policy, and transport safety rather than treating this text
-format as an unframed wire protocol.
+syntax. The Emacs value codec in 0088 and 0089 adds explicit framing,
+versioning, size/cancellation policy, and transport safety rather than treating
+this text format as an unframed wire protocol.
 
 ## Acceptance Criteria
 

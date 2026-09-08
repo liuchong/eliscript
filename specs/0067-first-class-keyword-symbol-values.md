@@ -1,6 +1,6 @@
 # 0067: First-class Keyword and Symbol Values
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0048 Value Equality and Deterministic Hashing,
@@ -108,12 +108,12 @@ identifiers rather than JavaScript object identity.
 the same rules without a namespace prefix.
 
 JSON serialization throws a deterministic error. Silent `{}` output would
-lose both category and fields, so a later versioned value codec must define
-wire representation explicitly.
+lose both category and fields. Specification 0088 defines the explicit
+versioned worker representation instead.
 
 ## Compatibility and Limits
 
-This M8 surface is provisional. It adds explicit values and extends
+This stable M8 surface adds explicit values and extends
 `value-type`, equality, hashing, and collection-key behavior without changing
 reader syntax, keyword property keys, host-library calling conventions, quoted forms, or
 compiler binding Symbols.
@@ -121,10 +121,10 @@ compiler binding Symbols.
 Immutable Symbol metadata is now specified by 0068; Keywords remain
 unannotated because they are interned. Canonical optimized-runtime
 printing/reading is specified by 0069, including tagged escape forms for
-otherwise ambiguous names. Portable data text, serialization codecs, namespace
-aliases, and Emacs boundary conversion remain separate work. Automatic source
-Keyword emission is implemented by 0085. Native JavaScript `Symbol` values
-retain the behavior defined by 0048.
+otherwise ambiguous names. Portable data text is implemented by 0071, while
+the versioned Emacs worker representation is implemented by 0088. Namespace
+aliases remain separate work. Automatic source Keyword emission is implemented
+by 0085. Native JavaScript `Symbol` values retain the behavior defined by 0048.
 
 ## Acceptance Criteria
 

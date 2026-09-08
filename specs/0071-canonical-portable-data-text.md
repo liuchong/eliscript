@@ -1,6 +1,6 @@
 # 0071: Canonical Portable Data Text
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0053 Eliscript-authored Persistent Vector Trie,
@@ -165,10 +165,8 @@ when a limit is exceeded.
 
 ## Next Boundary
 
-P1 construction is represented across implementation, value semantics,
-metadata, properties, and canonical text, and its exit audit is complete.
-Vector and Map source literals have migrated provisionally; optimized List
-text exists through 0086, and quoted persistent data now uses those categories
-through 0087. The explicit worker transport codec now lands in 0088;
-streaming/chunked transfer and protocol-definition transport remain separate
-later boundaries.
+P1 construction is stable across implementation, value semantics, metadata,
+properties, and canonical text, and its exit audit is complete. The complete
+persistent source-literal and explicit host-container boundary is frozen by
+0095. The worker transport codec, chunked transfer, and protocol-definition
+transport are implemented separately by 0088, 0089, and 0091.

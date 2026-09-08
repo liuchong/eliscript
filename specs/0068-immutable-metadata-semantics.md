@@ -1,6 +1,6 @@
 # 0068: Immutable Metadata Semantics
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
@@ -136,9 +136,9 @@ invalidating a value's HAMT key or Set membership semantics.
 
 Logical host conversions such as `toArray`, `toMap`, `toSet`, and the portable
 `*-to-array`/`*-to-entries` functions emit collection contents only. They do
-not insert metadata into the converted host value. A later explicit value
-codec may choose a versioned metadata representation; this specification does
-not define one.
+not insert metadata into the converted host value. The explicit value codec in
+0088 transports metadata through a versioned representation; this
+specification does not define that wire format.
 
 ## Failure Semantics
 
@@ -150,10 +150,9 @@ The optimized runtime validates public operations at the protocol boundary:
 - an invalid transform result is rejected by `withMeta`
 
 The portable reference returns `nil` for unsupported values, invalid metadata,
-or a non-function transform. This follows the existing provisional portable
-collection failure style until portable exception policy is unified. Valid
-operations have the same data, propagation, equality, hashing, and sharing
-semantics in both implementations.
+or a non-function transform. This is the stable portable failure contract for
+these operations. Valid operations have the same data, propagation, equality,
+hashing, and sharing semantics in both implementations.
 
 ## Acceptance Criteria
 
@@ -187,5 +186,5 @@ Canonical runtime printer/reader round trips are now defined by
 [0069-canonical-runtime-data-text.md](0069-canonical-runtime-data-text.md).
 The matching portable List/collection model and cross-family byte contract are
 implemented by [0071-canonical-portable-data-text.md](0071-canonical-portable-data-text.md).
-Complete the P1 exit audit before source literals migrate from native
-JavaScript containers to persistent Eliscript values.
+The P1 exit audit and source-literal migration are complete through 0078 and
+0083-0095.

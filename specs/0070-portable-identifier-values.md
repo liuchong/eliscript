@@ -1,6 +1,6 @@
 # 0070: Portable Keyword and Symbol Values
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0057 Portable Value Semantics Core,

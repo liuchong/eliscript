@@ -197,6 +197,66 @@ async function runBuiltPersistentValueProjectHost(command, outputRoot) {
   ]));
 }
 
+async function runBuiltValueTextProjectHost(command, outputRoot) {
+  const moduleUrl = (name) => JSON.stringify(pathToFileURL(
+    resolve(outputRoot, `${name}.mjs`),
+  ).href);
+  const source = [
+    `const dataText = await import(${moduleUrl("data-text")});`,
+    `const identifier = await import(${moduleUrl("identifier")});`,
+    `const list = await import(${moduleUrl("persistent-list")});`,
+    `const map = await import(${moduleUrl("persistent-map")});`,
+    `const metadata = await import(${moduleUrl("metadata")});`,
+    `const set = await import(${moduleUrl("persistent-set")});`,
+    `const value = await import(${moduleUrl("value")});`,
+    `const vector = await import(${moduleUrl("persistent-vector")});`,
+    "const keyword = identifier.keyword;",
+    "const symbol = identifier.symbol;",
+    "const unwrap = dataText.data_text_result_value;",
+    "let metadataValue = value.empty_value_map();",
+    "metadataValue = map.persistent_map_assoc(",
+    "  metadataValue, keyword('source'), 'project');",
+    "let members = value.empty_value_set();",
+    "for (const item of [3, 1, 2])",
+    "  members = set.persistent_set_conj(members, item);",
+    "const annotated = metadata.with_meta(",
+    "  vector.persistent_vector_from_array([symbol('article/title'), members]),",
+    "  metadataValue);",
+    "const root = list.persistent_list_from_array([",
+    "  keyword('article/title'), annotated,",
+    "]);",
+    "const printed = dataText.print_value(root);",
+    "const restored = dataText.read_value(unwrap(printed));",
+    "const restoredRoot = unwrap(restored);",
+    "const restoredAnnotated = list.persistent_list_nth(restoredRoot, 1, null);",
+    "const duplicate = dataText.read_value('{:a 1 :a 2}');",
+    "console.log(JSON.stringify({",
+    "  identifier: [",
+    "    identifier.qualified_name(keyword('article/title')),",
+    "    identifier.qualified_name(symbol('article', 'title')),",
+    "    identifier.keyword_QMARK_(keyword('article/title')),",
+    "    identifier.symbol_QMARK_(symbol('article/title')),",
+    "  ],",
+    "  metadata: [",
+    "    map.persistent_map_get(",
+    "      metadata.meta(restoredAnnotated), keyword('source'), null),",
+    "    value.value_equal_QMARK_(annotated, restoredAnnotated),",
+    "    value.value_hash(annotated) === value.value_hash(restoredAnnotated),",
+    "  ],",
+    "  text: unwrap(printed),",
+    "  roundTrip: value.value_equal_QMARK_(root, restoredRoot),",
+    "  fixedPoint: unwrap(dataText.print_value(restoredRoot)) === unwrap(printed),",
+    "  error: [duplicate.error.code, duplicate.error.line, duplicate.error.column],",
+    "}));",
+  ].join("\n");
+  return JSON.parse(await runSuccessful([
+    command,
+    "--input-type=module",
+    "--eval",
+    source,
+  ]));
+}
+
 test("sequence algorithms use protocols and Eliscript truthiness", () => {
   class Range {
     constructor(start, end, observe = () => {}) {
@@ -624,6 +684,68 @@ test("persistent value library builds as one project and executes under Bun and 
     expect(await runBuiltPersistentValueProjectHost(process.execPath, outputRoot))
       .toEqual(expected);
     expect(await runBuiltPersistentValueProjectHost(
+      process.env.NODE_BINARY ?? "node",
+      outputRoot,
+    )).toEqual(expected);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 60_000);
+
+test("identifier metadata and data text build as one project across Bun and Node", async () => {
+  const directory = await mkdtemp(resolve(ROOT, ".eliscript-value-text-project-"));
+  const outputRoot = resolve(directory, "stdlib");
+  const entries = ["identifier", "metadata", "data-text"];
+  const moduleNames = [
+    "bit",
+    "data-text",
+    "identifier",
+    "metadata",
+    "persistent-list",
+    "persistent-map",
+    "persistent-set",
+    "persistent-vector",
+    "value",
+  ];
+  try {
+    await symlink(resolve(ROOT, "runtime"), resolve(directory, "runtime"), "dir");
+    const report = JSON.parse(await runSuccessful([
+      resolve(ROOT, "bin/eliscript-build"),
+      "--json",
+      "--root",
+      resolve(ROOT, "stdlib"),
+      "--out-dir",
+      outputRoot,
+      "--no-cache",
+      ...entries.map((name) => resolve(ROOT, `stdlib/${name}.eli`)),
+    ]));
+    expect(report).toMatchObject({
+      format: "eliscript-build-report",
+      version: 2,
+      mode: "standard",
+      entries: entries.map((name) => `${name}.eli`).sort(),
+      counts: { modules: 9, compiled: 9, reused: 0 },
+      cache: { enabled: false, status: "disabled", reason: "cache-disabled" },
+    });
+    for (const name of moduleNames) {
+      const sourceMap = JSON.parse(await readFile(
+        resolve(outputRoot, `${name}.mjs.map`),
+        "utf8",
+      ));
+      expect(sourceMap.sourcesContent[0])
+        .toContain(`(module eliscript.${name}`);
+    }
+    const expected = {
+      identifier: ["article/title", "article/title", true, true],
+      metadata: ["project", true, true],
+      text: '(:article/title ^{:source "project"} [article/title #{1 2 3}])',
+      roundTrip: true,
+      fixedPoint: true,
+      error: ["ELI-DATA-TEXT", 1, 7],
+    };
+    expect(await runBuiltValueTextProjectHost(process.execPath, outputRoot))
+      .toEqual(expected);
+    expect(await runBuiltValueTextProjectHost(
       process.env.NODE_BINARY ?? "node",
       outputRoot,
     )).toEqual(expected);
