@@ -299,11 +299,20 @@ async function validateRuntimeModules(root, modules, specs, cache, errors) {
   };
 }
 
-function extractLibraryExports(source) {
-  const start = source.lastIndexOf("(export ");
-  const end = source.indexOf("))", start);
-  if (start < 0 || end < 0) return [];
-  return (source.slice(start + 8, end).match(/[^\s()]+/gu) ?? []).sort();
+export function extractLibraryExports(source) {
+  const start = source.lastIndexOf("(export");
+  if (start < 0 || !/[\s)]/u.test(source[start + 7] ?? "")) return [];
+
+  let depth = 0;
+  for (let index = start; index < source.length; index += 1) {
+    if (source[index] === "(") depth += 1;
+    if (source[index] !== ")") continue;
+    depth -= 1;
+    if (depth === 0) {
+      return (source.slice(start + 7, index).match(/[^\s()]+/gu) ?? []).sort();
+    }
+  }
+  return [];
 }
 
 async function validateStandardLibrary(root, modules, specs, cache, errors) {

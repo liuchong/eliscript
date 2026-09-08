@@ -77,11 +77,35 @@ unwrapped accumulator exactly once and stops at that source element.
 - `groupBy(keyFunction, collection)`
 - `countBy(keyFunction, collection)`
 - `frequencies(collection)`
+- `getIn(collection, path, notFound = null)`
+- `assocIn(collection, path, value)`
+- `update(collection, key, transform, ...arguments)`
+- `updateIn(collection, path, transform, ...arguments)`
+- `selectKeys(collection, keys)`
+- `merge(...collections)`
+- `mergeWith(combine, ...collections)`
+- `zipmap(keys, values)`
 
-All results are persistent Maps using the shared value equality and hashing
-contract. `groupBy` values are persistent Vectors in source order. Repeated
-keys in `indexBy` retain the last source value. Empty or null input returns the
-canonical empty persistent Map.
+Indexing, grouping, counting, and frequency results are persistent Maps using
+the shared value equality and hashing contract. `groupBy` values are persistent
+Vectors in source order. Repeated keys in `indexBy` retain the last source
+value. Empty or null input returns the canonical empty persistent Map.
+
+Paths are arbitrary `IReduce` sources. `getIn` returns the root for an empty
+path, preserves present `null` or `undefined` leaf values, and returns the
+caller-provided not-found value only for a missing path. `assocIn` replaces the
+root for an empty path, preserves every existing associative container, and
+creates persistent Maps for missing or nullish intermediate levels. `update`
+and `updateIn` validate their transform before lookup, pass additional
+arguments unchanged, and observe `null` for a missing value.
+
+`selectKeys`, `merge`, `mergeWith`, and `zipmap` return value-semantic
+persistent Maps. Selection distinguishes a present `undefined` value from an
+absent key. Merge order is left to right and later values win; `mergeWith`
+combines repeated keys, including keys whose prior value is `undefined`.
+`zipmap` consumes arbitrary reducible key and value sources and stops at the
+shorter materialized input. Every merged entry must contain exactly one key
+and one value.
 
 Each key function is validated before traversal and called exactly once per
 source value. Group and count discovery uses a value-semantic persistent index
@@ -102,7 +126,8 @@ remove reverse some take take-nth take-while
 `stdlib/core/data.eli` exports:
 
 ```text
-count-by frequencies group-by index-by
+assoc-in count-by frequencies get-in group-by index-by merge merge-with
+select-keys update update-in zipmap
 ```
 
 The modules preserve Lisp spelling at source boundaries. As completed by
@@ -126,6 +151,13 @@ instrumented 50,000-key build allocates fewer than one third of the HAMT nodes
 used by equivalent repeated persistent association. `groupBy` and `countBy`
 perform expected O(n) key-index work plus one final transient Map build. Group
 bucket storage is O(n); count storage is O(k) for `k` distinct keys.
+
+Nested access and update are O(p) for path length `p`, plus persistent
+association path costs at each nesting level. Selection and plain merge use one
+transient Map completion. Combining merge performs persistent associations so
+each repeated key can use value-semantic lookup. `zipmap` materializes both
+reducible inputs as persistent Vectors, then constructs one transient Map, for
+O(k + v) traversal and O(min(k, v)) associations.
 
 These are structural allocation guarantees, not timing promises. Host timing
 depends on JavaScript engine warmup, garbage collection, and callback cost.
@@ -173,6 +205,12 @@ dispatch internals remain later work.
 - **PCA-13:** Reductions includes the initial and each intermediate value,
   terminates exactly on a reduced initial or step result, and constructs one
   persistent Vector through a transient builder.
+- **PCA-14:** Nested associative reads and updates define empty, missing,
+  nullish, present-undefined, and variadic-transform behavior over reducible
+  paths without mutating the source.
+- **PCA-15:** Key selection, ordered merging, combining merge, and zipping
+  produce value-semantic persistent Maps, accept reducible inputs, and reject
+  malformed entries deterministically.
 
 ## Next Slice
 

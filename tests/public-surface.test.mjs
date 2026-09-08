@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   checkPublicSurface,
+  extractLibraryExports,
   SurfaceValidationError,
 } from "../tools/surface/check.mjs";
 
@@ -35,8 +36,8 @@ test("repository public surface matches every tracked implementation", async () 
     schemas: { total: 30 },
     adapters: { adapters: 9, exports: 32 },
     platformPackages: { packages: 2, exports: 37 },
-    runtimeModules: { modules: 30, exports: 251, public: 21, internal: 9 },
-    standardLibrary: { modules: 29, exports: 330 },
+    runtimeModules: { modules: 30, exports: 259, public: 21, internal: 9 },
+    standardLibrary: { modules: 29, exports: 338 },
     emacs: {
       functions: 158,
       records: 47,
@@ -44,6 +45,15 @@ test("repository public surface matches every tracked implementation", async () 
       internalRecords: 19,
     },
   });
+});
+
+test("standard library export scanner accepts formatted multiline forms", () => {
+  expect(extractLibraryExports(`(module example
+    (defun value () 1)
+    (export
+      value
+      other-value))`)).toEqual(["other-value", "value"]);
+  expect(extractLibraryExports("(module example (export value")).toEqual([]);
 });
 
 test("public surface checker rejects IR node drift", async () => {

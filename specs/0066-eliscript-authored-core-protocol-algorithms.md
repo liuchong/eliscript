@@ -60,14 +60,17 @@ remove reverse some take take-nth take-while
 `stdlib/core/data.eli` now contains the maintained implementations of:
 
 ```text
-count-by frequencies group-by index-by
+assoc-in count-by frequencies get-in group-by index-by merge merge-with
+select-keys update update-in zipmap
 ```
 
 The sequence algorithms reduce arbitrary protocol sources, preserve Eliscript
 truth semantics, terminate through reduced values, and construct persistent
 Vectors. The data algorithms construct value-semantic persistent Maps, retain
-source order within grouped persistent Vectors, and use owner-token transient
-Map builders for final construction and indexing.
+source order within grouped persistent Vectors, support nested associative
+reads and updates, and provide ordered merge, combining merge, key selection,
+and key/value zipping. Owner-token transient Map builders cover bulk operations
+that do not require prior-value lookup.
 
 The source modules import lower-level runtime capabilities rather than the
 corresponding `runtime/core/sequence.mjs` or `runtime/core/data.mjs` algorithm

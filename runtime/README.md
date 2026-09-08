@@ -170,9 +170,11 @@ is exposed only through `testing/vector.mjs`, `testing/map.mjs`, and
 `core/sequence.mjs` implements eager indexed/keep, prefix, sampling,
 interposition, dedupe/distinct, flattening, partitioning, reduction-history,
 and search operations against `IReduce`. Results are persistent Vectors and
-reduced values stop bounded traversal exactly. `core/data.mjs` implements value-semantic indexing,
-grouping, counting, and frequencies with persistent Map results and transient
-final construction. Native and persistent collections, null, and external
+reduced values stop bounded traversal exactly. `core/data.mjs` implements
+value-semantic indexing, grouping, counting, frequencies, nested associative
+reads and updates, key selection, merging, and key/value zipping. Bulk result
+construction uses persistent Maps and transient builders where prior-value
+lookup is not required. Native and persistent collections, null, and external
 protocol extensions all use the same algorithm path.
 
 `core/text-impl.mjs` and `core/object-impl.mjs` are generated from

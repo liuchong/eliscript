@@ -16,10 +16,18 @@ import {
   unreduced,
 } from "../runtime/core/collection.mjs";
 import {
+  assocIn,
   countBy,
   frequencies,
+  getIn,
   groupBy,
   indexBy,
+  merge as mergeData,
+  mergeWith,
+  selectKeys,
+  update as updateData,
+  updateIn,
+  zipmap,
 } from "../runtime/core/data.mjs";
 import { EMPTY_MAP } from "../runtime/core/map.mjs";
 import { extendProtocolType } from "../runtime/core/protocol.mjs";
@@ -139,6 +147,11 @@ async function runBuiltCoreProjectHost(command, outputRoot) {
     "  sourceValues);",
     "const mapped = sequence.map((value) => value + 1, sourceValues);",
     "const counts = data.frequencies(sourceValues);",
+    "const nested = data.update_in(",
+    "  data.assoc_in(null, ['profile', 'visits'], 1),",
+    "  ['profile', 'visits'],",
+    "  (value, amount) => value + amount, 4);",
+    "const mergedData = data.merge({ left: 1 }, { left: 3, right: 2 });",
     "const mappedObject = object.map_values(",
     "  (value) => value * 10, { left: 1, right: 2 });",
     "console.log(JSON.stringify({",
@@ -148,6 +161,11 @@ async function runBuiltCoreProjectHost(command, outputRoot) {
     "  transformed: [...transformed],",
     "  mapped: [...mapped],",
     "  frequencies: [counts.get(1), counts.get(2), counts.get(3)],",
+    "  data: [",
+    "    data.get_in(nested, ['profile', 'visits']),",
+    "    mergedData.get('left'),",
+    "    mergedData.get('right'),",
+    "  ],",
     "  text: [text.slice(1, 4, 'Eliscript'), text.join('-', sourceValues)],",
     "  object: [mappedObject.left, mappedObject.right],",
     "}));",
@@ -567,6 +585,103 @@ test("data algorithms return persistent value-semantic maps and vectors", () => 
   expect(countBy((value) => value, null)).toBe(EMPTY_MAP);
 });
 
+test("associative data algorithms preserve nested and value-semantic behavior", () => {
+  class ProtocolValues {
+    constructor(values) {
+      this.values = Object.freeze([...values]);
+      Object.freeze(this);
+    }
+  }
+  extendProtocolType(IReduce, ProtocolValues, {
+    reduce: (source, reducer, initial) => {
+      let result = initial;
+      for (const value of source.values) {
+        result = reducer(result, value);
+        if (isReduced(result)) return unreduced(result);
+      }
+      return result;
+    },
+  });
+  const source = (...values) => new ProtocolValues(values);
+
+  const nested = EMPTY_MAP.assoc(
+    "profile",
+    EMPTY_MAP.assoc("name", "Ada").assoc("unset", undefined),
+  );
+  expect(getIn(nested, source("profile", "name"))).toBe("Ada");
+  expect(getIn(nested, ["profile", "unset"], "missing")).toBeUndefined();
+  expect(getIn(nested, ["profile", "absent"], "missing")).toBe("missing");
+  expect(getIn(nested, [], "missing")).toBe(nested);
+
+  const associated = assocIn(nested, source("profile", "score"), 10);
+  expect(getIn(associated, ["profile", "score"])).toBe(10);
+  expect(getIn(nested, ["profile", "score"], "missing")).toBe("missing");
+  expect(getIn(assocIn(null, ["a", "b"], 3), ["a", "b"])).toBe(3);
+  expect(assocIn(nested, [], "replacement")).toBe("replacement");
+  expect(() => assocIn({ a: 1 }, ["a", "b"], 2)).toThrow();
+
+  const updated = updateData(nested, "visits", (value, amount) =>
+    (value ?? 0) + amount, 2);
+  expect(updated.get("visits")).toBe(2);
+  expect(updateData(null, "created", (value) => value === null).get("created"))
+    .toBe(true);
+  expect(updateData(nested.get("profile"), "unset", (value) =>
+    value === undefined).get("unset")).toBe(true);
+  const nestedUpdate = updateIn(nested, ["profile", "visits"],
+    (value, amount) => (value ?? 0) + amount, 4);
+  expect(getIn(nestedUpdate, ["profile", "visits"])).toBe(4);
+  expect(updateIn(3, [], (value, amount) => value + amount, 2)).toBe(5);
+  expect(() => updateData(nested, "x", null)).toThrow(
+    "update transform must be a function",
+  );
+  expect(() => updateIn(nested, ["x"], null)).toThrow(
+    "updateIn transform must be a function",
+  );
+
+  const selected = selectKeys(
+    { left: 1, unset: undefined, ignored: 3 },
+    source("unset", "left", "missing"),
+  );
+  expect(selected.count).toBe(2);
+  expect(selected.get("left")).toBe(1);
+  expect(selected.has("unset")).toBe(true);
+  expect(selected.get("unset", "missing")).toBeUndefined();
+  expect(selectKeys(null, ["left"])).toBe(EMPTY_MAP);
+
+  const valueKey = persistentVector("same");
+  const equalValueKey = persistentVector("same");
+  const merged = mergeData(
+    null,
+    { left: 1, overwritten: 1 },
+    new Map([["right", 2], ["overwritten", 3]]),
+  );
+  expect(merged.count).toBe(3);
+  expect(merged.get("overwritten")).toBe(3);
+  const combined = mergeWith(
+    (left, right) => left + right,
+    new Map([[valueKey, 2], ["unset", undefined]]),
+    new Map([[equalValueKey, 5], ["unset", 7]]),
+  );
+  expect(combined.count).toBe(2);
+  expect(combined.get(persistentVector("same"))).toBe(7);
+  expect(combined.get("unset")).toBeNaN();
+  expect(() => mergeWith(null, merged)).toThrow(
+    "mergeWith combine function must be a function",
+  );
+  expect(() => mergeData([["too", "many", "values"]])).toThrow(
+    "data entries must contain exactly one key/value pair",
+  );
+
+  const zipped = zipmap(
+    source(persistentVector("k"), "second", "unused"),
+    source(10, 20),
+  );
+  expect(zipped.count).toBe(2);
+  expect(zipped.get(persistentVector("k"))).toBe(10);
+  expect(zipped.get("second")).toBe(20);
+  expect(zipmap(null, [1, 2])).toBe(EMPTY_MAP);
+});
+
 test("indexBy uses a transient HAMT builder at scale", () => {
   const size = 50_000;
   const values = Array.from({ length: size }, (_, value) => value);
@@ -648,6 +763,14 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect([...usage.grouped.get(0)]).toEqual([0, 2, 4]);
     expect(usage.counted.get(1)).toBe(2);
     expect(usage.frequencies_result.get(1)).toBe(3);
+    expect(usage.nested_value).toBe(5);
+    expect(usage.updated_result.get("visits")).toBe(3);
+    expect(usage.selected_result.count).toBe(1);
+    expect(usage.selected_result.get("right")).toBe(2);
+    expect(usage.merged_result.get("overwritten")).toBe(3);
+    expect(usage.combined_result.get("hits")).toBe(7);
+    expect(usage.zipped_result.count).toBe(2);
+    expect(usage.zipped_result.get("b")).toBe(20);
 
     const generatedUsage = await readFile(usageModule, "utf8");
     expect(generatedUsage).toContain("first_even");
@@ -821,6 +944,7 @@ test("protocol standard-library algorithms agree under Bun and Node", async () =
     grouped: [[0, 2, 4], [1, 3]],
     counted: [3, 2],
     frequencies: [3, 2, 1],
+    associative: [5, 2, 3, 2, 7, 10, 20, 2],
   };
   expect(await runHost(process.execPath)).toEqual(expected);
   expect(await runHost(process.env.NODE_BINARY ?? "node")).toEqual(expected);
@@ -892,6 +1016,7 @@ test("stable protocol and core algorithms build as one project across Bun and No
       transformed: [4, 6, 4],
       mapped: [2, 3, 4, 3],
       frequencies: [1, 2, 1],
+      data: [5, 3, 2],
       text: ["lis", "1-2-3-2"],
       object: [10, 20],
     };

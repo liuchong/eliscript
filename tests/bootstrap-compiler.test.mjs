@@ -293,6 +293,14 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
       ["stdlib/core/data.eli", [
         "function collect_buckets(key_function, collection, create_bucket, update_bucket)",
         "function index_by(key_function, collection)",
+        "function get_in(collection, path, not_found = null)",
+        "function assoc_in(collection, path, value)",
+        "function update(collection, key, transform, ...arguments$)",
+        "function update_in(collection, path, transform, ...arguments$)",
+        "function select_keys(collection, keys)",
+        "function merge(...collections)",
+        "function merge_with(combine, ...collections)",
+        "function zipmap(keys, values)",
       ]],
       ["examples/emacs-index/index.eli", [
         "import {count_by} from \"../../stdlib/data.eli\";",

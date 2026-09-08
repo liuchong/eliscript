@@ -24,10 +24,17 @@ import {
   takeWhile,
 } from "../../runtime/core/sequence.mjs";
 import {
+  assocIn,
   countBy,
   frequencies,
+  getIn,
   groupBy,
   indexBy,
+  merge,
+  mergeWith,
+  selectKeys,
+  updateIn,
+  zipmap,
 } from "../../runtime/core/data.mjs";
 import { persistentVector } from "../../runtime/core/vector.mjs";
 
@@ -36,6 +43,20 @@ const indexed = indexBy((value) => value % 3, values);
 const grouped = groupBy((value) => value % 2, values);
 const counted = countBy((value) => value % 2, values);
 const counts = frequencies(persistentVector(1, 2, 1, 3, 2, 1));
+const nested = updateIn(
+  assocIn(null, ["profile", "visits"], 1),
+  ["profile", "visits"],
+  (value, amount) => value + amount,
+  4,
+);
+const selected = selectKeys({ left: 1, right: 2 }, ["right"]);
+const merged = merge({ left: 1 }, { left: 3, right: 2 });
+const combined = mergeWith(
+  (left, right) => left + right,
+  { hits: 2 },
+  { hits: 5 },
+);
+const zipped = zipmap(["a", "b", "unused"], [10, 20]);
 
 console.log(JSON.stringify({
   reverse: [...reverse(values)],
@@ -68,4 +89,14 @@ console.log(JSON.stringify({
   grouped: [[...grouped.get(0)], [...grouped.get(1)]],
   counted: [counted.get(0), counted.get(1)],
   frequencies: [counts.get(1), counts.get(2), counts.get(3)],
+  associative: [
+    getIn(nested, ["profile", "visits"]),
+    selected.get("right"),
+    merged.get("left"),
+    merged.get("right"),
+    combined.get("hits"),
+    zipped.get("a"),
+    zipped.get("b"),
+    zipped.count,
+  ],
 }));

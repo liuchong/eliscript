@@ -1,43 +1,52 @@
 (module eliscript.core.data
-  (import "../../runtime/core/collection.mjs" reduce)
+  (import "../../runtime/core/collection.mjs" :as Collection)
   (import "../../runtime/core/map.mjs" EMPTY_MAP)
   (import "../../runtime/core/transducer.mjs" into)
-  (import "../../runtime/core/transient.mjs"
-          assocBang persistentBang transient)
+  (import "../../runtime/core/transient.mjs" assocBang persistentBang transient)
   (import "../../runtime/core/vector.mjs" EMPTY_VECTOR)
-
   (defconst missing-value (js-object))
-
-  (defun require-function (value label)
+  (defun require-function
+    (value label)
     (if (= (value-type value) "function")
-        value
+      value
       (throw (new globalThis/TypeError (str label " must be a function")))))
-
+  (defun nullish? (value) (or (eq value nil) (eq value globalThis/undefined)))
+  (defun path-vector (path) (into EMPTY_VECTOR path))
+  (defun read-entry
+    (entry)
+    (if (= (Collection/count entry) 2)
+      (js-object :key (Collection/nth entry 0) :value (Collection/nth entry 1))
+      (throw
+        (new
+          globalThis/TypeError
+          "data entries must contain exactly one key/value pair"))))
   (defun collect-buckets
-      (key-function collection create-bucket update-bucket)
+    (key-function collection create-bucket update-bucket)
     (require-function key-function "data key function")
-    (let ((bucket-index EMPTY_MAP)
-          (keys (js-array))
-          (buckets (js-array)))
-      (reduce
+    (let ((bucket-index EMPTY_MAP) (keys (js-array)) (buckets (js-array)))
+      (Collection/reduce
         collection
-        (lambda (result value)
-          (let* ((key (funcall key-function value))
-                 (index (js-call bucket-index :get key missing-value)))
+        (lambda
+          (result value)
+          (let*
+            ((key (funcall key-function value))
+              (index (js-call bucket-index :get key missing-value)))
             (if (eq index missing-value)
-                (progn
-                  (setq index (js-length keys)
-                        bucket-index (js-call bucket-index :assoc key index))
-                  (js-call keys :push key)
-                  (js-call buckets :push (funcall create-bucket value)))
+              (progn
+                (setq
+                  index
+                  (js-length keys)
+                  bucket-index
+                  (js-call bucket-index :assoc key index))
+                (js-call keys :push key)
+                (js-call buckets :push (funcall create-bucket value)))
               (funcall update-bucket buckets index value))
             result))
         nil)
       (js-object :keys keys :buckets buckets)))
-
-  (defun persistent-map-from-buckets (keys buckets finish-bucket)
-    (let ((result (transient EMPTY_MAP))
-          (index 0))
+  (defun persistent-map-from-buckets
+    (keys buckets finish-bucket)
+    (let ((result (transient EMPTY_MAP)) (index 0))
       (while (< index (js-length keys))
         (assocBang
           result
@@ -45,44 +54,194 @@
           (funcall finish-bucket (js-nth index buckets)))
         (setq index (1+ index)))
       (persistentBang result)))
-
-  (defun index-by (key-function collection)
+  (defun index-by
+    (key-function collection)
     (require-function key-function "indexBy key function")
     (let ((result (transient EMPTY_MAP)))
-      (reduce
+      (Collection/reduce
         collection
-        (lambda (builder value)
+        (lambda
+          (builder value)
           (assocBang builder (funcall key-function value) value)
           builder)
         result)
       (persistentBang result)))
-
-  (defun group-by (key-function collection)
-    (let* ((grouped
-            (collect-buckets
-              key-function
-              collection
-              (lambda (value) (js-array value))
-              (lambda (buckets index value)
-                (js-call (js-nth index buckets) :push value))))
-           (keys (get grouped :keys))
-           (buckets (get grouped :buckets)))
+  (defun group-by
+    (key-function collection)
+    (let*
+      (
+        (grouped
+          (collect-buckets
+            key-function
+            collection
+            (lambda (value) (js-array value))
+            (lambda (buckets index value) (js-call (js-nth index buckets) :push value))))
+        (keys (get grouped :keys))
+        (buckets (get grouped :buckets)))
       (persistent-map-from-buckets
-        keys buckets (lambda (values) (into EMPTY_VECTOR values)))))
-
-  (defun count-by (key-function collection)
-    (let* ((counted
-            (collect-buckets
-              key-function
-              collection
-              (lambda (_value) 1)
-              (lambda (counts index _value)
-                (put counts index (1+ (js-nth index counts))))))
-           (keys (get counted :keys))
-           (buckets (get counted :buckets)))
+        keys
+        buckets
+        (lambda (values) (into EMPTY_VECTOR values)))))
+  (defun count-by
+    (key-function collection)
+    (let*
+      (
+        (counted
+          (collect-buckets
+            key-function
+            collection
+            (lambda (_value) 1)
+            (lambda (counts index _value) (put counts index (1+ (js-nth index counts))))))
+        (keys (get counted :keys))
+        (buckets (get counted :buckets)))
       (persistent-map-from-buckets keys buckets (lambda (count) count))))
-
-  (defun frequencies (collection)
-    (count-by (lambda (value) value) collection))
-
-  (export count-by frequencies group-by index-by))
+  (defun frequencies (collection) (count-by (lambda (value) value) collection))
+  (defun get-in
+    (collection path &optional not-found)
+    (let*
+      ((keys (path-vector path))
+        (size (Collection/count keys))
+        (index 0)
+        (current collection))
+      (while (and (< index size) (not (nullish? current)))
+        (setq
+          current
+          (Collection/get current (Collection/nth keys index) missing-value))
+        (if (eq current missing-value) (setq index size) (setq index (1+ index))))
+      (if (or (eq current missing-value) (and (< index size) (nullish? current)))
+        not-found
+        current)))
+  (defun assoc-in
+    (collection path value)
+    (let* ((keys (path-vector path)) (size (Collection/count keys)))
+      (if (= size 0)
+        value
+        (let ((parents (js-array)) (current collection) (index 0))
+          (while (< index (1- size))
+            (js-call parents :push current)
+            (if (nullish? current)
+              (setq current EMPTY_MAP)
+              (let
+                (
+                  (child
+                    (Collection/get current (Collection/nth keys index) missing-value)))
+                (setq
+                  current
+                  (if (or (eq child missing-value) (nullish? child)) EMPTY_MAP child))))
+            (setq index (1+ index)))
+          (let
+            (
+              (result
+                (Collection/assoc
+                  (if (nullish? current) EMPTY_MAP current)
+                  (Collection/nth keys (1- size))
+                  value)))
+            (setq index (- size 2))
+            (while (>= index 0)
+              (setq
+                current
+                (js-nth index parents)
+                result
+                (Collection/assoc
+                  (if (nullish? current) EMPTY_MAP current)
+                  (Collection/nth keys index)
+                  result)
+                index
+                (1- index)))
+            result)))))
+  (defun update
+    (collection key transform &rest arguments)
+    (require-function transform "update transform")
+    (let ((target (if (nullish? collection) EMPTY_MAP collection)))
+      (Collection/assoc
+        target
+        key
+        (apply transform (js-cons (Collection/get target key) arguments)))))
+  (defun update-in
+    (collection path transform &rest arguments)
+    (require-function transform "updateIn transform")
+    (assoc-in
+      collection
+      path
+      (apply transform (js-cons (get-in collection path) arguments))))
+  (defun select-keys
+    (collection keys)
+    (let ((result (transient EMPTY_MAP)))
+      (Collection/reduce
+        keys
+        (lambda
+          (builder key)
+          (when (and (not (nullish? collection)) (Collection/contains collection key))
+            (assocBang builder key (Collection/get collection key)))
+          builder)
+        result)
+      (persistentBang result)))
+  (defun merge
+    (&rest collections)
+    (let ((result (transient EMPTY_MAP)) (index 0))
+      (while (< index (js-length collections))
+        (Collection/reduce
+          (js-nth index collections)
+          (lambda
+            (builder entry)
+            (let ((pair (read-entry entry)))
+              (assocBang builder (get pair :key) (get pair :value)))
+            builder)
+          result)
+        (setq index (1+ index)))
+      (persistentBang result)))
+  (defun merge-with
+    (combine &rest collections)
+    (require-function combine "mergeWith combine function")
+    (let ((result EMPTY_MAP) (index 0))
+      (while (< index (js-length collections))
+        (setq
+          result
+          (Collection/reduce
+            (js-nth index collections)
+            (lambda
+              (current entry)
+              (let*
+                ((pair (read-entry entry))
+                  (key (get pair :key))
+                  (value (get pair :value)))
+                (Collection/assoc
+                  current
+                  key
+                  (if (Collection/contains current key)
+                    (funcall combine (Collection/get current key) value)
+                    value))))
+            result)
+          index
+          (1+ index)))
+      result))
+  (defun zipmap
+    (keys values)
+    (let*
+      ((key-vector (path-vector keys))
+        (value-vector (path-vector values))
+        (key-count (Collection/count key-vector))
+        (value-count (Collection/count value-vector))
+        (size (if (< key-count value-count) key-count value-count))
+        (result (transient EMPTY_MAP))
+        (index 0))
+      (while (< index size)
+        (assocBang
+          result
+          (Collection/nth key-vector index)
+          (Collection/nth value-vector index))
+        (setq index (1+ index)))
+      (persistentBang result)))
+  (export
+    assoc-in
+    count-by
+    frequencies
+    get-in
+    group-by
+    index-by
+    merge
+    merge-with
+    select-keys
+    update
+    update-in
+    zipmap))

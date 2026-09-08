@@ -40,7 +40,7 @@ function escapeHtml(value) {
 test("generated library API index matches every declared module and export", async () => {
   const index = await buildApiIndex({ root: ROOT });
   expect(index.moduleCount).toBe(29);
-  expect(index.exportCount).toBe(330);
+  expect(index.exportCount).toBe(338);
   expect(index.modules.find(({ module }) => module === "persistent-vector")).toEqual({
     module: "persistent-vector",
     source: "stdlib/persistent-vector.eli",

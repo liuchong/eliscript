@@ -388,7 +388,8 @@ algorithms through Lisp-named Eliscript modules:
 ```elisp
 (import "../../stdlib/core/seq.eli"
         distinct map mapcat partition-all reductions)
-(import "../../stdlib/core/data.eli" group-by frequencies)
+(import "../../stdlib/core/data.eli"
+        assoc-in get-in group-by frequencies merge-with select-keys zipmap)
 ```
 
 Sequence transforms accept any `IReduce` source and return persistent Vectors.
@@ -396,9 +397,11 @@ The maintained vocabulary includes indexed mapping/keeping, prefix and sampled
 selection, interposition, adjacent and global deduplication, mapcat,
 partitioning, and intermediate reduction history.
 Keyed-data transforms return value-semantic persistent Maps, with persistent
-Vector group values. Searches and bounded transforms use reduced values for
-early termination, while grouping and indexing use owner-token builders for
-final construction.
+Vector group values. Nested associative reads and updates preserve existing
+container shapes and create persistent Maps for missing levels. Selection,
+plain merge, and zipping use owner-token builders; combining merge retains
+value-semantic prior-value lookup. Searches and bounded transforms use reduced
+values for early termination.
 
 These modules intentionally import `runtime/core/*.mjs` and are not yet
 eligible for portable closure extraction. They are the language-level entry
