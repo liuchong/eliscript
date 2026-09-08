@@ -34,15 +34,15 @@ The registry currently contains 145 specifications.
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 25 |
-| Stable design | 118 |
+| Accepted design | 17 |
+| Stable design | 126 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
 | Implemented | 141 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 118 specifications as stable,
-23 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 126 specifications as stable,
+15 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -171,7 +171,7 @@ core inventory, checked local links, and five executable examples. Specification
 0138 adds canonical machine-readable and human-readable acceptance artifacts,
 five evidence summaries, a blocking-defect gate, and deterministic rejection
 of forged final results. Application and publishing documentation remains
-outside the core gate. AC-24 and final acceptance remain open because 13
+outside the core gate. AC-24 and final acceptance remain open because 11
 mandatory criteria are still incomplete.
 
 Post-M13 verification now closes PD-01 through specification 0139. Its fixed
@@ -477,14 +477,14 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0130 | [Hostile Boundary Security](0130-hostile-boundary-security.md) | Stable | Implemented |
 | 0131 | [Source-bound Core Performance Baseline](0131-source-bound-core-performance-baseline.md) | Stable | Implemented |
 | 0132 | [Repository Dependency and Generated-artifact Audits](0132-repository-integrity-audits.md) | Stable | Implemented |
-| 0133 | [Verified Installation and Daily Development Guide](0133-verified-onboarding-documentation.md) | Accepted | Implemented |
-| 0134 | [Versioned Core Acceptance Corpus and Truthful Audit Run](0134-versioned-core-acceptance-corpus.md) | Accepted | Implemented |
-| 0135 | [Traceable Local Onboarding Exercise](0135-local-onboarding.md) | Accepted | Implemented |
-| 0136 | [Local Compatibility Migration Rehearsal](0136-local-compatibility-migration-rehearsal.md) | Accepted | Implemented |
-| 0137 | [Complete Core Documentation Set](0137-complete-core-documentation.md) | Accepted | Implemented |
-| 0138 | [Versioned Final Acceptance Artifacts](0138-versioned-final-acceptance-artifacts.md) | Accepted | Implemented |
-| 0139 | [Deterministic Persistent Semantics Corpus](0139-deterministic-persistent-semantics-corpus.md) | Accepted | Implemented |
-| 0140 | [Clean Configured Project Workflow](0140-clean-configured-project-workflow.md) | Accepted | Implemented |
+| 0133 | [Verified Installation and Daily Development Guide](0133-verified-onboarding-documentation.md) | Stable | Implemented |
+| 0134 | [Versioned Core Acceptance Corpus and Truthful Audit Run](0134-versioned-core-acceptance-corpus.md) | Stable | Implemented |
+| 0135 | [Traceable Local Onboarding Exercise](0135-local-onboarding.md) | Stable | Implemented |
+| 0136 | [Local Compatibility Migration Rehearsal](0136-local-compatibility-migration-rehearsal.md) | Stable | Implemented |
+| 0137 | [Complete Core Documentation Set](0137-complete-core-documentation.md) | Stable | Implemented |
+| 0138 | [Versioned Final Acceptance Artifacts](0138-versioned-final-acceptance-artifacts.md) | Stable | Implemented |
+| 0139 | [Deterministic Persistent Semantics Corpus](0139-deterministic-persistent-semantics-corpus.md) | Stable | Implemented |
+| 0140 | [Clean Configured Project Workflow](0140-clean-configured-project-workflow.md) | Stable | Implemented |
 | 0141 | [Repeated Core Determinism Evidence](0141-repeated-core-determinism.md) | Stable | Implemented |
 | 0142 | [Maintained JavaScript Package Interop Fixture](0142-maintained-javascript-package-interop.md) | Accepted | Implemented |
 | 0143 | [Complete Negative Diagnostic Corpus](0143-complete-negative-diagnostic-corpus.md) | Stable | Implemented |

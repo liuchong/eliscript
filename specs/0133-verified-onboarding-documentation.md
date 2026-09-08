@@ -1,6 +1,6 @@
 # 0133: Verified Installation and Daily Development Guide
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-08
 - Depends on: 0106 Versioned Project Request Configuration,
@@ -102,6 +102,15 @@ make check-contracts
 The first command validates the versioned documentation contract. The second
 runs contract rejection and the real temporary-project workflow. The third
 includes documentation validation in the default repository contract gate.
+
+## Compatibility Freeze
+
+The version 2 guide contract, ordered workflow sections, required public
+commands, repository entry points, temporary-project execution path, and
+core/application evidence boundary are stable. Explanatory prose and
+additional troubleshooting may improve compatibly, but maintained commands
+may not silently change meaning and an application workflow may not replace
+any required core step.
 
 ## Acceptance Criteria
 

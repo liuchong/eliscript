@@ -1,6 +1,6 @@
 # 0135: Traceable Local Onboarding Exercise
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-08
 - Depends on: 0040 Project Maturity Roadmap and 1.0 Acceptance Contract,
@@ -113,6 +113,15 @@ bun tools/onboarding/check.mjs \
   and identify the exact local source revision.
 - **CMO-08:** Failed, incomplete, dirty, over-budget, or
   application-contaminated evidence cannot complete M13-02 or AC-22.
+
+## Compatibility Freeze
+
+The local provider identity, six ordered steps, frozen dependency installation,
+900,000 millisecond active-step budget, tracked-cleanliness requirements,
+source and command digests, byte-exact human report, and core/application test
+partition are stable. Additional recorded metadata may be additive, but it may
+not weaken a step, hide a failure, substitute a hosted runner, or count
+application execution toward this exercise.
 
 ## Retained Run
 

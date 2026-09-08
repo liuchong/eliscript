@@ -1,6 +1,6 @@
 # 0140: Clean Configured Project Workflow
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-08
 - Depends on: 0106 Versioned Project Request Configuration,
@@ -70,6 +70,15 @@ disables cache reuse. Relative configuration paths resolve from the
 configuration directory; relative command-line paths resolve from the current
 working directory. The maintained guide states this rule and the integration
 test proves the entry, root, output, and cache cases in one invocation.
+
+## Compatibility Freeze
+
+The version 2 canonical project, public format/check/build/watch sequence,
+read-only check behavior, standard ESM outputs, command-line precedence and
+path-resolution rules, owned watch shutdown, source restoration, and bounded
+temporary-state cleanup are stable. Additional workflow stages may be added
+compatibly, but existing commands may not mutate checked source, leak artifacts
+outside the configured boundary, or reverse explicit-over-config precedence.
 
 ## Acceptance Criteria
 

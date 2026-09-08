@@ -1,6 +1,6 @@
 # 0136: Local Compatibility Migration Rehearsal
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-08
 - Depends on: 0040 Project Maturity Roadmap and 1.0 Acceptance Contract,
@@ -94,6 +94,15 @@ bun tools/compatibility/rehearse.mjs \
   all results and source artifacts to one exact local revision.
 - **CMR-07:** Machine and human reports are mutually verified and cannot claim
   completion of AC-02.
+
+## Compatibility Freeze
+
+The version 1 transition schema, ordered migration inventory, dual-compiler
+artifact comparison, Bun and Node execution checks, legacy diagnostic parity,
+cache migration, local provenance, and explicit `completesAc02: false`
+boundary are stable. Future transitions may be added deliberately, but an
+existing transition cannot disappear without replacement evidence and this
+rehearsal cannot be reinterpreted as the complete final compatibility corpus.
 
 ## Retained Run
 

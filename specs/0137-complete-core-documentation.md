@@ -1,6 +1,6 @@
 # 0137: Complete Core Documentation Set
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-08
 - Depends on: 0040 Project Maturity Roadmap and 1.0 Acceptance Contract,
@@ -85,6 +85,15 @@ all eleven documents. The maintained test suite checks the positive inventory,
 rejects broken links and changed executable behavior, rejects application
 substitution, and executes the complete checkout onboarding path through public
 commands and the Emacs mode.
+
+## Compatibility Freeze
+
+The version 2 eleven-document inventory, documentation-hub reachability,
+ordered required sections, local-link containment, marked executable-snippet
+contract, exact expected outputs, and application exclusion are stable. New
+documents and examples may be added compatibly, but none of the required
+categories may be removed, redirected outside the repository, or satisfied by
+non-executable application material.
 
 ## Acceptance Criteria
 

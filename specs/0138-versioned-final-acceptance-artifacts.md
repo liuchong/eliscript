@@ -1,6 +1,6 @@
 # 0138: Versioned Final Acceptance Artifacts
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-08
 - Depends on: 0040 Project Maturity Roadmap and 1.0 Acceptance Contract,
@@ -76,6 +76,15 @@ bun tools/acceptance/finalize.mjs --verify --require-pass
 Generation and verification run directly in the local checkout. The stronger
 `--require-pass` command intentionally fails until the complete 1.0 gate is
 actually reached.
+
+## Compatibility Freeze
+
+The version 1 final-manifest format, canonical output paths, source-run and
+report binding, five evidence groups, unresolved-defect schema, severity 1 and
+2 blocking rule, derived gate calculation, byte-exact report, and
+non-contributing application projection are stable. Stabilizing this mechanism
+does not assert that its current result passes; `acceptancePass` remains wholly
+derived and cannot be set independently.
 
 ## Acceptance Criteria
 

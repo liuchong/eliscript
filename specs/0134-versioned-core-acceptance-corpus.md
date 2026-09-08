@@ -1,6 +1,6 @@
 # 0134: Versioned Core Acceptance Corpus and Truthful Audit Run
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-08
 - Depends on: 0040 Project Maturity Roadmap and 1.0 Acceptance Contract,
@@ -109,18 +109,24 @@ bun tools/acceptance/check.mjs --verify-run acceptance/runs/m13-01.json \
   --verify-markdown acceptance/runs/m13-01.md
 ```
 
-## Current Retained Run
+## Retained Run Contract
 
-The retained JSON and Markdown pair records its exact source commit and Git
-tree. The current run uses macOS arm64 with Bun 1.4.0, Node 26.8.1, and Emacs
-31.1. Both the core suite and strict byte compilation pass, and the checkout
-remains clean before and after the probes.
+The retained JSON and Markdown pair records its exact source commit, Git tree,
+environment, criterion totals, commands, and artifact digests. Those values
+belong to the generated run and are deliberately not duplicated as normative
+constants in this specification. The default contract gate verifies the
+current pair under `acceptance/runs/` and preserves incomplete criteria and
+non-contributing application results exactly as recorded.
 
-All 35 mandatory criteria receive a result: 21 pass, 14 remain incomplete, and
-none fail. `corpusComplete` and `operationalSuccess` are true while
-`acceptancePass` is false. AV-01 and AV-02 are explicitly `not-run` and remain
-non-contributing. The exact command and artifact digests are retained under
-`acceptance/runs/` and verified by the default contract gate.
+## Compatibility Freeze
+
+The version 1 corpus and run formats, normative-heading derivation, complete
+criterion inventory, bounded probe mapping, source and environment provenance,
+three-way separation of corpus completeness, operational success, and final
+acceptance, byte-exact Markdown rendering, and stronger `--require-pass` gate
+are stable. New mandatory criteria or probes require an explicit contract
+revision; no compatible change may reinterpret `incomplete` as `pass` or admit
+application evidence into a core result.
 
 ## Acceptance Criteria
 

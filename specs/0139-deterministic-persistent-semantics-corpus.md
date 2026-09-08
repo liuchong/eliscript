@@ -1,6 +1,6 @@
 # 0139: Deterministic Persistent Semantics Corpus
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-08
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
@@ -103,6 +103,15 @@ bun run fuzz:persistent-semantics
 
 Reduced sequence counts and single-sequence replay are diagnostic modes. They
 set `acceptanceEligible` to false and cannot satisfy PD-01.
+
+## Compatibility Freeze
+
+The version 1 xorshift seed derivation, family order, 100,000 sequences per
+family, eight updates per sequence, operation and observer inventory, retained
+history checks, scalar and collision semantics, frozen SHA-256 identities,
+Bun/Node equality, bounded diagnostics, and acceptance-eligibility rule are
+stable. Diagnostic replay remains compatible, but a reduced corpus can never
+stand in for the frozen PD-01 run.
 
 ## Acceptance Criteria
 
