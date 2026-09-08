@@ -87,7 +87,10 @@ The top-level schema is closed. Every unknown key rejects with `ELI-B0002`,
 phase `project-config`, and a stable key-bearing message. Unsupported schema
 versions, malformed JSON, duplicate top-level keys, invalid field types,
 duplicate portable entries, and unsafe paths also fail through that structured
-diagnostic category. No field is silently ignored.
+diagnostic category. Configuration parsing preserves every top-level object
+entry before validation on every supported Emacs release, so duplicate-key
+rejection does not depend on host parser replacement behavior. No field is
+silently ignored, and non-whitespace content after the JSON value is rejected.
 
 ## Command-line Precedence
 

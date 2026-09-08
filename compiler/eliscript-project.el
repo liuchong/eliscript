@@ -191,6 +191,18 @@ FILENAME and KEY identify invalid values in diagnostics."
      filename "%s must be a contained relative path" key))
   (expand-file-name value directory))
 
+(defun eliscript-project--read-configuration-json ()
+  "Read one JSON value while preserving every object entry."
+  (let ((json-object-type 'alist)
+        (json-array-type 'list)
+        (json-key-type 'symbol)
+        (json-null :null)
+        (json-false :false))
+    (prog1 (json-read)
+      (skip-chars-forward " \t\r\n")
+      (unless (eobp)
+        (signal 'json-error '("trailing content after JSON value"))))))
+
 (defun eliscript-project-read-configuration (filename)
   "Read and validate a versioned project request from FILENAME."
   (let* ((expanded (expand-file-name filename))
@@ -205,10 +217,8 @@ FILENAME and KEY identify invalid values in diagnostics."
         (with-temp-buffer
           (insert-file-contents canonical)
           (setq configuration
-                (json-parse-buffer
-                 :object-type 'alist :array-type 'list
-                 :null-object :null :false-object :false)))
-      (json-parse-error
+                (eliscript-project--read-configuration-json)))
+      (error
        (eliscript-project--configuration-fail
         canonical "invalid JSON: %s" (error-message-string error-data))))
     (unless (and (listp configuration)

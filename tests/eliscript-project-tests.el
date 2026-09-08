@@ -667,6 +667,8 @@
               "unsupported schemaVersion: 3")
              ("{\"schemaVersion\":1,\"entry\":\"first.eli\",\"entry\":\"second.eli\",\"outDir\":\"build\"}"
               "duplicate configuration key: entry")
+             ("{\"schemaVersion\":1,\"entry\":\"main.eli\",\"outDir\":\"build\"} trailing"
+              "invalid JSON:")
              ("{\"schemaVersion\":1,\"sourceRoot\":\"../src\",\"entry\":\"main.eli\",\"outDir\":\"build\"}"
               "sourceRoot must be a contained relative path")
              ("{\"schemaVersion\":1,\"entry\":\"main.eli\",\"outDir\":\"build\",\"portableEntries\":[\"work\",\"work\"]}"
