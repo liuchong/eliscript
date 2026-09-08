@@ -54,7 +54,7 @@ identifier begins with one of:
 bootstrap. compiler. language. macro. portable. project.
 ```
 
-There are currently 61 such features. A newly stable feature in one of these
+There are currently 62 such features. A newly stable feature in one of these
 domains makes the corpus stale until its source behavior is included in the
 shared fixtures or an existing bound parity test and the corpus identity is
 reviewed again.
@@ -71,7 +71,7 @@ The maintained shared fixtures contain:
 | Reader | 21 | 16 |
 | Expander | 37 | 16 |
 | Analyzer | 30 | 57 |
-| IR and emission | 27 | 0 |
+| IR and emission | 28 | 0 |
 
 The fixtures include every compiler module as a file-backed case. The IR
 fixture reaches the complete public node-kind vocabulary, while the negative

@@ -29,19 +29,19 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 147 specifications.
+The registry currently contains 148 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
 | Accepted design | 3 |
-| Stable design | 142 |
+| Stable design | 143 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 143 |
+| Implemented | 144 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 142 specifications as stable,
+Compatibility Baseline 2 separately classifies 143 specifications as stable,
 1 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
@@ -163,7 +163,7 @@ formal acceptance work.
 M13 has completed all 5/5 implementation units through specification 0138. Its
 versioned corpus derives all 35 mandatory AC/PD criteria from normative
 headings, maps each criterion to bounded probes and tracked evidence, and
-retains one clean audit with 24 pass, 11 incomplete, and zero failed criteria.
+retains one clean audit with 25 pass, 10 incomplete, and zero failed criteria.
 The final acceptance flag remains false. Specification 0135 records the local,
 source-bound onboarding exercise for M13-02 with all six steps passing within
 the active-step budget. Specification 0136 records the passing direct local
@@ -187,11 +187,11 @@ AC-07 proof as twenty direct local compiler builds and complete core acceptance
 executions with one versioned identity. Retained run `m13-04` completes the
 criterion with twenty clean, operational, identity-equivalent executions.
 Specification 0146 closes AC-05 with a source-bound compiler parity corpus over
-61 stable compiler-relevant features, 115 valid fixtures, 89 diagnostics, all
+62 stable compiler-relevant features, 116 valid fixtures, 89 diagnostics, all
 13 bootstrap modules, all 57 public IR kinds, and seven observable parity
 dimensions. Ten mandatory criteria remain incomplete.
-Specification 0147 derives a complete stable compatibility corpus over 140
-stable core features, 538 evidence locators, 67 core fixtures, and all three
+Specification 0147 derives a complete stable compatibility corpus over 141
+stable core features, 542 evidence locators, 68 core fixtures, and all three
 migration records. It keeps AC-02 incomplete while the final core feature
 remains provisional.
 
@@ -504,7 +504,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0145 | [Language Value Equality](0145-language-value-equality.md) | Stable | Implemented |
 | 0146 | [Complete Compiler Parity Corpus](0146-complete-compiler-parity-corpus.md) | Stable | Implemented |
 | 0147 | [Complete Stable Compatibility Corpus](0147-complete-stable-compatibility-corpus.md) | Stable | Implemented |
-| 0148 | [Map Binding Patterns](0148-map-binding-patterns.md) | Accepted | Implemented |
+| 0148 | [Map Binding Patterns](0148-map-binding-patterns.md) | Stable | Implemented |
 
 ## Adding a Specification
 

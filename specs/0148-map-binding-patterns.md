@@ -1,6 +1,6 @@
 # 0148: Map Binding Patterns
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-09
 - Depends on: 0036 Function Parameters, 0039 Vector Binding Patterns,
@@ -88,3 +88,7 @@ unsupported explicit lookup keys.
 - **MBP-05:** Invalid directives and targets fail during lexical analysis.
 - **MBP-06:** `:keys`, qualified `:keys`, `:strs`, and `:syms` preserve local
   names and lookup-key identity across native objects and persistent maps.
+
+All six criteria are part of the stable compatibility contract. Compatible
+extensions may add new directives, but existing lookup, default, evaluation,
+diagnostic, and local-name behavior cannot change silently.
