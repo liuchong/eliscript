@@ -180,7 +180,10 @@ sequences for each persistent collection family, freezes exact semantic
 summaries, and proves every retained older version unchanged after later
 updates. Specification 0140 closes AC-08 through one clean configured project
 workflow covering public format-check, check, build, standard ESM execution,
-watch lifecycle, and command-line precedence.
+watch lifecycle, and command-line precedence. Specification 0141 defines the
+remaining AC-07 proof as twenty direct local compiler builds and complete core
+acceptance executions with one versioned identity. The qualifying retained run
+is still pending, so AC-07 remains incomplete.
 
 ## Reading Paths
 
@@ -482,6 +485,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0138 | [Versioned Final Acceptance Artifacts](0138-versioned-final-acceptance-artifacts.md) | Accepted | Implemented |
 | 0139 | [Deterministic Persistent Semantics Corpus](0139-deterministic-persistent-semantics-corpus.md) | Accepted | Implemented |
 | 0140 | [Clean Configured Project Workflow](0140-clean-configured-project-workflow.md) | Accepted | Implemented |
+| 0141 | [Repeated Core Determinism Evidence](0141-repeated-core-determinism.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

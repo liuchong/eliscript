@@ -31,6 +31,7 @@ test-core: check-contracts
 		tests/core-performance-benchmark.test.mjs \
 		tests/maturity-progress.test.mjs \
 		tests/core-acceptance-corpus.test.mjs \
+		tests/repeated-determinism.test.mjs \
 		tests/final-acceptance.test.mjs \
 		tests/esm-imports.test.mjs \
 		tests/ci-contract.test.mjs \

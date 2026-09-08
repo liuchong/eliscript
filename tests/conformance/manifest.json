@@ -2362,6 +2362,30 @@
           "contains": "onboarding guide covers every maintained workflow and failure class"
         }
       ]
+    },
+    {
+      "id": "quality.repeated-core-determinism",
+      "title": "Repeated core determinism evidence",
+      "status": "accepted",
+      "spec": "0141",
+      "contracts": [
+        "Builds the self-hosted compiler and executes the complete core acceptance corpus exactly twenty times from one clean source identity",
+        "Computes one stable identity from declared compiler artifacts and an allow-listed core acceptance projection",
+        "Excludes timing temporary paths and command presentation observations structurally through a versioned schema",
+        "Retains locally verifiable machine-readable and human-readable evidence without hosted services or application frameworks"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/repeated-determinism.test.mjs",
+          "contains": "twenty identical clean runs satisfy the versioned local contract"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/repeated-determinism.test.mjs",
+          "contains": "identity, cleanliness, and projection drift are rejected"
+        }
+      ]
     }
   ]
 }
