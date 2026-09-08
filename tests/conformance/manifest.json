@@ -587,7 +587,7 @@
     {
       "id": "runtime.protocol-dispatch-core",
       "title": "Open protocol dispatch core",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0058",
       "contracts": ["Dispatches through direct slots, exact types, host categories, and explicit defaults", "Keeps protocol metadata immutable and extension registries private", "Migrates persistent value equality and hashing onto IEquiv and IHash", "Allows external immutable value types without prototype mutation"],
       "evidence": [
@@ -603,7 +603,7 @@
     {
       "id": "runtime.collection-capability-protocols",
       "title": "Collection capability protocols and reduction foundation",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0059",
       "contracts": ["Dispatches count, lookup, indexed access, sequence views, and reduction through open protocols", "Installs direct persistent collection capabilities and prototype-preserving native adapters", "Represents traversal as replayable immutable sequence views with frozen Map entries", "Supports explicit reduced values for exact early termination"],
       "evidence": [
@@ -619,7 +619,7 @@
     {
       "id": "runtime.collection-construction-protocols",
       "title": "Collection construction protocols",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0060",
       "contracts": ["Constructs persistent and native collection values through empty and conj protocols", "Updates associative keys and tests key presence without representation checks", "Supports truthful operation-level partial protocols for Set membership", "Bounds Map entry validation and preserves every source collection"],
       "evidence": [
@@ -636,7 +636,7 @@
     {
       "id": "runtime.collection-transducers",
       "title": "Composable transducers and protocol-driven into",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0061",
       "contracts": ["Composes destination-independent mapping, filtering, and bounded taking in one reduction", "Completes reducing functions exactly once and reuses transducers with fresh run state", "Constructs targets through empty, conj, and reduce protocols", "Traverses one million generated values without intermediate persistent collections"],
       "evidence": [
@@ -654,7 +654,7 @@
     {
       "id": "runtime.owner-token-transient-collections",
       "title": "Owner-token transient collections",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0062",
       "contracts": ["Shares persistent roots until an owner-selected path is updated", "Implements truthful transient Vector, Map, and Set capabilities with deterministic invalidation", "Preserves HAMT collisions, layout transitions, and every committed owner generation", "Uses transient builders in into with bounded million-value allocation"],
       "evidence": [
@@ -672,7 +672,7 @@
     {
       "id": "stdlib.protocol-driven-core-algorithms",
       "title": "Protocol-driven core sequence and data algorithms",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0063",
       "contracts": ["Uses Eliscript truth semantics over arbitrary IReduce sources", "Returns value-semantic persistent Vector and Map results", "Terminates searches and bounded transforms through reduced values", "Uses transient builders for indexed and grouped data construction"],
       "evidence": [
@@ -712,13 +712,14 @@
     {
       "id": "stdlib.eliscript-core-protocol-algorithms",
       "title": "Eliscript-authored core protocol surface and algorithms",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0066",
       "contracts": ["Exposes protocol, collection, transducer, and transient APIs from Eliscript modules", "Maintains sequence and keyed-data algorithm bodies in Eliscript", "Maps strict binding declarations and references consistently", "Matches self-hosted artifacts and executes under Bun and Node"],
       "evidence": [
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-symbol-mapping-avoids-strict-mode-bindings" },
         { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "Eliscript core modules compile and execute against runtime protocols" },
-        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "stable core protocol library builds as one project and executes under Bun and Node" }
       ]
     },
     {

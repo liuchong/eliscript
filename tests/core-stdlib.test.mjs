@@ -92,6 +92,54 @@ async function runHost(command) {
   return JSON.parse(await runSuccessful([command, HOST_FIXTURE]));
 }
 
+async function runBuiltCoreProjectHost(command, outputRoot) {
+  const moduleUrl = (name) => JSON.stringify(pathToFileURL(
+    resolve(outputRoot, `core/${name}.mjs`),
+  ).href);
+  const runtimeUrl = JSON.stringify(pathToFileURL(
+    resolve(ROOT, "runtime/core/vector.mjs"),
+  ).href);
+  const source = [
+    `const protocol = await import(${moduleUrl("protocol")});`,
+    `const collection = await import(${moduleUrl("collection")});`,
+    `const transient = await import(${moduleUrl("transient")});`,
+    `const transducer = await import(${moduleUrl("transducer")});`,
+    `const sequence = await import(${moduleUrl("seq")});`,
+    `const data = await import(${moduleUrl("data")});`,
+    `const vector = await import(${runtimeUrl});`,
+    "const named = protocol.define_protocol('Named', ['name']);",
+    "protocol.extend_protocol_category(named, 'number',",
+    "  { name: (value) => `n:${value}` });",
+    "const name = protocol.protocol_method(named, 'name');",
+    "const sourceValues = vector.persistentVector(1, 2, 3, 2);",
+    "const builder = transient.transient(vector.EMPTY_VECTOR);",
+    "transient.conj_BANG_(builder, 4, 5);",
+    "const built = transient.persistent_BANG_(builder);",
+    "const transformed = transducer.into(",
+    "  vector.EMPTY_VECTOR,",
+    "  transducer.compose_transducers(",
+    "    transducer.mapping((value) => value * 2),",
+    "    transducer.filtering((value) => value > 3)),",
+    "  sourceValues);",
+    "const mapped = sequence.map((value) => value + 1, sourceValues);",
+    "const counts = data.frequencies(sourceValues);",
+    "console.log(JSON.stringify({",
+    "  protocol: name(7),",
+    "  count: collection.collection_count(sourceValues),",
+    "  built: [...built],",
+    "  transformed: [...transformed],",
+    "  mapped: [...mapped],",
+    "  frequencies: [counts.get(1), counts.get(2), counts.get(3)],",
+    "}));",
+  ].join("\n");
+  return JSON.parse(await runSuccessful([
+    command,
+    "--input-type=module",
+    "--eval",
+    source,
+  ]));
+}
+
 test("sequence algorithms use protocols and Eliscript truthiness", () => {
   class Range {
     constructor(start, end, observe = () => {}) {
@@ -410,3 +458,60 @@ test("protocol standard-library algorithms agree under Bun and Node", async () =
   expect(await runHost(process.execPath)).toEqual(expected);
   expect(await runHost(process.env.NODE_BINARY ?? "node")).toEqual(expected);
 });
+
+test("stable core protocol library builds as one project and executes under Bun and Node", async () => {
+  const directory = await mkdtemp(resolve(ROOT, ".eliscript-core-project-"));
+  const outputRoot = resolve(directory, "stdlib");
+  const sources = [
+    "protocol",
+    "collection",
+    "transient",
+    "transducer",
+    "seq",
+    "data",
+  ].map((name) => resolve(ROOT, `stdlib/core/${name}.eli`));
+  try {
+    await symlink(resolve(ROOT, "runtime"), resolve(directory, "runtime"), "dir");
+    const report = JSON.parse(await runSuccessful([
+      resolve(ROOT, "bin/eliscript-build"),
+      "--json",
+      "--root",
+      resolve(ROOT, "stdlib"),
+      "--out-dir",
+      outputRoot,
+      "--no-cache",
+      ...sources,
+    ]));
+    expect(report).toMatchObject({
+      format: "eliscript-build-report",
+      version: 2,
+      mode: "standard",
+      entries: [
+        "core/collection.eli",
+        "core/data.eli",
+        "core/protocol.eli",
+        "core/seq.eli",
+        "core/transducer.eli",
+        "core/transient.eli",
+      ],
+      counts: { modules: 6, compiled: 6, reused: 0 },
+      cache: { enabled: false, status: "disabled", reason: "cache-disabled" },
+    });
+    const expected = {
+      protocol: "n:7",
+      count: 4,
+      built: [4, 5],
+      transformed: [4, 6, 4],
+      mapped: [2, 3, 4, 3],
+      frequencies: [1, 2, 1],
+    };
+    expect(await runBuiltCoreProjectHost(process.execPath, outputRoot))
+      .toEqual(expected);
+    expect(await runBuiltCoreProjectHost(
+      process.env.NODE_BINARY ?? "node",
+      outputRoot,
+    )).toEqual(expected);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 60_000);

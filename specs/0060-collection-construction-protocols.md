@@ -1,6 +1,6 @@
 # 0060: Collection Construction Protocols
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
@@ -175,11 +175,11 @@ reducing transformations and optimized target builders.
 
 ## Compatibility and Limits
 
-The construction protocols are provisional during M8. Existing concrete
-methods and JavaScript-style native APIs remain available. Eliscript literals
-and `stdlib/sequence.eli` still use their current representations until the
-portable compiler and standard library can invoke protocols with seed and
-self-hosted parity.
+The construction protocols are stable in Compatibility Baseline 2. Existing
+concrete methods and JavaScript-style native APIs remain available. Eliscript
+literals and `stdlib/sequence.eli` keep their current representations; any
+future migration is a separate contract and cannot silently change these
+operations.
 
 Subsequent P2 slices now provide generic algorithms, transducers,
 transient-backed `into`, owner-token invalidation, Eliscript-authored protocol

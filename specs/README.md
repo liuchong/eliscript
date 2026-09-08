@@ -34,15 +34,15 @@ The registry currently contains 145 specifications.
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 108 |
-| Stable design | 35 |
+| Accepted design | 101 |
+| Stable design | 42 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
 | Implemented | 141 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 35 specifications as stable,
-106 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 42 specifications as stable,
+99 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -402,15 +402,15 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0055 | [Eliscript-authored Persistent HAMT Map](0055-eliscript-persistent-map.md) | Accepted | Implemented |
 | 0056 | [Eliscript-authored Persistent Map-backed Set](0056-eliscript-persistent-set.md) | Accepted | Implemented |
 | 0057 | [Portable Value Semantics Core](0057-portable-value-semantics.md) | Accepted | Implemented |
-| 0058 | [Open Protocol Dispatch Core](0058-open-protocol-dispatch.md) | Accepted | Implemented |
-| 0059 | [Collection Capability Protocols and Reduction Foundation](0059-collection-capability-protocols.md) | Accepted | Implemented |
-| 0060 | [Collection Construction Protocols](0060-collection-construction-protocols.md) | Accepted | Implemented |
-| 0061 | [Composable Transducers and Protocol-driven Into](0061-composable-transducers.md) | Accepted | Implemented |
-| 0062 | [Owner-token Transient Collections](0062-owner-token-transient-collections.md) | Accepted | Implemented |
-| 0063 | [Protocol-driven Core Sequence and Data Algorithms](0063-protocol-driven-core-algorithms.md) | Accepted | Implemented |
+| 0058 | [Open Protocol Dispatch Core](0058-open-protocol-dispatch.md) | Stable | Implemented |
+| 0059 | [Collection Capability Protocols and Reduction Foundation](0059-collection-capability-protocols.md) | Stable | Implemented |
+| 0060 | [Collection Construction Protocols](0060-collection-construction-protocols.md) | Stable | Implemented |
+| 0061 | [Composable Transducers and Protocol-driven Into](0061-composable-transducers.md) | Stable | Implemented |
+| 0062 | [Owner-token Transient Collections](0062-owner-token-transient-collections.md) | Stable | Implemented |
+| 0063 | [Protocol-driven Core Sequence and Data Algorithms](0063-protocol-driven-core-algorithms.md) | Stable | Implemented |
 | 0064 | [Stack-safe Loop and Recur](0064-stack-safe-loop-recur.md) | Accepted | Implemented |
 | 0065 | [Deterministic Macro-generated Names and Capture Rules](0065-deterministic-macro-generated-names.md) | Accepted | Implemented |
-| 0066 | [Eliscript-authored Core Protocol Surface and Algorithms](0066-eliscript-authored-core-protocol-algorithms.md) | Accepted | Implemented |
+| 0066 | [Eliscript-authored Core Protocol Surface and Algorithms](0066-eliscript-authored-core-protocol-algorithms.md) | Stable | Implemented |
 | 0067 | [First-class Keyword and Symbol Values](0067-first-class-keyword-symbol-values.md) | Accepted | Implemented |
 | 0068 | [Immutable Metadata Semantics](0068-immutable-metadata-semantics.md) | Accepted | Implemented |
 | 0069 | [Canonical Runtime Data Text](0069-canonical-runtime-data-text.md) | Accepted | Implemented |

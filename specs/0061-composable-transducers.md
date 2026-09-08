@@ -1,6 +1,6 @@
 # 0061: Composable Transducers and Protocol-driven Into
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-29
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
@@ -196,10 +196,10 @@ purity.
 
 ## Compatibility and Limits
 
-This runtime surface is provisional during M8. It does not change existing
-Eliscript literal emission or the array-backed `stdlib/sequence.eli` API.
-Portable Eliscript protocol calls and language-authored transducer definitions
-remain later P2 work.
+This runtime surface is stable in Compatibility Baseline 2. It does not change
+existing Eliscript literal emission or the array-backed `stdlib/sequence.eli`
+API. Portable closure extraction remains a separate value-only contract and
+does not weaken the runtime transducer semantics defined here.
 
 `removing` and `dropping` were added with the maintained sequence algorithms in
 [0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md).

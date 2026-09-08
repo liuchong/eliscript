@@ -1,6 +1,6 @@
 # 0059: Collection Capability Protocols and Reduction Foundation
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
@@ -166,11 +166,11 @@ omitted when counting by traversal is acceptable.
 
 ## Compatibility and Limits
 
-This collection runtime surface is provisional during M8. It does not change
-current Eliscript literal emission or the older array-backed
+This collection runtime surface is stable in Compatibility Baseline 2. It does
+not change current Eliscript literal emission or the older array-backed
 `stdlib/sequence.eli` contract. Migrating that library requires protocol-call
 support in portable Eliscript and dual-compiler evidence, so it remains a
-separate P2 construction step.
+separate contract rather than an implicit change to these capabilities.
 
 Subsequent P2 slices now provide construction protocols, owner-token
 transients, generic algorithms, transducers, Eliscript-authored protocol

@@ -1,6 +1,6 @@
 # 0066: Eliscript-authored Core Protocol Surface and Algorithms
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0058 Open Protocol Dispatch Core,
@@ -94,9 +94,12 @@ sources, exact early termination, and a 50,000-key transient Map build.
 
 ## Compatibility and Limits
 
-This M8 surface is provisional. Existing public JavaScript runtime modules
-remain supported, and the earlier portable Array/Object-oriented standard
-library remains unchanged.
+This language-level core surface is stable in Compatibility Baseline 2.
+Existing public JavaScript runtime modules remain supported, and the earlier
+portable Array/Object-oriented standard library remains unchanged. Public
+module names, exports, argument conventions, and observable failure semantics
+cannot change incompatibly without a superseding specification and migration
+fixture.
 
 The new modules are Eliscript-authored but are not eligible for `--portable`
 closure extraction because they use JavaScript runtime values and host
@@ -109,6 +112,22 @@ remains later work. Specification 0091 adds the versioned data-only protocol
 definition and isolated local import path, while 0093 closes static transient
 ownership analysis; executable protocol state remains deliberately
 non-transportable.
+
+## Stabilization Evidence
+
+The default core suite verifies every lower-level protocol, collection,
+transducer, and transient contract directly. It also compiles these six
+Eliscript modules as one version 2 multi-entry project through the public
+`eliscript-build` command, executes the generated modules under Bun and Node,
+and checks representative behavior across all six module boundaries.
+
+The generated library API index owns the exact public export inventory. The
+project-level test complements the existing source-import fixture, direct
+runtime suites, seed/self-hosted byte-parity checks, Source Map checks,
+million-value traversal, HAMT collision, transient invalidation, and
+allocation-bound evidence. These modules are runtime-core modules and are
+therefore deliberately ineligible for portable closure extraction; that
+ineligibility is an explicit host-capability boundary, not missing evidence.
 
 ## Acceptance Criteria
 
@@ -136,6 +155,9 @@ non-transportable.
   transducer, transient, standard-library, contract, CLI, default-test, and
   strict byte-compilation suites remain green. No application framework is a
   core dependency or acceptance prerequisite.
+- **ECA-12:** The six language-level core modules build together through the
+  public multi-entry project command and execute with identical representative
+  results under Bun and Node.
 
 ## Follow-up
 

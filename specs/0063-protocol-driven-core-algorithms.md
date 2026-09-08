@@ -1,6 +1,6 @@
 # 0063: Protocol-driven Core Sequence and Data Algorithms
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0059 Collection Capability Protocols and Reduction Foundation,
@@ -116,10 +116,10 @@ depends on JavaScript engine warmup, garbage collection, and callback cost.
 
 ## Compatibility and Limits
 
-This surface is provisional during M8. It adds no collection literal rewrite
-and does not change the earlier portable sequence/data APIs. Existing native
-Array, Map, Set, null, persistent collections, and externally extended
-`IReduce` values remain valid sources.
+This surface is stable in Compatibility Baseline 2. It adds no collection
+literal rewrite and does not change the earlier portable sequence/data APIs.
+Existing native Array, Map, Set, null, persistent collections, and externally
+extended `IReduce` values remain valid sources.
 
 This slice does not add lazy sequences, `mapcat`, partitioning, sorting,
 comparison, text/object protocol migration, async reduction, metadata, or

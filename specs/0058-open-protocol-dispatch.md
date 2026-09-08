@@ -1,6 +1,6 @@
 # 0058: Open Protocol Dispatch Core
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
@@ -197,10 +197,12 @@ application and Emacs acceleration acceptance work in 0040 and 0041.
 ## Compatibility and Limits
 
 The protocol module, dispatch order, public exports, diagnostic fields, and
-`IEquiv`/`IHash` extension API are provisional during M8. Existing frozen
-equality and hash outputs do not change.
+`IEquiv`/`IHash` extension API are stable in Compatibility Baseline 2.
+Existing frozen equality and hash outputs do not change. An incompatible
+dispatch, extension, or diagnostic change requires a superseding
+specification and compatibility fixture.
 
-Open items include:
+Possible extensions outside this stable surface include:
 
 - transient protocols; the collection capability and construction sets are
   specified by [0059-collection-capability-protocols.md](0059-collection-capability-protocols.md)

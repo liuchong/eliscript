@@ -1,6 +1,6 @@
 # 0062: Owner-token Transient Collections
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-29
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
@@ -148,10 +148,11 @@ load.
 
 ## Compatibility and Limits
 
-This surface is provisional during M8. It does not change literal emission or
-the Eliscript-authored collection modules under `stdlib/`. The runtime owner
-algorithms establish the executable reference behavior that a later portable
-implementation can match.
+This surface is stable in Compatibility Baseline 2. It does not change literal
+emission or the Eliscript-authored collection modules under `stdlib/`. The
+runtime owner algorithms are the authoritative behavior for owner-token
+builders; another implementation must match this contract rather than alter
+it implicitly.
 
 This slice does not add transient List, pop, metadata, async-safe ownership,
 module-export analysis, host conversion, or transient extension tables for
