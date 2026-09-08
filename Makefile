@@ -30,6 +30,7 @@ test-core: check-contracts
 		tests/project-scale.test.mjs \
 		tests/core-performance-benchmark.test.mjs \
 		tests/maturity-progress.test.mjs \
+		tests/diagnostic-corpus.test.mjs \
 		tests/core-acceptance-corpus.test.mjs \
 		tests/repeated-determinism.test.mjs \
 		tests/final-acceptance.test.mjs \
@@ -102,6 +103,7 @@ test-applications:
 check-contracts:
 	$(BUN) tools/conformance/check.mjs
 	$(BUN) tools/progress/check.mjs
+	$(BUN) tools/diagnostics/check.mjs
 ifneq ($(ELISCRIPT_SKIP_RETAINED_ACCEPTANCE),1)
 	$(BUN) tools/acceptance/check.mjs \
 		--verify-run acceptance/runs/m13-01.json \

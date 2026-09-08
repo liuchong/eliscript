@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { diagnosticCorpusSuite } from "../tools/diagnostics/check.mjs";
+
 const projectDirectory = resolve(import.meta.dir, "..");
 const fixturePath = resolve(
   projectDirectory,
@@ -15,6 +17,11 @@ const oraclePath = resolve(
   "tests/bootstrap-expander-oracle.el",
 );
 const emacs = process.env.EMACS ?? "emacs";
+const diagnosticCorpus = await Bun.file(resolve(
+  projectDirectory,
+  "contracts/diagnostic-corpus.json",
+)).json();
+const diagnosticCases = diagnosticCorpusSuite(diagnosticCorpus, "expander").cases;
 
 async function run(command, options) {
   const child = Bun.spawn(command, {
@@ -85,30 +92,6 @@ function generatedResult(reader, expander, testCase, source) {
   }
 }
 
-function expectDiagnostic(testCase, result) {
-  const match = /^(.*):(\d+):(\d+): (.*)$/s.exec(testCase.error);
-  expect(match).not.toBeNull();
-  expect(result).toMatchObject({
-    status: "error",
-    message: testCase.error,
-    diagnostic: {
-      format: "eliscript-diagnostic",
-      version: 1,
-      code: "ELI-X0001",
-      severity: "error",
-      phase: "expansion",
-      message: match[4],
-      location: {
-        file: match[1],
-        start: {
-          line: Number(match[2]),
-          column: Number(match[3]),
-        },
-      },
-    },
-  });
-}
-
 test("bootstrapped expander matches seed syntax, spans, and diagnostics", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "eliscript-expander-"));
   try {
@@ -140,9 +123,14 @@ test("bootstrapped expander matches seed syntax, spans, and diagnostics", async 
     }
 
     expect(generated).toEqual(await seedResults());
-    fixture.invalid.forEach((testCase, index) => {
-      expectDiagnostic(testCase, generated[fixture.valid.length + index]);
-    });
+    expect(generated.slice(fixture.valid.length)).toEqual(
+      diagnosticCases.map((entry) => ({
+        name: entry.name,
+        status: "error",
+        message: entry.human,
+        diagnostic: entry.diagnostic,
+      })),
+    );
     for (const result of generated.slice(0, fixture.valid.length)) {
       expect(() => analyzer.analyze_module(result.forms, result.name))
         .not.toThrow();

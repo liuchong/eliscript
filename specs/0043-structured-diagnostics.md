@@ -140,3 +140,5 @@ public host entry points.
 - The reader, expander, and analyzer bootstrap suites prove exact seed and
   self-hosted diagnostic parity for all 89 maintained negative cases while the
   fixtures retain their exact historical human diagnostics.
+- Specification 0143 and `contracts/diagnostic-corpus.json` freeze the complete
+  ordered negative inventory and every full structured record, closing AC-03.

@@ -487,6 +487,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0140 | [Clean Configured Project Workflow](0140-clean-configured-project-workflow.md) | Accepted | Implemented |
 | 0141 | [Repeated Core Determinism Evidence](0141-repeated-core-determinism.md) | Stable | Implemented |
 | 0142 | [Maintained JavaScript Package Interop Fixture](0142-maintained-javascript-package-interop.md) | Accepted | Implemented |
+| 0143 | [Complete Negative Diagnostic Corpus](0143-complete-negative-diagnostic-corpus.md) | Stable | Implemented |
 
 ## Adding a Specification
 

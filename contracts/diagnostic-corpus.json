@@ -1,0 +1,2260 @@
+{
+  "schemaVersion": 1,
+  "format": "eliscript-diagnostic-corpus",
+  "version": 1,
+  "identity": "b352a36a4d6a3e3520a7c18ce5ef9c2edc59425a1dffe1902bf8861783730454",
+  "suites": [
+    {
+      "id": "reader",
+      "fixture": "tests/fixtures/bootstrap-reader.json",
+      "oracle": "tests/bootstrap-reader-oracle.el",
+      "validCaseCount": 21,
+      "negativeCaseCount": 16,
+      "cases": [
+        {
+          "name": "unclosed-list",
+          "human": "unclosed-list.eli:1:1: unexpected end of input",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "unexpected end of input",
+            "location": {
+              "file": "unclosed-list.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              }
+            }
+          }
+        },
+        {
+          "name": "unclosed-vector",
+          "human": "unclosed-vector.eli:1:1: unexpected end of input",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "unexpected end of input",
+            "location": {
+              "file": "unclosed-vector.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              }
+            }
+          }
+        },
+        {
+          "name": "unclosed-map",
+          "human": "unclosed-map.eli:1:1: unexpected end of input",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "unexpected end of input",
+            "location": {
+              "file": "unclosed-map.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              }
+            }
+          }
+        },
+        {
+          "name": "unclosed-set",
+          "human": "unclosed-set.eli:1:1: unexpected end of input",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "unexpected end of input",
+            "location": {
+              "file": "unclosed-set.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              }
+            }
+          }
+        },
+        {
+          "name": "odd-map",
+          "human": "odd-map.eli:1:1: map literal must contain an even number of forms",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "map literal must contain an even number of forms",
+            "location": {
+              "file": "odd-map.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 9,
+                "line": 1,
+                "column": 10
+              }
+            }
+          }
+        },
+        {
+          "name": "empty-keyword",
+          "human": "empty-keyword.eli:1:1: invalid keyword literal: :",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "invalid keyword literal: :",
+            "location": {
+              "file": "empty-keyword.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              }
+            }
+          }
+        },
+        {
+          "name": "ambiguous-keyword",
+          "human": "ambiguous-keyword.eli:1:1: invalid keyword literal: :one/two/three",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "invalid keyword literal: :one/two/three",
+            "location": {
+              "file": "ambiguous-keyword.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 14,
+                "line": 1,
+                "column": 15
+              }
+            }
+          }
+        },
+        {
+          "name": "unterminated-string",
+          "human": "string.eli:1:1: unexpected end of input",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "unexpected end of input",
+            "location": {
+              "file": "string.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              }
+            }
+          }
+        },
+        {
+          "name": "unexpected-close",
+          "human": "close.eli:1:1: Invalid read syntax: \")\"",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "Invalid read syntax: \")\"",
+            "location": {
+              "file": "close.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              }
+            }
+          }
+        },
+        {
+          "name": "unexpected-map-close",
+          "human": "map-close.eli:1:1: Invalid read syntax: \"}\"",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "Invalid read syntax: \"}\"",
+            "location": {
+              "file": "map-close.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              }
+            }
+          }
+        },
+        {
+          "name": "mismatched-close",
+          "human": "mismatch.eli:1:1: Invalid read syntax: \"]\"",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "Invalid read syntax: \"]\"",
+            "location": {
+              "file": "mismatch.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              }
+            }
+          }
+        },
+        {
+          "name": "map-mismatched-close",
+          "human": "map-mismatch.eli:1:1: Invalid read syntax: \")\"",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "Invalid read syntax: \")\"",
+            "location": {
+              "file": "map-mismatch.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              }
+            }
+          }
+        },
+        {
+          "name": "list-mismatched-map-close",
+          "human": "list-map-mismatch.eli:1:1: Invalid read syntax: \"}\"",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "Invalid read syntax: \"}\"",
+            "location": {
+              "file": "list-map-mismatch.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              }
+            }
+          }
+        },
+        {
+          "name": "missing-quoted-value",
+          "human": "quote.eli:1:1: unexpected end of input",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "unexpected end of input",
+            "location": {
+              "file": "quote.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              }
+            }
+          }
+        },
+        {
+          "name": "missing-function-value",
+          "human": "function.eli:1:1: unexpected end of input",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "unexpected end of input",
+            "location": {
+              "file": "function.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              }
+            }
+          }
+        },
+        {
+          "name": "unknown-dispatch",
+          "human": "dispatch.eli:1:1: Invalid read syntax: \"#f\"",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "Invalid read syntax: \"#f\"",
+            "location": {
+              "file": "dispatch.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "expander",
+      "fixture": "tests/fixtures/bootstrap-expander.json",
+      "oracle": "tests/bootstrap-expander-oracle.el",
+      "validCaseCount": 37,
+      "negativeCaseCount": 16,
+      "cases": [
+        {
+          "name": "missing-definition-shape",
+          "human": "missing.eli:1:1: defmacro expects a name and parameter list",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "defmacro expects a name and parameter list",
+            "location": {
+              "file": "missing.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 20,
+                "line": 1,
+                "column": 21
+              }
+            }
+          }
+        },
+        {
+          "name": "non-symbol-name",
+          "human": "name.eli:1:1: macro name must be a symbol: \"wrong\"",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "macro name must be a symbol: \"wrong\"",
+            "location": {
+              "file": "name.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 23,
+                "line": 1,
+                "column": 24
+              }
+            }
+          }
+        },
+        {
+          "name": "non-list-parameters",
+          "human": "parameters-list.eli:1:1: macro parameters must be a list: [value]",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "macro parameters must be a list: [value]",
+            "location": {
+              "file": "parameters-list.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 30,
+                "line": 1,
+                "column": 31
+              }
+            }
+          }
+        },
+        {
+          "name": "non-symbol-parameter",
+          "human": "parameter.eli:1:1: macro parameters must be symbols: (value 1)",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "macro parameters must be symbols: (value 1)",
+            "location": {
+              "file": "parameter.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 32,
+                "line": 1,
+                "column": 33
+              }
+            }
+          }
+        },
+        {
+          "name": "duplicate-definition",
+          "human": "duplicate.eli:2:1: duplicate macro definition: once",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "duplicate macro definition: once",
+            "location": {
+              "file": "duplicate.eli",
+              "start": {
+                "offset": 30,
+                "line": 2,
+                "column": 1
+              },
+              "end": {
+                "offset": 59,
+                "line": 2,
+                "column": 30
+              }
+            }
+          }
+        },
+        {
+          "name": "nested-definition",
+          "human": "nested.eli:2:3: defmacro is only valid at module top level",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "defmacro is only valid at module top level",
+            "location": {
+              "file": "nested.eli",
+              "start": {
+                "offset": 19,
+                "line": 2,
+                "column": 3
+              },
+              "end": {
+                "offset": 41,
+                "line": 2,
+                "column": 25
+              }
+            }
+          }
+        },
+        {
+          "name": "nested-portable-function",
+          "human": "portable-nested.eli:2:3: defportable is only valid at module top level",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "defportable is only valid at module top level",
+            "location": {
+              "file": "portable-nested.eli",
+              "start": {
+                "offset": 19,
+                "line": 2,
+                "column": 3
+              },
+              "end": {
+                "offset": 44,
+                "line": 2,
+                "column": 28
+              }
+            }
+          }
+        },
+        {
+          "name": "macro-failure",
+          "human": "failure.eli:3:1: macro boom failed: bad expansion",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "macro boom failed: bad expansion",
+            "location": {
+              "file": "failure.eli",
+              "start": {
+                "offset": 44,
+                "line": 3,
+                "column": 1
+              },
+              "end": {
+                "offset": 50,
+                "line": 3,
+                "column": 7
+              }
+            }
+          }
+        },
+        {
+          "name": "host-function-escape",
+          "human": "host.eli:2:1: macro host-value failed: unsupported macro function: getenv",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "macro host-value failed: unsupported macro function: getenv",
+            "location": {
+              "file": "host.eli",
+              "start": {
+                "offset": 41,
+                "line": 2,
+                "column": 1
+              },
+              "end": {
+                "offset": 53,
+                "line": 2,
+                "column": 13
+              }
+            }
+          }
+        },
+        {
+          "name": "macro-argument-arity",
+          "human": "arity.eli:2:1: macro pair failed: wrong number of arguments for pair",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "macro pair failed: wrong number of arguments for pair",
+            "location": {
+              "file": "arity.eli",
+              "start": {
+                "offset": 50,
+                "line": 2,
+                "column": 1
+              },
+              "end": {
+                "offset": 58,
+                "line": 2,
+                "column": 9
+              }
+            }
+          }
+        },
+        {
+          "name": "gensym-prefix-type",
+          "human": "gensym-type.eli:2:1: macro broken failed: gensym prefix must be a symbol or string",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "macro broken failed: gensym prefix must be a symbol or string",
+            "location": {
+              "file": "gensym-type.eli",
+              "start": {
+                "offset": 32,
+                "line": 2,
+                "column": 1
+              },
+              "end": {
+                "offset": 40,
+                "line": 2,
+                "column": 9
+              }
+            }
+          }
+        },
+        {
+          "name": "gensym-arity",
+          "human": "gensym-arity.eli:2:1: macro broken failed: gensym expects 0..1 arguments",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "macro broken failed: gensym expects 0..1 arguments",
+            "location": {
+              "file": "gensym-arity.eli",
+              "start": {
+                "offset": 45,
+                "line": 2,
+                "column": 1
+              },
+              "end": {
+                "offset": 53,
+                "line": 2,
+                "column": 9
+              }
+            }
+          }
+        },
+        {
+          "name": "gensym-invalid-prefix",
+          "human": "gensym-prefix.eli:2:1: macro broken failed: invalid gensym prefix: not/portable",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "macro broken failed: invalid gensym prefix: not/portable",
+            "location": {
+              "file": "gensym-prefix.eli",
+              "start": {
+                "offset": 45,
+                "line": 2,
+                "column": 1
+              },
+              "end": {
+                "offset": 53,
+                "line": 2,
+                "column": 9
+              }
+            }
+          }
+        },
+        {
+          "name": "gensym-reserved-prefix",
+          "human": "gensym-reserved.eli:2:1: macro broken failed: invalid gensym prefix: __eliscript_private",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "macro broken failed: invalid gensym prefix: __eliscript_private",
+            "location": {
+              "file": "gensym-reserved.eli",
+              "start": {
+                "offset": 52,
+                "line": 2,
+                "column": 1
+              },
+              "end": {
+                "offset": 60,
+                "line": 2,
+                "column": 9
+              }
+            }
+          }
+        },
+        {
+          "name": "incomplete-rest-parameter",
+          "human": "rest.eli:1:1: invalid macro parameter list",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "invalid macro parameter list",
+            "location": {
+              "file": "rest.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 30,
+                "line": 1,
+                "column": 31
+              }
+            }
+          }
+        },
+        {
+          "name": "runaway-expansion",
+          "human": "runaway.eli:2:1: macro expansion exceeded 100 steps near forever",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "macro expansion exceeded 100 steps near forever",
+            "location": {
+              "file": "runaway.eli",
+              "start": {
+                "offset": 45,
+                "line": 2,
+                "column": 1
+              },
+              "end": {
+                "offset": 56,
+                "line": 2,
+                "column": 12
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "analyzer",
+      "fixture": "tests/fixtures/bootstrap-analyzer.json",
+      "oracle": "tests/bootstrap-analyzer-oracle.el",
+      "validCaseCount": 30,
+      "negativeCaseCount": 57,
+      "cases": [
+        {
+          "name": "transient-across-await",
+          "human": "await.eli:1:131: transient binding builder cannot remain active across await",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "transient binding builder cannot remain active across await",
+            "location": {
+              "file": "await.eli",
+              "start": {
+                "offset": 130,
+                "line": 1,
+                "column": 131
+              },
+              "end": {
+                "offset": 145,
+                "line": 1,
+                "column": 146
+              }
+            }
+          }
+        },
+        {
+          "name": "transient-module-export",
+          "human": "export.eli:1:92: transient binding builder cannot be exported",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "transient binding builder cannot be exported",
+            "location": {
+              "file": "export.eli",
+              "start": {
+                "offset": 91,
+                "line": 1,
+                "column": 92
+              },
+              "end": {
+                "offset": 98,
+                "line": 1,
+                "column": 99
+              }
+            }
+          }
+        },
+        {
+          "name": "transient-after-persistent",
+          "human": "consumed.eli:1:155: transient binding builder is no longer editable after persistent!",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "transient binding builder is no longer editable after persistent!",
+            "location": {
+              "file": "consumed.eli",
+              "start": {
+                "offset": 154,
+                "line": 1,
+                "column": 155
+              },
+              "end": {
+                "offset": 161,
+                "line": 1,
+                "column": 162
+              }
+            }
+          }
+        },
+        {
+          "name": "transient-closure-capture",
+          "human": "closure.eli:1:132: transient binding builder cannot cross a function boundary",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "transient binding builder cannot cross a function boundary",
+            "location": {
+              "file": "closure.eli",
+              "start": {
+                "offset": 131,
+                "line": 1,
+                "column": 132
+              },
+              "end": {
+                "offset": 138,
+                "line": 1,
+                "column": 139
+              }
+            }
+          }
+        },
+        {
+          "name": "transient-conditional-completion",
+          "human": "maybe.eli:1:174: transient binding builder may already be persistent after conditional control flow",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "transient binding builder may already be persistent after conditional control flow",
+            "location": {
+              "file": "maybe.eli",
+              "start": {
+                "offset": 173,
+                "line": 1,
+                "column": 174
+              },
+              "end": {
+                "offset": 180,
+                "line": 1,
+                "column": 181
+              }
+            }
+          }
+        },
+        {
+          "name": "transient-loop-completion",
+          "human": "loop.eli:1:155: transient binding builder cannot be completed inside a repeated loop",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "transient binding builder cannot be completed inside a repeated loop",
+            "location": {
+              "file": "loop.eli",
+              "start": {
+                "offset": 154,
+                "line": 1,
+                "column": 155
+              },
+              "end": {
+                "offset": 161,
+                "line": 1,
+                "column": 162
+              }
+            }
+          }
+        },
+        {
+          "name": "unbound-transient-constructor-result",
+          "human": "construct.eli:1:72: transient result must be bound directly to one symbol",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "transient result must be bound directly to one symbol",
+            "location": {
+              "file": "construct.eli",
+              "start": {
+                "offset": 71,
+                "line": 1,
+                "column": 72
+              },
+              "end": {
+                "offset": 89,
+                "line": 1,
+                "column": 90
+              }
+            }
+          }
+        },
+        {
+          "name": "transient-update-as-value",
+          "human": "update-value.eli:1:122: transient update result cannot be used as an ordinary value",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "transient update result cannot be used as an ordinary value",
+            "location": {
+              "file": "update-value.eli",
+              "start": {
+                "offset": 121,
+                "line": 1,
+                "column": 122
+              },
+              "end": {
+                "offset": 138,
+                "line": 1,
+                "column": 139
+              }
+            }
+          }
+        },
+        {
+          "name": "indirect-transient-operation",
+          "human": "indirect.eli:1:84: transient operation Runtime/transient must be called directly",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "transient operation Runtime/transient must be called directly",
+            "location": {
+              "file": "indirect.eli",
+              "start": {
+                "offset": 83,
+                "line": 1,
+                "column": 84
+              },
+              "end": {
+                "offset": 100,
+                "line": 1,
+                "column": 101
+              }
+            }
+          }
+        },
+        {
+          "name": "uncertain-transient-in-catch",
+          "human": "try-transient.eli:1:190: transient binding builder may already be persistent after conditional control flow",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "transient binding builder may already be persistent after conditional control flow",
+            "location": {
+              "file": "try-transient.eli",
+              "start": {
+                "offset": 189,
+                "line": 1,
+                "column": 190
+              },
+              "end": {
+                "offset": 196,
+                "line": 1,
+                "column": 197
+              }
+            }
+          }
+        },
+        {
+          "name": "recur-outside-target",
+          "human": "recur-outside.eli:1:1: recur is only valid inside a function or loop",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "recur is only valid inside a function or loop",
+            "location": {
+              "file": "recur-outside.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 9,
+                "line": 1,
+                "column": 10
+              }
+            }
+          }
+        },
+        {
+          "name": "parallel-loop-initializer-scope",
+          "human": "loop-parallel.eli:1:17: unbound symbol: x",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "unbound symbol: x",
+            "location": {
+              "file": "loop-parallel.eli",
+              "start": {
+                "offset": 16,
+                "line": 1,
+                "column": 17
+              },
+              "end": {
+                "offset": 17,
+                "line": 1,
+                "column": 18
+              }
+            }
+          }
+        },
+        {
+          "name": "recur-not-tail-position",
+          "human": "recur-nontail.eli:1:24: recur is only valid in tail position",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "recur is only valid in tail position",
+            "location": {
+              "file": "recur-nontail.eli",
+              "start": {
+                "offset": 23,
+                "line": 1,
+                "column": 24
+              },
+              "end": {
+                "offset": 32,
+                "line": 1,
+                "column": 33
+              }
+            }
+          }
+        },
+        {
+          "name": "recur-function-arity",
+          "human": "recur-function-arity.eli:1:23: recur expects 2 arguments for the current function, got 1",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "recur expects 2 arguments for the current function, got 1",
+            "location": {
+              "file": "recur-function-arity.eli",
+              "start": {
+                "offset": 22,
+                "line": 1,
+                "column": 23
+              },
+              "end": {
+                "offset": 31,
+                "line": 1,
+                "column": 32
+              }
+            }
+          }
+        },
+        {
+          "name": "recur-loop-arity",
+          "human": "recur-loop-arity.eli:1:21: recur expects 2 arguments for the current loop, got 1",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "recur expects 2 arguments for the current loop, got 1",
+            "location": {
+              "file": "recur-loop-arity.eli",
+              "start": {
+                "offset": 20,
+                "line": 1,
+                "column": 21
+              },
+              "end": {
+                "offset": 29,
+                "line": 1,
+                "column": 30
+              }
+            }
+          }
+        },
+        {
+          "name": "recur-crosses-try",
+          "human": "recur-try.eli:1:24: recur cannot cross a try boundary",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "recur cannot cross a try boundary",
+            "location": {
+              "file": "recur-try.eli",
+              "start": {
+                "offset": 23,
+                "line": 1,
+                "column": 24
+              },
+              "end": {
+                "offset": 32,
+                "line": 1,
+                "column": 33
+              }
+            }
+          }
+        },
+        {
+          "name": "loop-binding-without-initializer",
+          "human": "loop-binding.eli:1:8: loop bindings require exactly one initializer: (x)",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "loop bindings require exactly one initializer: (x)",
+            "location": {
+              "file": "loop-binding.eli",
+              "start": {
+                "offset": 7,
+                "line": 1,
+                "column": 8
+              },
+              "end": {
+                "offset": 10,
+                "line": 1,
+                "column": 11
+              }
+            }
+          }
+        },
+        {
+          "name": "nested-function-resets-recur-target",
+          "human": "recur-nested-function.eli:1:32: recur expects 1 arguments for the current function, got 2",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "recur expects 1 arguments for the current function, got 2",
+            "location": {
+              "file": "recur-nested-function.eli",
+              "start": {
+                "offset": 31,
+                "line": 1,
+                "column": 32
+              },
+              "end": {
+                "offset": 42,
+                "line": 1,
+                "column": 43
+              }
+            }
+          }
+        },
+        {
+          "name": "unbound-symbol",
+          "human": "unbound.eli:2:3: unbound symbol: missing",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "unbound symbol: missing",
+            "location": {
+              "file": "unbound.eli",
+              "start": {
+                "offset": 19,
+                "line": 2,
+                "column": 3
+              },
+              "end": {
+                "offset": 26,
+                "line": 2,
+                "column": 10
+              }
+            }
+          }
+        },
+        {
+          "name": "portable-ordinary-function",
+          "human": "portable-function.eli:2:23: portable function work depends on non-portable function: helper",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-P0001",
+            "severity": "error",
+            "phase": "portable-analysis",
+            "message": "portable function work depends on non-portable function: helper",
+            "location": {
+              "file": "portable-function.eli",
+              "start": {
+                "offset": 42,
+                "line": 2,
+                "column": 23
+              },
+              "end": {
+                "offset": 48,
+                "line": 2,
+                "column": 29
+              }
+            }
+          }
+        },
+        {
+          "name": "portable-mutable-state",
+          "human": "portable-state.eli:2:22: portable function work depends on non-portable variable: total",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-P0001",
+            "severity": "error",
+            "phase": "portable-analysis",
+            "message": "portable function work depends on non-portable variable: total",
+            "location": {
+              "file": "portable-state.eli",
+              "start": {
+                "offset": 38,
+                "line": 2,
+                "column": 22
+              },
+              "end": {
+                "offset": 43,
+                "line": 2,
+                "column": 27
+              }
+            }
+          }
+        },
+        {
+          "name": "portable-host-interop",
+          "human": "portable-host.eli:1:22: portable function work cannot use js* (raw JavaScript)",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-P0001",
+            "severity": "error",
+            "phase": "portable-analysis",
+            "message": "portable function work cannot use js* (raw JavaScript)",
+            "location": {
+              "file": "portable-host.eli",
+              "start": {
+                "offset": 21,
+                "line": 1,
+                "column": 22
+              },
+              "end": {
+                "offset": 39,
+                "line": 1,
+                "column": 40
+              }
+            }
+          }
+        },
+        {
+          "name": "parallel-let-scope",
+          "human": "let.eli:2:25: unbound symbol: value",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "unbound symbol: value",
+            "location": {
+              "file": "let.eli",
+              "start": {
+                "offset": 41,
+                "line": 2,
+                "column": 25
+              },
+              "end": {
+                "offset": 46,
+                "line": 2,
+                "column": 30
+              }
+            }
+          }
+        },
+        {
+          "name": "duplicate-parameter",
+          "human": "duplicate.eli:1:25: duplicate parameter binding: value",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "duplicate parameter binding: value",
+            "location": {
+              "file": "duplicate.eli",
+              "start": {
+                "offset": 24,
+                "line": 1,
+                "column": 25
+              },
+              "end": {
+                "offset": 29,
+                "line": 1,
+                "column": 30
+              }
+            }
+          }
+        },
+        {
+          "name": "duplicate-optional-marker",
+          "human": "parameters.eli:1:32: invalid function parameter list",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "invalid function parameter list",
+            "location": {
+              "file": "parameters.eli",
+              "start": {
+                "offset": 31,
+                "line": 1,
+                "column": 32
+              },
+              "end": {
+                "offset": 40,
+                "line": 1,
+                "column": 41
+              }
+            }
+          }
+        },
+        {
+          "name": "incomplete-rest-parameter",
+          "human": "parameters.eli:1:15: invalid function parameter list",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "invalid function parameter list",
+            "location": {
+              "file": "parameters.eli",
+              "start": {
+                "offset": 14,
+                "line": 1,
+                "column": 15
+              },
+              "end": {
+                "offset": 27,
+                "line": 1,
+                "column": 28
+              }
+            }
+          }
+        },
+        {
+          "name": "trailing-rest-parameter",
+          "human": "parameters.eli:1:33: invalid function parameter list",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "invalid function parameter list",
+            "location": {
+              "file": "parameters.eli",
+              "start": {
+                "offset": 32,
+                "line": 1,
+                "column": 33
+              },
+              "end": {
+                "offset": 37,
+                "line": 1,
+                "column": 38
+              }
+            }
+          }
+        },
+        {
+          "name": "body-function-parameter",
+          "human": "parameters.eli:1:16: invalid function parameter list",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "invalid function parameter list",
+            "location": {
+              "file": "parameters.eli",
+              "start": {
+                "offset": 15,
+                "line": 1,
+                "column": 16
+              },
+              "end": {
+                "offset": 20,
+                "line": 1,
+                "column": 21
+              }
+            }
+          }
+        },
+        {
+          "name": "top-level-await",
+          "human": "async.eli:1:1: await is only valid inside an async function",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "await is only valid inside an async function",
+            "location": {
+              "file": "async.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 15,
+                "line": 1,
+                "column": 16
+              }
+            }
+          }
+        },
+        {
+          "name": "synchronous-function-await",
+          "human": "async.eli:2:3: await is only valid inside an async function",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "await is only valid inside an async function",
+            "location": {
+              "file": "async.eli",
+              "start": {
+                "offset": 26,
+                "line": 2,
+                "column": 3
+              },
+              "end": {
+                "offset": 41,
+                "line": 2,
+                "column": 18
+              }
+            }
+          }
+        },
+        {
+          "name": "await-arity",
+          "human": "async.eli:1:21: await expects 1 argument",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "await expects 1 argument",
+            "location": {
+              "file": "async.eli",
+              "start": {
+                "offset": 20,
+                "line": 1,
+                "column": 21
+              },
+              "end": {
+                "offset": 27,
+                "line": 1,
+                "column": 28
+              }
+            }
+          }
+        },
+        {
+          "name": "portable-async-function",
+          "human": "portable-async.eli:1:27: portable function work cannot use async (asynchronous functions)",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-P0001",
+            "severity": "error",
+            "phase": "portable-analysis",
+            "message": "portable function work cannot use async (asynchronous functions)",
+            "location": {
+              "file": "portable-async.eli",
+              "start": {
+                "offset": 26,
+                "line": 1,
+                "column": 27
+              },
+              "end": {
+                "offset": 42,
+                "line": 1,
+                "column": 43
+              }
+            }
+          }
+        },
+        {
+          "name": "try-without-clause",
+          "human": "exceptions.eli:1:18: try requires a catch or finally clause",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "try requires a catch or finally clause",
+            "location": {
+              "file": "exceptions.eli",
+              "start": {
+                "offset": 17,
+                "line": 1,
+                "column": 18
+              },
+              "end": {
+                "offset": 24,
+                "line": 1,
+                "column": 25
+              }
+            }
+          }
+        },
+        {
+          "name": "catch-without-binding",
+          "human": "exceptions.eli:1:25: catch requires a binding symbol or vector",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "catch requires a binding symbol or vector",
+            "location": {
+              "file": "exceptions.eli",
+              "start": {
+                "offset": 24,
+                "line": 1,
+                "column": 25
+              },
+              "end": {
+                "offset": 31,
+                "line": 1,
+                "column": 32
+              }
+            }
+          }
+        },
+        {
+          "name": "portable-throw",
+          "human": "portable-exceptions.eli:1:22: portable function work cannot use throw (exception control flow)",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-P0001",
+            "severity": "error",
+            "phase": "portable-analysis",
+            "message": "portable function work cannot use throw (exception control flow)",
+            "location": {
+              "file": "portable-exceptions.eli",
+              "start": {
+                "offset": 21,
+                "line": 1,
+                "column": 22
+              },
+              "end": {
+                "offset": 35,
+                "line": 1,
+                "column": 36
+              }
+            }
+          }
+        },
+        {
+          "name": "incomplete-vector-rest",
+          "human": "patterns.eli:1:16: vector &rest requires a binding",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "vector &rest requires a binding",
+            "location": {
+              "file": "patterns.eli",
+              "start": {
+                "offset": 15,
+                "line": 1,
+                "column": 16
+              },
+              "end": {
+                "offset": 28,
+                "line": 1,
+                "column": 29
+              }
+            }
+          }
+        },
+        {
+          "name": "trailing-vector-rest",
+          "human": "patterns.eli:1:34: vector &rest binding must be final",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "vector &rest binding must be final",
+            "location": {
+              "file": "patterns.eli",
+              "start": {
+                "offset": 33,
+                "line": 1,
+                "column": 34
+              },
+              "end": {
+                "offset": 38,
+                "line": 1,
+                "column": 39
+              }
+            }
+          }
+        },
+        {
+          "name": "vector-output-name-collision",
+          "human": "patterns.eli:1:25: binding foo_bar emits foo_bar, which collides with foo-bar",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "binding foo_bar emits foo_bar, which collides with foo-bar",
+            "location": {
+              "file": "patterns.eli",
+              "start": {
+                "offset": 24,
+                "line": 1,
+                "column": 25
+              },
+              "end": {
+                "offset": 31,
+                "line": 1,
+                "column": 32
+              }
+            }
+          }
+        },
+        {
+          "name": "pattern-rest-parameter",
+          "human": "patterns.eli:1:22: function &rest parameter must be a symbol",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "function &rest parameter must be a symbol",
+            "location": {
+              "file": "patterns.eli",
+              "start": {
+                "offset": 21,
+                "line": 1,
+                "column": 22
+              },
+              "end": {
+                "offset": 28,
+                "line": 1,
+                "column": 29
+              }
+            }
+          }
+        },
+        {
+          "name": "output-name-collision",
+          "human": "collision.eli:2:11: binding foo_bar emits foo_bar, which collides with foo-bar",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "binding foo_bar emits foo_bar, which collides with foo-bar",
+            "location": {
+              "file": "collision.eli",
+              "start": {
+                "offset": 31,
+                "line": 2,
+                "column": 11
+              },
+              "end": {
+                "offset": 38,
+                "line": 2,
+                "column": 18
+              }
+            }
+          }
+        },
+        {
+          "name": "immutable-assignment",
+          "human": "immutable.eli:2:7: cannot assign to immutable binding: answer",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "cannot assign to immutable binding: answer",
+            "location": {
+              "file": "immutable.eli",
+              "start": {
+                "offset": 27,
+                "line": 2,
+                "column": 7
+              },
+              "end": {
+                "offset": 33,
+                "line": 2,
+                "column": 13
+              }
+            }
+          }
+        },
+        {
+          "name": "missing-export",
+          "human": "export.eli:1:9: unbound symbol: missing",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "unbound symbol: missing",
+            "location": {
+              "file": "export.eli",
+              "start": {
+                "offset": 8,
+                "line": 1,
+                "column": 9
+              },
+              "end": {
+                "offset": 15,
+                "line": 1,
+                "column": 16
+              }
+            }
+          }
+        },
+        {
+          "name": "duplicate-default-import",
+          "human": "import.eli:1:1: duplicate :default import",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "duplicate :default import",
+            "location": {
+              "file": "import.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 45,
+                "line": 1,
+                "column": 46
+              }
+            }
+          }
+        },
+        {
+          "name": "namespace-and-named-import",
+          "human": "import-combination.eli:1:1: namespace and named imports cannot be combined",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "namespace and named imports cannot be combined",
+            "location": {
+              "file": "import-combination.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 32,
+                "line": 1,
+                "column": 33
+              }
+            }
+          }
+        },
+        {
+          "name": "portable-default-import",
+          "human": "portable-default.eli:1:1: import-portable only supports named imports",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "import-portable only supports named imports",
+            "location": {
+              "file": "portable-default.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 48,
+                "line": 1,
+                "column": 49
+              }
+            }
+          }
+        },
+        {
+          "name": "empty-portable-import",
+          "human": "portable-empty.eli:1:1: import-portable expects one or more bindings",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "import-portable expects one or more bindings",
+            "location": {
+              "file": "portable-empty.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 32,
+                "line": 1,
+                "column": 33
+              }
+            }
+          }
+        },
+        {
+          "name": "nested-top-level-form",
+          "human": "nested.eli:2:3: defun is only valid at module top level",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "defun is only valid at module top level",
+            "location": {
+              "file": "nested.eli",
+              "start": {
+                "offset": 18,
+                "line": 2,
+                "column": 3
+              },
+              "end": {
+                "offset": 36,
+                "line": 2,
+                "column": 21
+              }
+            }
+          }
+        },
+        {
+          "name": "invalid-let-binding",
+          "human": "binding.eli:1:7: invalid let binding: (1 2)",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "invalid let binding: (1 2)",
+            "location": {
+              "file": "binding.eli",
+              "start": {
+                "offset": 6,
+                "line": 1,
+                "column": 7
+              },
+              "end": {
+                "offset": 11,
+                "line": 1,
+                "column": 12
+              }
+            }
+          }
+        },
+        {
+          "name": "non-list-let-bindings",
+          "human": "bindings.eli:1:6: let bindings must be a list",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "let bindings must be a list",
+            "location": {
+              "file": "bindings.eli",
+              "start": {
+                "offset": 5,
+                "line": 1,
+                "column": 6
+              },
+              "end": {
+                "offset": 14,
+                "line": 1,
+                "column": 15
+              }
+            }
+          }
+        },
+        {
+          "name": "non-symbol-assignment",
+          "human": "assignment.eli:2:1: assignment target must be a symbol: 'value",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "assignment target must be a symbol: 'value",
+            "location": {
+              "file": "assignment.eli",
+              "start": {
+                "offset": 17,
+                "line": 2,
+                "column": 1
+              },
+              "end": {
+                "offset": 39,
+                "line": 2,
+                "column": 23
+              }
+            }
+          }
+        },
+        {
+          "name": "invalid-cond-clause",
+          "human": "cond.eli:1:7: invalid cond clause: []",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "invalid cond clause: []",
+            "location": {
+              "file": "cond.eli",
+              "start": {
+                "offset": 6,
+                "line": 1,
+                "column": 7
+              },
+              "end": {
+                "offset": 8,
+                "line": 1,
+                "column": 9
+              }
+            }
+          }
+        },
+        {
+          "name": "invalid-property-arity",
+          "human": "property.eli:1:1: get expects 2..3 arguments",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "get expects 2..3 arguments",
+            "location": {
+              "file": "property.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 9,
+                "line": 1,
+                "column": 10
+              }
+            }
+          }
+        },
+        {
+          "name": "invalid-object-arity",
+          "human": "object.eli:1:1: js-object expects key/value pairs",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "js-object expects key/value pairs",
+            "location": {
+              "file": "object.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 18,
+                "line": 1,
+                "column": 19
+              }
+            }
+          }
+        },
+        {
+          "name": "retired-array-alias",
+          "human": "array-alias.eli:1:2: unbound symbol: array",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "unbound symbol: array",
+            "location": {
+              "file": "array-alias.eli",
+              "start": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              },
+              "end": {
+                "offset": 6,
+                "line": 1,
+                "column": 7
+              }
+            }
+          }
+        },
+        {
+          "name": "retired-object-alias",
+          "human": "object-alias.eli:1:2: unbound symbol: object",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "unbound symbol: object",
+            "location": {
+              "file": "object-alias.eli",
+              "start": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              },
+              "end": {
+                "offset": 7,
+                "line": 1,
+                "column": 8
+              }
+            }
+          }
+        },
+        {
+          "name": "framework-names-are-ordinary",
+          "human": "ordinary.eli:1:2: unbound symbol: jsx",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "unbound symbol: jsx",
+            "location": {
+              "file": "ordinary.eli",
+              "start": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              },
+              "end": {
+                "offset": 4,
+                "line": 1,
+                "column": 5
+              }
+            }
+          }
+        },
+        {
+          "name": "invalid-module-name",
+          "human": "module.eli:1:1: module name must be a symbol",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-A0001",
+            "severity": "error",
+            "phase": "analysis",
+            "message": "module name must be a symbol",
+            "location": {
+              "file": "module.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 18,
+                "line": 1,
+                "column": 19
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

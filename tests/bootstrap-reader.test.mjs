@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { diagnosticCorpusSuite } from "../tools/diagnostics/check.mjs";
+
 const projectDirectory = resolve(import.meta.dir, "..");
 const fixturePath = resolve(
   projectDirectory,
@@ -15,6 +17,11 @@ const oraclePath = resolve(
   "tests/bootstrap-reader-oracle.el",
 );
 const emacs = process.env.EMACS ?? "emacs";
+const diagnosticCorpus = await Bun.file(resolve(
+  projectDirectory,
+  "contracts/diagnostic-corpus.json",
+)).json();
+const diagnosticCases = diagnosticCorpusSuite(diagnosticCorpus, "reader").cases;
 const artifactNames = [
   "symbol.mjs",
   "symbol.mjs.map",
@@ -110,30 +117,6 @@ function generatedResult(readString, testCase, source) {
   }
 }
 
-function expectDiagnostic(testCase, result) {
-  const match = /^(.*):(\d+):(\d+): (.*)$/s.exec(testCase.error);
-  expect(match).not.toBeNull();
-  expect(result).toMatchObject({
-    status: "error",
-    message: testCase.error,
-    diagnostic: {
-      format: "eliscript-diagnostic",
-      version: 1,
-      code: "ELI-R0001",
-      severity: "error",
-      phase: "reader",
-      message: match[4],
-      location: {
-        file: match[1],
-        start: {
-          line: Number(match[2]),
-          column: Number(match[3]),
-        },
-      },
-    },
-  });
-}
-
 async function caseSource(testCase) {
   if (Object.hasOwn(testCase, "source")) {
     return testCase.source;
@@ -171,9 +154,14 @@ test("bootstrapped reader matches normalized seed syntax and diagnostics", async
     }
 
     expect(generated).toEqual(await seedResults());
-    fixture.invalid.forEach((testCase, index) => {
-      expectDiagnostic(testCase, generated[fixture.valid.length + index]);
-    });
+    expect(generated.slice(fixture.valid.length)).toEqual(
+      diagnosticCases.map((entry) => ({
+        name: entry.name,
+        status: "error",
+        message: entry.human,
+        diagnostic: entry.diagnostic,
+      })),
+    );
     expect(firstArtifacts.get("reader.mjs.map"))
       .toContain("bootstrap/compiler/reader.eli");
   } finally {

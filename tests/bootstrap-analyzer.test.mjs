@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { diagnosticCorpusSuite } from "../tools/diagnostics/check.mjs";
+
 const projectDirectory = resolve(import.meta.dir, "..");
 const fixturePath = resolve(
   projectDirectory,
@@ -15,13 +17,11 @@ const oraclePath = resolve(
   "tests/bootstrap-analyzer-oracle.el",
 );
 const emacs = process.env.EMACS ?? "emacs";
-const portableDiagnostics = new Set([
-  "portable-ordinary-function",
-  "portable-mutable-state",
-  "portable-host-interop",
-  "portable-async-function",
-  "portable-throw",
-]);
+const diagnosticCorpus = await Bun.file(resolve(
+  projectDirectory,
+  "contracts/diagnostic-corpus.json",
+)).json();
+const diagnosticCases = diagnosticCorpusSuite(diagnosticCorpus, "analyzer").cases;
 
 async function run(command, options) {
   const child = Bun.spawn(command, {
@@ -86,31 +86,6 @@ function generatedResult(readString, analyzeModule, testCase, source) {
   }
 }
 
-function expectDiagnostic(testCase, result) {
-  const match = /^(.*):(\d+):(\d+): (.*)$/s.exec(testCase.error);
-  const portable = portableDiagnostics.has(testCase.name);
-  expect(match).not.toBeNull();
-  expect(result).toMatchObject({
-    status: "error",
-    message: testCase.error,
-    diagnostic: {
-      format: "eliscript-diagnostic",
-      version: 1,
-      code: portable ? "ELI-P0001" : "ELI-A0001",
-      severity: "error",
-      phase: portable ? "portable-analysis" : "analysis",
-      message: match[4],
-      location: {
-        file: match[1],
-        start: {
-          line: Number(match[2]),
-          column: Number(match[3]),
-        },
-      },
-    },
-  });
-}
-
 test("bootstrapped analyzer matches seed acceptance and diagnostics", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "eliscript-analyzer-"));
   try {
@@ -139,9 +114,14 @@ test("bootstrapped analyzer matches seed acceptance and diagnostics", async () =
     }
 
     expect(generated).toEqual(await seedResults());
-    fixture.invalid.forEach((testCase, index) => {
-      expectDiagnostic(testCase, generated[fixture.valid.length + index]);
-    });
+    expect(generated.slice(fixture.valid.length)).toEqual(
+      diagnosticCases.map((entry) => ({
+        name: entry.name,
+        status: "error",
+        message: entry.human,
+        diagnostic: entry.diagnostic,
+      })),
+    );
     expect(await Bun.file(resolve(directory, "analyzer.mjs.map")).text())
       .toContain("bootstrap/compiler/analyzer.eli");
   } finally {
