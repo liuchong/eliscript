@@ -1,6 +1,6 @@
 # 0075: Portable Result Values
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0021 Portable Functions and Dependency Closure,
@@ -110,9 +110,9 @@ exact first-error termination.
 
 ## Compatibility and Limits
 
-This module is provisional during M11 construction. The representation and 15
-exports are tracked in the public-surface and compatibility contracts but are
-not stable until the broader core-library naming and error audit is complete.
+The representation, 15 exports, branch behavior, and traversal failure policy
+are stable. Incompatible changes require the compatibility process rather than
+an in-place naming, representation, or error-policy revision.
 
 This slice does not add exception capture, Promise composition, cancellation,
 protocol-generic sources, an error hierarchy, a JavaScript class, or Result

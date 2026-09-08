@@ -1,6 +1,6 @@
 # 0072: Atomic State References
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0038 Exception Control Flow, 0041 Host Symbiosis,
@@ -178,6 +178,6 @@ transitions. Updates with no watches do not allocate notification nodes.
 This specification does not add asynchronous swaps, compare-and-set,
 software transactional memory, agents, history retention, worker-shared
 state, or serialization. Any such facility needs a separate ordering and
-failure contract. Final PD-11 acceptance still requires the unified 1.0
-acceptance manifest; this implementation supplies its core executable state
-evidence but does not by itself complete the project-wide gate.
+failure contract. The unified 1.0 acceptance manifest now records the Atom
+evidence under PD-11; this stable module does not imply completion of unrelated
+project-wide gates.

@@ -800,72 +800,78 @@
     {
       "id": "stdlib.atomic-state-references",
       "title": "Atomic state references",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0072",
       "contracts": ["Separates changing identity from immutable values", "Validates exactly one synchronous transition before commit", "Queues nested watch notifications in commit order", "Matches self-hosted artifacts and Bun/Node execution"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/atom.test.mjs", "contains": "Eliscript Atom preserves ordered single-transition state semantics" },
-        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "public state interop result JSON and numeric modules build across hosts" }
       ]
     },
     {
       "id": "stdlib.javascript-container-interop",
       "title": "Native JavaScript container interop",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0073",
       "contracts": ["Keeps native and persistent container boundaries explicit with shallow conversion by default", "Deeply converts mixed supported graphs while preserving sharing and rejecting cycles or value-semantic collapse", "Rejects accessors, Symbol keys, opaque values, and resource-limit violations with structured exact-path errors", "Matches self-hosted artifacts and Bun/Node execution including plain-object and maintained package boundaries"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/interop-js.test.mjs", "contains": "Eliscript JS interop preserves explicit host and persistent boundaries" },
         { "kind": "bun-test", "file": "tests/interop-package.test.mjs", "contains": "maintained JavaScript package consumes native values across compilers and hosts" },
-        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "public state interop result JSON and numeric modules build across hosts" }
       ]
     },
     {
       "id": "stdlib.efficient-host-identity-hashing",
       "title": "Efficient process-local host identity hashing",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0074",
       "contracts": ["Assigns stable module-local tokens to opaque JavaScript identities", "Keeps object/function token storage weak and native Symbol identity explicit", "Preserves deterministic hashes for scalar, identifier, and persistent value families", "Avoids type-wide HAMT collision groups under seed/self-hosted Bun and Node execution"],
       "evidence": [
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-portable-value-inspection-operations" },
         { "kind": "bun-test", "file": "tests/portable-value-semantics.test.mjs", "contains": "Eliscript-authored value semantics compile and agree across hosts" },
-        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "public state interop result JSON and numeric modules build across hosts" }
       ]
     },
     {
       "id": "stdlib.portable-result-values",
       "title": "Portable value-semantic Result records and combinators",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0075",
       "contracts": ["Represents Ok and Err as exact value-semantic persistent records", "Preserves false, nil, undefined, branch identity, and exact callback counts", "Collects and traverses persistent Vectors with first-error short circuit", "Matches self-hosted artifacts and Bun/Node execution with dependency pruning"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/portable-result.test.mjs", "contains": "portable Result values are byte-identical and short-circuit at scale" },
         { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "repository public surface matches every tracked implementation" },
-        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "public state interop result JSON and numeric modules build across hosts" }
       ]
     },
     {
       "id": "stdlib.portable-json-values",
       "title": "Strict portable persistent JSON codec",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0076",
       "contracts": ["Parses strict JSON directly into portable scalar, persistent Vector, and value-semantic Map values", "Encodes the exact portable JSON domain with deterministic string-key order and explicit unsupported-value errors", "Rejects duplicates, cycles, malformed input, and resource-limit violations through value-semantic Result errors", "Matches self-hosted artifacts and Bun/Node execution with dependency pruning and generated round trips"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/portable-json.test.mjs", "contains": "portable JSON values are strict, canonical, bounded, and self-hosted" },
         { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "repository public surface matches every tracked implementation" },
-        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "public state interop result JSON and numeric modules build across hosts" }
       ]
     },
     {
       "id": "stdlib.portable-numeric-foundation",
       "title": "Portable Number and safe-integer foundation",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0077",
       "contracts": ["Classifies finite, NaN, infinite, integral, safe-integral, signed, zero, and parity Number values without coercion", "Defines exact checked safe-integer arithmetic and distinct truncating quotient, remainder, and divisor-signed modulo behavior", "Computes iterative nonnegative GCD and overflow-checked LCM with explicit invalid-input nil results", "Matches self-hosted artifacts and Bun/Node execution over generated algebraic invariants with dependency pruning"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/portable-numeric.test.mjs", "contains": "portable numeric functions preserve exact Number and safe-integer contracts" },
         { "kind": "bun-test", "file": "tests/public-surface.test.mjs", "contains": "repository public surface matches every tracked implementation" },
-        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" }
+        { "kind": "bun-test", "file": "tests/bootstrap-compiler.test.mjs", "contains": "portable compiler driver reaches a reproducible fixed point" },
+        { "kind": "bun-test", "file": "tests/core-stdlib.test.mjs", "contains": "public state interop result JSON and numeric modules build across hosts" }
       ]
     },
     {

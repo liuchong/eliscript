@@ -1,6 +1,6 @@
 # 0077: Portable Numeric Foundation
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0003 Implemented Core Language,
@@ -46,9 +46,8 @@ Every predicate is total and returns false for a value outside its accepted
 domain. A non-predicate operation returns nil when its input type, ordering
 domain, divisor, or exact-result bound is invalid. Since no valid operation in
 this module produces nil, callers can distinguish failure without host
-exceptions. This value-or-nil policy is provisional until the complete M11
-standard-library error audit; it must not silently change to coercion or
-throwing in the meantime.
+exceptions. This value-or-nil policy is stable and cannot silently change to
+coercion or throwing.
 
 ## Number Classification
 
@@ -177,11 +176,11 @@ transitive helpers. Selecting `gcd`, for example, retains safe-integer
 classification, absolute value, and remainder but excludes `lcm`, checked
 addition, variadic extrema, and clamping.
 
-This module is provisional during M11. It does not add source syntax, BigInt
-arithmetic, exact ratios, decimal values, powers, roots, logarithms,
-trigonometry, random generation, statistical aggregation, or protocol-based
-numeric extension. Those capabilities require separate contracts and should
-not be smuggled into the portable foundation as opaque host calls.
+This stable module does not add source syntax, BigInt arithmetic, exact ratios,
+decimal values, powers, roots, logarithms, trigonometry, random generation,
+statistical aggregation, or protocol-based numeric extension. Those
+capabilities require separate contracts and should not be smuggled into the
+portable foundation as opaque host calls.
 
 ## Acceptance Criteria
 

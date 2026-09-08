@@ -257,6 +257,76 @@ async function runBuiltValueTextProjectHost(command, outputRoot) {
   ]));
 }
 
+async function runBuiltPublicStdlibProjectHost(command, outputRoot) {
+  const moduleUrl = (name) => JSON.stringify(pathToFileURL(
+    resolve(outputRoot, `${name}.mjs`),
+  ).href);
+  const source = [
+    `const atom = await import(${moduleUrl("state/atom")});`,
+    `const interop = await import(${moduleUrl("interop/js")});`,
+    `const json = await import(${moduleUrl("json")});`,
+    `const numeric = await import(${moduleUrl("numeric")});`,
+    `const result = await import(${moduleUrl("result")});`,
+    `const value = await import(${moduleUrl("value")});`,
+    "const transitions = [];",
+    "const reference = atom.atom(1);",
+    "atom.add_watch(reference, 'project', (_key, _ref, oldValue, newValue) => {",
+    "  transitions.push([oldValue, newValue]);",
+    "});",
+    "const swapped = atom.swap_BANG_(reference, (current, amount) =>",
+    "  current + amount, 4);",
+    "const reset = atom.reset_BANG_(reference, 2);",
+    "const hostSource = { items: [1, 2], nested: { ready: true } };",
+    "const persistentSnapshot = interop.from_js(hostSource, { deep: true });",
+    "hostSource.items.push(3);",
+    "const restoredHost = interop.to_js_object(",
+    "  persistentSnapshot, { deep: true });",
+    "const parsed = json.parse_json('{\"b\":2,\"a\":[1,true]}');",
+    "const encoded = json.stringify_json(result.result_payload(parsed));",
+    "const leftIdentity = {};",
+    "const rightIdentity = {};",
+    "const leftHash = value.value_hash(leftIdentity);",
+    "const mapped = result.map_ok((item) => item + 1, result.ok(41));",
+    "const failed = result.err('stop');",
+    "console.log(JSON.stringify({",
+    "  atom: [",
+    "    atom.atom_QMARK_(reference), swapped, reset, atom.deref(reference),",
+    "    transitions,",
+    "  ],",
+    "  interop: [",
+    "    restoredHost.items, restoredHost.nested.get('ready'), hostSource.items.length,",
+    "    interop.object_QMARK_(restoredHost), interop.array_QMARK_(restoredHost.items),",
+    "    interop.js_map_QMARK_(restoredHost.nested),",
+    "  ],",
+    "  result: [",
+    "    result.ok_QMARK_(mapped), result.result_payload(mapped),",
+    "    result.err_QMARK_(failed), result.result_payload(failed),",
+    "  ],",
+    "  json: [",
+    "    result.ok_QMARK_(parsed), result.ok_QMARK_(encoded),",
+    "    result.result_payload(encoded),",
+    "  ],",
+    "  numeric: [",
+    "    numeric.gcd(54, 24), numeric.lcm(21, 6),",
+    "    numeric.modulo(-5, 3),",
+    "    numeric.checked_add(Number.MAX_SAFE_INTEGER, 1),",
+    "  ],",
+    "  identity: [",
+    "    leftHash === value.value_hash(leftIdentity),",
+    "    leftHash !== value.value_hash(rightIdentity),",
+    "    value.value_equal_QMARK_(leftIdentity, leftIdentity),",
+    "    value.value_equal_QMARK_(leftIdentity, rightIdentity),",
+    "  ],",
+    "}));",
+  ].join("\n");
+  return JSON.parse(await runSuccessful([
+    command,
+    "--input-type=module",
+    "--eval",
+    source,
+  ]));
+}
+
 test("sequence algorithms use protocols and Eliscript truthiness", () => {
   class Range {
     constructor(start, end, observe = () => {}) {
@@ -746,6 +816,75 @@ test("identifier metadata and data text build as one project across Bun and Node
     expect(await runBuiltValueTextProjectHost(process.execPath, outputRoot))
       .toEqual(expected);
     expect(await runBuiltValueTextProjectHost(
+      process.env.NODE_BINARY ?? "node",
+      outputRoot,
+    )).toEqual(expected);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 60_000);
+
+test("public state interop result JSON and numeric modules build across hosts", async () => {
+  const directory = await mkdtemp(resolve(ROOT, ".eliscript-stdlib-project-"));
+  const outputRoot = resolve(directory, "stdlib");
+  const entries = [
+    "state/atom",
+    "interop/js",
+    "result",
+    "json",
+    "numeric",
+  ];
+  const modules = [
+    ["bit", "eliscript.bit"],
+    ["interop/js", "eliscript.interop.js"],
+    ["json", "eliscript.json"],
+    ["numeric", "eliscript.numeric"],
+    ["persistent-list", "eliscript.persistent-list"],
+    ["persistent-map", "eliscript.persistent-map"],
+    ["persistent-set", "eliscript.persistent-set"],
+    ["persistent-vector", "eliscript.persistent-vector"],
+    ["result", "eliscript.result"],
+    ["state/atom", "eliscript.state.atom"],
+    ["value", "eliscript.value"],
+  ];
+  try {
+    await symlink(resolve(ROOT, "runtime"), resolve(directory, "runtime"), "dir");
+    const report = JSON.parse(await runSuccessful([
+      resolve(ROOT, "bin/eliscript-build"),
+      "--json",
+      "--root",
+      resolve(ROOT, "stdlib"),
+      "--out-dir",
+      outputRoot,
+      "--no-cache",
+      ...entries.map((name) => resolve(ROOT, `stdlib/${name}.eli`)),
+    ]));
+    expect(report).toMatchObject({
+      format: "eliscript-build-report",
+      version: 2,
+      mode: "standard",
+      entries: entries.map((name) => `${name}.eli`).sort(),
+      counts: { modules: 11, compiled: 11, reused: 0 },
+      cache: { enabled: false, status: "disabled", reason: "cache-disabled" },
+    });
+    for (const [name, declaration] of modules) {
+      const sourceMap = JSON.parse(await readFile(
+        resolve(outputRoot, `${name}.mjs.map`),
+        "utf8",
+      ));
+      expect(sourceMap.sourcesContent[0]).toContain(`(module ${declaration}`);
+    }
+    const expected = {
+      atom: [true, 5, 2, 2, [[1, 5], [5, 2]]],
+      interop: [[1, 2], true, 3, true, true, true],
+      result: [true, 42, true, "stop"],
+      json: [true, true, '{"a":[1,true],"b":2}'],
+      numeric: [6, 42, 1, null],
+      identity: [true, true, true, false],
+    };
+    expect(await runBuiltPublicStdlibProjectHost(process.execPath, outputRoot))
+      .toEqual(expected);
+    expect(await runBuiltPublicStdlibProjectHost(
       process.env.NODE_BINARY ?? "node",
       outputRoot,
     )).toEqual(expected);

@@ -34,15 +34,15 @@ The registry currently contains 145 specifications.
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 87 |
-| Stable design | 56 |
+| Accepted design | 81 |
+| Stable design | 62 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
 | Implemented | 141 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 56 specifications as stable,
-85 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 62 specifications as stable,
+79 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -416,12 +416,12 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0069 | [Canonical Runtime Data Text](0069-canonical-runtime-data-text.md) | Stable | Implemented |
 | 0070 | [Portable Keyword and Symbol Values](0070-portable-identifier-values.md) | Stable | Implemented |
 | 0071 | [Canonical Portable Data Text](0071-canonical-portable-data-text.md) | Stable | Implemented |
-| 0072 | [Atomic State References](0072-atomic-state-references.md) | Accepted | Implemented |
-| 0073 | [Native JavaScript Container Interop](0073-native-javascript-container-interop.md) | Accepted | Implemented |
-| 0074 | [Process-local Host Identity Hashing](0074-process-local-host-identity-hashing.md) | Accepted | Implemented |
-| 0075 | [Portable Result Values](0075-portable-result-values.md) | Accepted | Implemented |
-| 0076 | [Portable JSON Values](0076-portable-json-values.md) | Accepted | Implemented |
-| 0077 | [Portable Numeric Foundation](0077-portable-numeric-foundation.md) | Accepted | Implemented |
+| 0072 | [Atomic State References](0072-atomic-state-references.md) | Stable | Implemented |
+| 0073 | [Native JavaScript Container Interop](0073-native-javascript-container-interop.md) | Stable | Implemented |
+| 0074 | [Process-local Host Identity Hashing](0074-process-local-host-identity-hashing.md) | Stable | Implemented |
+| 0075 | [Portable Result Values](0075-portable-result-values.md) | Stable | Implemented |
+| 0076 | [Portable JSON Values](0076-portable-json-values.md) | Stable | Implemented |
+| 0077 | [Portable Numeric Foundation](0077-portable-numeric-foundation.md) | Stable | Implemented |
 | 0078 | [Persistent Collection Core Exit Audit](0078-persistent-collection-core-exit-audit.md) | Accepted | Implemented |
 | 0079 | [Eliscript-authored Protocol Dispatch Policy](0079-eliscript-protocol-dispatch-policy.md) | Accepted | Implemented |
 | 0080 | [Canonical Generated Protocol Runtime](0080-canonical-generated-protocol-runtime.md) | Accepted | Implemented |

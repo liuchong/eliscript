@@ -1,6 +1,6 @@
 # 0073: Native JavaScript Container Interop
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,

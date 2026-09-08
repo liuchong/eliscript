@@ -1,6 +1,6 @@
 # 0076: Portable JSON Values
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0021 Portable Functions and Dependency Closure,
@@ -200,9 +200,9 @@ complete dependency graph. Bun and Node execute identical behavior reports.
 Portable selection from `parse-json` excludes the stringify entry point,
 encoder traversal, and entry sorting.
 
-This module is provisional during M11. Error names, limits, and the seven
-exports are tracked in compatibility and public-surface contracts but become
-stable only through the complete core-library naming and error audit.
+The seven exports, error names, limits, canonical key ordering, and accepted
+value domain are stable. Incompatible changes require the compatibility
+process rather than an in-place codec-policy revision.
 
 ## Acceptance Criteria
 

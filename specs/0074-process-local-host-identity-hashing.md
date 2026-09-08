@@ -1,6 +1,6 @@
 # 0074: Process-local Host Identity Hashing
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0048 Value Equality and Deterministic Hashing,
