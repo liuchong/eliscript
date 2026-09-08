@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "format": "eliscript-source-debugging-corpus",
+  "version": 1,
+  "cases": [
+    {
+      "id": "compiler",
+      "source": "tests/fixtures/diagnostic-unbound.eli",
+      "location": {
+        "start": { "offset": 19, "line": 2, "column": 3 },
+        "end": { "offset": 26, "line": 2, "column": 10 }
+      },
+      "evidence": {
+        "file": "tests/source-debugging.test.mjs",
+        "contains": "compiler failure preserves its complete Eliscript source span"
+      }
+    },
+    {
+      "id": "runtime",
+      "source": "tests/fixtures/evaluation-session/main.eli",
+      "location": { "line": 8, "column": 30 },
+      "evidence": {
+        "file": "tests/source-debugging.test.mjs",
+        "contains": "runtime failure maps through persistent evaluation"
+      }
+    },
+    {
+      "id": "browser-event",
+      "source": "tests/fixtures/source-debugging.eli",
+      "location": { "line": 3, "column": 14 },
+      "evidence": {
+        "file": "tests/source-debugging.test.mjs",
+        "contains": "browser event and async rejection map under Bun and Node"
+      }
+    },
+    {
+      "id": "async-rejection",
+      "source": "tests/fixtures/source-debugging.eli",
+      "location": { "line": 7, "column": 14 },
+      "evidence": {
+        "file": "tests/source-debugging.test.mjs",
+        "contains": "browser event and async rejection map under Bun and Node"
+      }
+    },
+    {
+      "id": "worker",
+      "source": "tests/fixtures/worker.eli",
+      "location": { "line": 15, "column": 6 },
+      "evidence": {
+        "file": "tests/worker-runtime.test.mjs",
+        "contains": "maps failures through project source maps"
+      }
+    }
+  ]
+}

@@ -29,19 +29,19 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 142 specifications.
+The registry currently contains 144 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
 | Accepted design | 109 |
-| Stable design | 31 |
+| Stable design | 33 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 138 |
+| Implemented | 140 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 31 specifications as stable,
+Compatibility Baseline 2 separately classifies 33 specifications as stable,
 107 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
@@ -488,6 +488,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0141 | [Repeated Core Determinism Evidence](0141-repeated-core-determinism.md) | Stable | Implemented |
 | 0142 | [Maintained JavaScript Package Interop Fixture](0142-maintained-javascript-package-interop.md) | Accepted | Implemented |
 | 0143 | [Complete Negative Diagnostic Corpus](0143-complete-negative-diagnostic-corpus.md) | Stable | Implemented |
+| 0144 | [Source-level Failure Mapping](0144-source-level-failure-mapping.md) | Stable | Implemented |
 
 ## Adding a Specification
 

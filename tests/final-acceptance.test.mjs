@@ -28,7 +28,7 @@ retainedFinalTest("canonical final artifacts derive every gate from the retained
     format: "eliscript-1.0-acceptance-manifest",
     version: 1,
     summary: {
-      criteria: { pass: 23, incomplete: 12, fail: 0, total: 35 },
+      criteria: { pass: 24, incomplete: 11, fail: 0, total: 35 },
       corpusComplete: true,
       operationalSuccess: true,
       evidenceComplete: true,

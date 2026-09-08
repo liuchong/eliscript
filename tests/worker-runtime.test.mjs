@@ -517,7 +517,7 @@ test("worker negotiates the persistent value codec without changing JSON mode", 
   }
 });
 
-test("long-lived worker implements the versioned NDJSON protocol", async () => {
+test("long-lived worker implements the versioned NDJSON protocol and maps failures through project source maps", async () => {
   const directory = await mkdtemp(resolve(tmpdir(), "eliscript-worker-"));
   const modulePath = resolve(directory, "worker.mjs");
   const reloadPath = resolve(directory, "reload.mjs");
@@ -711,11 +711,17 @@ test("long-lived worker implements the versioned NDJSON protocol", async () => {
         code: "runtime",
         location: {
           file: fixturePath,
-          line: expect.any(Number),
-          column: expect.any(Number),
+          line: 15,
+          column: 6,
         },
       },
     });
+    expect(sourceError.error.location.generated).toMatchObject({
+      line: expect.any(Number),
+      column: expect.any(Number),
+    });
+    expect(sourceError.error.location.generated.file.endsWith("worker.mjs"))
+      .toBe(true);
     expect(sourceError.error.frames.some(
       (frame) => frame.file === fixturePath,
     )).toBe(true);

@@ -2437,6 +2437,40 @@
           "contains": "bootstrapped analyzer matches seed acceptance and diagnostics"
         }
       ]
+    },
+    {
+      "id": "runtime.source-level-failure-mapping",
+      "title": "Source-level failure mapping",
+      "status": "stable",
+      "spec": "0144",
+      "contracts": [
+        "Maps compiler runtime browser event async rejection and worker failures to exact Eliscript source positions",
+        "Keeps generated module coordinates only as secondary evidence when an Eliscript location exists",
+        "Shares one host-neutral Source Map v3 decoder stack parser and frame mapper across runtime boundaries",
+        "Runs directly under local Emacs Bun and Node without hosted isolated framework or publishing evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/source-debugging.test.mjs",
+          "contains": "compiler failure preserves its complete Eliscript source span"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/source-debugging.test.mjs",
+          "contains": "runtime failure maps through persistent evaluation"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/source-debugging.test.mjs",
+          "contains": "browser event and async rejection map under Bun and Node"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/worker-runtime.test.mjs",
+          "contains": "maps failures through project source maps"
+        }
+      ]
     }
   ]
 }

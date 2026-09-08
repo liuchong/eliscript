@@ -1,3 +1,5 @@
+import { sourceMappedFailure } from "../runtime/source-mapping.mjs";
+
 export const browserCapabilityKinds = Object.freeze([
   "clock",
   "document",
@@ -171,4 +173,32 @@ export function browserSetTimeout(capabilities, callback, delay, ...arguments_) 
 
 export function browserClearTimeout(capabilities, handle) {
   return operationFor(capabilities, "clearTimeout", "timers")(handle);
+}
+
+export function browserEventBoundary(handler, report, sourceMaps = []) {
+  if (typeof handler !== "function") {
+    fail("invalid-event-handler", "browser event handler must be a function");
+  }
+  if (typeof report !== "function") {
+    fail("invalid-event-reporter", "browser event reporter must be a function");
+  }
+  if (!Array.isArray(sourceMaps)) {
+    fail("invalid-source-maps", "browser event source maps must be an array");
+  }
+  return function boundedBrowserEvent(...arguments_) {
+    const reportFailure = (error) => {
+      report(sourceMappedFailure(error, sourceMaps), arguments_[0]);
+      return undefined;
+    };
+    try {
+      const result = Reflect.apply(handler, this, arguments_);
+      return result !== null &&
+          (typeof result === "object" || typeof result === "function") &&
+          typeof result.then === "function"
+        ? Promise.resolve(result).catch(reportFailure)
+        : result;
+    } catch (error) {
+      return reportFailure(error);
+    }
+  };
 }

@@ -96,6 +96,8 @@ file, so indexed sections and multiple source entries are unnecessary.
 - The generated Source Map encoder matches complete parsed seed documents,
   including Unicode source content and mapping strings for its own compiler
   sources.
+- Runtime consumption and exact failure-location requirements are defined by
+  [0144 Source-level Failure Mapping](0144-source-level-failure-mapping.md).
 
 ## Deferred Work
 

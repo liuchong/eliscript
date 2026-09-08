@@ -18,6 +18,11 @@ import {
   workerValueFraming,
   workerValueStreamLimits,
 } from "./worker-value-stream.mjs";
+import {
+  decodeSourceMappings,
+  mapSourceFrames,
+  parseJavaScriptStack,
+} from "./source-mapping.mjs";
 
 export const protocolVersion = 1;
 const runtimeDirectory = dirname(fileURLToPath(import.meta.url));
@@ -83,59 +88,13 @@ for (const method of ["log", "info", "debug"]) {
   console[method] = (...values) => console.error(...values);
 }
 
-function stackFrames(stack) {
-  if (typeof stack !== "string") return [];
-  const frames = [];
-  for (const line of stack.split("\n")) {
-    const match = line.match(/^\s*at (?:(.*?) \()?(.+):(\d+):(\d+)\)?$/);
-    if (!match) continue;
-    let file = match[2];
-    if (file.startsWith("file:")) {
-      try {
-        file = fileURLToPath(file);
-      } catch {
-        // Preserve an unrecognized URL as reported by the runtime.
-      }
-    }
-    frames.push({
-      function: match[1] || undefined,
-      file,
-      line: Number(match[3]),
-      column: Number(match[4]),
-    });
+function normalizeWorkerStackFile(file) {
+  if (!file.startsWith("file:")) return file;
+  try {
+    return fileURLToPath(file);
+  } catch {
+    return file;
   }
-  return frames;
-}
-
-function mappedFrames(frames, sourceMaps) {
-  if (!sourceMaps || sourceMaps.length === 0) return frames;
-  const mapsByFile = new Map(
-    sourceMaps.map((sourceMap) => [sourceMap.generatedFile, sourceMap]),
-  );
-  return frames.map((frame) => {
-    const sourceMap = mapsByFile.get(resolve(frame.file));
-    if (!sourceMap) return frame;
-    const mapping = sourceMap.lines[frame.line - 1];
-    if (!mapping) return frame;
-    const generatedColumn = Math.max(0, frame.column - 1);
-    let segment;
-    for (const candidate of mapping) {
-      if (candidate.generatedColumn > generatedColumn) break;
-      segment = candidate;
-    }
-    if (!segment || segment.source === undefined) return frame;
-    return {
-      ...frame,
-      generated: {
-        file: frame.file,
-        line: frame.line,
-        column: frame.column,
-      },
-      file: sourceMap.sources[segment.source],
-      line: segment.originalLine + 1,
-      column: segment.originalColumn + 1,
-    };
-  });
 }
 
 function errorPayload(code, message, error, sourceMaps) {
@@ -144,7 +103,10 @@ function errorPayload(code, message, error, sourceMaps) {
   if (error?.path) payload.path = error.path;
   if (error?.stack) {
     payload.stack = error.stack;
-    const frames = mappedFrames(stackFrames(error.stack), sourceMaps);
+    const frames = mapSourceFrames(
+      parseJavaScriptStack(error.stack, { normalizeFile: normalizeWorkerStackFile }),
+      sourceMaps ?? [],
+    );
     if (frames.length > 0) {
       payload.frames = frames;
       payload.location = frames.find((frame) => frame.file.endsWith(".eli")) ??
@@ -234,56 +196,6 @@ function moduleUrl(identity) {
   return url.href;
 }
 
-const base64Vlq = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-function decodeVlq(segment) {
-  const values = [];
-  let index = 0;
-  while (index < segment.length) {
-    let value = 0;
-    let shift = 0;
-    let continuation;
-    do {
-      const digit = base64Vlq.indexOf(segment[index]);
-      if (digit === -1) throw new Error("invalid Base64 VLQ digit");
-      index += 1;
-      value |= (digit & 31) << shift;
-      continuation = (digit & 32) !== 0;
-      shift += 5;
-    } while (continuation);
-    const negative = (value & 1) === 1;
-    value >>= 1;
-    values.push(negative ? -value : value);
-  }
-  return values;
-}
-
-function decodeMappings(mappings) {
-  let source = 0;
-  let originalLine = 0;
-  let originalColumn = 0;
-  return mappings.split(";").map((encodedLine) => {
-    let generatedColumn = 0;
-    const line = [];
-    for (const encoded of encodedLine.split(",")) {
-      if (!encoded) continue;
-      const values = decodeVlq(encoded);
-      generatedColumn += values[0];
-      const decoded = { generatedColumn };
-      if (values.length >= 4) {
-        source += values[1];
-        originalLine += values[2];
-        originalColumn += values[3];
-        decoded.source = source;
-        decoded.originalLine = originalLine;
-        decoded.originalColumn = originalColumn;
-      }
-      line.push(decoded);
-    }
-    return line;
-  });
-}
-
 export async function loadSourceMap(moduleUrl_) {
   try {
     const cleanUrl = new URL(moduleUrl_);
@@ -304,7 +216,7 @@ export async function loadSourceMap(moduleUrl_) {
           ? resolve(fileURLToPath(sourceUrl))
           : sourceUrl.href;
       }),
-      lines: decodeMappings(map.mappings),
+      lines: decodeSourceMappings(map.mappings),
     };
   } catch (error) {
     console.error(`could not load source map for ${moduleUrl_}: ${error.message}`);

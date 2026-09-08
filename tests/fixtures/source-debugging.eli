@@ -1,0 +1,9 @@
+(module source.debugging
+  (defun event-failure (_event)
+    (js-call nil :missing))
+
+  (defasync async-failure (_event)
+    (await (Promise/resolve nil))
+    (js-call nil :missing))
+
+  (export event-failure async-failure))
