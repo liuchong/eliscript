@@ -1,6 +1,6 @@
 # 0029: Portable Indexing Composition
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0022 Emacs Worker Integration,
@@ -72,8 +72,18 @@ removes the directory recursively.
 - Existing object/data runtime coverage continues to prove own-property safety
   for the frequency object.
 
-## Follow-up
+## Completed Follow-up
 
 The deterministic build manifest, whole-graph worker identity, and dependency
 Source Map loading are implemented in
 [0030-project-graph-manifest.md](0030-project-graph-manifest.md).
+
+## Compatibility Freeze
+
+The selected portable graph, immutable term-frequency scoring semantics,
+duplicate-query behavior, root-relative generated layout, whole-session worker
+identity, and recursive cleanup are stable. Compilation may prune unreachable
+declarations but must preserve graph edges and output behavior.
+
+Alternative indexing algorithms remain application choices and require their
+own representative measurements; they do not change this composition contract.

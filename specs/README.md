@@ -34,15 +34,15 @@ The registry currently contains 145 specifications.
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 17 |
-| Stable design | 126 |
+| Accepted design | 3 |
+| Stable design | 140 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
 | Implemented | 141 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 126 specifications as stable,
-15 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 140 specifications as stable,
+1 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -137,8 +137,10 @@ M11 has all 6/6 implementation units complete. Its 29-module, 304-export API
 index is generated from explicit metadata and the checked public surface.
 Browser and worker platform packages now expose only named host authority,
 inject request-scoped progress and cancellation into the real worker, and keep
-frameworks outside core evidence. M11 compatibility stabilization and its
-final exit audit remain open.
+frameworks outside core evidence. M11 compatibility stabilization is now
+138/139 complete. The only provisional core feature is the full supported
+matrix proof for JavaScript package interoperation in specification 0142; the
+final exit audit remains open.
 
 M12 has all 6/6 implementation units complete through specifications 0127
 through 0132. The fixed 100,000-input corpus checks seed/self-hosted reader agreement,
@@ -326,13 +328,13 @@ defined by [0125](0125-generated-library-api-index.md).
 | ID | Specification | Status | Implementation |
 | --- | --- | --- | --- |
 | 0001 | [Language and Toolchain Boundary](0001-language-and-toolchain.md) | Draft | In progress |
-| 0002 | [Emacs Acceleration Through JavaScript](0002-emacs-acceleration.md) | Accepted | Implemented |
-| 0003 | [Implemented Core Language](0003-core-language-v0.md) | Accepted | Implemented |
+| 0002 | [Emacs Acceleration Through JavaScript](0002-emacs-acceleration.md) | Stable | Implemented |
+| 0003 | [Implemented Core Language](0003-core-language-v0.md) | Stable | Implemented |
 | 0004 | [Lexical Analysis and Binding Diagnostics](0004-lexical-analysis.md) | Stable | Implemented |
 | 0005 | [Compile-time Macros](0005-compile-time-macros.md) | Stable | Implemented |
 | 0006 | [Located Forms and Diagnostic Positions](0006-source-locations.md) | Stable | Implemented |
-| 0007 | [Explicit Compiler Intermediate Representation](0007-intermediate-representation.md) | Accepted | Implemented |
-| 0008 | [Direct ECMAScript Emission from IR](0008-direct-ir-emission.md) | Accepted | Implemented |
+| 0007 | [Explicit Compiler Intermediate Representation](0007-intermediate-representation.md) | Stable | Implemented |
+| 0008 | [Direct ECMAScript Emission from IR](0008-direct-ir-emission.md) | Stable | Implemented |
 | 0009 | [Source Map v3 Emission](0009-source-maps.md) | Stable | Implemented |
 | 0010 | [React Element Compilation](0010-react-elements.md) | Superseded | Superseded |
 | 0011 | [Vite Adapter](0011-vite-adapter.md) | Stable | Implemented |
@@ -342,12 +344,12 @@ defined by [0125](0125-generated-library-api-index.md).
 
 | ID | Specification | Status | Implementation |
 | --- | --- | --- | --- |
-| 0013 | [Bootstrap Foundation](0013-bootstrap-foundation.md) | Accepted | Implemented |
-| 0014 | [Portable Syntax and Reader](0014-portable-syntax-reader.md) | Accepted | Implemented |
-| 0015 | [Portable Lexical Analyzer](0015-portable-lexical-analyzer.md) | Accepted | Implemented |
-| 0016 | [Portable Macro Expander](0016-portable-macro-expander.md) | Accepted | Implemented |
-| 0017 | [Portable IR Lowering](0017-portable-ir-lowering.md) | Accepted | Implemented |
-| 0018 | [Portable ESM and Source Map Emission](0018-portable-emission.md) | Accepted | Implemented |
+| 0013 | [Bootstrap Foundation](0013-bootstrap-foundation.md) | Stable | Implemented |
+| 0014 | [Portable Syntax and Reader](0014-portable-syntax-reader.md) | Stable | Implemented |
+| 0015 | [Portable Lexical Analyzer](0015-portable-lexical-analyzer.md) | Stable | Implemented |
+| 0016 | [Portable Macro Expander](0016-portable-macro-expander.md) | Stable | Implemented |
+| 0017 | [Portable IR Lowering](0017-portable-ir-lowering.md) | Stable | Implemented |
+| 0018 | [Portable ESM and Source Map Emission](0018-portable-emission.md) | Stable | Implemented |
 | 0019 | [Self-Hosted Compiler Driver](0019-self-hosted-compiler.md) | Stable | Implemented |
 | 0020 | [Emacs Worker Protocol and Measurement Probe](0020-worker-protocol.md) | Stable | Implemented |
 | 0021 | [Portable Functions and Dependency Closure](0021-portable-functions.md) | Stable | Implemented |
@@ -363,7 +365,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0026 | [Portable Immutable Object Library](0026-portable-object-library.md) | Stable | Implemented |
 | 0027 | [Portable Data Indexing](0027-portable-data-indexing.md) | Stable | Implemented |
 | 0028 | [Portable Module Composition](0028-portable-module-composition.md) | Stable | Implemented |
-| 0029 | [Portable Indexing Composition](0029-portable-indexing-composition.md) | Accepted | Implemented |
+| 0029 | [Portable Indexing Composition](0029-portable-indexing-composition.md) | Stable | Implemented |
 | 0030 | [Project Graph Manifest](0030-project-graph-manifest.md) | Stable | Implemented |
 | 0031 | [Incremental Project Builds](0031-incremental-project-builds.md) | Stable | Implemented |
 | 0032 | [Build Decision Reports](0032-build-decision-reports.md) | Stable | Implemented |
@@ -395,7 +397,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0048 | [Value Equality and Deterministic Hashing](0048-value-equality-and-hashing.md) | Stable | Implemented |
 | 0049 | [Persistent Hash Map Trie Prototype](0049-persistent-hash-map-prototype.md) | Stable | Implemented |
 | 0050 | [Persistent Hash Set Prototype](0050-persistent-hash-set-prototype.md) | Stable | Implemented |
-| 0051 | [HAMT Layout Benchmark and Threshold Selection](0051-hamt-layout-benchmark.md) | Accepted | Implemented |
+| 0051 | [HAMT Layout Benchmark and Threshold Selection](0051-hamt-layout-benchmark.md) | Stable | Implemented |
 | 0052 | [Portable 32-bit Integer Operations](0052-portable-32-bit-operations.md) | Stable | Implemented |
 | 0053 | [Eliscript-authored Persistent Vector Trie](0053-eliscript-persistent-vector.md) | Stable | Implemented |
 | 0054 | [Eliscript-authored Persistent List](0054-eliscript-persistent-list.md) | Stable | Implemented |
@@ -408,8 +410,8 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0061 | [Composable Transducers and Protocol-driven Into](0061-composable-transducers.md) | Stable | Implemented |
 | 0062 | [Owner-token Transient Collections](0062-owner-token-transient-collections.md) | Stable | Implemented |
 | 0063 | [Protocol-driven Core Sequence and Data Algorithms](0063-protocol-driven-core-algorithms.md) | Stable | Implemented |
-| 0064 | [Stack-safe Loop and Recur](0064-stack-safe-loop-recur.md) | Accepted | Implemented |
-| 0065 | [Deterministic Macro-generated Names and Capture Rules](0065-deterministic-macro-generated-names.md) | Accepted | Implemented |
+| 0064 | [Stack-safe Loop and Recur](0064-stack-safe-loop-recur.md) | Stable | Implemented |
+| 0065 | [Deterministic Macro-generated Names and Capture Rules](0065-deterministic-macro-generated-names.md) | Stable | Implemented |
 | 0066 | [Eliscript-authored Core Protocol Surface and Algorithms](0066-eliscript-authored-core-protocol-algorithms.md) | Stable | Implemented |
 | 0067 | [First-class Keyword and Symbol Values](0067-first-class-keyword-symbol-values.md) | Stable | Implemented |
 | 0068 | [Immutable Metadata Semantics](0068-immutable-metadata-semantics.md) | Stable | Implemented |

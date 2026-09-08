@@ -1,6 +1,6 @@
 # 0008: Direct ECMAScript Emission from IR
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0003 Core Language v0, 0007 Explicit Compiler IR
@@ -79,3 +79,14 @@ source-mapped output.
 
 - optional IR validation at backend boundaries
 - optimization and canonicalization passes
+
+## Compatibility Freeze
+
+The public production path emits directly from typed IR and must not regain a
+dependency on reader-shaped forms or the compatibility form emitter. For an
+unchanged source and compiler revision, ESM and Source Map output remain
+byte-stable across seed and self-hosted compilation.
+
+Backend validation and optimization may evolve internally, but they must
+preserve language behavior, deterministic output, source locations, and
+host-neutral standard ESM.

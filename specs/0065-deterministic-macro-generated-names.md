@@ -1,6 +1,6 @@
 # 0065: Deterministic Macro-generated Names and Capture Rules
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0005 Compile-time Macros, 0006 Located Forms and Diagnostic
@@ -20,9 +20,9 @@ site and may deliberately capture a caller binding. Generated symbols provide
 the opt-in mechanism for private macro bindings that must not capture or be
 captured accidentally.
 
-The surface is provisional during M8. The source marker, generated spelling,
-and explicit capture model must be evaluated in real standard-library macros
-before they can become stable.
+The source marker, generated spelling, and explicit capture model are exercised
+by portable standard-library macros and are stable across both compiler
+generations.
 
 ## Module Name Allocator
 
@@ -132,7 +132,7 @@ artifacts.
 
 Macro failures retain the existing `ELI-X0001` public expansion wrapper and
 the macro name, filename, line, and column. The stable message categories for
-this provisional surface are:
+this surface are:
 
 - `gensym expects 0..1 arguments`
 - `gensym prefix must be a symbol or string`
@@ -187,8 +187,19 @@ every binding introduced by a macro.
   protocol, project, adapter, worker, contract, and strict byte-compilation
   suites remain green.
 
-## Next Slice
+## Integration
 
 Use generated names in portable standard-library macros that introduce local
 bindings. The separate declared macro file dependency contract is completed in
 [0124-declared-macro-file-dependencies.md](0124-declared-macro-file-dependencies.md).
+
+## Compatibility Freeze
+
+The module-local allocator, source-name reservation, `gensym` forms,
+depth-one trailing-`$` marker, explicit call-site capture rules, generated
+spelling, diagnostics, and call-site source spans are stable. Repeated
+compilation must remain byte-identical across seed and self-hosted compilers.
+
+Fully hygienic syntax objects, definition-site binding, namespaces, reader
+macros, and cross-module generated identity are separate language designs and
+are not implied by this contract.

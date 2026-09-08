@@ -1,6 +1,6 @@
 # 0016: Portable Macro Expander
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 
@@ -123,7 +123,7 @@ expander, and analyzer, then compares:
 The position oracle now indexes each source once, keeping normalization linear
 as portable compiler sources grow.
 
-## Next Phase
+## Downstream Integration
 
 The portable front end covers symbol mapping, syntax, reading, macro expansion,
 and lexical analysis. Portable IR lowering is specified in
@@ -132,3 +132,14 @@ Source Map emission is implemented in
 [0018-portable-emission.md](0018-portable-emission.md). The host-neutral
 compiler driver and fixed point are implemented in
 [0019-self-hosted-compiler.md](0019-self-hosted-compiler.md).
+
+## Compatibility Freeze
+
+Macro expansion remains a deterministic interpreter over explicit syntax. The
+supported evaluator subset, source-order definition scope, quotation behavior,
+call-site spans, generated-name allocator, explicit compiler-context
+capabilities, and recursion limit are stable across both compiler generations.
+
+The expander must not use ambient host state or dynamic evaluation. New macro
+operations require an explicit deterministic contract and shared seed/self-host
+conformance evidence.

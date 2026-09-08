@@ -32,14 +32,16 @@ defined by specification 0118. Baseline 1 remains historical evidence; baseline
 
 ## Stable Contract
 
-Baseline 2 currently classifies 126 specifications and their 126 conformance
+Baseline 2 currently classifies 140 specifications and their 140 conformance
 features as stable. The stable set covers these externally meaningful areas:
 
-- lexical binding, deterministic macro behavior, source locations, and Source
-  Map v3 output
+- the core language, lexical binding, deterministic macro behavior and
+  generated names, stack-safe recurrence, source locations, explicit IR, and
+  direct ESM plus Source Map v3 output
 - separately maintained application validation adapters over public compiler
   output
-- reproducible self-hosting and the compiler fixed-point requirement
+- the complete portable reader, analyzer, expander, lowerer, and emitter;
+  reproducible self-hosting and the compiler fixed-point requirement
 - worker protocol v1, portable function closure, resilient Emacs worker
   integration, and portable module composition
 - multi-file builds, project graph identity, incremental decisions, build
@@ -90,10 +92,10 @@ other explicitly non-identity observations remain implementation details.
 
 ## Provisional Contract
 
-Fifteen implemented specifications and features remain provisional. They cover
-the broad pre-1.0 language, portable compiler stages, remaining foundational
-runtime work, and JavaScript package interoperation whose full-matrix evidence
-or public contracts may still change before the 1.0 freeze.
+One implemented specification and feature remains provisional: specification
+0142 and `quality.javascript-package-interop`. Its local package fixture and
+host-neutral ESM behavior are implemented, but its required supported-matrix
+evidence remains incomplete.
 
 Provisional does not mean untested. Every item continues to own executable
 evidence and remains in the public-surface inventory where applicable. It
@@ -114,7 +116,7 @@ evidence that their deliverables already exist.
 
 ## Machine-Readable Baseline
 
-The version 1 baseline contains sorted, unique identifiers under:
+The versioned baseline contains sorted, unique identifiers under:
 
 ```text
 specifications.stable

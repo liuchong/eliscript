@@ -1,6 +1,6 @@
 # 0007: Explicit Compiler Intermediate Representation
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0004 Lexical Analysis, 0006 Located Forms
@@ -9,7 +9,7 @@
 
 Eliscript now lowers analyzed forms into an explicit intermediate
 representation before ECMAScript emission. The IR separates language semantics
-from Emacs reader data and gives the seed and future self-hosted compilers a
+from Emacs reader data and gives the seed and self-hosted compilers a
 shared structural contract.
 
 ```text
@@ -70,8 +70,8 @@ nodes such as parameter bindings and object properties use the narrowest
 available child span. Macro-generated IR keeps the macro call origin established
 by specification 0006.
 
-This makes IR the authoritative source-location input for future diagnostics
-and source maps; later backends do not need to inspect reader forms.
+This makes IR the authoritative source-location input for diagnostics and
+source maps; backends do not need to inspect reader forms.
 
 ## Emission Boundary
 
@@ -108,6 +108,17 @@ implemented language surface.
 ## Deferred Work
 
 - optimization and canonicalization passes over IR
+
+## Compatibility Freeze
+
+The 55 public node kinds, typed structural children, kind-specific properties,
+deterministic preorder traversal, and recursive source spans form the stable IR
+surface. Production compilation lowers through this IR boundary, and the
+canonical persisted form remains governed by specification 0108.
+
+Validation, optimization, and canonicalization may be added as internal passes
+provided they preserve observable language behavior, source locations, and the
+versioned canonical representation contract.
 
 Structured compiler diagnostics are implemented by
 [0043-structured-diagnostics.md](0043-structured-diagnostics.md).

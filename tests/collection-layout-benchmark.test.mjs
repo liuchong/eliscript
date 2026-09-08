@@ -97,6 +97,19 @@ test("HAMT layout host adapters agree under Bun and Node", async () => {
     entry.array.bytesPerNode.median > 0)).toBe(true);
 });
 
+test("HAMT browser benchmark uses copied native ESM without a bundler", async () => {
+  const benchmarkFile = fileURLToPath(
+    new URL("../tools/collections/benchmark.mjs", import.meta.url),
+  );
+  const source = await readFile(benchmarkFile, "utf8");
+
+  expect(source).not.toContain('from "vite"');
+  expect(source).toContain('case ".mjs": return "text/javascript; charset=utf-8"');
+  expect(source).toContain('"tools/collections/browser/main.mjs"');
+  expect(source).toContain("await copyFile(path.join(projectDirectory, relative), destination)");
+  expect(source).toContain("/tools/collections/browser/index.html?");
+});
+
 test("committed HAMT layout baseline proves the 32/24 threshold decision", async () => {
   const baselineFile = fileURLToPath(
     new URL("../benchmarks/hamt-layout-macos-arm64.json", import.meta.url),

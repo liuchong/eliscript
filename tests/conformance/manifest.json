@@ -4,20 +4,27 @@
     {
       "id": "acceleration.measurement-probe",
       "title": "Segmented Emacs acceleration measurement",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0002",
       "contracts": ["Reports cold and warm end-to-end measurements", "Compares equivalent Emacs Lisp and generated JavaScript results"],
-      "evidence": [{ "kind": "bun-test", "file": "tests/worker-benchmark.test.mjs", "contains": "worker benchmark reports equivalent cold and warm measurements" }]
+      "evidence": [
+        { "kind": "bun-test", "file": "tests/worker-benchmark.test.mjs", "contains": "worker benchmark reports equivalent cold and warm measurements" },
+        { "kind": "bun-test", "file": "tests/emacs-analysis-evidence.test.mjs", "contains": "committed Emacs analysis benchmark preserves qualified evidence" }
+      ]
     },
     {
       "id": "language.core",
       "title": "Implemented core language",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0003",
       "contracts": ["Compiles core literals and data forms", "Executes the representative core program as ESM"],
       "evidence": [
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-literals-and-data" },
-        { "kind": "shell", "file": "tests/cli-test.sh", "contains": "tests/fixtures/core.eli" }
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-emits-functions-and-lexical-bindings" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-preserves-lisp-truthiness" },
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-enforces-complete-esm-import-contract" },
+        { "kind": "shell", "file": "tests/cli-test.sh", "contains": "tests/fixtures/core.eli" },
+        { "kind": "bun-test", "file": "tests/esm-imports.test.mjs", "contains": "complete ESM imports are identical and executable across compilers and hosts" }
       ]
     },
     {
@@ -56,23 +63,27 @@
     {
       "id": "compiler.explicit-ir",
       "title": "Explicit intermediate representation",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0007",
       "contracts": ["Lowers analyzed forms into explicit IR", "Preserves origin spans through lowering"],
       "evidence": [
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-lowerer-builds-explicit-ir" },
-        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-lowerer-preserves-macro-call-origin" }
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-lowerer-preserves-macro-call-origin" },
+        { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" },
+        { "kind": "bun-test", "file": "tests/bootstrap-ir-serialization.test.mjs", "contains": "canonical IR v1 is lossless, strict, and host reproducible" }
       ]
     },
     {
       "id": "compiler.direct-ir-emission",
       "title": "Direct ESM emission from IR",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0008",
       "contracts": ["Emits directly from IR", "Matches the compatibility backend"],
       "evidence": [
         { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-ir-emitter-matches-compatibility-backend" },
-        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-ir-emitter-does-not-call-form-backend" }
+        { "kind": "ert", "file": "tests/eliscript-tests.el", "contains": "eliscript-ir-emitter-does-not-call-form-backend" },
+        { "kind": "bun-test", "file": "tests/bootstrap-emitter.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" },
+        { "kind": "bun-test", "file": "tests/esm-imports.test.mjs", "contains": "complete ESM imports are identical and executable across compilers and hosts" }
       ]
     },
     {
@@ -111,7 +122,7 @@
     {
       "id": "bootstrap.symbol-foundation",
       "title": "Bootstrap symbol foundation",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0013",
       "contracts": ["Maps symbols identically in seed and generated compilers", "Shares one conformance fixture"],
       "evidence": [
@@ -122,56 +133,62 @@
     {
       "id": "bootstrap.portable-reader",
       "title": "Portable syntax and reader",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0014",
       "contracts": ["Reads normalized located syntax", "Matches seed diagnostics and reads compiler sources"],
       "evidence": [
         { "kind": "ert", "file": "tests/bootstrap-tests.el", "contains": "eliscript-seed-reader-satisfies-bootstrap-cases" },
-        { "kind": "bun-test", "file": "tests/bootstrap-reader.test.mjs", "contains": "bootstrapped reader matches normalized seed syntax and diagnostics" }
+        { "kind": "bun-test", "file": "tests/bootstrap-reader.test.mjs", "contains": "bootstrapped reader matches normalized seed syntax and diagnostics" },
+        { "kind": "bun-test", "file": "tests/reader-program-fuzz.test.mjs", "contains": "100000 deterministic reader and program mutations preserve every invariant" },
+        { "kind": "bun-test", "file": "tests/diagnostic-corpus.test.mjs", "contains": "complete negative diagnostic corpus is frozen and source-derived" }
       ]
     },
     {
       "id": "bootstrap.portable-analyzer",
       "title": "Portable lexical analyzer",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0015",
       "contracts": ["Matches seed acceptance and diagnostics", "Analyzes all bootstrap compiler sources"],
       "evidence": [
         { "kind": "ert", "file": "tests/bootstrap-tests.el", "contains": "eliscript-seed-analyzer-satisfies-bootstrap-cases" },
-        { "kind": "bun-test", "file": "tests/bootstrap-analyzer.test.mjs", "contains": "bootstrapped analyzer matches seed acceptance and diagnostics" }
+        { "kind": "bun-test", "file": "tests/bootstrap-analyzer.test.mjs", "contains": "bootstrapped analyzer matches seed acceptance and diagnostics" },
+        { "kind": "bun-test", "file": "tests/diagnostic-corpus.test.mjs", "contains": "complete negative diagnostic corpus is frozen and source-derived" }
       ]
     },
     {
       "id": "bootstrap.portable-expander",
       "title": "Portable macro expander",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0016",
       "contracts": ["Matches expanded syntax and call-site spans", "Rejects unavailable host evaluation"],
       "evidence": [
         { "kind": "ert", "file": "tests/bootstrap-tests.el", "contains": "eliscript-seed-expander-satisfies-bootstrap-cases" },
-        { "kind": "bun-test", "file": "tests/bootstrap-expander.test.mjs", "contains": "bootstrapped expander matches seed syntax, spans, and diagnostics" }
+        { "kind": "bun-test", "file": "tests/bootstrap-expander.test.mjs", "contains": "bootstrapped expander matches seed syntax, spans, and diagnostics" },
+        { "kind": "bun-test", "file": "tests/macro-generated-names.test.mjs", "contains": "macro-generated names are deterministic and capture-safe" }
       ]
     },
     {
       "id": "bootstrap.portable-ir",
       "title": "Portable IR lowering",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0017",
       "contracts": ["Matches complete normalized IR trees", "Preserves JSON-safe values and source spans"],
       "evidence": [
         { "kind": "ert", "file": "tests/bootstrap-tests.el", "contains": "eliscript-seed-ir-lowering-satisfies-bootstrap-cases" },
-        { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" }
+        { "kind": "bun-test", "file": "tests/bootstrap-ir.test.mjs", "contains": "bootstrapped lowerer matches complete seed IR trees and spans" },
+        { "kind": "bun-test", "file": "tests/bootstrap-ir-serialization.test.mjs", "contains": "canonical IR v1 is lossless, strict, and host reproducible" }
       ]
     },
     {
       "id": "bootstrap.portable-emitter",
       "title": "Portable ESM and source-map emission",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0018",
       "contracts": ["Matches complete seed ESM", "Matches parsed Source Map documents"],
       "evidence": [
         { "kind": "ert", "file": "tests/bootstrap-tests.el", "contains": "eliscript-seed-emitter-satisfies-bootstrap-cases" },
-        { "kind": "bun-test", "file": "tests/bootstrap-emitter.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" }
+        { "kind": "bun-test", "file": "tests/bootstrap-emitter.test.mjs", "contains": "bootstrapped emitter matches seed ESM and Source Map output" },
+        { "kind": "bun-test", "file": "tests/esm-imports.test.mjs", "contains": "complete ESM imports are identical and executable across compilers and hosts" }
       ]
     },
     {
@@ -282,7 +299,7 @@
     {
       "id": "portable.indexing-composition",
       "title": "Portable indexing application composition",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0029",
       "contracts": ["Builds the index-to-data-to-object graph", "Executes the composed graph through the worker adapter"],
       "evidence": [
@@ -505,13 +522,14 @@
     {
       "id": "runtime.hamt-layout-benchmark",
       "title": "Cross-host HAMT layout benchmark and measured thresholds",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0051",
       "contracts": ["Measures equivalent Bitmap and Array nodes through real lookup and persistent update paths", "Preserves raw samples, correctness checksums, host fingerprints, parameters, and a source digest", "Runs under Bun, Node, and headless Chrome with bounded process and listener cleanup", "Marks unsupported Bun retained-heap measurements absent instead of substituting RSS", "Recomputes promotion and demotion candidates from a declared workload and memory policy", "Selects 32-branch promotion and 24-branch demotion from the committed baseline"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/collection-layout-benchmark.test.mjs", "contains": "HAMT layout core validates equivalent real node operations" },
         { "kind": "bun-test", "file": "tests/collection-layout-benchmark.test.mjs", "contains": "HAMT layout host adapters agree under Bun and Node" },
-        { "kind": "bun-test", "file": "tests/collection-layout-benchmark.test.mjs", "contains": "committed HAMT layout baseline proves the 32/24 threshold decision" }
+        { "kind": "bun-test", "file": "tests/collection-layout-benchmark.test.mjs", "contains": "committed HAMT layout baseline proves the 32/24 threshold decision" },
+        { "kind": "bun-test", "file": "tests/collection-layout-benchmark.test.mjs", "contains": "HAMT browser benchmark uses copied native ESM without a bundler" }
       ]
     },
     {
@@ -701,7 +719,7 @@
     {
       "id": "language.stack-safe-loop-recur",
       "title": "Stack-safe loop and recur",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0064",
       "contracts": ["Targets the nearest loop or function only from tail position", "Evaluates recurrence arguments once before simultaneous rebinding", "Lowers explicit binding-loop and recur IR with deterministic emission", "Executes million-step recurrence without JavaScript stack growth"],
       "evidence": [
@@ -714,7 +732,7 @@
     {
       "id": "macro.deterministic-generated-names",
       "title": "Deterministic macro-generated names and capture rules",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0065",
       "contracts": ["Avoids source and dynamically interned symbol collisions", "Reuses automatic names within one template and allocates fresh names across calls", "Defines deliberate caller capture and quote boundaries", "Matches seed and self-hosted artifacts under Bun and Node"],
       "evidence": [

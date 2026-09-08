@@ -1,6 +1,6 @@
 # 0064: Stack-safe Loop and Recur
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-31
 - Depends on: 0004 Lexical Analysis and Binding Diagnostics,
@@ -27,8 +27,8 @@ compilation produce byte-identical JavaScript and Source Map documents. The
 generated JavaScript uses labeled `while (true)` blocks and `continue`; it does
 not use JavaScript recursion for a valid `recur` path.
 
-This surface is provisional during M8. Ordinary self-calls remain ordinary
-JavaScript calls and are not implicitly optimized.
+Ordinary self-calls remain ordinary JavaScript calls and are not implicitly
+optimized; stack-safe transfer is available only through explicit `recur`.
 
 ## Binding Loop
 
@@ -232,11 +232,22 @@ rules.
   protocol, project, adapter, worker, contract, and strict byte-compilation
   suites remain green.
 
-## Next Slice
+## Integration
 
 Use stack-safe recurrence when portable Eliscript implementations need
 iterative control, while keeping migrations profile- and design-driven.
 Deterministic macro-generated names and capture rules are now implemented in
 [0065-deterministic-macro-generated-names.md](0065-deterministic-macro-generated-names.md).
-The next language-closure work remains persistent literal integration, explicit
-host conversion, and portable protocol/core definitions.
+Subsequent language-closure specifications implement persistent literal
+integration, explicit host conversion, and portable protocol/core definitions.
+
+## Compatibility Freeze
+
+The `loop` and `recur` syntax, nearest-target resolution, tail-position rules,
+parallel initialization, evaluate-before-rebind semantics, exception boundary,
+async ordering, `binding-loop`/`recur` IR nodes, diagnostics, and stack-safe
+emission are stable across seed and self-hosted compilers.
+
+General tail-call optimization, mutual recurrence, named jumps, and implicit
+self-call rewriting remain outside this contract. They require separate syntax
+and compatibility specifications.

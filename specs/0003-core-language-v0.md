@@ -1,6 +1,6 @@
 # 0003: Implemented Core Language
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-27
 - Depends on: 0001 Language and Toolchain Boundary
@@ -8,9 +8,10 @@
 
 ## Summary
 
-This specification records the behavior implemented by the first Emacs Lisp
-seed compiler. It is a vertical slice, not a commitment to preserve every
-surface form indefinitely.
+This specification records the stable core language contract first implemented
+by the Emacs Lisp seed compiler and now shared by the seed and self-hosted
+compilers. Compatible specifications may add forms and values, but the behavior
+defined here remains the language foundation.
 
 The compiler reads `.eli` source with the Emacs Lisp reader and emits standard
 ECMAScript modules. Emacs is the only compilation dependency. Bun 1.4 or newer
@@ -237,9 +238,22 @@ Compile-time user macros and recursive source locations are implemented by the
 front end described in specifications 0005 and 0006. Explicit IR lowering is
 specified in 0007. Source maps and structured diagnostics are implemented; see
 0009 and [0043-structured-diagnostics.md](0043-structured-diagnostics.md).
-General Emacs object interop and the complete 1.0 diagnostic corpus remain
-future work. Later Eliscript versions may add forms that are more expressive
-than Emacs Lisp rather than preserving compatibility for its own sake.
+General Emacs object interop remains outside the core language boundary.
+Structured and source-derived diagnostics are specified by 0043 and later
+diagnostic contracts. Compatible Eliscript versions may add forms that are more
+expressive than Emacs Lisp without changing the behavior frozen here.
+
+## Compatibility Freeze
+
+The value mapping, Lisp truthiness, lexical binding rules, expression-valued
+control flow, module forms, deterministic identifier mapping, and explicit
+JavaScript interop boundary in this specification are stable. Generated ESM
+must remain host-neutral and executable by both supported command-line hosts.
+
+New forms, standard-library operations, persistent values, and explicit host
+capabilities may be added compatibly. Arbitrary Emacs object semantics, hidden
+JavaScript coercions, dynamic scope, and implicit host access are not inferred
+from this core contract.
 
 ## Acceptance Evidence
 

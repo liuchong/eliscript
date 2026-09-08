@@ -1,6 +1,6 @@
 # 0018: Portable ESM and Source Map Emission
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0008 Direct ECMAScript Emission from IR,
@@ -19,8 +19,8 @@ portable IR -> emitter.eli -> ECMAScript
 
 Together with the portable reader, expander, analyzer, and lowerer, this
 completes the host-neutral pure computation path from source text to generated
-artifacts. Filesystem and command-line orchestration remain the responsibility
-of the next compiler-driver phase.
+artifacts. Specification 0019 composes that path with thin filesystem and
+command-line adapters.
 
 ## Fragment Contract
 
@@ -54,17 +54,18 @@ Emacs objects, text properties, Bun APIs, or Node.js modules.
 
 ## Build Boundary
 
-`bin/eliscript-bootstrap` emits ten compiler modules in dependency order:
+`bin/eliscript-bootstrap` emits thirteen compiler modules in dependency order:
 
 ```text
-symbol -> syntax -> reader -> expander -> analyzer -> ir -> lower
-       -> source-map -> emitter -> compiler
+symbol -> syntax -> reader -> formatter -> expander -> transient-analysis
+       -> analyzer -> ir -> lower -> source-map -> emitter -> project
+       -> compiler
 ```
 
 The generated emitter imports the portable symbol, IR, and Source Map modules.
 It exports expression, top-level, plain-module, and source-mapped-module entry
-points. A later driver will compose the existing phases and provide filesystem
-adapters without moving host concerns into these modules.
+points. The driver composes these phases and provides filesystem adapters
+without moving host concerns into the pure compiler modules.
 
 ## Conformance Evidence
 
@@ -79,8 +80,19 @@ fresh Bun process, and require deterministic source-mapped bootstrap artifacts.
 The generated backend matches the seed byte-for-byte for ESM and exactly for
 the complete Source Map document.
 
-## Next Phase
+## Driver Integration
 
 The host-neutral driver, thin filesystem adapter, and reproducible compiler
 fixed point are implemented in
 [0019-self-hosted-compiler.md](0019-self-hosted-compiler.md).
+
+## Compatibility Freeze
+
+Explicit `{text, marks}` fragments, deterministic temporary allocation, direct
+IR emission, Source Map v3 generation, and byte-identical seed/self-hosted ESM
+form the stable portable backend contract. Plain and source-mapped output share
+one formatter, and generated modules remain standard host-neutral ESM.
+
+Backend validation and optimization may evolve internally only when they
+preserve emitted behavior, deterministic artifacts, and complete source-map
+locations.

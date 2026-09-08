@@ -1,6 +1,6 @@
 # 0015: Portable Lexical Analyzer
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 
@@ -11,9 +11,9 @@ Lisp seed compiler builds it to an ordinary ESM module, and the generated
 analyzer consumes the explicit syntax nodes produced by the portable reader.
 It neither converts nodes back to Emacs values nor mutates the input tree.
 
-This establishes a portable front-end path from source text through reading and
-lexical validation. Macro expansion, IR lowering, emission, and the compiler
-driver still use the seed implementation.
+This establishes the portable front-end path from source text through reading,
+macro expansion, and lexical validation. IR lowering, emission, and the
+compiler driver are now also implemented by the self-hosted pipeline.
 
 ## Scope Model
 
@@ -76,7 +76,7 @@ references retain their original segments.
 
 ## Build Boundary
 
-The stable bootstrap build now emits five portable modules and source maps:
+The analyzer dependency closure contains five portable modules and source maps:
 
 ```text
 symbol.eli   -> symbol.mjs
@@ -101,9 +101,9 @@ Coverage includes forward declarations, lexical scope, mutable state, imports,
 exports, special forms, lambdas, JavaScript references, duplicate bindings,
 identifier collisions, invalid arities, malformed clauses, and all thirteen
 bootstrap modules. Repeated bootstrap builds remain byte-identical, including
-the new analyzer and its source map.
+the analyzer and its source map.
 
-## Next Phase
+## Downstream Integration
 
 The portable macro expander that feeds this analyzer is specified in
 [0016-portable-macro-expander.md](0016-portable-macro-expander.md), and the
@@ -112,3 +112,15 @@ implemented lowering stage in
 now emit direct ESM and Source Map output as specified in
 [0018-portable-emission.md](0018-portable-emission.md); the compiler driver is
 implemented in [0019-self-hosted-compiler.md](0019-self-hosted-compiler.md).
+
+## Compatibility Freeze
+
+Two-pass top-level declaration, lexical scope lookup, emitted-name collision
+detection, mutability checks, syntax-boundary handling, and complete located
+diagnostics form the stable analyzer contract. Seed and self-hosted analyzers
+must continue to agree for valid programs and the source-derived negative
+diagnostic corpus.
+
+Additional forms may extend analysis through explicit rules. Hidden dynamic
+scope, mutation of input syntax, and host-object identity are outside this
+contract.

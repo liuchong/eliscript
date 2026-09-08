@@ -1,6 +1,6 @@
 # 0013: Bootstrap Foundation
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 
@@ -11,9 +11,10 @@ Eliscript and running both implementations against shared conformance data.
 The first portable module owns symbol-name validation and deterministic
 ECMAScript identifier mapping.
 
-This stage does not claim self-hosting. It establishes the directory,
-representation boundary, build command, and dual-implementation test pattern
-that later compiler phases must follow.
+This foundation established the directory, representation boundary, build
+command, and dual-implementation test pattern used by the completed
+self-hosted compiler. Specifications 0019 and 0112 now own the fixed point and
+production-authority claims built on this layer.
 
 ## Source and Artifact Boundary
 
@@ -27,9 +28,10 @@ Emacs Lisp seed + bootstrap/compiler/symbol.eli
   -> JavaScript host
 ```
 
-The seed compiler remains authoritative while Generation 1 is incomplete. A
-portable module is accepted only after it matches the seed contract over one
-shared fixture and can be built through the public compiler CLI.
+The seed compiler remains an independent compatibility oracle, while the
+self-hosted compiler is the production authority. A portable module is accepted
+only after it matches the shared contract and can be built through the public
+compiler CLI.
 
 ## Runtime Symbol Representation
 
@@ -79,9 +81,9 @@ the test.
 This arrangement is intentionally symmetric: changing semantics requires one
 fixture change and both implementations must agree before the suite passes.
 
-## Next Portable Phases
+## Completed Integration
 
-The remaining Generation 1 dependency order is:
+The completed Generation 1 dependency order was:
 
 1. explicit syntax values and source spans
 2. a portable reader
@@ -104,3 +106,14 @@ Source Map generation by
 [0018-portable-emission.md](0018-portable-emission.md). The host-neutral driver
 and reproducible fixed point are implemented by
 [0019-self-hosted-compiler.md](0019-self-hosted-compiler.md).
+
+## Compatibility Freeze
+
+Portable compiler sources live under `bootstrap/compiler`, generated artifacts
+remain ordinary ESM plus Source Map v3, and symbol mapping consumes explicit
+name strings rather than host symbol identity. Seed and self-hosted
+implementations must continue to agree over shared fixtures and diagnostics.
+
+New compiler phases may extend the dependency graph, but they must retain this
+host-neutral data boundary, deterministic build layout, and dual-implementation
+evidence until an explicit compatibility contract supersedes it.

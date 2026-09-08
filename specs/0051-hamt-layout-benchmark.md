@@ -1,6 +1,6 @@
 # 0051: HAMT Layout Benchmark and Threshold Selection
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0040 Project Maturity Roadmap,
@@ -12,7 +12,7 @@
 
 This specification defines the reproducible cross-host benchmark used to
 select the sparse `BitmapIndexedNode` and dense `ArrayNode` transition
-thresholds in the provisional HAMT runtime.
+thresholds in the stable HAMT runtime.
 
 The first implementation used promotion at 16 occupied branches and demotion
 at 8. Correctness and structural sharing were proven, but those thresholds had
@@ -25,8 +25,8 @@ The measured decision is:
 - promote a bitmap node when insertion reaches 32 occupied branches
 - retain a dense node until deletion reaches 24 occupied branches, then demote
 
-The eight-branch hysteresis band avoids representation churn. This change is
-an internal provisional representation decision: Map and Set values, hashes,
+The eight-branch hysteresis band avoids representation churn. This is a stable
+internal representation decision: Map and Set values, hashes,
 equality, traversal membership, and complexity contracts do not change.
 
 ## Benchmark Surface
@@ -131,12 +131,13 @@ The formal baseline contains exactly three reports:
 - Node.js using V8
 - local headless Chrome using browser V8
 
-The browser source is bundled into a temporary Vite directory. A static server
+The browser source and its exact native ESM dependency closure are copied into
+a temporary root without a bundler or source transformation. A static server
 uses fixed loopback port 8740, and Chrome DevTools Protocol uses fixed port
 8741. The runner refuses occupied ports, waits for a page target, reads the
 completed report through `Runtime.evaluate`, sends `Browser.close`, and applies
 SIGTERM/SIGKILL only to the exact child PID after bounded grace periods. Both
-listeners and the temporary profile/build directory close in `finally` paths.
+listeners and the temporary profile/module directory close in `finally` paths.
 
 This avoids browser automation dependencies and avoids the platform-specific
 non-terminating behavior of Chrome `--dump-dom` on an asynchronous module.
@@ -153,6 +154,8 @@ keys, hashing, node behavior, orchestration, and measurement:
 - `runtime/core/value.mjs`
 - `runtime/core/value-internals.mjs`
 - `tools/collections/benchmark.mjs`
+- `tools/collections/browser/index.html`
+- `tools/collections/browser/main.mjs`
 - `tools/collections/layout-benchmark.mjs`
 
 Paths, separators, and file bytes enter the digest in a declared order. The
@@ -204,9 +207,9 @@ The macOS arm64 baseline in
 The recomputed promotion candidate is 32 and demotion candidate is 24. The
 runtime constants and Map/Set transition tests use those exact values.
 
-These figures describe one recorded machine and engine set. They justify the
-provisional representation decision; they are not universal speed claims or
-regression budgets.
+These figures describe one recorded machine and engine set. They bind the
+selected representation to reviewable source and host evidence; they are not
+universal speed claims or regression budgets.
 
 ## Conformance Evidence
 
@@ -227,22 +230,26 @@ The default suite does not launch Chrome or compare timings. It validates the
 committed browser evidence and runs cheap Bun/Node adapter smoke tests. The
 full three-host benchmark remains an explicit measurement command.
 
-## Compatibility and Remaining Work
+## Compatibility and Extension Work
 
-This specification and feature are provisional in Compatibility Baseline 1.
-Changing 16/8 to 32/24 changes only internal node layout and performance. It
-does not alter collection values or serialized public data.
+The 32/24 transition changes only internal node layout and performance. It does
+not alter collection values or serialized public data. Compatibility Baseline
+2 freezes the source-bound report format, exact Bun/Node/Chrome host coverage,
+checksum and retained-heap validation, source digest, decision policy, and
+runtime thresholds.
 
-Remaining work includes:
+The following measurements may extend evidence without blocking this stable
+contract:
 
 - repeat formal baselines on Linux x64 and future supported engine versions
-- at least three stable runs before defining any performance regression budget
+- at least three stable runs before defining a separate performance regression
+  budget
 - browser engines beyond Chrome when they enter the supported matrix
 - small-map flat-layout measurement if such a representation is proposed
 - full-map workloads with nested paths and varied key distributions
 - transient owner-token layouts and bulk-construction benchmarks
 
-The 0041 cross-engine node-layout comparison and dense-node threshold-selection
-steps are satisfied for the current provisional HAMT. This does not complete
-P0 because portable integer bit operations and the Eliscript implementation
-remain open.
+The 0041 cross-engine node-layout comparison, portable integer bit operations,
+Eliscript implementation, and dense-node threshold-selection steps are
+complete. Recorded timings remain machine-specific observations rather than a
+fixed compatibility budget.

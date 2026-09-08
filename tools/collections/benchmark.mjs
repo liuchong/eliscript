@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import {
+  copyFile,
+  mkdir,
   mkdtemp,
   readFile,
   rm,
@@ -14,8 +16,6 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { build } from "vite";
-
 import { validateLayoutHostReport } from "./layout-benchmark.mjs";
 
 export const LAYOUT_SUITE_FORMAT = "eliscript-hamt-layout-benchmark";
@@ -26,7 +26,17 @@ export const BROWSER_DEBUG_PORT = 8741;
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const projectDirectory = path.resolve(directory, "../..");
 const hostRunner = path.join(directory, "layout-host.mjs");
-const browserDirectory = path.join(directory, "browser");
+const browserModuleFiles = Object.freeze([
+  "runtime/core/map-internals.mjs",
+  "runtime/core/protocol-error.mjs",
+  "runtime/core/protocol-impl.mjs",
+  "runtime/core/protocol.mjs",
+  "runtime/core/value-internals.mjs",
+  "runtime/core/value.mjs",
+  "tools/collections/browser/index.html",
+  "tools/collections/browser/main.mjs",
+  "tools/collections/layout-benchmark.mjs",
+]);
 const digestFiles = Object.freeze([
   "runtime/core/map-internals.mjs",
   "runtime/core/protocol-error.mjs",
@@ -35,6 +45,8 @@ const digestFiles = Object.freeze([
   "runtime/core/value.mjs",
   "runtime/core/value-internals.mjs",
   "tools/collections/benchmark.mjs",
+  "tools/collections/browser/index.html",
+  "tools/collections/browser/main.mjs",
   "tools/collections/layout-benchmark.mjs",
 ]);
 
@@ -161,10 +173,21 @@ function contentType(file) {
   switch (path.extname(file)) {
     case ".html": return "text/html; charset=utf-8";
     case ".js": return "text/javascript; charset=utf-8";
+    case ".mjs": return "text/javascript; charset=utf-8";
     case ".css": return "text/css; charset=utf-8";
     case ".json": return "application/json; charset=utf-8";
     default: return "application/octet-stream";
   }
+}
+
+async function prepareBrowserRoot(temporaryDirectory) {
+  const root = path.join(temporaryDirectory, "browser-root");
+  for (const relative of browserModuleFiles) {
+    const destination = path.join(root, relative);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await copyFile(path.join(projectDirectory, relative), destination);
+  }
+  return root;
 }
 
 function startStaticServer(root) {
@@ -427,19 +450,7 @@ export function analyzeLayoutSuite(hosts) {
 }
 
 async function runBrowserBenchmark(environment, temporaryDirectory) {
-  const outputDirectory = path.join(temporaryDirectory, "browser-dist");
-  await build({
-    root: browserDirectory,
-    base: "./",
-    logLevel: "silent",
-    build: {
-      outDir: outputDirectory,
-      emptyOutDir: true,
-      minify: false,
-      sourcemap: false,
-    },
-  });
-
+  const browserRoot = await prepareBrowserRoot(temporaryDirectory);
   const chrome = await findChromeExecutable();
   const userDataDirectory = path.join(temporaryDirectory, "chrome-profile");
   let server;
@@ -447,8 +458,10 @@ async function runBrowserBenchmark(environment, temporaryDirectory) {
   let debuggerClient;
   try {
     await assertPortAvailable(BROWSER_DEBUG_PORT);
-    server = await startStaticServer(outputDirectory);
-    const url = `http://127.0.0.1:${BROWSER_PORT}/?${browserQuery(environment)}`;
+    server = await startStaticServer(browserRoot);
+    const url =
+      `http://127.0.0.1:${BROWSER_PORT}/tools/collections/browser/index.html?` +
+      browserQuery(environment);
     processHandle = launchProcess(chrome, [
       "--headless=new",
       "--disable-gpu",

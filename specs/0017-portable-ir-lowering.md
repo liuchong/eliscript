@@ -1,6 +1,6 @@
 # 0017: Portable IR Lowering
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0007 Explicit IR, 0015 Portable Lexical Analyzer,
@@ -43,7 +43,7 @@ JSON-compatible.
 Quoted compound data is recursively encoded with tagged `symbol`, `keyword`,
 `undefined`, `list`, and `vector` objects. Literal object keys are normalized
 to strings; computed keys remain child expressions. This representation can be
-serialized, compared, cached, or passed to a future host-neutral driver.
+serialized, compared, cached, or passed to the host-neutral compiler driver.
 Quoted brace syntax therefore remains a tagged `list` beginning with
 `hash-map`; unquoted brace syntax lowers to `persistent-map-literal`.
 
@@ -78,9 +78,20 @@ The fixture verifies:
 - all thirteen bootstrap compiler sources
 - deterministic generated modules and Source Map files
 
-## Next Phase
+## Downstream Integration
 
 Generation 1 now reaches stable portable IR. Direct ESM and Source Map emission
 is implemented in [0018-portable-emission.md](0018-portable-emission.md). The
 host-neutral driver and reproducible self-compilation are implemented in
 [0019-self-hosted-compiler.md](0019-self-hosted-compiler.md).
+
+## Compatibility Freeze
+
+Portable lowering covers all 55 public IR kinds using ordinary serializable
+objects, typed children, kind-specific properties, and a source span on every
+semantic and structural node. It preserves source order and operator identity
+without optimization.
+
+New language forms may add versioned IR surface through explicit specifications.
+Host objects, implicit evaluation, and representation-changing optimization do
+not enter this stable lowering boundary.

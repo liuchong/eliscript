@@ -1,6 +1,6 @@
 # 0014: Portable Syntax and Reader
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 
@@ -93,6 +93,7 @@ layout:
 bootstrap/compiler/symbol.eli -> dist/bootstrap/symbol.mjs
 bootstrap/compiler/syntax.eli -> dist/bootstrap/syntax.mjs
 bootstrap/compiler/reader.eli -> dist/bootstrap/reader.mjs
+bootstrap/compiler/formatter.eli -> dist/bootstrap/formatter.mjs
 bootstrap/compiler/expander.eli -> dist/bootstrap/expander.mjs
 bootstrap/compiler/transient-analysis.eli -> dist/bootstrap/transient-analysis.mjs
 bootstrap/compiler/analyzer.eli -> dist/bootstrap/analyzer.mjs
@@ -127,9 +128,20 @@ The generated reader reading its own source proves reader-level closure. The
 Generation 1 pipeline can now expand, analyze, lower, and emit that syntax tree,
 and the portable host adapter drives complete filesystem compilation.
 
-## Next Phase
+## Downstream Integration
 
 The portable lexical analyzer that consumes these nodes is specified in
-[0015-portable-lexical-analyzer.md](0015-portable-lexical-analyzer.md). The next
-dependency boundary is macro expansion, which must preserve spans through
-generated forms and feed explicit syntax directly to that analyzer.
+[0015-portable-lexical-analyzer.md](0015-portable-lexical-analyzer.md). Macro
+expansion preserves spans through generated forms and feeds explicit syntax
+directly to that analyzer as specified by 0016.
+
+## Compatibility Freeze
+
+The six syntax-node kinds, JSON-compatible payloads, Unicode code-point source
+spans, supported reader grammar, prefix normalization, and source-located
+diagnostic categories are stable. All thirteen bootstrap modules must remain
+readable by both compiler generations with equivalent complete syntax trees.
+
+Additional reader syntax may be added only through shared conformance cases.
+Host-specific reader behavior, object identity, and implicit Emacs syntax do
+not enter the portable syntax contract.

@@ -30,7 +30,7 @@ test("repository specifications have complete conformance evidence", async () =>
     schemaVersion: 1,
     specifications: {
       total: 145,
-      statuses: { draft: 1, accepted: 17, stable: 126, superseded: 1 },
+      statuses: { draft: 1, accepted: 3, stable: 140, superseded: 1 },
       implementations: {
         "in-progress": 3,
         implemented: 141,
@@ -40,20 +40,20 @@ test("repository specifications have complete conformance evidence", async () =>
     },
     features: {
       total: 141,
-      evidence: 525,
+      evidence: 541,
       domains: {
-        acceleration: { features: 1, evidence: 1 },
-        bootstrap: { features: 13, evidence: 30 },
-        compiler: { features: 15, evidence: 41 },
+        acceleration: { features: 1, evidence: 2 },
+        bootstrap: { features: 13, evidence: 36 },
+        compiler: { features: 15, evidence: 45 },
         editor: { features: 4, evidence: 22 },
-        language: { features: 22, evidence: 86 },
+        language: { features: 22, evidence: 90 },
         macro: { features: 3, evidence: 9 },
         portable: { features: 3, evidence: 5 },
         platform: { features: 1, evidence: 8 },
         project: { features: 5, evidence: 7 },
         publishing: { features: 1, evidence: 2 },
         quality: { features: 22, evidence: 76 },
-        runtime: { features: 16, evidence: 98 },
+        runtime: { features: 16, evidence: 99 },
         stdlib: { features: 21, evidence: 85 },
         toolchain: { features: 5, evidence: 20 },
         tooling: { features: 1, evidence: 2 },
@@ -61,12 +61,12 @@ test("repository specifications have complete conformance evidence", async () =>
       },
     },
     baseline: {
-      stableSpecifications: 126,
-      provisionalSpecifications: 15,
+      stableSpecifications: 140,
+      provisionalSpecifications: 1,
       planningSpecifications: 3,
       supersededSpecifications: 1,
-      stableFeatures: 126,
-      provisionalFeatures: 15,
+      stableFeatures: 140,
+      provisionalFeatures: 1,
     },
   });
 });
@@ -154,7 +154,7 @@ test("contract checker rejects incomplete stable baselines", async () => {
   baseline.specifications.stable.shift();
 
   const errors = await validationErrors({ baseline });
-  expect(errors).toContain("stable specification baseline is missing: 0004");
+  expect(errors).toContain("stable specification baseline is missing: 0002");
 });
 
 test("contract checker rejects partially promoted stable contracts", async () => {

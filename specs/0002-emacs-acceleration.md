@@ -1,6 +1,6 @@
 # 0002: Emacs Acceleration Through JavaScript
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-27
 - Depends on: 0001 Language and Toolchain Boundary
@@ -64,11 +64,10 @@ Emacs command
   -> apply result to Emacs state
 ```
 
-The transport and JavaScript host are adapters. The latest stable Bun runtime
-is the reference worker host because it combines a fast JavaScriptCore runtime,
-ESM execution, package management, testing, and bundling in one tool. A browser
-or embedded engine may later implement the same protocol. Bun does not become
-a dependency of the core compiler.
+The transport and JavaScript host are adapters. Bun 1.4 is the reference worker
+host because it combines a fast JavaScriptCore runtime, ESM execution, package
+management, and testing in one tool. A browser or embedded engine may implement
+the same protocol. Bun does not become a dependency of the core compiler.
 
 Requests need:
 
@@ -198,11 +197,16 @@ dispatches document requests asynchronously, and preserves ordered results.
 See [0022-emacs-worker-integration.md](0022-emacs-worker-integration.md) and
 [0029-portable-indexing-composition.md](0029-portable-indexing-composition.md).
 
-## Open Questions
+## Compatibility Freeze
 
-1. Should portable functions also have a directly executable Emacs backend?
-2. Which parts of the worker protocol must also run unchanged in browsers?
-3. Which data types cross the host boundary without explicit conversion?
-4. How should capabilities such as filesystem and network access be granted?
-5. Can source maps preserve useful Emacs buffer positions for unsaved code?
-6. What speedup threshold justifies moving a workload out of Emacs?
+The stable contract freezes explicit `defportable` delegation, versioned
+newline-delimited JSON messages, negotiated capabilities, serializable values,
+source-mapped diagnostics, cancellation, progress, restart, and transactional
+application of successful results. The Emacs client and JavaScript worker are
+adapters around generated modules; neither becomes part of the core compiler.
+
+Acceleration remains opt-in and evidence-driven. No workload is automatically
+delegated, no speedup is implied by compilation alone, and end-to-end
+measurement must include compilation, startup, transport, execution, and result
+application. Additional hosts, value codecs, capabilities, and unsaved-buffer
+mapping may extend this contract only through explicit compatible protocols.
