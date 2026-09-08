@@ -38,7 +38,7 @@
   (concat
    "import { get as __eliscript_get } from \"eliscript/runtime/core/collection.mjs\";\n"
    "const __eliscript_binding_missing = Symbol(\"eliscript.binding.missing\");\n"
-   "const __eliscript_binding_get = (value, key, notFound) => { if (value == null) return notFound; const prototype = typeof value === \"object\" ? Object.getPrototypeOf(value) : undefined; if (prototype === Object.prototype || prototype === null) { const type = key && Object.getOwnPropertyDescriptor(key, Symbol.for(\"eliscript.value.type\")); if (type?.value === \"keyword\") key = key.qualifiedName; } return __eliscript_get(value, key, notFound); };\n")
+   "const __eliscript_binding_get = (value, key, notFound) => { if (value == null) return notFound; const prototype = typeof value === \"object\" ? Object.getPrototypeOf(value) : undefined; if (prototype === Object.prototype || prototype === null) { const type = key && Object.getOwnPropertyDescriptor(key, Symbol.for(\"eliscript.value.type\")); if (type?.value === \"keyword\" || type?.value === \"symbol\") key = key.qualifiedName; } return __eliscript_get(value, key, notFound); };\n")
   "Generated runtime support for protocol-driven map binding patterns.")
 
 (defun eliscript-ir-emitter--locate (node output)

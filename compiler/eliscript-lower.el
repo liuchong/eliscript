@@ -30,6 +30,17 @@
   (eliscript-ir-make-node
    kind (eliscript-form-span form) value children properties))
 
+(defun eliscript-lower--map-binding-key (entry)
+  "Lower the lookup key in normalized map binding ENTRY."
+  (let ((kind (plist-get entry :key-kind))
+        (target (plist-get entry :target))
+        (name (plist-get entry :key-name)))
+    (pcase kind
+      ('keys (eliscript-lower--node 'literal target name))
+      ('strs (eliscript-lower--node 'literal target name))
+      ('syms (eliscript-lower--node 'quoted-literal target name))
+      (_ (eliscript-lower-expression (plist-get entry :key))))))
+
 (defun eliscript-lower--binding-target (pattern)
   "Lower binding PATTERN to structural IR."
   (let ((value (eliscript-form-value pattern)))
@@ -64,7 +75,7 @@
               (append
                (list
                 (eliscript-lower--binding-target (plist-get entry :target))
-                (eliscript-lower-expression (plist-get entry :key)))
+                (eliscript-lower--map-binding-key entry))
                (and default-present
                     (list
                      (eliscript-lower-expression

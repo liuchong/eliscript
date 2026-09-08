@@ -7,6 +7,17 @@
 (defun explicit-and-nested ({alias :name {:keys [city]} :profile})
   (js-array alias city))
 
+(defun shortcuts ({:keys [profile/name] :account/keys [id]
+                   :strs [label] :syms [token] :or {id 7}})
+  (js-array name id label token))
+
+(defun persistent-shortcuts ()
+  (let (({:keys [profile/name] :account/keys [id]
+          :strs [label] :syms [token]}
+         {:profile/name "persistent" :account/id 9
+          "label" "text" 'token "symbol"}))
+    (js-array name id label token)))
+
 (defun lexical-map (value)
   (let (({:keys [name age] :or {age 18} :as row} value))
     (js-array name age row)))
@@ -29,5 +40,5 @@
   (let (({:keys [name age] :or {age 18}} {:name "Eliscript"}))
     (js-array name age)))
 
-(export unpack optional-map explicit-and-nested lexical-map countdown catch-map
-        portable-name persistent-map-pattern)
+(export unpack optional-map explicit-and-nested shortcuts persistent-shortcuts
+        lexical-map countdown catch-map portable-name persistent-map-pattern)

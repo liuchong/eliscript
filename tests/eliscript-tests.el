@@ -494,6 +494,9 @@
           "(defun unpack ({:keys [name age] :or {age 18} :as row})
   [name age row])
 (defun nested ({alias :name {:keys [city]} :profile}) [alias city])
+(defun shortcuts ({:keys [profile/name] :account/keys [id]
+                   :strs [label] :syms [token] :or {id 7}})
+  [name id label token])
 (defun recover ()
   (try (throw (js-object :code 7))
     (catch {:keys [code]} code)))")
@@ -520,6 +523,10 @@
         (defun nested ((hash-map alias :name
                                   (hash-map city :city) :profile))
           (vector alias city))
+        (defun shortcuts ((hash-map name :profile/name id :account/id
+                                     label "label" token (quote token)
+                                     :or (hash-map id 7)))
+          (vector name id label token))
         (defun recover nil
           (try (throw (js-object :code 7))
             (catch (hash-map code :code) code)))))))
@@ -530,9 +537,20 @@
      "(defportable portable-name ({:keys [name]}) name)"
      '(portable-name)
      "portable-map-patterns.eli")))
+  (let ((output
+         (eliscript-compile-string
+          "(defun shortcut ({:keys [profile/name] :strs [label] :syms [token]}) [name label token])"
+          "map-shortcuts.eli")))
+    (should (string-match-p
+             (regexp-quote "__eliscript_keyword(\"profile/name\")") output))
+    (should (string-match-p
+             (regexp-quote "__eliscript_symbol(\"token\")") output)))
   (dolist (source
            '("(defun broken ({:keys name}) name)"
              "(defun broken ({:keys [name] :keys [other]}) name)"
+             "(defun broken ({:strs label}) label)"
+             "(defun broken ({:syms [:token]}) token)"
+             "(defun broken ({:account/keys [id] :account/keys [other]}) id)"
              "(defun broken ({:or {missing 1} :keys [name]}) name)"
              "(defun broken ({:as 1}) nil)"
              "(defun broken ({:unknown value}) value)"))

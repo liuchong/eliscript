@@ -94,6 +94,35 @@
   (defun binding-marker-p (name)
     (js-call (js-array "&optional" "&rest" "&body") :includes name))
 
+  (defun split-binding-name (name)
+    (let ((slash (js-call name :lastIndexOf "/")))
+      (if (< slash 0)
+          (js-object :namespace undefined :local name)
+        (js-object
+          :namespace (js-call name :slice 0 slash)
+          :local (js-call name :slice (1+ slash))))))
+
+  (defun map-binding-shortcut (node)
+    (when (keyword-node-p node)
+      (let* ((parts (split-binding-name (node-name node)))
+             (kind (get parts :local)))
+        (when (js-call (js-array "keys" "strs" "syms") :includes kind)
+          (js-object :kind kind :namespace (get parts :namespace))))))
+
+  (defun shortcut-entry (shortcut name-node)
+    (let* ((name (node-name name-node))
+           (parts (split-binding-name name))
+           (local (get parts :local))
+           (namespace (or (get shortcut :namespace)
+                          (get parts :namespace)))
+           (kind (get shortcut :kind))
+           (qualified (if namespace (str namespace "/" local) local)))
+      (js-object
+        :target (js-object
+                  :kind "symbol" :name local :span (node-span name-node))
+        :keyKind kind
+        :keyName (if (= kind "strs") name qualified))))
+
   (defun map-binding-key-p (node)
     (or (keyword-node-p node)
         (and node
@@ -106,34 +135,40 @@
           (entries (js-array))
           (defaults (new globalThis.Map))
           (as undefined)
-          (keys-seen false)
+          (shortcuts-seen (new globalThis.Set))
           (or-seen false)
           (as-seen false)
           (index 0))
       (while (< index (get items :length))
         (let* ((left (js-nth index items))
                (right (js-nth (1+ index) items))
-               (directive (and (keyword-node-p left) (node-name left))))
+               (directive (and (keyword-node-p left) (node-name left)))
+               (shortcut (map-binding-shortcut left)))
           (cond
-            ((= directive "keys")
-             (when keys-seen
-               (analyzer-fail context (node-span left)
-                 "map binding pattern accepts :keys once"))
-             (setq keys-seen t)
-             (unless (vector-node-p right)
-               (analyzer-fail context (node-span right)
-                 "map binding :keys value must be a vector"))
-             (js-call (node-items right) :forEach
-               (lambda (name-node)
-                 (let ((name (and (symbol-node-p name-node)
-                                  (node-name name-node))))
-                   (unless (and name
-                                (not (binding-marker-p name))
-                                (not (js-call name :includes "/")))
-                     (analyzer-fail context (node-span name-node)
-                       "map binding :keys entries must be unqualified symbols"))
-                   (js-call entries :push
-                     (js-object :target name-node :keyName name))))) )
+            (shortcut
+             (let ((kind (get shortcut :kind)))
+               (when (js-call shortcuts-seen :has directive)
+                 (analyzer-fail context (node-span left)
+                   (str "map binding pattern accepts :" directive " once")))
+               (js-call shortcuts-seen :add directive)
+               (unless (vector-node-p right)
+                 (analyzer-fail context (node-span right)
+                   (str "map binding :" kind " value must be a vector")))
+               (js-call (node-items right) :forEach
+                 (lambda (name-node)
+                   (let ((name (and (symbol-node-p name-node)
+                                    (node-name name-node))))
+                     (unless (and name
+                                  (not (binding-marker-p name))
+                                  (> (get
+                                       (get (split-binding-name name) :local)
+                                       :length)
+                                     0))
+                       (analyzer-fail context (node-span name-node)
+                         (str "map binding :" kind
+                              " entries must be symbols")))
+                     (js-call entries :push
+                       (shortcut-entry shortcut name-node)))))))
             ((= directive "or")
              (when or-seen
                (analyzer-fail context (node-span left)

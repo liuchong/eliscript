@@ -41,6 +41,25 @@
   (defun binding-marker-p (name)
     (js-call (js-array "&optional" "&rest" "&body") :includes name))
 
+  (defun split-binding-name (name)
+    (let ((slash (js-call name :lastIndexOf "/")))
+      (if (< slash 0)
+          (js-object :namespace undefined :local name)
+        (js-object
+          :namespace (js-call name :slice 0 slash)
+          :local (js-call name :slice (1+ slash))))))
+
+  (defun map-binding-shortcut-p (node)
+    (and (keyword-node-p node)
+         (js-call (js-array "keys" "strs" "syms") :includes
+           (get (split-binding-name (node-name node)) :local))))
+
+  (defun local-binding-node (node)
+    (js-object
+      :kind "symbol"
+      :name (get (split-binding-name (node-name node)) :local)
+      :span (node-span node)))
+
   (defun binding-nodes (pattern context)
     (cond
       ((symbol-node-p pattern)
@@ -68,9 +87,10 @@
                   (right (js-nth (1+ index) items))
                   (directive (and (keyword-node-p left) (node-name left))))
              (cond
-               ((= directive "keys")
+               ((map-binding-shortcut-p left)
                 (js-call (node-items right) :forEach
-                  (lambda (binding) (js-call result :push binding))))
+                  (lambda (binding)
+                    (js-call result :push (local-binding-node binding)))))
                ((= directive "as") (js-call result :push right))
                ((= directive "or") nil)
                (t

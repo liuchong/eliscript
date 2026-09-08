@@ -39,6 +39,35 @@
          (= (node-kind node) "literal")
          (= (js* "typeof node.value") "string")))
 
+  (defun split-binding-name (name)
+    (let ((slash (js-call name :lastIndexOf "/")))
+      (if (< slash 0)
+          (js-object :namespace undefined :local name)
+        (js-object
+          :namespace (js-call name :slice 0 slash)
+          :local (js-call name :slice (1+ slash))))))
+
+  (defun map-binding-shortcut (node)
+    (when (keyword-node-p node)
+      (let* ((parts (split-binding-name (node-name node)))
+             (kind (get parts :local)))
+        (when (js-call (js-array "keys" "strs" "syms") :includes kind)
+          (js-object :kind kind :namespace (get parts :namespace))))))
+
+  (defun shortcut-entry (shortcut name-node)
+    (let* ((name (node-name name-node))
+           (parts (split-binding-name name))
+           (local (get parts :local))
+           (namespace (or (get shortcut :namespace)
+                          (get parts :namespace)))
+           (kind (get shortcut :kind))
+           (qualified (if namespace (str namespace "/" local) local)))
+      (js-object
+        :target (js-object
+                  :kind "symbol" :name local :span (node-span name-node))
+        :keyKind kind
+        :keyName (if (= kind "strs") name qualified))))
+
   (defun null-node-p (node)
     (and node
          (= (node-kind node) "literal")
@@ -103,13 +132,14 @@
       (while (< index (get items :length))
         (let* ((left (js-nth index items))
                (right (js-nth (1+ index) items))
-               (directive (and (keyword-node-p left) (node-name left))))
+               (directive (and (keyword-node-p left) (node-name left)))
+               (shortcut (map-binding-shortcut left)))
           (cond
-            ((= directive "keys")
+            (shortcut
              (js-call (node-items right) :forEach
                (lambda (name-node)
                  (js-call entries :push
-                   (js-object :target name-node :keyName (node-name name-node))))))
+                   (shortcut-entry shortcut name-node)))))
             ((= directive "or")
              (let ((pairs (js-call (node-items right) :slice 1))
                    (default-index 0))
@@ -163,12 +193,22 @@
              (let ((entry-children
                     (js-array (lower-binding-target (get entry :target)))))
                (js-call entry-children :push
-                 (if (get entry :keyName)
-                     (make-node
-                       "literal" (node-span (get entry :target))
-                       (get entry :keyName) (js-array)
-                       (js-object :literalKind "keyword"))
-                   (lower-expression (get entry :key))))
+                 (cond
+                   ((= (get entry :keyKind) "keys")
+                    (make-node
+                      "literal" (node-span (get entry :target))
+                      (get entry :keyName) (js-array)
+                      (js-object :literalKind "keyword")))
+                   ((= (get entry :keyKind) "strs")
+                    (make-node
+                      "literal" (node-span (get entry :target))
+                      (get entry :keyName) (js-array) nil))
+                   ((= (get entry :keyKind) "syms")
+                    (make-node
+                      "quoted-literal" (node-span (get entry :target))
+                      (js-object :kind "symbol" :name (get entry :keyName))
+                      (js-array) nil))
+                   (t (lower-expression (get entry :key)))))
                (when (get entry :hasDefault)
                  (js-call entry-children :push
                    (lower-expression (get entry :default))))

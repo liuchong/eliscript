@@ -33,10 +33,45 @@
         (vectorp value)
         (eliscript-binding-map-pattern-p form))))
 
-(defun eliscript-binding--keyword-name (form name)
-  "Create a located keyword FORM from binding NAME."
-  (eliscript-form-inherit
-   (intern (concat ":" (symbol-name name))) form))
+(defun eliscript-binding--split-name (name)
+  "Return NAME as a (NAMESPACE . LOCAL-NAME) string pair."
+  (let* ((text (symbol-name name))
+         (slash (cl-position ?/ text :from-end t)))
+    (if slash
+        (cons (substring text 0 slash) (substring text (1+ slash)))
+      (cons nil text))))
+
+(defun eliscript-binding--map-shortcut (directive)
+  "Return normalized map shortcut metadata for keyword DIRECTIVE."
+  (when (keywordp directive)
+    (let* ((parts
+            (eliscript-binding--split-name
+             (intern (substring (symbol-name directive) 1))))
+           (kind (intern (cdr parts))))
+      (when (memq kind '(keys strs syms))
+        (list :kind kind :namespace (car parts))))))
+
+(defun eliscript-binding--map-shortcut-entry
+    (kind namespace name-form name)
+  "Normalize one KIND shortcut binding for NAME-FORM and NAME.
+
+NAMESPACE comes from a qualified shortcut such as `:user/keys'."
+  (let* ((parts (eliscript-binding--split-name name))
+         (local-name (cdr parts))
+         (key-namespace (or namespace (car parts)))
+         (qualified-name
+          (if key-namespace
+              (concat key-namespace "/" local-name)
+            local-name))
+         (target
+          (eliscript-form-inherit (intern local-name) name-form)))
+    (list :target target
+          :key-kind kind
+          :key-name
+          (pcase kind
+            ('keys (intern (concat ":" qualified-name)))
+            ('syms (intern qualified-name))
+            ('strs (symbol-name name))))))
 
 (defun eliscript-binding-map-spec (pattern fail)
   "Validate map binding PATTERN and return its normalized specification.
@@ -46,33 +81,43 @@ The result contains `:entries', each with `:target', `:key', and optional
 and a diagnostic message."
   (let* ((items (cdr (eliscript-form-value pattern)))
          entries defaults as
-         keys-seen or-seen as-seen)
+         shortcuts-seen or-seen as-seen)
     (unless (= (% (length items) 2) 0)
       (funcall fail pattern "map binding pattern requires key/value pairs"))
     (while items
       (let* ((left (pop items))
              (right (pop items))
-             (directive (eliscript-form-value left)))
+             (directive (eliscript-form-value left))
+             (shortcut (eliscript-binding--map-shortcut directive)))
         (cond
-         ((eq directive :keys)
-          (when keys-seen
-            (funcall fail left "map binding pattern accepts :keys once"))
-          (setq keys-seen t)
+         (shortcut
+          (when (memq directive shortcuts-seen)
+            (funcall fail left
+                     (format "map binding pattern accepts %s once" directive)))
+          (push directive shortcuts-seen)
           (let ((names (eliscript-form-value right)))
             (unless (vectorp names)
-              (funcall fail right "map binding :keys value must be a vector"))
+              (funcall fail right
+                       (format "map binding :%s value must be a vector"
+                               (plist-get shortcut :kind))))
             (dolist (name-form (append names nil))
               (let ((name (eliscript-form-value name-form)))
                 (unless (and name
                              (symbolp name)
                              (not (keywordp name))
                              (not (memq name eliscript-binding--markers))
-                             (not (string-match-p "/" (symbol-name name))))
+                             (> (length
+                                 (cdr (eliscript-binding--split-name name)))
+                                0))
                   (funcall fail name-form
-                           "map binding :keys entries must be unqualified symbols"))
-                (push (list :target name-form
-                            :key (eliscript-binding--keyword-name name-form name))
-                      entries)))))
+                           (format "map binding :%s entries must be symbols"
+                                   (plist-get shortcut :kind))))
+                (push
+                 (eliscript-binding--map-shortcut-entry
+                  (plist-get shortcut :kind)
+                  (plist-get shortcut :namespace)
+                  name-form name)
+                 entries)))))
          ((eq directive :or)
           (when or-seen
             (funcall fail left "map binding pattern accepts :or once"))
@@ -165,7 +210,8 @@ and a diagnostic message."
 
 FAIL receives the offending form and a diagnostic message.  Vector patterns
 support nested vectors, nil holes, and one final `&rest' symbol.  Map patterns
-support explicit entries plus `:keys', `:or', and `:as'."
+support explicit entries plus `:keys', `:strs', `:syms', qualified
+shortcuts, `:or', and `:as'."
   (let ((value (eliscript-form-value pattern)))
     (cond
      ((null value) nil)

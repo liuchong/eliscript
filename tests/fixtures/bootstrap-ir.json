@@ -48,7 +48,7 @@
     {
       "name": "map-binding-patterns",
       "filename": "map-patterns.eli",
-      "source": "(defportable map-name ({:keys [name]}) name)\n(defun unpack ({:keys [name age] :or {age 18} :as row})\n  [name age row])\n(defun nested ({alias :name {:keys [city]} :profile}) [alias city])\n(defun recover ()\n  (try (throw (js-object :code 7))\n    (catch {:keys [code]} code)))\n(export map-name unpack nested recover)"
+      "source": "(defportable map-name ({:keys [name]}) name)\n(defun unpack ({:keys [name age] :or {age 18} :as row})\n  [name age row])\n(defun nested ({alias :name {:keys [city]} :profile}) [alias city])\n(defun shortcuts ({:keys [profile/name] :account/keys [id] :strs [label] :syms [token] :or {id 7}})\n  [name id label token])\n(defun recover ()\n  (try (throw (js-object :code 7))\n    (catch {:keys [code]} code)))\n(export map-name unpack nested shortcuts recover)"
     },
     {
       "name": "object-primitives",

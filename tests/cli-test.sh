@@ -197,6 +197,9 @@ MAP_PATTERNS_OUTPUT=$(ELISCRIPT_MAP_PATTERNS_MODULE="$MAP_PATTERNS_MODULE" bun -
     module.unpack({ name: "Ada", age: null, note: null }),
     module.optional_map(),
     module.explicit_and_nested({ name: "Ada", profile: { city: "London" } }),
+    module.shortcuts({ "profile/name": "Ada", "account/id": 5, label: "text", token: "symbol" }),
+    module.shortcuts({ "profile/name": "Ada", label: "text", token: "symbol" }),
+    module.persistent_shortcuts(),
     module.lexical_map({ name: "Ada" }),
     module.countdown({ remaining: 10000 }),
     module.catch_map(),
@@ -205,7 +208,7 @@ MAP_PATTERNS_OUTPUT=$(ELISCRIPT_MAP_PATTERNS_MODULE="$MAP_PATTERNS_MODULE" bun -
   ]));
 ')
 
-EXPECTED_MAP_PATTERNS='[["Ada",18,"missing"],["Ada",null,null],"anonymous",["Ada","London"],["Ada",18,{"name":"Ada"}],0,[7,"caught"],"portable",["Eliscript",18]]'
+EXPECTED_MAP_PATTERNS='[["Ada",18,"missing"],["Ada",null,null],"anonymous",["Ada","London"],["Ada",5,"text","symbol"],["Ada",7,"text","symbol"],["persistent",9,"text","symbol"],["Ada",18,{"name":"Ada"}],0,[7,"caught"],"portable",["Eliscript",18]]'
 if [ "$MAP_PATTERNS_OUTPUT" != "$EXPECTED_MAP_PATTERNS" ]; then
   printf 'expected map pattern output: %s\nactual map pattern output:   %s\n' \
     "$EXPECTED_MAP_PATTERNS" "$MAP_PATTERNS_OUTPUT" >&2
