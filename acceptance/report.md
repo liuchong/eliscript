@@ -1,9 +1,9 @@
 # Eliscript 1.0 Acceptance Report
 
-- Source commit: `7bf086448e8d8445f5a7061b24dddb137631af84`
-- Source tree: `0bed214cbabeed5db9b37b76ed9e2a0c931cbf54`
+- Source commit: `9134976dee191e10ef014f0a21e8c046d45f3753`
+- Source tree: `36b1b25c2b354e3625aec0ec7f858b125ba7d132`
 - Contract: `contracts/final-acceptance.json` (`fc7760bdccc644b014b3513e4020f3647e3128e54676481d1515504967f2651d`)
-- Generated: 2026-09-08T03:13:00.890Z
+- Generated: 2026-09-08T03:22:54.630Z
 - Environment: Darwin 25.6.0; arm64; Bun 1.4.0; Node v26.8.1; Emacs 31.1
 - Corpus complete: yes
 - Operational success: yes
@@ -80,8 +80,8 @@ No unresolved defects are recorded.
 
 | Probe | Command | Result | Exit | Duration (ms) | Output SHA-256 |
 | --- | --- | --- | ---: | ---: | --- |
-| core-suite | `make test-core` | pass | 0 | 451415.551 | `1fb91ec17957617d5e8c63094cee542d1ee5f4caa831dc294f32b5bfbe0c4890` |
-| strict-byte-compile | `make byte-compile` | pass | 0 | 920.501 | `4110c50ff8be0d96e678ed5ef31967a2aca72a86558181796ef5f14b5a350c3e` |
+| core-suite | `make test-core` | pass | 0 | 456685.937 | `0d9aaf64e8c773d0fbd6103fc209bc96ca338bae01f223fe4e20c3976f529ec1` |
+| strict-byte-compile | `make byte-compile` | pass | 0 | 1059.567 | `4110c50ff8be0d96e678ed5ef31967a2aca72a86558181796ef5f14b5a350c3e` |
 
 ## Artifact Digests
 
@@ -89,8 +89,8 @@ No unresolved defects are recorded.
 | --- | --- |
 | `.github/workflows/compatibility.yml` | `45a2c3941d06adc6d745b4490197beb2a86266fda2685a69a88aeaa6afacfb90` |
 | `acceptance/defects.json` | `da4ac30acd7e57ec357e3d30da05c304605d0a2407733137adf1a44f5b137377` |
-| `acceptance/manifest.json` | `4f1a50f877e42f9b227da6b447bece7704b55ae74bd783d751f2847e13784688` |
-| `acceptance/report.md` | `6a435b225bf1c5356fdb7c84e213bd3e4da8d4165e81fb27b3d9d3295bf8dad8` |
+| `acceptance/manifest.json` | `debad740d4c57991ca0fb65bf0ce8ba3283ee6fdf050c51cc76a6ff5f5512c1e` |
+| `acceptance/report.md` | `7481853b8e46a0eeb53403c229142598cbc85a76fa32771e23146bd4f33c32ab` |
 | `acceptance/runs/m13-02.json` | `de2767587a9c5b2ff4280c7a1005d88274f0dc9f6c327edd89a2944d67053355` |
 | `acceptance/runs/m13-04.json` | `47a58aab430e21d26a9fce392283d06bb62b969a90ae5e922307e4dbce58a880` |
 | `acceptance/runs/m13-04.md` | `a9b55996a36aab1d86696ec7a1edd4eb63d297060f0c319e959c1c1090e53411` |
@@ -152,7 +152,7 @@ No unresolved defects are recorded.
 | `tests/eliscript-repl-tests.el` | `68f9f92967aabcf26ef9bd2d605368f5df062e524698dd031407c2ca783ac54e` |
 | `tests/emacs-analysis-evidence.test.mjs` | `17b1f280f4df04d1cfd2a6f9c35f1e89a04c9189fb38ff3294c97596050e3d57` |
 | `tests/esm-imports.test.mjs` | `73db20c832401a1930f6d4e686f0fd9d28a2553bf6ad25f3ea3cc8bee55c2d5f` |
-| `tests/final-acceptance.test.mjs` | `33c0b65db2f2478b8ae88b6b98da08c9b6212a132a71343f45874925a58ab9b3` |
+| `tests/final-acceptance.test.mjs` | `902c49c8460f228706ababda1295e63744c363fea9cd34499e577adbdc20488d` |
 | `tests/format-cli-test.sh` | `21cfbe2fd3de2fd908e5bfb01c9e3f8fa874c6b0e6d3c6b4539e4532567a6999` |
 | `tests/interop-js.test.mjs` | `f76f8aeb7ca895b44732a6c07716ee5cf6657023cbf6bc6e28c7583db65d35f0` |
 | `tests/local-onboarding.test.mjs` | `759ccfa512954e46ca1743f99e9d1f28cbdaffe5933c82546e48a6b1f7f2d099` |
