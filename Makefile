@@ -107,6 +107,9 @@ ifneq ($(ELISCRIPT_SKIP_RETAINED_ACCEPTANCE),1)
 		--verify-markdown acceptance/runs/m13-01.md
 	$(BUN) tools/acceptance/finalize.mjs --verify
 endif
+	$(BUN) tools/acceptance/repeat.mjs --verify \
+		--json-report acceptance/runs/m13-04.json \
+		--markdown-report acceptance/runs/m13-04.md
 	$(BUN) tools/surface/check.mjs
 	$(BUN) tools/surface/generate-api.mjs --check
 	$(BUN) tools/ci/render-workflow.mjs --check

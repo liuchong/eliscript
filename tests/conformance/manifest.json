@@ -2366,7 +2366,7 @@
     {
       "id": "quality.repeated-core-determinism",
       "title": "Repeated core determinism evidence",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0141",
       "contracts": [
         "Builds the self-hosted compiler and executes the complete core acceptance corpus exactly twenty times from one clean source identity",
@@ -2384,6 +2384,11 @@
           "kind": "bun-test",
           "file": "tests/repeated-determinism.test.mjs",
           "contains": "identity, cleanliness, and projection drift are rejected"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/repeated-determinism.test.mjs",
+          "contains": "retained repeated-determinism evidence verifies when present"
         }
       ]
     }

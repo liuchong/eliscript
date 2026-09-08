@@ -1280,6 +1280,12 @@ temporary paths, and cache observations are excluded from artifact identity by
 schema rather than text filtering. Application builds may repeat this check as
 non-blocking validation.
 
+**Status:** Complete. Specification
+[0141-repeated-core-determinism.md](0141-repeated-core-determinism.md) defines
+the local evidence schema. Retained run `m13-04` records twenty clean compiler
+and complete core acceptance executions from one source identity, all matching
+one combined SHA-256 digest.
+
 ### C. Project Toolchain
 
 **AC-08 MUST - Clean project workflow**

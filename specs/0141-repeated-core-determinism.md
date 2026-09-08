@@ -1,6 +1,6 @@
 # 0141: Repeated Core Determinism Evidence
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-08
 - Depends on: 0019 Self-Hosted Compiler Driver,
