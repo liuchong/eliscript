@@ -108,6 +108,7 @@ function requirementExerciseProgram() {
       expression(irNode("intrinsic", "car", [
         irNode("persistent-list-literal", null),
       ])),
+      expression(irNode("intrinsic", "equal", [literal(1), literal(1)])),
       expression(irNode("property-read", "get", [
         irNode("reference", "value"),
         literal("static-key", "keyword"),
@@ -120,7 +121,8 @@ function requirementChecksum(requirements) {
   return Number(requirements.hostIdentityToken) +
     Number(requirements.literal) * 2 +
     Number(requirements.collection) * 4 +
-    Number(requirements.list) * 8;
+    Number(requirements.list) * 8 +
+    Number(requirements.value) * 16;
 }
 
 function countProgramNodes(program) {

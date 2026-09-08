@@ -11,9 +11,9 @@
 ## Summary
 
 The self-hosted emitter now discovers conditional runtime imports with one IR
-traversal. The previous implementation recursively traversed the same program
-four times to detect persistent literals, generic collection operations, List
-operations, and process-local host identity tokens.
+traversal. The readable implementation recursively traverses the same program
+five times to detect persistent literals, generic collection operations, List
+operations, value equality, and process-local host identity tokens.
 
 The five independent predicates remain in the Eliscript-authored emitter as a
 readable reference implementation. The production emitter uses the one-pass
@@ -33,15 +33,15 @@ compiler modules rather than a generated tree with a convenient shape.
 
 The reviewed macOS arm64 report covers:
 
-- 275,380 bytes of maintained compiler source
-- 13 programs, including one explicit requirement exercise
-- 25,057 IR nodes
+- 335,900 bytes of maintained compiler source
+- 14 programs, including one explicit requirement exercise
+- 29,341 IR nodes
 - 9 alternating timing samples after warmup
 - exact optimized/reference agreement for every program
 
-The reviewed median is 276.218208 ms for the one-pass collector and
-440.912459 ms for the reference predicates over 80 repeated corpus scans, a
-1.596247x speedup. The decision threshold was fixed at 1.25x before recording
+The reviewed median is 424.730750 ms for the one-pass collector and
+737.548416 ms for the reference predicates over 80 repeated corpus scans, a
+1.736508x speedup. The decision threshold was fixed at 1.25x before recording
 the report. This local report supports the implementation choice; it is not a
 universal host-performance promise.
 

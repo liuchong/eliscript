@@ -1,0 +1,29 @@
+(module fixture.language-equality
+  (defportable same-value? (left right) (equal left right))
+  (defun report
+    ()
+    (let
+      ((left [1 {:nested #{:ready nil}}])
+        (right [1 {:nested #{nil :ready}}])
+        (native-left (js-array 1 2))
+        (native-right (js-array 1 2)))
+      (js-object
+        :persistent
+        (same-value? left right)
+        :persistentIdentity
+        (eq left right)
+        :sameIdentity
+        (eq left left)
+        :nativeDistinct
+        (equal native-left native-right)
+        :nativeSame
+        (equal native-left native-left)
+        :nan
+        (equal (js* "NaN") (js* "NaN"))
+        :signedZero
+        (equal (js* "-0") 0)
+        :mapOrder
+        (equal {:a 1 :b 2} {:b 2 :a 1})
+        :setOrder
+        (equal #{:a :b} #{:b :a}))))
+  (export same-value? report))

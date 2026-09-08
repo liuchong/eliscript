@@ -159,9 +159,10 @@ Maps. `(list ...)` constructs canonical persistent Lists, and Set syntax plus
 construction is available only through the explicit `js-` forms; the former
 `array` and `object` aliases are ordinary unbound names unless declared by the
 program. `nth` and `length` dispatch through collection protocols; `js-nth`
-and `js-length` are explicit native access. `equal` currently uses strict
-identity equality in the language intrinsic; structural equality is available
-through the persistent value runtime.
+and `js-length` are explicit native access. `eq` performs strict JavaScript
+identity comparison, while `equal` performs recursive Eliscript value equality
+as specified by
+[0145-language-value-equality.md](0145-language-value-equality.md).
 
 Higher-order, non-mutating sequence operations are implemented as Eliscript
 library code rather than special forms. See

@@ -26,6 +26,9 @@
 (defconst eliscript-emitter--list-runtime-import
   "import { cons as __eliscript_cons, first as __eliscript_first, rest as __eliscript_rest } from \"eliscript/runtime/core/list.mjs\";\n"
   "Generated import for canonical persistent List operations.")
+(defconst eliscript-emitter--value-runtime-import
+  "import { equalValues as __eliscript_equal } from \"eliscript/runtime/core/value.mjs\";\n"
+  "Generated import for canonical language value equality.")
 (require 'eliscript-symbol)
 
 (defalias 'eliscript-emitter--munge-segment
@@ -940,9 +943,14 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
       ('1-
        (eliscript-emitter--require-arity "1-" arguments 1 1)
        (format "(%s - 1)" (eliscript-emitter-emit-expression (car arguments))))
-      ((or 'eq 'equal)
+      ('eq
        (eliscript-emitter--require-arity (symbol-name operator) arguments 2 2)
        (format "(%s === %s)"
+               (eliscript-emitter-emit-expression (nth 0 arguments))
+               (eliscript-emitter-emit-expression (nth 1 arguments))))
+      ('equal
+       (eliscript-emitter--require-arity "equal" arguments 2 2)
+       (format "__eliscript_equal(%s, %s)"
                (eliscript-emitter-emit-expression (nth 0 arguments))
                (eliscript-emitter-emit-expression (nth 1 arguments))))
       ('nil?
@@ -1288,6 +1296,21 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
          (t nil))))
     (cl-some #'walk forms)))
 
+(defun eliscript-emitter--uses-value-runtime-p (forms)
+  "Return non-nil when FORMS use canonical language value equality."
+  (cl-labels
+      ((walk
+        (form)
+        (cond
+         ((vectorp form) (cl-some #'walk (append form nil)))
+         ((consp form)
+          (cond
+           ((eq (car form) 'quote) nil)
+           ((eq (car form) 'equal) t)
+           (t (cl-some #'walk form))))
+         (t nil))))
+    (cl-some #'walk forms)))
+
 (defun eliscript-emit-module (forms)
   "Emit FORMS as one ECMAScript module."
   (let ((eliscript-emitter--temporary-counter 0))
@@ -1301,6 +1324,9 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
        "")
      (if (eliscript-emitter--uses-list-runtime-p forms)
          eliscript-emitter--list-runtime-import
+       "")
+     (if (eliscript-emitter--uses-value-runtime-p forms)
+         eliscript-emitter--value-runtime-import
        "")
      "const __eliscript_truthy = (value) => value !== false && value != null;\n"
      (if (eliscript-emitter--uses-host-identity-token-p forms)

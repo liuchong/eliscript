@@ -97,14 +97,14 @@ baseline and optimized order after warmup.
 
 The reviewed macOS arm64 report records:
 
-- 275,380 bytes across 12 compiler modules
-- 441,772 bytes of baseline generated JavaScript
-- 337,871 bytes of optimized generated JavaScript
+- 335,900 bytes across 13 compiler modules
+- 531,189 bytes of baseline generated JavaScript
+- 409,991 bytes of optimized generated JavaScript
 - 2 warmup rounds
 - 11 alternating samples with 6 complete corpus rounds per sample
-- 655.780083 ms baseline median
-- 405.239709 ms optimized median
-- 1.618252x complete-compiler speedup
+- 845.304291 ms baseline median
+- 537.280625 ms optimized median
+- 1.573301x complete-compiler speedup
 
 The decision threshold was fixed at 1.15x before the reviewed report was
 recorded. Every current compiler source, both seed emitter implementations,
@@ -145,7 +145,7 @@ require profile evidence and measured changes with explicit semantic bounds.
 - **BCE-05:** Executable evidence observes binary and n-ary side effects, and
   the three-generation compiler fixed point remains byte-identical.
 - **BCE-06:** The benchmark accepts only the exact pre-specialization baseline
-  revision and the same eleven-module current-source corpus.
+  revision and the same thirteen-module current-source corpus.
 - **BCE-07:** The reviewed report contains source and host fingerprints, raw
   alternating samples, medians, byte counts, checksums, threshold, and a
   passing decision.

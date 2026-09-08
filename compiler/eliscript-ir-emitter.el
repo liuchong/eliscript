@@ -29,6 +29,10 @@
   "import { cons as __eliscript_cons, first as __eliscript_first, rest as __eliscript_rest } from \"eliscript/runtime/core/list.mjs\";\n"
   "Generated import for canonical persistent List operations.")
 
+(defconst eliscript-ir-emitter--value-runtime-import
+  "import { equalValues as __eliscript_equal } from \"eliscript/runtime/core/value.mjs\";\n"
+  "Generated import for canonical language value equality.")
+
 (defun eliscript-ir-emitter--locate (node output)
   "Mark OUTPUT with NODE's source span when source-map recording is active."
   (if eliscript-ir-emitter--record-source-spans
@@ -822,9 +826,14 @@
        (eliscript-ir-emitter--require-arity node 1 1)
        (format "(%s - 1)"
                (eliscript-ir-emitter-emit-expression (car nodes))))
-      ((or 'eq 'equal)
+      ('eq
        (eliscript-ir-emitter--require-arity node 2 2)
        (format "(%s === %s)"
+               (eliscript-ir-emitter-emit-expression (nth 0 nodes))
+               (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
+      ('equal
+       (eliscript-ir-emitter--require-arity node 2 2)
+       (format "__eliscript_equal(%s, %s)"
                (eliscript-ir-emitter-emit-expression (nth 0 nodes))
                (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
       ('nil?
@@ -1198,6 +1207,7 @@ JavaScript property or tag string rather than an Eliscript value."
         uses-literal-runtime
         uses-collection-runtime
         uses-list-runtime
+        uses-value-runtime
         uses-host-identity-token
         portable-functions
         exported-bindings)
@@ -1210,6 +1220,9 @@ JavaScript property or tag string rather than an Eliscript value."
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (memq (eliscript-ir-node-value node) '(car cdr cons)))
          (setq uses-list-runtime t))
+       (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
+                  (eq (eliscript-ir-node-value node) 'equal))
+         (setq uses-value-runtime t))
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (eq (eliscript-ir-node-value node) 'host-identity-token))
          (setq uses-host-identity-token t))
@@ -1233,6 +1246,9 @@ JavaScript property or tag string rather than an Eliscript value."
        "")
      (if uses-list-runtime
          eliscript-ir-emitter--list-runtime-import
+       "")
+     (if uses-value-runtime
+         eliscript-ir-emitter--value-runtime-import
        "")
      "const __eliscript_truthy = (value) => value !== false && value != null;\n"
      (if uses-host-identity-token

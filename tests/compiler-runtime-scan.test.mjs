@@ -108,6 +108,7 @@ test("optimized compiler runtime scan matches its readable reference", async () 
         expression(irNode("intrinsic", "car", [
           irNode("persistent-list-literal", null),
         ])),
+        expression(irNode("intrinsic", "equal", [literal(1), literal(1)])),
       ],
     };
     const staticKeywordProperty = {
@@ -133,12 +134,14 @@ test("optimized compiler runtime scan matches its readable reference", async () 
       literal: true,
       collection: true,
       list: true,
+      value: true,
     });
     expect(emitter.runtime_requirements(staticKeywordProperty)).toEqual({
       hostIdentityToken: false,
       literal: false,
       collection: false,
       list: false,
+      value: false,
     });
   } finally {
     await rm(directory, { recursive: true, force: true });

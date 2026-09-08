@@ -29,20 +29,20 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 144 specifications.
+The registry currently contains 145 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 109 |
-| Stable design | 33 |
+| Accepted design | 108 |
+| Stable design | 35 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 140 |
+| Implemented | 141 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 33 specifications as stable,
-107 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 35 specifications as stable,
+106 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -392,7 +392,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | ID | Specification | Status | Implementation |
 | --- | --- | --- | --- |
 | 0047 | [Persistent Vector Trie Prototype](0047-persistent-vector-prototype.md) | Accepted | Implemented |
-| 0048 | [Value Equality and Deterministic Hashing](0048-value-equality-and-hashing.md) | Accepted | Implemented |
+| 0048 | [Value Equality and Deterministic Hashing](0048-value-equality-and-hashing.md) | Stable | Implemented |
 | 0049 | [Persistent Hash Map Trie Prototype](0049-persistent-hash-map-prototype.md) | Accepted | Implemented |
 | 0050 | [Persistent Hash Set Prototype](0050-persistent-hash-set-prototype.md) | Accepted | Implemented |
 | 0051 | [HAMT Layout Benchmark and Threshold Selection](0051-hamt-layout-benchmark.md) | Accepted | Implemented |
@@ -489,6 +489,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0142 | [Maintained JavaScript Package Interop Fixture](0142-maintained-javascript-package-interop.md) | Accepted | Implemented |
 | 0143 | [Complete Negative Diagnostic Corpus](0143-complete-negative-diagnostic-corpus.md) | Stable | Implemented |
 | 0144 | [Source-level Failure Mapping](0144-source-level-failure-mapping.md) | Stable | Implemented |
+| 0145 | [Language Value Equality](0145-language-value-equality.md) | Stable | Implemented |
 
 ## Adding a Specification
 

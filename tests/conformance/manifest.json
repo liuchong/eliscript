@@ -447,7 +447,7 @@
     {
       "id": "runtime.value-equality-hashing",
       "title": "Value equality and deterministic 32-bit hashing",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0048",
       "contracts": ["Defines coercion-free SameValueZero scalar semantics", "Compares and hashes persistent vectors recursively by ordered values", "Uses process-local identity semantics for opaque host values", "Caches immutable persistent hashes privately", "Resolves matching hashes with value equality"],
       "evidence": [
@@ -2469,6 +2469,36 @@
           "kind": "bun-test",
           "file": "tests/worker-runtime.test.mjs",
           "contains": "maps failures through project source maps"
+        }
+      ]
+    },
+    {
+      "id": "language.value-equality",
+      "title": "Language value equality",
+      "status": "stable",
+      "spec": "0145",
+      "contracts": [
+        "Keeps eq as strict identity while equal delegates to canonical recursive value equality",
+        "Links the value runtime once only for live equal expressions",
+        "Matches persistent host NaN and signed-zero semantics across compiler generations",
+        "Produces byte-identical ESM and Source Maps across seed and self-hosted compilers",
+        "Executes with identical results under local Bun and Node without hosted isolated or application evidence"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-separates-identity-and-value-equality"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/language-equality.test.mjs",
+          "contains": "language equal uses value semantics across compilers and local hosts"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/compiler-runtime-scan.test.mjs",
+          "contains": "optimized compiler runtime scan matches its readable reference"
         }
       ]
     }

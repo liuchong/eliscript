@@ -99,22 +99,22 @@ specialization directly; `locate` remains an exported semantic test boundary.
 ## Reproducible Benchmark Contract
 
 `tools/compiler/locate-benchmark.mjs` compiles all maintained self-hosted
-modules to real IR and real generated fragments. The corpus contains 22 module
-artifact fragments plus 11 shifted fragments whose first mark begins after
+modules to real IR and real generated fragments. The corpus contains 26 module
+artifact fragments plus 13 shifted fragments whose first mark begins after
 offset zero.
 
-Before timing, all 33 optimized/reference results must contain byte-identical
+Before timing, all 39 optimized/reference results must contain byte-identical
 text and structurally equal ordered marks. The reviewed macOS arm64 report
 records:
 
-- 275,380 bytes of maintained compiler source
-- 12 compiler programs and 24 generated artifact fragments
-- 12 shifted non-zero-start cases, for 36 total cases
-- 674,350 generated text bytes and 44,608 Source Map marks
+- 335,900 bytes of maintained compiler source
+- 13 compiler programs and 26 generated artifact fragments
+- 13 shifted non-zero-start cases, for 39 total cases
+- 818,474 generated text bytes and 52,565 Source Map marks
 - 9 alternating samples after warmup, with 500 corpus passes per sample
 
-The current reviewed median is 29.205416 ms for ordered production location and
-70.913500 ms for the retained scan-and-copy reference, a 2.428094x local
+The current reviewed median is 36.804125 ms for ordered production location and
+70.841916 ms for the retained scan-and-copy reference, a 1.924836x local
 speedup. The maintenance threshold is 1.75x. It was recalibrated from the
 original 2x threshold after specification 0100 independently removed binary
 comparison closures from both production and reference generated code. The

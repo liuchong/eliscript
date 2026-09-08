@@ -53,7 +53,7 @@ closures, while `whitespace-code-p` contained four.
 
 `tools/compiler/reader-character-benchmark.mjs` requires an exact detached
 baseline at revision `d6822134a187d4247611db56822ef47164a76a61`. Both generated
-compilers compile the same current eleven-module self-hosted compiler corpus
+compilers compile the same current thirteen-module self-hosted compiler corpus
 with Source Maps. Every generated module and Source Map must be byte-identical
 before timing begins.
 
@@ -63,9 +63,9 @@ predicate pairs over all Unicode code points and explicit host boundaries.
 Timing alternates reference and optimized predicates, then baseline and
 optimized complete compilers, to reduce order bias.
 
-The reviewed macOS arm64 report records 275,381 real-source decisions, a
-5.399289x predicate median speedup, 15 timing samples, 8 complete corpus rounds
-per compiler sample, and a 1.249726x complete-compiler median speedup against a
+The reviewed macOS arm64 report records 335,901 real-source decisions, a
+4.652380x predicate median speedup, 15 timing samples, 8 complete corpus rounds
+per compiler sample, and a 1.246257x complete-compiler median speedup against a
 predeclared threshold of 1.08x. The report is source-bound by SHA-256 and
 records raw samples, medians, checksums, host identity, corpus size, and the
 final decision. Default tests validate the report without using wall-clock

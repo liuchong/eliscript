@@ -1,6 +1,6 @@
 # 0048: Value Equality and Deterministic Hashing
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-08-28
 - Depends on: 0034 Nullish Values, 0041 Host Symbiosis, Persistent Data, and
@@ -8,7 +8,7 @@
 
 ## Summary
 
-This specification defines the provisional M8 value comparison and 32-bit hash
+This specification defines the stable value comparison and 32-bit hash
 foundation used by persistent collections. It separates portable value
 semantics from JavaScript host identity, gives persistent vectors recursive
 value equality, and freezes deterministic Bun/Node fixtures used by persistent
@@ -25,10 +25,11 @@ adds the `IEquiv`, `IHash`, and `extendValueType` exports while preserving the
 scalar rules, frozen hashes, identity fallback, and cache behavior defined
 here.
 
-These JavaScript names are provisional runtime APIs. Compiler forms still keep
-their Compatibility Baseline 1 behavior: `eq`, `equal`, and `=` currently emit
-strict JavaScript comparison. Language-form migration waits for all persistent
-value families and explicit host conversion.
+The JavaScript functions are stable runtime APIs. The language-level `equal`
+form delegates to `equalValues`; `eq` remains strict JavaScript identity and
+`=` remains the n-ary comparison form defined by the core language. The exact
+language boundary is specified by
+[0145-language-value-equality.md](0145-language-value-equality.md).
 
 ## Equality Families
 
@@ -213,22 +214,16 @@ The default suite verifies:
 - insertion-order-independent Map and Set hashes, including collisions
 - exact frozen hash output under both Bun and Node.js
 
-## Compatibility and Remaining Work
+## Compatibility
 
-This specification and its conformance feature are provisional in
-Compatibility Baseline 1. They establish the key contract needed by HAMT Map
-and Set but do not complete 0041 value semantics.
+This specification and its conformance feature are stable in Compatibility
+Baseline 2. They establish the equality and hashing contract shared by the
+language, persistent collections, and portable value library.
 
 Metadata exclusion is now implemented and evidenced by
 [0068-immutable-metadata-semantics.md](0068-immutable-metadata-semantics.md).
-Remaining work includes:
-
-- language-form and literal migration
-- portable protocol dispatch policy
-- hostile-input and decode-boundary security limits
-
-The P0 equality/hash fixture requirement is satisfied for currently
-implemented runtime values. Persistent Map HAMT support is specified by
+The P0 equality/hash fixture requirement is satisfied for all implemented
+runtime values. Persistent Map HAMT support is specified by
 [0049-persistent-hash-map-prototype.md](0049-persistent-hash-map-prototype.md),
 and Set support by
 [0050-persistent-hash-set-prototype.md](0050-persistent-hash-set-prototype.md).

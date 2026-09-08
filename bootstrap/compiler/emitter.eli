@@ -17,6 +17,8 @@
     "import { count as __eliscript_count, nth as __eliscript_nth } from \"eliscript/runtime/core/collection.mjs\";\n")
   (defconst list-runtime-import
     "import { cons as __eliscript_cons, first as __eliscript_first, rest as __eliscript_rest } from \"eliscript/runtime/core/list.mjs\";\n")
+  (defconst value-runtime-import
+    "import { equalValues as __eliscript_equal } from \"eliscript/runtime/core/value.mjs\";\n")
   (defconst host-identity-token-helper
     "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n")
   (defconst fail
@@ -894,10 +896,15 @@
         ((= name "1-")
          (require-node-arity node 1 1)
          (combine (js-array "(" (emit-expression (js-nth 0 nodes)) " - 1)")))
-        ((or (= name "eq") (= name "equal"))
+        ((= name "eq")
          (require-node-arity node 2 2)
          (combine
            (js-array "(" (emit-expression (js-nth 0 nodes)) " === "
+            (emit-expression (js-nth 1 nodes)) ")")))
+        ((= name "equal")
+         (require-node-arity node 2 2)
+         (combine
+           (js-array "__eliscript_equal(" (emit-expression (js-nth 0 nodes)) ", "
             (emit-expression (js-nth 1 nodes)) ")")))
         ((= name "nil?")
          (require-node-arity node 1 1)
@@ -1310,6 +1317,17 @@
               (setq found t))))
         found)))
 
+  (defun node-uses-value-runtime-p (node)
+    (if (and (= (ir-kind node) "intrinsic")
+             (= (ir-value node) "equal"))
+        t
+      (let ((found false))
+        (js-call (children node) :forEach
+          (lambda (child)
+            (when (node-uses-value-runtime-p child)
+              (setq found t))))
+        found)))
+
   (defun program-uses-host-identity-token-p (program)
     (let ((found false))
       (js-call (program-body program) :forEach
@@ -1342,12 +1360,21 @@
             (setq found t))))
       found))
 
+  (defun program-uses-value-runtime-p (program)
+    (let ((found false))
+      (js-call (program-body program) :forEach
+        (lambda (node)
+          (when (node-uses-value-runtime-p node)
+            (setq found t))))
+      found))
+
   (defun reference-runtime-requirements (program)
     (js-object
       :hostIdentityToken (program-uses-host-identity-token-p program)
       :literal (program-uses-literal-runtime-p program)
       :collection (program-uses-collection-runtime-p program)
-      :list (program-uses-list-runtime-p program)))
+      :list (program-uses-list-runtime-p program)
+      :value (program-uses-value-runtime-p program)))
 
   (defun static-literal-key-p (node index static-key-index)
     (and static-key-index
@@ -1384,7 +1411,9 @@
            ((or (= value "nth") (= value "length"))
             (put requirements :collection t))
            ((or (= value "car") (= value "cdr") (= value "cons"))
-            (put requirements :list t)))))
+            (put requirements :list t))
+           ((= value "equal")
+            (put requirements :value t)))))
       (while (< index (get nodes :length))
         (let ((child (js-nth index nodes)))
           (collect-runtime-requirements
@@ -1401,7 +1430,8 @@
              :hostIdentityToken false
              :literal false
              :collection false
-             :list false)))
+             :list false
+             :value false)))
       (js-call (program-body program) :forEach
         (lambda (node)
           (collect-runtime-requirements node requirements false)))
@@ -1469,6 +1499,9 @@
            "")
          (if (get requirements :list)
              list-runtime-import
+           "")
+         (if (get requirements :value)
+             value-runtime-import
            "")
          "const __eliscript_truthy = (value) => value !== false && value != null;\n"
          (if (get requirements :hostIdentityToken)

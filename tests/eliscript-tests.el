@@ -651,6 +651,33 @@
      (equal (eliscript-compile-string source "comparison.eli")
             (eliscript-tests--legacy-compile-string source "comparison.eli")))))
 
+(ert-deftest eliscript-separates-identity-and-value-equality ()
+  (let* ((source
+          "(defun compare (left right) [(eq left right) (equal left right)])")
+         (output (eliscript-compile-string source "equality.eli"))
+         (legacy (eliscript-tests--legacy-compile-string source "equality.eli"))
+         (runtime-path "eliscript/runtime/core/value.mjs")
+         (first-import (string-match (regexp-quote runtime-path) output)))
+    (should (equal output legacy))
+    (should first-import)
+    (should-not
+     (string-match (regexp-quote runtime-path)
+                   output (+ first-import (length runtime-path))))
+    (should (string-match-p (regexp-quote "(left === right)") output))
+    (should
+     (string-match-p
+      (regexp-quote "__eliscript_equal(left, right)") output))
+    (should-not
+     (string-match-p
+      (regexp-quote runtime-path)
+      (eliscript-compile-string
+       "(defun same-object (left right) (eq left right))" "identity.eli")))
+    (should-not
+     (string-match-p
+      (regexp-quote runtime-path)
+      (eliscript-compile-string "(defconst form '(equal left right))"
+                                "quoted-equality.eli")))))
+
 (ert-deftest eliscript-enforces-complete-esm-import-contract ()
   (let ((output
          (eliscript-compile-string

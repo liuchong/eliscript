@@ -30,11 +30,16 @@ dispatch through collection protocols. Native JavaScript containers are
 explicit through forms such as `js-array` and are documented in
 [JavaScript interoperation](javascript-interop.md).
 
+`eq` compares identity. `equal` compares Eliscript values recursively:
+independently constructed persistent collections can be equal, `NaN` equals
+`NaN`, signed zeroes are equal, and opaque host objects remain identity-based.
+
 <!-- eliscript-snippet:language-values -->
 ```elisp
 (module docs.language-values
   (defconst values [1 2 3])
-  (print (str (nth 1 values) ":" (length values))))
+  (print (str (nth 1 values) ":" (length values)))
+  (print (equal values [1 2 3])))
 ```
 
 ## Bindings And Functions
