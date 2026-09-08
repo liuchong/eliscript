@@ -101,7 +101,7 @@ retainedReportTest(
     });
 
     expect(report.summary).toEqual({
-      criteria: { pass: 24, incomplete: 11, fail: 0, total: 35 },
+      criteria: { pass: 25, incomplete: 10, fail: 0, total: 35 },
       corpusComplete: true,
       operationalSuccess: true,
       acceptancePass: false,
