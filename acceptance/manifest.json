@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "format": "eliscript-1.0-acceptance-manifest",
   "version": 1,
-  "generatedAt": "2026-09-08T04:05:28.503Z",
+  "generatedAt": "2026-09-08T04:39:10.501Z",
   "source": {
-    "commit": "d83c952a78fbb74afceb90086b090b228d1bae6f",
-    "tree": "dd8ba00379451978583cb419c6bc65157cfa6b51",
+    "commit": "9ca56a8eb4f81ba71ee94d0625f7e991d3cd092f",
+    "tree": "ef450147ab82b11c8743eea043be98016fcb9352",
     "cleanBefore": true,
     "cleanAfter": true
   },
@@ -24,9 +24,9 @@
   },
   "sourceRun": {
     "json": "acceptance/runs/m13-01.json",
-    "jsonSha256": "76a044c1d03ab9eda0c9d7cf3bb9b4d4d8dc44db8aa5ee30b7646a68afb5c9fa",
+    "jsonSha256": "8e03bc8e86c2a1eabfeb83b903c6acdd43a2a51e970908567c2ed86057ef5ce1",
     "markdown": "acceptance/runs/m13-01.md",
-    "markdownSha256": "aafa80a98c9b504ddccbcb87c90d38bb517766bdefe64dad21c26e5cd0c1a12a"
+    "markdownSha256": "640f6d8beaa4b0e4fdcc32d41a2fd16564b010dad262844991d748171c07f579"
   },
   "commands": [
     {
@@ -39,9 +39,9 @@
       "status": "pass",
       "exitCode": 0,
       "timedOut": false,
-      "durationMs": 530458.372,
-      "outputSha256": "465c7db3e69289181f41ced3f67a1aa47dae3a2e3e958821e38f0bf666babeea",
-      "summary": "0 fail | 1031846 expect() calls | Ran 308 tests across 86 files. [510.20s]"
+      "durationMs": 476199.707,
+      "outputSha256": "f448627e789a27bfead44b109c3ff5f929eb663e8beff835edb7b9fc2fda8691",
+      "summary": "0 fail | 1031680 expect() calls | Ran 311 tests across 87 files. [456.45s]"
     },
     {
       "id": "strict-byte-compile",
@@ -53,7 +53,7 @@
       "status": "pass",
       "exitCode": 0,
       "timedOut": false,
-      "durationMs": 1116.031,
+      "durationMs": 1000.768,
       "outputSha256": "4110c50ff8be0d96e678ed5ef31967a2aca72a86558181796ef5f14b5a350c3e",
       "summary": "EMACS=\"emacs\" ./tools/ci/strict-byte-compile.sh"
     }
@@ -93,19 +93,22 @@
       "id": "AC-03",
       "title": "Deterministic diagnostics",
       "sourceSpec": "0040",
-      "result": "incomplete",
-      "declaredStatus": "partial",
+      "result": "pass",
+      "declaredStatus": "complete",
       "probes": [
         "core-suite"
       ],
       "evidence": [
+        "contracts/diagnostic-corpus.json",
         "specs/0043-structured-diagnostics.md",
+        "specs/0143-complete-negative-diagnostic-corpus.md",
         "tests/bootstrap-analyzer.test.mjs",
         "tests/bootstrap-expander.test.mjs",
         "tests/bootstrap-reader.test.mjs",
-        "tests/conformance.test.mjs"
-      ],
-      "remaining": "Close exact diagnostic parity over every final negative conformance case."
+        "tests/conformance.test.mjs",
+        "tests/diagnostic-corpus.test.mjs",
+        "tools/diagnostics/check.mjs"
+      ]
     },
     {
       "id": "AC-04",
@@ -613,11 +616,11 @@
     },
     {
       "file": "acceptance/manifest.json",
-      "sha256": "f5525d3bc522e0b8ccad76bb0b5a35186f58ee31d5ff02df73c242196ee3466c"
+      "sha256": "30e0b831f03746de9b9bb8ef90b9c6427c6121fb5dec6ab63bd7a2cdf7075e2d"
     },
     {
       "file": "acceptance/report.md",
-      "sha256": "9689c92e2ad805fc67dfebbf0036aa19488164b84dd333aa0621e21069e48405"
+      "sha256": "ee78d7aa99370303939c69e7446cacb97e3a95046bb9c63c045f7e99ad458076"
     },
     {
       "file": "acceptance/runs/m13-02.json",
@@ -649,7 +652,7 @@
     },
     {
       "file": "contracts/compatibility-baseline.json",
-      "sha256": "df5fb4644d68722fd8c2807dc2d1dbee787577b146081789d196a0fe11e79bbf"
+      "sha256": "dc6fcd744ca4bae29cd884b819ff1fd26945a71cb656824b5471e3840037edc1"
     },
     {
       "file": "contracts/compatibility-matrix.json",
@@ -657,7 +660,11 @@
     },
     {
       "file": "contracts/core-acceptance-corpus.json",
-      "sha256": "f3f2d09207d5ccef03e01ec9da692ae62c6bf856131c129dd01ce7af68ccf083"
+      "sha256": "2c96baba205217cd643f9fb6c25398dc15e85ad5fad708652ad29f752bac25ce"
+    },
+    {
+      "file": "contracts/diagnostic-corpus.json",
+      "sha256": "aa6204f3b444c0fca8f490d0b06555f4bf00f0fdcfc66c9597de62d1af69086d"
     },
     {
       "file": "contracts/documentation.json",
@@ -673,7 +680,7 @@
     },
     {
       "file": "contracts/maturity-progress.json",
-      "sha256": "81daff848c8daf887228d07596876395d421f74bb57f7cda502ba3f5023529aa"
+      "sha256": "f446f33958ea9aa8e2d0c1704aef9c0f50774bcc58612b3f29966730c2947796"
     },
     {
       "file": "contracts/repository-integrity.json",
@@ -705,7 +712,7 @@
     },
     {
       "file": "specs/0043-structured-diagnostics.md",
-      "sha256": "e3860092d05169c19ce58a461067556e26b478a062365c81acc2313facfe6ccf"
+      "sha256": "288e2ff2bf5c67772b659de6c09bce340fa3374086185234cdedb57f5af9a6ff"
     },
     {
       "file": "specs/0048-value-equality-and-hashing.md",
@@ -780,8 +787,12 @@
       "sha256": "964106e7c60ed3e36bb31aa0207e6c5d421cef7ba9b1a721ca20aedad29de99e"
     },
     {
+      "file": "specs/0143-complete-negative-diagnostic-corpus.md",
+      "sha256": "15dbca346655c96077c7544daeb73cb4e15049207b777d81aeb68b02d4ff5fdd"
+    },
+    {
       "file": "specs/index.json",
-      "sha256": "ab44b67b8988c96bf76657b22099928f51599ceda72456caf9c7530a23ac2835"
+      "sha256": "782e5d03079232de65a8fbf542b6650b46a3117b222345fb82059d4718e15ead"
     },
     {
       "file": "tests/api-index.test.mjs",
@@ -793,7 +804,7 @@
     },
     {
       "file": "tests/bootstrap-analyzer.test.mjs",
-      "sha256": "d348d2ce436664663211a9b9ae7407dd60819bb8a83beab899d5dbcfad05ac0b"
+      "sha256": "ac2bfaaa29531eb6addab3a526a32b64d4981bba825033204d16703259961287"
     },
     {
       "file": "tests/bootstrap-compiler.test.mjs",
@@ -809,7 +820,7 @@
     },
     {
       "file": "tests/bootstrap-expander.test.mjs",
-      "sha256": "905da4acf5bb6be21cf4928b31620eb04049d5a37a3794c1d57e771a73235db9"
+      "sha256": "f4dc1556352e4e247677a316440e2d2f725a7fb608f7835c9e1e611b6e9d4d2a"
     },
     {
       "file": "tests/bootstrap-formatter.test.mjs",
@@ -825,7 +836,7 @@
     },
     {
       "file": "tests/bootstrap-reader.test.mjs",
-      "sha256": "2cc277bd6692093186edb62fa2b6193cf5e0648dba8c30c6ce07338004d346a8"
+      "sha256": "e079d6fe6d0731f1f569804ca38810afdd81450be0fe815631a4efe045de1941"
     },
     {
       "file": "tests/boundary-security.test.mjs",
@@ -841,15 +852,19 @@
     },
     {
       "file": "tests/conformance.test.mjs",
-      "sha256": "4f8627dbcf98c5e0142eccb8921c11977d8c8c009a57ec1cd40966e04c27ed21"
+      "sha256": "60821c2794a724882451c25ceb762c75ceae0ea75fd88ac10ae8138f33ca35d8"
     },
     {
       "file": "tests/conformance/manifest.json",
-      "sha256": "703ccaccc53418d0711abf22017425fbfd521be8b2a4ae24667ec32c4612e58e"
+      "sha256": "088fbb380ef3748d24349d1c4aefd69ecb298fc69a60318608176103cf1cb916"
     },
     {
       "file": "tests/core-stdlib.test.mjs",
       "sha256": "333371f1c51d66ae8ea38d019c6289941cd516ce9f9bae04193def8a07b03f80"
+    },
+    {
+      "file": "tests/diagnostic-corpus.test.mjs",
+      "sha256": "4a5b06adc53786e881fab48e72c39a09737d4a3a0cfd7b4fd7b80f1c20980fdd"
     },
     {
       "file": "tests/eliscript-mode-tests.el",
@@ -972,6 +987,10 @@
       "sha256": "fc86ef0866cd180afbede79d4dfdd6c3ef25b6e4ee633f066e70916f194d853c"
     },
     {
+      "file": "tools/diagnostics/check.mjs",
+      "sha256": "6d6cb9e65ca59628c60459397b86d77f426b44755f3a5bc1334f2ed0ea43b2dc"
+    },
+    {
       "file": "tools/documentation/check.mjs",
       "sha256": "eb19276b62b18c4d8aaa443b97ec5a9252bfd4d0acc744c5762aedcac9bc6447"
     },
@@ -1091,7 +1110,7 @@
         },
         {
           "id": "AC-03",
-          "result": "incomplete"
+          "result": "pass"
         },
         {
           "id": "AC-04",
@@ -1225,7 +1244,7 @@
       "artifacts": [
         {
           "file": "contracts/core-acceptance-corpus.json",
-          "sha256": "f3f2d09207d5ccef03e01ec9da692ae62c6bf856131c129dd01ce7af68ccf083"
+          "sha256": "2c96baba205217cd643f9fb6c25398dc15e85ad5fad708652ad29f752bac25ce"
         }
       ]
     }
@@ -1256,8 +1275,8 @@
   ],
   "summary": {
     "criteria": {
-      "pass": 22,
-      "incomplete": 13,
+      "pass": 23,
+      "incomplete": 12,
       "fail": 0,
       "total": 35
     },
