@@ -269,6 +269,7 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "function catting()",
         "function compose_transducers(...transducers)",
         "function deduping()",
+        "function distincting()",
         "function interposing(separator)",
         "function keeping_indexed(transform)",
         "function mapping_indexed(transform)",
@@ -282,6 +283,11 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
       ["stdlib/core/seq.eli", [
         "function reverse(collection)",
         "function map(transform, collection)",
+        "function map_indexed(transform, collection)",
+        "function distinct(collection)",
+        "function mapcat(transform, collection)",
+        "function partition_all(size, collection)",
+        "function reductions(step, initial, collection)",
         "function concat(...collections)",
       ]],
       ["stdlib/core/data.eli", [

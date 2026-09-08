@@ -58,13 +58,16 @@
   (defun deduping ()
     (Runtime/deduping))
 
+  (defun distincting ()
+    (Runtime/distincting))
+
   (defun transduce (transducer reducer initial collection)
     (Runtime/transduce transducer reducer initial collection))
 
   (defun into (target &rest arguments)
     (apply Runtime/into (js-cons target arguments)))
 
-  (export catting completing compose-transducers deduping dropping
+  (export catting completing compose-transducers deduping distincting dropping
           dropping-while filtering interposing into keeping keeping-indexed
           mapcatting mapping mapping-indexed partitioning-all partitioning-by
           removing taking taking-nth taking-while transduce))

@@ -1,7 +1,10 @@
 (module eliscript.core.seq
-  (import "../../runtime/core/collection.mjs" reduce reduced)
+  (import "../../runtime/core/collection.mjs"
+          isReduced reduce reduced unreduced)
   (import "../../runtime/core/transducer.mjs"
-          dropping filtering into mapping removing taking)
+          deduping distincting dropping droppingWhile filtering into
+          interposing keeping keepingIndexed mapcatting mapping mappingIndexed
+          partitioningAll partitioningBy removing taking takingNth takingWhile)
   (import "../../runtime/core/transient.mjs"
           conjBang persistentBang transient)
   (import "../../runtime/core/truth.mjs" isTruthy)
@@ -28,6 +31,15 @@
   (defun map (transform collection)
     (into EMPTY_VECTOR (mapping transform) collection))
 
+  (defun map-indexed (transform collection)
+    (into EMPTY_VECTOR (mappingIndexed transform) collection))
+
+  (defun keep (transform collection)
+    (into EMPTY_VECTOR (keeping transform) collection))
+
+  (defun keep-indexed (transform collection)
+    (into EMPTY_VECTOR (keepingIndexed transform) collection))
+
   (defun filter (predicate collection)
     (into EMPTY_VECTOR (filtering predicate) collection))
 
@@ -39,6 +51,33 @@
 
   (defun drop (limit collection)
     (into EMPTY_VECTOR (dropping limit) collection))
+
+  (defun take-while (predicate collection)
+    (into EMPTY_VECTOR (takingWhile predicate) collection))
+
+  (defun drop-while (predicate collection)
+    (into EMPTY_VECTOR (droppingWhile predicate) collection))
+
+  (defun take-nth (interval collection)
+    (into EMPTY_VECTOR (takingNth interval) collection))
+
+  (defun interpose (separator collection)
+    (into EMPTY_VECTOR (interposing separator) collection))
+
+  (defun dedupe (collection)
+    (into EMPTY_VECTOR (deduping) collection))
+
+  (defun distinct (collection)
+    (into EMPTY_VECTOR (distincting) collection))
+
+  (defun mapcat (transform collection)
+    (into EMPTY_VECTOR (mapcatting transform) collection))
+
+  (defun partition-all (size collection)
+    (into EMPTY_VECTOR (partitioningAll size) collection))
+
+  (defun partition-by (classifier collection)
+    (into EMPTY_VECTOR (partitioningBy classifier) collection))
 
   (defun concat (&rest collections)
     (let ((result (transient EMPTY_VECTOR))
@@ -83,4 +122,21 @@
              not-found)))
       (if (eq result not-found) not-found-value (get result :value))))
 
-  (export concat drop every? filter find map remove reverse some take))
+  (defun reductions (step initial collection)
+    (require-function step "reductions step")
+    (let ((builder (transient EMPTY_VECTOR))
+          (seed (unreduced initial)))
+      (conjBang builder seed)
+      (unless (isReduced initial)
+        (reduce
+          collection
+          (lambda (current input)
+            (let ((next (funcall step current input)))
+              (conjBang builder (unreduced next))
+              (if (isReduced next) (reduced (unreduced next)) next)))
+          seed))
+      (persistentBang builder)))
+
+  (export concat dedupe distinct drop drop-while every? filter find interpose
+          keep keep-indexed map map-indexed mapcat partition-all partition-by
+          reductions remove reverse some take take-nth take-while))

@@ -37,8 +37,8 @@ Four new Eliscript API modules expose the runtime substrate:
 - `stdlib/core/transducer.eli` exports reducer completion, composition,
   mapping, indexed mapping/keeping, filtering, removing, bounded and
   predicate-controlled take/drop, nth sampling, interposition, adjacent
-  deduplication, persistent-Vector partitioning, cat/mapcat, transduction, and
-  `into`.
+  deduplication, global distinctness, persistent-Vector partitioning,
+  cat/mapcat, transduction, and `into`.
 - `stdlib/core/transient.eli` exports editable capabilities and `transient`,
   `conj!`, `assoc!`, `dissoc!`, and `persistent!`.
 
@@ -52,7 +52,9 @@ implementations. The protocol module now additionally owns its policy.
 `stdlib/core/seq.eli` now contains the maintained implementations of:
 
 ```text
-concat drop every? filter find map remove reverse some take
+concat dedupe distinct drop drop-while every? filter find interpose keep
+keep-indexed map map-indexed mapcat partition-all partition-by reductions
+remove reverse some take take-nth take-while
 ```
 
 `stdlib/core/data.eli` now contains the maintained implementations of:
@@ -162,6 +164,9 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
 - **ECA-12:** The six language-level core modules build together through the
   public multi-entry project command and execute with identical representative
   results under Bun and Node.
+- **ECA-13:** The complete maintained sequence vocabulary compiles from
+  `stdlib/core/seq.eli`, accepts protocol sources, and matches the direct
+  runtime facade under Bun and Node.
 
 ## Follow-up
 

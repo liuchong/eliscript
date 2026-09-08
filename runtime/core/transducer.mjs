@@ -1,5 +1,6 @@
 import {
   conj,
+  contains,
   empty,
   isReduced,
   reduce,
@@ -7,6 +8,7 @@ import {
   unreduced,
 } from "./collection.mjs";
 import { implementsProtocolOperation } from "./protocol.mjs";
+import { EMPTY_SET } from "./set.mjs";
 import {
   IEditable,
   conjBang,
@@ -418,6 +420,24 @@ export function deduping() {
           return result;
         }
         previous = input;
+        return downstream(result, input);
+      },
+      (result) => downstream(result),
+    );
+  });
+}
+
+export function distincting() {
+  return makeTransducer((reducingFunction) => {
+    const downstream = asReducingFunction(
+      reducingFunction,
+      "distincting reducing function",
+    );
+    let seen = EMPTY_SET;
+    return completing(
+      (result, input) => {
+        if (contains(seen, input)) return result;
+        seen = conj(seen, input);
         return downstream(result, input);
       },
       (result) => downstream(result),

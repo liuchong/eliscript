@@ -39,8 +39,11 @@ functions and are invoked exactly once for each value reaching their stage.
 
 `runtime/core/sequence.mjs` exports:
 
-- transforms: `reverse`, `map`, `filter`, `remove`, `take`, `drop`, `concat`
+- transforms: `reverse`, `map`, `mapIndexed`, `keep`, `keepIndexed`, `filter`,
+  `remove`, `take`, `drop`, `takeWhile`, `dropWhile`, `takeNth`, `interpose`,
+  `dedupe`, `distinct`, `mapcat`, `partitionAll`, `partitionBy`, and `concat`
 - searches: `some`, `every`, `find`
+- reduction history: `reductions`
 
 Every source is traversed only through generic `reduce`. Transform results are
 persistent Vectors. `map`, `filter`, `remove`, `take`, and `drop` delegate to
@@ -54,6 +57,17 @@ predicate result is truthy. `some` and `find` accept an optional not-found
 value, defaulting to `null`. `take`, `some`, `every`, and `find` terminate the
 source at the exact decisive element when its `IReduce` implementation honors
 the reduced-value contract.
+
+Indexed and keep transforms preserve the transducer index and exact-nil
+contracts. Prefix, sampling, interposition, adjacent dedupe, flattening, and
+partitioning are eager persistent-Vector materializations of their transducer
+counterparts. `distinct` differs from `dedupe`: it retains only the first
+occurrence across the whole input using Eliscript value equality and hashing.
+
+`reductions(step, initial, collection)` returns a persistent Vector containing
+the initial value followed by every intermediate accumulator. A reduced
+initial value prevents source traversal. A reduced step result contributes its
+unwrapped accumulator exactly once and stops at that source element.
 
 ## Data Algorithms
 
@@ -80,7 +94,9 @@ owner-token transient. `indexBy` uses a transient Map throughout.
 `stdlib/core/seq.eli` exports:
 
 ```text
-concat drop every? filter find map remove reverse some take
+concat dedupe distinct drop drop-while every? filter find interpose keep
+keep-indexed map map-indexed mapcat partition-all partition-by reductions
+remove reverse some take take-nth take-while
 ```
 
 `stdlib/core/data.eli` exports:
@@ -121,8 +137,8 @@ literal rewrite and does not change the earlier portable sequence/data APIs.
 Existing native Array, Map, Set, null, persistent collections, and externally
 extended `IReduce` values remain valid sources.
 
-This slice does not add lazy sequences, `mapcat`, partitioning, sorting,
-comparison, text/object protocol migration, async reduction, metadata, or
+This slice does not add lazy sequences, sorting, comparison, text/object
+protocol migration, async reduction, metadata, or
 compiler-generated direct protocol calls. Specification 0066 moves the public
 protocol access surface and maintained algorithms into Eliscript; portable
 dispatch internals remain later work.
@@ -151,6 +167,12 @@ dispatch internals remain later work.
 - **PCA-11:** Existing protocol, transducer, transient, persistent collection,
   portable standard-library, contract, and complete repository suites remain
   green.
+- **PCA-12:** Indexed, keep, prefix, sampling, interposition, dedupe,
+  distinctness, mapcat, and partition functions accept arbitrary `IReduce`
+  sources and return persistent Vectors with their transducer semantics.
+- **PCA-13:** Reductions includes the initial and each intermediate value,
+  terminates exactly on a reduced initial or step result, and constructs one
+  persistent Vector through a transient builder.
 
 ## Next Slice
 

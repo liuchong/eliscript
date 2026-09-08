@@ -2,6 +2,7 @@ import {
   catting,
   composeTransducers,
   deduping,
+  distincting,
   droppingWhile,
   filtering,
   interposing,
@@ -51,6 +52,12 @@ console.log(JSON.stringify({
     (result, value) => [...result, value],
     [],
     ["skip", "skip", null, "left", "left", "right", "stop", "unreachable"],
+  ),
+  distinct: transduce(
+    distincting(),
+    (result, value) => [...result, value],
+    [],
+    [1, 2, 1, 3, 2],
   ),
   sampled: transduce(
     composeTransducers(

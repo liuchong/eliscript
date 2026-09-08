@@ -35,7 +35,8 @@ changing the observable API or results defined here.
 - transducer constructors: `mapping`, `mappingIndexed`, `keeping`,
   `keepingIndexed`, `filtering`, `removing`, `taking`, `dropping`,
   `takingWhile`, `droppingWhile`, `takingNth`, `interposing`, `deduping`,
-  `partitioningAll`, `partitioningBy`, `catting`, and `mapcatting`
+  `distincting`, `partitioningAll`, `partitioningBy`, `catting`, and
+  `mapcatting`
 - composition: `composeTransducers`
 - execution: `transduce`, `into`
 
@@ -154,6 +155,13 @@ allocated equal persistent values collapse while a repeated value after a
 different value remains visible. A private sentinel allows `undefined` to be a
 normal first or previous value.
 
+### Global Distinctness
+
+`distincting()` emits only the first occurrence of each value in one
+reduction. Its per-application seen set uses Eliscript equality and hashing,
+so separately allocated equal persistent values are duplicates. Reusing the
+same transducer starts with an empty seen set.
+
 ### Partitioning
 
 `partitioningAll(size)` accepts a positive safe integer and emits persistent
@@ -251,7 +259,8 @@ For `n` consumed scalar inputs and constant-time user transforms, `transduce`
 is O(n) time with O(s) reducing state, where `s` is the number of composed
 stateful stages. Indexed mapping/keeping, sampling, interposition, prefix
 control, and adjacent dedupe use bounded counters, flags, or one previous
-value per application. Partitioning uses O(p) retained values where `p` is the
+value per application. Global distinctness retains O(k) value-semantic set
+state for `k` distinct inputs. Partitioning uses O(p) retained values where `p` is the
 current partition size; `partitioningBy` therefore makes an intentionally
 unbounded group visible in its required output. Cat/mapcat is O(n + m), where
 `m` is the number of nested values actually consumed. Composition depth is
@@ -292,8 +301,9 @@ does not weaken the runtime transducer semantics defined here.
 [0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md).
 Indexed mapping/keeping, sampling, interposition, predicate-controlled
 prefixes, adjacent dedupe, partitioning, and cat/mapcat are compatible additive
-extensions to the same stable contract. This surface does not yet provide
-global distinctness, async transducers, parallel fold, or implicit completion
+extensions to the same stable contract. Global distinctness is an additive
+extension using the same value contract. This surface does not yet provide
+async transducers, parallel fold, or implicit completion
 initializers. Those operations require concrete maintained use cases and their
 own completion or resource contracts before joining the public surface.
 
@@ -342,6 +352,9 @@ own completion or resource contracts before joining the public surface.
   termination.
 - **TRD-18:** A million-value partition is constructed through a transient
   Vector without argument expansion or JavaScript stack growth.
+- **TRD-19:** Global distinctness retains first occurrence order, uses
+  Eliscript value equality and hashing, and allocates an empty seen set for
+  every execution.
 
 ## Continuation
 

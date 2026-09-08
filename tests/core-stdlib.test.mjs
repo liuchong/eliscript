@@ -12,6 +12,7 @@ import { pathToFileURL } from "node:url";
 import {
   IReduce,
   isReduced,
+  reduced,
   unreduced,
 } from "../runtime/core/collection.mjs";
 import {
@@ -24,15 +25,28 @@ import { EMPTY_MAP } from "../runtime/core/map.mjs";
 import { extendProtocolType } from "../runtime/core/protocol.mjs";
 import {
   concat,
+  dedupe,
+  distinct,
   drop,
+  dropWhile,
   every,
   filter,
   find,
+  interpose,
+  keep,
+  keepIndexed,
   map,
+  mapIndexed,
+  mapcat,
+  partitionAll,
+  partitionBy,
+  reductions,
   remove,
   reverse,
   some,
   take,
+  takeNth,
+  takeWhile,
 } from "../runtime/core/sequence.mjs";
 import {
   composeTransducers,
@@ -421,6 +435,86 @@ test("sequence algorithms use protocols and Eliscript truthiness", () => {
   expect(find(() => false, values, "missing")).toBe("missing");
 });
 
+test("expanded sequence vocabulary builds persistent results through protocols", () => {
+  class ProtocolValues {
+    constructor(values) {
+      this.values = Object.freeze([...values]);
+      Object.freeze(this);
+    }
+  }
+  extendProtocolType(IReduce, ProtocolValues, {
+    reduce: (source, reducer, initial) => {
+      let result = initial;
+      for (const value of source.values) {
+        result = reducer(result, value);
+        if (isReduced(result)) return unreduced(result);
+      }
+      return result;
+    },
+  });
+  const source = (...values) => new ProtocolValues(values);
+  const values = source(0, 1, 2, 3, 4, 5);
+  expect([...mapIndexed((index, value) => `${index}:${value}`, values)])
+    .toEqual(["0:0", "1:1", "2:2", "3:3", "4:4", "5:5"]);
+  expect([...keep((value) => value % 2 === 0 ? value : null, values)])
+    .toEqual([0, 2, 4]);
+  expect([...keepIndexed((index, value) => value % 2 === 0
+    ? persistentVector(index, value)
+    : null, values)].map((value) => [...value]))
+    .toEqual([[0, 0], [2, 2], [4, 4]]);
+  expect([...takeWhile((value) => value < 3, values)]).toEqual([0, 1, 2]);
+  expect([...dropWhile((value) => value < 3, values)]).toEqual([3, 4, 5]);
+  expect([...takeNth(2, values)]).toEqual([0, 2, 4]);
+  expect([...interpose("between", source("left", "middle", "right"))])
+    .toEqual(["left", "between", "middle", "between", "right"]);
+  expect([...dedupe(source(1, 1, 2, 1, 1))]).toEqual([1, 2, 1]);
+
+  const equalKey = () => persistentVector("same");
+  const first = equalKey();
+  expect([...distinct(source(first, 1, equalKey(), 2, 1, first))])
+    .toEqual([first, 1, 2]);
+  expect([...mapcat(
+    (value) => persistentVector(value, value * 10),
+    source(1, 2, 3),
+  )])
+    .toEqual([1, 10, 2, 20, 3, 30]);
+  expect([...partitionAll(2, values)].map((value) => [...value]))
+    .toEqual([[0, 1], [2, 3], [4, 5]]);
+  expect([...partitionBy((value) => value % 2, source(1, 3, 2, 4, 5))]
+    .map((value) => [...value]))
+    .toEqual([[1, 3], [2, 4], [5]]);
+
+  const observed = [];
+  class ObservedRange {
+    constructor(end) {
+      this.end = end;
+      Object.freeze(this);
+    }
+  }
+  extendProtocolType(IReduce, ObservedRange, {
+    reduce: (range, reducer, initial) => {
+      let result = initial;
+      for (let value = 1; value < range.end; value += 1) {
+        observed.push(value);
+        result = reducer(result, value);
+        if (isReduced(result)) return unreduced(result);
+      }
+      return result;
+    },
+  });
+  expect([...reductions(
+    (sum, value) => value === 3 ? reduced(sum + value) : sum + value,
+    0,
+    new ObservedRange(100),
+  )]).toEqual([0, 1, 3, 6]);
+  expect(observed).toEqual([1, 2, 3]);
+  expect([...reductions(() => 99, reduced(7), new ObservedRange(100))])
+    .toEqual([7]);
+  expect(observed).toEqual([1, 2, 3]);
+  expect(() => reductions(null, 0, values))
+    .toThrow("reductions step must be a function");
+});
+
 test("removing and dropping compose with fresh reduction state", () => {
   const pipeline = composeTransducers(
     dropping(2),
@@ -530,6 +624,21 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect([...usage.removed]).toEqual([0, 1, 3, 4]);
     expect([...usage.taken]).toEqual([0, 1, 2]);
     expect([...usage.dropped]).toEqual([2, 3, 4]);
+    expect([...usage.indexed_map]).toEqual([0, 2, 4, 6, 8]);
+    expect([...usage.kept]).toEqual([0, 2, 4]);
+    expect([...usage.kept_indexed]).toEqual([0, 4, 8]);
+    expect([...usage.taken_while]).toEqual([0, 1, 2]);
+    expect([...usage.dropped_while]).toEqual([3, 4]);
+    expect([...usage.sampled_sequence]).toEqual([0, 2, 4]);
+    expect([...usage.interposed_sequence]).toEqual([1, "x", 2, "x", 3]);
+    expect([...usage.deduped]).toEqual([1, 2, 1]);
+    expect([...usage.distinct_values]).toEqual([1, 2, 3]);
+    expect([...usage.flattened_values]).toEqual([1, 10, 2, 20]);
+    expect([...usage.fixed_partitions].map((value) => [...value]))
+      .toEqual([[0, 1], [2, 3], [4]]);
+    expect([...usage.keyed_partitions].map((value) => [...value]))
+      .toEqual([[1, 3], [2, 4], [5]]);
+    expect([...usage.intermediate_values]).toEqual([0, 1, 3, 6]);
     expect([...usage.reversed]).toEqual([4, 3, 2, 1, 0]);
     expect([...usage.concatenated]).toEqual([0, 1, 2, 3, 4]);
     expect(usage.first_even).toBe(4);
@@ -596,6 +705,7 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect([...api.report.sampled].map((value) => [...value]))
       .toEqual([[0, 5], [3, 7]]);
     expect([...api.report.interposed]).toEqual(["left", "between", "right"]);
+    expect([...api.report["unique-transformed"]]).toEqual([1, 2, 3]);
     expect([...api.report.partitioned].map((value) => [...value]))
       .toEqual([[1, 2], [3]]);
     expect([...api.report.grouped].map((value) => [...value]))
@@ -690,6 +800,19 @@ test("protocol standard-library algorithms agree under Bun and Node", async () =
     remove: [0, 1, 3, 4],
     take: [0, 1, 2],
     drop: [2, 3, 4],
+    mapIndexed: [0, 2, 4, 6, 8],
+    keep: [0, 2, 4],
+    keepIndexed: [0, 4, 8],
+    takeWhile: [0, 1, 2],
+    dropWhile: [3, 4],
+    takeNth: [0, 2, 4],
+    interpose: [1, "x", 2, "x", 3],
+    dedupe: [1, 2, 1],
+    distinct: [1, 2, 3],
+    mapcat: [1, 10, 2, 20],
+    partitionAll: [[0, 1], [2, 3], [4]],
+    partitionBy: [[1, 3], [2, 4], [5]],
+    reductions: [0, 1, 3, 6],
     concat: [0, 1, 2, 3, 4],
     some: 0,
     every: true,

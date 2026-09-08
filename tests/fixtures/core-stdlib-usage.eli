@@ -1,6 +1,8 @@
 (module test.core-stdlib-usage
   (import "./stdlib/core/seq.mjs"
-          concat drop every? filter find map remove reverse some take)
+          concat dedupe distinct drop drop-while every? filter find interpose
+          keep keep-indexed map map-indexed mapcat partition-all partition-by
+          reductions remove reverse some take take-nth take-while)
   (import "./stdlib/core/data.mjs"
           count-by frequencies group-by index-by)
 
@@ -10,6 +12,27 @@
   (defconst removed (remove (lambda (value) (= value 2)) values))
   (defconst taken (take 3 values))
   (defconst dropped (drop 2 values))
+  (defconst indexed-map
+    (map-indexed (lambda (index value) (+ index value)) values))
+  (defconst kept
+    (keep (lambda (value) (if (= (% value 2) 0) value nil)) values))
+  (defconst kept-indexed
+    (keep-indexed
+      (lambda (index value) (if (= (% value 2) 0) (+ index value) nil))
+      values))
+  (defconst taken-while (take-while (lambda (value) (< value 3)) values))
+  (defconst dropped-while (drop-while (lambda (value) (< value 3)) values))
+  (defconst sampled-sequence (take-nth 2 values))
+  (defconst interposed-sequence (interpose "x" [1 2 3]))
+  (defconst deduped (dedupe [1 1 2 1]))
+  (defconst distinct-values (distinct [1 2 1 3 2]))
+  (defconst flattened-values
+    (mapcat (lambda (value) [value (* value 10)]) [1 2]))
+  (defconst fixed-partitions (partition-all 2 values))
+  (defconst keyed-partitions
+    (partition-by (lambda (value) (% value 2)) [1 3 2 4 5]))
+  (defconst intermediate-values
+    (reductions (lambda (sum value) (+ sum value)) 0 [1 2 3]))
   (defconst reversed (reverse values))
   (defconst concatenated (concat [0 1] [2] nil [3 4]))
   (defconst first-even (find (lambda (value) (= (% value 2) 0)) [1 3 4 6]))
@@ -20,6 +43,9 @@
   (defconst counted (count-by (lambda (value) (% value 2)) values))
   (defconst frequencies-result (frequencies [1 2 1 3 2 1]))
 
-  (export mapped filtered removed taken dropped reversed concatenated
+  (export mapped filtered removed taken dropped indexed-map kept kept-indexed
+          taken-while dropped-while sampled-sequence interposed-sequence
+          deduped distinct-values flattened-values fixed-partitions
+          keyed-partitions intermediate-values reversed concatenated
           first-even zero-truth all-truth indexed grouped counted
           frequencies-result))

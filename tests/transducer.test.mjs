@@ -17,6 +17,7 @@ import {
   completing,
   composeTransducers,
   deduping,
+  distincting,
   droppingWhile,
   filtering,
   interposing,
@@ -219,6 +220,22 @@ test("deduping uses Eliscript value equality and preserves separated repeats", (
     [],
     [undefined, undefined, left, equal, different, left],
   )).toEqual([undefined, left, different, left]);
+  expect(transduce(transducer, (values, value) => [...values, value], [], [1, 1, 2]))
+    .toEqual([1, 2]);
+});
+
+test("distincting removes global duplicates with fresh value-semantic state", () => {
+  const left = persistentVector(1, 2);
+  const equal = persistentVector(1, 2);
+  const different = persistentVector(2, 1);
+  const transducer = distincting();
+
+  expect(transduce(
+    transducer,
+    (values, value) => [...values, value],
+    [],
+    [undefined, left, 1, equal, undefined, different, 1, left],
+  )).toEqual([undefined, left, 1, different]);
   expect(transduce(transducer, (values, value) => [...values, value], [], [1, 1, 2]))
     .toEqual([1, 2]);
 });
@@ -531,6 +548,7 @@ test("transducers agree under Bun and Node and stay single-pass at scale", async
     entries: [["key-1", 10], ["key-2", 20]],
     reused: [[1, 2], [1, 2]],
     stateful: ["2:left", "3:right"],
+    distinct: [1, 2, 3],
     sampled: ["0:left", "3:right"],
     interposed: ["left", "between", "right"],
     partitions: [[1, 3], [2, 4], [5]],
@@ -572,6 +590,21 @@ test("transducers agree under Bun and Node and stay single-pass at scale", async
     tailAllocations: 0,
     rootGrowths: 0,
   });
+
+  let distinctPulls = 0;
+  const repeated = sequenceView(() => (function* values() {
+    for (let value = 0; value < 100_000; value += 1) {
+      distinctPulls += 1;
+      yield value % 10_000;
+    }
+  })(), 100_000);
+  expect(transduce(
+    distincting(),
+    (result) => result + 1,
+    0,
+    repeated,
+  )).toBe(10_000);
+  expect(distinctPulls).toBe(100_000);
 
   let partitionPulls = 0;
   const partitionSource = sequenceView(() => (function* values() {

@@ -386,11 +386,15 @@ Exact semantics and cross-compiler/cross-host evidence are specified in
 algorithms through Lisp-named Eliscript modules:
 
 ```elisp
-(import "../../stdlib/core/seq.eli" map filter take every?)
+(import "../../stdlib/core/seq.eli"
+        distinct map mapcat partition-all reductions)
 (import "../../stdlib/core/data.eli" group-by frequencies)
 ```
 
 Sequence transforms accept any `IReduce` source and return persistent Vectors.
+The maintained vocabulary includes indexed mapping/keeping, prefix and sampled
+selection, interposition, adjacent and global deduplication, mapcat,
+partitioning, and intermediate reduction history.
 Keyed-data transforms return value-semantic persistent Maps, with persistent
 Vector group values. Searches and bounded transforms use reduced values for
 early termination, while grouping and indexing use owner-token builders for

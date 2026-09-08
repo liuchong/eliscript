@@ -16,9 +16,10 @@
   (import "./stdlib/core/transient.mjs"
           assoc! conj! persistent! transient)
   (import "./stdlib/core/transducer.mjs"
-          catting compose-transducers deduping dropping-while filtering into
-          interposing keeping keeping-indexed mapcatting mapping mapping-indexed
-          partitioning-all partitioning-by taking-nth taking-while)
+          catting compose-transducers deduping distincting dropping-while
+          filtering into interposing keeping keeping-indexed mapcatting mapping
+          mapping-indexed partitioning-all partitioning-by taking-nth
+          taking-while)
   (import "./runtime/core/map.mjs" EMPTY_MAP)
   (import "./runtime/core/vector.mjs" EMPTY_VECTOR)
 
@@ -107,6 +108,9 @@
   (defconst interposed
     (into EMPTY_VECTOR (interposing "between") ["left" "right"]))
 
+  (defconst unique-transformed
+    (into EMPTY_VECTOR (distincting) [1 2 1 3 2]))
+
   (defconst partitioned
     (into EMPTY_VECTOR (partitioning-all 2) [1 2 3]))
 
@@ -149,6 +153,7 @@
       :concatenated concatenated
       :sampled sampled
       :interposed interposed
+      :unique-transformed unique-transformed
       :partitioned partitioned
       :grouped grouped
       :reduced-state (reduced? (reduced 1))

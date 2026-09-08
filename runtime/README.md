@@ -167,9 +167,10 @@ is exposed only through `testing/vector.mjs`, `testing/map.mjs`, and
 
 ### Core Algorithms
 
-`core/sequence.mjs` implements eager sequence transformations and searches
-against `IReduce`, returning persistent Vectors and using reduced values for
-exact bounded traversal. `core/data.mjs` implements value-semantic indexing,
+`core/sequence.mjs` implements eager indexed/keep, prefix, sampling,
+interposition, dedupe/distinct, flattening, partitioning, reduction-history,
+and search operations against `IReduce`. Results are persistent Vectors and
+reduced values stop bounded traversal exactly. `core/data.mjs` implements value-semantic indexing,
 grouping, counting, and frequencies with persistent Map results and transient
 final construction. Native and persistent collections, null, and external
 protocol extensions all use the same algorithm path.
