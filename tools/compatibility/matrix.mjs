@@ -419,6 +419,24 @@ async function reportFiles(root, directory) {
   }
 }
 
+async function sourceMatchesCurrentCheckout(root, commit, directory) {
+  const excludedReports = `:(exclude)${directory}/*.json`;
+  const committed = await capture(
+    ["git", "diff", "--quiet", `${commit}..HEAD`, "--", ".", excludedReports],
+    { cwd: root, timeoutMs: 30_000 },
+  );
+  if (committed.exitCode > 1 || committed.timedOut) {
+    throw new LocalCompatibilityMatrixError([
+      `could not compare retained source ${commit} with the current checkout`,
+    ]);
+  }
+  const working = await successfulOutput(
+    ["git", "status", "--porcelain", "--untracked-files=all", "--", ".", excludedReports],
+    { cwd: root, timeoutMs: 30_000 },
+  );
+  return committed.exitCode === 0 && working === "";
+}
+
 export async function checkLocalMatrixEvidence(options = {}) {
   const root = path.resolve(options.root ?? DEFAULT_ROOT);
   const { matrix, matrixSha256 } = await readMatrix(root);
@@ -459,13 +477,29 @@ export async function checkLocalMatrixEvidence(options = {}) {
     errors.push("all matrix reports must bind one identical source commit and tree");
   }
   if (errors.length > 0) throw new LocalCompatibilityMatrixError(errors);
+  let currentSource = reports.length === 0;
+  if (sources.size === 1) {
+    const [identity] = sources;
+    const commit = identity.split(":", 1)[0];
+    const sourceMatches = options.sourceMatches ??
+      ((candidate) => sourceMatchesCurrentCheckout(
+        root,
+        candidate,
+        matrix.localEvidence.directory,
+      ));
+    currentSource = await sourceMatches(commit);
+  }
   const missing = expected.map((cell) => cell.id).filter((id) => !seen.has(id));
+  const stale = currentSource ? [] : [...seen];
   return {
     schemaVersion: 1,
     required: expected.length,
-    completed: seen.size,
+    retained: seen.size,
+    completed: currentSource ? seen.size : 0,
     missing,
-    complete: missing.length === 0,
+    stale,
+    currentSource,
+    complete: currentSource && missing.length === 0,
     sourceIdentity: [...sources][0] ?? null,
   };
 }
@@ -473,7 +507,10 @@ export async function checkLocalMatrixEvidence(options = {}) {
 function printReport(report) {
   process.stdout.write(
     `Local compatibility matrix: ${report.completed}/${report.required} cells\n` +
+    `Retained reports: ${report.retained}; current source: ` +
+    `${report.currentSource ? "yes" : "no"}\n` +
     `Missing: ${report.missing.join(", ") || "none"}\n` +
+    `Stale: ${report.stale.join(", ") || "none"}\n` +
     `Complete: ${report.complete ? "yes" : "no"}\n`,
   );
 }

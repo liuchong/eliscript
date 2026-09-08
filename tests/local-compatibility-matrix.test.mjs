@@ -113,17 +113,37 @@ test("one direct local report remains an explicitly incomplete matrix", async ()
   expect(await checkLocalMatrixEvidence({
     ...validationOptions,
     reports: [value],
+    sourceMatches: async () => true,
   })).toEqual({
     schemaVersion: 1,
     required: 4,
+    retained: 1,
     completed: 1,
     missing: [
       "linux-x64-emacs-30.2",
       "macos-arm64-emacs-29.4",
       "macos-arm64-emacs-30.2",
     ],
+    stale: [],
+    currentSource: true,
     complete: false,
     sourceIdentity: `${value.source.commit}:${value.source.tree}`,
+  });
+});
+
+test("historical reports do not count for changed source", async () => {
+  const value = report();
+  expect(await checkLocalMatrixEvidence({
+    ...validationOptions,
+    reports: [value],
+    sourceMatches: async () => false,
+  })).toMatchObject({
+    required: 4,
+    retained: 1,
+    completed: 0,
+    stale: [value.cell.id],
+    currentSource: false,
+    complete: false,
   });
 });
 
@@ -155,5 +175,6 @@ test("local matrix aggregation rejects duplicate cells", async () => {
   await expect(checkLocalMatrixEvidence({
     ...validationOptions,
     reports: [value, structuredClone(value)],
+    sourceMatches: async () => true,
   })).rejects.toThrow(/duplicate matrix cell/u);
 });
