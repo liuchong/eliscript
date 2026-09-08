@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "format": "eliscript-1.0-acceptance-manifest",
   "version": 1,
-  "generatedAt": "2026-09-08T03:22:54.630Z",
+  "generatedAt": "2026-09-08T04:05:28.503Z",
   "source": {
-    "commit": "9134976dee191e10ef014f0a21e8c046d45f3753",
-    "tree": "36b1b25c2b354e3625aec0ec7f858b125ba7d132",
+    "commit": "d83c952a78fbb74afceb90086b090b228d1bae6f",
+    "tree": "dd8ba00379451978583cb419c6bc65157cfa6b51",
     "cleanBefore": true,
     "cleanAfter": true
   },
@@ -24,9 +24,9 @@
   },
   "sourceRun": {
     "json": "acceptance/runs/m13-01.json",
-    "jsonSha256": "d91e3277dd1afb0f24f0ce362d559da7c4a9292f61c2ec450f3821f10f1311f5",
+    "jsonSha256": "76a044c1d03ab9eda0c9d7cf3bb9b4d4d8dc44db8aa5ee30b7646a68afb5c9fa",
     "markdown": "acceptance/runs/m13-01.md",
-    "markdownSha256": "73a83952e8c37d00fee74a5f9a555d46141cd785f813077809987f55d027ef61"
+    "markdownSha256": "aafa80a98c9b504ddccbcb87c90d38bb517766bdefe64dad21c26e5cd0c1a12a"
   },
   "commands": [
     {
@@ -39,9 +39,9 @@
       "status": "pass",
       "exitCode": 0,
       "timedOut": false,
-      "durationMs": 456685.937,
-      "outputSha256": "0d9aaf64e8c773d0fbd6103fc209bc96ca338bae01f223fe4e20c3976f529ec1",
-      "summary": "0 fail | 1031821 expect() calls | Ran 306 tests across 85 files. [436.99s]"
+      "durationMs": 530458.372,
+      "outputSha256": "465c7db3e69289181f41ced3f67a1aa47dae3a2e3e958821e38f0bf666babeea",
+      "summary": "0 fail | 1031846 expect() calls | Ran 308 tests across 86 files. [510.20s]"
     },
     {
       "id": "strict-byte-compile",
@@ -53,7 +53,7 @@
       "status": "pass",
       "exitCode": 0,
       "timedOut": false,
-      "durationMs": 1059.567,
+      "durationMs": 1116.031,
       "outputSha256": "4110c50ff8be0d96e678ed5ef31967a2aca72a86558181796ef5f14b5a350c3e",
       "summary": "EMACS=\"emacs\" ./tools/ci/strict-byte-compile.sh"
     }
@@ -539,9 +539,11 @@
       ],
       "evidence": [
         "specs/0073-native-javascript-container-interop.md",
-        "tests/interop-js.test.mjs"
+        "specs/0142-maintained-javascript-package-interop.md",
+        "tests/interop-js.test.mjs",
+        "tests/interop-package.test.mjs"
       ],
-      "remaining": "Add the maintained JavaScript package fixture and pass the full supported matrix."
+      "remaining": "Pass the maintained JavaScript package fixture on the full supported matrix."
     },
     {
       "id": "PD-08",
@@ -611,11 +613,11 @@
     },
     {
       "file": "acceptance/manifest.json",
-      "sha256": "debad740d4c57991ca0fb65bf0ce8ba3283ee6fdf050c51cc76a6ff5f5512c1e"
+      "sha256": "f5525d3bc522e0b8ccad76bb0b5a35186f58ee31d5ff02df73c242196ee3466c"
     },
     {
       "file": "acceptance/report.md",
-      "sha256": "7481853b8e46a0eeb53403c229142598cbc85a76fa32771e23146bd4f33c32ab"
+      "sha256": "9689c92e2ad805fc67dfebbf0036aa19488164b84dd333aa0621e21069e48405"
     },
     {
       "file": "acceptance/runs/m13-02.json",
@@ -647,7 +649,7 @@
     },
     {
       "file": "contracts/compatibility-baseline.json",
-      "sha256": "b6a35be8b79db55268152643f1f2bd36c2fa6a46b5c8cf0c0ddfac632b9f9877"
+      "sha256": "df5fb4644d68722fd8c2807dc2d1dbee787577b146081789d196a0fe11e79bbf"
     },
     {
       "file": "contracts/compatibility-matrix.json",
@@ -655,7 +657,7 @@
     },
     {
       "file": "contracts/core-acceptance-corpus.json",
-      "sha256": "da87a5d9c6974292724a04792bf5d8b611c4098fe0e479ff6761a4cd1a671f2f"
+      "sha256": "f3f2d09207d5ccef03e01ec9da692ae62c6bf856131c129dd01ce7af68ccf083"
     },
     {
       "file": "contracts/documentation.json",
@@ -671,11 +673,11 @@
     },
     {
       "file": "contracts/maturity-progress.json",
-      "sha256": "cfbf221e3ad1bb9d2d87b641301667343f90e8aea4454766597873b977c6d12d"
+      "sha256": "81daff848c8daf887228d07596876395d421f74bb57f7cda502ba3f5023529aa"
     },
     {
       "file": "contracts/repository-integrity.json",
-      "sha256": "44ceeab03e9d268e38ca1abe6a16c3e537e9ac67bced82a782ffb83e731731ef"
+      "sha256": "409e2fcb359ee6151641206d6203608803ae1e81d381aad89ab97d4781e647b4"
     },
     {
       "file": "docs/getting-started.md",
@@ -699,7 +701,7 @@
     },
     {
       "file": "specs/0041-host-symbiosis-and-persistent-data.md",
-      "sha256": "3a63c6bcac60a4e14150670342b08f17cefc27cdcd534bb3f6aae7f16333a092"
+      "sha256": "740072c49929ac6bb67e1d8c62858ece7b9581e49683de14e8a32b07db43759f"
     },
     {
       "file": "specs/0043-structured-diagnostics.md",
@@ -715,7 +717,7 @@
     },
     {
       "file": "specs/0073-native-javascript-container-interop.md",
-      "sha256": "13880ce43bd5ce4fb4ef867e8ef74483b41e23d3243e9cc4669ed297d402a2e0"
+      "sha256": "80180015364676b0987e2ee4a8b4e15c7780afd7508a2fe5c23f0d7ad99a83cf"
     },
     {
       "file": "specs/0078-persistent-collection-core-exit-audit.md",
@@ -774,8 +776,12 @@
       "sha256": "0d87814a7ad8f601aeff595e310a5cf304c58619cf536259705a252a9ad87ebe"
     },
     {
+      "file": "specs/0142-maintained-javascript-package-interop.md",
+      "sha256": "964106e7c60ed3e36bb31aa0207e6c5d421cef7ba9b1a721ca20aedad29de99e"
+    },
+    {
       "file": "specs/index.json",
-      "sha256": "5fb649bd6e0d2517d133623451ad370f90c305530e65dad70be7cda2fc954015"
+      "sha256": "ab44b67b8988c96bf76657b22099928f51599ceda72456caf9c7530a23ac2835"
     },
     {
       "file": "tests/api-index.test.mjs",
@@ -835,11 +841,11 @@
     },
     {
       "file": "tests/conformance.test.mjs",
-      "sha256": "1ebf29b05bd01b1032f7f0683349d95ea7497e81b3a74180b4b1a4ae3dbfe1ff"
+      "sha256": "4f8627dbcf98c5e0142eccb8921c11977d8c8c009a57ec1cd40966e04c27ed21"
     },
     {
       "file": "tests/conformance/manifest.json",
-      "sha256": "85471f052a2436002451979bac1f3cf8a6babc428bbaa35e1d48135d9849b640"
+      "sha256": "703ccaccc53418d0711abf22017425fbfd521be8b2a4ae24667ec32c4612e58e"
     },
     {
       "file": "tests/core-stdlib.test.mjs",
@@ -872,6 +878,10 @@
     {
       "file": "tests/interop-js.test.mjs",
       "sha256": "f76f8aeb7ca895b44732a6c07716ee5cf6657023cbf6bc6e28c7583db65d35f0"
+    },
+    {
+      "file": "tests/interop-package.test.mjs",
+      "sha256": "627c58c1da19108b2828f32cce99cd325937aa70709b4b6121566bb858c12c94"
     },
     {
       "file": "tests/local-onboarding.test.mjs",
@@ -967,7 +977,7 @@
     },
     {
       "file": "tools/integrity/check.mjs",
-      "sha256": "90e25918f18a212424ac2e81d5c1a89081ba6be7b0b58c7ddb11b83ea46a1ac3"
+      "sha256": "12377912218cf242deb8b406cd59cc87afe127dd2a636eafabf2177bbf3a2b39"
     }
   ],
   "evidence": [
@@ -1215,7 +1225,7 @@
       "artifacts": [
         {
           "file": "contracts/core-acceptance-corpus.json",
-          "sha256": "da87a5d9c6974292724a04792bf5d8b611c4098fe0e479ff6761a4cd1a671f2f"
+          "sha256": "f3f2d09207d5ccef03e01ec9da692ae62c6bf856131c129dd01ce7af68ccf083"
         }
       ]
     }
