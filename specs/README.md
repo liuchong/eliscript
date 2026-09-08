@@ -34,15 +34,15 @@ The registry currently contains 145 specifications.
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 33 |
-| Stable design | 110 |
+| Accepted design | 25 |
+| Stable design | 118 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
 | Implemented | 141 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 110 specifications as stable,
-31 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 118 specifications as stable,
+23 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -469,14 +469,14 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0122 | [Evidence-derived Maturity Progress](0122-evidence-derived-maturity-progress.md) | Stable | Implemented |
 | 0123 | [Stable ECMAScript Module Import Contract](0123-stable-esm-import-contract.md) | Stable | Implemented |
 | 0124 | [Declared Macro File Dependencies](0124-declared-macro-file-dependencies.md) | Stable | Implemented |
-| 0125 | [Generated Library API Index](0125-generated-library-api-index.md) | Accepted | Implemented |
-| 0126 | [Explicit Browser and Worker Capability Packages](0126-explicit-host-capability-packages.md) | Accepted | Implemented |
-| 0127 | [Deterministic Reader and Program Fuzzing](0127-deterministic-reader-program-fuzz.md) | Accepted | Implemented |
-| 0128 | [Deterministic Project Scale and Invalidation](0128-project-scale-invalidation.md) | Accepted | Implemented |
-| 0129 | [Worker Lifecycle Soak and Recovery](0129-worker-lifecycle-soak.md) | Accepted | Implemented |
-| 0130 | [Hostile Boundary Security](0130-hostile-boundary-security.md) | Accepted | Implemented |
-| 0131 | [Source-bound Core Performance Baseline](0131-source-bound-core-performance-baseline.md) | Accepted | Implemented |
-| 0132 | [Repository Dependency and Generated-artifact Audits](0132-repository-integrity-audits.md) | Accepted | Implemented |
+| 0125 | [Generated Library API Index](0125-generated-library-api-index.md) | Stable | Implemented |
+| 0126 | [Explicit Browser and Worker Capability Packages](0126-explicit-host-capability-packages.md) | Stable | Implemented |
+| 0127 | [Deterministic Reader and Program Fuzzing](0127-deterministic-reader-program-fuzz.md) | Stable | Implemented |
+| 0128 | [Deterministic Project Scale and Invalidation](0128-project-scale-invalidation.md) | Stable | Implemented |
+| 0129 | [Worker Lifecycle Soak and Recovery](0129-worker-lifecycle-soak.md) | Stable | Implemented |
+| 0130 | [Hostile Boundary Security](0130-hostile-boundary-security.md) | Stable | Implemented |
+| 0131 | [Source-bound Core Performance Baseline](0131-source-bound-core-performance-baseline.md) | Stable | Implemented |
+| 0132 | [Repository Dependency and Generated-artifact Audits](0132-repository-integrity-audits.md) | Stable | Implemented |
 | 0133 | [Verified Installation and Daily Development Guide](0133-verified-onboarding-documentation.md) | Accepted | Implemented |
 | 0134 | [Versioned Core Acceptance Corpus and Truthful Audit Run](0134-versioned-core-acceptance-corpus.md) | Accepted | Implemented |
 | 0135 | [Traceable Local Onboarding Exercise](0135-local-onboarding.md) | Accepted | Implemented |

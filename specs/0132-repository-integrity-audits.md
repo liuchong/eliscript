@@ -1,6 +1,6 @@
 # 0132: Repository Dependency and Generated-artifact Audits
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-08
 - Depends on: 0019 Self-Hosted Compiler Driver,
@@ -95,6 +95,15 @@ The audit prints a machine-derived count summary and exits nonzero with all
 available boundary or artifact failures. Child operations have a bounded
 lifetime, receive a graceful termination request on timeout, and are forcibly
 reclaimed if they do not exit.
+
+## Compatibility Freeze
+
+The version 1 dependency and artifact schema, exact package ownership,
+nearest-manifest isolation, structured JavaScript and self-hosted Eliscript
+import scans, zero third-party core dependency rule, generated marker parity,
+in-memory reproduction, derived-output checks, benchmark source binding, and
+bounded child cleanup are stable. A new dependency or artifact must be added
+explicitly within its owning scope and cannot gain authority by omission.
 
 ## Acceptance Criteria
 

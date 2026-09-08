@@ -1,6 +1,6 @@
 # 0125: Generated Library API Index
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-07
 - Depends on: 0040 Project Maturity Roadmap and 1.0 Acceptance Contract, 0042 Specification Registry and Conformance Evidence, 0044 Public Surface Registry and Consistency Matrix
@@ -81,6 +81,15 @@ separately by [0126](0126-explicit-host-capability-packages.md).
 The static documentation page is an output consumer. It contributes no new
 language forms, runtime semantics, library dependencies, or maturity evidence
 beyond proving that the explicit core metadata is complete and reproducible.
+
+## Compatibility Freeze
+
+The version 1 metadata and generated-index formats, closed role vocabulary,
+source/specification/stability joins, lexical ordering, exact export
+projection, deterministic HTML hooks, and byte-exact `--check` behavior are
+stable. The recorded module and export counts are source-derived baseline
+facts, not permanent upper limits; compatible library additions must update
+the authoritative inventories and regenerated artifacts together.
 
 ## Acceptance Criteria
 

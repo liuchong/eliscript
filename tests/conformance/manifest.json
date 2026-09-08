@@ -1894,7 +1894,7 @@
     {
       "id": "quality.generated-library-api-index",
       "title": "Generated standard-library API index",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0125",
       "contracts": [
         "Records explicit source, owner, stability, role, and summary metadata for every standard-library module",
@@ -1917,7 +1917,22 @@
         {
           "kind": "bun-test",
           "file": "tests/api-index.test.mjs",
+          "contains": "library API metadata requires an explicit normalized module name"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/api-index.test.mjs",
           "contains": "library API metadata must match specification stability"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/api-index.test.mjs",
+          "contains": "library API metadata rejects an unknown owning specification"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/api-index.test.mjs",
+          "contains": "generated API page exposes deterministic search and machine-readable hooks"
         },
         {
           "kind": "bun-test",
@@ -1934,7 +1949,7 @@
     {
       "id": "platform.explicit-host-capability-packages",
       "title": "Explicit browser and worker host capabilities",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0126",
       "contracts": [
         "Requires an explicit host object and exact grant list without reading ambient globals",
@@ -1963,6 +1978,11 @@
         {
           "kind": "bun-test",
           "file": "tests/platform-capabilities.test.mjs",
+          "contains": "worker capabilities reject undeclared unavailable and forged operations"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/platform-capabilities.test.mjs",
           "contains": "platform capability behavior is identical under Bun and Node"
         },
         {
@@ -1985,7 +2005,7 @@
     {
       "id": "quality.deterministic-reader-program-fuzz",
       "title": "Deterministic reader and program fuzzing",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0127",
       "contracts": [
         "Generates and replays 100000 deterministic grammar-aware and complete-module mutation inputs",
@@ -2011,7 +2031,7 @@
     {
       "id": "quality.project-scale-invalidation",
       "title": "Deterministic project scale and invalidation",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0128",
       "contracts": [
         "Generates one fixed reachable 1000-module graph with chains diamonds cycles and 299 shared-dependency importers",
@@ -2033,7 +2053,7 @@
     {
       "id": "worker.lifecycle-soak-recovery",
       "title": "Worker lifecycle soak and recovery",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0129",
       "contracts": [
         "Completes exactly 100000 correct uniquely accounted real Emacs worker requests in bounded concurrent batches",
@@ -2053,6 +2073,16 @@
         {
           "kind": "bun-test",
           "file": "tests/worker-lifecycle-soak.test.mjs",
+          "contains": "smaller diagnostic worker runs cannot claim acceptance"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/worker-lifecycle-soak.test.mjs",
+          "contains": "rejected worker runs verify failure-path cleanup"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/worker-lifecycle-soak.test.mjs",
           "contains": "committed worker lifecycle soak report matches its measured sources"
         }
       ]
@@ -2060,7 +2090,7 @@
     {
       "id": "quality.hostile-boundary-security",
       "title": "Hostile project and process boundary security",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0130",
       "contracts": [
         "Rejects direct and symbolic source paths that escape the canonical project root",
@@ -2102,7 +2132,7 @@
     {
       "id": "quality.source-bound-core-performance-baseline",
       "title": "Source-bound core performance baseline",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0131",
       "contracts": [
         "Measures compiler project-build real Emacs worker and persistent-data workload paths in three independent processes",
@@ -2128,7 +2158,7 @@
     {
       "id": "quality.repository-integrity-audits",
       "title": "Repository dependency and generated-artifact audits",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0132",
       "contracts": [
         "Pins every root package version manifest section allowed source prefix and nested private-package root in one closed machine-readable contract",
@@ -2144,6 +2174,21 @@
           "kind": "bun-test",
           "file": "tests/repository-integrity.test.mjs",
           "contains": "repository dependencies and generated artifacts satisfy declared boundaries"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/repository-integrity.test.mjs",
+          "contains": "repository integrity rejects undeclared and boundary-crossing imports"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/repository-integrity.test.mjs",
+          "contains": "repository integrity isolates declared dependencies at the nearest package boundary"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/repository-integrity.test.mjs",
+          "contains": "repository integrity rejects stale benchmark source evidence"
         },
         {
           "kind": "bun-test",

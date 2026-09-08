@@ -1,6 +1,6 @@
 # 0127: Deterministic Reader and Program Fuzzing
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-07
 - Depends on: 0014 Portable Syntax and Reader, 0040 Project Maturity Roadmap
@@ -108,6 +108,14 @@ bun run fuzz:reader-program
 
 `make test` executes the same fixed 100,000-input contract. Smaller case counts
 are diagnostic probes only and cannot satisfy this specification.
+
+## Compatibility Freeze
+
+The version 1 generator, seed, 50,000/50,000 case split, corpus order, checked
+digests, reader agreement, span and diagnostic invariants, formatter and
+compiler round trips, resource ceilings, and child cleanup requirements are
+stable. A deliberate grammar-domain or corpus change requires a new corpus
+version and reviewed identities rather than silently replacing this baseline.
 
 ## Acceptance Criteria
 

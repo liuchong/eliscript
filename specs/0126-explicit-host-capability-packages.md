@@ -1,6 +1,6 @@
 # 0126: Explicit Browser and Worker Capability Packages
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-07
 - Depends on: 0020 Emacs Worker Protocol and Measurement Probe, 0040 Project
@@ -96,6 +96,15 @@ Application code may pass a narrowly granted token into ordinary functions or
 use it from JavaScript-backed operations. UI-library adapters, publishing
 systems, and bundlers remain replaceable consumers and provide no evidence for
 this specification.
+
+## Compatibility Freeze
+
+The version 1 browser and worker capability descriptors, closed grant sets,
+original-token authority, private operation storage, request ownership,
+receiver preservation, cancellation error, package-confined resolution, and
+ambient-authority prohibition are stable. New authority requires a new
+explicit grant or versioned package contract; descriptor-compatible lookalikes
+must never acquire executable authority.
 
 ## Acceptance Criteria
 

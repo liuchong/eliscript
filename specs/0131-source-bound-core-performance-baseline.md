@@ -1,6 +1,6 @@
 # 0131: Source-bound Core Performance Baseline
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-07
 - Depends on: 0033 Build Phase Timings,
@@ -134,6 +134,15 @@ The command rebuilds the self-hosted compiler before starting three fresh
 measurement processes. The retained JSON report is the machine-readable
 artifact; this specification and `benchmarks/README.md` are the human-readable
 methodology.
+
+## Compatibility Freeze
+
+The version 1 four-workload corpus, three-process measurement protocol,
+warmup/sample counts, correctness identities, fixed median/any-run/spread
+budgets, environment metadata, raw samples, source binding, and stale-report
+rejection are stable. Additional host baselines may be added separately, but
+they cannot weaken or overwrite the retained reference-host thresholds without
+a new reviewed contract and measurements.
 
 ## Acceptance Criteria
 

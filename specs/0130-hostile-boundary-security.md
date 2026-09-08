@@ -1,6 +1,6 @@
 # 0130: Hostile Boundary Security
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-07
 - Depends on: 0020 Worker Protocol, 0022 Project Build System,
@@ -134,6 +134,15 @@ through the Emacs single-file APIs. Existing focused project, macro, platform,
 worker, and bootstrap tests remain required regression evidence. No
 application framework, UI library, bundler, publisher, site generator, hosting
 system, or development server contributes to this core security result.
+
+## Compatibility Freeze
+
+The canonical containment rules, declared macro authority, unforgeable worker
+capabilities, closed configuration and protocol schemas, complete-plan
+preflight, canonical-path and filesystem-identity alias rejection, protected
+input preservation, and fail-before-write behavior are stable. The documented
+concurrent privileged filesystem race remains outside this boundary; narrowing
+any covered rejection requires a superseding security contract.
 
 ## Acceptance Criteria
 

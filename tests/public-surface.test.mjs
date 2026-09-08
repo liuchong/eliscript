@@ -86,14 +86,14 @@ test("public surface checker rejects platform classification and export drift", 
     ({ id }) => id === "browser-capabilities",
   );
   package_.host = "ambient";
-  package_.stability = "stable";
+  package_.stability = "accepted";
   package_.namedExports.shift();
   const errors = await validationErrors(surface);
   expect(errors).toContain(
     'browser-capabilities has invalid platform host "ambient"',
   );
   expect(errors).toContain(
-    "browser-capabilities stability must match specification 0126 status accepted",
+    "browser-capabilities stability must match specification 0126 status stable",
   );
   expect(errors).toContain(
     "browser-capabilities export inventory is missing current entries: BrowserCapabilityError",

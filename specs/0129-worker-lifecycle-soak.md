@@ -1,6 +1,6 @@
 # 0129: Worker Lifecycle Soak and Recovery
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-07
 - Depends on: 0020 Worker Protocol, 0021 Emacs Worker Integration,
@@ -134,6 +134,14 @@ The runner starts no server. Normal completion and every error path use one
 `unwind-protect` cleanup owner, stop the current client, terminate any remaining
 owned process object, remove the temporary directory, and verify all recorded
 PIDs have disappeared.
+
+## Compatibility Freeze
+
+The version 1 100,000-request workload, concurrency bound, five-generation
+fault sequence, exact accounting and checksum, RSS checkpoints and growth
+budgets, automatic recovery, callback discipline, protocol shutdown, process
+reclamation, and source-bound report are stable. Short probes remain
+diagnostic-only and cannot replace this acceptance workload.
 
 ## Acceptance Criteria
 

@@ -32,7 +32,7 @@ defined by specification 0118. Baseline 1 remains historical evidence; baseline
 
 ## Stable Contract
 
-Baseline 2 currently classifies 110 specifications and their 110 conformance
+Baseline 2 currently classifies 118 specifications and their 118 conformance
 features as stable. The stable set covers these externally meaningful areas:
 
 - lexical binding, deterministic macro behavior, source locations, and Source
@@ -73,6 +73,10 @@ features as stable. The stable set covers these externally meaningful areas:
 - the maintained Emacs mode, read-only checking, virtual-source compilation,
   persistent evaluation, terminal REPL, host-neutral watch lifecycle, generic
   explicit ESM interoperation, and evidence-derived progress calculations
+- generated standard-library API indexes, explicit browser and worker
+  capabilities, deterministic reader/program fuzzing, 1,000-module
+  invalidation, 100,000-request worker lifecycle recovery, hostile-boundary
+  security, source-bound core performance, and repository-integrity audits
 - specification, diagnostic, public-surface, continuous compatibility, and
   compatibility-baseline schemas
 
@@ -83,7 +87,7 @@ other explicitly non-identity observations remain implementation details.
 
 ## Provisional Contract
 
-Thirty-one implemented specifications and features remain provisional. They
+Twenty-three implemented specifications and features remain provisional. They
 cover the broad pre-1.0 language, compiler internals, remaining standard-library
 modules, editor tooling, host interop, compatibility-matrix closure, and final
 acceptance evidence whose public contracts may still change before the 1.0
@@ -186,6 +190,8 @@ those changes can proceed without accidental compatibility claims.
 - Stable specification and feature statuses agree bidirectionally.
 - Negative tests reject missing baseline entries and partially promoted
   stable contracts.
-- The default local suite and the four-cell remote compatibility matrix pass.
+- Historical M7 evidence recorded a passing local suite and four-cell
+  compatibility matrix; current final matrix acceptance remains separately
+  open and requires fresh source-bound evidence.
 - Every later promotion remains explicit in the owning specification,
   conformance manifest, public-surface registry, and versioned baseline.

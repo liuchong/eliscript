@@ -1,6 +1,6 @@
 # 0128: Deterministic Project Scale and Invalidation
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-07
 - Depends on: 0030 Project Graph Manifest, 0031 Incremental Project Builds,
@@ -112,6 +112,14 @@ The public command is:
 ```sh
 bun run scale:project
 ```
+
+## Compatibility Freeze
+
+The version 1 1,000-module topology, exact edge inventory, source identities,
+no-op byte preservation, single-source invalidation decisions, forced-clean
+equivalence, evaluated behavior, resource ceilings, and cleanup rules are
+stable. A larger or differently shaped scale corpus must be additive and
+versioned; it cannot weaken or reinterpret this graph's expected decisions.
 
 ## Acceptance Criteria
 
