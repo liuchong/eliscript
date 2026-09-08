@@ -72,6 +72,7 @@ const validationOptions = {
   matrix,
   matrixSha256,
   resolveTree: async () => "2".repeat(40),
+  resolveCodeIdentity: async () => "3".repeat(64),
 };
 
 test("local compatibility evidence derives all real machine cells", () => {
@@ -127,7 +128,7 @@ test("one direct local report remains an explicitly incomplete matrix", async ()
     stale: [],
     currentSource: true,
     complete: false,
-    sourceIdentity: `${value.source.commit}:${value.source.tree}`,
+    sourceIdentity: "3".repeat(64),
   });
 });
 
@@ -177,4 +178,17 @@ test("local matrix aggregation rejects duplicate cells", async () => {
     reports: [value, structuredClone(value)],
     sourceMatches: async () => true,
   })).rejects.toThrow(/duplicate matrix cell/u);
+});
+
+test("local matrix aggregation rejects mixed source content", async () => {
+  const first = report(expectedMatrixCells(matrix)[0]);
+  const second = report(expectedMatrixCells(matrix)[1]);
+  second.source.commit = "4".repeat(40);
+  await expect(checkLocalMatrixEvidence({
+    ...validationOptions,
+    reports: [first, second],
+    sourceMatches: async () => true,
+    resolveCodeIdentity: async (commit) =>
+      commit === first.source.commit ? "5".repeat(64) : "6".repeat(64),
+  })).rejects.toThrow(/one identical source content identity/u);
 });

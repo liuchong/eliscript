@@ -437,6 +437,16 @@ async function sourceMatchesCurrentCheckout(root, commit, directory) {
   return committed.exitCode === 0 && working === "";
 }
 
+async function sourceCodeIdentity(root, commit, directory) {
+  const tree = await gitOutput(root, "ls-tree", "-r", "--full-tree", commit);
+  const prefix = `${directory}/`;
+  const entries = tree.split("\n").filter((entry) => {
+    const separator = entry.indexOf("\t");
+    return separator < 0 || !entry.slice(separator + 1).startsWith(prefix);
+  });
+  return sha256(`${entries.join("\n")}\n`);
+}
+
 export async function checkLocalMatrixEvidence(options = {}) {
   const root = path.resolve(options.root ?? DEFAULT_ROOT);
   const { matrix, matrixSha256 } = await readMatrix(root);
@@ -449,7 +459,8 @@ export async function checkLocalMatrixEvidence(options = {}) {
   );
   const errors = [];
   const seen = new Set();
-  const sources = new Set();
+  const sourceCommits = new Set();
+  const codeIdentities = new Set();
   for (const item of reports) {
     const report = item.value ?? item;
     try {
@@ -461,7 +472,14 @@ export async function checkLocalMatrixEvidence(options = {}) {
       });
       if (seen.has(result.cell.id)) errors.push(`duplicate matrix cell ${result.cell.id}`);
       seen.add(result.cell.id);
-      sources.add(`${result.source.commit}:${result.source.tree}`);
+      sourceCommits.add(result.source.commit);
+      const resolveCodeIdentity = options.resolveCodeIdentity ??
+        ((commit) => sourceCodeIdentity(
+          root,
+          commit,
+          matrix.localEvidence.directory,
+        ));
+      codeIdentities.add(await resolveCodeIdentity(result.source.commit));
       const expectedFilename = path.join(
         matrix.localEvidence.directory,
         `${result.cell.id}.json`,
@@ -473,21 +491,21 @@ export async function checkLocalMatrixEvidence(options = {}) {
       errors.push(...(error.errors ?? [error.message]));
     }
   }
-  if (sources.size > 1) {
-    errors.push("all matrix reports must bind one identical source commit and tree");
+  if (codeIdentities.size > 1) {
+    errors.push("all matrix reports must bind one identical source content identity");
   }
   if (errors.length > 0) throw new LocalCompatibilityMatrixError(errors);
   let currentSource = reports.length === 0;
-  if (sources.size === 1) {
-    const [identity] = sources;
-    const commit = identity.split(":", 1)[0];
+  if (sourceCommits.size > 0) {
     const sourceMatches = options.sourceMatches ??
       ((candidate) => sourceMatchesCurrentCheckout(
         root,
         candidate,
         matrix.localEvidence.directory,
       ));
-    currentSource = await sourceMatches(commit);
+    currentSource = (await Promise.all(
+      [...sourceCommits].map((commit) => sourceMatches(commit)),
+    )).every(Boolean);
   }
   const missing = expected.map((cell) => cell.id).filter((id) => !seen.has(id));
   const stale = currentSource ? [] : [...seen];
@@ -500,7 +518,7 @@ export async function checkLocalMatrixEvidence(options = {}) {
     stale,
     currentSource,
     complete: currentSource && missing.length === 0,
-    sourceIdentity: [...sources][0] ?? null,
+    sourceIdentity: [...codeIdentities][0] ?? null,
   };
 }
 

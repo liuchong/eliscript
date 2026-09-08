@@ -77,9 +77,11 @@ Reports live under `acceptance/matrix/`. Each report retains command status,
 duration, output digests, exact environment versions, and the source commit and
 tree. Reports use format `eliscript-local-compatibility-cell` version 1.
 `--verify-all` validates every present report, rejects duplicates or
-mixed source identities, and marks historical reports stale when tracked source
-outside the report directory has changed. AC-21 remains incomplete until all
-four exact cells bind the current source identity.
+mixed source-content identities, and marks historical reports stale when
+tracked source outside the report directory has changed. Report-only commits
+may differ because the comparison excludes the retained report directory.
+AC-21 remains incomplete until all four exact cells bind the current source
+content identity.
 
 ## Deterministic Workflow Projection
 
