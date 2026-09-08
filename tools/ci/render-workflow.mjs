@@ -25,6 +25,13 @@ function sortedUnique(values, label, errors) {
   }
 }
 
+function safeRelativePath(value) {
+  return typeof value === "string" && value.length > 0 &&
+    !path.isAbsolute(value) &&
+    !value.split("/").includes("..") &&
+    path.posix.normalize(value) === value;
+}
+
 function actionMap(matrix, errors) {
   if (!Array.isArray(matrix.actions)) {
     errors.push("actions must be an array");
@@ -118,6 +125,21 @@ export function validateCompatibilityMatrix(matrix) {
     errors.push("javascriptHost must declare an exact Bun version");
   }
 
+  const localEvidence = matrix.localEvidence;
+  if (!isPlainObject(localEvidence)) {
+    errors.push("localEvidence must declare direct local matrix evidence");
+  } else {
+    if (!safeRelativePath(localEvidence.directory) ||
+        localEvidence.directory !== "acceptance/matrix") {
+      errors.push("localEvidence directory must be acceptance/matrix");
+    }
+    if (!isPlainObject(localEvidence.nodeHost) ||
+        localEvidence.nodeHost.name !== "node" ||
+        !/^\d+\.\d+\.\d+$/.test(localEvidence.nodeHost.version ?? "")) {
+      errors.push("localEvidence nodeHost must declare an exact Node version");
+    }
+  }
+
   const actions = actionMap(matrix, errors);
   const commands = Array.isArray(matrix.commands) ? matrix.commands : [];
   const requiredCommands = [
@@ -128,6 +150,13 @@ export function validateCompatibilityMatrix(matrix) {
   if (JSON.stringify(commands) !== JSON.stringify(requiredCommands)) {
     errors.push(`commands must be ${requiredCommands.join(", ")}`);
   }
+  const timeouts = localEvidence?.timeoutsMs;
+  if (!isPlainObject(timeouts) ||
+      JSON.stringify(Object.keys(timeouts)) !== JSON.stringify(requiredCommands) ||
+      requiredCommands.some((command) =>
+        !Number.isInteger(timeouts[command]) || timeouts[command] < 60_000)) {
+    errors.push("localEvidence timeoutsMs must cover every command with bounded values");
+  }
 
   if (errors.length > 0) throw new CompatibilityMatrixError(errors);
   return {
@@ -135,6 +164,7 @@ export function validateCompatibilityMatrix(matrix) {
     systems,
     emacsVersions,
     javascriptHost: matrix.javascriptHost,
+    localEvidence,
     actions,
     commands,
     jobs: systems.length * emacsVersions.length,
@@ -233,6 +263,8 @@ export async function checkCompatibilityWorkflow(options = {}) {
     })),
     emacsVersions: validated.emacsVersions,
     javascriptHost: validated.javascriptHost,
+    nodeHost: validated.localEvidence.nodeHost,
+    localEvidenceDirectory: validated.localEvidence.directory,
     jobs: validated.jobs,
     workflow: validated.workflow,
   };
@@ -247,7 +279,9 @@ export function humanCompatibilityReport(report) {
     `  Systems        ${systems}`,
     `  Emacs          ${report.emacsVersions.join(", ")}`,
     `  JS host        ${report.javascriptHost.name} ${report.javascriptHost.version}`,
+    `  Node host      ${report.nodeHost.name} ${report.nodeHost.version}`,
     `  Matrix jobs    ${report.jobs}`,
+    `  Local evidence ${report.localEvidenceDirectory}`,
     `  Workflow       ${report.workflow}`,
   ].join("\n");
 }

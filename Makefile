@@ -39,6 +39,7 @@ test-core: check-contracts
 		tests/final-acceptance.test.mjs \
 		tests/esm-imports.test.mjs \
 		tests/ci-contract.test.mjs \
+		tests/local-compatibility-matrix.test.mjs \
 		tests/collection-layout-benchmark.test.mjs \
 		tests/transient-builder-benchmark.test.mjs \
 		tests/bootstrap-symbol.test.mjs tests/bootstrap-reader.test.mjs \
@@ -123,6 +124,7 @@ endif
 	$(BUN) tools/surface/check.mjs
 	$(BUN) tools/surface/generate-api.mjs --check
 	$(BUN) tools/ci/render-workflow.mjs --check
+	$(BUN) tools/compatibility/matrix.mjs --verify-all
 	$(BUN) tools/documentation/check.mjs
 	$(BUN) tools/onboarding/check.mjs \
 		--verify-run acceptance/runs/m13-02.json \

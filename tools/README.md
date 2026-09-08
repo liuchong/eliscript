@@ -20,7 +20,8 @@ directory is required by the compiler core.
 | [`acceptance/`](acceptance/) | Specification-derived AC/PD corpus and retained maturity audit runs |
 | [`conformance/`](conformance/) | Specification registry and evidence validation |
 | [`surface/`](surface/) | Public-surface and compatibility-baseline validation |
-| [`ci/`](ci/) | Deterministic compatibility workflow generation |
+| [`ci/`](ci/) | Optional deterministic compatibility workflow projection |
+| [`compatibility/matrix.mjs`](compatibility/matrix.mjs) | Direct local compatibility-cell execution and retained evidence verification |
 
 Generated reports and workflows are contract outputs. Their source registries
 and generators should be changed together.

@@ -439,9 +439,10 @@
       "title": "Continuous operating-system and Emacs compatibility matrix",
       "status": "stable",
       "spec": "0045",
-      "contracts": ["Defines the complete Linux/macOS and Emacs 29/30 matrix as versioned data", "Renders one immutable pinned workflow and rejects contract drift", "Runs the complete suite and strict byte compilation in every matrix cell"],
+      "contracts": ["Defines the complete Linux/macOS and Emacs 29/30 matrix as versioned data", "Runs the complete suite and strict byte compilation directly on each real machine", "Binds every retained cell to one clean source tree and exact Emacs Bun and Node versions", "Keeps a deterministic workflow as an optional projection rather than acceptance authority"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/ci-contract.test.mjs", "contains": "repository compatibility matrix renders the committed CI workflow" },
+        { "kind": "bun-test", "file": "tests/local-compatibility-matrix.test.mjs", "contains": "one direct local report remains an explicitly incomplete matrix" },
         { "kind": "fixture", "file": "contracts/compatibility-matrix.json", "contains": "\"format\": \"eliscript-compatibility-matrix\"" }
       ]
     },

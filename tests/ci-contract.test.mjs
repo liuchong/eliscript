@@ -36,6 +36,8 @@ describe("compatibility matrix contract", () => {
     expect(report.systems.map((system) => system.id)).toEqual(["linux", "macos"]);
     expect(report.emacsVersions).toEqual(["29.4", "30.2"]);
     expect(report.javascriptHost).toEqual({ name: "bun", version: "1.4.0" });
+    expect(report.nodeHost).toEqual({ name: "node", version: "24.20.0" });
+    expect(report.localEvidenceDirectory).toBe("acceptance/matrix");
   });
 
   test("matrix rejects a missing supported operating system", () => {
@@ -60,6 +62,14 @@ describe("compatibility matrix contract", () => {
     const matrix = copyBaseline();
     matrix.commands = matrix.commands.filter((command) => command !== "make byte-compile");
     expectMatrixFailure(matrix, /commands must be/);
+  });
+
+  test("matrix rejects incomplete local evidence settings", () => {
+    const matrix = copyBaseline();
+    matrix.localEvidence.nodeHost.version = "current";
+    delete matrix.localEvidence.timeoutsMs["make byte-compile"];
+    expectMatrixFailure(matrix, /exact Node version/);
+    expectMatrixFailure(matrix, /timeoutsMs must cover every command/);
   });
 
   test("checker rejects manual workflow drift", async () => {

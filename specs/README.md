@@ -191,7 +191,7 @@ Specification 0146 closes AC-05 with a source-bound compiler parity corpus over
 13 bootstrap modules, all 57 public IR kinds, and seven observable parity
 dimensions. Ten mandatory criteria remain incomplete.
 Specification 0147 derives a complete stable compatibility corpus over 141
-stable core features, 542 evidence locators, 68 core fixtures, and all three
+stable core features, 543 evidence locators, 68 core fixtures, and all three
 migration records. It keeps AC-02 incomplete while the final core feature
 remains provisional.
 
