@@ -1,9 +1,9 @@
 # Eliscript 1.0 Acceptance Report
 
-- Source commit: `8465db4915066590d5880230cfb532bf02113c69`
-- Source tree: `2b0c714837d1740c40cec73fd44a79780a595e17`
+- Source commit: `5d2fa78303cc931cb6bee9e31a4ea9bea12c4dc5`
+- Source tree: `761b647fd428bb8c3b74d252f00657245c5883f4`
 - Contract: `contracts/final-acceptance.json` (`fc7760bdccc644b014b3513e4020f3647e3128e54676481d1515504967f2651d`)
-- Generated: 2026-09-08T10:23:11.468Z
+- Generated: 2026-09-08T10:54:36.871Z
 - Environment: Darwin 25.6.0; arm64; Bun 1.4.0; Node v26.8.1; Emacs 31.1
 - Corpus complete: yes
 - Operational success: yes
@@ -80,8 +80,8 @@ No unresolved defects are recorded.
 
 | Probe | Command | Result | Exit | Duration (ms) | Output SHA-256 |
 | --- | --- | --- | ---: | ---: | --- |
-| core-suite | `make test-core` | pass | 0 | 534692.901 | `b5092b366e2343c527d30ee39dfaa467f9db8504bc605752676bb086f8169ab9` |
-| strict-byte-compile | `make byte-compile` | pass | 0 | 1060.565 | `4110c50ff8be0d96e678ed5ef31967a2aca72a86558181796ef5f14b5a350c3e` |
+| core-suite | `make test-core` | pass | 0 | 484780.365 | `1aebcdafd552e803496fdad1bb52a3ad6686152d99466247adffe21979a1c37b` |
+| strict-byte-compile | `make byte-compile` | pass | 0 | 1038.807 | `4110c50ff8be0d96e678ed5ef31967a2aca72a86558181796ef5f14b5a350c3e` |
 
 ## Artifact Digests
 
@@ -89,8 +89,8 @@ No unresolved defects are recorded.
 | --- | --- |
 | `.github/workflows/compatibility.yml` | `45a2c3941d06adc6d745b4490197beb2a86266fda2685a69a88aeaa6afacfb90` |
 | `acceptance/defects.json` | `da4ac30acd7e57ec357e3d30da05c304605d0a2407733137adf1a44f5b137377` |
-| `acceptance/manifest.json` | `7f96679b0f36bded998b3c563ca691de985de2221d554656967875cda4df785d` |
-| `acceptance/report.md` | `fc03c7f34c49b84be8bbaa3bfdc3aa33b1d2c56a40854389b1902f750ff19278` |
+| `acceptance/manifest.json` | `d7b405a43fbf8e61d16c816cfaaa378971aa38b06b4ba036461af09d1ad41f3a` |
+| `acceptance/report.md` | `9f78d6fdedaa819f8c376427b03cd0f6aa5fd455201d1ccbd5f490d168e3c483` |
 | `acceptance/runs/m13-02.json` | `de2767587a9c5b2ff4280c7a1005d88274f0dc9f6c327edd89a2944d67053355` |
 | `acceptance/runs/m13-04.json` | `47a58aab430e21d26a9fce392283d06bb62b969a90ae5e922307e4dbce58a880` |
 | `acceptance/runs/m13-04.md` | `a9b55996a36aab1d86696ec7a1edd4eb63d297060f0c319e959c1c1090e53411` |
@@ -98,7 +98,7 @@ No unresolved defects are recorded.
 | `benchmarks/transient-builder-macos-arm64.json` | `68ac7c6e701d58bd91e491b5eb3008136c9d341512ec3207d1614bcf5ac9f6f7` |
 | `benchmarks/worker-lifecycle-soak-macos-arm64.json` | `3f08cdd4ec997b9869439794e6a94ed63e0cc483a0d07d450959ac9abce230a2` |
 | `benchmarks/worker-value-stream-macos-arm64.json` | `7fdf64d25067722b265d4a4b377e62b87e8b8c678fe15c045c9a5a8876578dd3` |
-| `contracts/compatibility-baseline.json` | `51e448510009189177d5564c0d852407b1f4f297ff3ce9c5caded1ed35bbb15c` |
+| `contracts/compatibility-baseline.json` | `b0216d323a4d0c2b75b46b79fc4ea397dc5819b5df4a4bbba9f1840076f95537` |
 | `contracts/compatibility-matrix.json` | `cb8ef575762f556a13a2ad8113ba56448ea5c14113ca438184e2527ee1eeb38d` |
 | `contracts/core-acceptance-corpus.json` | `77fcba9f32672005e177bca353965012bc98816021509b8a4436896cf81e2990` |
 | `contracts/diagnostic-corpus.json` | `aa6204f3b444c0fca8f490d0b06555f4bf00f0fdcfc66c9597de62d1af69086d` |
@@ -119,7 +119,7 @@ No unresolved defects are recorded.
 | `specs/0072-atomic-state-references.md` | `b143f1cb604a85a78d80665a649ef68443101e87bc3bded03823ce4ecbadb22c` |
 | `specs/0073-native-javascript-container-interop.md` | `9f8fa459e3529579ec7590bc6fdda480efb9f68a3dc9a30670b3472366283d2d` |
 | `specs/0078-persistent-collection-core-exit-audit.md` | `ced21c3357b88396ce96a6e6cafbd209ae338e15edebf305b52a0b2c082586c6` |
-| `specs/0093-static-transient-ownership-analysis.md` | `fa82e7c3860cd1611a3f52193b7202bd99faba7cef4863b15dcf66cbb2ceda96` |
+| `specs/0093-static-transient-ownership-analysis.md` | `078922f8760c891ea2cff4a4923c82012b09f822b941be1400ddd761feb7f2ea` |
 | `specs/0104-accelerated-emacs-operation-service.md` | `88de328860ac1b3ce243f3a37b883184beca4e59462775f2ff04a8556e4a596e` |
 | `specs/0105-emacs-analysis-performance-reinvestment.md` | `5edf7204e0fb30e6b473f7ae5d661d3c2eb5b7b12d43f164184318ab393b76d7` |
 | `specs/0112-unified-self-hosted-build-operation.md` | `42efd18488b36b794c04e37e4556d6bc09aa003418d0dd33516f41827864aedb` |
@@ -135,7 +135,7 @@ No unresolved defects are recorded.
 | `specs/0142-maintained-javascript-package-interop.md` | `964106e7c60ed3e36bb31aa0207e6c5d421cef7ba9b1a721ca20aedad29de99e` |
 | `specs/0143-complete-negative-diagnostic-corpus.md` | `15dbca346655c96077c7544daeb73cb4e15049207b777d81aeb68b02d4ff5fdd` |
 | `specs/0144-source-level-failure-mapping.md` | `c3d5531b9bede4737c50e8bee16bec1e530f2c9bc64ea0990631b4043c18fcc3` |
-| `specs/index.json` | `edc8a36f41f1c718236b3a5c7b4acda831fc95c3a03cc9a88648c6a42c6758f7` |
+| `specs/index.json` | `66f045c22c6420d4fa40dd2b96ebb10b7baef6706809f99658337734095ac8e1` |
 | `tests/api-index.test.mjs` | `7854b8be563e67a6c569133cea41f4ccf1758bc3955654234e22d91a82b2ec99` |
 | `tests/atom.test.mjs` | `1403c404bf1c49c2532899a3ffe306536cf2affc7400d08d785439a9d5dcc296` |
 | `tests/bootstrap-analyzer.test.mjs` | `ac2bfaaa29531eb6addab3a526a32b64d4981bba825033204d16703259961287` |
@@ -150,8 +150,8 @@ No unresolved defects are recorded.
 | `tests/boundary-security.test.mjs` | `1d63fcc782b15b8a72c451fc5354b457945779ef0882b5b11856cfe6f9be3650` |
 | `tests/ci-contract.test.mjs` | `56ed36c60aa1af5d51ee105ea2d5854cf9a6d37749eb03a7cc322bf54d3ca09e` |
 | `tests/clean-project-workflow.test.mjs` | `082b8d3262faab8f70e63305dddff63f8bb69d9da9ed6eedb97f7ab21d44ee45` |
-| `tests/conformance.test.mjs` | `6de6552e6c5b1f08f59c57f3ae02df8a59c1d1ea941fbfd063291037487708cc` |
-| `tests/conformance/manifest.json` | `e6574d0e50d8521f20df1f04b9acddb92944071415fef54e85c5ba9829e6b25e` |
+| `tests/conformance.test.mjs` | `bad1881fd2b7e4c2e8b180e6f4497ce620e12081528418340603c86e93db630f` |
+| `tests/conformance/manifest.json` | `2da0b84074725988a82850353674a3101fcbb0c44b9c5b5345d5c6af3c6d7f8d` |
 | `tests/core-stdlib.test.mjs` | `e7ce59b7eabbcbbea36e0cd79ca9fa0cf1ff1f3fc9b06a5de41ec4bcf6edfc9b` |
 | `tests/diagnostic-corpus.test.mjs` | `4a5b06adc53786e881fab48e72c39a09737d4a3a0cfd7b4fd7b80f1c20980fdd` |
 | `tests/eliscript-mode-tests.el` | `5e7e22d28c8cf6472cb80778fd8790df2a6963b457ef5300ce4b984b068791e9` |
