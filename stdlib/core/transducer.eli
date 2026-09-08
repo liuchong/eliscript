@@ -16,6 +16,9 @@
   (defun keeping (transform)
     (Runtime/keeping transform))
 
+  (defun keeping-indexed (transform)
+    (Runtime/keepingIndexed transform))
+
   (defun catting ()
     (Runtime/catting))
 
@@ -40,6 +43,18 @@
   (defun dropping-while (predicate)
     (Runtime/droppingWhile predicate))
 
+  (defun taking-nth (interval)
+    (Runtime/takingNth interval))
+
+  (defun interposing (separator)
+    (Runtime/interposing separator))
+
+  (defun partitioning-all (size)
+    (Runtime/partitioningAll size))
+
+  (defun partitioning-by (classifier)
+    (Runtime/partitioningBy classifier))
+
   (defun deduping ()
     (Runtime/deduping))
 
@@ -50,5 +65,6 @@
     (apply Runtime/into (js-cons target arguments)))
 
   (export catting completing compose-transducers deduping dropping
-          dropping-while filtering into keeping mapcatting mapping
-          mapping-indexed removing taking taking-while transduce))
+          dropping-while filtering interposing into keeping keeping-indexed
+          mapcatting mapping mapping-indexed partitioning-all partitioning-by
+          removing taking taking-nth taking-while transduce))

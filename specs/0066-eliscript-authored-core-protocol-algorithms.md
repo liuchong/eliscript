@@ -35,9 +35,10 @@ Four new Eliscript API modules expose the runtime substrate:
   generic count, empty, construction, lookup, membership, indexed access,
   sequence, reduction, and reduced-value operations.
 - `stdlib/core/transducer.eli` exports reducer completion, composition,
-  mapping, indexed mapping, keeping, filtering, removing, bounded and
-  predicate-controlled take/drop, adjacent deduplication, cat/mapcat,
-  transduction, and `into`.
+  mapping, indexed mapping/keeping, filtering, removing, bounded and
+  predicate-controlled take/drop, nth sampling, interposition, adjacent
+  deduplication, persistent-Vector partitioning, cat/mapcat, transduction, and
+  `into`.
 - `stdlib/core/transient.eli` exports editable capabilities and `transient`,
   `conj!`, `assoc!`, `dissoc!`, and `persistent!`.
 
@@ -92,7 +93,8 @@ must execute under both Bun and Node.js.
 The executable corpus covers protocol category and default extensions,
 operation slots, generic collection access, Vector and Map transients,
 post-`persistent!` invalidation, composed transducers, external `IReduce`
-sources, exact early termination, and a 50,000-key transient Map build.
+sources, exact early termination, persistent partition flushing, and a
+50,000-key transient Map build.
 
 ## Compatibility and Limits
 

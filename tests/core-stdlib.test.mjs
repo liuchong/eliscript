@@ -593,6 +593,13 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
       .toEqual([[2, 2], [3, 4]]);
     expect([...api.report.flattened]).toEqual([1, 10, 2, 20]);
     expect([...api.report.concatenated]).toEqual(["left", "right"]);
+    expect([...api.report.sampled].map((value) => [...value]))
+      .toEqual([[0, 5], [3, 7]]);
+    expect([...api.report.interposed]).toEqual(["left", "between", "right"]);
+    expect([...api.report.partitioned].map((value) => [...value]))
+      .toEqual([[1, 2], [3]]);
+    expect([...api.report.grouped].map((value) => [...value]))
+      .toEqual([[1, 2], [3, 4]]);
 
     class SourceRange {
       constructor(end, observe) {
@@ -648,6 +655,8 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
       "if (JSON.stringify([...seq.map((value) => value * 3, [1,2,3])]) !== '[3,6,9]') process.exit(1);",
       "if (JSON.stringify([...api.report['stateful-transformed']].map((value) => [...value])) !== '[[2,2],[3,4]]') process.exit(1);",
       "if (JSON.stringify([...api.report.flattened]) !== '[1,10,2,20]') process.exit(1);",
+      "if (JSON.stringify([...api.report.sampled].map((value) => [...value])) !== '[[0,5],[3,7]]') process.exit(1);",
+      "if (JSON.stringify([...api.report.partitioned].map((value) => [...value])) !== '[[1,2],[3]]') process.exit(1);",
       "if (String(identifier.keyword('article/title')) !== ':article/title') process.exit(1);",
       "if (metadata.meta(api.report['vector-appended']) !== null) process.exit(1);",
     ].join("");

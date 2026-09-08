@@ -7,6 +7,7 @@ import {
   IReduce,
   count,
   isReduced,
+  nth,
   reduced,
   sequenceView,
   unreduced,
@@ -18,12 +19,17 @@ import {
   deduping,
   droppingWhile,
   filtering,
+  interposing,
   into,
   keeping,
+  keepingIndexed,
   mapcatting,
   mapping,
   mappingIndexed,
+  partitioningAll,
+  partitioningBy,
   taking,
+  takingNth,
   takingWhile,
   transduce,
 } from "../runtime/core/transducer.mjs";
@@ -31,6 +37,7 @@ import { persistentHashMap } from "../runtime/core/map.mjs";
 import { persistentHashSet } from "../runtime/core/set.mjs";
 import {
   EMPTY_VECTOR,
+  isPersistentVector,
   persistentVector,
 } from "../runtime/core/vector.mjs";
 import { extendProtocolType } from "../runtime/core/protocol.mjs";
@@ -216,6 +223,111 @@ test("deduping uses Eliscript value equality and preserves separated repeats", (
     .toEqual([1, 2]);
 });
 
+test("indexed keep nth and interpose allocate fresh bounded state per run", () => {
+  const indexed = keepingIndexed((index, value) =>
+    value === "skip" ? null : `${index}:${value}`);
+  expect(transduce(
+    indexed,
+    (values, value) => [...values, value],
+    [],
+    ["left", "skip", "right"],
+  )).toEqual(["0:left", "2:right"]);
+  expect(transduce(indexed, (values, value) => [...values, value], [], ["again"]))
+    .toEqual(["0:again"]);
+
+  const everyThird = takingNth(3);
+  expect(transduce(
+    everyThird,
+    (values, value) => [...values, value],
+    [],
+    [0, 1, 2, 3, 4, 5, 6],
+  )).toEqual([0, 3, 6]);
+  expect(transduce(everyThird, (values, value) => [...values, value], [], [7, 8]))
+    .toEqual([7]);
+
+  let pulls = 0;
+  const source = sequenceView(() => (function* values() {
+    for (const value of [1, 2, 3]) {
+      pulls += 1;
+      yield value;
+    }
+  })(), 3);
+  expect(transduce(
+    composeTransducers(interposing("separator"), taking(2)),
+    (values, value) => [...values, value],
+    [],
+    source,
+  )).toEqual([1, "separator"]);
+  expect(pulls).toBe(2);
+  expect(transduce(
+    interposing("separator"),
+    (values, value) => [...values, value],
+    [],
+    ["only"],
+  )).toEqual(["only"]);
+});
+
+test("partitioning transducers emit persistent groups and flush completion once", () => {
+  const fixed = partitioningAll(3);
+  const partitions = transduce(
+    fixed,
+    (values, value) => [...values, value],
+    [],
+    [1, 2, 3, 4, 5, 6, 7, 8],
+  );
+  expect(partitions.every(isPersistentVector)).toBe(true);
+  expect(partitions.map((partition) => [...partition]))
+    .toEqual([[1, 2, 3], [4, 5, 6], [7, 8]]);
+  expect(transduce(fixed, (values, value) => [...values, [...value]], [], [9, 10]))
+    .toEqual([[9, 10]]);
+
+  const grouped = transduce(
+    partitioningBy((value) => persistentVector(value % 2)),
+    (values, value) => [...values, [...value]],
+    [],
+    [1, 3, 2, 4, 5, 7],
+  );
+  expect(grouped).toEqual([[1, 3], [2, 4], [5, 7]]);
+
+  let groupedPulls = 0;
+  const groupedSource = sequenceView(() => (function* values() {
+    for (const value of [1, 3, 2, 4]) {
+      groupedPulls += 1;
+      yield value;
+    }
+  })(), 4);
+  let completions = 0;
+  const firstGroupReducer = completing(
+    (values, value) => [...values, [...value]],
+    (values) => {
+      completions += 1;
+      return values;
+    },
+  );
+  expect(transduce(
+    composeTransducers(partitioningBy((value) => value % 2), taking(1)),
+    firstGroupReducer,
+    [],
+    groupedSource,
+  )).toEqual([[1, 3]]);
+  expect([groupedPulls, completions]).toEqual([3, 1]);
+
+  let pulls = 0;
+  const source = sequenceView(() => (function* values() {
+    for (let value = 0; value < 100; value += 1) {
+      pulls += 1;
+      yield value;
+    }
+  })(), 100);
+  expect(transduce(
+    composeTransducers(partitioningAll(4), taking(1)),
+    (values, value) => [...values, [...value]],
+    [],
+    source,
+  )).toEqual([[0, 1, 2, 3]]);
+  expect(pulls).toBe(4);
+});
+
 test("catting and mapcatting flatten reducible values and propagate termination", () => {
   expect(transduce(
     catting(),
@@ -363,6 +475,9 @@ test("transducer boundaries reject malformed operations before traversal", () =>
     "mapping-indexed transform must be a function",
   );
   expect(() => keeping(null)).toThrow("keeping transform must be a function");
+  expect(() => keepingIndexed(null)).toThrow(
+    "keeping-indexed transform must be a function",
+  );
   expect(() => mapcatting(null)).toThrow(
     "mapcatting transform must be a function",
   );
@@ -372,6 +487,15 @@ test("transducer boundaries reject malformed operations before traversal", () =>
   );
   expect(() => droppingWhile(null)).toThrow(
     "dropping-while predicate must be a function",
+  );
+  expect(() => takingNth(0)).toThrow(
+    "taking-nth interval must be a positive safe integer",
+  );
+  expect(() => partitioningAll(-1)).toThrow(
+    "partitioning-all size must be a positive safe integer",
+  );
+  expect(() => partitioningBy(null)).toThrow(
+    "partitioning-by classifier must be a function",
   );
   expect(() => taking(-1)).toThrow(
     "taking limit must be a non-negative safe integer",
@@ -407,6 +531,9 @@ test("transducers agree under Bun and Node and stay single-pass at scale", async
     entries: [["key-1", 10], ["key-2", 20]],
     reused: [[1, 2], [1, 2]],
     stateful: ["2:left", "3:right"],
+    sampled: ["0:left", "3:right"],
+    interposed: ["left", "between", "right"],
+    partitions: [[1, 3], [2, 4], [5]],
     flattened: [1, 10, 2],
     concatenated: ["left", "right"],
   });
@@ -445,6 +572,24 @@ test("transducers agree under Bun and Node and stay single-pass at scale", async
     tailAllocations: 0,
     rootGrowths: 0,
   });
+
+  let partitionPulls = 0;
+  const partitionSource = sequenceView(() => (function* values() {
+    for (let value = 0; value < 1_000_000; value += 1) {
+      partitionPulls += 1;
+      yield value;
+    }
+  })(), 1_000_000);
+  const millionPartition = transduce(
+    partitioningAll(1_000_000),
+    (_result, partition) => partition,
+    null,
+    partitionSource,
+  );
+  expect(partitionPulls).toBe(1_000_000);
+  expect(count(millionPartition)).toBe(1_000_000);
+  expect(nth(millionPartition, 0)).toBe(0);
+  expect(nth(millionPartition, 999_999)).toBe(999_999);
 
   const bounded = into(
     EMPTY_VECTOR,

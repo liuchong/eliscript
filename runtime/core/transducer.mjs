@@ -15,10 +15,12 @@ import {
 } from "./transient.mjs";
 import { isTruthy } from "./truth.mjs";
 import { equalValues } from "./value.mjs";
+import { EMPTY_VECTOR } from "./vector.mjs";
 
 const REDUCING_FUNCTION = Symbol("eliscript.transducer.reducing-function");
 const ZERO_INPUT = Symbol("eliscript.transducer.zero-input");
 const NO_PREVIOUS_VALUE = Symbol("eliscript.transducer.no-previous-value");
+const NO_PARTITION_KEY = Symbol("eliscript.transducer.no-partition-key");
 
 function identity(value) {
   return value;
@@ -27,6 +29,13 @@ function identity(value) {
 function requireFunction(value, label) {
   if (typeof value !== "function") {
     throw new TypeError(`${label} must be a function`);
+  }
+  return value;
+}
+
+function requirePositiveSafeInteger(value, label) {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(`${label} must be a positive safe integer`);
   }
   return value;
 }
@@ -47,6 +56,25 @@ function applyTransducer(transducer, reducingFunction) {
     transducer(reducingFunction),
     "transducer result",
   );
+}
+
+function createPartitionBuffer() {
+  let builder = transient(EMPTY_VECTOR);
+  let length = 0;
+  return Object.freeze({
+    append(value) {
+      builder = conjBang(builder, value);
+      length += 1;
+      return length;
+    },
+    flush(result, downstream) {
+      if (length === 0) return result;
+      const partition = persistentBang(builder);
+      builder = transient(EMPTY_VECTOR);
+      length = 0;
+      return downstream(result, partition);
+    },
+  });
 }
 
 const IDENTITY_TRANSDUCER = makeTransducer((reducingFunction) =>
@@ -114,6 +142,26 @@ export function keeping(transform) {
     return completing(
       (result, input) => {
         const value = transform(input);
+        return value === null ? result : downstream(result, value);
+      },
+      (result) => downstream(result),
+    );
+  });
+}
+
+export function keepingIndexed(transform) {
+  requireFunction(transform, "keeping-indexed transform");
+  return makeTransducer((reducingFunction) => {
+    const downstream = asReducingFunction(
+      reducingFunction,
+      "keeping-indexed reducing function",
+    );
+    let index = 0;
+    return completing(
+      (result, input) => {
+        const currentIndex = index;
+        index += 1;
+        const value = transform(currentIndex, input);
         return value === null ? result : downstream(result, value);
       },
       (result) => downstream(result),
@@ -263,6 +311,96 @@ export function droppingWhile(predicate) {
         return downstream(result, input);
       },
       (result) => downstream(result),
+    );
+  });
+}
+
+export function takingNth(interval) {
+  requirePositiveSafeInteger(interval, "taking-nth interval");
+  return makeTransducer((reducingFunction) => {
+    const downstream = asReducingFunction(
+      reducingFunction,
+      "taking-nth reducing function",
+    );
+    let remaining = 0;
+    return completing(
+      (result, input) => {
+        if (remaining > 0) {
+          remaining -= 1;
+          return result;
+        }
+        remaining = interval - 1;
+        return downstream(result, input);
+      },
+      (result) => downstream(result),
+    );
+  });
+}
+
+export function interposing(separator) {
+  return makeTransducer((reducingFunction) => {
+    const downstream = asReducingFunction(
+      reducingFunction,
+      "interposing reducing function",
+    );
+    let started = false;
+    return completing(
+      (result, input) => {
+        if (!started) {
+          started = true;
+          return downstream(result, input);
+        }
+        const separated = downstream(result, separator);
+        return isReduced(separated)
+          ? separated
+          : downstream(separated, input);
+      },
+      (result) => downstream(result),
+    );
+  });
+}
+
+export function partitioningAll(size) {
+  requirePositiveSafeInteger(size, "partitioning-all size");
+  return makeTransducer((reducingFunction) => {
+    const downstream = asReducingFunction(
+      reducingFunction,
+      "partitioning-all reducing function",
+    );
+    const buffer = createPartitionBuffer();
+    return completing(
+      (result, input) => buffer.append(input) === size
+        ? buffer.flush(result, downstream)
+        : result,
+      (result) => downstream(unreduced(buffer.flush(result, downstream))),
+    );
+  });
+}
+
+export function partitioningBy(classifier) {
+  requireFunction(classifier, "partitioning-by classifier");
+  return makeTransducer((reducingFunction) => {
+    const downstream = asReducingFunction(
+      reducingFunction,
+      "partitioning-by reducing function",
+    );
+    const buffer = createPartitionBuffer();
+    let previousKey = NO_PARTITION_KEY;
+    return completing(
+      (result, input) => {
+        const key = classifier(input);
+        if (previousKey === NO_PARTITION_KEY || equalValues(previousKey, key)) {
+          previousKey = key;
+          buffer.append(input);
+          return result;
+        }
+        const stepped = buffer.flush(result, downstream);
+        if (isReduced(stepped)) return stepped;
+        previousKey = key;
+        buffer.append(input);
+        return stepped;
+      },
+      (result) => downstream(unreduced(buffer.flush(result, downstream))),
     );
   });
 }

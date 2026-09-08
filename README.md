@@ -94,7 +94,7 @@ local onboarding exercise, and exit audit remain formal acceptance work.
 M11's six implementation units are complete. Reviewed metadata classifies all
 29 standard-library modules by role and owning specification; the generated
 [API page](docs/pages/api.html) and machine-readable
-[API index](docs/pages/api-index.json) expose all 304 checked exports. The
+[API index](docs/pages/api-index.json) expose all 316 checked exports. The
 default contract gate rejects metadata, implementation, stability, or generated
 artifact drift. Explicit [browser and worker capability packages](platform/README.md)
 now grant only named host authority, inject request-scoped progress and
@@ -159,9 +159,10 @@ The completed M8 language contract provides:
   dispatch identities without transferring functions or extension state
 - generic collection lookup, traversal, reduction, construction, association,
   and key-presence operations
-- reusable mapping, indexed mapping, keeping, filtering, removing, prefix
-  take/drop, value-semantic deduplication, cat/mapcat, and bounded transducers
-  with protocol-driven `transduce` and `into`
+- reusable mapping, indexed mapping/keeping, filtering, removing, prefix
+  take/drop, nth sampling, interposition, value-semantic deduplication,
+  persistent-Vector partitioning, cat/mapcat, and bounded transducers with
+  protocol-driven `transduce` and `into`
 - owner-token transient Vector, Map, and Set builders with deterministic
   completion invalidation and transient-backed persistent `into`, with
   source-bound 12.329933x/17.486689x/17.937565x Vector/Map/Set builder evidence

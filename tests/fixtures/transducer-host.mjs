@@ -4,12 +4,16 @@ import {
   deduping,
   droppingWhile,
   filtering,
+  interposing,
   into,
   keeping,
+  keepingIndexed,
   mapcatting,
   mapping,
   mappingIndexed,
+  partitioningBy,
   taking,
+  takingNth,
   takingWhile,
   transduce,
 } from "../../runtime/core/transducer.mjs";
@@ -47,6 +51,27 @@ console.log(JSON.stringify({
     (result, value) => [...result, value],
     [],
     ["skip", "skip", null, "left", "left", "right", "stop", "unreachable"],
+  ),
+  sampled: transduce(
+    composeTransducers(
+      keepingIndexed((index, value) => value === null ? null : `${index}:${value}`),
+      takingNth(2),
+    ),
+    (result, value) => [...result, value],
+    [],
+    ["left", null, "skip", "right", "tail"],
+  ),
+  interposed: transduce(
+    interposing("between"),
+    (result, value) => [...result, value],
+    [],
+    ["left", "right"],
+  ),
+  partitions: transduce(
+    partitioningBy((value) => value % 2),
+    (result, value) => [...result, [...value]],
+    [],
+    [1, 3, 2, 4, 5],
   ),
   flattened: transduce(
     composeTransducers(

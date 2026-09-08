@@ -17,7 +17,8 @@
           assoc! conj! persistent! transient)
   (import "./stdlib/core/transducer.mjs"
           catting compose-transducers deduping dropping-while filtering into
-          keeping mapcatting mapping mapping-indexed taking-while)
+          interposing keeping keeping-indexed mapcatting mapping mapping-indexed
+          partitioning-all partitioning-by taking-nth taking-while)
   (import "./runtime/core/map.mjs" EMPTY_MAP)
   (import "./runtime/core/vector.mjs" EMPTY_VECTOR)
 
@@ -94,6 +95,27 @@
   (defconst concatenated
     (into EMPTY_VECTOR (catting) [["left"] ["right"]]))
 
+  (defconst sampled
+    (into
+      EMPTY_VECTOR
+      (compose-transducers
+        (keeping-indexed
+          (lambda (index value) (if (= value 0) nil [index value])))
+        (taking-nth 2))
+      [5 0 6 7 8]))
+
+  (defconst interposed
+    (into EMPTY_VECTOR (interposing "between") ["left" "right"]))
+
+  (defconst partitioned
+    (into EMPTY_VECTOR (partitioning-all 2) [1 2 3]))
+
+  (defconst grouped
+    (into
+      EMPTY_VECTOR
+      (partitioning-by (lambda (value) (> value 2)))
+      [1 2 3 4]))
+
   (defconst report
     (js-object
       :number-description (funcall describe 7)
@@ -125,6 +147,10 @@
       :stateful-transformed stateful-transformed
       :flattened flattened
       :concatenated concatenated
+      :sampled sampled
+      :interposed interposed
+      :partitioned partitioned
+      :grouped grouped
       :reduced-state (reduced? (reduced 1))
       :unreduced-value (unreduced (reduced 9))
       :keyword-string (str title-keyword)

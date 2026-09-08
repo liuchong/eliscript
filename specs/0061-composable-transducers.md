@@ -10,8 +10,9 @@
 ## Summary
 
 This specification adds the destination-independent collection transformation
-layer. Stateless mapping/filtering, run-local indexed/keep/prefix/dedupe
-transforms, and nested cat/mapcat transforms construct reusable transducers;
+layer. Stateless mapping/filtering, run-local indexed/keep/prefix/sampling,
+interposition/dedupe transforms, buffered partitioning, and nested cat/mapcat
+transforms construct reusable transducers;
 `composeTransducers` combines them in one declared-order reduction;
 `transduce` executes the resulting reducing function; and `into` constructs a
 target only through `IEmptyable`, `IConj`, and `IReduce`.
@@ -31,9 +32,10 @@ changing the observable API or results defined here.
 `runtime/core/transducer.mjs` exports:
 
 - reducing-function construction: `completing`
-- transducer constructors: `mapping`, `mappingIndexed`, `keeping`, `filtering`,
-  `removing`, `taking`, `dropping`, `takingWhile`, `droppingWhile`, `deduping`,
-  `catting`, and `mapcatting`
+- transducer constructors: `mapping`, `mappingIndexed`, `keeping`,
+  `keepingIndexed`, `filtering`, `removing`, `taking`, `dropping`,
+  `takingWhile`, `droppingWhile`, `takingNth`, `interposing`, `deduping`,
+  `partitioningAll`, `partitioningBy`, `catting`, and `mapcatting`
 - composition: `composeTransducers`
 - execution: `transduce`, `into`
 
@@ -117,6 +119,11 @@ reducing function, so reusing the transducer starts every run at zero.
 remain ordinary output values. This preserves the distinction between the
 language's nil value and other falsey host values.
 
+`keepingIndexed(transform)` combines the same exact-nil contract with a
+zero-based input index. The index advances for every value reaching the stage,
+including values whose transformed result is suppressed, and restarts at zero
+for every application.
+
 ### Predicate-controlled Prefixes
 
 `takingWhile(predicate)` passes values while the predicate is
@@ -129,6 +136,16 @@ falsey result it passes that input and every later input downstream without
 calling the predicate again. Both predicates and all stage state are allocated
 or validated before traversal as appropriate.
 
+### Sampling and Interposition
+
+`takingNth(interval)` accepts a positive safe integer, passes the first value,
+and then every `interval`th value reaching the stage. A bounded countdown avoids
+an ever-growing index and restarts for every application.
+
+`interposing(separator)` passes a separator before every input except the
+first. When the downstream reducer terminates on a separator, the corresponding
+input is not passed and the reduced result propagates immediately.
+
 ### Adjacent Deduplication
 
 `deduping()` suppresses only consecutive equivalent values. Equality uses the
@@ -136,6 +153,26 @@ shared Eliscript value contract rather than JavaScript identity, so separately
 allocated equal persistent values collapse while a repeated value after a
 different value remains visible. A private sentinel allows `undefined` to be a
 normal first or previous value.
+
+### Partitioning
+
+`partitioningAll(size)` accepts a positive safe integer and emits persistent
+Vectors of at most `size` consecutive inputs. Every full partition is emitted
+during stepping; a non-empty final partition is emitted exactly once during
+completion. Empty input emits no partition.
+
+`partitioningBy(classifier)` calls the classifier once for each input and emits
+maximal consecutive groups with equivalent keys. Key comparison uses Eliscript
+value equality, so separately allocated equal persistent keys remain in the
+same partition. The final non-empty group is emitted during completion.
+
+Both partitioning transducers accumulate through owner-token transient Vectors
+and convert only emitted groups to persistent values. This avoids JavaScript
+argument expansion, remains stack-safe for a million-value group, and makes
+the output category independent of the input collection. Buffers are reset
+before downstream stepping so reduced termination cannot cause a duplicate
+completion flush. A boundary input is not buffered when emitting the previous
+group terminates downstream.
 
 ### Cat and Mapcat
 
@@ -212,8 +249,11 @@ one source reduction and constructs no mapped or filtered intermediate value.
 
 For `n` consumed scalar inputs and constant-time user transforms, `transduce`
 is O(n) time with O(s) reducing state, where `s` is the number of composed
-stateful stages. Indexed mapping, prefix control, and adjacent dedupe use one
-counter, flag, or previous value per application. Cat/mapcat is O(n + m), where
+stateful stages. Indexed mapping/keeping, sampling, interposition, prefix
+control, and adjacent dedupe use bounded counters, flags, or one previous
+value per application. Partitioning uses O(p) retained values where `p` is the
+current partition size; `partitioningBy` therefore makes an intentionally
+unbounded group visible in its required output. Cat/mapcat is O(n + m), where
 `m` is the number of nested values actually consumed. Composition depth is
 fixed before traversal and does not grow the JavaScript call stack per input.
 
@@ -250,12 +290,12 @@ does not weaken the runtime transducer semantics defined here.
 
 `removing` and `dropping` were added with the maintained sequence algorithms in
 [0063-protocol-driven-core-algorithms.md](0063-protocol-driven-core-algorithms.md).
-Indexed mapping, keeping, predicate-controlled prefixes, adjacent dedupe, and
-cat/mapcat are compatible additive extensions to the same stable contract.
-This surface does not yet provide partitioning, global distinctness, async
-transducers, parallel fold, or implicit completion initializers. Those
-operations require concrete maintained use cases and their own completion or
-resource contracts before joining the public surface.
+Indexed mapping/keeping, sampling, interposition, predicate-controlled
+prefixes, adjacent dedupe, partitioning, and cat/mapcat are compatible additive
+extensions to the same stable contract. This surface does not yet provide
+global distinctness, async transducers, parallel fold, or implicit completion
+initializers. Those operations require concrete maintained use cases and their
+own completion or resource contracts before joining the public surface.
 
 ## Acceptance Criteria
 
@@ -293,6 +333,15 @@ resource contracts before joining the public surface.
 - **TRD-15:** Cat and mapcat accept arbitrary reducible nested values and
   propagate downstream reduced termination to the outer source without an
   intermediate collection.
+- **TRD-16:** Indexed keep, nth sampling, and interposition allocate fresh
+  bounded state, preserve exact index/suppression rules, and propagate reduced
+  termination before an input following a terminating separator.
+- **TRD-17:** Fixed-size and classifier partitioning emit persistent Vectors,
+  flush one final non-empty group exactly once, compare classifier keys by
+  Eliscript value equality, and never retain a boundary input after downstream
+  termination.
+- **TRD-18:** A million-value partition is constructed through a transient
+  Vector without argument expansion or JavaScript stack growth.
 
 ## Continuation
 

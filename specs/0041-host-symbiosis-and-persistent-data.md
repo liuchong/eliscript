@@ -372,9 +372,9 @@ is needed.
 ### Reduction and Transducers
 
 Collection-native `reduce` is the primary algorithmic primitive. `map`,
-indexed map, keep, `filter`, `remove`, prefix take/drop, adjacent dedupe,
-`mapcat`, and value transforms are expressed as reducing-function
-transformations where practical.
+indexed map/keep, `filter`, `remove`, prefix take/drop, nth sampling,
+interposition, adjacent dedupe, partitioning, `mapcat`, and value transforms
+are expressed as reducing-function transformations where practical.
 
 A transducer is a pure function from one reducing function to another. It does
 not know the input source or output destination. `transduce` combines:
@@ -756,9 +756,10 @@ reduced-value early termination. The construction side then continues in
 persistent updates, truthful partial Set membership, and immutable native
 copies. Composable reducing transformations follow in
 [0061-composable-transducers.md](0061-composable-transducers.md): mapping,
-indexed mapping, keeping, filtering, bounded and predicate-controlled
-take/drop, adjacent deduplication, cat/mapcat, completion, reduced termination,
-and protocol-driven `into` now execute without intermediate collections.
+indexed mapping/keeping, filtering, bounded and predicate-controlled take/drop,
+nth sampling, interposition, adjacent deduplication, persistent-Vector
+partitioning, cat/mapcat, completion, reduced termination, and protocol-driven
+`into` now execute without transformed intermediate collections.
 Owner-token runtime builders and transient-backed `into` follow in
 [0062-owner-token-transient-collections.md](0062-owner-token-transient-collections.md).
 Protocol-driven sequence and keyed-data algorithms continue in
@@ -1166,6 +1167,10 @@ An instrumented composed map/filter/take transducer over one million values
 allocates no intermediate persistent collection. Transient-backed bulk vector
 and map construction is at least 1.5x faster than repeated persistent updates
 on the declared reference machine across 30 warm runs.
+
+Buffered partitioning constructs a million-value output group through one
+owner-token transient Vector, remains stack-safe, and emits only persistent
+Vectors across the public reducing boundary.
 
 ### PD-07: Host Interop
 
