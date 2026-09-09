@@ -169,8 +169,10 @@ is exposed only through `testing/vector.mjs`, `testing/map.mjs`, and
 
 `core/sequence.mjs` implements eager indexed/keep, prefix, sampling,
 interposition, dedupe/distinct, flattening, partitioning, reduction-history,
-and search operations against `IReduce`. Results are persistent Vectors and
-reduced values stop bounded traversal exactly. `core/data.mjs` implements
+boundary lookup, bounded tail selection, one-pass splitting, and search
+operations against `IReduce`. Results are persistent Vectors, reduced values
+stop bounded traversal exactly, and tail selection uses fixed-position ring
+storage. `core/data.mjs` implements
 value-semantic indexing, grouping, counting, frequencies, nested associative
 reads and updates, key selection, merging, and key/value zipping. Bulk result
 construction uses persistent Maps and transient builders where prior-value

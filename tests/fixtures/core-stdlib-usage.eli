@@ -1,26 +1,34 @@
 (module test.core-stdlib-usage
   (import "./stdlib/core/seq.mjs"
+    butlast
     concat
     dedupe
     distinct
     drop
+    drop-last
     drop-while
     every?
     filter
     find
+    first
     interpose
     keep
     keep-indexed
+    last
     map
     map-indexed
     mapcat
+    sequence-nth
     partition-all
     partition-by
     reductions
     remove
     reverse
     some
+    split-at
+    split-with
     take
+    take-last
     take-nth
     take-while)
   (import "./stdlib/core/data.mjs"
@@ -64,6 +72,14 @@
   (defconst first-even (find (lambda (value) (= (% value 2) 0)) [1 3 4 6]))
   (defconst zero-truth (some (lambda (value) (if (= value 2) 0 nil)) values))
   (defconst all-truth (every? (lambda (value) (if (= value 3) "" 0)) values))
+  (defconst first-value (first values "missing"))
+  (defconst last-value (last values "missing"))
+  (defconst third-value (sequence-nth 2 values "missing"))
+  (defconst tail-values (take-last 2 values))
+  (defconst without-tail (drop-last 2 values))
+  (defconst without-last (butlast values))
+  (defconst split-position (split-at 2 values))
+  (defconst split-prefix (split-with (lambda (value) (< value 3)) values))
   (defconst indexed (index-by (lambda (value) (% value 3)) values))
   (defconst grouped (group-by (lambda (value) (% value 2)) values))
   (defconst counted (count-by (lambda (value) (% value 2)) values))
@@ -107,6 +123,14 @@
     first-even
     zero-truth
     all-truth
+    first-value
+    last-value
+    third-value
+    tail-values
+    without-tail
+    without-last
+    split-position
+    split-prefix
     indexed
     grouped
     counted

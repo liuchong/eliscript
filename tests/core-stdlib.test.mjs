@@ -32,27 +32,35 @@ import {
 import { EMPTY_MAP } from "../runtime/core/map.mjs";
 import { extendProtocolType } from "../runtime/core/protocol.mjs";
 import {
+  butlast,
   concat,
   dedupe,
   distinct,
   drop,
+  dropLast,
   dropWhile,
   every,
   filter,
   find,
+  first,
   interpose,
   keep,
   keepIndexed,
+  last,
   map,
   mapIndexed,
   mapcat,
+  sequenceNth,
   partitionAll,
   partitionBy,
   reductions,
   remove,
   reverse,
   some,
+  splitAt,
+  splitWith,
   take,
+  takeLast,
   takeNth,
   takeWhile,
 } from "../runtime/core/sequence.mjs";
@@ -162,6 +170,14 @@ async function runBuiltCoreProjectHost(command, outputRoot) {
     "  built: [...built],",
     "  transformed: [...transformed],",
     "  mapped: [...mapped],",
+    "  sequence: [",
+    "    sequence.first(sourceValues),",
+    "    sequence.last(sourceValues),",
+    "    sequence.sequence_nth(2, sourceValues),",
+    "    [...sequence.take_last(2, sourceValues)],",
+    "    [...sequence.drop_last(2, sourceValues)],",
+    "    [...sequence.split_at(2, sourceValues)].map((part) => [...part]),",
+    "  ],",
     "  frequencies: [counts.get(1), counts.get(2), counts.get(3)],",
     "  data: [",
     "    data.get_in(nested, ['profile', 'visits']),",
@@ -551,6 +567,77 @@ test("expanded sequence vocabulary builds persistent results through protocols",
     .toThrow("reductions step must be a function");
 });
 
+test("finite sequence selection is single-pass, bounded, and nullish-safe", () => {
+  class ObservedValues {
+    constructor(values, observations) {
+      this.values = Object.freeze([...values]);
+      this.observations = observations;
+      Object.freeze(this);
+    }
+  }
+  extendProtocolType(IReduce, ObservedValues, {
+    reduce: (source, reducer, initial) => {
+      let result = initial;
+      for (const value of source.values) {
+        source.observations.push(value);
+        result = reducer(result, value);
+        if (isReduced(result)) return unreduced(result);
+      }
+      return result;
+    },
+  });
+  const observed = [];
+  const source = (...values) => new ObservedValues(values, observed);
+
+  expect(first(source(undefined, 1), "missing")).toBeUndefined();
+  expect(observed).toEqual([undefined]);
+  observed.length = 0;
+  expect(sequenceNth(2, source("a", "b", undefined, "d"), "missing"))
+    .toBeUndefined();
+  expect(observed).toEqual(["a", "b", undefined]);
+  expect(sequenceNth(8, source(1, 2), "missing")).toBe("missing");
+  expect(last(source(1, 2, undefined), "missing")).toBeUndefined();
+  expect(first(source(), "missing")).toBe("missing");
+  expect(last(source(), "missing")).toBe("missing");
+
+  expect([...takeLast(3, source(0, 1, 2, 3, 4))]).toEqual([2, 3, 4]);
+  expect([...takeLast(9, source(0, 1, 2))]).toEqual([0, 1, 2]);
+  expect([...takeLast(0, source(0, 1, 2))]).toEqual([]);
+  expect([...dropLast(2, source(0, 1, 2, 3, 4))]).toEqual([0, 1, 2]);
+  expect([...dropLast(9, source(0, 1, 2))]).toEqual([]);
+  expect([...dropLast(0, source(0, 1, 2))]).toEqual([0, 1, 2]);
+  expect([...butlast(source(0, 1, 2))]).toEqual([0, 1]);
+
+  const at = splitAt(2, source(0, 1, 2, 3));
+  expect([...at].map((part) => [...part])).toEqual([[0, 1], [2, 3]]);
+  const predicateCalls = [];
+  const withPrefix = splitWith((value) => {
+    predicateCalls.push(value);
+    return value < 3 ? 0 : false;
+  }, source(1, 2, 3, 4, 5));
+  expect([...withPrefix].map((part) => [...part])).toEqual([[1, 2], [3, 4, 5]]);
+  expect(predicateCalls).toEqual([1, 2, 3]);
+
+  for (const operation of [
+    () => sequenceNth(-1, source()),
+    () => takeLast(1.5, source()),
+    () => dropLast(Number.MAX_SAFE_INTEGER + 1, source()),
+    () => splitAt(-1, source()),
+  ]) {
+    expect(operation).toThrow("must be a non-negative safe integer");
+  }
+  expect(() => splitWith(null, source())).toThrow(
+    "splitWith predicate must be a function",
+  );
+
+  const large = new ObservedValues(
+    Array.from({ length: 100_000 }, (_, index) => index),
+    observed,
+  );
+  expect([...takeLast(3, large)]).toEqual([99_997, 99_998, 99_999]);
+  expect(dropLast(3, large).count).toBe(99_997);
+});
+
 test("removing and dropping compose with fresh reduction state", () => {
   const pipeline = composeTransducers(
     dropping(2),
@@ -777,6 +864,16 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect(usage.first_even).toBe(4);
     expect(usage.zero_truth).toBe(0);
     expect(usage.all_truth).toBe(true);
+    expect(usage.first_value).toBe(0);
+    expect(usage.last_value).toBe(4);
+    expect(usage.third_value).toBe(2);
+    expect([...usage.tail_values]).toEqual([3, 4]);
+    expect([...usage.without_tail]).toEqual([0, 1, 2]);
+    expect([...usage.without_last]).toEqual([0, 1, 2, 3]);
+    expect([...usage.split_position].map((part) => [...part]))
+      .toEqual([[0, 1], [2, 3, 4]]);
+    expect([...usage.split_prefix].map((part) => [...part]))
+      .toEqual([[0, 1, 2], [3, 4]]);
     expect(usage.indexed.get(0)).toBe(3);
     expect([...usage.grouped.get(0)]).toEqual([0, 2, 4]);
     expect(usage.counted.get(1)).toBe(2);
@@ -794,8 +891,8 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect(generatedUsage).toContain("first_even");
 
     const seqMap = await Bun.file(`${seqModule}.map`).json();
-    expect(seqMap.sourcesContent[0]).toContain("(defun reverse (collection)");
-    expect(seqMap.sourcesContent[0]).toContain("(defun some");
+    expect(seqMap.sourcesContent[0]).toContain("(defun reverse\n    (collection)");
+    expect(seqMap.sourcesContent[0]).toContain("(defun some\n    (predicate collection");
     expect(seqMap.sourcesContent[0]).not.toContain("runtime/core/sequence.mjs");
     const dataMap = await Bun.file(`${dataModule}.map`).json();
     expect(dataMap.sourcesContent[0]).toContain("(defun collect-buckets");
@@ -958,6 +1055,16 @@ test("protocol standard-library algorithms agree under Bun and Node", async () =
     some: 0,
     every: true,
     find: 3,
+    selection: [
+      0,
+      4,
+      2,
+      [3, 4],
+      [0, 1, 2],
+      [0, 1, 2, 3],
+      [[0, 1], [2, 3, 4]],
+      [[0, 1, 2], [3, 4]],
+    ],
     indexed: [3, 4, 2],
     grouped: [[0, 2, 4], [1, 3]],
     counted: [3, 2],
@@ -1036,6 +1143,7 @@ test("stable protocol and core algorithms build as one project across Bun and No
       built: [4, 5],
       transformed: [4, 6, 4],
       mapped: [2, 3, 4, 3],
+      sequence: [1, 2, 3, [3, 2], [1, 2], [[1, 2], [3, 2]]],
       frequencies: [1, 2, 1],
       data: [5, 3, 2],
       order: [

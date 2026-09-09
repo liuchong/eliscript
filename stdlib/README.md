@@ -430,7 +430,8 @@ algorithms through Lisp-named Eliscript modules:
 
 ```elisp
 (import "../../stdlib/core/seq.eli"
-        distinct map mapcat partition-all reductions)
+        distinct map mapcat partition-all reductions
+        first sequence-nth take-last drop-last split-at split-with)
 (import "../../stdlib/core/data.eli"
         assoc-in get-in group-by frequencies merge-with select-keys zipmap)
 ```
@@ -439,6 +440,9 @@ Sequence transforms accept any `IReduce` source and return persistent Vectors.
 The maintained vocabulary includes indexed mapping/keeping, prefix and sampled
 selection, interposition, adjacent and global deduplication, mapcat,
 partitioning, and intermediate reduction history.
+Boundary selection preserves present `undefined` values separately from
+absence. Tail selection uses bounded ring storage, while positional and
+predicate splitting traverse once and return persistent Vector pairs.
 Keyed-data transforms return value-semantic persistent Maps, with persistent
 Vector group values. Nested associative reads and updates preserve existing
 container shapes and create persistent Maps for missing levels. Selection,
@@ -451,6 +455,8 @@ eligible for portable closure extraction. They are the language-level entry
 points for the current protocol core. Exact semantics and allocation evidence
 are specified in
 [specs/0063-protocol-driven-core-algorithms.md](../specs/0063-protocol-driven-core-algorithms.md).
+Finite selection and splitting are specified in
+[0150](../specs/0150-protocol-driven-finite-sequence-selection.md).
 
 ## Portable Sequence Compatibility Module
 

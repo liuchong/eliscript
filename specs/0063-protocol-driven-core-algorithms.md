@@ -41,8 +41,9 @@ functions and are invoked exactly once for each value reaching their stage.
 
 - transforms: `reverse`, `map`, `mapIndexed`, `keep`, `keepIndexed`, `filter`,
   `remove`, `take`, `drop`, `takeWhile`, `dropWhile`, `takeNth`, `interpose`,
-  `dedupe`, `distinct`, `mapcat`, `partitionAll`, `partitionBy`, and `concat`
-- searches: `some`, `every`, `find`
+  `dedupe`, `distinct`, `mapcat`, `partitionAll`, `partitionBy`, `concat`,
+  `takeLast`, `dropLast`, `butlast`, `splitAt`, and `splitWith`
+- searches: `first`, `last`, `sequenceNth`, `some`, `every`, `find`
 - reduction history: `reductions`
 
 Every source is traversed only through generic `reduce`. Transform results are
@@ -68,6 +69,12 @@ occurrence across the whole input using Eliscript value equality and hashing.
 the initial value followed by every intermediate accumulator. A reduced
 initial value prevents source traversal. A reduced step result contributes its
 unwrapped accumulator exactly once and stops at that source element.
+
+`first` and `sequenceNth` stop at the exact selected value while `last`
+consumes the finite source. They distinguish a present `undefined` from
+absence. Tail selection uses bounded ring storage, and `splitAt` and
+`splitWith` traverse once to produce persistent Vector pairs. `splitWith`
+stops predicate evaluation after the first Lisp-false result.
 
 ## Data Algorithms
 
@@ -118,9 +125,10 @@ owner-token transient. `indexBy` uses a transient Map throughout.
 `stdlib/core/seq.eli` exports:
 
 ```text
-concat dedupe distinct drop drop-while every? filter find interpose keep
-keep-indexed map map-indexed mapcat partition-all partition-by reductions
-remove reverse some take take-nth take-while
+butlast concat dedupe distinct drop drop-last drop-while every? filter find
+first interpose keep keep-indexed last map map-indexed mapcat partition-all
+partition-by reductions remove reverse sequence-nth some split-at split-with
+take take-last take-nth take-while
 ```
 
 `stdlib/core/data.eli` exports:
@@ -166,6 +174,11 @@ searches are O(n). Transform construction uses one final persistent Vector;
 transient-backed operations reuse owner-selected trie paths. `reverse` uses
 O(n) private temporary storage because the current protocol set has no
 reversible traversal capability.
+
+Tail selection traverses in O(n), uses O(min(n, k)) private ring storage for
+limit `k`, and never performs repeated front removal. Splitting traverses once,
+preserves order, and builds both persistent results through owner-token
+transients.
 
 `indexBy` has expected O(n) HAMT work and one transient completion. Its
 instrumented 50,000-key build allocates fewer than one third of the HAMT nodes
@@ -239,6 +252,11 @@ dispatch internals remain later work.
   inputs unchanged, and returns persistent Vectors under Bun and Node.
 - **PCA-18:** `sortBy`, `minKey`, and `maxKey` evaluate each key once and retain
   the specified stable or last-tie behavior.
+- **PCA-19:** Boundary and indexed sequence selection distinguish present
+  `undefined` from absence and stop at the exact decisive source value.
+- **PCA-20:** Tail and split operations accept protocol sources, use bounded or
+  single-pass construction, and return persistent Vector results in source
+  order.
 
 ## Next Slice
 

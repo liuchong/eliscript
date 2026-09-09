@@ -2766,6 +2766,36 @@
           "contains": "portable compiler driver reaches a reproducible fixed point"
         }
       ]
+    },
+    {
+      "id": "stdlib.protocol-driven-finite-sequence-selection",
+      "title": "Protocol-driven finite sequence selection",
+      "status": "stable",
+      "spec": "0150",
+      "contracts": [
+        "Exports boundary lookup bounded tail selection and one-pass splitting across Lisp and JavaScript surfaces",
+        "Accepts arbitrary IReduce sources and preserves present undefined values separately from absence",
+        "Stops first and sequence-nth exactly while split-with stops predicate evaluation after its first false result",
+        "Uses non-negative safe integer bounds bounded ring storage and persistent Vector results",
+        "Produces byte-identical fixed points and identical local Bun and Node results"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "finite sequence selection is single-pass, bounded, and nullish-safe"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "stable protocol and core algorithms build as one project across Bun and Node"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }

@@ -1,142 +1,289 @@
 (module eliscript.core.seq
-  (import "../../runtime/core/collection.mjs"
-          isReduced reduce reduced unreduced)
+  (import "../../runtime/core/collection.mjs" isReduced reduce reduced unreduced)
   (import "../../runtime/core/transducer.mjs"
-          deduping distincting dropping droppingWhile filtering into
-          interposing keeping keepingIndexed mapcatting mapping mappingIndexed
-          partitioningAll partitioningBy removing taking takingNth takingWhile)
-  (import "../../runtime/core/transient.mjs"
-          conjBang persistentBang transient)
+    deduping
+    distincting
+    dropping
+    droppingWhile
+    filtering
+    into
+    interposing
+    keeping
+    keepingIndexed
+    mapcatting
+    mapping
+    mappingIndexed
+    partitioningAll
+    partitioningBy
+    removing
+    taking
+    takingNth
+    takingWhile)
+  (import "../../runtime/core/transient.mjs" conjBang persistentBang transient)
   (import "../../runtime/core/truth.mjs" isTruthy)
-  (import "../../runtime/core/vector.mjs" EMPTY_VECTOR)
-
+  (import "../../runtime/core/vector.mjs" EMPTY_VECTOR persistentVector)
   (defconst not-found (js-object))
-
-  (defun require-function (value label)
+  (defconst sequence-ring (js* "() => new Map()"))
+  (defconst sequence-safe-integer? (js* "Number.isSafeInteger"))
+  (defun require-function
+    (value label)
     (if (= (value-type value) "function")
-        value
+      value
       (throw (new globalThis/TypeError (str label " must be a function")))))
-
-  (defun reverse (collection)
-    (let ((values
-           (reduce
-             collection
-             (lambda (result value)
-               (js-call result :push value)
-               result)
-             (js-array))))
+  (defun require-non-negative-safe-integer
+    (value label)
+    (if (and (funcall sequence-safe-integer? value) (>= value 0))
+      value
+      (throw
+        (new globalThis/TypeError (str label " must be a non-negative safe integer")))))
+  (defun first
+    (collection &optional not-found-value)
+    (let
+      (
+        (result
+          (reduce
+            collection
+            (lambda (missing value) (reduced (js-object :value value)))
+            not-found)))
+      (if (eq result not-found) not-found-value (get result :value))))
+  (defun sequence-nth
+    (index collection &optional not-found-value)
+    (require-non-negative-safe-integer index "sequence-nth index")
+    (let*
+      ((position 0)
+        (result
+          (reduce
+            collection
+            (lambda
+              (missing value)
+              (if (= position index)
+                (reduced (js-object :value value))
+                (progn (setq position (1+ position)) missing)))
+            not-found)))
+      (if (eq result not-found) not-found-value (get result :value))))
+  (defun last
+    (collection &optional not-found-value)
+    (let
+      (
+        (result
+          (reduce
+            collection
+            (lambda (missing value) (js-object :value value))
+            not-found)))
+      (if (eq result not-found) not-found-value (get result :value))))
+  (defun take-last
+    (limit collection)
+    (require-non-negative-safe-integer limit "take-last limit")
+    (if (= limit 0)
+      EMPTY_VECTOR
+      (let ((ring (funcall sequence-ring)) (count 0) (start 0))
+        (reduce
+          collection
+          (lambda
+            (state value)
+            (if (< count limit)
+              (progn (js-call ring :set count value) (setq count (1+ count)))
+              (progn (js-call ring :set start value) (setq start (% (1+ start) limit))))
+            state)
+          nil)
+        (let ((builder (transient EMPTY_VECTOR)) (index 0))
+          (while (< index count)
+            (conjBang builder (js-call ring :get (% (+ start index) limit)))
+            (setq index (1+ index)))
+          (persistentBang builder)))))
+  (defun drop-last
+    (limit collection)
+    (require-non-negative-safe-integer limit "drop-last limit")
+    (if (= limit 0)
+      (into EMPTY_VECTOR collection)
+      (let
+        ((ring (funcall sequence-ring))
+          (builder (transient EMPTY_VECTOR))
+          (count 0)
+          (start 0))
+        (reduce
+          collection
+          (lambda
+            (state value)
+            (if (< count limit)
+              (progn (js-call ring :set count value) (setq count (1+ count)))
+              (progn
+                (conjBang builder (js-call ring :get start))
+                (js-call ring :set start value)
+                (setq start (% (1+ start) limit))))
+            state)
+          nil)
+        (persistentBang builder))))
+  (defun butlast (collection) (drop-last 1 collection))
+  (defun split-at
+    (limit collection)
+    (require-non-negative-safe-integer limit "split-at limit")
+    (let ((left (transient EMPTY_VECTOR)) (right (transient EMPTY_VECTOR)) (index 0))
+      (reduce
+        collection
+        (lambda
+          (state value)
+          (conjBang (if (< index limit) left right) value)
+          (setq index (1+ index))
+          state)
+        nil)
+      (persistentVector (persistentBang left) (persistentBang right))))
+  (defun split-with
+    (predicate collection)
+    (require-function predicate "split-with predicate")
+    (let ((left (transient EMPTY_VECTOR)) (right (transient EMPTY_VECTOR)) (prefix t))
+      (reduce
+        collection
+        (lambda
+          (state value)
+          (if (and prefix (isTruthy (funcall predicate value)))
+            (conjBang left value)
+            (progn (setq prefix false) (conjBang right value)))
+          state)
+        nil)
+      (persistentVector (persistentBang left) (persistentBang right))))
+  (defun reverse
+    (collection)
+    (let
+      (
+        (values
+          (reduce
+            collection
+            (lambda (result value) (js-call result :push value) result)
+            (js-array))))
       (js-call values :reverse)
       (into EMPTY_VECTOR values)))
-
-  (defun map (transform collection)
-    (into EMPTY_VECTOR (mapping transform) collection))
-
-  (defun map-indexed (transform collection)
+  (defun map (transform collection) (into EMPTY_VECTOR (mapping transform) collection))
+  (defun map-indexed
+    (transform collection)
     (into EMPTY_VECTOR (mappingIndexed transform) collection))
-
-  (defun keep (transform collection)
-    (into EMPTY_VECTOR (keeping transform) collection))
-
-  (defun keep-indexed (transform collection)
+  (defun keep (transform collection) (into EMPTY_VECTOR (keeping transform) collection))
+  (defun keep-indexed
+    (transform collection)
     (into EMPTY_VECTOR (keepingIndexed transform) collection))
-
-  (defun filter (predicate collection)
+  (defun filter
+    (predicate collection)
     (into EMPTY_VECTOR (filtering predicate) collection))
-
-  (defun remove (predicate collection)
+  (defun remove
+    (predicate collection)
     (into EMPTY_VECTOR (removing predicate) collection))
-
-  (defun take (limit collection)
-    (into EMPTY_VECTOR (taking limit) collection))
-
-  (defun drop (limit collection)
-    (into EMPTY_VECTOR (dropping limit) collection))
-
-  (defun take-while (predicate collection)
+  (defun take (limit collection) (into EMPTY_VECTOR (taking limit) collection))
+  (defun drop (limit collection) (into EMPTY_VECTOR (dropping limit) collection))
+  (defun take-while
+    (predicate collection)
     (into EMPTY_VECTOR (takingWhile predicate) collection))
-
-  (defun drop-while (predicate collection)
+  (defun drop-while
+    (predicate collection)
     (into EMPTY_VECTOR (droppingWhile predicate) collection))
-
-  (defun take-nth (interval collection)
+  (defun take-nth
+    (interval collection)
     (into EMPTY_VECTOR (takingNth interval) collection))
-
-  (defun interpose (separator collection)
+  (defun interpose
+    (separator collection)
     (into EMPTY_VECTOR (interposing separator) collection))
-
-  (defun dedupe (collection)
-    (into EMPTY_VECTOR (deduping) collection))
-
-  (defun distinct (collection)
-    (into EMPTY_VECTOR (distincting) collection))
-
-  (defun mapcat (transform collection)
+  (defun dedupe (collection) (into EMPTY_VECTOR (deduping) collection))
+  (defun distinct (collection) (into EMPTY_VECTOR (distincting) collection))
+  (defun mapcat
+    (transform collection)
     (into EMPTY_VECTOR (mapcatting transform) collection))
-
-  (defun partition-all (size collection)
+  (defun partition-all
+    (size collection)
     (into EMPTY_VECTOR (partitioningAll size) collection))
-
-  (defun partition-by (classifier collection)
+  (defun partition-by
+    (classifier collection)
     (into EMPTY_VECTOR (partitioningBy classifier) collection))
-
-  (defun concat (&rest collections)
-    (let ((result (transient EMPTY_VECTOR))
-          (index 0))
+  (defun concat
+    (&rest collections)
+    (let ((result (transient EMPTY_VECTOR)) (index 0))
       (while (< index (js-length collections))
         (reduce
           (js-nth index collections)
-          (lambda (builder value)
-            (conjBang builder value))
+          (lambda (builder value) (conjBang builder value))
           result)
         (setq index (1+ index)))
       (persistentBang result)))
-
-  (defun some (predicate collection &optional not-found-value)
+  (defun some
+    (predicate collection &optional not-found-value)
     (require-function predicate "some predicate")
-    (let ((result
-           (reduce
-             collection
-             (lambda (missing value)
-               (let ((matched (funcall predicate value)))
-                 (if (isTruthy matched) (reduced matched) missing)))
-             not-found)))
+    (let
+      (
+        (result
+          (reduce
+            collection
+            (lambda
+              (missing value)
+              (let ((matched (funcall predicate value)))
+                (if (isTruthy matched) (reduced matched) missing)))
+            not-found)))
       (if (eq result not-found) not-found-value result)))
-
-  (defun every? (predicate collection)
+  (defun every?
+    (predicate collection)
     (require-function predicate "every predicate")
     (reduce
       collection
-      (lambda (result value)
+      (lambda
+        (result value)
         (if (isTruthy (funcall predicate value)) result (reduced false)))
       t))
-
-  (defun find (predicate collection &optional not-found-value)
+  (defun find
+    (predicate collection &optional not-found-value)
     (require-function predicate "find predicate")
-    (let ((result
-           (reduce
-             collection
-             (lambda (missing value)
-               (if (isTruthy (funcall predicate value))
-                   (reduced (js-object :value value))
-                 missing))
-             not-found)))
+    (let
+      (
+        (result
+          (reduce
+            collection
+            (lambda
+              (missing value)
+              (if (isTruthy (funcall predicate value))
+                (reduced (js-object :value value))
+                missing))
+            not-found)))
       (if (eq result not-found) not-found-value (get result :value))))
-
-  (defun reductions (step initial collection)
+  (defun reductions
+    (step initial collection)
     (require-function step "reductions step")
-    (let ((builder (transient EMPTY_VECTOR))
-          (seed (unreduced initial)))
+    (let ((builder (transient EMPTY_VECTOR)) (seed (unreduced initial)))
       (conjBang builder seed)
       (unless (isReduced initial)
         (reduce
           collection
-          (lambda (current input)
+          (lambda
+            (current input)
             (let ((next (funcall step current input)))
               (conjBang builder (unreduced next))
               (if (isReduced next) (reduced (unreduced next)) next)))
           seed))
       (persistentBang builder)))
-
-  (export concat dedupe distinct drop drop-while every? filter find interpose
-          keep keep-indexed map map-indexed mapcat partition-all partition-by
-          reductions remove reverse some take take-nth take-while))
+  (export
+    butlast
+    concat
+    dedupe
+    distinct
+    drop
+    drop-last
+    drop-while
+    every?
+    filter
+    find
+    first
+    interpose
+    keep
+    keep-indexed
+    last
+    map
+    map-indexed
+    mapcat
+    partition-all
+    partition-by
+    reductions
+    remove
+    reverse
+    sequence-nth
+    some
+    split-at
+    split-with
+    take
+    take-last
+    take-nth
+    take-while))

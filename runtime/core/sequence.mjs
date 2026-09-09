@@ -30,7 +30,7 @@ import {
   transient,
 } from "./transient.mjs";
 import { isTruthy } from "./truth.mjs";
-import { EMPTY_VECTOR } from "./vector.mjs";
+import { EMPTY_VECTOR, persistentVector } from "./vector.mjs";
 
 const NOT_FOUND = Symbol("eliscript.sequence.not-found");
 
@@ -39,6 +39,116 @@ function requireFunction(value, label) {
     throw new TypeError(`${label} must be a function`);
   }
   return value;
+}
+
+function requireNonNegativeSafeInteger(value, label) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError(`${label} must be a non-negative safe integer`);
+  }
+  return value;
+}
+
+export function first(collection, notFound = null) {
+  const result = reduce(collection, (missing, value) =>
+    reduced({ value }), NOT_FOUND);
+  return result === NOT_FOUND ? notFound : result.value;
+}
+
+export function sequenceNth(index, collection, notFound = null) {
+  requireNonNegativeSafeInteger(index, "sequenceNth index");
+  let position = 0;
+  const result = reduce(collection, (missing, value) => {
+    if (position === index) return reduced({ value });
+    position += 1;
+    return missing;
+  }, NOT_FOUND);
+  return result === NOT_FOUND ? notFound : result.value;
+}
+
+export function last(collection, notFound = null) {
+  const result = reduce(collection, (missing, value) => ({ value }), NOT_FOUND);
+  return result === NOT_FOUND ? notFound : result.value;
+}
+
+export function takeLast(limit, collection) {
+  requireNonNegativeSafeInteger(limit, "takeLast limit");
+  if (limit === 0) return EMPTY_VECTOR;
+
+  const ring = new Array(limit);
+  let count = 0;
+  let start = 0;
+  reduce(collection, (state, value) => {
+    if (count < limit) {
+      ring[count] = value;
+      count += 1;
+    } else {
+      ring[start] = value;
+      start = (start + 1) % limit;
+    }
+    return state;
+  }, null);
+
+  const builder = transient(EMPTY_VECTOR);
+  for (let index = 0; index < count; index += 1) {
+    conjBang(builder, ring[(start + index) % limit]);
+  }
+  return persistentBang(builder);
+}
+
+export function dropLast(limit, collection) {
+  requireNonNegativeSafeInteger(limit, "dropLast limit");
+  if (limit === 0) return into(EMPTY_VECTOR, collection);
+
+  const ring = new Array(limit);
+  const builder = transient(EMPTY_VECTOR);
+  let count = 0;
+  let start = 0;
+  reduce(collection, (state, value) => {
+    if (count < limit) {
+      ring[count] = value;
+      count += 1;
+    } else {
+      conjBang(builder, ring[start]);
+      ring[start] = value;
+      start = (start + 1) % limit;
+    }
+    return state;
+  }, null);
+  return persistentBang(builder);
+}
+
+export function butlast(collection) {
+  return dropLast(1, collection);
+}
+
+export function splitAt(limit, collection) {
+  requireNonNegativeSafeInteger(limit, "splitAt limit");
+  const left = transient(EMPTY_VECTOR);
+  const right = transient(EMPTY_VECTOR);
+  let index = 0;
+  reduce(collection, (state, value) => {
+    conjBang(index < limit ? left : right, value);
+    index += 1;
+    return state;
+  }, null);
+  return persistentVector(persistentBang(left), persistentBang(right));
+}
+
+export function splitWith(predicate, collection) {
+  requireFunction(predicate, "splitWith predicate");
+  const left = transient(EMPTY_VECTOR);
+  const right = transient(EMPTY_VECTOR);
+  let prefix = true;
+  reduce(collection, (state, value) => {
+    if (prefix && isTruthy(predicate(value))) {
+      conjBang(left, value);
+    } else {
+      prefix = false;
+      conjBang(right, value);
+    }
+    return state;
+  }, null);
+  return persistentVector(persistentBang(left), persistentBang(right));
 }
 
 export function reverse(collection) {

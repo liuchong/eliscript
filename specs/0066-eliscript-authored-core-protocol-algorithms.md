@@ -53,9 +53,10 @@ implementations. The protocol module now additionally owns its policy.
 `stdlib/core/seq.eli` now contains the maintained implementations of:
 
 ```text
-concat dedupe distinct drop drop-while every? filter find interpose keep
-keep-indexed map map-indexed mapcat partition-all partition-by reductions
-remove reverse some take take-nth take-while
+butlast concat dedupe distinct drop drop-last drop-while every? filter find
+first interpose keep keep-indexed last map map-indexed mapcat partition-all
+partition-by reductions remove reverse sequence-nth some split-at split-with
+take take-last take-nth take-while
 ```
 
 `stdlib/core/data.eli` now contains the maintained implementations of:
@@ -184,6 +185,9 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
 - **ECA-14:** Maintained ordering compiles from `stdlib/core/order.eli`, remains
   stable over protocol sources, caches sort keys once, and matches under Bun
   and Node.
+- **ECA-15:** Maintained finite sequence selection compiles from
+  `stdlib/core/seq.eli`, preserves nullish values, uses bounded tail storage,
+  splits in one pass, and matches the direct runtime facade.
 
 ## Follow-up
 
