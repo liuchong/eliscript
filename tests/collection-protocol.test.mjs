@@ -24,6 +24,7 @@ import {
   reduced,
   seq,
   sequenceView,
+  unboundedSequenceView,
   unreduced,
 } from "../runtime/core/collection.mjs";
 import {
@@ -318,6 +319,34 @@ test("seq returns replayable immutable logical views and immutable map entries",
   expect(count(mutableObjectView)).toBe(2);
   expect(() => new (vectorView.constructor)()).toThrow(
     "SequenceView values must be created by seq",
+  );
+});
+
+test("unbounded sequence views are replayable without speculative traversal", () => {
+  let factories = 0;
+  const values = unboundedSequenceView(() => {
+    factories += 1;
+    let value = 0;
+    return {
+      next: () => ({ value: value++, done: false }),
+    };
+  });
+
+  expect(Object.isFrozen(values)).toBe(true);
+  expect(isSequenceView(values)).toBe(true);
+  expect(seq(values)).toBe(values);
+  expect(factories).toBe(0);
+  expect(reduce(values, (result, value) =>
+    value === 2 ? reduced([...result, value]) : [...result, value], [])).toEqual(
+    [0, 1, 2],
+  );
+  expect(factories).toBe(1);
+  expect(() => count(values)).toThrow(
+    "unbounded sequence does not have a finite count",
+  );
+  expect(factories).toBe(1);
+  expect(() => unboundedSequenceView(null)).toThrow(
+    "unbounded sequence view factory must be a function",
   );
 });
 

@@ -43,6 +43,7 @@ const NO_INITIAL = Symbol("eliscript.collection.no-initial");
 const REDUCED_STATE = Symbol("eliscript.collection.reduced-state");
 const SEQUENCE_STATE = Symbol("eliscript.collection.sequence-state");
 const SEQUENCE_TOKEN = Symbol("eliscript.collection.sequence-token");
+const UNBOUNDED_SEQUENCE = Symbol("eliscript.collection.unbounded-sequence");
 
 function checkedCount(value) {
   if (!Number.isSafeInteger(value) || value < 0) {
@@ -98,6 +99,9 @@ export function readCollectionEntry(entry) {
 }
 
 function sequenceCount(state) {
+  if (state.count === UNBOUNDED_SEQUENCE) {
+    throw new RangeError("unbounded sequence does not have a finite count");
+  }
   if (typeof state.count === "function") {
     return checkedCount(state.count());
   }
@@ -127,6 +131,9 @@ export class SequenceView {
   }
 
   [COLLECTION_SEQ]() {
+    if (this[SEQUENCE_STATE].count === UNBOUNDED_SEQUENCE) {
+      return this;
+    }
     return this[COLLECTION_COUNT]() === 0 ? null : this;
   }
 
@@ -154,6 +161,13 @@ export function sequenceView(factory, count = null) {
     }
   }
   return new SequenceView(SEQUENCE_TOKEN, factory, count);
+}
+
+export function unboundedSequenceView(factory) {
+  if (typeof factory !== "function") {
+    throw new TypeError("unbounded sequence view factory must be a function");
+  }
+  return new SequenceView(SEQUENCE_TOKEN, factory, UNBOUNDED_SEQUENCE);
 }
 
 export function reducedValue(value) {

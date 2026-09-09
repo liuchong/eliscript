@@ -1,6 +1,7 @@
 import {
   butlast,
   concat,
+  cycle,
   dedupe,
   distinct,
   drop,
@@ -10,10 +11,12 @@ import {
   filter,
   find,
   first,
+  generate,
   interpose,
   keep,
   keepIndexed,
   last,
+  iterate,
   map,
   mapIndexed,
   mapcat,
@@ -22,7 +25,10 @@ import {
   partitionBy,
   reductions,
   remove,
+  repeat,
+  repeatedly,
   reverse,
+  range,
   some,
   splitAt,
   splitWith,
@@ -65,6 +71,7 @@ const combined = mergeWith(
   { hits: 5 },
 );
 const zipped = zipmap(["a", "b", "unused"], [10, 20]);
+let generatedState = 0;
 
 console.log(JSON.stringify({
   reverse: [...reverse(values)],
@@ -102,6 +109,15 @@ console.log(JSON.stringify({
     [...butlast(values)],
     [...splitAt(2, values)].map((part) => [...part]),
     [...splitWith((value) => value < 3, values)].map((part) => [...part]),
+  ],
+  sources: [
+    [...range(1, 8, 2)],
+    [...take(5, range())],
+    [...take(4, repeat("x"))],
+    [...repeatedly(3, () => ++generatedState)],
+    [...take(5, iterate((value) => value * 2, 1))],
+    [...take(7, cycle([1, 2, 3]))],
+    [...generate(4, (index) => index * index)],
   ],
   indexed: [indexed.get(0), indexed.get(1), indexed.get(2)],
   grouped: [[...grouped.get(0)], [...grouped.get(1)]],

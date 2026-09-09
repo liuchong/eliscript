@@ -43,6 +43,7 @@ functions and are invoked exactly once for each value reaching their stage.
   `remove`, `take`, `drop`, `takeWhile`, `dropWhile`, `takeNth`, `interpose`,
   `dedupe`, `distinct`, `mapcat`, `partitionAll`, `partitionBy`, `concat`,
   `takeLast`, `dropLast`, `butlast`, `splitAt`, and `splitWith`
+- sources: `range`, `repeat`, `repeatedly`, `iterate`, `cycle`, and `generate`
 - searches: `first`, `last`, `sequenceNth`, `some`, `every`, `find`
 - reduction history: `reductions`
 
@@ -75,6 +76,13 @@ consumes the finite source. They distinguish a present `undefined` from
 absence. Tail selection uses bounded ring storage, and `splitAt` and
 `splitWith` traverse once to produce persistent Vector pairs. `splitWith`
 stops predicate evaluation after the first Lisp-false result.
+
+Sequence sources return replayable `SequenceView` values rather than eager
+Vectors. Finite range, repeat, repeatedly, and generate sources expose exact
+safe-integer counts. Open range, one-argument repeat/repeatedly, iterate, and
+non-empty cycle are explicitly unbounded, so generic count rejects them before
+traversal. Producers and transforms run only as values are consumed; cycle
+captures its finite protocol source once as a persistent Vector snapshot.
 
 ## Data Algorithms
 
@@ -125,10 +133,10 @@ owner-token transient. `indexBy` uses a transient Map throughout.
 `stdlib/core/seq.eli` exports:
 
 ```text
-butlast concat dedupe distinct drop drop-last drop-while every? filter find
-first interpose keep keep-indexed last map map-indexed mapcat partition-all
-partition-by reductions remove reverse sequence-nth some split-at split-with
-take take-last take-nth take-while
+butlast concat cycle dedupe distinct drop drop-last drop-while every? filter
+find first generate interpose iterate keep keep-indexed last map map-indexed
+mapcat partition-all partition-by range reductions remove repeat repeatedly
+reverse sequence-nth some split-at split-with take take-last take-nth take-while
 ```
 
 `stdlib/core/data.eli` exports:
@@ -180,6 +188,11 @@ limit `k`, and never performs repeated front removal. Splitting traverses once,
 preserves order, and builds both persistent results through owner-token
 transients.
 
+Each finite sequence source advances in O(1) work per yielded value and retains
+O(1) iterator state. Unbounded sources have the same per-value bound and cannot
+be counted. `cycle` performs one O(n) snapshot of its finite source and retains
+O(n) immutable storage before yielding in O(1) work per value.
+
 `indexBy` has expected O(n) HAMT work and one transient completion. Its
 instrumented 50,000-key build allocates fewer than one third of the HAMT nodes
 used by equivalent repeated persistent association. `groupBy` and `countBy`
@@ -203,8 +216,8 @@ literal rewrite and does not change the earlier portable sequence/data APIs.
 Existing native Array, Map, Set, null, persistent collections, and externally
 extended `IReduce` values remain valid sources.
 
-This slice does not add lazy sequences, text/object protocol migration, async
-reduction, metadata, or
+This slice does not add memoized lazy lists, text/object protocol migration,
+async reduction, metadata, or
 compiler-generated direct protocol calls. Specification 0066 moves the public
 protocol access surface and maintained algorithms into Eliscript; portable
 dispatch internals remain later work.
@@ -257,6 +270,9 @@ dispatch internals remain later work.
 - **PCA-20:** Tail and split operations accept protocol sources, use bounded or
   single-pass construction, and return persistent Vector results in source
   order.
+- **PCA-21:** Replayable finite and unbounded sequence sources expose explicit
+  count behavior, defer callback execution until consumption, and compose with
+  bounded protocol reduction without stack growth.
 
 ## Next Slice
 

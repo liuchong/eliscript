@@ -34,7 +34,8 @@ Four new Eliscript API modules expose the runtime substrate:
   dispatch implementation is completed by specification 0079.
 - `stdlib/core/collection.eli` exports the nine collection capabilities and
   generic count, empty, construction, lookup, membership, indexed access,
-  sequence, reduction, and reduced-value operations.
+  bounded and unbounded sequence views, reduction, and reduced-value
+  operations.
 - `stdlib/core/transducer.eli` exports reducer completion, composition,
   mapping, indexed mapping/keeping, filtering, removing, bounded and
   predicate-controlled take/drop, nth sampling, interposition, adjacent
@@ -53,10 +54,10 @@ implementations. The protocol module now additionally owns its policy.
 `stdlib/core/seq.eli` now contains the maintained implementations of:
 
 ```text
-butlast concat dedupe distinct drop drop-last drop-while every? filter find
-first interpose keep keep-indexed last map map-indexed mapcat partition-all
-partition-by reductions remove reverse sequence-nth some split-at split-with
-take take-last take-nth take-while
+butlast concat cycle dedupe distinct drop drop-last drop-while every? filter
+find first generate interpose iterate keep keep-indexed last map map-indexed
+mapcat partition-all partition-by range reductions remove repeat repeatedly
+reverse sequence-nth some split-at split-with take take-last take-nth take-while
 ```
 
 `stdlib/core/data.eli` now contains the maintained implementations of:
@@ -76,7 +77,9 @@ IComparable comparator compare-values max-key min-key reverse-comparator sort so
 
 The sequence algorithms reduce arbitrary protocol sources, preserve Eliscript
 truth semantics, terminate through reduced values, and construct persistent
-Vectors. The data algorithms construct value-semantic persistent Maps, retain
+Vectors. Their sequence constructors expose replayable finite and explicitly
+unbounded views with lazy callback execution. The data algorithms construct
+value-semantic persistent Maps, retain
 source order within grouped persistent Vectors, support nested associative
 reads and updates, and provide ordered merge, combining merge, key selection,
 and key/value zipping. Owner-token transient Map builders cover bulk operations
@@ -188,6 +191,9 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
 - **ECA-15:** Maintained finite sequence selection compiles from
   `stdlib/core/seq.eli`, preserves nullish values, uses bounded tail storage,
   splits in one pass, and matches the direct runtime facade.
+- **ECA-16:** Maintained replayable sequence sources compile from
+  `stdlib/core/seq.eli`, distinguish bounded and unbounded cardinality, defer
+  callbacks until consumption, and match the direct runtime facade.
 
 ## Follow-up
 

@@ -1,5 +1,13 @@
 (module eliscript.core.seq
-  (import "../../runtime/core/collection.mjs" isReduced reduce reduced unreduced)
+  (import "../../runtime/core/collection.mjs"
+    count
+    isReduced
+    nth
+    reduce
+    reduced
+    sequenceView
+    unboundedSequenceView
+    unreduced)
   (import "../../runtime/core/transducer.mjs"
     deduping
     distincting
@@ -25,6 +33,8 @@
   (defconst not-found (js-object))
   (defconst sequence-ring (js* "() => new Map()"))
   (defconst sequence-safe-integer? (js* "Number.isSafeInteger"))
+  (defconst sequence-finite? (js* "Number.isFinite"))
+  (defconst sequence-ceil (js* "Math.ceil"))
   (defun require-function
     (value label)
     (if (= (value-type value) "function")
@@ -36,6 +46,165 @@
       value
       (throw
         (new globalThis/TypeError (str label " must be a non-negative safe integer")))))
+  (defun require-finite-number
+    (value label)
+    (if (funcall sequence-finite? value)
+      value
+      (throw (new globalThis/TypeError (str label " must be a finite number")))))
+  (defun sequence-iterator-result (value done) (js-object :value value :done done))
+  (defun sequence-iterator (next) (js-object :next next))
+  (defun sequence-range-count
+    (start end step)
+    (let ((distance (/ (- end start) step)))
+      (if (> distance 0)
+        (require-non-negative-safe-integer
+          (funcall sequence-ceil distance)
+          "range count")
+        0)))
+  (defun sequence-range-factory
+    (start step limit)
+    (lambda
+      ()
+      (let ((index 0))
+        (sequence-iterator
+          (lambda
+            ()
+            (if (and (not (nil? limit)) (>= index limit))
+              (sequence-iterator-result undefined t)
+              (let ((value (+ start (* index step))))
+                (setq index (1+ index))
+                (sequence-iterator-result value false))))))))
+  (defun range
+    (&rest bounds)
+    (let ((arity (js-length bounds)))
+      (if (= arity 0)
+        (unboundedSequenceView (sequence-range-factory 0 1 nil))
+        (progn
+          (when (> arity 3)
+            (throw (new globalThis/TypeError "range expects zero to three arguments")))
+          (let*
+            (
+              (start
+                (require-finite-number
+                  (if (= arity 1) 0 (js-nth 0 bounds))
+                  "range start"))
+              (end
+                (require-finite-number
+                  (if (= arity 1) (js-nth 0 bounds) (js-nth 1 bounds))
+                  "range end"))
+              (step
+                (require-finite-number
+                  (if (= arity 3) (js-nth 2 bounds) 1)
+                  "range step")))
+            (when (= step 0)
+              (throw (new globalThis/TypeError "range step must be non-zero")))
+            (let ((limit (sequence-range-count start end step)))
+              (sequenceView (sequence-range-factory start step limit) limit)))))))
+  (defun sequence-repeat-factory
+    (value limit)
+    (lambda
+      ()
+      (let ((index 0))
+        (sequence-iterator
+          (lambda
+            ()
+            (if (and (not (nil? limit)) (>= index limit))
+              (sequence-iterator-result undefined t)
+              (progn (setq index (1+ index)) (sequence-iterator-result value false))))))))
+  (defun repeat
+    (&rest arguments)
+    (let ((arity (js-length arguments)))
+      (cond
+        ((= arity 1)
+          (unboundedSequenceView (sequence-repeat-factory (js-nth 0 arguments) nil)))
+        ((= arity 2)
+          (let
+            (
+              (limit
+                (require-non-negative-safe-integer (js-nth 0 arguments) "repeat count")))
+            (sequenceView (sequence-repeat-factory (js-nth 1 arguments) limit) limit)))
+        (t
+          (throw
+            (new globalThis/TypeError "repeat expects a value or a count and value"))))))
+  (defun sequence-repeatedly-factory
+    (producer limit)
+    (lambda
+      ()
+      (let ((index 0))
+        (sequence-iterator
+          (lambda
+            ()
+            (if (and (not (nil? limit)) (>= index limit))
+              (sequence-iterator-result undefined t)
+              (progn
+                (setq index (1+ index))
+                (sequence-iterator-result (funcall producer) false))))))))
+  (defun repeatedly
+    (&rest arguments)
+    (let ((arity (js-length arguments)))
+      (cond
+        ((= arity 1)
+          (let
+            ((producer (require-function (js-nth 0 arguments) "repeatedly producer")))
+            (unboundedSequenceView (sequence-repeatedly-factory producer nil))))
+        ((= arity 2)
+          (let
+            (
+              (limit
+                (require-non-negative-safe-integer
+                  (js-nth 0 arguments)
+                  "repeatedly count"))
+              (producer (require-function (js-nth 1 arguments) "repeatedly producer")))
+            (sequenceView (sequence-repeatedly-factory producer limit) limit)))
+        (t
+          (throw
+            (new
+              globalThis/TypeError
+              "repeatedly expects a producer or a count and producer"))))))
+  (defun iterate
+    (transform seed)
+    (require-function transform "iterate transform")
+    (unboundedSequenceView
+      (lambda
+        ()
+        (let ((value seed) (started false))
+          (sequence-iterator
+            (lambda
+              ()
+              (if started (setq value (funcall transform value)) (setq started t))
+              (sequence-iterator-result value false)))))))
+  (defun cycle
+    (collection)
+    (let* ((values (into EMPTY_VECTOR collection)) (limit (count values)))
+      (if (= limit 0)
+        nil
+        (unboundedSequenceView
+          (lambda
+            ()
+            (let ((index 0))
+              (sequence-iterator
+                (lambda
+                  ()
+                  (let ((value (nth index values)))
+                    (setq index (% (1+ index) limit))
+                    (sequence-iterator-result value false))))))))))
+  (defun generate
+    (limit producer)
+    (require-non-negative-safe-integer limit "generate count")
+    (require-function producer "generate producer")
+    (sequenceView
+      (lambda
+        ()
+        (let ((index 0))
+          (sequence-iterator
+            (lambda
+              ()
+              (if (>= index limit)
+                (sequence-iterator-result undefined t)
+                (let ((value (funcall producer index)))
+                  (setq index (1+ index))
+                  (sequence-iterator-result value false)))))))
+      limit))
   (defun first
     (collection &optional not-found-value)
     (let
@@ -258,6 +427,7 @@
   (export
     butlast
     concat
+    cycle
     dedupe
     distinct
     drop
@@ -267,10 +437,12 @@
     filter
     find
     first
+    generate
     interpose
     keep
     keep-indexed
     last
+    iterate
     map
     map-indexed
     mapcat
@@ -278,7 +450,10 @@
     partition-by
     reductions
     remove
+    repeat
+    repeatedly
     reverse
+    range
     sequence-nth
     some
     split-at

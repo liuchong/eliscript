@@ -1,6 +1,5 @@
 (module eliscript.core.collection
   (import "../../runtime/core/collection.mjs" :as Runtime)
-
   (defconst ICounted Runtime/ICounted)
   (defconst IEmptyable Runtime/IEmptyable)
   (defconst IConj Runtime/IConj)
@@ -10,49 +9,53 @@
   (defconst ISeqable Runtime/ISeqable)
   (defconst IReduce Runtime/IReduce)
   (defconst SequenceView Runtime/SequenceView)
-
-  (defun collection-count (collection)
-    (Runtime/count collection))
-
-  (defun empty (collection)
-    (Runtime/empty collection))
-
-  (defun conj (collection &rest values)
+  (defun collection-count (collection) (Runtime/count collection))
+  (defun empty (collection) (Runtime/empty collection))
+  (defun conj
+    (collection &rest values)
     (apply Runtime/conj (js-cons collection values)))
-
-  (defun assoc (collection key value &rest key-values)
-    (apply Runtime/assoc
-           (js-cons collection (js-cons key (js-cons value key-values)))))
-
-  (defun lookup (collection key &rest not-found)
+  (defun assoc
+    (collection key value &rest key-values)
+    (apply Runtime/assoc (js-cons collection (js-cons key (js-cons value key-values)))))
+  (defun lookup
+    (collection key &rest not-found)
     (apply Runtime/get (js-cons collection (js-cons key not-found))))
-
-  (defun contains? (collection key)
-    (Runtime/contains collection key))
-
-  (defun collection-nth (collection index &rest not-found)
+  (defun contains? (collection key) (Runtime/contains collection key))
+  (defun collection-nth
+    (collection index &rest not-found)
     (apply Runtime/nth (js-cons collection (js-cons index not-found))))
-
-  (defun reduce (collection reducer &rest initial)
+  (defun reduce
+    (collection reducer &rest initial)
     (apply Runtime/reduce (js-cons collection (js-cons reducer initial))))
-
-  (defun collection-seq (collection)
-    (Runtime/seq collection))
-
-  (defun reduced (value)
-    (Runtime/reduced value))
-
-  (defun reduced? (value)
-    (Runtime/isReduced value))
-
-  (defun unreduced (value)
-    (Runtime/unreduced value))
-
-  (defun sequence-view (factory &rest count)
+  (defun collection-seq (collection) (Runtime/seq collection))
+  (defun reduced (value) (Runtime/reduced value))
+  (defun reduced? (value) (Runtime/isReduced value))
+  (defun unreduced (value) (Runtime/unreduced value))
+  (defun sequence-view
+    (factory &rest count)
     (apply Runtime/sequenceView (js-cons factory count)))
-
-  (export IAssociative IConj ICounted IEmptyable IIndexed ILookup IReduce
-          ISeqable SequenceView assoc collection-count collection-nth
-          collection-seq conj contains? empty lookup reduce reduced reduced?
-          sequence-view
-          unreduced))
+  (defun unbounded-sequence-view (factory) (Runtime/unboundedSequenceView factory))
+  (export
+    IAssociative
+    IConj
+    ICounted
+    IEmptyable
+    IIndexed
+    ILookup
+    IReduce
+    ISeqable
+    SequenceView
+    assoc
+    collection-count
+    collection-nth
+    collection-seq
+    conj
+    contains?
+    empty
+    lookup
+    reduce
+    reduced
+    reduced?
+    sequence-view
+    unbounded-sequence-view
+    unreduced))

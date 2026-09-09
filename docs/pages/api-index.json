@@ -2,7 +2,7 @@
   "format": "eliscript-library-api-index",
   "version": 1,
   "moduleCount": 31,
-  "exportCount": 364,
+  "exportCount": 371,
   "modules": [
     {
       "module": "bit",
@@ -25,7 +25,7 @@
       "specFile": "specs/0066-eliscript-authored-core-protocol-algorithms.md",
       "stability": "stable",
       "role": "runtime-core",
-      "summary": "Protocol-driven collection capabilities, reduction, lookup, and sequence views.",
+      "summary": "Protocol-driven collection capabilities, reduction, lookup, and bounded or unbounded sequence views.",
       "exports": [
         "IAssociative",
         "IConj",
@@ -48,6 +48,7 @@
         "reduced",
         "reduced?",
         "sequence-view",
+        "unbounded-sequence-view",
         "unreduced"
       ]
     },
@@ -198,10 +199,11 @@
       "specFile": "specs/0066-eliscript-authored-core-protocol-algorithms.md",
       "stability": "stable",
       "role": "runtime-core",
-      "summary": "Protocol-driven eager transformation, finite selection, splitting, grouping, and reduction history.",
+      "summary": "Protocol-driven replayable sequence sources, eager transformation, finite selection, splitting, grouping, and reduction history.",
       "exports": [
         "butlast",
         "concat",
+        "cycle",
         "dedupe",
         "distinct",
         "drop",
@@ -211,7 +213,9 @@
         "filter",
         "find",
         "first",
+        "generate",
         "interpose",
+        "iterate",
         "keep",
         "keep-indexed",
         "last",
@@ -220,8 +224,11 @@
         "mapcat",
         "partition-all",
         "partition-by",
+        "range",
         "reductions",
         "remove",
+        "repeat",
+        "repeatedly",
         "reverse",
         "sequence-nth",
         "some",

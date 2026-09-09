@@ -2796,6 +2796,36 @@
           "contains": "portable compiler driver reaches a reproducible fixed point"
         }
       ]
+    },
+    {
+      "id": "stdlib.replayable-sequence-sources",
+      "title": "Replayable bounded and unbounded sequence sources",
+      "status": "stable",
+      "spec": "0151",
+      "contracts": [
+        "Exports replayable range repetition iteration cycle and indexed generation across Lisp and JavaScript surfaces",
+        "Distinguishes exact finite counts from explicit unbounded cardinality without speculative traversal",
+        "Defers producer and transform callbacks until values are consumed and creates independent traversal state",
+        "Snapshots arbitrary finite IReduce cycle sources once as persistent data",
+        "Produces byte-identical fixed points and identical local Bun and Node results"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/collection-protocol.test.mjs",
+          "contains": "unbounded sequence views are replayable without speculative traversal"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "replayable sequence sources compose lazily with bounded reduction"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }

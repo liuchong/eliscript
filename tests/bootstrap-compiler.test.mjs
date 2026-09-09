@@ -271,6 +271,7 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "function assoc(collection, key, value, ...key_values)",
         "function collection_count(collection)",
         "function reduce(collection, reducer, ...initial)",
+        "function unbounded_sequence_view(factory)",
       ]],
       ["stdlib/core/transient.eli", [
         "function assoc_BANG_(collection, key, value, ...key_values)",
@@ -292,6 +293,12 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "function transduce(transducer, reducer, initial, collection)",
       ]],
       ["stdlib/core/seq.eli", [
+        "function range(...bounds)",
+        "function repeat(...arguments$)",
+        "function repeatedly(...arguments$)",
+        "function iterate(transform, seed)",
+        "function cycle(collection)",
+        "function generate(limit, producer)",
         "function first(collection, not_found_value = null)",
         "function sequence_nth(index, collection, not_found_value = null)",
         "function last(collection, not_found_value = null)",

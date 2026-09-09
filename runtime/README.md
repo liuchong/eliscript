@@ -138,10 +138,11 @@ object and its implementations cannot.
 `ISeqable`, and `IReduce`. Persistent List, Vector, Map, and Set values use direct
 Symbol slots; native Array, Map, Set, and ordinary Object values use exact-type
 extension tables, while primitive String uses an explicit host category.
-Adapters do not modify prototypes. Sequence views are frozen and replayable,
-keyed elements are frozen entries, reduced values provide early termination,
-and construction operations preserve persistent inputs or return immutable
-native copies.
+Adapters do not modify prototypes. Sequence views are frozen and replayable;
+bounded views expose finite counts, while explicitly unbounded views answer
+`seq` without traversal and reject `count` immediately. Keyed elements are
+frozen entries, reduced values provide early termination, and construction
+operations preserve persistent inputs or return immutable native copies.
 
 ### Transducers
 
@@ -167,12 +168,15 @@ is exposed only through `testing/vector.mjs`, `testing/map.mjs`, and
 
 ### Core Algorithms
 
-`core/sequence.mjs` implements eager indexed/keep, prefix, sampling,
+`core/sequence.mjs` implements replayable range, repetition, iteration, cycle,
+and indexed generation sources plus eager indexed/keep, prefix, sampling,
 interposition, dedupe/distinct, flattening, partitioning, reduction-history,
 boundary lookup, bounded tail selection, one-pass splitting, and search
 operations against `IReduce`. Results are persistent Vectors, reduced values
 stop bounded traversal exactly, and tail selection uses fixed-position ring
-storage. `core/data.mjs` implements
+storage. Source callbacks are lazy, finite sources expose exact counts, and
+unbounded sources compose with every reduced-value bounded consumer.
+`core/data.mjs` implements
 value-semantic indexing, grouping, counting, frequencies, nested associative
 reads and updates, key selection, merging, and key/value zipping. Bulk result
 construction uses persistent Maps and transient builders where prior-value

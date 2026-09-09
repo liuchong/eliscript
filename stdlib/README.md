@@ -430,7 +430,8 @@ algorithms through Lisp-named Eliscript modules:
 
 ```elisp
 (import "../../stdlib/core/seq.eli"
-        distinct map mapcat partition-all reductions
+        cycle distinct generate iterate map mapcat partition-all range
+        reductions repeat repeatedly
         first sequence-nth take-last drop-last split-at split-with)
 (import "../../stdlib/core/data.eli"
         assoc-in get-in group-by frequencies merge-with select-keys zipmap)
@@ -450,6 +451,12 @@ plain merge, and zipping use owner-token builders; combining merge retains
 value-semantic prior-value lookup. Searches and bounded transforms use reduced
 values for early termination.
 
+`range`, `repeat`, `repeatedly`, `iterate`, `cycle`, and `generate` create
+replayable sequence views. Finite sources publish exact counts; open sources
+are explicitly unbounded, so `collection-count` rejects them without starting
+a traversal. Producer callbacks execute only for consumed values, and `cycle`
+captures its finite `IReduce` input once as a persistent snapshot.
+
 These modules intentionally import `runtime/core/*.mjs` and are not yet
 eligible for portable closure extraction. They are the language-level entry
 points for the current protocol core. Exact semantics and allocation evidence
@@ -457,6 +464,8 @@ are specified in
 [specs/0063-protocol-driven-core-algorithms.md](../specs/0063-protocol-driven-core-algorithms.md).
 Finite selection and splitting are specified in
 [0150](../specs/0150-protocol-driven-finite-sequence-selection.md).
+Replayable bounded and unbounded sources are specified in
+[0151](../specs/0151-replayable-sequence-sources.md).
 
 ## Portable Sequence Compatibility Module
 

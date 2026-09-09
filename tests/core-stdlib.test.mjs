@@ -11,8 +11,11 @@ import { pathToFileURL } from "node:url";
 
 import {
   IReduce,
+  count as collectionCount,
   isReduced,
+  isSequenceView,
   reduced,
+  seq,
   unreduced,
 } from "../runtime/core/collection.mjs";
 import {
@@ -34,6 +37,7 @@ import { extendProtocolType } from "../runtime/core/protocol.mjs";
 import {
   butlast,
   concat,
+  cycle,
   dedupe,
   distinct,
   drop,
@@ -43,10 +47,12 @@ import {
   filter,
   find,
   first,
+  generate,
   interpose,
   keep,
   keepIndexed,
   last,
+  iterate,
   map,
   mapIndexed,
   mapcat,
@@ -55,7 +61,10 @@ import {
   partitionBy,
   reductions,
   remove,
+  repeat,
+  repeatedly,
   reverse,
+  range,
   some,
   splitAt,
   splitWith,
@@ -155,6 +164,7 @@ async function runBuiltCoreProjectHost(command, outputRoot) {
     "    transducer.filtering((value) => value > 3)),",
     "  sourceValues);",
     "const mapped = sequence.map((value) => value + 1, sourceValues);",
+    "let generatedState = 0;",
     "const counts = data.frequencies(sourceValues);",
     "const nested = data.update_in(",
     "  data.assoc_in(null, ['profile', 'visits'], 1),",
@@ -177,6 +187,15 @@ async function runBuiltCoreProjectHost(command, outputRoot) {
     "    [...sequence.take_last(2, sourceValues)],",
     "    [...sequence.drop_last(2, sourceValues)],",
     "    [...sequence.split_at(2, sourceValues)].map((part) => [...part]),",
+    "  ],",
+    "  sources: [",
+    "    [...sequence.range(1, 8, 2)],",
+    "    [...sequence.take(5, sequence.range())],",
+    "    [...sequence.take(4, sequence.repeat('x'))],",
+    "    [...sequence.repeatedly(3, () => ++generatedState)],",
+    "    [...sequence.take(5, sequence.iterate((value) => value * 2, 1))],",
+    "    [...sequence.take(7, sequence.cycle([1, 2, 3]))],",
+    "    [...sequence.generate(4, (index) => index * index)],",
     "  ],",
     "  frequencies: [counts.get(1), counts.get(2), counts.get(3)],",
     "  data: [",
@@ -638,6 +657,92 @@ test("finite sequence selection is single-pass, bounded, and nullish-safe", () =
   expect(dropLast(3, large).count).toBe(99_997);
 });
 
+test("replayable sequence sources compose lazily with bounded reduction", () => {
+  const unboundedRange = range();
+  expect(isSequenceView(unboundedRange)).toBe(true);
+  expect(seq(unboundedRange)).toBe(unboundedRange);
+  expect(() => collectionCount(unboundedRange)).toThrow(
+    "unbounded sequence does not have a finite count",
+  );
+  expect([...take(5, unboundedRange)]).toEqual([0, 1, 2, 3, 4]);
+  expect([...take(5, unboundedRange)]).toEqual([0, 1, 2, 3, 4]);
+
+  expect([...range(5)]).toEqual([0, 1, 2, 3, 4]);
+  expect([...range(1, 8, 2)]).toEqual([1, 3, 5, 7]);
+  expect([...range(5, -1, -2)]).toEqual([5, 3, 1]);
+  expect([...range(0, 1, 0.25)]).toEqual([0, 0.25, 0.5, 0.75]);
+  expect(range(5, 0)).toBeNull();
+  expect(collectionCount(range(0, 7, 2))).toBe(4);
+
+  expect([...take(4, repeat("value"))]).toEqual([
+    "value", "value", "value", "value",
+  ]);
+  expect([...repeat(3, undefined)]).toEqual([
+    undefined, undefined, undefined,
+  ]);
+  expect(repeat(0, "value")).toBeNull();
+
+  let repeatedCalls = 0;
+  const produced = repeatedly(3, () => ++repeatedCalls);
+  expect(repeatedCalls).toBe(0);
+  expect([...produced]).toEqual([1, 2, 3]);
+  expect([...produced]).toEqual([4, 5, 6]);
+
+  let iterationCalls = 0;
+  const powers = iterate((value) => {
+    iterationCalls += 1;
+    return value * 2;
+  }, 1);
+  expect([...take(5, powers)]).toEqual([1, 2, 4, 8, 16]);
+  expect(iterationCalls).toBe(4);
+
+  let cyclePulls = 0;
+  class CycleSource {
+    constructor(values) {
+      this.values = values;
+    }
+  }
+  extendProtocolType(IReduce, CycleSource, {
+    reduce: (source, reducer, initial) => {
+      let result = initial;
+      for (const value of source.values) {
+        cyclePulls += 1;
+        result = reducer(result, value);
+        if (isReduced(result)) return unreduced(result);
+      }
+      return result;
+    },
+  });
+  const finiteSource = new CycleSource([1, 2, 3]);
+  expect([...take(7, cycle(finiteSource))]).toEqual([1, 2, 3, 1, 2, 3, 1]);
+  expect(cyclePulls).toBe(3);
+  expect(cycle(null)).toBeNull();
+
+  let generatedCalls = 0;
+  const generated = generate(4, (index) => {
+    generatedCalls += 1;
+    return index * index;
+  });
+  expect(generatedCalls).toBe(0);
+  expect([...generated]).toEqual([0, 1, 4, 9]);
+  expect(generatedCalls).toBe(4);
+  expect(last(take(100_000, range()))).toBe(99_999);
+
+  for (const operation of [
+    () => range(0, 1, 0),
+    () => range(Number.POSITIVE_INFINITY),
+    () => range(0, 1, 1, 2),
+    () => repeat(-1, "value"),
+    () => repeat(),
+    () => repeatedly(1, null),
+    () => iterate(null, 0),
+    () => generate(1.5, () => 0),
+    () => generate(1, null),
+  ]) {
+    expect(operation).toThrow();
+  }
+});
+
 test("removing and dropping compose with fresh reduction state", () => {
   const pipeline = composeTransducers(
     dropping(2),
@@ -874,6 +979,14 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
       .toEqual([[0, 1], [2, 3, 4]]);
     expect([...usage.split_prefix].map((part) => [...part]))
       .toEqual([[0, 1, 2], [3, 4]]);
+    expect([...usage.finite_range]).toEqual([1, 3, 5, 7]);
+    expect([...usage.open_range]).toEqual([0, 1, 2, 3, 4]);
+    expect([...usage.repeated_values]).toEqual(["x", "x", "x", "x"]);
+    expect([...usage.produced_values]).toEqual([1, 2, 3]);
+    expect([...usage.iterated_values]).toEqual([1, 2, 4, 8, 16]);
+    expect(usage.iteration_state).toBe(4);
+    expect([...usage.cycled_values]).toEqual([1, 2, 3, 1, 2, 3, 1]);
+    expect([...usage.generated_values]).toEqual([0, 1, 4, 9]);
     expect(usage.indexed.get(0)).toBe(3);
     expect([...usage.grouped.get(0)]).toEqual([0, 2, 4]);
     expect(usage.counted.get(1)).toBe(2);
@@ -1065,6 +1178,15 @@ test("protocol standard-library algorithms agree under Bun and Node", async () =
       [[0, 1], [2, 3, 4]],
       [[0, 1, 2], [3, 4]],
     ],
+    sources: [
+      [1, 3, 5, 7],
+      [0, 1, 2, 3, 4],
+      ["x", "x", "x", "x"],
+      [1, 2, 3],
+      [1, 2, 4, 8, 16],
+      [1, 2, 3, 1, 2, 3, 1],
+      [0, 1, 4, 9],
+    ],
     indexed: [3, 4, 2],
     grouped: [[0, 2, 4], [1, 3]],
     counted: [3, 2],
@@ -1144,6 +1266,15 @@ test("stable protocol and core algorithms build as one project across Bun and No
       transformed: [4, 6, 4],
       mapped: [2, 3, 4, 3],
       sequence: [1, 2, 3, [3, 2], [1, 2], [[1, 2], [3, 2]]],
+      sources: [
+        [1, 3, 5, 7],
+        [0, 1, 2, 3, 4],
+        ["x", "x", "x", "x"],
+        [1, 2, 3],
+        [1, 2, 4, 8, 16],
+        [1, 2, 3, 1, 2, 3, 1],
+        [0, 1, 4, 9],
+      ],
       frequencies: [1, 2, 1],
       data: [5, 3, 2],
       order: [

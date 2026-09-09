@@ -26,6 +26,7 @@ import {
   reduceIterable,
   reducedValue,
   sequenceView as createSequenceView,
+  unboundedSequenceView as createUnboundedSequenceView,
   unreducedValue,
   validateCollectionCount,
 } from "./collection-internals.mjs";
@@ -242,6 +243,10 @@ export const SequenceView = InternalSequenceView;
 
 export function sequenceView(factory, count = null) {
   return createSequenceView(factory, count);
+}
+
+export function unboundedSequenceView(factory) {
+  return createUnboundedSequenceView(factory);
 }
 
 export function count(collection) {

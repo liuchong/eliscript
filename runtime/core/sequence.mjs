@@ -1,7 +1,11 @@
 import {
+  count as collectionCount,
   isReduced,
+  nth as collectionNth,
   reduce,
   reduced,
+  sequenceView,
+  unboundedSequenceView,
   unreduced,
 } from "./collection.mjs";
 import {
@@ -46,6 +50,131 @@ function requireNonNegativeSafeInteger(value, label) {
     throw new TypeError(`${label} must be a non-negative safe integer`);
   }
   return value;
+}
+
+function requireFiniteNumber(value, label) {
+  if (!Number.isFinite(value)) {
+    throw new TypeError(`${label} must be a finite number`);
+  }
+  return value;
+}
+
+function rangeCount(start, end, step) {
+  const distance = (end - start) / step;
+  if (!(distance > 0)) return 0;
+  return requireNonNegativeSafeInteger(Math.ceil(distance), "range count");
+}
+
+function rangeFactory(start, step, count = null) {
+  return () => (function* rangeValues() {
+    let index = 0;
+    while (count === null || index < count) {
+      yield start + index * step;
+      index += 1;
+    }
+  })();
+}
+
+export function range(...bounds) {
+  if (bounds.length === 0) {
+    return unboundedSequenceView(rangeFactory(0, 1));
+  }
+  if (bounds.length > 3) {
+    throw new TypeError("range expects zero to three arguments");
+  }
+
+  const start = requireFiniteNumber(
+    bounds.length === 1 ? 0 : bounds[0],
+    "range start",
+  );
+  const end = requireFiniteNumber(
+    bounds.length === 1 ? bounds[0] : bounds[1],
+    "range end",
+  );
+  const step = requireFiniteNumber(bounds.length === 3 ? bounds[2] : 1, "range step");
+  if (step === 0) {
+    throw new TypeError("range step must be non-zero");
+  }
+  const count = rangeCount(start, end, step);
+  return sequenceView(rangeFactory(start, step, count), count);
+}
+
+function repeatFactory(value, count = null) {
+  return () => (function* repeatedValues() {
+    let index = 0;
+    while (count === null || index < count) {
+      yield value;
+      index += 1;
+    }
+  })();
+}
+
+export function repeat(...arguments_) {
+  if (arguments_.length === 1) {
+    return unboundedSequenceView(repeatFactory(arguments_[0]));
+  }
+  if (arguments_.length === 2) {
+    const count = requireNonNegativeSafeInteger(arguments_[0], "repeat count");
+    return sequenceView(repeatFactory(arguments_[1], count), count);
+  }
+  throw new TypeError("repeat expects a value or a count and value");
+}
+
+function repeatedlyFactory(producer, count = null) {
+  return () => (function* producedValues() {
+    let index = 0;
+    while (count === null || index < count) {
+      yield producer();
+      index += 1;
+    }
+  })();
+}
+
+export function repeatedly(...arguments_) {
+  if (arguments_.length === 1) {
+    const producer = requireFunction(arguments_[0], "repeatedly producer");
+    return unboundedSequenceView(repeatedlyFactory(producer));
+  }
+  if (arguments_.length === 2) {
+    const count = requireNonNegativeSafeInteger(arguments_[0], "repeatedly count");
+    const producer = requireFunction(arguments_[1], "repeatedly producer");
+    return sequenceView(repeatedlyFactory(producer, count), count);
+  }
+  throw new TypeError("repeatedly expects a producer or a count and producer");
+}
+
+export function iterate(transform, seed) {
+  requireFunction(transform, "iterate transform");
+  return unboundedSequenceView(() => (function* iterationValues() {
+    let value = seed;
+    while (true) {
+      yield value;
+      value = transform(value);
+    }
+  })());
+}
+
+export function cycle(collection) {
+  const values = into(EMPTY_VECTOR, collection);
+  const count = collectionCount(values);
+  if (count === 0) return null;
+  return unboundedSequenceView(() => (function* cycledValues() {
+    let index = 0;
+    while (true) {
+      yield collectionNth(values, index);
+      index = (index + 1) % count;
+    }
+  })());
+}
+
+export function generate(count, producer) {
+  requireNonNegativeSafeInteger(count, "generate count");
+  requireFunction(producer, "generate producer");
+  return sequenceView(() => (function* generatedValues() {
+    for (let index = 0; index < count; index += 1) {
+      yield producer(index);
+    }
+  })(), count);
 }
 
 export function first(collection, notFound = null) {

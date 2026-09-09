@@ -2,6 +2,7 @@
   (import "./stdlib/core/seq.mjs"
     butlast
     concat
+    cycle
     dedupe
     distinct
     drop
@@ -11,10 +12,12 @@
     filter
     find
     first
+    generate
     interpose
     keep
     keep-indexed
     last
+    iterate
     map
     map-indexed
     mapcat
@@ -23,7 +26,10 @@
     partition-by
     reductions
     remove
+    repeat
+    repeatedly
     reverse
+    range
     some
     split-at
     split-with
@@ -45,6 +51,23 @@
     update-in
     zipmap)
   (defconst values [0 1 2 3 4])
+  (defvar generated-state 0)
+  (defvar iteration-state 0)
+  (defconst finite-range (range 1 8 2))
+  (defconst open-range (take 5 (range)))
+  (defconst repeated-values (take 4 (repeat "x")))
+  (defconst produced-values
+    (repeatedly
+      3
+      (lambda () (progn (setq generated-state (1+ generated-state)) generated-state))))
+  (defconst iterated-values
+    (take
+      5
+      (iterate
+        (lambda (value) (progn (setq iteration-state (1+ iteration-state)) (* value 2)))
+        1)))
+  (defconst cycled-values (take 7 (cycle [1 2 3])))
+  (defconst generated-values (generate 4 (lambda (index) (* index index))))
   (defconst mapped (map (lambda (value) (* value 2)) values))
   (defconst filtered (filter (lambda (value) (= (% value 2) 0)) values))
   (defconst removed (remove (lambda (value) (= value 2)) values))
@@ -100,6 +123,14 @@
   (defconst zipped-result (zipmap ["a" "b" "unused"] [10 20]))
   (defconst nested-value (get-in nested-update-result ["profile" "visits"] "missing"))
   (export
+    finite-range
+    open-range
+    repeated-values
+    produced-values
+    iterated-values
+    iteration-state
+    cycled-values
+    generated-values
     mapped
     filtered
     removed

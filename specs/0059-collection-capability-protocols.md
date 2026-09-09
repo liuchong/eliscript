@@ -32,7 +32,8 @@ collection capabilities.
 
 - protocols: `ICounted`, `ILookup`, `IIndexed`, `ISeqable`, `IReduce`
 - generic operations: `count`, `get`, `nth`, `seq`, `reduce`
-- sequence values: `SequenceView`, `sequenceView`, `isSequenceView`
+- sequence values: `SequenceView`, `sequenceView`, `unboundedSequenceView`,
+  `isSequenceView`
 - early termination: `reduced`, `isReduced`, `unreduced`
 
 The implementation identities and direct slots remain internal to
@@ -84,6 +85,11 @@ two independent traversals. It is not a mutable iterator cursor. Persistent
 views close over immutable roots. Native container views deliberately observe
 later host mutation; callers use a persistent conversion when they require a
 snapshot.
+
+An explicitly unbounded `SequenceView` has no finite cardinality. `seq`
+returns that view without invoking its iterator factory, while `count` rejects
+the operation immediately rather than attempting traversal. This marker is
+part of protocol behavior but remains private representation state.
 
 Vector yields values in index order. String yields UTF-16 code units. Map and
 ordinary Object yield frozen two-element `[key, value]` entries. Set yields
@@ -164,6 +170,10 @@ capabilities remain representation-dependent.
 may be a non-negative safe integer, a resolver for host-backed views, or
 omitted when counting by traversal is acceptable.
 
+`unboundedSequenceView(factory)` is the corresponding constructor for a source
+that cannot terminate naturally. It preserves replayability while making
+accidental full traversal through `count` impossible.
+
 ## Compatibility and Limits
 
 This collection runtime surface is stable in Compatibility Baseline 2. It does
@@ -214,6 +224,9 @@ construction contract, while indexed access remains deliberately absent.
   exact one-million-element reduction completes without stack growth.
 - **CCP-10:** Existing persistent collection, protocol, public-surface,
   conformance, compatibility, and full regression suites remain green.
+- **CCP-11:** An explicitly unbounded sequence view answers `seq` without
+  traversal, rejects `count` immediately, and composes with reduced-value
+  consumers that stop at a finite boundary.
 
 ## Next Slice
 
