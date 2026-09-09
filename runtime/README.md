@@ -177,6 +177,12 @@ construction uses persistent Maps and transient builders where prior-value
 lookup is not required. Native and persistent collections, null, and external
 protocol extensions all use the same algorithm path.
 
+`core/order.mjs` defines the open `IComparable` protocol, deterministic
+natural comparison for scalar, identifier, List, and Vector values, comparator
+adaptation, stable `sort` and `sortBy`, and keyed extrema. Sorting consumes any
+`IReduce` source, caches each sort key once, preserves equal-value source order,
+and returns a persistent Vector without mutating its input.
+
 `core/text-impl.mjs` and `core/object-impl.mjs` are generated from
 `stdlib/core/text.eli` and `stdlib/core/object.eli`. Their public modules are
 camel-case re-export facades. Text indexing uses UTF-16 code units throughout;
@@ -184,7 +190,8 @@ keyed transformations use protocols and transducer-backed `into`, selecting
 transient construction for persistent Map targets without type branches.
 
 `stdlib/core/protocol.eli`, `stdlib/core/seq.eli`, `stdlib/core/data.eli`,
-`stdlib/core/text.eli`, and `stdlib/core/object.eli` provide the maintained
+`stdlib/core/order.eli`, `stdlib/core/text.eli`, and `stdlib/core/object.eli`
+provide the maintained
 Lisp-named Eliscript implementations. Protocol definitions and extension
 tables remain process-local and are not serialized by the worker value codec.
 

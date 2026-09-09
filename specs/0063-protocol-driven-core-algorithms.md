@@ -130,6 +130,27 @@ assoc-in count-by frequencies get-in group-by index-by merge merge-with
 select-keys update update-in zipmap
 ```
 
+`runtime/core/order.mjs` defines open comparison and ordering operations:
+
+```text
+IComparable comparator compareValues maxKey minKey reverseComparator sort sortBy
+```
+
+Natural comparison is deterministic for nullish values, booleans, numbers,
+big integers, strings, Keywords, Symbols, persistent Lists, and persistent
+Vectors. Numbers order `NaN` after every other number and treat two `NaN`
+values as equal for ordering. Sequential values compare lexicographically.
+Incompatible natural types and values without an `IComparable` implementation
+fail deterministically; user types can extend the protocol without modifying
+their prototypes.
+
+`sort` and `sortBy` accept arbitrary reducible sources and return persistent
+Vectors. They are explicitly stable through source-index tie breaking and do
+not mutate inputs. `sortBy` evaluates its key function once per source value.
+Comparators may return finite numbers or act as Lisp-truth predicates;
+`reverseComparator` reverses either form. `minKey` and `maxKey` evaluate each
+key once and select the last value when keys compare equally.
+
 The modules preserve Lisp spelling at source boundaries. As completed by
 specification 0066, they import lower-level collection, transducer, transient,
 truth, Map, and Vector capabilities and contain their maintained algorithm
@@ -169,8 +190,8 @@ literal rewrite and does not change the earlier portable sequence/data APIs.
 Existing native Array, Map, Set, null, persistent collections, and externally
 extended `IReduce` values remain valid sources.
 
-This slice does not add lazy sequences, sorting, comparison, text/object
-protocol migration, async reduction, metadata, or
+This slice does not add lazy sequences, text/object protocol migration, async
+reduction, metadata, or
 compiler-generated direct protocol calls. Specification 0066 moves the public
 protocol access surface and maintained algorithms into Eliscript; portable
 dispatch internals remain later work.
@@ -211,6 +232,13 @@ dispatch internals remain later work.
 - **PCA-15:** Key selection, ordered merging, combining merge, and zipping
   produce value-semantic persistent Maps, accept reducible inputs, and reject
   malformed entries deterministically.
+- **PCA-16:** Natural comparison is deterministic across every registered
+  scalar, identifier, and persistent sequential type and remains open to
+  external `IComparable` extensions.
+- **PCA-17:** Sorting accepts arbitrary `IReduce` sources, is stable, leaves
+  inputs unchanged, and returns persistent Vectors under Bun and Node.
+- **PCA-18:** `sortBy`, `minKey`, and `maxKey` evaluate each key once and retain
+  the specified stable or last-tie behavior.
 
 ## Next Slice
 

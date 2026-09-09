@@ -1,0 +1,133 @@
+(module eliscript.core.order
+  (import "../../runtime/core/collection.mjs" reduce)
+  (import "../../runtime/core/order.mjs" :as Runtime)
+  (import "../../runtime/core/transducer.mjs" into)
+  (import "../../runtime/core/truth.mjs" isTruthy)
+  (import "../../runtime/core/vector.mjs" EMPTY_VECTOR)
+  (defconst IComparable Runtime/IComparable)
+  (defun require-function
+    (value label)
+    (if (= (value-type value) "function")
+      value
+      (throw (new globalThis/TypeError (str label " must be a function")))))
+  (defun finite-number?
+    (value)
+    (and (= (value-type value) "number") (js-call globalThis/Number :isFinite value)))
+  (defun normalize-comparison-result
+    (value label)
+    (if (finite-number? value)
+      (if (< value 0) -1 (if (> value 0) 1 0))
+      (throw (new globalThis/TypeError (str label " must return a finite number")))))
+  (defun compare-values (left right) (Runtime/compareValues left right))
+  (defun comparator
+    (comparison)
+    (require-function comparison "comparator comparison")
+    (lambda
+      (left right)
+      (let ((result (funcall comparison left right)))
+        (if (= (value-type result) "number")
+          (normalize-comparison-result result "comparator comparison")
+          (if (isTruthy result) -1 (if (isTruthy (funcall comparison right left)) 1 0))))))
+  (defun reverse-comparator
+    (&rest arguments)
+    (let ((length (js-length arguments)))
+      (if (> length 1)
+        (throw
+          (new globalThis/TypeError "reverseComparator expects zero or one comparator"))
+        (let
+          (
+            (normalized
+              (comparator (if (= length 0) compare-values (js-nth 0 arguments)))))
+          (lambda (left right) (funcall normalized right left))))))
+  (defun collect-decorated
+    (collection key-function)
+    (reduce
+      collection
+      (lambda
+        (result value)
+        (js-call
+          result
+          :push
+          (js-object
+            :index
+            (js-length result)
+            :key
+            (funcall key-function value)
+            :value
+            value))
+        result)
+      (js-array)))
+  (defun sort-decorated
+    (values comparison)
+    (js-call
+      values
+      :sort
+      (lambda
+        (left right)
+        (let ((result (funcall comparison (get left :key) (get right :key))))
+          (if (= result 0) (- (get left :index) (get right :index)) result))))
+    (into EMPTY_VECTOR (js-call values :map (lambda (entry) (get entry :value)))))
+  (defun sort
+    (&rest arguments)
+    (let ((length (js-length arguments)))
+      (if (and (/= length 1) (/= length 2))
+        (throw
+          (new
+            globalThis/TypeError
+            "sort expects a collection or comparator and collection"))
+        (let
+          ((comparison (if (= length 1) compare-values (js-nth 0 arguments)))
+            (collection (js-nth (1- length) arguments)))
+          (sort-decorated
+            (collect-decorated collection (lambda (value) value))
+            (comparator comparison))))))
+  (defun sort-by
+    (key-function &rest arguments)
+    (require-function key-function "sortBy key function")
+    (let ((length (js-length arguments)))
+      (if (and (/= length 1) (/= length 2))
+        (throw
+          (new
+            globalThis/TypeError
+            "sortBy expects a key function, optional comparator, and collection"))
+        (let
+          ((comparison (if (= length 1) compare-values (js-nth 0 arguments)))
+            (collection (js-nth (1- length) arguments)))
+          (sort-decorated
+            (collect-decorated collection key-function)
+            (comparator comparison))))))
+  (defun extreme-key
+    (label direction key-function values)
+    (require-function key-function (str label " key function"))
+    (if (= (js-length values) 0)
+      (throw
+        (new
+          globalThis/TypeError
+          (str label " expects a key function and at least one value")))
+      (let
+        ((selected (js-nth 0 values))
+          (selected-key (funcall key-function (js-nth 0 values)))
+          (index 1))
+        (while (< index (js-length values))
+          (let*
+            ((candidate (js-nth index values))
+              (candidate-key (funcall key-function candidate)))
+            (when (>= (* (compare-values candidate-key selected-key) direction) 0)
+              (setq selected candidate selected-key candidate-key)))
+          (setq index (1+ index)))
+        selected)))
+  (defun min-key
+    (key-function &rest values)
+    (extreme-key "minKey" -1 key-function values))
+  (defun max-key
+    (key-function &rest values)
+    (extreme-key "maxKey" 1 key-function values))
+  (export
+    IComparable
+    comparator
+    compare-values
+    max-key
+    min-key
+    reverse-comparator
+    sort
+    sort-by))

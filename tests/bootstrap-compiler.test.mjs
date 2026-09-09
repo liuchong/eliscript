@@ -302,6 +302,15 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "function merge_with(combine, ...collections)",
         "function zipmap(keys, values)",
       ]],
+      ["stdlib/core/order.eli", [
+        "function compare_values(left, right)",
+        "function comparator(comparison)",
+        "function reverse_comparator(...arguments$)",
+        "function sort(...arguments$)",
+        "function sort_by(key_function, ...arguments$)",
+        "function min_key(key_function, ...values)",
+        "function max_key(key_function, ...values)",
+      ]],
       ["examples/emacs-index/index.eli", [
         "import {count_by} from \"../../stdlib/data.eli\";",
         "function score_document(id, terms, query_terms)",

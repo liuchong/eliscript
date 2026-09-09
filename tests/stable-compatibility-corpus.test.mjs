@@ -37,9 +37,9 @@ test("stable compatibility corpus covers every frozen core behavior", async () =
     excludedApplicationFeatures: 2,
     migrations: 3,
     fixtures: 68,
-    evidenceLocators: 551,
-    evidenceFiles: 110,
-    sourceFiles: 325,
+    evidenceLocators: 553,
+    evidenceFiles: 111,
+    sourceFiles: 326,
     readyForAc02: false,
     identity: expect.stringMatching(/^[0-9a-f]{64}$/u),
   });

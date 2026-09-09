@@ -92,9 +92,9 @@ diagnostics, terminal REPL, and Emacs mode discovery. The complete M10 matrix,
 local onboarding exercise, and exit audit remain formal acceptance work.
 
 M11's six implementation units are complete. Reviewed metadata classifies all
-29 standard-library modules by role and owning specification; the generated
+30 standard-library modules by role and owning specification; the generated
 [API page](docs/pages/api.html) and machine-readable
-[API index](docs/pages/api-index.json) expose all 338 checked exports. The
+[API index](docs/pages/api-index.json) expose all 346 checked exports. The
 default contract gate rejects metadata, implementation, stability, or generated
 artifact drift. Explicit [browser and worker capability packages](platform/README.md)
 now grant only named host authority, inject request-scoped progress and

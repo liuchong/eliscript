@@ -16,6 +16,27 @@ The generated API index is the exact current module/export inventory. Its
 stability labels come from each module's owning specification and remain
 provisional wherever the label is `accepted`.
 
+## Core Ordering
+
+`core/order.eli` provides the maintained language-level comparison and sorting
+algorithms over the runtime's open `IComparable` protocol:
+
+```elisp
+(import "../../stdlib/core/order.eli"
+        compare-values reverse-comparator sort sort-by)
+
+[(sort [3 1 2 1])
+ (sort (reverse-comparator) [3 1 2 1])
+ (sort-by (lambda (entry) (get entry :priority)) entries)]
+```
+
+Natural comparison covers nullish values, booleans, numbers, big integers,
+strings, Keywords, Symbols, persistent Lists, and persistent Vectors. Custom
+types participate through ordinary protocol extension. Sorting is stable,
+accepts any reducible source, caches each key exactly once, returns a persistent
+Vector, and never mutates its source. `min-key` and `max-key` choose the last
+value on an equal key, matching the stable tie contract.
+
 ## Bit
 
 `bit.eli` builds population count and 32-bit rotations entirely from portable

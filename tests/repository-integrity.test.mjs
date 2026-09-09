@@ -37,7 +37,7 @@ test("repository dependencies and generated artifacts satisfy declared boundarie
       deterministicOutputs: 7,
       derivedArtifacts: 3,
       benchmarkArtifacts: 14,
-      benchmarkSources: 267,
+      benchmarkSources: 269,
     },
   });
   expect(report.dependency.scannedJavaScript).toBeGreaterThan(0);

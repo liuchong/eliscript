@@ -14,7 +14,8 @@
 This specification moves the maintained core collection API and algorithm
 bodies into ordinary Eliscript modules. Applications can import protocols,
 collection operations, transducers, transient builders, sequence algorithms,
-and keyed-data algorithms from `stdlib/core/` without importing camel-cased
+keyed-data algorithms, and ordering algorithms from `stdlib/core/` without
+importing camel-cased
 JavaScript APIs directly.
 
 At this specification's original acceptance boundary, protocol objects,
@@ -64,6 +65,14 @@ assoc-in count-by frequencies get-in group-by index-by merge merge-with
 select-keys update update-in zipmap
 ```
 
+`stdlib/core/order.eli` contains the maintained comparator adaptation, stable
+sorting, key-cached sorting, and keyed-extrema algorithms while exposing the
+runtime's open `IComparable` identity:
+
+```text
+IComparable comparator compare-values max-key min-key reverse-comparator sort sort-by
+```
+
 The sequence algorithms reduce arbitrary protocol sources, preserve Eliscript
 truth semantics, terminate through reduced values, and construct persistent
 Vectors. The data algorithms construct value-semantic persistent Maps, retain
@@ -74,8 +83,10 @@ that do not require prior-value lookup.
 
 The source modules import lower-level runtime capabilities rather than the
 corresponding `runtime/core/sequence.mjs` or `runtime/core/data.mjs` algorithm
-modules. Their Source Maps therefore contain the actual maintained Eliscript
-function bodies.
+modules. Ordering imports only natural protocol dispatch from
+`runtime/core/order.mjs`; comparator adaptation, stable decoration, key
+caching, and extrema remain visible Eliscript bodies. Their Source Maps
+therefore contain the actual maintained Eliscript function bodies.
 
 ## Binding-name Correctness
 
@@ -92,7 +103,7 @@ function `arguments` object.
 ## Bootstrap and Execution Contract
 
 The seed and self-hosted compilers must emit byte-identical JavaScript and
-Source Maps for all six `stdlib/core/` modules in this slice. Generated modules
+Source Maps for all seven `stdlib/core/` modules in this slice. Generated modules
 must execute under both Bun and Node.js.
 
 The executable corpus covers protocol category and default extensions,
@@ -125,10 +136,10 @@ non-transportable.
 ## Stabilization Evidence
 
 The default core suite verifies every lower-level protocol, collection,
-transducer, and transient contract directly. It also compiles these six
+transducer, and transient contract directly. It also compiles these seven
 Eliscript modules as one version 2 multi-entry project through the public
 `eliscript-build` command, executes the generated modules under Bun and Node,
-and checks representative behavior across all six module boundaries.
+and checks representative behavior across all seven module boundaries.
 
 The generated library API index owns the exact public export inventory. The
 project-level test complements the existing source-import fixture, direct
@@ -145,7 +156,7 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
 - **ECA-02:** Sequence and keyed-data algorithm bodies are maintained in
   `.eli` and do not import the corresponding JavaScript algorithm modules.
 - **ECA-03:** Generated Source Maps retain the complete Eliscript source of all
-  six modules.
+  seven modules.
 - **ECA-04:** External protocol extensions participate in generic reduction
   and stop at the exact reduced value.
 - **ECA-05:** Vector and Map transient builders invalidate deterministically
@@ -164,12 +175,15 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
   transducer, transient, standard-library, contract, CLI, default-test, and
   strict byte-compilation suites remain green. No application framework is a
   core dependency or acceptance prerequisite.
-- **ECA-12:** The six language-level core modules build together through the
+- **ECA-12:** The seven language-level core modules build together through the
   public multi-entry project command and execute with identical representative
   results under Bun and Node.
 - **ECA-13:** The complete maintained sequence vocabulary compiles from
   `stdlib/core/seq.eli`, accepts protocol sources, and matches the direct
   runtime facade under Bun and Node.
+- **ECA-14:** Maintained ordering compiles from `stdlib/core/order.eli`, remains
+  stable over protocol sources, caches sort keys once, and matches under Bun
+  and Node.
 
 ## Follow-up
 
