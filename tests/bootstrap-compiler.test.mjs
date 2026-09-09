@@ -237,6 +237,17 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "import {has_QMARK_} from \"./object.eli\";",
         "function group_by(key_function, values)",
       ]],
+      ["stdlib/function.eli", [
+        "import {empty_persistent_vector, persistent_vector_conj} from \"./persistent-vector.eli\";",
+        "function identity(value)",
+        "function comp(...functions)",
+        "function partial(function$, ...bound_arguments)",
+        "function juxt(...functions)",
+        "function fnil(function$, ...defaults)",
+        "function every_pred(...predicates)",
+        "function some_fn(...predicates)",
+        "function trampoline(function$, ...arguments$)",
+      ]],
       ["stdlib/core/protocol.eli", [
         "function define_protocol(name, operations)",
         "function extend_protocol_type(protocol, constructor, implementations)",

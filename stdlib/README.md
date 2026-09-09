@@ -37,6 +37,28 @@ accepts any reducible source, caches each key exactly once, returns a persistent
 Vector, and never mutates its source. `min-key` and `max-key` choose the last
 value on an equal key, matching the stable tie contract.
 
+## Functional Combinators
+
+`function.eli` supplies ten higher-order building blocks in portable
+Eliscript, without compiler intrinsics or host-framework helpers:
+
+```elisp
+(import "../../stdlib/function.eli"
+        comp every-pred fnil juxt partial trampoline)
+
+[(funcall (comp (lambda (value) (* value 2)) +) 3 4)
+ (funcall (juxt 1+ 1-) 5)
+ (funcall (fnil + 0 0) nil 8)]
+```
+
+Composition runs right to left, partial application preserves every forwarded
+value including JavaScript `undefined`, and `juxt` returns a persistent Vector.
+`every-pred` and `some-fn` preserve Lisp truth and short-circuit in documented
+predicate-major order. `trampoline` evaluates arbitrarily long thunk chains
+with constant stack usage. The complete identity, argument, nullish, ordering,
+and portability contracts are specified in
+[0149](../specs/0149-portable-functional-combinators.md).
+
 ## Bit
 
 `bit.eli` builds population count and 32-bit rotations entirely from portable

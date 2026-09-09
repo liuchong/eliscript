@@ -2736,6 +2736,36 @@
           "contains": "bootstrapped emitter matches seed ESM and Source Map output"
         }
       ]
+    },
+    {
+      "id": "stdlib.portable-functional-combinators",
+      "title": "Portable functional combinators",
+      "status": "stable",
+      "spec": "0149",
+      "contracts": [
+        "Exports ten portable composition predicate nil-normalization parallel-application and trampoline functions",
+        "Preserves argument order function identity cases undefined values and Lisp truth",
+        "Short-circuits predicate combinators in predicate-major argument-left-to-right order",
+        "Returns persistent Vectors from juxt and evaluates 100000 thunks with constant stack usage",
+        "Produces byte-identical fixed points and identical local Bun and Node results"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-function.test.mjs",
+          "contains": "portable function combinators compile and agree across local hosts"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-function.test.mjs",
+          "contains": "predicate combinators preserve Lisp truth and short-circuit order"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }

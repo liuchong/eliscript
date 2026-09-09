@@ -1,0 +1,120 @@
+(module eliscript.function
+  (import-portable "./persistent-vector.eli"
+    empty-persistent-vector
+    persistent-vector-conj)
+  (defportable reverse-values
+    (values)
+    (let ((result (js-array)) (index 0))
+      (while (< index (js-length values))
+        (setq result (js-cons (aref values index) result) index (1+ index)))
+      result))
+  (defportable append-values
+    (left right)
+    (let ((result (js-array)) (index 0))
+      (while (< index (js-length left))
+        (setq result (js-cons (aref left index) result) index (1+ index)))
+      (setq index 0)
+      (while (< index (js-length right))
+        (setq result (js-cons (aref right index) result) index (1+ index)))
+      (reverse-values result)))
+  (defportable identity (value) value)
+  (defportable constantly (value) (lambda (&rest arguments) value))
+  (defportable complement
+    (predicate)
+    (lambda (&rest arguments) (not (apply predicate arguments))))
+  (defportable comp
+    (&rest functions)
+    (let ((length (js-length functions)))
+      (cond ((= length 0) identity)
+        ((= length 1) (aref functions 0))
+        (t
+          (lambda
+            (&rest arguments)
+            (let ((index (1- length)) result)
+              (setq result (apply (aref functions index) arguments) index (1- index))
+              (while (>= index 0)
+                (setq result (funcall (aref functions index) result) index (1- index)))
+              result))))))
+  (defportable partial
+    (function &rest bound-arguments)
+    (if (= (js-length bound-arguments) 0)
+      function
+      (lambda
+        (&rest arguments)
+        (apply function (append-values bound-arguments arguments)))))
+  (defportable juxt
+    (&rest functions)
+    (lambda
+      (&rest arguments)
+      (let ((result (empty-persistent-vector)) (index 0))
+        (while (< index (js-length functions))
+          (setq
+            result
+            (persistent-vector-conj result (apply (aref functions index) arguments))
+            index
+            (1+ index)))
+        result)))
+  (defportable fnil
+    (function &rest defaults)
+    (lambda
+      (&rest arguments)
+      (let ((normalized (js-array)) (index 0))
+        (while (< index (js-length arguments))
+          (let ((value (aref arguments index)))
+            (setq
+              normalized
+              (js-cons
+                (if (and (< index (js-length defaults)) (nil? value))
+                  (aref defaults index)
+                  value)
+                normalized)
+              index
+              (1+ index))))
+        (apply function (reverse-values normalized)))))
+  (defportable every-pred
+    (&rest predicates)
+    (lambda
+      (&rest arguments)
+      (let ((predicate-index 0) (matched t))
+        (while (and matched (< predicate-index (js-length predicates)))
+          (let ((argument-index 0) (predicate (aref predicates predicate-index)))
+            (while (and matched (< argument-index (js-length arguments)))
+              (unless (funcall predicate (aref arguments argument-index))
+                (setq matched false))
+              (setq argument-index (1+ argument-index))))
+          (setq predicate-index (1+ predicate-index)))
+        matched)))
+  (defportable some-fn
+    (&rest predicates)
+    (lambda
+      (&rest arguments)
+      (let ((predicate-index 0) (argument-index 0) (found false) (result nil))
+        (while (and (not found) (< predicate-index (js-length predicates)))
+          (setq argument-index 0)
+          (while (and (not found) (< argument-index (js-length arguments)))
+            (let
+              (
+                (candidate
+                  (funcall
+                    (aref predicates predicate-index)
+                    (aref arguments argument-index))))
+              (when candidate (setq found t result candidate)))
+            (setq argument-index (1+ argument-index)))
+          (setq predicate-index (1+ predicate-index)))
+        result)))
+  (defportable trampoline
+    (function &rest arguments)
+    (let ((result (apply function arguments)))
+      (while (= (value-type result) "function") (setq result (funcall result)))
+      result))
+  (export
+    comp
+    complement
+    constantly
+    every-pred
+    fnil
+    identity
+    juxt
+    partial
+    some-fn
+    trampoline))

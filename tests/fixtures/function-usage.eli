@@ -1,0 +1,68 @@
+(module test.function-usage
+  (import "./stdlib/function.mjs"
+    complement
+    comp
+    constantly
+    every-pred
+    fnil
+    identity
+    juxt
+    partial
+    some-fn
+    trampoline)
+  (import "./stdlib/persistent-vector.mjs" persistent-vector-to-array)
+  (defun bounce
+    (value limit)
+    (if (= value limit) value (lambda () (bounce (1+ value) limit))))
+  (defconst juxtaposed
+    (funcall (juxt (lambda (value) (1+ value)) (lambda (value) (1- value))) 5))
+  (defconst nil-patched
+    (funcall (fnil (lambda (&rest values) values) 10 20 30) nil undefined 3))
+  (defconst result
+    (js-object
+      :identity
+      (identity 7)
+      :constant
+      (funcall (constantly "fixed") 1 2 3)
+      :complement
+      (funcall (complement (lambda (left right) (< left right))) 3 2)
+      :composition
+      (funcall
+        (comp (lambda (value) (* value 2)) (lambda (left right) (+ left right)))
+        3
+        4)
+      :partial
+      (funcall
+        (partial
+          (lambda
+            (&rest values)
+            (+ (js-nth 0 values) (js-nth 1 values) (js-nth 2 values) (js-nth 3 values)))
+          1
+          2)
+        3
+        4)
+      :juxt
+      (persistent-vector-to-array juxtaposed)
+      :fnil
+      (js-array
+        (aref nil-patched 0)
+        (undefined? (aref nil-patched 1))
+        (aref nil-patched 2))
+      :every
+      (funcall
+        (every-pred (lambda (value) (> value 0)) (lambda (value) (< value 10)))
+        1
+        5
+        9)
+      :some
+      (funcall
+        (some-fn
+          (lambda (value) (if (= value 2) 0 nil))
+          (lambda (value) (if (= value 3) "later" nil)))
+        1
+        2
+        3)
+      :trampoline
+      (trampoline bounce 0 100000)))
+  (print (JSON/stringify result))
+  (export result))

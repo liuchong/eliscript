@@ -70,7 +70,7 @@ test-core: check-contracts
 		tests/emacs-analysis-evidence.test.mjs \
 		tests/stdlib-sequence.test.mjs \
 		tests/stdlib-text.test.mjs tests/stdlib-object.test.mjs \
-		tests/stdlib-bit.test.mjs \
+		tests/stdlib-bit.test.mjs tests/stdlib-function.test.mjs \
 		tests/portable-persistent-list.test.mjs \
 		tests/portable-persistent-map.test.mjs \
 		tests/portable-persistent-set.test.mjs \

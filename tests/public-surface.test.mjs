@@ -37,7 +37,7 @@ test("repository public surface matches every tracked implementation", async () 
     adapters: { adapters: 9, exports: 32 },
     platformPackages: { packages: 2, exports: 37 },
     runtimeModules: { modules: 31, exports: 267, public: 22, internal: 9 },
-    standardLibrary: { modules: 30, exports: 346 },
+    standardLibrary: { modules: 31, exports: 356 },
     emacs: {
       functions: 158,
       records: 47,

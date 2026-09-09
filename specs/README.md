@@ -505,6 +505,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0146 | [Complete Compiler Parity Corpus](0146-complete-compiler-parity-corpus.md) | Stable | Implemented |
 | 0147 | [Complete Stable Compatibility Corpus](0147-complete-stable-compatibility-corpus.md) | Stable | Implemented |
 | 0148 | [Map Binding Patterns](0148-map-binding-patterns.md) | Stable | Implemented |
+| 0149 | [Portable Functional Combinators](0149-portable-functional-combinators.md) | Stable | Implemented |
 
 ## Adding a Specification
 
