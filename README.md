@@ -153,8 +153,9 @@ The completed M8 language contract provides:
 - canonical readable data text for both optimized runtime values and portable
   List/Vector/Map/Set values, with deterministic order, metadata, limits, and
   Bun/Node round trips
-- synchronous Atom state references with validators, commit-ordered watches,
-  nested transition queuing, and explicit reentrancy rejection
+- synchronous Atom state references with value-semantic compare-and-set,
+  old/new transition results, validators, commit-ordered watches, nested
+  transition queuing, and explicit reentrancy rejection
 - explicit shallow and deep conversion between persistent values and native
   JavaScript Array, plain object, Map, and Set containers
 - open runtime protocols with direct and externally registered methods
@@ -434,11 +435,10 @@ Portable identifiers and data text stay inside the same selected closure:
 Changing identity is explicit through Atom rather than collection mutation:
 
 ```elisp
-(import "../../stdlib/state/atom.eli" atom deref swap!)
+(import "../../stdlib/state/atom.eli" atom deref swap-vals!)
 
 (let ((counter (atom 0)))
-  (swap! counter (lambda (value) (1+ value)))
-  (deref counter))
+  (swap-vals! counter (lambda (value) (1+ value))))
 ```
 
 Persistent values cross into ordinary JavaScript only through explicit

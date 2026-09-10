@@ -1,19 +1,27 @@
 import { pathToFileURL } from "node:url";
+import { dirname, resolve } from "node:path";
 
 const [modulePath] = process.argv.slice(2);
 const atomModule = await import(pathToFileURL(modulePath).href);
+const vectorModule = await import(pathToFileURL(
+  resolve(dirname(modulePath), "../persistent-vector.eli"),
+).href);
 
 const {
   add_watch: addWatch,
   atom,
   atom_QMARK_: isAtom,
+  compare_and_set_BANG_: compareAndSet,
   deref,
   get_validator: getValidator,
   remove_watch: removeWatch,
   reset_BANG_: reset,
+  reset_vals_BANG_: resetVals,
   set_validator_BANG_: setValidator,
   swap_BANG_: swap,
+  swap_vals_BANG_: swapVals,
 } = atomModule;
+const { persistent_vector_to_array: vectorToArray } = vectorModule;
 
 function captureError(operation) {
   try {
@@ -40,6 +48,32 @@ Object.defineProperty(hostileAtom, "identify", {
 const resetResult = reset(counter, 2);
 const swapResult = swap(counter, (value, left, right) =>
   value + left + right, 3, 4);
+const resetValues = vectorToArray(resetVals(counter, 10));
+const swapValues = vectorToArray(
+  swapVals(counter, (value, amount) => value + amount, 5),
+);
+const compareMismatch = compareAndSet(counter, 10, 20);
+const compareSuccess = compareAndSet(counter, 15, 20);
+const equalExpectedValue = resetVals(atom(0), 1);
+const equalObservedValue = resetVals(atom(0), 1);
+const equalExpected = atom(equalExpectedValue);
+const valueEqualCompare = compareAndSet(
+  equalExpected,
+  equalObservedValue,
+  [3, 4],
+);
+const opaqueExpected = { value: 1 };
+const opaqueReference = atom(opaqueExpected);
+const opaqueMismatch = compareAndSet(
+  opaqueReference,
+  { value: 1 },
+  { value: 2 },
+);
+const opaqueSuccess = compareAndSet(
+  opaqueReference,
+  opaqueExpected,
+  { value: 3 },
+);
 
 const validatorCalls = [];
 const nonnegative = (value) => {
@@ -47,6 +81,12 @@ const nonnegative = (value) => {
   return value >= 0;
 };
 const guarded = atom(2, { validator: nonnegative });
+let guardedWatchCalls = 0;
+addWatch(guarded, "guard", () => {
+  guardedWatchCalls += 1;
+});
+const compareRejected = compareAndSet(guarded, 99, -1);
+const compareMismatchWatchCalls = guardedWatchCalls;
 let inheritedValidatorCalls = 0;
 const inheritedOptions = Object.create({
   validator() {
@@ -92,6 +132,12 @@ const reentrantValidatorCode = captureError(() =>
   setValidator(reentrantValidator, (value) => {
     reset(reentrantValidator, value);
     return true;
+  }));
+const reentrantCompare = atom(1);
+const reentrantCompareCode = captureError(() =>
+  swap(reentrantCompare, (value) => {
+    compareAndSet(reentrantCompare, value, value + 1);
+    return value + 2;
   }));
 
 const watched = atom(0);
@@ -168,6 +214,28 @@ for (let index = 0; index < 20_000; index += 1) {
       modelAgreement = false;
     }
     if (deref(model) !== before) modelAgreement = false;
+  } else if (index % 13 === 0) {
+    const before = deref(model);
+    const candidate = randomState % 10_000;
+    const values = vectorToArray(resetVals(model, candidate));
+    if (values[0] !== before || values[1] !== candidate) modelAgreement = false;
+  } else if (index % 11 === 0) {
+    const before = deref(model);
+    const amount = randomState % 7;
+    const values = vectorToArray(
+      swapVals(model, (value, increment) => value + increment, amount),
+    );
+    if (values[0] !== before || values[1] !== before + amount) {
+      modelAgreement = false;
+    }
+  } else if (index % 7 === 0) {
+    const before = deref(model);
+    const shouldMatch = (randomState & 2) === 0;
+    const expected = shouldMatch ? before : before + 1;
+    const candidate = randomState % 10_000;
+    if (compareAndSet(model, expected, candidate) !== shouldMatch) {
+      modelAgreement = false;
+    }
   } else if ((randomState & 1) === 0) {
     const next = randomState % 10_000;
     reset(model, next);
@@ -191,12 +259,24 @@ console.log(JSON.stringify({
     hostileAtom: isAtom(hostileAtom),
     resetResult,
     swapResult,
+    resetValues,
+    swapValues,
+    compareMismatch,
+    compareSuccess,
     value: deref(counter),
+    valueEqualCompare,
+    valueEqualState: deref(equalExpected),
+    opaqueMismatch,
+    opaqueSuccess,
+    opaqueState: deref(opaqueReference),
     invalidReference: captureError(() => deref({})),
     invalidTransform: captureError(() => swap(counter, null)),
   },
   validation: {
     calls: validatorCalls,
+    compareRejected,
+    compareMismatchWatchCalls,
+    guardedWatchCalls,
     acceptedValue,
     rejectedCode,
     rejectedState,
@@ -219,6 +299,8 @@ console.log(JSON.stringify({
     validator: reentrantValidatorCode,
     validatorState: deref(reentrantValidator),
     validatorInstalled: getValidator(reentrantValidator) !== null,
+    compare: reentrantCompareCode,
+    compareState: deref(reentrantCompare),
   },
   watches: {
     outerResetResult,

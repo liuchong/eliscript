@@ -81,6 +81,11 @@ precedence over parent rules when they address the same decision.
   turns without new executable behavior are a development-strategy warning.
   When that occurs, stop expanding process artifacts, identify the smallest
   high-value core feature, and ship its locally verified slice first.
-- **DELIVERY-05** - Prefer several small, independently reviewable feature
-  commits over one large speculative batch. Every slice must preserve local
-  compiler parity and leave the repository in a directly testable state.
+- **DELIVERY-05** - Prefer coherent capability batches that deliver every
+  closely related API unlocked by one shared design. Split commits only when
+  the pieces are independently useful and independently verifiable; do not
+  reduce a mature API family to repeated one-function turns.
+- **DELIVERY-06** - During a capability batch, iterate with focused tests.
+  Refresh generated contracts and run the broad local gate once at the batch
+  boundary. Refresh the full compatibility matrix only at a milestone gate or
+  when its evidence is the capability being delivered.

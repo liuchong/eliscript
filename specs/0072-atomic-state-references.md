@@ -26,7 +26,7 @@ with the seed and self-hosted compilers.
 The module exports:
 
 ```text
-atom atom? deref reset! swap!
+atom atom? deref reset! reset-vals! swap! swap-vals! compare-and-set!
 add-watch remove-watch
 get-validator set-validator!
 ```
@@ -48,9 +48,19 @@ identity callback, or wrapping a similar object does not create another Atom.
 arguments, validates the result, commits it, and returns it. A failed function
 or validator leaves the current value unchanged.
 
+`reset-vals!` and `swap-vals!` perform the same single transitions and return a
+persistent Vector containing the committed old and new values. The swap
+transform is still called exactly once.
+
+`compare-and-set!` compares the current value with an expected value using
+canonical Eliscript value equality. Equal persistent values therefore match,
+while opaque host objects match only by identity. A mismatch returns false
+without validating, committing, or notifying watches. A match performs one
+ordinary validated commit and returns true.
+
 Eliscript runs these operations synchronously. There is no implicit Promise
-waiting, retry loop, compare-and-set operation, or cross-worker synchronization
-in this contract.
+waiting, retry loop, cross-worker synchronization, or lock-free concurrency
+claim in this contract.
 
 ## Validators
 
@@ -65,9 +75,10 @@ The candidate is installed only after that check succeeds. A rejected or
 throwing candidate leaves the previous validator installed. `get-validator`
 returns the installed validator or nil.
 
-The implementation marks validator and swap-function execution as transition
-phases. A `reset!`, `swap!`, watch registration change, or validator change on
-the same Atom during either phase is rejected with
+The implementation marks validation, swap-function execution, and
+compare-and-set equality as transition phases. Any reset, swap,
+compare-and-set, watch registration change, or validator change on the same
+Atom during any phase is rejected with
 `ELI-ATOM-REENTRANT`. `deref` remains valid, so a callback may inspect the
 current pre-transition value. This rule prevents stale outer writes and
 partially installed validator changes.
@@ -141,7 +152,7 @@ cross a host boundary.
 | Operation | Cost |
 | --- | --- |
 | `atom`, `deref`, validation without user work | O(1) |
-| `reset!`, `swap!` without watches | O(1) plus user function/validator |
+| reset, swap, and compare-and-set without watches | O(1) plus equality, user function, and validator work |
 | `add-watch`, `remove-watch` | expected O(log32 w) |
 | notify one transition | O(w) plus callback work |
 | nested notification queue append/read | O(log32 q) worst case |
@@ -153,10 +164,11 @@ transitions. Updates with no watches do not allocate notification nodes.
 
 - **ASR-01:** The complete public API is authored in `.eli`, uses only a host
   `WeakSet` for identity registration, and has no runtime Atom class dependency.
-- **ASR-02:** `reset!` and variadic `swap!` make exactly one validated commit
-  and return the committed value.
+- **ASR-02:** Reset and variadic swap operations make exactly one validated
+  commit; value-pair variants return a persistent Vector of old and new values.
 - **ASR-03:** Failed and throwing validators preserve the old state, install no
-  replacement validator, and emit no watch event.
+  replacement validator, and emit no watch event; failed comparisons do not
+  invoke the validator.
 - **ASR-04:** Swap and validation reentrancy on the same Atom is rejected
   without a stale outer commit.
 - **ASR-05:** Watches observe committed old/new pairs, use commit-time
@@ -166,8 +178,8 @@ transitions. Updates with no watches do not allocate notification nodes.
 - **ASR-07:** Watch exceptions preserve their identity, do not skip other
   registered watches, and leave the notification queue reusable.
 - **ASR-08:** Forged and hostile objects are not accepted as Atoms.
-- **ASR-09:** Generated operation histories agree with a simple reference
-  state model, and 100,000 sequential swaps remain stack safe.
+- **ASR-09:** Generated reset, swap, and compare-and-set histories agree with a
+  simple reference state model, and 100,000 sequential swaps remain stack safe.
 - **ASR-10:** Seed/self-hosted artifacts and source maps are byte-identical;
   Bun and Node reports agree for both generations.
 - **ASR-11:** Public-surface, compatibility, conformance, standard-library
@@ -175,9 +187,8 @@ transitions. Updates with no watches do not allocate notification nodes.
 
 ## Deferred Work
 
-This specification does not add asynchronous swaps, compare-and-set,
-software transactional memory, agents, history retention, worker-shared
-state, or serialization. Any such facility needs a separate ordering and
-failure contract. The unified 1.0 acceptance manifest now records the Atom
-evidence under PD-11; this stable module does not imply completion of unrelated
-project-wide gates.
+This specification does not add asynchronous swaps, software transactional
+memory, agents, history retention, worker-shared state, or serialization. Any
+such facility needs a separate ordering and failure contract. The unified 1.0
+acceptance manifest now records the Atom evidence under PD-11; this stable
+module does not imply completion of unrelated project-wide gates.

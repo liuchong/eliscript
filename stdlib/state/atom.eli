@@ -1,5 +1,5 @@
 (module eliscript.state.atom
-  (import-portable "../value.eli" empty-value-map)
+  (import-portable "../value.eli" empty-value-map value-equal?)
   (import-portable "../persistent-map.eli"
                    persistent-map-assoc
                    persistent-map-count
@@ -79,6 +79,7 @@
            (ensure-transition-allowed nil)
            (validate nil)
            (drain-notifications nil)
+           (transform-candidate nil)
            (commit nil))
       (atom-validate-candidate validator initial)
 
@@ -131,8 +132,23 @@
                            notifying false)))
                   (when failed (throw first-error))))))
 
+      (setq transform-candidate
+            (lambda (transform arguments)
+              (when (not (= (value-type transform) "function"))
+                (atom-fail
+                 "ELI-ATOM-INVALID-TRANSFORM"
+                 "Atom swap transform must be a function"))
+              (funcall ensure-transition-allowed)
+              (let ((candidate nil))
+                (setq phase "swap")
+                (try
+                  (setq candidate
+                        (apply transform (js-cons current arguments)))
+                  (finally (setq phase nil)))
+                candidate)))
+
       (setq commit
-            (lambda (candidate)
+            (lambda (candidate return-values)
               (funcall validate candidate validator)
               (let ((old-value current))
                 (setq current candidate)
@@ -144,27 +160,43 @@
                                  :new-value candidate
                                  :watches watches)))
                   (funcall drain-notifications))
-                candidate)))
+                (if return-values
+                    (persistent-vector-conj
+                     (persistent-vector-conj
+                      (empty-persistent-vector)
+                      old-value)
+                     candidate)
+                  candidate))))
 
       (setq reference
             (js-object
              :kind "eliscript/atom"
              :read (lambda () current)
-             :reset (lambda (candidate) (funcall commit candidate))
+             :reset (lambda (candidate) (funcall commit candidate false))
+             :reset-values (lambda (candidate) (funcall commit candidate t))
              :swap
              (lambda (transform arguments)
-               (when (not (= (value-type transform) "function"))
-                 (atom-fail
-                  "ELI-ATOM-INVALID-TRANSFORM"
-                  "Atom swap transform must be a function"))
+               (funcall
+                commit
+                (funcall transform-candidate transform arguments)
+                false))
+             :swap-values
+             (lambda (transform arguments)
+               (funcall
+                commit
+                (funcall transform-candidate transform arguments)
+                t))
+             :compare-and-set
+             (lambda (expected candidate)
                (funcall ensure-transition-allowed)
-               (let ((candidate nil))
-                 (setq phase "swap")
+               (let ((matches false))
+                 (setq phase "comparison")
                  (try
-                   (setq candidate
-                         (apply transform (js-cons current arguments)))
+                   (setq matches (value-equal? current expected))
                    (finally (setq phase nil)))
-                 (funcall commit candidate)))
+                 (if matches
+                   (progn (funcall commit candidate false) t)
+                   false)))
              :add-watch
              (lambda (key watch)
                (funcall ensure-transition-allowed)
@@ -202,8 +234,20 @@
   (defun reset! (reference candidate)
     (funcall (atom-method reference "reset") candidate))
 
+  (defun reset-vals! (reference candidate)
+    (funcall (atom-method reference "reset-values") candidate))
+
   (defun swap! (reference transform &rest arguments)
     (funcall (atom-method reference "swap") transform arguments))
+
+  (defun swap-vals! (reference transform &rest arguments)
+    (funcall (atom-method reference "swap-values") transform arguments))
+
+  (defun compare-and-set! (reference expected candidate)
+    (funcall
+     (atom-method reference "compare-and-set")
+     expected
+     candidate))
 
   (defun add-watch (reference key watch)
     (funcall (atom-method reference "add-watch") key watch))
@@ -217,5 +261,5 @@
   (defun set-validator! (reference validator)
     (funcall (atom-method reference "set-validator") validator))
 
-  (export add-watch atom atom? deref get-validator remove-watch reset!
-          set-validator! swap!))
+  (export add-watch atom atom? compare-and-set! deref get-validator
+          remove-watch reset! reset-vals! set-validator! swap! swap-vals!))

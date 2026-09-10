@@ -377,14 +377,15 @@ the runtime format. See
 
 ```elisp
 (import "../../stdlib/state/atom.eli"
-        add-watch atom deref reset! swap!)
+        add-watch atom compare-and-set! deref reset-vals! swap-vals!)
 
 (let ((counter (atom 0)))
   (add-watch counter "log"
              (lambda (_key _reference old-value new-value)
                (print old-value new-value)))
-  (swap! counter (lambda (value amount) (+ value amount)) 2)
-  (reset! counter 10)
+  (swap-vals! counter (lambda (value amount) (+ value amount)) 2)
+  (compare-and-set! counter 2 8)
+  (reset-vals! counter 10)
   (deref counter))
 ```
 
@@ -392,7 +393,9 @@ Validators run before installation. Watches receive committed old/new pairs
 after installation, and nested watch updates are queued so one transition's
 complete watch snapshot runs before the next transition. Validator and swap
 callbacks cannot recursively change the same Atom, preventing stale outer
-writes. Atom failures use structured codes; user callback exceptions retain
+writes. Compare-and-set uses canonical value equality and does no work on a
+mismatch. The `-vals!` operations return persistent old/new pairs. Atom
+failures use structured codes; user callback exceptions retain
 their original identity. Atoms are host identities and are deliberately not
 part of canonical data text or portable worker values. Exact semantics and
 cross-compiler/cross-host evidence are specified in

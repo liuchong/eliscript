@@ -120,12 +120,24 @@ test("Eliscript Atom preserves ordered single-transition state semantics", async
         hostileAtom: false,
         resetResult: 2,
         swapResult: 9,
-        value: 9,
+        resetValues: [9, 10],
+        swapValues: [10, 15],
+        compareMismatch: false,
+        compareSuccess: true,
+        value: 20,
+        valueEqualCompare: true,
+        valueEqualState: [3, 4],
+        opaqueMismatch: false,
+        opaqueSuccess: true,
+        opaqueState: { value: 3 },
         invalidReference: "ELI-ATOM-INVALID-REFERENCE",
         invalidTransform: "ELI-ATOM-INVALID-TRANSFORM",
       },
       validation: {
         calls: [2, 5, -1],
+        compareRejected: false,
+        compareMismatchWatchCalls: 0,
+        guardedWatchCalls: 2,
         acceptedValue: 5,
         rejectedCode: "ELI-ATOM-VALIDATION",
         rejectedState: 5,
@@ -148,6 +160,8 @@ test("Eliscript Atom preserves ordered single-transition state semantics", async
         validator: "ELI-ATOM-REENTRANT",
         validatorState: 1,
         validatorInstalled: false,
+        compare: "ELI-ATOM-REENTRANT",
+        compareState: 1,
       },
       watches: {
         outerResetResult: 1,
@@ -163,7 +177,7 @@ test("Eliscript Atom preserves ordered single-transition state semantics", async
       },
       model: {
         agreement: true,
-        transitions: 18_823,
+        transitions: 17_687,
         value: 2_764,
       },
       scale: { value: 100_000 },
@@ -175,6 +189,7 @@ test("Eliscript Atom preserves ordered single-transition state semantics", async
     expect(sourceMap.sourcesContent).toHaveLength(1);
     expect(sourceMap.sourcesContent[0]).toContain("(defun atom (initial");
     expect(sourceMap.sourcesContent[0]).toContain("(defun swap!");
+    expect(sourceMap.sourcesContent[0]).toContain("(defun compare-and-set!");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
