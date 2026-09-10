@@ -1,0 +1,63 @@
+(module test.deferred-usage
+  (import "./stdlib/deferred.mjs" delay delay? force memoize realized?)
+  (import "./stdlib/persistent-vector.mjs"
+    persistent-vector-from-array
+    persistent-vector-nth
+    persistent-vector-to-array)
+  (defvar delay-calls 0)
+  (defconst deferred-value
+    (delay
+      (lambda
+        ()
+        (setq delay-calls (1+ delay-calls))
+        (persistent-vector-from-array (js-array 20 22)))))
+  (defconst realized-before (realized? deferred-value))
+  (defconst first-force (force deferred-value))
+  (defconst second-force (force deferred-value))
+  (defvar memo-calls 0)
+  (defconst cached-sum
+    (memoize
+      (lambda
+        (values marker)
+        (setq memo-calls (1+ memo-calls))
+        (if marker
+          (+ (persistent-vector-nth values 0 nil) (persistent-vector-nth values 1 nil))
+          undefined))))
+  (defconst first-sum
+    (funcall cached-sum (persistent-vector-from-array (js-array 20 22)) t))
+  (defconst second-sum
+    (funcall cached-sum (persistent-vector-from-array (js-array 20 22)) t))
+  (defconst first-undefined
+    (funcall cached-sum (persistent-vector-from-array (js-array 1 2)) false))
+  (defconst second-undefined
+    (funcall cached-sum (persistent-vector-from-array (js-array 1 2)) false))
+  (defconst result
+    (js-object
+      :delay
+      (js-object
+        :recognized
+        (delay? deferred-value)
+        :before
+        realized-before
+        :after
+        (realized? deferred-value)
+        :same
+        (= first-force second-force)
+        :value
+        (persistent-vector-to-array first-force)
+        :calls
+        delay-calls
+        :passthrough
+        (force 9))
+      :memo
+      (js-object
+        :first
+        first-sum
+        :second
+        second-sum
+        :undefined
+        (and (undefined? first-undefined) (undefined? second-undefined))
+        :calls
+        memo-calls)))
+  (print (JSON/stringify result))
+  (export result))

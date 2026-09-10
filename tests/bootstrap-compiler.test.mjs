@@ -248,6 +248,13 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "function some_fn(...predicates)",
         "function trampoline(function$, ...arguments$)",
       ]],
+      ["stdlib/deferred.eli", [
+        "function delay(producer)",
+        "function delay_QMARK_(value)",
+        "function force(value)",
+        "function memoize(function$)",
+        "function realized_QMARK_(value)",
+      ]],
       ["stdlib/core/protocol.eli", [
         "function define_protocol(name, operations)",
         "function extend_protocol_type(protocol, constructor, implementations)",

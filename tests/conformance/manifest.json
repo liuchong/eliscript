@@ -3129,6 +3129,37 @@
           "contains": "(some-> (observed undefined)"
         }
       ]
+    },
+    {
+      "id": "stdlib.deferred-and-memoized-computation",
+      "title": "Deferred and memoized computation",
+      "status": "stable",
+      "spec": "0161",
+      "contracts": [
+        "Exports delayed identity realization forcing and value-semantic memoization",
+        "Retains every successful value exactly once and passes non-Delay force inputs through",
+        "Uses frozen registered Delay references and rejects recursive forcing",
+        "Restores pending state after producer errors and does not cache memoized failures",
+        "Uses persistent argument vectors and value Map equality for memoization keys",
+        "Produces byte-identical fixed points and identical local Bun and Node results"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-deferred.test.mjs",
+          "contains": "deferred computations compile and agree across local hosts"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/stdlib-deferred.test.mjs",
+          "contains": "delay and memoize retry failures without caching partial state"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }

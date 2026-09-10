@@ -1,0 +1,70 @@
+(module eliscript.deferred
+  (import-portable "./persistent-map.eli"
+    persistent-map-assoc
+    persistent-map-get
+    persistent-map-has?)
+  (import-portable "./persistent-vector.eli" persistent-vector-from-array)
+  (import-portable "./value.eli" empty-value-map)
+  (defconst deferred-kind "eliscript/delay")
+  (defconst deferred-pending "pending")
+  (defconst deferred-running "running")
+  (defconst deferred-realized "realized")
+  (defconst deferred-registry (js* "new WeakSet()"))
+  (defun deferred-fail
+    (code message)
+    (throw (js-object :kind "eliscript/deferred-error" :code code :message message)))
+  (defun delay
+    (producer)
+    (when (not (= (value-type producer) "function"))
+      (deferred-fail
+        "ELI-DEFERRED-INVALID-PRODUCER"
+        "delay producer must be a function"))
+    (let ((state deferred-pending) (value nil) (reference nil))
+      (setq
+        reference
+        (js-call
+          globalThis.Object
+          :freeze
+          (js-object
+            :kind
+            deferred-kind
+            :realized
+            (lambda () (= state deferred-realized))
+            :force
+            (lambda
+              ()
+              (cond ((= state deferred-realized) value)
+                ((= state deferred-running)
+                  (deferred-fail
+                    "ELI-DEFERRED-REENTRANT-FORCE"
+                    "delay cannot force itself while it is running"))
+                (t
+                  (setq state deferred-running)
+                  (try
+                    (let ((computed (funcall producer)))
+                      (setq value computed state deferred-realized)
+                      computed)
+                    (catch error (setq state deferred-pending) (throw error)))))))))
+      (js-call deferred-registry :add reference)
+      reference))
+  (defun delay?
+    (value)
+    (if (= (value-type value) "object")
+      (try (js-call deferred-registry :has value) (catch _error false))
+      false))
+  (defun realized? (value) (and (delay? value) (funcall (get value "realized" nil))))
+  (defun force (value) (if (delay? value) (funcall (get value "force" nil)) value))
+  (defun memoize
+    (function)
+    (when (not (= (value-type function) "function"))
+      (deferred-fail "ELI-DEFERRED-INVALID-FUNCTION" "memoize value must be a function"))
+    (let ((cache (empty-value-map)))
+      (lambda
+        (&rest arguments)
+        (let ((key (persistent-vector-from-array arguments)))
+          (if (persistent-map-has? cache key)
+            (persistent-map-get cache key nil)
+            (let ((result (apply function arguments)))
+              (setq cache (persistent-map-assoc cache key result))
+              result))))))
+  (export delay delay? force memoize realized?))

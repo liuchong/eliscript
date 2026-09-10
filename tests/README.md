@@ -35,6 +35,11 @@ The maturity-progress test derives implementation, verification, and
 stabilization percentages from explicit core acceptance units. Application
 demonstrations are validated separately and cannot raise core progress.
 
+`stdlib-deferred.test.mjs` builds delayed computation and value-semantic
+memoization from Eliscript sources, executes the maintained fixture under Bun
+and Node, and covers frozen identity, false/nullish caching, producer retry,
+recursive force rejection, and non-cached memoized failures.
+
 `reader-program-fuzz.test.mjs` runs the fixed 100,000-input M12 reliability
 corpus. Half of the inputs are recursively generated reader forms and half are
 complete-module mutations. The test checks seed/self-hosted reader decisions,

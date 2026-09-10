@@ -59,6 +59,29 @@ with constant stack usage. The complete identity, argument, nullish, ordering,
 and portability contracts are specified in
 [0149](../specs/0149-portable-functional-combinators.md).
 
+## Deferred Computation
+
+`deferred.eli` provides synchronous delayed values and value-semantic function
+memoization without compiler syntax or framework policy:
+
+```elisp
+(import "../../stdlib/deferred.eli" delay force memoize realized?)
+
+(let* ((answer (delay (lambda () (expensive-computation))))
+       (cached-score (memoize score)))
+  [(realized? answer)
+   (force answer)
+   (funcall cached-score document options)])
+```
+
+A Delay producer runs only on its first successful `force`; errors restore the
+pending state, recursive forcing is rejected, and all successful values
+including `nil`, `undefined`, and `false` are retained exactly. Memoization keys
+complete argument vectors with persistent value equality, so structurally equal
+persistent inputs share cache entries. Exact identity, retry, error, and host
+parity semantics are specified in
+[0161](../specs/0161-deferred-and-memoized-computation.md).
+
 ## Bit
 
 `bit.eli` builds population count and 32-bit rotations entirely from portable

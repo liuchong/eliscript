@@ -526,6 +526,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0158 | [Declarative Multimethod Definitions](0158-declarative-multimethod-definitions.md) | Stable | Implemented |
 | 0159 | [Declarative Protocol Definitions](0159-declarative-protocol-definitions.md) | Stable | Implemented |
 | 0160 | [Threading and Conditional Binding Forms](0160-threading-and-conditional-binding-forms.md) | Stable | Implemented |
+| 0161 | [Deferred and Memoized Computation](0161-deferred-and-memoized-computation.md) | Stable | Implemented |
 
 ## Adding a Specification
 
