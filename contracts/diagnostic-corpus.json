@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "format": "eliscript-diagnostic-corpus",
   "version": 1,
-  "identity": "3a74f866b9488c8ee56bb66f6b901120272799ce49d292024e48be0e9992433d",
+  "identity": "5a43c82a131490de9ff802fb3decb549c59187e4ca144689c9dfa542f97897f0",
   "suites": [
     {
       "id": "reader",
@@ -443,7 +443,7 @@
       "fixture": "tests/fixtures/bootstrap-expander.json",
       "oracle": "tests/bootstrap-expander-oracle.el",
       "validCaseCount": 40,
-      "negativeCaseCount": 30,
+      "negativeCaseCount": 36,
       "cases": [
         {
           "name": "missing-definition-shape",
@@ -1191,6 +1191,156 @@
                 "offset": 19,
                 "line": 1,
                 "column": 20
+              }
+            }
+          }
+        },
+        {
+          "name": "missing-letfn-bindings",
+          "human": "letfn-missing.eli:1:1: letfn requires a binding list",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "letfn requires a binding list",
+            "location": {
+              "file": "letfn-missing.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 7,
+                "line": 1,
+                "column": 8
+              }
+            }
+          }
+        },
+        {
+          "name": "missing-letfn-body",
+          "human": "letfn-body.eli:1:1: letfn requires at least one body form",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "letfn requires at least one body form",
+            "location": {
+              "file": "letfn-body.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 10,
+                "line": 1,
+                "column": 11
+              }
+            }
+          }
+        },
+        {
+          "name": "non-list-letfn-bindings",
+          "human": "letfn-bindings.eli:1:1: letfn bindings must be a list",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "letfn bindings must be a list",
+            "location": {
+              "file": "letfn-bindings.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 19,
+                "line": 1,
+                "column": 20
+              }
+            }
+          }
+        },
+        {
+          "name": "incomplete-letfn-declaration",
+          "human": "letfn-declaration.eli:1:9: letfn declaration requires a name, parameter list, and body",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "letfn declaration requires a name, parameter list, and body",
+            "location": {
+              "file": "letfn-declaration.eli",
+              "start": {
+                "offset": 8,
+                "line": 1,
+                "column": 9
+              },
+              "end": {
+                "offset": 22,
+                "line": 1,
+                "column": 23
+              }
+            }
+          }
+        },
+        {
+          "name": "non-symbol-letfn-name",
+          "human": "letfn-name.eli:1:9: letfn name must be a symbol: 1",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "letfn name must be a symbol: 1",
+            "location": {
+              "file": "letfn-name.eli",
+              "start": {
+                "offset": 8,
+                "line": 1,
+                "column": 9
+              },
+              "end": {
+                "offset": 25,
+                "line": 1,
+                "column": 26
+              }
+            }
+          }
+        },
+        {
+          "name": "non-list-letfn-parameters",
+          "human": "letfn-parameters.eli:1:9: letfn declaration requires a parameter list",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "letfn declaration requires a parameter list",
+            "location": {
+              "file": "letfn-parameters.eli",
+              "start": {
+                "offset": 8,
+                "line": 1,
+                "column": 9
+              },
+              "end": {
+                "offset": 26,
+                "line": 1,
+                "column": 27
               }
             }
           }

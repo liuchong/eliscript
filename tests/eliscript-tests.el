@@ -1688,6 +1688,40 @@
                (regexp-quote (cadr case))
                (error-message-string error-data))))))
 
+(ert-deftest eliscript-expander-desugars-local-recursive-functions ()
+  (let ((output
+         (eliscript-compile-string
+          (concat
+           "(defun run ()\n"
+           "  (letfn ((even? (n) (if (= n 0) t (odd? (1- n))))\n"
+           "          (odd? ((n) (if (= n 0) false (even? (1- n))))\n"
+           "                ((n fallback) fallback))\n"
+           "          (later async (n) n))\n"
+           "    (even? 10)))")
+          "letfn.eli")))
+    (should (string-match-p "even_QMARK_ = (n) =>" output))
+    (should (string-match-p "odd_QMARK_ = (\\.\\.\\.arity_arguments\\$G" output))
+    (should (string-match-p "later = async (n) =>" output))
+    (should-not (string-match-p "letfn" output))))
+
+(ert-deftest eliscript-expander-validates-local-recursive-functions ()
+  (dolist (case
+           '(("(letfn)" "letfn requires a binding list")
+             ("(letfn ())" "letfn requires at least one body form")
+             ("(letfn value value)" "letfn bindings must be a list")
+             ("(letfn ((1 (x) x)) x)" "letfn name must be a symbol: 1")
+             ("(letfn ((f x x)) (f 1))"
+              "letfn declaration requires a parameter list")
+             ("(letfn ((f (x))) (f 1))"
+              "letfn declaration requires a name, parameter list, and body")))
+    (let ((error-data
+           (should-error
+            (eliscript-compile-string (car case) "letfn-error.eli")
+            :type 'eliscript-expand-error)))
+      (should (string-match-p
+               (regexp-quote (cadr case))
+               (error-message-string error-data))))))
+
 (ert-deftest eliscript-expander-preserves-quoted-data ()
   (let ((output
          (eliscript-compile-string

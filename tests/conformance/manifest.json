@@ -3574,6 +3574,45 @@
           "contains": "self-hosted formatter preserves concrete syntax and core semantics"
         }
       ]
+    },
+    {
+      "id": "language.local-recursive-functions",
+      "title": "Local recursive functions",
+      "status": "stable",
+      "spec": "0172",
+      "contracts": [
+        "Predeclares one shared lexical scope for every local function name",
+        "Supports direct mutual forward and escaping recursive closures",
+        "Composes with multi-arity recur async and portable function semantics",
+        "Matches Seed self-hosted Source Maps Bun and Node execution"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-expander-desugars-local-recursive-functions"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-expander-validates-local-recursive-functions"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/local-recursive-functions.test.mjs",
+          "contains": "local recursive functions agree across compilers and local hosts"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-indentation-matches-formatter-structure"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-formatter.test.mjs",
+          "contains": "self-hosted formatter preserves concrete syntax and core semantics"
+        }
+      ]
     }
   ]
 }

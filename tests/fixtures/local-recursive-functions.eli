@@ -1,0 +1,43 @@
+(module tests.local-recursive-functions
+  (defconst escaped-even
+    (letfn ((even? (value)
+              (if (= value 0) t (odd? (1- value))))
+            (odd? (value)
+              (if (= value 0) false (even? (1- value)))))
+      even?))
+
+  (defportable portable-even? (value)
+    (letfn ((even? (current)
+              (if (= current 0) t (odd? (1- current))))
+            (odd? (current)
+              (if (= current 0) false (even? (1- current)))))
+      (even? value)))
+
+  (defun report ()
+    (let ((offset 40))
+      (letfn ((even? (value)
+                (if (= value 0) t (odd? (1- value))))
+              (odd? (value)
+                (if (= value 0) false (even? (1- value))))
+              (choose
+                (() "none")
+                ((value) (+ offset value)))
+              (countdown (value)
+                (if (= value 0) "done" (recur (1- value)))))
+        (js-object
+          :even (even? 10000)
+          :odd (odd? 10001)
+          :none (choose)
+          :captured (choose 2)
+          :stackSafe (countdown 10000)
+          :escapedEven (funcall escaped-even 24)
+          :portableEven (portable-even? 18)))))
+
+  (defasync async-report ()
+    (letfn ((left async (value)
+              (if (= value 0) "async-done" (await (right (1- value)))))
+            (right async (value)
+              (if (= value 0) "async-done" (await (left (1- value))))))
+      (await (left 12))))
+
+  (export report async-report escaped-even portable-even?))

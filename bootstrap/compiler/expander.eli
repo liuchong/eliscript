@@ -1637,6 +1637,84 @@
         (js-call result-items :push dispatch)
         (make-list result-items (node-span source-node)))))
 
+  (defun desugar-letfn (args source-node context span)
+    (when (= (get args :length) 0)
+      (expander-fail context span "letfn requires a binding list"))
+    (when (= (get args :length) 1)
+      (expander-fail context span "letfn requires at least one body form"))
+    (let* ((bindings-node (js-nth 0 args))
+           (declarations (list-items bindings-node))
+           (bindings (js-array))
+           (assignments (js-array)))
+      (when (eq declarations undefined)
+        (expander-fail context span "letfn bindings must be a list"))
+      (js-call declarations :forEach
+        (lambda (declaration)
+          (let* ((declaration-span (or (node-span declaration) span))
+                 (items (list-items declaration)))
+            (when (or (eq items undefined) (< (get items :length) 3))
+              (expander-fail
+                context declaration-span
+                "letfn declaration requires a name, parameter list, and body"))
+            (let* ((name-node (js-nth 0 items))
+                   (marker-node (js-nth 1 items))
+                   (async-function
+                     (and (symbol-node-p marker-node)
+                          (= (node-name marker-node) "async")))
+                   (function-forms
+                     (js-call items :slice (if async-function 2 1)))
+                   (operator-node
+                     (symbol-node
+                       (if async-function "async" "lambda")
+                       declaration-span))
+                   (parameters (js-nth 0 function-forms))
+                   (function-node nil))
+              (unless (symbol-node-p name-node)
+                (expander-fail
+                  context declaration-span
+                  (str "letfn name must be a symbol: "
+                       (node-display name-node))))
+              (unless (list-node-p parameters)
+                (expander-fail
+                  context declaration-span
+                  "letfn declaration requires a parameter list"))
+              (setq function-node
+                (if (multi-arity-clause-p parameters)
+                    (let* ((named
+                             (desugar-multi-arity
+                               operator-node name-node function-forms
+                               declaration context declaration-span))
+                           (named-items (node-items named)))
+                      (make-list
+                        (js-call
+                          (js-array (js-nth 0 named-items))
+                          :concat (js-call named-items :slice 2))
+                        (node-span named)))
+                  (progn
+                    (when (= (get function-forms :length) 1)
+                      (expander-fail
+                        context declaration-span
+                        "letfn declaration requires a function body"))
+                    (make-list
+                      (js-call (js-array operator-node) :concat function-forms)
+                      declaration-span))))
+              (js-call bindings :push
+                (make-list
+                  (js-array name-node (literal-node nil declaration-span))
+                  declaration-span))
+              (js-call assignments :push
+                (make-list
+                  (js-array
+                    (symbol-node "set!" declaration-span)
+                    name-node
+                    function-node)
+                  declaration-span))))))
+      (make-list
+        (js-call
+          (js-array (symbol-node "let" span) (make-list bindings span))
+          :concat assignments (js-call args :slice 1))
+        (node-span source-node))))
+
   (defun desugar-defprotocol (args context span)
     (when (< (get args :length) 2)
       (expander-fail
@@ -2233,6 +2311,12 @@
                  (js-call (expand-bindings args environment depth context)
                    :forEach
                    (lambda (item) (js-call expanded :push item))))
+                ((= operator "letfn")
+                 (setq expanded
+                   (node-items
+                     (expand-expression
+                       (desugar-letfn args form context span)
+                       environment depth context))))
                 ((= operator "setq")
                  (js-call (expand-alternating
                             args environment depth context false false)

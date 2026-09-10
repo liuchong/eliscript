@@ -84,6 +84,7 @@ test-core: check-contracts
 		tests/declarative-protocol.test.mjs tests/declarative-record.test.mjs \
 		tests/declarative-type.test.mjs \
 		tests/value-dispatch.test.mjs tests/multi-arity.test.mjs \
+		tests/local-recursive-functions.test.mjs \
 		tests/core-expression-forms.test.mjs \
 		tests/interop-js.test.mjs \
 		tests/interop-package.test.mjs \

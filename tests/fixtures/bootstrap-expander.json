@@ -381,6 +381,42 @@
       "filename": "multi-arity-body.eli",
       "source": "(defun choose ((x)) ((x y) y))",
       "error": "multi-arity-body.eli:1:15: multi-arity clause requires a parameter list and body"
+    },
+    {
+      "name": "missing-letfn-bindings",
+      "filename": "letfn-missing.eli",
+      "source": "(letfn)",
+      "error": "letfn-missing.eli:1:1: letfn requires a binding list"
+    },
+    {
+      "name": "missing-letfn-body",
+      "filename": "letfn-body.eli",
+      "source": "(letfn ())",
+      "error": "letfn-body.eli:1:1: letfn requires at least one body form"
+    },
+    {
+      "name": "non-list-letfn-bindings",
+      "filename": "letfn-bindings.eli",
+      "source": "(letfn value value)",
+      "error": "letfn-bindings.eli:1:1: letfn bindings must be a list"
+    },
+    {
+      "name": "incomplete-letfn-declaration",
+      "filename": "letfn-declaration.eli",
+      "source": "(letfn ((walk (value))) value)",
+      "error": "letfn-declaration.eli:1:9: letfn declaration requires a name, parameter list, and body"
+    },
+    {
+      "name": "non-symbol-letfn-name",
+      "filename": "letfn-name.eli",
+      "source": "(letfn ((1 (value) value)) value)",
+      "error": "letfn-name.eli:1:9: letfn name must be a symbol: 1"
+    },
+    {
+      "name": "non-list-letfn-parameters",
+      "filename": "letfn-parameters.eli",
+      "source": "(letfn ((walk value value)) value)",
+      "error": "letfn-parameters.eli:1:9: letfn declaration requires a parameter list"
     }
   ]
 }

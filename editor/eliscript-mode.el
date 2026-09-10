@@ -77,7 +77,7 @@ Relative paths are resolved from the discovered project root."
   '("->" "->>" "and" "apply" "as->" "async" "await" "case" "catch" "cond" "condp" "cond->" "cond->>"
     "do" "finally" "fn" "funcall" "if" "if-let" "if-some" "js*" "js-array" "js-call"
     "js-cons" "js-length" "js-nth" "js-object" "lambda" "let"
-    "let*" "loop" "new" "or" "progn" "quote" "recur" "set!" "setq"
+    "let*" "letfn" "loop" "new" "or" "progn" "quote" "recur" "set!" "setq"
     "some->" "some->>" "throw" "try" "unless" "when" "when-let" "when-some" "while"))
 
 (defconst eliscript-mode--definition-heads

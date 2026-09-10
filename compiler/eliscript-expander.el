@@ -766,6 +766,81 @@
         (list parameters dispatch))
        source-form))))
 
+(defun eliscript-expander--desugar-letfn (arguments source-form)
+  "Return recursive local function ARGUMENTS as ordinary lexical forms."
+  (unless arguments
+    (eliscript-expander--fail "letfn requires a binding list"))
+  (unless (cdr arguments)
+    (eliscript-expander--fail "letfn requires at least one body form"))
+  (let* ((bindings-form (car arguments))
+         (declarations (eliscript-form-value bindings-form))
+         bindings assignments)
+    (unless (proper-list-p declarations)
+      (eliscript-expander--fail "letfn bindings must be a list"))
+    (dolist (declaration declarations)
+      (let* ((eliscript-expander--current-span
+              (or (eliscript-form-span declaration)
+                  eliscript-expander--current-span))
+             (items (eliscript-form-value declaration)))
+        (unless (and (proper-list-p items) (>= (length items) 3))
+          (eliscript-expander--fail
+           "letfn declaration requires a name, parameter list, and body"))
+        (let* ((name-form (car items))
+               (name (eliscript-form-value name-form))
+               (async-p (eq (eliscript-form-value (cadr items)) 'async))
+               (function-forms (if async-p (cddr items) (cdr items)))
+               (operator-form
+                (eliscript-expander--generated-form-at
+                 (if async-p 'async 'lambda) declaration))
+               function-form)
+          (unless (eliscript-macro-eval-symbol-p name)
+            (eliscript-expander--fail
+             "letfn name must be a symbol: %S" name))
+          (unless (and function-forms
+                       (proper-list-p
+                        (eliscript-form-value (car function-forms))))
+            (eliscript-expander--fail
+             "letfn declaration requires a parameter list"))
+          (setq function-form
+                (if (eliscript-expander--multi-arity-clause-p
+                     (car function-forms))
+                    (let* ((named
+                            (eliscript-expander--desugar-multi-arity
+                             operator-form name-form function-forms declaration))
+                           (named-items (eliscript-form-value named)))
+                      (eliscript-form-inherit
+                       (cons (car named-items) (cddr named-items))
+                       named))
+                  (progn
+                    (unless (cdr function-forms)
+                      (eliscript-expander--fail
+                       "letfn declaration requires a function body"))
+                    (eliscript-expander--generated-form-at
+                     (cons operator-form function-forms) declaration))))
+          (push
+           (eliscript-expander--generated-form-at
+            (list name-form
+                  (eliscript-expander--generated-form-at nil declaration))
+            declaration)
+           bindings)
+          (push
+           (eliscript-expander--generated-form-at
+            (list
+             (eliscript-expander--generated-form-at 'set! declaration)
+             name-form
+             function-form)
+            declaration)
+           assignments))))
+    (eliscript-expander--generated-form-at
+     (append
+      (list
+       (eliscript-expander--generated-form-at 'let source-form)
+       (eliscript-expander--generated-form-at
+        (nreverse bindings) bindings-form))
+      (nreverse assignments)
+      (cdr arguments))
+     source-form)))
+
 (defun eliscript-expander--desugar-defprotocol (arguments)
   "Return core declarations represented by defprotocol ARGUMENTS."
   (when (< (length arguments) 2)
@@ -1374,6 +1449,11 @@
               (cons operator-form
                     (eliscript-expander--expand-bindings
                      arguments environment depth)))
+             ('letfn
+              (eliscript-form-value
+               (eliscript-expander--expand-expression
+                (eliscript-expander--desugar-letfn arguments form)
+                environment depth)))
              ('setq
               (cons operator-form
                     (eliscript-expander--expand-assignment

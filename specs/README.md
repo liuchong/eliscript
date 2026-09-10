@@ -537,6 +537,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0169 | [Protocol Implementation Values](0169-protocol-implementation-values.md) | Stable | Implemented |
 | 0170 | [Value Dispatch Forms](0170-value-dispatch-forms.md) | Stable | Implemented |
 | 0171 | [Multi-arity Functions](0171-multi-arity-functions.md) | Stable | Implemented |
+| 0172 | [Local Recursive Functions](0172-local-recursive-functions.md) | Stable | Implemented |
 
 ## Adding a Specification
 
