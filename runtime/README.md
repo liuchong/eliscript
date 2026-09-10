@@ -40,6 +40,9 @@ implements an immutable 32-way bit-partitioned vector trie with a short tail
 and now backs square-bracket value expressions. Internal
 node shape, allocation, visit, and sharing observations are isolated in
 `testing/vector.mjs`; applications must not depend on those test adapters.
+`subvec` creates an O(1) range view that shares the complete source trie and
+tail, flattens nested views, and retains Vector protocols, value semantics,
+metadata, and selected-path updates without exposing hidden source values.
 
 ### Persistent List
 

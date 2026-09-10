@@ -1361,6 +1361,8 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
       "identifier-state": true,
     });
     expect([...api.report["vector-appended"]]).toEqual([1, 2, 3, 4]);
+    expect([...api.report["vector-slice"]]).toEqual([2, 3]);
+    expect([...api.report["vector-slice-bounded"]]).toEqual([2, 3]);
     expect([...api.report["vector-empty"]]).toEqual([]);
     expect([...api.report.transformed]).toEqual([6, 8]);
     expect([...api.report["stateful-transformed"]].map((value) => [...value]))
@@ -1434,6 +1436,8 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
       "if (api.report['native-array-collection']) process.exit(1);",
       "if (api.report['bounded-vector-count'] !== 2) process.exit(1);",
       "if (!api.report['distinct-scalars'] || api.report['distinct-vectors']) process.exit(1);",
+      "if (JSON.stringify([...api.report['vector-slice']]) !== '[2,3]') process.exit(1);",
+      "if (JSON.stringify([...api.report['vector-slice-bounded']]) !== '[2,3]') process.exit(1);",
       "if (!api.report['empty-vector-empty'] || !api.report['non-empty-vector-same']) process.exit(1);",
       "if (!api.report['map-associative'] || api.report['map-indexed']) process.exit(1);",
       "if (JSON.stringify([...api.report['vector-appended']]) !== '[1,2,3,4]') process.exit(1);",

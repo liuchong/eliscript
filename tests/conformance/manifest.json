@@ -3265,6 +3265,53 @@
           "contains": "portable compiler driver reaches a reproducible fixed point"
         }
       ]
+    },
+    {
+      "id": "stdlib.persistent-subvector-views",
+      "title": "Persistent subvector views",
+      "status": "stable",
+      "spec": "0165",
+      "contracts": [
+        "Creates immutable O(1) Vector range views with exact bound validation",
+        "Flattens nested views onto one base Vector without traversal or node allocation",
+        "Preserves Vector classification protocols value equality hashing and metadata",
+        "Supports relative association logical append pop traversal and reduction without source mutation",
+        "Materializes only visible values when converting to an owner-token transient builder",
+        "Shares every source node at one million values and copies one selected path after association",
+        "Produces byte-identical wrappers and matching local Bun and Node results"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-vector.test.mjs",
+          "contains": "persistent subvector is an O(1) structurally shared vector view"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-vector.test.mjs",
+          "contains": "persistent subvector supports immutable vector operations and protocols"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-vector.test.mjs",
+          "contains": "persistent vector keeps trie work bounded at one million values"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-vector.test.mjs",
+          "contains": "persistent vector has equivalent behavior under Bun and Node"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "Eliscript core modules compile and execute against runtime protocols"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }

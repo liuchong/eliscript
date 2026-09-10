@@ -530,6 +530,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0162 | [Collection Capability Predicates and Empty Value Semantics](0162-collection-capability-predicates.md) | Stable | Implemented |
 | 0163 | [Replayable Sequence Head and Tail Views](0163-replayable-sequence-head-tail-views.md) | Stable | Implemented |
 | 0164 | [Persistent Collection Classification and Bounded Inspection](0164-persistent-collection-classification.md) | Stable | Implemented |
+| 0165 | [Persistent Subvector Views](0165-persistent-subvector-views.md) | Stable | Implemented |
 
 ## Adding a Specification
 

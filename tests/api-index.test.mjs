@@ -40,7 +40,7 @@ function escapeHtml(value) {
 test("generated library API index matches every declared module and export", async () => {
   const index = await buildApiIndex({ root: ROOT });
   expect(index.moduleCount).toBe(35);
-  expect(index.exportCount).toBe(476);
+  expect(index.exportCount).toBe(477);
   expect(index.modules.find(({ module }) => module === "deferred")).toEqual({
     module: "deferred",
     source: "stdlib/deferred.eli",

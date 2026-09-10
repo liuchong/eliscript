@@ -298,6 +298,7 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "function sequential_QMARK_(value)",
         "function seqable_QMARK_(collection)",
         "function set_QMARK_(value)",
+        "function subvec(vector, start, end = null)",
         "function reduce(collection, reducer, ...initial)",
         "function reduce_kv(collection, reducer, initial)",
         "function reduction_view(reduce_function)",

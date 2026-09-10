@@ -26,12 +26,13 @@ own persistent values and logical sequence views:
 
 ```elisp
 (import "../../stdlib/core/collection.eli"
-        bounded-count collection? distinct? sequence? vector?)
+        bounded-count collection? distinct? sequence? subvec vector?)
 
 [(collection? [1 2 3])
  (vector? [1 2 3])
  (sequence? [1 2 3])
  (bounded-count 2 [1 2 3])
+ (subvec [10 20 30 40] 1 3)
  (distinct? [1 2] [1 2])]
 ```
 
@@ -39,6 +40,9 @@ own persistent values and logical sequence views:
 for unbounded views. `distinct?` compares persistent values structurally and
 host objects by identity. Exact classification and traversal semantics are in
 [0164](../specs/0164-persistent-collection-classification.md).
+`subvec` adds O(1) persistent Vector range views with complete protocol,
+structural-sharing, metadata, and value behavior; see
+[0165](../specs/0165-persistent-subvector-views.md).
 
 ## Core Ordering
 

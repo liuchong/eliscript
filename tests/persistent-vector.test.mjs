@@ -5,7 +5,31 @@ import {
   PersistentVector,
   isPersistentVector,
   persistentVector,
+  subvec,
 } from "../runtime/core/vector.mjs";
+import {
+  assoc,
+  conj,
+  count,
+  empty,
+  isCollection,
+  isSequential,
+  isVector,
+  nth,
+  peek,
+  pop,
+  reduceKV,
+  rseq,
+  seq,
+} from "../runtime/core/collection.mjs";
+import { persistentHashMap } from "../runtime/core/map.mjs";
+import { meta, withMeta } from "../runtime/core/metadata.mjs";
+import { hashValue, equalValues } from "../runtime/core/value.mjs";
+import {
+  conjBang,
+  persistentBang,
+  transient,
+} from "../runtime/core/transient.mjs";
 import {
   inspectPersistentVector,
   persistentVectorMetrics,
@@ -102,6 +126,87 @@ test("persistent vector crosses tail and trie depth boundaries", () => {
   expect(inspectPersistentVector(collapsed).shift).toBe(5);
   expect(values.count).toBe(1057);
   expect(values.peek()).toBe(1056);
+});
+
+test("persistent subvector is an O(1) structurally shared vector view", () => {
+  const source = vectorRange(4096);
+  const shape = inspectPersistentVector(source);
+
+  resetPersistentVectorMetrics();
+  const slice = subvec(source, 31, 2050);
+  expect(persistentVectorMetrics()).toEqual({
+    nodeAllocations: 0,
+    nodeVisits: 0,
+    tailAllocations: 0,
+    rootGrowths: 0,
+  });
+  expect(sharedPersistentVectorNodes(source, slice)).toBe(shape.nodeCount);
+  expect(Object.isFrozen(slice)).toBe(true);
+  expect(isPersistentVector(slice)).toBe(true);
+  expect(isCollection(slice)).toBe(true);
+  expect(isVector(slice)).toBe(true);
+  expect(isSequential(slice)).toBe(true);
+  expect(slice.count).toBe(2019);
+  expect(slice.size).toBe(2019);
+  expect(slice.nth(0)).toBe(31);
+  expect(slice.nth(2018)).toBe(2049);
+  expect(slice.peek()).toBe(2049);
+  expect(subvec(slice, 1, 4).toArray()).toEqual([32, 33, 34]);
+  expect(subvec(slice, 2016).toArray()).toEqual([2047, 2048, 2049]);
+
+  expect(() => subvec([], 0)).toThrow("subvec expects a persistent vector");
+  for (const range of [[-1, 2], [3, 2], [0, 4097], [1.5, 2]]) {
+    expect(() => subvec(source, range[0], range[1])).toThrow(RangeError);
+  }
+  expect(() => slice.nth(-1)).toThrow(RangeError);
+  expect(slice.nth(2019, "missing")).toBe("missing");
+});
+
+test("persistent subvector supports immutable vector operations and protocols", () => {
+  const source = vectorRange(10);
+  const slice = subvec(source, 2, 5);
+  const updated = assoc(slice, 1, 30);
+  const appended = conj(slice, 50);
+
+  expect(slice.toArray()).toEqual([2, 3, 4]);
+  expect(updated.toArray()).toEqual([2, 30, 4]);
+  expect(appended.toArray()).toEqual([2, 3, 4, 50]);
+  expect(source.toArray()).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  expect(count(slice)).toBe(3);
+  expect(nth(slice, 1)).toBe(3);
+  expect(peek(slice)).toBe(4);
+  expect(pop(slice).toArray()).toEqual([2, 3]);
+  expect([...seq(slice)]).toEqual([2, 3, 4]);
+  expect([...rseq(slice)]).toEqual([4, 3, 2]);
+  expect(reduceKV(slice, (result, index, value) =>
+    result + index + value, 0)).toBe(12);
+  expect(slice.reduce((result, value, index) =>
+    result + index + value, 0)).toBe(12);
+  expect(subvec(source, 4, 4).reduce((value) => value, 7)).toBe(7);
+  expect(() => subvec(source, 4, 4).reduce((value) => value)).toThrow(
+    "cannot reduce an empty persistent subvector without an initial value",
+  );
+
+  const metadata = persistentHashMap(["source", "slice"]);
+  const annotated = withMeta(slice, metadata);
+  expect(meta(annotated)).toBe(metadata);
+  expect(meta(assoc(annotated, 0, 20))).toBe(metadata);
+  expect(meta(empty(annotated))).toBe(metadata);
+
+  expect(equalValues(slice, persistentVector(2, 3, 4))).toBe(true);
+  expect(hashValue(slice)).toBe(hashValue(persistentVector(2, 3, 4)));
+
+  const builder = transient(annotated);
+  conjBang(builder, 5);
+  const committed = persistentBang(builder);
+  expect(committed.toArray()).toEqual([2, 3, 4, 5]);
+  expect(meta(committed)).toBe(metadata);
+
+  const emptySlice = subvec(source, 3, 3);
+  expect(emptySlice.peek("missing")).toBe("missing");
+  expect(() => emptySlice.pop()).toThrow(
+    "cannot pop an empty persistent subvector",
+  );
 });
 
 test("persistent vector updates copy only the selected trie path", () => {
@@ -241,6 +346,26 @@ test("persistent vector keeps trie work bounded at one million values", () => {
   );
   expect(values.nth(500000)).toBe(500000);
   expect(updated.nth(500000)).toBe(-1);
+
+  resetPersistentVectorMetrics();
+  const slice = subvec(values, 499_999, 500_002);
+  expect(persistentVectorMetrics()).toEqual({
+    nodeAllocations: 0,
+    nodeVisits: 0,
+    tailAllocations: 0,
+    rootGrowths: 0,
+  });
+  expect(slice.toArray()).toEqual([499_999, 500_000, 500_001]);
+  expect(sharedPersistentVectorNodes(values, slice)).toBe(shape.nodeCount);
+
+  resetPersistentVectorMetrics();
+  const sliceUpdated = slice.assoc(1, "slice");
+  expect(persistentVectorMetrics().nodeAllocations).toBe(shape.depth);
+  expect(sharedPersistentVectorNodes(values, sliceUpdated)).toBe(
+    shape.nodeCount - shape.depth,
+  );
+  expect(values.nth(500_000)).toBe(500_000);
+  expect(sliceUpdated.toArray()).toEqual([499_999, "slice", 500_001]);
 }, 30000);
 
 test("persistent vector has equivalent behavior under Bun and Node", async () => {

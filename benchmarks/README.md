@@ -260,7 +260,7 @@ Set `ELISCRIPT_ANALYSIS_OUTPUT` to intentionally refresh a reviewed report.
 service startup, one-time document indexing, six crossover corpora, and 30
 alternating primary samples for exact Emacs Lisp and Eliscript implementations.
 Search and statistics are the selected transducer-backed workflows; the
-committed report records 9.679x and 8.267x median warm end-to-end speedups and
+committed report records 10.270x and 8.335x median warm end-to-end speedups and
 the conservative 16,000-character routing threshold.
 
 Run the real buffer lifecycle soak with:

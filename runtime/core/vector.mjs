@@ -57,6 +57,7 @@ import {
 const MAX_COUNT = 0x7fffffff;
 const MISSING = Symbol("eliscript.vector.missing");
 const VECTOR_HASH_TAG = 0x4f1b_2c3d;
+const SUBVECTOR_STATE = new WeakMap();
 
 function assertIndex(index, upperBound, operation) {
   if (!Number.isInteger(index) || index < 0 || index >= upperBound) {
@@ -85,6 +86,20 @@ function reverseVectorIterator(state) {
       }
       const value = chunk[index - chunkStart];
       index -= 1;
+      return { value, done: false };
+    },
+  };
+}
+
+function vectorRangeIterator(vector, start, end, reverse = false) {
+  let index = reverse ? end - 1 : start;
+  return {
+    next() {
+      if (reverse ? index < start : index >= end) {
+        return { value: undefined, done: true };
+      }
+      const value = vector.nth(index);
+      index += reverse ? -1 : 1;
       return { value, done: false };
     },
   };
@@ -686,10 +701,249 @@ export class PersistentVector {
   }
 }
 
+class PersistentSubVector extends PersistentVector {
+  constructor(vector, start, end, metadata = null) {
+    const source = vector[VECTOR_STATE];
+    super(
+      VECTOR_CONSTRUCTOR_TOKEN,
+      source.count,
+      source.shift,
+      source.root,
+      source.tail,
+      metadata,
+    );
+    SUBVECTOR_STATE.set(this, Object.freeze({ vector, start, end, metadata }));
+  }
+
+  get count() {
+    const state = SUBVECTOR_STATE.get(this);
+    return state.end - state.start;
+  }
+
+  get size() {
+    return this.count;
+  }
+
+  nth(index, notFound = MISSING) {
+    const state = SUBVECTOR_STATE.get(this);
+    const count = state.end - state.start;
+    if (!Number.isInteger(index) || index < 0 || index >= count) {
+      if (notFound !== MISSING) return notFound;
+      assertIndex(index, count, "subvec nth");
+    }
+    return state.vector.nth(state.start + index);
+  }
+
+  assoc(index, value) {
+    const state = SUBVECTOR_STATE.get(this);
+    const count = state.end - state.start;
+    if (!Number.isInteger(index) || index < 0 || index > count) {
+      throw new RangeError(
+        `subvec assoc index ${String(index)} is outside [0, ${count}]`,
+      );
+    }
+    const absoluteIndex = state.start + index;
+    const vector = absoluteIndex === state.vector.count
+      ? state.vector.conj(value)
+      : state.vector.assoc(absoluteIndex, value);
+    return new PersistentSubVector(
+      vector,
+      state.start,
+      Math.max(state.end, absoluteIndex + 1),
+      state.metadata,
+    );
+  }
+
+  conj(value) {
+    return this.assoc(this.count, value);
+  }
+
+  peek(notFound = null) {
+    const state = SUBVECTOR_STATE.get(this);
+    return state.start === state.end
+      ? notFound
+      : state.vector.nth(state.end - 1);
+  }
+
+  pop() {
+    const state = SUBVECTOR_STATE.get(this);
+    if (state.start === state.end) {
+      throw new RangeError("cannot pop an empty persistent subvector");
+    }
+    return state.end - state.start === 1
+      ? emptyVectorWithMetadata(state.metadata)
+      : new PersistentSubVector(
+        state.vector,
+        state.start,
+        state.end - 1,
+        state.metadata,
+      );
+  }
+
+  reduce(reducer, ...initial) {
+    if (typeof reducer !== "function") {
+      throw new TypeError("persistent subvector reducer must be a function");
+    }
+    const state = SUBVECTOR_STATE.get(this);
+    let index = 0;
+    let result;
+    if (initial.length === 0) {
+      if (state.start === state.end) {
+        throw new TypeError(
+          "cannot reduce an empty persistent subvector without an initial value",
+        );
+      }
+      result = state.vector.nth(state.start);
+      index = 1;
+    } else {
+      result = initial[0];
+    }
+    while (index < state.end - state.start) {
+      result = reducer(result, state.vector.nth(state.start + index), index);
+      index += 1;
+    }
+    return result;
+  }
+
+  [COLLECTION_COUNT]() {
+    return this.count;
+  }
+
+  [COLLECTION_EMPTY]() {
+    return emptyVectorWithMetadata(SUBVECTOR_STATE.get(this).metadata);
+  }
+
+  [COLLECTION_CONJ](value) {
+    return this.conj(value);
+  }
+
+  [COLLECTION_PEEK]() {
+    return this.peek();
+  }
+
+  [COLLECTION_POP]() {
+    return this.pop();
+  }
+
+  [COLLECTION_RSEQ]() {
+    const state = SUBVECTOR_STATE.get(this);
+    return state.start === state.end
+      ? null
+      : sequenceView(
+        () => vectorRangeIterator(
+          state.vector,
+          state.start,
+          state.end,
+          true,
+        ),
+        state.end - state.start,
+      );
+  }
+
+  [COLLECTION_GET](index, notFound = null) {
+    return this.nth(index, notFound);
+  }
+
+  [COLLECTION_ASSOC](index, value) {
+    return this.assoc(index, value);
+  }
+
+  [COLLECTION_CONTAINS](index) {
+    return Number.isInteger(index) && index >= 0 && index < this.count;
+  }
+
+  [COLLECTION_NTH](index, ...notFound) {
+    return notFound.length === 0
+      ? this.nth(index)
+      : this.nth(index, notFound[0]);
+  }
+
+  [COLLECTION_SEQ]() {
+    return this.count === 0
+      ? null
+      : sequenceView(() => this[Symbol.iterator](), this.count);
+  }
+
+  [COLLECTION_REDUCE](reducer, ...initial) {
+    return reduceIterable(this, reducer, ...initial);
+  }
+
+  [COLLECTION_REDUCE_KV](reducer, initial) {
+    const state = SUBVECTOR_STATE.get(this);
+    let result = initial;
+    let index = 0;
+    while (state.start + index < state.end) {
+      result = reducer(result, index, state.vector.nth(state.start + index));
+      index += 1;
+      if (isReducedValue(result)) return unreducedValue(result);
+    }
+    return result;
+  }
+
+  [EDITABLE_TRANSIENT]() {
+    const state = SUBVECTOR_STATE.get(this);
+    const builder = makeTransientVector(
+      emptyVectorWithMetadata(state.metadata),
+    );
+    for (const value of this) {
+      builder[TRANSIENT_CONJ](value);
+    }
+    return builder;
+  }
+
+  [METADATA_READ]() {
+    return SUBVECTOR_STATE.get(this).metadata;
+  }
+
+  [METADATA_WITH](metadata) {
+    const state = SUBVECTOR_STATE.get(this);
+    return metadata === state.metadata
+      ? this
+      : new PersistentSubVector(
+        state.vector,
+        state.start,
+        state.end,
+        metadata,
+      );
+  }
+
+  [Symbol.iterator]() {
+    const state = SUBVECTOR_STATE.get(this);
+    return vectorRangeIterator(state.vector, state.start, state.end);
+  }
+
+  get [Symbol.toStringTag]() {
+    return "EliscriptPersistentSubVector";
+  }
+}
+
 export const EMPTY_VECTOR = makeVector(0, BRANCH_BITS, EMPTY_ROOT, EMPTY_TAIL);
 
 export function persistentVector(...values) {
   return PersistentVector.from(values);
+}
+
+export function subvec(vector, start, end = undefined) {
+  if (!(vector instanceof PersistentVector)) {
+    throw new TypeError("subvec expects a persistent vector");
+  }
+  const count = vector.count;
+  const limit = end == null ? count : end;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(limit) ||
+      start < 0 || limit < start || limit > count) {
+    throw new RangeError(
+      `subvec range [${String(start)}, ${String(limit)}) is outside [0, ${count}]`,
+    );
+  }
+  if (vector instanceof PersistentSubVector) {
+    const state = SUBVECTOR_STATE.get(vector);
+    return new PersistentSubVector(
+      state.vector,
+      state.start + start,
+      state.start + limit,
+    );
+  }
+  return new PersistentSubVector(vector, start, limit);
 }
 
 export function isPersistentVector(value) {

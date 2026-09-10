@@ -1,6 +1,7 @@
 import {
   EMPTY_VECTOR,
   isPersistentVector,
+  subvec,
 } from "../../runtime/core/vector.mjs";
 import {
   inspectPersistentVector,
@@ -18,6 +19,8 @@ const shape = inspectPersistentVector(values);
 resetPersistentVectorMetrics();
 const updated = values.assoc(54_321, "updated");
 const metrics = persistentVectorMetrics();
+const slice = subvec(values, 32_767, 32_770);
+const nestedSlice = subvec(slice, 1);
 
 console.log(JSON.stringify({
   persistent: isPersistentVector(values),
@@ -27,5 +30,9 @@ console.log(JSON.stringify({
   updated: updated.nth(54_321),
   sharedNodes: sharedPersistentVectorNodes(values, updated),
   metrics,
+  slice: slice.toArray(),
+  nestedSlice: nestedSlice.toArray(),
+  slicePersistent: isPersistentVector(slice),
+  sliceSharedNodes: sharedPersistentVectorNodes(values, slice),
   sum: values.reduce((total, value) => total + value, 0),
 }));

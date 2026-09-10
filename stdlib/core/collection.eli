@@ -1,5 +1,6 @@
 (module eliscript.core.collection
   (import "../../runtime/core/collection.mjs" :as Runtime)
+  (import "../../runtime/core/vector.mjs" :as Vector)
   (defconst ICounted Runtime/ICounted)
   (defconst IEmptyable Runtime/IEmptyable)
   (defconst IConj Runtime/IConj)
@@ -31,6 +32,7 @@
   (defun sequence? (value) (Runtime/isSequence value))
   (defun bounded-count (limit collection) (Runtime/boundedCount limit collection))
   (defun distinct? (&rest values) (apply Runtime/areDistinct values))
+  (defun subvec (vector start &optional end) (Vector/subvec vector start end))
   (defun empty (collection) (Runtime/empty collection))
   (defun conj
     (collection &rest values)
@@ -119,6 +121,7 @@
     sequential?
     seqable?
     set?
+    subvec
     reduced
     reduced?
     reduction-view
