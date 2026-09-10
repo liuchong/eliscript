@@ -1437,6 +1437,56 @@
                (regexp-quote (cadr case))
                (error-message-string error-data))))))
 
+(ert-deftest eliscript-expander-desugars-record-declarations ()
+  (let ((output
+         (eliscript-compile-string
+          (concat
+           "(import \"./record.eli\" define-record-type)\n"
+           "(defrecord Person [name age])\n"
+           "(export Person ->Person map->Person Person?)")
+          "declarative-record.eli")))
+    (should (string-match-p
+             (regexp-quote
+              "const Person = define_record_type(\"Person\", [\"name\", \"age\"]);")
+             output))
+    (should (string-match-p
+             (regexp-quote
+              "const __GT_Person = (name, age) =>")
+             output))
+    (should (string-match-p
+             (regexp-quote "(Person)[\"create\"](name, age)") output))
+    (should (string-match-p
+             (regexp-quote "const map__GT_Person = (source) =>") output))
+    (should (string-match-p
+             (regexp-quote "(Person)[\"fromMap\"](source)") output))
+    (should (string-match-p
+             (regexp-quote "const Person_QMARK_ = (value) =>") output))
+    (should-not (string-match-p "defrecord" output))))
+
+(ert-deftest eliscript-expander-validates-record-declarations ()
+  (dolist (case
+           '(("(defrecord Person)"
+              "defrecord expects a name and field vector")
+             ("(defrecord \"Person\" [name])"
+              "defrecord name must be an unqualified symbol")
+             ("(defrecord domain/Person [name])"
+              "defrecord name must be an unqualified symbol")
+             ("(defrecord Person (name))"
+              "defrecord fields must be a vector")
+             ("(defrecord Person [name domain/age])"
+              "defrecord fields must be unqualified symbols")
+             ("(defrecord Person [name name])"
+              "defrecord declares duplicate field: name")
+             ("(defun broken () (defrecord Nested [value]))"
+              "defrecord is only valid at module top level")))
+    (let ((error-data
+           (should-error
+            (eliscript-compile-string (car case) "record-error.eli")
+            :type 'eliscript-expand-error)))
+      (should (string-match-p
+               (regexp-quote (cadr case))
+               (error-message-string error-data))))))
+
 (ert-deftest eliscript-expander-desugars-threading-and-binding-forms ()
   (let ((output
          (eliscript-compile-string

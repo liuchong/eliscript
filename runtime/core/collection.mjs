@@ -47,6 +47,7 @@ import {
 import { isPersistentList } from "./list.mjs";
 import { isPersistentHashMap } from "./map.mjs";
 import { isPersistentQueue } from "./queue.mjs";
+import { isRecord } from "./record.mjs";
 import { EMPTY_SET, isPersistentHashSet } from "./set.mjs";
 import { isPersistentVector } from "./vector.mjs";
 
@@ -407,6 +408,7 @@ export function isCollection(value) {
     isPersistentQueue(value) ||
     isPersistentVector(value) ||
     isPersistentHashMap(value) ||
+    isRecord(value) ||
     isPersistentHashSet(value);
 }
 
@@ -423,7 +425,7 @@ export function isQueue(value) {
 }
 
 export function isMap(value) {
-  return isPersistentHashMap(value);
+  return isPersistentHashMap(value) || isRecord(value);
 }
 
 export function isSet(value) {

@@ -1,0 +1,16 @@
+(module eliscript.core.record
+  (import "../../runtime/core/record.mjs" :as Runtime)
+  (defun define-record-type (name fields)
+    (Runtime/defineRecordType name fields))
+  (defun record? (value) (Runtime/isRecord value))
+  (defun record-type? (value) (Runtime/isRecordType value))
+  (defun record-type (value) (Runtime/recordType value))
+  (defun record-type-name (value) (Runtime/recordTypeName value))
+  (defun record-field-names (value) (Runtime/recordFieldNames value))
+  (export
+    define-record-type
+    record?
+    record-type?
+    record-type
+    record-type-name
+    record-field-names))

@@ -66,6 +66,17 @@ the literal ABI, while canonical data text uses `#queue [...]`. Structural
 observations are isolated in
 `testing/queue.mjs`.
 
+### Immutable Records
+
+`core/record.mjs` defines exact immutable domain types over persistent HashMap
+storage. `defrecord` generates positional and map constructors plus an exact
+predicate; instances support property and Keyword lookup, persistent Map
+updates and reduction, type-sensitive equality and hashing, immutable metadata,
+and ordinary exact-type protocol extension. Removing an extra key preserves
+the Record type, while removing a declared field returns a persistent HashMap.
+The runtime has no framework or transport dependency; exact semantics are in
+[0168](../specs/0168-immutable-record-types.md).
+
 ### Value Semantics
 
 `core/value.mjs` defines provisional coercion-free value equality and unsigned

@@ -476,6 +476,115 @@
              operation-form))))))
       operation-forms))))
 
+(defun eliscript-expander--desugar-defrecord (arguments)
+  "Return core declarations represented by defrecord ARGUMENTS."
+  (unless (= (length arguments) 2)
+    (eliscript-expander--fail
+     "defrecord expects a name and field vector"))
+  (let* ((name-form (nth 0 arguments))
+         (name (eliscript-form-value name-form))
+         (fields-form (nth 1 arguments))
+         (fields (eliscript-form-value fields-form))
+         (seen (make-hash-table :test #'equal))
+         field-names)
+    (unless (and (eliscript-macro-eval-symbol-p name)
+                 (not (string-match-p "/" (symbol-name name))))
+      (eliscript-expander--fail
+       "defrecord name must be an unqualified symbol: %S"
+       (eliscript-form-strip name-form)))
+    (unless (vectorp fields)
+      (eliscript-expander--fail
+       "defrecord fields must be a vector: %S"
+       (eliscript-form-strip fields-form)))
+    (dolist (field-form (append fields nil))
+      (let ((field (eliscript-form-value field-form)))
+        (unless (and (eliscript-macro-eval-symbol-p field)
+                     (not (string-match-p "/" (symbol-name field))))
+          (eliscript-expander--fail
+           "defrecord fields must be unqualified symbols: %S"
+           (eliscript-form-strip field-form)))
+        (let ((field-name (symbol-name field)))
+          (when (gethash field-name seen)
+            (eliscript-expander--fail
+             "defrecord declares duplicate field: %s" field-name))
+          (puthash field-name t seen)
+          (push (eliscript-expander--generated-form-at
+                 field-name field-form)
+                field-names))))
+    (setq field-names (nreverse field-names))
+    (let* ((name-string (symbol-name name))
+           (field-forms (append fields nil))
+           (parameter-form
+            (eliscript-expander--generated-form-at field-forms fields-form))
+           (constructor-form
+            (eliscript-expander--generated-form-at
+             (intern (concat "->" name-string)) name-form))
+           (map-constructor-form
+            (eliscript-expander--generated-form-at
+             (intern (concat "map->" name-string)) name-form))
+           (predicate-form
+            (eliscript-expander--generated-form-at
+             (intern (concat name-string "?")) name-form))
+           (source-form
+            (eliscript-expander--generated-form-at 'source fields-form))
+           (value-form
+            (eliscript-expander--generated-form-at 'value name-form)))
+      (list
+       (eliscript-expander--generated-form
+        (list
+         (eliscript-expander--generated-form 'defconst)
+         name-form
+         (eliscript-expander--generated-form
+          (list
+           (eliscript-expander--generated-form 'define-record-type)
+           (eliscript-expander--generated-form-at name-string name-form)
+           (eliscript-expander--generated-form
+            (cons (eliscript-expander--generated-form 'js-array)
+                  field-names))))))
+       (eliscript-expander--generated-form
+        (list
+         (eliscript-expander--generated-form 'defconst)
+         constructor-form
+         (eliscript-expander--generated-form
+          (list
+           (eliscript-expander--generated-form 'lambda)
+           parameter-form
+           (eliscript-expander--generated-form
+            (append
+             (list
+              (eliscript-expander--generated-form 'js-call)
+              name-form
+              (eliscript-expander--generated-form ':create))
+             field-forms))))))
+       (eliscript-expander--generated-form
+        (list
+         (eliscript-expander--generated-form 'defconst)
+         map-constructor-form
+         (eliscript-expander--generated-form
+          (list
+           (eliscript-expander--generated-form 'lambda)
+           (eliscript-expander--generated-form (list source-form))
+           (eliscript-expander--generated-form
+            (list
+             (eliscript-expander--generated-form 'js-call)
+             name-form
+             (eliscript-expander--generated-form ':fromMap)
+             source-form))))))
+       (eliscript-expander--generated-form
+        (list
+         (eliscript-expander--generated-form 'defconst)
+         predicate-form
+         (eliscript-expander--generated-form
+          (list
+           (eliscript-expander--generated-form 'lambda)
+           (eliscript-expander--generated-form (list value-form))
+           (eliscript-expander--generated-form
+            (list
+             (eliscript-expander--generated-form 'js-call)
+             name-form
+             (eliscript-expander--generated-form ':isInstance)
+             value-form))))))))))
+
 (defun eliscript-expander--protocol-method-object (form-name method-forms)
   "Build an implementation object for FORM-NAME from METHOD-FORMS."
   (unless method-forms
@@ -669,7 +778,8 @@
           (eliscript-expander--fail
            "defmethod is only valid at module top level"))
          ((memq operator
-                '(defprotocol extend-type extend-category extend-default))
+                '(defrecord defprotocol extend-type extend-category
+                  extend-default))
           (eliscript-expander--fail
            "%s is only valid at module top level" operator))
          ((and (symbolp operator) (gethash operator environment))
@@ -816,6 +926,10 @@
          ((eq operator 'defprotocol)
           (eliscript-expander--expand-top-level-sequence
            (eliscript-expander--desugar-defprotocol arguments)
+           environment depth))
+         ((eq operator 'defrecord)
+          (eliscript-expander--expand-top-level-sequence
+           (eliscript-expander--desugar-defrecord arguments)
            environment depth))
          ((eq operator 'extend-type)
           (eliscript-expander--expand-top-level

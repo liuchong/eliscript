@@ -1342,6 +1342,126 @@
               span))))
       forms))
 
+  (defun desugar-defrecord (args context span)
+    (when (/= (get args :length) 2)
+      (expander-fail
+        context span "defrecord expects a name and field vector"))
+    (let* ((name-node (js-nth 0 args))
+           (fields-node (js-nth 1 args))
+           (seen (new (js* "Set")))
+           (field-nodes (js-array))
+           (field-names (js-array))
+           (forms (js-array)))
+      (unless (and (symbol-node-p name-node)
+                   (not (js-call (node-name name-node) :includes "/")))
+        (expander-fail
+          context span
+          (str "defrecord name must be an unqualified symbol: "
+               (node-display name-node))))
+      (unless (vector-node-p fields-node)
+        (expander-fail
+          context span
+          (str "defrecord fields must be a vector: "
+               (node-display fields-node))))
+      (js-call (node-items fields-node) :forEach
+        (lambda (field-node)
+          (unless (and (symbol-node-p field-node)
+                       (not (js-call (node-name field-node) :includes "/")))
+            (expander-fail
+              context span
+              (str "defrecord fields must be unqualified symbols: "
+                   (node-display field-node))))
+          (let ((field-name (node-name field-node)))
+            (when (js-call seen :has field-name)
+              (expander-fail
+                context span
+                (str "defrecord declares duplicate field: " field-name)))
+            (js-call seen :add field-name)
+            (js-call field-nodes :push field-node)
+            (js-call field-names :push
+              (literal-node field-name (node-span field-node))))))
+      (let* ((name (node-name name-node))
+             (constructor-node
+               (symbol-node (str "->" name) (node-span name-node)))
+             (map-constructor-node
+               (symbol-node (str "map->" name) (node-span name-node)))
+             (predicate-node
+               (symbol-node (str name "?") (node-span name-node)))
+             (source-node (symbol-node "source" (node-span fields-node)))
+             (value-node (symbol-node "value" (node-span name-node))))
+        (js-call forms :push
+          (make-list
+            (js-array
+              (symbol-node "defconst" span)
+              name-node
+              (make-list
+                (js-array
+                  (symbol-node "define-record-type" span)
+                  (literal-node name (node-span name-node))
+                  (make-list
+                    (js-call
+                      (js-array (symbol-node "js-array" span))
+                      :concat field-names)
+                    span))
+                span))
+            span))
+        (js-call forms :push
+          (make-list
+            (js-array
+              (symbol-node "defconst" span)
+              constructor-node
+              (make-list
+                (js-array
+                  (symbol-node "lambda" span)
+                  (make-list field-nodes (node-span fields-node))
+                  (make-list
+                    (js-call
+                      (js-array
+                        (symbol-node "js-call" span)
+                        name-node
+                        (keyword-node "create" span))
+                      :concat field-nodes)
+                    span))
+                span))
+            span))
+        (js-call forms :push
+          (make-list
+            (js-array
+              (symbol-node "defconst" span)
+              map-constructor-node
+              (make-list
+                (js-array
+                  (symbol-node "lambda" span)
+                  (make-list (js-array source-node) span)
+                  (make-list
+                    (js-array
+                      (symbol-node "js-call" span)
+                      name-node
+                      (keyword-node "fromMap" span)
+                      source-node)
+                    span))
+                span))
+            span))
+        (js-call forms :push
+          (make-list
+            (js-array
+              (symbol-node "defconst" span)
+              predicate-node
+              (make-list
+                (js-array
+                  (symbol-node "lambda" span)
+                  (make-list (js-array value-node) span)
+                  (make-list
+                    (js-array
+                      (symbol-node "js-call" span)
+                      name-node
+                      (keyword-node "isInstance" span)
+                      value-node)
+                    span))
+                span))
+            span)))
+      forms))
+
   (defun protocol-method-object (form-name method-nodes context span)
     (when (= (get method-nodes :length) 0)
       (expander-fail
@@ -1486,7 +1606,8 @@
            ((= operator "defmethod")
             (expander-fail
               context span "defmethod is only valid at module top level"))
-           ((or (= operator "defprotocol")
+           ((or (= operator "defrecord")
+                (= operator "defprotocol")
                 (= operator "extend-type")
                 (= operator "extend-category")
                 (= operator "extend-default"))
@@ -1629,6 +1750,10 @@
           ((= operator "defprotocol")
            (expand-top-level-sequence
              (desugar-defprotocol args context span)
+             environment depth context))
+          ((= operator "defrecord")
+           (expand-top-level-sequence
+             (desugar-defrecord args context span)
              environment depth context))
           ((= operator "extend-type")
            (expand-top-level

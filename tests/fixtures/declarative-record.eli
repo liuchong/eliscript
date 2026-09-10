@@ -1,0 +1,64 @@
+(module tests.declarative-record
+  (import "../../stdlib/core/protocol.eli"
+    define-protocol extend-protocol-type protocol-method)
+  (import "../../stdlib/core/record.eli"
+    define-record-type record? record-type-name)
+  (import "../../runtime/core/collection.mjs" :as Collection)
+  (import "../../runtime/core/identifier.mjs" :as Identifier)
+  (import "../../runtime/core/map.mjs" :as Map)
+  (import "../../runtime/core/value.mjs" :as Value)
+
+  (defprotocol IDescribe describe)
+  (defrecord Person [name age])
+
+  (extend-type Person IDescribe
+    (describe (person)
+      (str (get person :name) ":" (get person :age))))
+
+  (defun record-report ()
+    (let* ((name-key (Identifier/keyword "name"))
+           (role-key (Identifier/keyword "role"))
+           (ada (->Person "Ada" 36))
+           (equal-ada (->Person "Ada" 36))
+           (enriched (Collection/assoc ada role-key "mathematician"))
+           (plain (Collection/dissoc enriched name-key))
+           (grace
+             (map->Person
+               (Map/persistentHashMap
+                 (js-array name-key "Grace")
+                 (js-array role-key "engineer")))))
+      (js-object
+        :identity
+        (js-object
+          :type (record-type-name Person)
+          :record (record? ada)
+          :predicate (Person? ada))
+        :construction
+        (js-object
+          :name (get ada :name)
+          :age (get ada :age)
+          :mappedName (get grace :name)
+          :mappedAge (get grace :age nil)
+          :mappedRole (Collection/get grace role-key))
+        :map
+        (js-object
+          :count (Collection/count enriched)
+          :role (Collection/get enriched role-key)
+          :extraRemovalKeepsRecord
+            (record? (Collection/dissoc enriched role-key))
+          :fieldRemovalKeepsRecord (record? plain)
+          :fieldRemovalCount (Collection/count plain))
+        :value
+        (js-object
+          :equal (Value/equalValues ada equal-ada)
+          :hashEqual (= (Value/hashValue ada) (Value/hashValue equal-ada)))
+        :protocol (describe ada))))
+
+  (export
+    Person
+    ->Person
+    map->Person
+    Person?
+    IDescribe
+    describe
+    record-report))

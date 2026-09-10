@@ -3415,6 +3415,45 @@
           "contains": "portable compiler driver reaches a reproducible fixed point"
         }
       ]
+    },
+    {
+      "id": "language.immutable-record-types",
+      "title": "Immutable Record types",
+      "status": "stable",
+      "spec": "0168",
+      "contracts": [
+        "Declares exact immutable Record types with positional map and predicate bindings",
+        "Participates in persistent Map value metadata and open protocol semantics",
+        "Preserves Record layout on association and extra removal while degrading after field removal",
+        "Matches Seed and self-hosted ESM Source Maps Bun and Node execution"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-expander-desugars-record-declarations"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/record.test.mjs",
+          "contains": "records participate in persistent map operations"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/record.test.mjs",
+          "contains": "records have type-sensitive value semantics and metadata"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/record.test.mjs",
+          "contains": "record constructors are exact protocol extension targets"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/declarative-record.test.mjs",
+          "contains": "defrecord is identical across seed and self-hosted compilers"
+        }
+      ]
     }
   ]
 }

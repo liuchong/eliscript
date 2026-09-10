@@ -49,6 +49,12 @@ Vector views. Its append and removal operations compose with the
 same collection, value, and metadata protocols; see
 [0166](../specs/0166-persistent-queue.md).
 
+`core/record.eli` supports declarative immutable domain types. A declaration
+such as `(defrecord Person [name age])` creates the exact type `Person`, the
+constructors `->Person` and `map->Person`, and the predicate `Person?`.
+Records compose with persistent Map operations, value equality and hashing,
+metadata, and `extend-type`; see [0168](../specs/0168-immutable-record-types.md).
+
 ## Core Ordering
 
 `core/order.eli` provides the maintained language-level comparison and sorting
