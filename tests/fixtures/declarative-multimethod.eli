@@ -1,0 +1,15 @@
+(module tests.declarative-multimethod
+  (import "./multimethod.eli" add-method! multi-fn)
+
+  (defmulti render (lambda (kind value) kind) "fallback")
+
+  (defmethod render "text" (kind value)
+    (str "text:" value))
+
+  (defmethod render "number" (kind value)
+    (* value 2))
+
+  (defmethod render "fallback" (kind value)
+    (str "fallback:" kind ":" value))
+
+  (export render))

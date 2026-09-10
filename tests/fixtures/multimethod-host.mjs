@@ -1,8 +1,9 @@
 import { pathToFileURL } from "node:url";
 
-const [modulePath] = process.argv.slice(2);
+const [modulePath, declarativePath] = process.argv.slice(2);
 const moduleUrl = pathToFileURL(modulePath);
 const multimethodModule = await import(moduleUrl.href);
+const declarativeModule = await import(pathToFileURL(declarativePath).href);
 const hierarchyModule = await import(new URL("./hierarchy.eli", moduleUrl).href);
 const mapModule = await import(new URL("./persistent-map.eli", moduleUrl).href);
 const setModule = await import(new URL("./persistent-set.eli", moduleUrl).href);
@@ -399,5 +400,11 @@ console.log(JSON.stringify({
   hierarchicalScale: {
     calls: hierarchicalScaleCalls,
     total: hierarchicalScaleTotal,
+  },
+  declarations: {
+    identity: isMultiFn(declarativeModule.render),
+    text: declarativeModule.render("text", "hello"),
+    number: declarativeModule.render("number", 21),
+    fallback: declarativeModule.render("other", 9),
   },
 }));

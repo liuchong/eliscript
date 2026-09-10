@@ -30,7 +30,7 @@
 (defconst eliscript-evaluation--operation-keys
   '(id operation source filename root line column))
 (defconst eliscript-evaluation--definition-heads
-  '(defasync defconst defmacro defn defportable defun defvar))
+  '(defasync defconst defmacro defmulti defn defportable defun defvar))
 (defconst eliscript-evaluation--module-heads
   '(export export-default import import-portable module))
 

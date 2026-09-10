@@ -58,6 +58,16 @@
         'runtimeBinding
         (eliscript-evaluation-form-description
          "(defmacro twice (value) `(+ ,value ,value))" "repl.eli"))))
+  (let ((definition
+         (eliscript-evaluation-form-description
+          "(defmulti render (lambda (value) value))" "repl.eli"))
+        (method
+         (eliscript-evaluation-form-description
+          "(defmethod render :text (value) value)" "repl.eli")))
+    (should (equal (alist-get 'kind definition) "definition"))
+    (should (equal (alist-get 'name definition) "render"))
+    (should (eq (alist-get 'runtimeBinding definition) t))
+    (should (equal (alist-get 'kind method) "expression")))
   (dolist (name '(jsx fragment defcomponent))
     (should
      (equal

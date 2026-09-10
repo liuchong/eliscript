@@ -1290,6 +1290,47 @@
     (should (string-match-p "const answer = 42;" output))
     (should (string-match-p "export {answer};" output))))
 
+(ert-deftest eliscript-expander-desugars-multimethod-declarations ()
+  (let ((output
+         (eliscript-compile-string
+          (concat
+           "(import \"./multimethod.eli\" add-method! multi-fn)\n"
+           "(defmulti render (lambda (kind value) kind) \"fallback\")\n"
+           "(defmethod render \"text\" (kind value) (str value))\n"
+           "(export render)")
+          "declarative.eli")))
+    (should (string-match-p
+             (regexp-quote
+              "const render = multi_fn(\"render\", (kind, value) =>")
+             output))
+    (should (string-match-p
+             (regexp-quote
+              "add_method_BANG_(render, \"text\", (kind, value) =>")
+             output))
+    (should-not (string-match-p "defmulti\\|defmethod" output))))
+
+(ert-deftest eliscript-expander-validates-multimethod-declarations ()
+  (dolist (case
+           '(("(defmulti render)"
+             "defmulti expects a name, dispatch function, and optional default value")
+             ("(defmulti \"render\" (lambda (value) value))"
+              "defmulti name must be a symbol")
+             ("(defmethod render :text)"
+             "defmethod expects a multimethod, dispatch value, and parameter list")
+             ("(defmethod (get registry :render) :text (value) value)"
+              "defmethod target must be a symbol")
+             ("(defun broken () (defmulti nested (lambda (value) value)))"
+              "defmulti is only valid at module top level")
+             ("(defun broken () (defmethod render :text (value) value))"
+              "defmethod is only valid at module top level")))
+    (let ((error-data
+           (should-error
+            (eliscript-compile-string (car case) "declarative-error.eli")
+            :type 'eliscript-expand-error)))
+      (should (string-match-p
+               (regexp-quote (cadr case))
+               (error-message-string error-data))))))
+
 (ert-deftest eliscript-expander-preserves-quoted-data ()
   (let ((output
          (eliscript-compile-string

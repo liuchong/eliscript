@@ -55,6 +55,26 @@ Functions use `defun`, `defn`, `lambda`, or `fn`. Parameters may include
 inside an asynchronous body. `defportable` defines functions whose complete
 dependency closure can execute in the restricted worker environment.
 
+## Multimethod Definitions
+
+`defmulti` creates a named multimethod from a dispatch function and an optional
+default dispatch value. `defmethod` registers a normal function body for one
+dispatch value. Both are top-level declarations and compile to the portable
+`multi-fn` and `add-method!` APIs rather than a compiler-owned runtime.
+
+```elisp
+(import "../stdlib/multimethod.eli" add-method! multi-fn)
+
+(defmulti render (lambda (kind value) kind) :fallback)
+(defmethod render :text (kind value) (str "text:" value))
+(defmethod render :fallback (kind value) (str "unknown:" value))
+```
+
+The imports are explicit: omitting either dependency produces the same unbound
+symbol diagnostic as any other missing binding. Method registration follows
+source order and retains all exact, hierarchy, preference, and persistent
+snapshot behavior from the multimethod standard library.
+
 ## Control Flow
 
 The core forms are `if`, `when`, `unless`, `cond`, `and`, `or`, `progn`,

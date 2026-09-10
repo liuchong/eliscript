@@ -151,6 +151,18 @@ test("self-hosted evaluation descriptors are closed and framework neutral", () =
     "(defmacro twice (value) `(+ ,value ,value))",
     "repl.eli",
   ).runtimeBinding).toBeFalse();
+  expect(compiler.evaluation_form_description(
+    "(defmulti render (lambda (value) value))",
+    "repl.eli",
+  )).toMatchObject({
+    kind: "definition",
+    name: "render",
+    runtimeBinding: true,
+  });
+  expect(compiler.evaluation_form_description(
+    "(defmethod render :text (value) value)",
+    "repl.eli",
+  ).kind).toBe("expression");
   for (const name of ["jsx", "fragment", "defcomponent"]) {
     expect(compiler.evaluation_form_description(
       `(${name} 1)`,
@@ -224,6 +236,16 @@ test("seed and self-hosted evaluation descriptors agree", async () => {
     {
       kind: "form",
       source: "(defmacro twice (value) `(+ ,value ,value))",
+      filename: "repl.eli",
+    },
+    {
+      kind: "form",
+      source: "(defmulti render (lambda (value) value))",
+      filename: "repl.eli",
+    },
+    {
+      kind: "form",
+      source: "(defmethod render :text (value) value)",
       filename: "repl.eli",
     },
     {

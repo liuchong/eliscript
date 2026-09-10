@@ -517,6 +517,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0155 | [Reversible Collection Traversal](0155-reversible-collection-traversal.md) | Stable | Implemented |
 | 0156 | [Value-dispatched Multimethods](0156-value-dispatched-multimethods.md) | Stable | Implemented |
 | 0157 | [Persistent Dispatch Hierarchies and Preferred Multimethods](0157-persistent-dispatch-hierarchies.md) | Stable | Implemented |
+| 0158 | [Declarative Multimethod Definitions](0158-declarative-multimethod-definitions.md) | Stable | Implemented |
 
 ## Adding a Specification
 

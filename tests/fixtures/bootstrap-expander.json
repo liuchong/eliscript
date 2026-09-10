@@ -126,6 +126,11 @@
       "source": "(defmacro identity (value) value)\n(defun View (props)\n  (let ((value (identity props)))\n    (js-object :fixed (identity value) literal-key (identity value) (identity :computed) (identity value))))\n(export View)"
     },
     {
+      "name": "declarative-multimethod-definitions",
+      "filename": "multimethod-declarations.eli",
+      "source": "(import \"./multimethod.eli\" add-method! multi-fn)\n(defmacro decorate (value) `(str \"method:\" ,value))\n(defmulti render (lambda (kind value) kind) \"fallback\")\n(defmethod render \"text\" (kind value) (decorate value))\n(defmethod render \"fallback\" (kind value) (str kind \":\" value))\n(export render)"
+    },
+    {
       "name": "self-symbol-module",
       "filename": "bootstrap/compiler/symbol.eli",
       "file": "bootstrap/compiler/symbol.eli"

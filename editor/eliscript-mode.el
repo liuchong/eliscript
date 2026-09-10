@@ -61,14 +61,14 @@ Relative paths are resolved from the discovered project root."
   "Canonical project roots mapped to their live watch processes.")
 
 (defconst eliscript-mode--function-heads
-  '("defasync" "defn" "defportable" "defun"))
+  '("defasync" "defmulti" "defn" "defportable" "defun"))
 
 (defconst eliscript-mode--macro-heads '("defmacro"))
 
 (defconst eliscript-mode--variable-heads '("defconst" "defvar"))
 
 (defconst eliscript-mode--top-level-heads
-  '("defasync" "defconst" "defmacro" "defn"
+  '("defasync" "defconst" "defmacro" "defmethod" "defmulti" "defn"
     "defportable" "defun" "defvar" "export" "export-default"
     "import" "import-portable" "module"))
 

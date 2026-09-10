@@ -8,6 +8,10 @@ const stdlib = resolve(root, "stdlib");
 const compiler = resolve(root, "bin/eliscript");
 const bootstrapBuilder = resolve(root, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(root, "bin/eliscript-portable");
+const declarativeFixture = resolve(
+  root,
+  "tests/fixtures/declarative-multimethod.eli",
+);
 const dependencies = [
   "bit",
   "identifier",
@@ -54,8 +58,15 @@ async function compileFamily(command, outputDirectory, environment = {}) {
     command,
     "--source-map",
     "--output",
-    resolve(outputDirectory, "multimethod.mjs"),
+    resolve(outputDirectory, "multimethod.eli"),
     resolve(stdlib, "multimethod.eli"),
+  ], environment);
+  await runSuccessful([
+    command,
+    "--source-map",
+    "--output",
+    resolve(outputDirectory, "declarative-multimethod.mjs"),
+    declarativeFixture,
   ], environment);
 }
 
@@ -85,7 +96,8 @@ test("Eliscript multimethods dispatch on values with persistent method snapshots
 
     for (const relative of [
       ...dependencies.map((name) => `${name}.eli`),
-      "multimethod.mjs",
+      "multimethod.eli",
+      "declarative-multimethod.mjs",
     ]) {
       const seed = resolve(seedDirectory, relative);
       const selfHosted = resolve(selfHostedDirectory, relative);
@@ -96,13 +108,18 @@ test("Eliscript multimethods dispatch on values with persistent method snapshots
 
     const reports = [];
     for (const outputDirectory of [seedDirectory, selfHostedDirectory]) {
-      const modulePath = resolve(outputDirectory, "multimethod.mjs");
+      const modulePath = resolve(outputDirectory, "multimethod.eli");
+      const declarativePath = resolve(
+        outputDirectory,
+        "declarative-multimethod.mjs",
+      );
       reports.push(JSON.parse(await runSuccessful([
         "bun",
         "--preload",
         bunPreload,
         hostFixture,
         modulePath,
+        declarativePath,
       ])));
       reports.push(JSON.parse(await runSuccessful([
         process.env.NODE ?? "node",
@@ -110,6 +127,7 @@ test("Eliscript multimethods dispatch on values with persistent method snapshots
         nodeLoader,
         hostFixture,
         modulePath,
+        declarativePath,
       ])));
     }
     for (const report of reports) expect(report).toEqual(reports[0]);
@@ -273,14 +291,27 @@ test("Eliscript multimethods dispatch on values with persistent method snapshots
         calls: 100_000,
         total: 4_999_950_000,
       },
+      declarations: {
+        identity: true,
+        text: "text:hello",
+        number: 42,
+        fallback: "fallback:other:9",
+      },
     });
 
     const sourceMap = await Bun.file(
-      resolve(seedDirectory, "multimethod.mjs.map"),
+      resolve(seedDirectory, "multimethod.eli.map"),
     ).json();
     expect(sourceMap.sourcesContent).toHaveLength(1);
     expect(sourceMap.sourcesContent[0]).toContain("(defun multi-fn\n");
     expect(sourceMap.sourcesContent[0]).toContain("(defun add-method!\n");
+    const declarativeSourceMap = await Bun.file(
+      resolve(seedDirectory, "declarative-multimethod.mjs.map"),
+    ).json();
+    expect(declarativeSourceMap.sourcesContent[0])
+      .toContain("(defmulti render");
+    expect(declarativeSourceMap.sourcesContent[0])
+      .toContain("(defmethod render \"text\"");
     const hierarchySourceMap = await Bun.file(
       resolve(seedDirectory, "hierarchy.eli.map"),
     ).json();

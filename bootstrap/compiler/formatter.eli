@@ -9,7 +9,7 @@
     (js* "(message, filename) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-F0001', severity: 'error', phase: 'formatter', message, ...(filename ? { location: { file: filename } } : {}) }; throw error; }"))
   (defconst declaration-heads
     (js-array
-      "module" "defasync" "defconst" "defmacro"
+      "module" "defasync" "defconst" "defmacro" "defmethod" "defmulti"
       "defn" "defportable" "defun" "defvar" "export-default"))
   (defconst operand-heads
     (js-array

@@ -3017,6 +3017,41 @@
           "contains": "transitivePreference"
         }
       ]
+    },
+    {
+      "id": "language.declarative-multimethod-definitions",
+      "title": "Declarative multimethod definitions",
+      "status": "stable",
+      "spec": "0158",
+      "contracts": [
+        "Expands defmulti to one immutable multi-fn binding with exact source name and optional default value",
+        "Expands defmethod to one source-ordered add-method registration with ordinary lambda semantics",
+        "Requires explicit standard-library bindings and never duplicates the multimethod runtime in the compiler",
+        "Preserves source spans and deterministic top-level shape diagnostics across seed and self-hosted expanders",
+        "Produces byte-identical modules and Source Maps plus identical authenticated dispatch under Bun and Node"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-expander-desugars-multimethod-declarations"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-expander.test.mjs",
+          "contains": "bootstrapped expander matches seed syntax, spans, and diagnostics"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/multimethod.test.mjs",
+          "contains": "Eliscript multimethods dispatch on values with persistent method snapshots"
+        },
+        {
+          "kind": "fixture",
+          "file": "tests/fixtures/declarative-multimethod.eli",
+          "contains": "(defmulti render"
+        }
+      ]
     }
   ]
 }

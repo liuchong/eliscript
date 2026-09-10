@@ -1011,6 +1011,56 @@
            (make-list expanded (node-span clause))))
         (t (expand-expression clause environment depth context)))))
 
+  (defun desugar-defmulti (args context span)
+    (when (or (< (get args :length) 2) (> (get args :length) 3))
+      (expander-fail
+        context span
+        "defmulti expects a name, dispatch function, and optional default value"))
+    (let ((name-node (js-nth 0 args)))
+      (unless (symbol-node-p name-node)
+        (expander-fail
+          context span
+          (str "defmulti name must be a symbol: "
+               (node-display name-node))))
+      (let ((call-items
+             (js-array
+               (symbol-node "multi-fn" span)
+               (literal-node (node-name name-node) span)
+               (js-nth 1 args))))
+        (when (= (get args :length) 3)
+          (js-call call-items :push (js-nth 2 args)))
+        (make-list
+          (js-array
+            (symbol-node "defconst" span)
+            name-node
+            (make-list call-items span))
+          span))))
+
+  (defun desugar-defmethod (args context span)
+    (when (< (get args :length) 3)
+      (expander-fail
+        context span
+        "defmethod expects a multimethod, dispatch value, and parameter list"))
+    (let ((target-node (js-nth 0 args)))
+      (unless (symbol-node-p target-node)
+        (expander-fail
+          context span
+          (str "defmethod target must be a symbol: "
+               (node-display target-node))))
+      (let ((lambda-items
+             (js-array
+               (symbol-node "lambda" span)
+               (js-nth 2 args))))
+        (js-call (js-call args :slice 3) :forEach
+          (lambda (item) (js-call lambda-items :push item)))
+        (make-list
+          (js-array
+            (symbol-node "add-method!" span)
+            target-node
+            (js-nth 1 args)
+            (make-list lambda-items span))
+          span))))
+
   (defun expand-expression (form environment depth context)
     (cond
       ((= (node-kind form) "vector")
@@ -1037,6 +1087,12 @@
            ((= operator "defasync")
             (expander-fail
               context span "defasync is only valid at module top level"))
+           ((= operator "defmulti")
+            (expander-fail
+              context span "defmulti is only valid at module top level"))
+           ((= operator "defmethod")
+            (expander-fail
+              context span "defmethod is only valid at module top level"))
            ((and operator (js-call environment :has operator))
             (expand-expression
               (locate-generated
@@ -1119,6 +1175,14 @@
           ((= operator "defmacro")
            (register-macro form environment context)
            (js-array))
+          ((= operator "defmulti")
+           (expand-top-level
+             (desugar-defmulti args context span)
+             environment depth context))
+          ((= operator "defmethod")
+           (expand-top-level
+             (desugar-defmethod args context span)
+             environment depth context))
           ((and operator (js-call environment :has operator))
            (expand-top-level
              (locate-generated

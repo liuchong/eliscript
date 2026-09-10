@@ -205,6 +205,57 @@
       (_ (eliscript-expander--expand-expression
           clause environment depth)))))
 
+(defun eliscript-expander--generated-form (value)
+  "Wrap generated VALUE at the current declaration location."
+  (eliscript-form-wrap value eliscript-expander--current-span))
+
+(defun eliscript-expander--desugar-defmulti (arguments)
+  "Return the core declaration represented by defmulti ARGUMENTS."
+  (unless (<= 2 (length arguments) 3)
+    (eliscript-expander--fail
+     "defmulti expects a name, dispatch function, and optional default value"))
+  (let* ((name-form (nth 0 arguments))
+         (name (eliscript-form-value name-form)))
+    (unless (symbolp name)
+      (eliscript-expander--fail
+       "defmulti name must be a symbol: %S"
+       (eliscript-form-strip name-form)))
+    (eliscript-expander--generated-form
+     (list
+      (eliscript-expander--generated-form 'defconst)
+      name-form
+      (eliscript-expander--generated-form
+       (append
+        (list
+         (eliscript-expander--generated-form 'multi-fn)
+         (eliscript-expander--generated-form (symbol-name name))
+         (nth 1 arguments))
+        (when (= (length arguments) 3)
+          (list (nth 2 arguments)))))))))
+
+(defun eliscript-expander--desugar-defmethod (arguments)
+  "Return the method registration represented by defmethod ARGUMENTS."
+  (unless (>= (length arguments) 3)
+    (eliscript-expander--fail
+     "defmethod expects a multimethod, dispatch value, and parameter list"))
+  (let* ((target-form (nth 0 arguments))
+         (target (eliscript-form-value target-form)))
+    (unless (symbolp target)
+      (eliscript-expander--fail
+       "defmethod target must be a symbol: %S"
+       (eliscript-form-strip target-form)))
+    (eliscript-expander--generated-form
+     (list
+      (eliscript-expander--generated-form 'add-method!)
+      target-form
+      (nth 1 arguments)
+      (eliscript-expander--generated-form
+       (append
+        (list
+         (eliscript-expander--generated-form 'lambda)
+         (nth 2 arguments))
+        (nthcdr 3 arguments)))))))
+
 (defun eliscript-expander--expand-expression (form environment depth)
   "Expand expression FORM in macro ENVIRONMENT at DEPTH."
   (let* ((value (eliscript-form-value form))
@@ -237,6 +288,12 @@
          ((eq operator 'defasync)
           (eliscript-expander--fail
            "defasync is only valid at module top level"))
+         ((eq operator 'defmulti)
+          (eliscript-expander--fail
+           "defmulti is only valid at module top level"))
+         ((eq operator 'defmethod)
+          (eliscript-expander--fail
+           "defmethod is only valid at module top level"))
          ((and (symbolp operator) (gethash operator environment))
           (eliscript-expander--expand-expression
            (eliscript-form-locate-generated
@@ -318,6 +375,14 @@
          ((eq operator 'defmacro)
           (eliscript-expander--register form environment)
           nil)
+         ((eq operator 'defmulti)
+          (eliscript-expander--expand-top-level
+           (eliscript-expander--desugar-defmulti arguments)
+           environment depth))
+         ((eq operator 'defmethod)
+          (eliscript-expander--expand-top-level
+           (eliscript-expander--desugar-defmethod arguments)
+           environment depth))
          ((and (symbolp operator) (gethash operator environment))
           (eliscript-expander--expand-top-level
            (eliscript-form-locate-generated

@@ -64,6 +64,8 @@
     (insert "(module demo.core)\n"
             "(defn answer (&optional x)\n"
             "  (if x :yes false))\n"
+            "(defmulti render (lambda (value) value))\n"
+            "(defmethod render :text (value) value)\n"
             "(defconst label \"ready\")\n"
             "; note\n")
     (font-lock-ensure)
@@ -82,6 +84,12 @@
                 'font-lock-constant-face))
     (should (eq (eliscript-mode-tests--face-at "false")
                 'font-lock-constant-face))
+    (should (eq (eliscript-mode-tests--face-at "defmulti")
+                'font-lock-keyword-face))
+    (should (eq (eliscript-mode-tests--face-at "render")
+                'font-lock-function-name-face))
+    (should (eq (eliscript-mode-tests--face-at "defmethod")
+                'font-lock-keyword-face))
     (should (eq (eliscript-mode-tests--face-at "label")
                 'font-lock-variable-name-face))
     (should (eq (eliscript-mode-tests--face-at "ready")
@@ -95,11 +103,12 @@
     (insert "(module demo.core)\n\n"
             "(defun first (x)\n  (print x))\n\n"
             "(defmacro with-value (&body body)\n  body)\n\n"
+            "(defmulti render (lambda (value) value))\n\n"
             "(defconst answer 42)\n")
     (font-lock-ensure)
     (let ((names (eliscript-mode-tests--imenu-names
                   (imenu--make-index-alist t))))
-      (dolist (name '("demo.core" "first" "with-value" "answer"))
+      (dolist (name '("demo.core" "first" "with-value" "render" "answer"))
         (should (member name names))))
     (goto-char (point-min))
     (search-forward "print")

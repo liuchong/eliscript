@@ -24,7 +24,7 @@ const SUITES = [
     fixture: "tests/fixtures/bootstrap-expander.json",
     oracle: "tests/bootstrap-expander-oracle.el",
     environment: "ELISCRIPT_EXPANDER_FIXTURE",
-    validCaseCount: 37,
+    validCaseCount: 38,
     negativeCaseCount: 16,
   },
   {
