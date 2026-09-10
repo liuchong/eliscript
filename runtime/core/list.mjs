@@ -2,6 +2,8 @@ import {
   COLLECTION_CONJ,
   COLLECTION_COUNT,
   COLLECTION_EMPTY,
+  COLLECTION_PEEK,
+  COLLECTION_POP,
   COLLECTION_REDUCE,
   COLLECTION_SEQ,
   reduceIterable,
@@ -167,6 +169,14 @@ export class PersistentList {
 
   [COLLECTION_CONJ](value) {
     return this.conj(value);
+  }
+
+  [COLLECTION_PEEK]() {
+    return this.peek();
+  }
+
+  [COLLECTION_POP]() {
+    return this.pop();
   }
 
   [COLLECTION_SEQ]() {

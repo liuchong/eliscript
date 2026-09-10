@@ -9,8 +9,8 @@
 
 ## Summary
 
-This specification completes the non-transient collection protocol foundation
-with `IEmptyable`, `IConj`, and `IAssociative`. Generic `empty`, `conj`,
+This specification establishes the non-transient collection construction
+foundation with `IEmptyable`, `IConj`, and `IAssociative`. Generic `empty`, `conj`,
 `assoc`, and `contains` operations now construct and update persistent Vector,
 Map, and Set values through direct Symbol methods. Exact-type native Array,
 Map, Set, and ordinary Object adapters provide immutable-copy behavior without
@@ -181,7 +181,7 @@ literals and `stdlib/sequence.eli` keep their current representations; any
 future migration is a separate contract and cannot silently change these
 operations.
 
-Subsequent P2 slices now provide generic algorithms, transducers,
+Subsequent slices now provide generic algorithms, transducers,
 transient-backed `into`, owner-token invalidation, Eliscript-authored protocol
 surfaces, portable dispatch policy, explicit native conversion, and named
 String/Object host adapters through specifications
@@ -191,7 +191,8 @@ String/Object host adapters through specifications
 [0073](0073-native-javascript-container-interop.md),
 [0079](0079-eliscript-protocol-dispatch-policy.md),
 [0080](0080-canonical-generated-protocol-runtime.md), and
-[0081](0081-protocol-driven-text-object.md). Persistent collection literal
+[0081](0081-protocol-driven-text-object.md), and removal/stack capabilities in
+[0154](0154-map-set-stack-capability-protocols.md). Persistent collection literal
 migration and static transient ownership analysis are now completed by the
 0082-through-0095 language series and specification 0093. Further compiler
 specialization remains profile-driven work.

@@ -94,7 +94,7 @@ local onboarding exercise, and exit audit remain formal acceptance work.
 M11's six implementation units are complete. Reviewed metadata classifies all
 31 standard-library modules by role and owning specification; the generated
 [API page](docs/pages/api.html) and machine-readable
-[API index](docs/pages/api-index.json) expose all 378 checked exports. The
+[API index](docs/pages/api-index.json) expose all 385 checked exports. The
 default contract gate rejects metadata, implementation, stability, or generated
 artifact drift. Explicit [browser and worker capability packages](platform/README.md)
 now grant only named host authority, inject request-scoped progress and
@@ -233,7 +233,9 @@ Vector literals, `(hash-map ...)`, brace Map literals, `(hash-set ...)`, and
 `#{...}` Set literals now link through a standard ESM literal ABI. `js-array`,
 `js-object`, `js-nth`, and `js-length`
 make host-container construction and access explicit, while language-level
-`nth` and `length` use collection protocols. First-class source Keyword
+`nth` and `length` use collection protocols. Generic `dissoc` and `disj`
+remove persistent or copied native values, while `peek` and `pop` expose
+representation-appropriate List, Vector, and Array stack behavior. First-class source Keyword
 expressions now construct canonical immutable runtime values while
 Keyword-shaped host property keys retain explicit string-key behavior. Quote
 now constructs canonical persistent List/Vector and identifier values instead

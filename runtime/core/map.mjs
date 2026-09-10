@@ -31,6 +31,7 @@ import {
   COLLECTION_CONTAINS,
   COLLECTION_REDUCE,
   COLLECTION_REDUCE_KV,
+  COLLECTION_DISSOC,
   COLLECTION_SEQ,
   isReducedValue,
   reduceIterable,
@@ -304,6 +305,10 @@ export class PersistentHashMap {
 
   [COLLECTION_CONTAINS](key) {
     return this.has(key);
+  }
+
+  [COLLECTION_DISSOC](key) {
+    return this.dissoc(key);
   }
 
   [COLLECTION_SEQ]() {

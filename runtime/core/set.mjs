@@ -23,6 +23,7 @@ import {
   COLLECTION_GET,
   COLLECTION_CONTAINS,
   COLLECTION_REDUCE,
+  COLLECTION_DISJ,
   COLLECTION_SEQ,
   reduceIterable,
   sequenceView,
@@ -293,6 +294,10 @@ export class PersistentHashSet {
 
   [COLLECTION_CONJ](value) {
     return this.conj(value);
+  }
+
+  [COLLECTION_DISJ](value) {
+    return this.disj(value);
   }
 
   [COLLECTION_GET](value, notFound = null) {

@@ -9,6 +9,9 @@
   (defconst ISeqable Runtime/ISeqable)
   (defconst IReduce Runtime/IReduce)
   (defconst IKVReduce Runtime/IKVReduce)
+  (defconst IMap Runtime/IMap)
+  (defconst ISet Runtime/ISet)
+  (defconst IStack Runtime/IStack)
   (defconst ReductionView Runtime/ReductionView)
   (defconst SequenceView Runtime/SequenceView)
   (defun collection-count (collection) (Runtime/count collection))
@@ -32,6 +35,14 @@
   (defun reduce-kv
     (collection reducer initial)
     (Runtime/reduceKV collection reducer initial))
+  (defun dissoc
+    (collection &rest keys)
+    (apply Runtime/dissoc (js-cons collection keys)))
+  (defun disj
+    (collection &rest values)
+    (apply Runtime/disj (js-cons collection values)))
+  (defun peek (collection) (Runtime/peek collection))
+  (defun pop (collection) (Runtime/pop collection))
   (defun collection-seq (collection) (Runtime/seq collection))
   (defun reduced (value) (Runtime/reduced value))
   (defun reduced? (value) (Runtime/isReduced value))
@@ -51,6 +62,9 @@
     ILookup
     IReduce
     IKVReduce
+    IMap
+    ISet
+    IStack
     ISeqable
     ReductionView
     SequenceView
@@ -64,6 +78,10 @@
     lookup
     reduce
     reduce-kv
+    dissoc
+    disj
+    peek
+    pop
     reduced
     reduced?
     reduction-view

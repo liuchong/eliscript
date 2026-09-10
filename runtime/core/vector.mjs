@@ -34,6 +34,8 @@ import {
   COLLECTION_NTH,
   COLLECTION_REDUCE,
   COLLECTION_REDUCE_KV,
+  COLLECTION_PEEK,
+  COLLECTION_POP,
   COLLECTION_SEQ,
   isReducedValue,
   reduceIterable,
@@ -539,6 +541,14 @@ export class PersistentVector {
 
   [COLLECTION_CONJ](value) {
     return this.conj(value);
+  }
+
+  [COLLECTION_PEEK]() {
+    return this.peek();
+  }
+
+  [COLLECTION_POP]() {
+    return this.pop();
   }
 
   [COLLECTION_GET](index, notFound = null) {

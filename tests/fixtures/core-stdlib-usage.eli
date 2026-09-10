@@ -50,7 +50,7 @@
     update
     update-in
     zipmap)
-  (import "./stdlib/core/collection.mjs" reduce-kv)
+  (import "./stdlib/core/collection.mjs" disj dissoc peek pop reduce-kv)
   (import "./stdlib/core/transducer.mjs" eduction filtering mapping run!)
   (defconst values [0 1 2 3 4])
   (defvar generated-state 0)
@@ -140,6 +140,12 @@
       {"left" 3 "right" 5}
       (lambda (total key value) (+ total (js-length key) value))
       0))
+  (defconst removed-map (dissoc {"left" 1 "middle" 2 "right" 3} "left" "right"))
+  (defconst removed-set (disj #{"left" "middle" "right"} "left" "right"))
+  (defconst vector-stack-top (peek [1 2 3]))
+  (defconst vector-stack-rest (pop [1 2 3]))
+  (defconst list-stack-top (peek (list 1 2 3)))
+  (defconst list-stack-rest (pop (list 1 2 3)))
   (defconst nested-value (get-in nested-update-result ["profile" "visits"] "missing"))
   (export
     finite-range
@@ -196,4 +202,10 @@
     combined-result
     zipped-result
     keyed-total
+    removed-map
+    removed-set
+    vector-stack-top
+    vector-stack-rest
+    list-stack-top
+    list-stack-rest
     nested-value))

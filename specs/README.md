@@ -29,19 +29,19 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 153 specifications.
+The registry currently contains 154 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
 | Accepted design | 3 |
-| Stable design | 148 |
+| Stable design | 149 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 149 |
+| Implemented | 150 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 148 specifications as stable,
+Compatibility Baseline 2 separately classifies 149 specifications as stable,
 1 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
@@ -133,12 +133,12 @@ refreshes matching Flymake buffers. The verified onboarding guide executes the
 documented project, compiler, host, REPL, and editor path. The complete AC-12
 matrix and M10 exit audit remain formal acceptance work.
 
-M11 has all 6/6 implementation units complete. Its 31-module, 378-export API
+M11 has all 6/6 implementation units complete. Its 31-module, 385-export API
 index is generated from explicit metadata and the checked public surface.
 Browser and worker platform packages now expose only named host authority,
 inject request-scoped progress and cancellation into the real worker, and keep
 frameworks outside core evidence. M11 compatibility stabilization is now
-146/147 complete. The only provisional core feature is the full supported
+147/148 complete. The only provisional core feature is the full supported
 matrix proof for JavaScript package interoperation in specification 0142; the
 final exit audit remains open.
 
@@ -510,6 +510,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0151 | [Replayable Bounded and Unbounded Sequence Sources](0151-replayable-sequence-sources.md) | Stable | Implemented |
 | 0152 | [Replayable Reducible Transducer Pipelines](0152-replayable-reducible-transducer-pipelines.md) | Stable | Implemented |
 | 0153 | [Key/Value Reduction Protocol](0153-key-value-reduction-protocol.md) | Stable | Implemented |
+| 0154 | [Map, Set, and Stack Capability Protocols](0154-map-set-stack-capability-protocols.md) | Stable | Implemented |
 
 ## Adding a Specification
 

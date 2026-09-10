@@ -2896,6 +2896,41 @@
           "contains": "portable compiler driver reaches a reproducible fixed point"
         }
       ]
+    },
+    {
+      "id": "stdlib.map-set-stack-capability-protocols",
+      "title": "Map set and stack capability protocols",
+      "status": "stable",
+      "spec": "0154",
+      "contracts": [
+        "Exports open IMap ISet and IStack protocols plus dissoc disj peek and pop across JavaScript and Lisp collection surfaces",
+        "Removes persistent Map and Set values through shared HAMT paths while retaining no-op identity and immutable inputs",
+        "Uses the shared List head and the bounded Vector tail path as representation-appropriate stack tops",
+        "Copies native Map Set Object and Array values and admits independently extensible external capabilities",
+        "Produces byte-identical fixed points and identical local Bun and Node results including million-value Vector pop"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/collection-protocol.test.mjs",
+          "contains": "removal and stack protocols preserve immutable collection categories"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/collection-protocol.test.mjs",
+          "contains": "external values can implement removal and stack capabilities independently"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "Eliscript core modules compile and execute against runtime protocols"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }

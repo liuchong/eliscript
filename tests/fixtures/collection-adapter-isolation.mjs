@@ -8,8 +8,11 @@ const {
   IEmptyable,
   IIndexed,
   ILookup,
+  IMap,
   IReduce,
+  ISet,
   ISeqable,
+  IStack,
 } = await import("../../runtime/core/collection.mjs");
 const { protocolSlot } = await import("../../runtime/core/protocol.mjs");
 
@@ -24,6 +27,10 @@ const slots = [
   protocolSlot(IReduce, "reduce"),
   protocolSlot(IAssociative, "assoc"),
   protocolSlot(IAssociative, "contains"),
+  protocolSlot(IMap, "dissoc"),
+  protocolSlot(ISet, "disj"),
+  protocolSlot(IStack, "peek"),
+  protocolSlot(IStack, "pop"),
 ];
 
 console.log(JSON.stringify({

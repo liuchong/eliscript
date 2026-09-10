@@ -16,6 +16,9 @@ export const I_INDEXED = defineProtocol("IIndexed", ["nth"]);
 export const I_SEQABLE = defineProtocol("ISeqable", ["seq"]);
 export const I_REDUCE = defineProtocol("IReduce", ["reduce"]);
 export const I_KV_REDUCE = defineProtocol("IKVReduce", ["reduceKV"]);
+export const I_MAP = defineProtocol("IMap", ["dissoc"]);
+export const I_SET = defineProtocol("ISet", ["disj"]);
+export const I_STACK = defineProtocol("IStack", ["peek", "pop"]);
 
 export const COLLECTION_COUNT = protocolSlot(I_COUNTED, "count");
 export const COLLECTION_EMPTY = protocolSlot(I_EMPTYABLE, "empty");
@@ -27,6 +30,10 @@ export const COLLECTION_NTH = protocolSlot(I_INDEXED, "nth");
 export const COLLECTION_SEQ = protocolSlot(I_SEQABLE, "seq");
 export const COLLECTION_REDUCE = protocolSlot(I_REDUCE, "reduce");
 export const COLLECTION_REDUCE_KV = protocolSlot(I_KV_REDUCE, "reduceKV");
+export const COLLECTION_DISSOC = protocolSlot(I_MAP, "dissoc");
+export const COLLECTION_DISJ = protocolSlot(I_SET, "disj");
+export const COLLECTION_PEEK = protocolSlot(I_STACK, "peek");
+export const COLLECTION_POP = protocolSlot(I_STACK, "pop");
 
 export const dispatchCollectionCount = protocolMethod(I_COUNTED, "count");
 export const dispatchCollectionEmpty = protocolMethod(I_EMPTYABLE, "empty");
@@ -41,6 +48,10 @@ export const dispatchCollectionNth = protocolMethod(I_INDEXED, "nth");
 export const dispatchCollectionSeq = protocolMethod(I_SEQABLE, "seq");
 export const dispatchCollectionReduce = protocolMethod(I_REDUCE, "reduce");
 export const dispatchCollectionReduceKV = protocolMethod(I_KV_REDUCE, "reduceKV");
+export const dispatchCollectionDissoc = protocolMethod(I_MAP, "dissoc");
+export const dispatchCollectionDisj = protocolMethod(I_SET, "disj");
+export const dispatchCollectionPeek = protocolMethod(I_STACK, "peek");
+export const dispatchCollectionPop = protocolMethod(I_STACK, "pop");
 
 const NO_INITIAL = Symbol("eliscript.collection.no-initial");
 const REDUCED_STATE = Symbol("eliscript.collection.reduced-state");

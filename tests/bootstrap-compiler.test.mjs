@@ -270,6 +270,10 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
       ["stdlib/core/collection.eli", [
         "function assoc(collection, key, value, ...key_values)",
         "function collection_count(collection)",
+        "function disj(collection, ...values)",
+        "function dissoc(collection, ...keys)",
+        "function peek(collection)",
+        "function pop(collection)",
         "function reduce(collection, reducer, ...initial)",
         "function reduce_kv(collection, reducer, initial)",
         "function reduction_view(reduce_function)",

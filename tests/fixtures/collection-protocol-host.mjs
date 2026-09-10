@@ -3,22 +3,28 @@ import {
   conj,
   contains,
   count,
+  disj,
+  dissoc,
   empty,
   get,
   isSequenceView,
   nth,
+  peek,
+  pop,
   reduce,
   reduceKV,
   reduced,
   seq,
 } from "../../runtime/core/collection.mjs";
 import { persistentHashMap } from "../../runtime/core/map.mjs";
+import { persistentList } from "../../runtime/core/list.mjs";
 import { persistentHashSet } from "../../runtime/core/set.mjs";
 import { persistentVector } from "../../runtime/core/vector.mjs";
 
 const vector = persistentVector(2, 4, 6, 8);
 const map = persistentHashMap(["left", 3], ["right", 5]);
 const set = persistentHashSet("alpha", "beta");
+const list = persistentList(2, 4, 6, 8);
 const mapEntries = [...seq(map)].sort(([left], [right]) => left.localeCompare(right));
 const constructedMap = [...conj(map, ["third", 7])]
   .sort(([left], [right]) => left.localeCompare(right));
@@ -48,5 +54,16 @@ console.log(JSON.stringify({
     associated: [...assoc(vector, 1, 9)],
     contains: [contains(vector, 3), contains(map, "missing"), contains(set, "beta")],
     emptied: [count(empty(vector)), count(empty(map)), count(empty(set))],
+  },
+  removal: {
+    map: [...dissoc(map, "left")],
+    set: [...disj(set, "alpha")],
+    object: dissoc({ left: 3, right: 5 }, "left"),
+  },
+  stack: {
+    list: [peek(list), [...pop(list)]],
+    vector: [peek(vector), [...pop(vector)]],
+    array: [peek([2, 4, 6]), pop([2, 4, 6])],
+    nil: [peek(null), pop(null)],
   },
 }));

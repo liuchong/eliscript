@@ -64,8 +64,8 @@ test("maturity progress is derived from explicit core acceptance units", async (
       blocked: [],
     },
     stabilization: {
-      completed: 146,
-      total: 147,
+      completed: 147,
+      total: 148,
       completedPercent: 99.3,
       remaining: 1,
       remainingPercent: 0.7,

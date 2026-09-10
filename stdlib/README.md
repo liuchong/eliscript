@@ -456,6 +456,11 @@ Persistent Vector and HAMT Map values avoid public entry allocation, external
 keyed types can implement the capability independently, and merge operations
 prefer the keyed path without changing Vector/Array entry-source semantics.
 
+`dissoc` and `disj` remove one or more mappings or members through `IMap` and
+`ISet`. `peek` and `pop` provide `IStack` access using the List head or
+Vector/Array tail. Persistent values preserve structural sharing and their
+existing root/navigation metadata rules; native values are copied before removal.
+
 `range`, `repeat`, `repeatedly`, `iterate`, `cycle`, and `generate` create
 replayable sequence views. Finite sources publish exact counts; open sources
 are explicitly unbounded, so `collection-count` rejects them without starting
@@ -480,6 +485,8 @@ Replayable reduction-only transducer pipelines are specified in
 [0152](../specs/0152-replayable-reducible-transducer-pipelines.md).
 Key/value reduction is specified in
 [0153](../specs/0153-key-value-reduction-protocol.md).
+Map, Set, and Stack capabilities are specified in
+[0154](../specs/0154-map-set-stack-capability-protocols.md).
 
 ## Portable Sequence Compatibility Module
 

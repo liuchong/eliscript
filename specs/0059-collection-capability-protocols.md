@@ -13,8 +13,8 @@
 
 This specification turns the generic protocol mechanism into the first shared
 collection capability layer. It defines `ICounted`, `ILookup`, `IIndexed`,
-`ISeqable`, `IReduce`, and `IKVReduce`; installs direct Symbol methods on persistent Vector,
-Map, and Set values; and supplies external adapters for native JavaScript
+`ISeqable`, `IReduce`, and `IKVReduce`; installs direct Symbol methods on
+persistent Vector, Map, and Set values; and supplies external adapters for native JavaScript
 Array, Map, Set, String, and exact ordinary Object values without modifying
 their prototypes.
 
@@ -31,8 +31,9 @@ collection capabilities.
 `runtime/core/collection.mjs` exports:
 
 - protocols: `ICounted`, `ILookup`, `IIndexed`, `ISeqable`, `IReduce`,
-  `IKVReduce`
-- generic operations: `count`, `get`, `nth`, `seq`, `reduce`, `reduceKV`
+  `IKVReduce`, `IMap`, `ISet`, `IStack`
+- generic operations: `count`, `get`, `nth`, `seq`, `reduce`, `reduceKV`,
+  `dissoc`, `disj`, `peek`, `pop`
 - sequence values: `SequenceView`, `sequenceView`, `unboundedSequenceView`,
   `isSequenceView`
 - reduction values: `ReductionView`, `reductionView`, `isReductionView`
@@ -126,6 +127,13 @@ without constructing public entry pairs. Vector and Array keys are indexes;
 Map and Object keys are their logical keys. The operation always requires an
 explicit initial value and shares `reduced` early termination with `reduce`.
 
+### Removal and Stack Capabilities
+
+Specification [0154](0154-map-set-stack-capability-protocols.md) adds `IMap`,
+`ISet`, and `IStack`. Persistent and native maps/sets gain immutable removal;
+List, Vector, and Array gain representation-appropriate stack access. These
+capabilities remain independent from traversal and construction protocols.
+
 ## Reduced Values
 
 `reduced(value)` wraps a completed accumulator. Returning that wrapper from a
@@ -145,10 +153,10 @@ inventing a second termination channel.
 
 Persistent types install direct Symbol-keyed protocol methods:
 
-- Vector: all sequence capabilities plus `IKVReduce`
-- List: `ICounted`, `ISeqable`, `IReduce`
-- Map: `ICounted`, `ILookup`, `ISeqable`, `IReduce`, `IKVReduce`
-- Set: `ICounted`, `ILookup`, `ISeqable`, `IReduce`
+- Vector: all sequence capabilities plus `IKVReduce` and `IStack`
+- List: `ICounted`, `ISeqable`, `IReduce`, `IStack`
+- Map: `ICounted`, `ILookup`, `ISeqable`, `IReduce`, `IKVReduce`, `IMap`
+- Set: `ICounted`, `ILookup`, `ISeqable`, `IReduce`, `ISet`
 
 Direct methods delegate traversal to existing representation-native iterators.
 No protocol operation inspects private node shapes from outside the owning
@@ -254,6 +262,9 @@ construction contract, while indexed access remains deliberately absent.
 - **CCP-13:** Key/value reduction passes indexes or stored keys directly,
   supports open external extension and reduced termination, and remains
   stack-constant at one million indexed values.
+- **CCP-14:** Map, Set, and Stack capabilities dispatch independently, preserve
+  persistent sharing and native inputs, and remain extensible by external
+  immutable types.
 
 ## Next Slice
 

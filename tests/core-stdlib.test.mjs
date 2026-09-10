@@ -1025,6 +1025,12 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect(usage.zipped_result.count).toBe(2);
     expect(usage.zipped_result.get("b")).toBe(20);
     expect(usage.keyed_total).toBe(17);
+    expect([...usage.removed_map]).toEqual([["middle", 2]]);
+    expect([...usage.removed_set]).toEqual(["middle"]);
+    expect(usage.vector_stack_top).toBe(3);
+    expect([...usage.vector_stack_rest]).toEqual([1, 2]);
+    expect(usage.list_stack_top).toBe(1);
+    expect([...usage.list_stack_rest]).toEqual([2, 3]);
 
     const generatedUsage = await readFile(usageModule, "utf8");
     expect(generatedUsage).toContain("first_even");

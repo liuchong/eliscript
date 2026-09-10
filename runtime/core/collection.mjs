@@ -11,6 +11,9 @@ import {
   I_ASSOCIATIVE,
   I_REDUCE,
   I_KV_REDUCE,
+  I_MAP,
+  I_SET,
+  I_STACK,
   I_SEQABLE,
   ReductionView as InternalReductionView,
   SequenceView as InternalSequenceView,
@@ -23,6 +26,10 @@ import {
   dispatchCollectionNth,
   dispatchCollectionReduce,
   dispatchCollectionReduceKV,
+  dispatchCollectionDissoc,
+  dispatchCollectionDisj,
+  dispatchCollectionPeek,
+  dispatchCollectionPop,
   dispatchCollectionSeq,
   isReducedValue,
   readCollectionEntry,
@@ -75,9 +82,21 @@ function mapAssoc(values, key, value) {
   return result;
 }
 
+function mapDissoc(values, key) {
+  const result = new Map(values);
+  result.delete(key);
+  return result;
+}
+
 function setConj(values, value) {
   const result = new Set(values);
   result.add(value);
+  return result;
+}
+
+function setDisj(values, value) {
+  const result = new Set(values);
+  result.delete(value);
   return result;
 }
 
@@ -91,6 +110,26 @@ function objectAssoc(values, key, value) {
 function objectConj(values, entry) {
   const [key, value] = readCollectionEntry(entry);
   return objectAssoc(values, key, value);
+}
+
+function objectDissoc(values, key) {
+  if (typeof key !== "string") {
+    throw new TypeError("plain object dissociation keys must be strings");
+  }
+  const result = { ...values };
+  delete result[key];
+  return result;
+}
+
+function arrayPeek(values) {
+  return values.length === 0 ? null : values[values.length - 1];
+}
+
+function arrayPop(values) {
+  if (values.length === 0) {
+    throw new RangeError("cannot pop an empty array");
+  }
+  return values.slice(0, -1);
 }
 
 function arraySequence(values) {
@@ -209,6 +248,7 @@ extendProtocolType(I_REDUCE, Object, {
     reduceIterable(objectSequence(value) ?? [], reducer, ...initial),
 });
 extendProtocolType(I_KV_REDUCE, Object, { reduceKV: reduceObjectValues });
+extendProtocolType(I_MAP, Object, { dissoc: objectDissoc });
 
 extendProtocolType(I_COUNTED, Array, { count: (values) => values.length });
 extendProtocolType(I_EMPTYABLE, Array, { empty: () => [] });
@@ -226,6 +266,7 @@ extendProtocolType(I_INDEXED, Array, { nth: indexedValue });
 extendProtocolType(I_SEQABLE, Array, { seq: arraySequence });
 extendProtocolType(I_REDUCE, Array, { reduce: reduceIterable });
 extendProtocolType(I_KV_REDUCE, Array, { reduceKV: reduceIndexedValues });
+extendProtocolType(I_STACK, Array, { peek: arrayPeek, pop: arrayPop });
 
 extendProtocolType(I_COUNTED, Map, { count: (values) => values.size });
 extendProtocolType(I_EMPTYABLE, Map, { empty: () => new Map() });
@@ -244,6 +285,7 @@ extendProtocolType(I_REDUCE, Map, {
     reduceIterable(mapSequence(values) ?? [], reducer, ...initial),
 });
 extendProtocolType(I_KV_REDUCE, Map, { reduceKV: reduceMapValues });
+extendProtocolType(I_MAP, Map, { dissoc: mapDissoc });
 
 extendProtocolType(I_COUNTED, Set, { count: (values) => values.size });
 extendProtocolType(I_EMPTYABLE, Set, { empty: () => new Set() });
@@ -256,6 +298,7 @@ extendProtocolType(I_ASSOCIATIVE, Set, {
 });
 extendProtocolType(I_SEQABLE, Set, { seq: setSequence });
 extendProtocolType(I_REDUCE, Set, { reduce: reduceIterable });
+extendProtocolType(I_SET, Set, { disj: setDisj });
 
 extendProtocolCategory(I_COUNTED, "null", { count: () => 0 });
 extendProtocolCategory(I_EMPTYABLE, "null", { empty: () => null });
@@ -266,6 +309,9 @@ extendProtocolCategory(I_REDUCE, "null", {
 extendProtocolCategory(I_KV_REDUCE, "null", {
   reduceKV: (_value, _reducer, initial) => initial,
 });
+extendProtocolCategory(I_MAP, "null", { dissoc: () => null });
+extendProtocolCategory(I_SET, "null", { disj: () => null });
+extendProtocolCategory(I_STACK, "null", { peek: () => null, pop: () => null });
 
 export const ICounted = I_COUNTED;
 export const IEmptyable = I_EMPTYABLE;
@@ -276,6 +322,9 @@ export const IIndexed = I_INDEXED;
 export const ISeqable = I_SEQABLE;
 export const IReduce = I_REDUCE;
 export const IKVReduce = I_KV_REDUCE;
+export const IMap = I_MAP;
+export const ISet = I_SET;
+export const IStack = I_STACK;
 
 export const ReductionView = InternalReductionView;
 export const SequenceView = InternalSequenceView;
@@ -373,6 +422,36 @@ export function reduceKV(collection, reducer, initial) {
     throw new TypeError("key/value reducer must be a function");
   }
   return unreducedValue(dispatchCollectionReduceKV(collection, reducer, initial));
+}
+
+export function dissoc(collection, ...keys) {
+  let result = collection;
+  for (const key of keys) {
+    result = dispatchCollectionDissoc(result, key);
+  }
+  return result;
+}
+
+export function disj(collection, ...values) {
+  let result = collection;
+  for (const value of values) {
+    result = dispatchCollectionDisj(result, value);
+  }
+  return result;
+}
+
+export function peek(collection) {
+  if (arguments.length !== 1) {
+    throw new TypeError("peek requires exactly one collection");
+  }
+  return dispatchCollectionPeek(collection);
+}
+
+export function pop(collection) {
+  if (arguments.length !== 1) {
+    throw new TypeError("pop requires exactly one collection");
+  }
+  return dispatchCollectionPop(collection);
 }
 
 export function reduced(value) {

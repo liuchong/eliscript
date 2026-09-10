@@ -10,19 +10,26 @@ import {
   IIndexed,
   IKVReduce,
   ILookup,
+  IMap,
   IReduce,
+  ISet,
   ISeqable,
+  IStack,
   ReductionView,
   assoc,
   conj,
   contains,
   count,
+  disj,
+  dissoc,
   empty,
   get,
   isReduced,
   isReductionView,
   isSequenceView,
   nth,
+  peek,
+  pop,
   reduce,
   reduceKV,
   reductionView,
@@ -40,9 +47,14 @@ import {
   protocolSlot,
 } from "../runtime/core/protocol.mjs";
 import {
+  EMPTY_LIST,
+  persistentList,
+} from "../runtime/core/list.mjs";
+import {
   EMPTY_MAP,
   persistentHashMap,
 } from "../runtime/core/map.mjs";
+import { meta, withMeta } from "../runtime/core/metadata.mjs";
 import {
   EMPTY_SET,
   persistentHashSet,
@@ -165,6 +177,138 @@ test("construction protocols are frozen capabilities with direct persistent meth
   expect([...map[protocolSlot(IConj, "conj")](Object.freeze(["next", 7]))])
     .toEqual(expect.arrayContaining([["answer", 42], ["next", 7]]));
   expect(set[protocolSlot(IAssociative, "contains")]("ready")).toBe(true);
+});
+
+test("removal and stack protocols preserve immutable collection categories", () => {
+  const map = persistentHashMap(["left", 1], ["right", 2]);
+  const set = persistentHashSet("left", "right");
+  const tail = persistentList(2, 3);
+  const list = tail.conj(1);
+  const vector = persistentVector(1, 2, 3);
+
+  for (const protocol of [IMap, ISet, IStack]) {
+    expect(Object.isFrozen(protocol)).toBe(true);
+  }
+  expect(implementsProtocol(IMap, map)).toBe(true);
+  expect(implementsProtocol(ISet, set)).toBe(true);
+  expect(implementsProtocol(IStack, list)).toBe(true);
+  expect(implementsProtocol(IStack, vector)).toBe(true);
+  expect(implementsProtocol(IMap, vector)).toBe(false);
+  expect(implementsProtocol(ISet, map)).toBe(false);
+
+  expect(map[protocolSlot(IMap, "dissoc")]("left").has("left")).toBe(false);
+  expect(set[protocolSlot(ISet, "disj")]("left").has("left")).toBe(false);
+  expect(list[protocolSlot(IStack, "peek")]()).toBe(1);
+  expect(vector[protocolSlot(IStack, "pop")]()).toEqual(persistentVector(1, 2));
+
+  const removedMap = dissoc(map, "left", "missing");
+  expect([...removedMap]).toEqual([["right", 2]]);
+  expect([...map]).toEqual(expect.arrayContaining([["left", 1], ["right", 2]]));
+  expect(dissoc(map)).toBe(map);
+  expect(dissoc(map, "missing")).toBe(map);
+
+  const removedSet = disj(set, "left", "missing");
+  expect([...removedSet]).toEqual(["right"]);
+  expect([...set]).toEqual(expect.arrayContaining(["left", "right"]));
+  expect(disj(set)).toBe(set);
+  expect(disj(set, "missing")).toBe(set);
+
+  const storedKey = persistentVector("value", 7);
+  const equalKey = persistentVector("value", 7);
+  expect(count(dissoc(persistentHashMap([storedKey, "mapped"]), equalKey))).toBe(0);
+  expect(count(disj(persistentHashSet(storedKey), equalKey))).toBe(0);
+
+  expect(peek(list)).toBe(1);
+  expect(pop(list)).toBe(tail);
+  expect(peek(vector)).toBe(3);
+  expect(pop(vector)).toEqual(persistentVector(1, 2));
+  expect(peek(EMPTY_LIST)).toBe(null);
+  expect(peek(EMPTY_VECTOR)).toBe(null);
+  expect(() => pop(EMPTY_LIST)).toThrow("cannot pop an empty persistent list");
+  expect(() => pop(EMPTY_VECTOR)).toThrow("cannot pop an empty persistent vector");
+
+  const metadata = persistentHashMap(["source", "test"]);
+  const annotatedMap = withMeta(map, metadata);
+  const annotatedSet = withMeta(set, metadata);
+  expect(meta(dissoc(annotatedMap, "left"))).toBe(metadata);
+  expect(meta(disj(annotatedSet, "left"))).toBe(metadata);
+  expect(dissoc(annotatedMap, "missing")).toBe(annotatedMap);
+  expect(disj(annotatedSet, "missing")).toBe(annotatedSet);
+  expect(meta(pop(withMeta(list, metadata)))).toBe(null);
+  expect(meta(pop(withMeta(vector, metadata)))).toBe(metadata);
+  expect(meta(pop(withMeta(persistentVector(1), metadata)))).toBe(metadata);
+
+  const nativeMap = new Map([["left", 1], ["right", 2]]);
+  const nativeSet = new Set(["left", "right"]);
+  const nativeObject = { left: 1, right: 2 };
+  const nativeArray = [1, 2, 3];
+  expect([...dissoc(nativeMap, "left")]).toEqual([["right", 2]]);
+  expect([...disj(nativeSet, "left")]).toEqual(["right"]);
+  expect(dissoc(nativeObject, "left")).toEqual({ right: 2 });
+  expect(peek(nativeArray)).toBe(3);
+  expect(pop(nativeArray)).toEqual([1, 2]);
+  expect([...nativeMap]).toEqual([["left", 1], ["right", 2]]);
+  expect([...nativeSet]).toEqual(["left", "right"]);
+  expect(nativeObject).toEqual({ left: 1, right: 2 });
+  expect(nativeArray).toEqual([1, 2, 3]);
+  expect(peek([])).toBe(null);
+  expect(() => pop([])).toThrow("cannot pop an empty array");
+
+  expect(dissoc(null, "left")).toBe(null);
+  expect(disj(null, "left")).toBe(null);
+  expect(peek(null)).toBe(null);
+  expect(pop(null)).toBe(null);
+  expect(() => dissoc(nativeObject, 1)).toThrow(
+    "plain object dissociation keys must be strings",
+  );
+  expect(() => disj(map, "left")).toThrow(ProtocolDispatchError);
+  expect(() => peek(set)).toThrow(ProtocolDispatchError);
+  expect(() => peek()).toThrow("peek requires exactly one collection");
+  expect(() => pop(vector, 1)).toThrow("pop requires exactly one collection");
+});
+
+test("external values can implement removal and stack capabilities independently", () => {
+  class ExternalMap {
+    constructor(entries) {
+      this.entries = Object.freeze(entries);
+      Object.freeze(this);
+    }
+  }
+  class ExternalSet {
+    constructor(values) {
+      this.values = Object.freeze(values);
+      Object.freeze(this);
+    }
+  }
+  class ExternalStack {
+    constructor(values) {
+      this.values = Object.freeze(values);
+      Object.freeze(this);
+    }
+  }
+  extendProtocolType(IMap, ExternalMap, {
+    dissoc: (source, key) => new ExternalMap(
+      source.entries.filter(([entryKey]) => entryKey !== key),
+    ),
+  });
+  extendProtocolType(ISet, ExternalSet, {
+    disj: (source, value) => new ExternalSet(
+      source.values.filter((entry) => entry !== value),
+    ),
+  });
+  extendProtocolType(IStack, ExternalStack, {
+    peek: (source) => source.values.at(-1) ?? null,
+    pop: (source) => new ExternalStack(source.values.slice(0, -1)),
+  });
+
+  expect(dissoc(new ExternalMap([["left", 1], ["right", 2]]), "left").entries)
+    .toEqual([["right", 2]]);
+  expect(disj(new ExternalSet([1, 2, 3]), 2).values).toEqual([1, 3]);
+  const stack = new ExternalStack([1, 2, 3]);
+  expect(peek(stack)).toBe(3);
+  expect(pop(stack).values).toEqual([1, 2]);
+  expect(implementsProtocol(IConj, stack)).toBe(false);
+  expect(implementsProtocol(IIndexed, stack)).toBe(false);
 });
 
 test("empty preserves logical collection categories and canonical persistent values", () => {
@@ -560,14 +704,21 @@ test("native adapters are exact, realm-explicit, and prototype preserving", asyn
 
   expect(() => count(remote)).toThrow(ProtocolDispatchError);
   expect(() => empty(remote)).toThrow(ProtocolDispatchError);
+  expect(() => peek(remote)).toThrow(ProtocolDispatchError);
   extendProtocolType(ICounted, remote.constructor, {
     count: (values) => values.length,
   });
   extendProtocolType(IEmptyable, remote.constructor, {
     empty: (values) => values.slice(0, 0),
   });
+  extendProtocolType(IStack, remote.constructor, {
+    peek: (values) => values.at(-1) ?? null,
+    pop: (values) => values.slice(0, -1),
+  });
   expect(count(remote)).toBe(3);
   expect(empty(remote)).toEqual([]);
+  expect(peek(remote)).toBe(8);
+  expect(pop(remote)).toEqual([3, 5]);
   expect(Reflect.ownKeys(Array.prototype)).toEqual(arrayPrototypeKeys);
   expect(Reflect.ownKeys(Map.prototype)).toEqual(mapPrototypeKeys);
   expect(Reflect.ownKeys(Set.prototype)).toEqual(setPrototypeKeys);
@@ -624,6 +775,17 @@ test("collection capabilities agree under Bun and Node and reduce at million sca
       contains: [true, false, true],
       emptied: [0, 0, 0],
     },
+    removal: {
+      map: [["right", 5]],
+      set: ["beta"],
+      object: { right: 5 },
+    },
+    stack: {
+      list: [2, [4, 6, 8]],
+      vector: [8, [2, 4, 6]],
+      array: [6, [2, 4]],
+      nil: [null, null],
+    },
   });
 
   const values = Array.from({ length: 1_000_000 }, (_value, index) => index);
@@ -645,4 +807,8 @@ test("generic construction reaches one million values without stack growth", () 
   const changed = assoc(vector, 500_000, "changed");
   expect(nth(changed, 500_000)).toBe("changed");
   expect(nth(vector, 500_000)).toBe(500_000);
+  const shortened = pop(vector);
+  expect(count(shortened)).toBe(999_999);
+  expect(peek(shortened)).toBe(999_998);
+  expect(peek(vector)).toBe(999_999);
 }, 30_000);
