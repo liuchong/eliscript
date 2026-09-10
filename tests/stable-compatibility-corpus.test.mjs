@@ -37,7 +37,7 @@ test("stable compatibility corpus covers every frozen core behavior", async () =
     excludedApplicationFeatures: 2,
     migrations: 3,
     fixtures: 76,
-    evidenceLocators: 596,
+    evidenceLocators: 598,
     evidenceFiles: 120,
     sourceFiles: 351,
     readyForAc02: false,

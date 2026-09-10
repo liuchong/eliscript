@@ -17,13 +17,23 @@ import {
 import {
   difference,
   disjoint,
+  index,
   intersection,
+  join,
+  mapInvert,
+  project,
+  rename,
+  renameKeys,
+  select,
   set,
   subset,
   superset,
   union,
 } from "../runtime/core/set-algebra.mjs";
-import { EMPTY_MAP } from "../runtime/core/map.mjs";
+import {
+  EMPTY_MAP,
+  persistentHashMap,
+} from "../runtime/core/map.mjs";
 import { meta, withMeta } from "../runtime/core/metadata.mjs";
 import { extendProtocolType } from "../runtime/core/protocol.mjs";
 import {
@@ -89,6 +99,8 @@ async function runUsageHost(command, module) {
   const source = [
     `const usage = await import(${JSON.stringify(pathToFileURL(module).href)});`,
     "const ordered = (value) => [...value].sort((a, b) => a - b);",
+    "const rows = (value) => [...value].map((row) => Object.fromEntries(row)).sort((a, b) => a.id !== undefined && b.id !== undefined ? a.id - b.id : JSON.stringify(a).localeCompare(JSON.stringify(b)));",
+    "const entries = (value) => [...value].map((entry) => [...entry]).sort((a, b) => String(a[0]).localeCompare(String(b[0])));",
     "console.log(JSON.stringify({",
     "  converted: ordered(usage.converted),",
     "  united: ordered(usage.united),",
@@ -97,6 +109,14 @@ async function runUsageHost(command, module) {
     "  subset: usage.subset_result,",
     "  superset: usage.superset_result,",
     "  disjoint: usage.disjoint_result,",
+    "  selected: rows(usage.selected),",
+    "  projected: rows(usage.projected),",
+    "  renamed: rows(usage.renamed),",
+    "  renamedKeys: Object.fromEntries(usage.renamed_keys),",
+    "  indexSizes: [...usage.indexed].map((entry) => entry[1].count).sort(),",
+    "  inverted: entries(usage.inverted),",
+    "  joined: rows(usage.joined),",
+    "  mappedJoined: rows(usage.mapped_joined),",
     "}));",
   ].join("\n");
   return JSON.parse(await runSuccessful([
@@ -168,6 +188,136 @@ test("set relations are value-semantic and enforce complete arity", () => {
   expect(() => disjoint()).toThrow("disjoint expects 2 collections");
 });
 
+test("relational projection and selection preserve value semantics and metadata", () => {
+  const metadata = EMPTY_MAP.assoc("source", "people");
+  const ada = persistentHashMap(
+    ["id", 1],
+    ["name", "Ada"],
+    ["team", "compiler"],
+  );
+  const lin = persistentHashMap(
+    ["id", 2],
+    ["name", "Lin"],
+    ["team", "runtime"],
+  );
+  const source = withMeta(persistentHashSet(ada, lin), metadata);
+
+  const selected = select((row) => row.get("team") === "compiler", source);
+  expect(selected.count).toBe(1);
+  expect(selected.has(ada)).toBe(true);
+  expect(meta(selected)).toBe(metadata);
+  expect(select(() => true, source)).toBe(source);
+
+  const projected = project(source, values("team"));
+  expect(projected.count).toBe(2);
+  expect(projected.has(persistentHashMap(["team", "compiler"]))).toBe(true);
+  expect(projected.has(persistentHashMap(["team", "runtime"]))).toBe(true);
+  expect(meta(projected)).toBe(metadata);
+});
+
+test("relational rename and inversion handle swaps and traversal collisions", () => {
+  const metadata = EMPTY_MAP.assoc("source", "mapping");
+  const source = withMeta(persistentHashMap(
+    ["left", 1],
+    ["right", 2],
+    ["stable", 3],
+  ), metadata);
+  const swapped = renameKeys(source, persistentHashMap(
+    ["left", "right"],
+    ["right", "left"],
+    ["missing", "new"],
+  ));
+  expect(swapped.get("left")).toBe(2);
+  expect(swapped.get("right")).toBe(1);
+  expect(swapped.get("stable")).toBe(3);
+  expect(swapped.has("missing")).toBe(false);
+  expect(meta(swapped)).toBe(metadata);
+
+  const relation = persistentHashSet(source);
+  const renamed = rename(relation, persistentHashMap(["stable", "kept"]));
+  expect(renamed.has(persistentHashMap(
+    ["left", 1],
+    ["right", 2],
+    ["kept", 3],
+  ))).toBe(true);
+
+  const collisionSource = persistentHashMap(
+    ["first", "shared"],
+    ["second", "shared"],
+  );
+  let lastKey;
+  for (const [key] of collisionSource) lastKey = key;
+  const inverted = mapInvert(collisionSource);
+  expect(inverted.count).toBe(1);
+  expect(inverted.get("shared")).toBe(lastKey);
+});
+
+test("relational indexing drives natural and mapped joins", () => {
+  const ada = persistentHashMap(
+    ["id", 1],
+    ["name", "Ada"],
+    ["team", "compiler"],
+  );
+  const lin = persistentHashMap(
+    ["id", 2],
+    ["name", "Lin"],
+    ["team", "runtime"],
+  );
+  const people = persistentHashSet(ada, lin);
+  const grouped = index(people, ["team"]);
+  expect(grouped.count).toBe(2);
+  expect(grouped.get(persistentHashMap(["team", "compiler"])).has(ada))
+    .toBe(true);
+
+  const roles = persistentHashSet(
+    persistentHashMap(["id", 1], ["role", "admin"]),
+    persistentHashMap(["id", 4], ["role", "guest"]),
+  );
+  const natural = join(people, roles);
+  expect(natural.count).toBe(1);
+  expect(natural.has(persistentHashMap(
+    ["id", 1],
+    ["name", "Ada"],
+    ["team", "compiler"],
+    ["role", "admin"],
+  ))).toBe(true);
+
+  const memberships = persistentHashSet(
+    persistentHashMap(["user-id", 2], ["role", "maintainer"]),
+  );
+  const mapped = join(
+    people,
+    memberships,
+    persistentHashMap(["id", "user-id"]),
+  );
+  expect(mapped.count).toBe(1);
+  expect([...mapped][0].get("name")).toBe("Lin");
+  expect([...mapped][0].get("role")).toBe("maintainer");
+
+  const leftSmaller = join(
+    persistentHashSet(lin),
+    persistentHashSet(
+      ...memberships,
+      persistentHashMap(["user-id", 9], ["role", "observer"]),
+    ),
+    persistentHashMap(["id", "user-id"]),
+  );
+  expect(leftSmaller.count).toBe(1);
+  expect([...leftSmaller][0].get("role")).toBe("maintainer");
+  expect(join(people, EMPTY_SET).count).toBe(0);
+});
+
+test("relational set operations enforce arity and predicate contracts", () => {
+  expect(() => select(null, [])).toThrow("select predicate must be a function");
+  expect(() => project([])).toThrow("project expects 2 collections");
+  expect(() => renameKeys({})).toThrow("renameKeys expects 2 collections");
+  expect(() => rename([])).toThrow("rename expects 2 collections");
+  expect(() => index([])).toThrow("index expects 2 collections");
+  expect(() => mapInvert({}, {})).toThrow("mapInvert expects 1 collection");
+  expect(() => join()).toThrow("join expects 2 or 3 relations");
+  expect(() => join([], [], {}, {})).toThrow("join expects 2 or 3 relations");
+});
+
 test("Eliscript-authored set algebra compiles and agrees across local hosts", async () => {
   const directory = await mkdtemp(resolve(ROOT, ".eliscript-core-set-"));
   const runtimeLink = resolve(directory, "runtime");
@@ -186,6 +336,27 @@ test("Eliscript-authored set algebra compiles and agrees across local hosts", as
       subset: true,
       superset: true,
       disjoint: true,
+      selected: [
+        { id: 1, name: "Ada", team: "compiler" },
+        { id: 3, name: "Mira", team: "compiler" },
+      ],
+      projected: [{ team: "compiler" }, { team: "runtime" }],
+      renamed: [
+        { id: 1, display: "Ada", team: "compiler" },
+        { id: 2, display: "Lin", team: "runtime" },
+        { id: 3, display: "Mira", team: "compiler" },
+      ],
+      renamedKeys: { left: 2, right: 1 },
+      indexSizes: [1, 2],
+      inverted: [[1, "left"], [2, "right"]],
+      joined: [{ id: 1, name: "Ada", role: "admin", team: "compiler" }],
+      mappedJoined: [{
+        id: 2,
+        name: "Lin",
+        role: "maintainer",
+        team: "runtime",
+        "user-id": 2,
+      }],
     };
     expect(await runUsageHost(process.execPath, usageModule)).toEqual(expected);
     expect(await runUsageHost(process.env.NODE ?? "node", usageModule))
@@ -194,6 +365,7 @@ test("Eliscript-authored set algebra compiles and agrees across local hosts", as
     const sourceMap = JSON.parse(await readFile(`${setModule}.map`, "utf8"));
     expect(sourceMap.sourcesContent[0]).toContain("(defun union");
     expect(sourceMap.sourcesContent[0]).toContain("(defun subset?");
+    expect(sourceMap.sourcesContent[0]).toContain("(defun join");
     expect(sourceMap.sourcesContent[0]).not.toContain(
       "runtime/core/set-algebra.mjs",
     );

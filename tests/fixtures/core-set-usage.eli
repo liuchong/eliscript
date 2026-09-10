@@ -1,8 +1,16 @@
 (module test.core-set-usage
+  (import "./runtime/core/collection.mjs" :as Collection)
   (import "./stdlib/core/set.mjs"
     difference
     disjoint?
+    index
     intersection
+    join
+    map-invert
+    project
+    rename
+    rename-keys
+    select
     set
     subset?
     superset?
@@ -14,10 +22,34 @@
   (defconst subset-result (subset? [1 3] converted))
   (defconst superset-result (superset? converted [1 2]))
   (defconst disjoint-result (disjoint? converted [8 9]))
+  (defconst people
+    #{
+      {"id" 1 "name" "Ada" "team" "compiler"}
+      {"id" 2 "name" "Lin" "team" "runtime"}
+      {"id" 3 "name" "Mira" "team" "compiler"}})
+  (defconst selected
+    (select (lambda (row) (equal (Collection/get row "team") "compiler")) people))
+  (defconst projected (project people ["team"]))
+  (defconst renamed (rename people {"name" "display"}))
+  (defconst renamed-keys
+    (rename-keys {"left" 1 "right" 2} {"left" "right" "right" "left"}))
+  (defconst indexed (index people ["team"]))
+  (defconst inverted (map-invert {"left" 1 "right" 2}))
+  (defconst joined (join people #{{"id" 1 "role" "admin"} {"id" 4 "role" "guest"}}))
+  (defconst mapped-joined
+    (join people #{{"user-id" 2 "role" "maintainer"}} {"id" "user-id"}))
   (export
     converted
     disjoint-result
+    indexed
     intersected
+    inverted
+    joined
+    mapped-joined
+    projected
+    renamed
+    renamed-keys
+    selected
     subtracted
     subset-result
     superset-result

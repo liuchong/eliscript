@@ -146,8 +146,10 @@ owner-token transient. `indexBy` uses a transient Map throughout.
 ## Set Algorithms
 
 `runtime/core/set-algebra.mjs` exports `set`, `union`, `intersection`,
-`difference`, `subset`, `superset`, and `disjoint`. The Lisp-named predicates
-are `subset?`, `superset?`, and `disjoint?` in `stdlib/core/set.eli`.
+`difference`, `subset`, `superset`, `disjoint`, `select`, `project`,
+`renameKeys`, `rename`, `index`, `mapInvert`, and `join`. The Lisp-named
+predicates and keyed operation names are `subset?`, `superset?`, `disjoint?`,
+`rename-keys`, and `map-invert` in `stdlib/core/set.eli`.
 
 `set` converts any `IReduce` source to a value-semantic persistent Set and
 returns an existing persistent Set unchanged. Union and difference accept one
@@ -156,6 +158,15 @@ Intersection repeatedly traverses the smaller persistent operand and keeps
 the first Set's metadata. Membership relations convert their operands once,
 compare cardinality where useful, and terminate on the first failed or shared
 member through reduced values. Inputs are never mutated.
+
+Relational operations treat a relation as a value-semantic Set of keyed rows.
+`select` filters rows with Eliscript truth semantics. `project` and `rename`
+collapse value-equal rows and retain relation metadata. `rename-keys` removes
+all source keys before assigning renamed values, so swaps are lossless and a
+target collision keeps the last traversed mapping. `index` groups rows under
+projected persistent Map keys. `map-invert` reverses keys and values with the
+same last-traversed collision rule. Natural and mapped `join` index the smaller
+relation and produce persistent merged rows without mutating either input.
 
 ## Eliscript Modules
 
@@ -250,6 +261,12 @@ consumed values. Pairwise intersection traverses the smaller operand and uses
 expected O(1) membership checks. Set relations use O(min(n, m)) membership
 work after conversion and stop at the first decisive member.
 
+Selection, projection, and relation renaming perform expected O(n) Set work.
+Indexing performs one projected Map construction and one persistent group
+update per row. Join constructs an index for the smaller relation, then probes
+the larger relation with expected O(1) value-semantic key lookup; output work is
+proportional to the number of matched row pairs.
+
 These are structural allocation guarantees, not timing promises. Host timing
 depends on JavaScript engine warmup, garbage collection, and callback cost.
 
@@ -328,6 +345,10 @@ dispatch internals remain later work.
   `IReduce` sources, preserve value semantics and left metadata, use transient
   builders for bulk results, leave inputs unchanged, and agree under Bun and
   Node.
+- **PCA-25:** Relational selection, projection, key renaming, inversion,
+  indexing, and natural or mapped joins preserve persistent value semantics,
+  use the smaller join index, retain relation metadata where applicable, and
+  agree under Bun and Node.
 
 ## Next Slice
 

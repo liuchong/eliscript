@@ -483,7 +483,8 @@ protocol-driven runtime algorithms through Lisp-named Eliscript modules:
         assoc-in get-in group-by frequencies keys vals
         update-keys update-vals merge-with select-keys zipmap)
 (import "../../stdlib/core/set.eli"
-        difference disjoint? intersection set subset? superset? union)
+        difference disjoint? index intersection join map-invert project
+        rename rename-keys select set subset? superset? union)
 ```
 
 Sequence transforms accept any `IReduce` source and return persistent Vectors.
@@ -509,6 +510,10 @@ Set conversion and algebra accept arbitrary protocol collections and return
 value-semantic persistent Sets. Intersection and difference retain left-hand
 metadata; subset, superset, and disjoint checks stop as soon as the answer is
 known.
+Relations are persistent Sets of keyed rows. `select` and `project` filter and
+shape rows, `rename-keys` and `rename` transform schemas, `index` groups rows by
+projected persistent Map keys, and `join` performs natural or explicit
+key-mapped joins using the smaller relation as its index.
 
 `reduce-kv` passes indexes or stored keys directly through `IKVReduce`.
 Persistent Vector and HAMT Map values avoid public entry allocation, external

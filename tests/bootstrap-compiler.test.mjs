@@ -347,6 +347,13 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "function subset_QMARK_(...arguments$)",
         "function superset_QMARK_(...arguments$)",
         "function disjoint_QMARK_(...arguments$)",
+        "function select(...arguments$)",
+        "function project(...arguments$)",
+        "function rename_keys(...arguments$)",
+        "function rename(...arguments$)",
+        "function index(...arguments$)",
+        "function map_invert(...arguments$)",
+        "function join(...arguments$)",
       ]],
       ["stdlib/core/order.eli", [
         "function compare_values(left, right)",

@@ -72,7 +72,8 @@ keys select-keys update update-in update-keys update-vals vals zipmap
 `stdlib/core/set.eli` now contains the maintained implementations of:
 
 ```text
-difference disjoint? intersection set subset? superset? union
+difference disjoint? index intersection join map-invert project rename
+rename-keys select set subset? superset? union
 ```
 
 `stdlib/core/order.eli` contains the maintained comparator adaptation, stable
@@ -96,6 +97,9 @@ that do not require prior-value lookup. Set conversion and algebra accept
 arbitrary protocol collections, preserve value-semantic membership, retain
 left-hand metadata, and use owner-token transient Set builders. Set relations
 terminate as soon as their result is known.
+Relational Set operations select and project keyed rows, perform lossless key
+renaming, construct value-semantic indexes, and join on natural or explicit key
+mappings. Join indexes the smaller relation and returns persistent merged rows.
 
 The source modules import lower-level runtime capabilities rather than the
 corresponding `runtime/core/sequence.mjs`, `runtime/core/data.mjs`, or
@@ -224,6 +228,9 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
 - **ECA-21:** Maintained Set conversion, algebra, and relations compile from
   `stdlib/core/set.eli`, accept protocol sources, preserve persistent value
   semantics and left metadata, and agree under Bun and Node.
+- **ECA-22:** Maintained relational Set selection, projection, renaming,
+  inversion, indexing, and joins compile from `stdlib/core/set.eli`, preserve
+  value-semantic persistent rows, and agree under Bun and Node.
 
 ## Follow-up
 
