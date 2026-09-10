@@ -10,6 +10,7 @@ import {
   unboundedSequenceView,
   unreduced,
 } from "./collection.mjs";
+import { isPersistentList } from "./list.mjs";
 import { implementsProtocolOperation } from "./protocol.mjs";
 import {
   deduping,
@@ -37,9 +38,14 @@ import {
   transient,
 } from "./transient.mjs";
 import { isTruthy } from "./truth.mjs";
-import { EMPTY_VECTOR, persistentVector } from "./vector.mjs";
+import {
+  EMPTY_VECTOR,
+  isPersistentVector,
+  persistentVector,
+} from "./vector.mjs";
 
 const NOT_FOUND = Symbol("eliscript.sequence.not-found");
+const NO_PARTITION_PAD = Symbol("eliscript.sequence.no-partition-pad");
 
 function requireFunction(value, label) {
   if (typeof value !== "function") {
@@ -53,6 +59,63 @@ function requireNonNegativeSafeInteger(value, label) {
     throw new TypeError(`${label} must be a non-negative safe integer`);
   }
   return value;
+}
+
+function requirePositiveSafeInteger(value, label) {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(`${label} must be a positive safe integer`);
+  }
+  return value;
+}
+
+function materializeSources(collections) {
+  const sources = [];
+  for (const collection of collections) {
+    sources.push(into(EMPTY_VECTOR, collection));
+  }
+  return sources;
+}
+
+function partitionWindows(
+  size,
+  step,
+  collection,
+  { includePartial = false, pad = NO_PARTITION_PAD } = {},
+) {
+  requirePositiveSafeInteger(size, "partition size");
+  requirePositiveSafeInteger(step, "partition step");
+  const values = into(EMPTY_VECTOR, collection);
+  const valueCount = collectionCount(values);
+  const result = transient(EMPTY_VECTOR);
+
+  for (let start = 0; start < valueCount; start += step) {
+    const group = transient(EMPTY_VECTOR);
+    let groupCount = Math.min(size, valueCount - start);
+    for (let offset = 0; offset < groupCount; offset += 1) {
+      conjBang(group, collectionNth(values, start + offset));
+    }
+
+    const partial = groupCount < size;
+    if (partial && pad !== NO_PARTITION_PAD) {
+      reduce(pad, (builder, value) => {
+        conjBang(builder, value);
+        groupCount += 1;
+        return groupCount >= size ? reduced(builder) : builder;
+      }, group);
+    }
+    const completed = persistentBang(group);
+    if (!partial || includePartial || pad !== NO_PARTITION_PAD) {
+      conjBang(result, completed);
+    }
+    if (partial && !includePartial) break;
+  }
+  return persistentBang(result);
+}
+
+function isSequentialBranch(value) {
+  return Array.isArray(value) ||
+    isPersistentList(value) ||
+    isPersistentVector(value);
 }
 
 function requireFiniteNumber(value, label) {
@@ -358,8 +421,36 @@ export function mapcat(transform, collection) {
   return into(EMPTY_VECTOR, mapcatting(transform), collection);
 }
 
-export function partitionAll(size, collection) {
-  return into(EMPTY_VECTOR, partitioningAll(size), collection);
+export function partition(size, ...arguments_) {
+  if (arguments_.length === 1) {
+    return partitionWindows(size, size, arguments_[0]);
+  }
+  if (arguments_.length === 2) {
+    return partitionWindows(size, arguments_[0], arguments_[1]);
+  }
+  if (arguments_.length === 3) {
+    return partitionWindows(size, arguments_[0], arguments_[2], {
+      pad: arguments_[1],
+    });
+  }
+  throw new TypeError(
+    "partition expects size and collection, optional step, or step and pad",
+  );
+}
+
+export function partitionAll(size, ...arguments_) {
+  if (arguments_.length === 1) {
+    requirePositiveSafeInteger(size, "partition size");
+    return into(EMPTY_VECTOR, partitioningAll(size), arguments_[0]);
+  }
+  if (arguments_.length === 2) {
+    return partitionWindows(size, arguments_[0], arguments_[1], {
+      includePartial: true,
+    });
+  }
+  throw new TypeError(
+    "partitionAll expects size and collection or size, step, and collection",
+  );
 }
 
 export function partitionBy(classifier, collection) {
@@ -370,6 +461,40 @@ export function concat(...collections) {
   const result = transient(EMPTY_VECTOR);
   for (const collection of collections) {
     reduce(collection, (builder, value) => conjBang(builder, value), result);
+  }
+  return persistentBang(result);
+}
+
+export function interleave(...collections) {
+  if (collections.length === 0) return EMPTY_VECTOR;
+  const sources = materializeSources(collections);
+  let limit = collectionCount(sources[0]);
+  for (let index = 1; index < sources.length; index += 1) {
+    limit = Math.min(limit, collectionCount(sources[index]));
+  }
+  const result = transient(EMPTY_VECTOR);
+  for (let valueIndex = 0; valueIndex < limit; valueIndex += 1) {
+    for (const source of sources) {
+      conjBang(result, collectionNth(source, valueIndex));
+    }
+  }
+  return persistentBang(result);
+}
+
+export function interleaveAll(...collections) {
+  if (collections.length === 0) return EMPTY_VECTOR;
+  const sources = materializeSources(collections);
+  let limit = 0;
+  for (const source of sources) {
+    limit = Math.max(limit, collectionCount(source));
+  }
+  const result = transient(EMPTY_VECTOR);
+  for (let valueIndex = 0; valueIndex < limit; valueIndex += 1) {
+    for (const source of sources) {
+      if (valueIndex < collectionCount(source)) {
+        conjBang(result, collectionNth(source, valueIndex));
+      }
+    }
   }
   return persistentBang(result);
 }
@@ -387,6 +512,14 @@ export function every(predicate, collection) {
   requireFunction(predicate, "every predicate");
   return reduce(collection, (result, value) =>
     isTruthy(predicate(value)) ? result : reduced(false), true);
+}
+
+export function notAny(predicate, collection) {
+  return !isTruthy(some(predicate, collection));
+}
+
+export function notEvery(predicate, collection) {
+  return !every(predicate, collection);
 }
 
 export function find(predicate, collection, notFound = null) {
@@ -410,4 +543,39 @@ export function reductions(step, initial, collection) {
     }, seed);
   }
   return persistentBang(builder);
+}
+
+export function treeSeq(branchPredicate, childrenFunction, root) {
+  requireFunction(branchPredicate, "treeSeq branch predicate");
+  requireFunction(childrenFunction, "treeSeq children function");
+  const result = transient(EMPTY_VECTOR);
+  const stack = [root];
+  while (stack.length > 0) {
+    const value = stack.pop();
+    conjBang(result, value);
+    if (isTruthy(branchPredicate(value))) {
+      const children = into(EMPTY_VECTOR, childrenFunction(value));
+      for (let index = collectionCount(children) - 1; index >= 0; index -= 1) {
+        stack.push(collectionNth(children, index));
+      }
+    }
+  }
+  return persistentBang(result);
+}
+
+export function flatten(root) {
+  const result = transient(EMPTY_VECTOR);
+  const stack = [root];
+  while (stack.length > 0) {
+    const value = stack.pop();
+    if (isSequentialBranch(value)) {
+      const children = into(EMPTY_VECTOR, value);
+      for (let index = collectionCount(children) - 1; index >= 0; index -= 1) {
+        stack.push(collectionNth(children, index));
+      }
+    } else {
+      conjBang(result, value);
+    }
+  }
+  return persistentBang(result);
 }

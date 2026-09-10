@@ -51,8 +51,11 @@ import {
   every,
   filter,
   find,
+  flatten,
   first,
   generate,
+  interleave,
+  interleaveAll,
   interpose,
   keep,
   keepIndexed,
@@ -61,6 +64,9 @@ import {
   map,
   mapIndexed,
   mapcat,
+  notAny,
+  notEvery,
+  partition,
   sequenceNth,
   partitionAll,
   partitionBy,
@@ -77,6 +83,7 @@ import {
   takeLast,
   takeNth,
   takeWhile,
+  treeSeq,
 } from "../runtime/core/sequence.mjs";
 import {
   composeTransducers,
@@ -193,6 +200,15 @@ async function runBuiltCoreProjectHost(command, outputRoot) {
     "    [...sequence.take_last(2, sourceValues)],",
     "    [...sequence.drop_last(2, sourceValues)],",
     "    [...sequence.split_at(2, sourceValues)].map((part) => [...part]),",
+    "  ],",
+    "  composed: [",
+    "    [...sequence.interleave([1, 2, 3], ['a', 'b'])],",
+    "    [...sequence.interleave_all([1, 2, 3], ['a', 'b'])],",
+    "    [...sequence.partition(3, 2, [9], [0, 1, 2, 3])].map((part) => [...part]),",
+    "    [...sequence.partition_all(3, 2, [0, 1, 2, 3])].map((part) => [...part]),",
+    "    [...sequence.flatten([1, [2, vector.persistentVector(3)], 4])],",
+    "    sequence.not_any_QMARK_((value) => value > 9, sourceValues),",
+    "    sequence.not_every_QMARK_((value) => value < 3, sourceValues),",
     "  ],",
     "  sources: [",
     "    [...sequence.range(1, 8, 2)],",
@@ -517,7 +533,7 @@ test("sequence algorithms use protocols and Eliscript truthiness", () => {
   expect(find(() => false, values, "missing")).toBe("missing");
 });
 
-test("expanded sequence vocabulary builds persistent results through protocols", () => {
+test("sequence composition partitioning and tree traversal use protocol sources", () => {
   class ProtocolValues {
     constructor(values) {
       this.values = Object.freeze([...values]);
@@ -565,6 +581,61 @@ test("expanded sequence vocabulary builds persistent results through protocols",
   expect([...partitionBy((value) => value % 2, source(1, 3, 2, 4, 5))]
     .map((value) => [...value]))
     .toEqual([[1, 3], [2, 4], [5]]);
+  expect([...interleave(source(1, 2, 3), source("a", "b"), source(true, false))])
+    .toEqual([1, "a", true, 2, "b", false]);
+  expect([...interleaveAll(source(1, 2, 3), source("a", "b"))])
+    .toEqual([1, "a", 2, "b", 3]);
+  expect([...partition(3, values)].map((value) => [...value]))
+    .toEqual([[0, 1, 2], [3, 4, 5]]);
+  expect([...partition(3, 2, values)].map((value) => [...value]))
+    .toEqual([[0, 1, 2], [2, 3, 4]]);
+  expect([...partition(3, 2, source(9), values)].map((value) => [...value]))
+    .toEqual([[0, 1, 2], [2, 3, 4], [4, 5, 9]]);
+  expect([...partitionAll(3, 2, values)].map((value) => [...value]))
+    .toEqual([[0, 1, 2], [2, 3, 4], [4, 5]]);
+  expect(notAny((value) => value > 9, values)).toBe(true);
+  expect(notAny((value) => value === 0 ? 0 : false, values)).toBe(false);
+  expect(notEvery((value) => value < 5, values)).toBe(true);
+  expect(notEvery(() => "", values)).toBe(false);
+
+  const tree = {
+    name: "root",
+    children: [
+      { name: "left", children: [] },
+      {
+        name: "right",
+        children: [{ name: "leaf", children: null }],
+      },
+    ],
+  };
+  expect([...treeSeq(
+    (node) => node.children !== null,
+    (node) => node.children,
+    tree,
+  )].map((node) => node.name)).toEqual(["root", "left", "right", "leaf"]);
+  expect([...flatten(persistentVector(1, [2, persistentVector(3)], 4))])
+    .toEqual([1, 2, 3, 4]);
+  const leafMap = new Map([["key", "value"]]);
+  expect([...flatten([leafMap, 7])]).toEqual([leafMap, 7]);
+  expect([...flatten(8)]).toEqual([8]);
+
+  let deepTree = { children: null };
+  for (let index = 0; index < 100_000; index += 1) {
+    deepTree = { children: [deepTree] };
+  }
+  expect(treeSeq(
+    (node) => node.children !== null,
+    (node) => node.children,
+    deepTree,
+  ).count).toBe(100_001);
+
+  for (const operation of [
+    () => partition(0, values),
+    () => partition(2, 0, values),
+    () => partitionAll(2),
+    () => treeSeq(null, (value) => value, tree),
+    () => treeSeq(() => true, null, tree),
+  ]) expect(operation).toThrow();
 
   const observed = [];
   class ObservedRange {
@@ -1355,6 +1426,15 @@ test("stable protocol and core algorithms build as one project across Bun and No
       transformed: [4, 6, 4],
       mapped: [2, 3, 4, 3],
       sequence: [1, 2, 3, [3, 2], [1, 2], [[1, 2], [3, 2]]],
+      composed: [
+        [1, "a", 2, "b"],
+        [1, "a", 2, "b", 3],
+        [[0, 1, 2], [2, 3, 9]],
+        [[0, 1, 2], [2, 3]],
+        [1, 2, 3, 4],
+        true,
+        true,
+      ],
       sources: [
         [1, 3, 5, 7],
         [0, 1, 2, 3, 4],

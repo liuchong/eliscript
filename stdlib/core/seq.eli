@@ -11,6 +11,7 @@
     unboundedSequenceView
     unreduced)
   (import "../../runtime/core/protocol.mjs" implementsProtocolOperation)
+  (import "../../runtime/core/list.mjs" isPersistentList)
   (import "../../runtime/core/transducer.mjs"
     deduping
     distincting
@@ -32,9 +33,14 @@
     takingWhile)
   (import "../../runtime/core/transient.mjs" conjBang persistentBang transient)
   (import "../../runtime/core/truth.mjs" isTruthy)
-  (import "../../runtime/core/vector.mjs" EMPTY_VECTOR persistentVector)
+  (import "../../runtime/core/vector.mjs"
+    EMPTY_VECTOR
+    isPersistentVector
+    persistentVector)
   (defconst not-found (js-object))
+  (defconst sequence-no-partition-pad (js-object))
   (defconst sequence-ring (js* "() => new Map()"))
+  (defconst sequence-array? (js* "Array.isArray"))
   (defconst sequence-safe-integer? (js* "Number.isSafeInteger"))
   (defconst sequence-finite? (js* "Number.isFinite"))
   (defconst sequence-ceil (js* "Math.ceil"))
@@ -49,6 +55,62 @@
       value
       (throw
         (new globalThis/TypeError (str label " must be a non-negative safe integer")))))
+  (defun require-positive-safe-integer
+    (value label)
+    (if (and (funcall sequence-safe-integer? value) (> value 0))
+      value
+      (throw (new globalThis/TypeError (str label " must be a positive safe integer")))))
+  (defun sequence-materialize-sources
+    (collections)
+    (let ((sources (js-array)) (index 0))
+      (while (< index (js-length collections))
+        (js-call sources :push (into EMPTY_VECTOR (js-nth index collections)))
+        (setq index (1+ index)))
+      sources))
+  (defun sequence-partition-windows
+    (size step pad include-partial collection)
+    (require-positive-safe-integer size "partition size")
+    (require-positive-safe-integer step "partition step")
+    (let*
+      ((values (into EMPTY_VECTOR collection))
+        (value-count (count values))
+        (result (transient EMPTY_VECTOR))
+        (start 0))
+      (while (< start value-count)
+        (let*
+          ((remaining (- value-count start))
+            (group-count (if (< remaining size) remaining size))
+            (partial (< group-count size))
+            (group (transient EMPTY_VECTOR))
+            (offset 0))
+          (while (< offset group-count)
+            (conjBang group (nth (+ start offset) values))
+            (setq offset (1+ offset)))
+          (when (and partial (not (eq pad sequence-no-partition-pad)))
+            (reduce
+              pad
+              (lambda
+                (builder value)
+                (conjBang builder value)
+                (setq group-count (1+ group-count))
+                (if (>= group-count size) (reduced builder) builder))
+              group))
+          (let ((completed (persistentBang group)))
+            (when
+              (or
+                (not partial)
+                include-partial
+                (not (eq pad sequence-no-partition-pad)))
+              (conjBang result completed)))
+          (setq start (+ start step))
+          (when (and partial (not include-partial)) (setq start value-count))))
+      (persistentBang result)))
+  (defun sequence-sequential-branch?
+    (value)
+    (or
+      (funcall sequence-array? value)
+      (isPersistentList value)
+      (isPersistentVector value)))
   (defun require-finite-number
     (value label)
     (if (funcall sequence-finite? value)
@@ -362,9 +424,55 @@
   (defun mapcat
     (transform collection)
     (into EMPTY_VECTOR (mapcatting transform) collection))
+  (defun partition
+    (size &rest arguments)
+    (let ((arity (js-length arguments)))
+      (cond
+        ((= arity 1)
+          (sequence-partition-windows
+            size
+            size
+            sequence-no-partition-pad
+            false
+            (js-nth 0 arguments)))
+        ((= arity 2)
+          (sequence-partition-windows
+            size
+            (js-nth 0 arguments)
+            sequence-no-partition-pad
+            false
+            (js-nth 1 arguments)))
+        ((= arity 3)
+          (sequence-partition-windows
+            size
+            (js-nth 0 arguments)
+            (js-nth 1 arguments)
+            false
+            (js-nth 2 arguments)))
+        (t
+          (throw
+            (new
+              globalThis/TypeError
+              "partition expects size and collection, optional step, or step and pad"))))))
   (defun partition-all
-    (size collection)
-    (into EMPTY_VECTOR (partitioningAll size) collection))
+    (size &rest arguments)
+    (let ((arity (js-length arguments)))
+      (cond
+        ((= arity 1)
+          (require-positive-safe-integer size "partition size")
+          (into EMPTY_VECTOR (partitioningAll size) (js-nth 0 arguments)))
+        ((= arity 2)
+          (sequence-partition-windows
+            size
+            (js-nth 0 arguments)
+            sequence-no-partition-pad
+            t
+            (js-nth 1 arguments)))
+        (t
+          (throw
+            (new
+              globalThis/TypeError
+              "partition-all expects size and collection or size, step, and collection"))))))
   (defun partition-by
     (classifier collection)
     (into EMPTY_VECTOR (partitioningBy classifier) collection))
@@ -378,6 +486,52 @@
           result)
         (setq index (1+ index)))
       (persistentBang result)))
+  (defun interleave
+    (&rest collections)
+    (if (= (js-length collections) 0)
+      EMPTY_VECTOR
+      (let*
+        ((sources (sequence-materialize-sources collections))
+          (source-count (js-length sources))
+          (limit (count (js-nth 0 sources)))
+          (source-index 1)
+          (value-index 0)
+          (result (transient EMPTY_VECTOR)))
+        (while (< source-index source-count)
+          (let ((source-size (count (js-nth source-index sources))))
+            (when (< source-size limit) (setq limit source-size)))
+          (setq source-index (1+ source-index)))
+        (while (< value-index limit)
+          (setq source-index 0)
+          (while (< source-index source-count)
+            (conjBang result (nth value-index (js-nth source-index sources)))
+            (setq source-index (1+ source-index)))
+          (setq value-index (1+ value-index)))
+        (persistentBang result))))
+  (defun interleave-all
+    (&rest collections)
+    (if (= (js-length collections) 0)
+      EMPTY_VECTOR
+      (let*
+        ((sources (sequence-materialize-sources collections))
+          (source-count (js-length sources))
+          (limit 0)
+          (source-index 0)
+          (value-index 0)
+          (result (transient EMPTY_VECTOR)))
+        (while (< source-index source-count)
+          (let ((source-size (count (js-nth source-index sources))))
+            (when (> source-size limit) (setq limit source-size)))
+          (setq source-index (1+ source-index)))
+        (while (< value-index limit)
+          (setq source-index 0)
+          (while (< source-index source-count)
+            (let ((source (js-nth source-index sources)))
+              (when (< value-index (count source))
+                (conjBang result (nth value-index source))))
+            (setq source-index (1+ source-index)))
+          (setq value-index (1+ value-index)))
+        (persistentBang result))))
   (defun some
     (predicate collection &optional not-found-value)
     (require-function predicate "some predicate")
@@ -401,6 +555,8 @@
         (result value)
         (if (isTruthy (funcall predicate value)) result (reduced false)))
       t))
+  (defun not-any? (predicate collection) (not (isTruthy (some predicate collection))))
+  (defun not-every? (predicate collection) (not (every? predicate collection)))
   (defun find
     (predicate collection &optional not-found-value)
     (require-function predicate "find predicate")
@@ -431,6 +587,34 @@
               (if (isReduced next) (reduced (unreduced next)) next)))
           seed))
       (persistentBang builder)))
+  (defun tree-seq
+    (branch-predicate children-function root)
+    (require-function branch-predicate "tree-seq branch predicate")
+    (require-function children-function "tree-seq children function")
+    (let ((result (transient EMPTY_VECTOR)) (stack (js-array root)))
+      (while (> (js-length stack) 0)
+        (let ((value (js-call stack :pop)))
+          (conjBang result value)
+          (when (isTruthy (funcall branch-predicate value))
+            (let*
+              ((children (into EMPTY_VECTOR (funcall children-function value)))
+                (index (1- (count children))))
+              (while (>= index 0)
+                (js-call stack :push (nth index children))
+                (setq index (1- index)))))))
+      (persistentBang result)))
+  (defun flatten
+    (root)
+    (let ((result (transient EMPTY_VECTOR)) (stack (js-array root)))
+      (while (> (js-length stack) 0)
+        (let ((value (js-call stack :pop)))
+          (if (sequence-sequential-branch? value)
+            (let* ((children (into EMPTY_VECTOR value)) (index (1- (count children))))
+              (while (>= index 0)
+                (js-call stack :push (nth index children))
+                (setq index (1- index))))
+            (conjBang result value))))
+      (persistentBang result)))
   (export
     butlast
     concat
@@ -443,9 +627,12 @@
     every?
     filter
     find
+    flatten
     first
     generate
     interpose
+    interleave
+    interleave-all
     keep
     keep-indexed
     last
@@ -453,6 +640,9 @@
     map
     map-indexed
     mapcat
+    not-any?
+    not-every?
+    partition
     partition-all
     partition-by
     reductions
@@ -468,4 +658,5 @@
     take
     take-last
     take-nth
-    take-while))
+    take-while
+    tree-seq))

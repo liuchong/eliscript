@@ -167,7 +167,8 @@ The completed M8 language contract provides:
   values, with open protocol extension and allocation-light HAMT traversal
 - reusable mapping, indexed mapping/keeping, filtering, removing, prefix
   take/drop, nth sampling, interposition, value-semantic deduplication,
-  persistent-Vector partitioning, cat/mapcat, and bounded transducers with
+  interleaving, stepped persistent-Vector partitioning, stack-safe tree
+  traversal, sequential flattening, cat/mapcat, and bounded transducers with
   protocol-driven `transduce` and `into`
 - replayable reduction-only views and `eduction` pipelines over finite or
   unbounded sources, with explicit ordered `run!` effectful consumption

@@ -57,9 +57,10 @@ implementations. The protocol module now additionally owns its policy.
 
 ```text
 butlast concat cycle dedupe distinct drop drop-last drop-while every? filter
-find first generate interpose iterate keep keep-indexed last map map-indexed
-mapcat partition-all partition-by range reductions remove repeat repeatedly
-reverse sequence-nth some split-at split-with take take-last take-nth take-while
+find first flatten generate interleave interleave-all interpose iterate keep
+keep-indexed last map map-indexed mapcat not-any? not-every? partition
+partition-all partition-by range reductions remove repeat repeatedly reverse
+sequence-nth some split-at split-with take take-last take-nth take-while tree-seq
 ```
 
 `stdlib/core/data.eli` now contains the maintained implementations of:
@@ -228,6 +229,10 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
 - **ECA-21:** Maintained Set conversion, algebra, and relations compile from
   `stdlib/core/set.eli`, accept protocol sources, preserve persistent value
   semantics and left metadata, and agree under Bun and Node.
+- **ECA-22:** Maintained sequence composition, stepped partitioning, negative
+  predicates, tree traversal, and flattening compile from
+  `stdlib/core/seq.eli`, remain stack safe, and agree with the direct runtime
+  facade under Bun and Node.
 - **ECA-22:** Maintained relational Set selection, projection, renaming,
   inversion, indexing, and joins compile from `stdlib/core/set.eli`, preserve
   value-semantic persistent rows, and agree under Bun and Node.

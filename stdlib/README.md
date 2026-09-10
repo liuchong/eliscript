@@ -479,8 +479,8 @@ protocol-driven runtime algorithms through Lisp-named Eliscript modules:
 
 ```elisp
 (import "../../stdlib/core/seq.eli"
-        cycle distinct generate iterate map mapcat partition-all range
-        reductions repeat repeatedly
+        cycle distinct flatten generate interleave iterate map mapcat
+        partition partition-all range reductions repeat repeatedly tree-seq
         first sequence-nth take-last drop-last split-at split-with)
 (import "../../stdlib/core/data.eli"
         assoc-in get-in group-by frequencies keys vals
@@ -493,7 +493,8 @@ protocol-driven runtime algorithms through Lisp-named Eliscript modules:
 Sequence transforms accept any `IReduce` source and return persistent Vectors.
 The maintained vocabulary includes indexed mapping/keeping, prefix and sampled
 selection, interposition, adjacent and global deduplication, mapcat,
-partitioning, and intermediate reduction history.
+round-robin interleaving, stepped and padded partitioning, stack-safe tree
+traversal, sequential flattening, and intermediate reduction history.
 Boundary selection preserves present `undefined` values separately from
 absence. Tail selection uses bounded ring storage, while positional and
 predicate splitting traverse once and return persistent Vector pairs.

@@ -41,10 +41,13 @@ functions and are invoked exactly once for each value reaching their stage.
 
 - transforms: `reverse`, `map`, `mapIndexed`, `keep`, `keepIndexed`, `filter`,
   `remove`, `take`, `drop`, `takeWhile`, `dropWhile`, `takeNth`, `interpose`,
-  `dedupe`, `distinct`, `mapcat`, `partitionAll`, `partitionBy`, `concat`,
-  `takeLast`, `dropLast`, `butlast`, `splitAt`, and `splitWith`
+  `dedupe`, `distinct`, `mapcat`, `partition`, `partitionAll`, `partitionBy`,
+  `concat`, `interleave`, `interleaveAll`, `takeLast`, `dropLast`, `butlast`,
+  `splitAt`, and `splitWith`
 - sources: `range`, `repeat`, `repeatedly`, `iterate`, `cycle`, and `generate`
-- searches: `first`, `last`, `sequenceNth`, `some`, `every`, `find`
+- searches: `first`, `last`, `sequenceNth`, `some`, `every`, `notAny`,
+  `notEvery`, and `find`
+- tree traversal: `treeSeq` and `flatten`
 - reduction history: `reductions`
 
 Every source is traversed only through generic `reduce`. Transform results are
@@ -76,6 +79,20 @@ consumes the finite source. They distinguish a present `undefined` from
 absence. Tail selection uses bounded ring storage, and `splitAt` and
 `splitWith` traverse once to produce persistent Vector pairs. `splitWith`
 stops predicate evaluation after the first Lisp-false result.
+
+`interleave` emits complete source rounds through the shortest finite source;
+`interleaveAll` continues round-robin until every source is exhausted. Both
+materialize arbitrary reducible inputs exactly once and return one persistent
+Vector. `partition` supports size, optional step, and optional finite padding;
+it discards an unpadded incomplete window. `partitionAll` additionally accepts
+an explicit step and retains every non-empty partial window. Size and step are
+positive safe integers.
+
+`treeSeq` performs pre-order depth-first traversal with an explicit mutable
+work stack and preserves child order. `flatten` applies the same stack-safe
+walk to nested persistent Lists, persistent Vectors, and native Arrays, while
+retaining Map, Set, scalar, and opaque host values as leaves. Both return
+persistent Vectors and are defined for finite trees.
 
 Sequence sources return replayable `SequenceView` values rather than eager
 Vectors. Finite range, repeat, repeatedly, and generate sources expose exact
@@ -174,9 +191,10 @@ relation and produce persistent merged rows without mutating either input.
 
 ```text
 butlast concat cycle dedupe distinct drop drop-last drop-while every? filter
-find first generate interpose iterate keep keep-indexed last map map-indexed
-mapcat partition-all partition-by range reductions remove repeat repeatedly
-reverse sequence-nth some split-at split-with take take-last take-nth take-while
+find first flatten generate interleave interleave-all interpose iterate keep
+keep-indexed last map map-indexed mapcat not-any? not-every? partition
+partition-all partition-by range reductions remove repeat repeatedly reverse
+sequence-nth some split-at split-with take take-last take-nth take-while tree-seq
 ```
 
 `stdlib/core/data.eli` exports:
@@ -189,7 +207,8 @@ select-keys update update-in update-keys update-vals vals zipmap
 `stdlib/core/set.eli` exports:
 
 ```text
-difference disjoint? intersection set subset? superset? union
+difference disjoint? index intersection join map-invert project rename
+rename-keys select set subset? superset? union
 ```
 
 `runtime/core/order.mjs` defines open comparison and ordering operations:
@@ -233,6 +252,11 @@ Tail selection traverses in O(n), uses O(min(n, k)) private ring storage for
 limit `k`, and never performs repeated front removal. Splitting traverses once,
 preserves order, and builds both persistent results through owner-token
 transients.
+
+Interleaving and stepped partitioning first materialize each finite source and
+then perform linear output work. Tree traversal and flattening are O(n) in
+visited nodes, use an explicit O(w) pending-node stack, and never consume the
+JavaScript call stack; `w` is the maximum pending traversal width.
 
 Each finite sequence source advances in O(1) work per yielded value and retains
 O(1) iterator state. Unbounded sources have the same per-value bound and cannot
@@ -349,6 +373,10 @@ dispatch internals remain later work.
   indexing, and natural or mapped joins preserve persistent value semantics,
   use the smaller join index, retain relation metadata where applicable, and
   agree under Bun and Node.
+- **PCA-26:** Interleaving, stepped partitioning, negative predicates,
+  pre-order tree traversal, and sequential flattening accept their documented
+  protocol sources, return persistent Vectors, preserve order, and traverse a
+  100,000-level tree without recursive stack growth.
 
 ## Next Slice
 
