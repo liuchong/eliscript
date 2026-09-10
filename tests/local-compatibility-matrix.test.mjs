@@ -7,6 +7,7 @@ import { expect, test } from "bun:test";
 
 import {
   checkLocalMatrixEvidence,
+  commandEnvironment,
   expectedMatrixCells,
   LocalCompatibilityMatrixError,
   validateLocalMatrixReport,
@@ -74,6 +75,19 @@ const validationOptions = {
   resolveTree: async () => "2".repeat(40),
   resolveCodeIdentity: async () => "3".repeat(64),
 };
+
+test("matrix command environment breaks retained-evidence recursion", () => {
+  expect(commandEnvironment({
+    bun: "/opt/tools/bun",
+    node: "/opt/tools/node",
+    emacs: "/opt/tools/emacs",
+  })).toMatchObject({
+    BUN: "/opt/tools/bun",
+    NODE: "/opt/tools/node",
+    EMACS: "/opt/tools/emacs",
+    ELISCRIPT_SKIP_RETAINED_ACCEPTANCE: "1",
+  });
+});
 
 test("local compatibility evidence derives all real machine cells", () => {
   expect(expectedMatrixCells(matrix)).toEqual([

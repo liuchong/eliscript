@@ -199,7 +199,7 @@ async function localEnvironment(binaries, root) {
   };
 }
 
-function commandEnvironment(binaries) {
+export function commandEnvironment(binaries) {
   const directories = [...new Set([
     path.dirname(path.resolve(binaries.bun)),
     path.dirname(path.resolve(binaries.node)),
@@ -211,6 +211,7 @@ function commandEnvironment(binaries) {
     BUN: binaries.bun,
     NODE: binaries.node,
     EMACS: binaries.emacs,
+    ELISCRIPT_SKIP_RETAINED_ACCEPTANCE: "1",
   };
 }
 
