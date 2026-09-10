@@ -26,9 +26,17 @@ import {
   dissoc,
   empty,
   get,
+  isAssociative,
+  isCounted,
+  isEmpty,
+  isIndexed,
+  isReducible,
   isReduced,
+  isReversible,
   isReductionView,
+  isSeqable,
   isSequenceView,
+  notEmpty,
   nth,
   peek,
   pop,
@@ -108,6 +116,71 @@ test("collection protocols are frozen capabilities with direct persistent method
   expect(set[protocolSlot(ILookup, "get")]("ready", null)).toBe("ready");
   expect(map[protocolSlot(IKVReduce, "reduceKV")]((sum, _key, value) =>
     sum + value, 0)).toBe(42);
+});
+
+test("collection capability predicates and emptiness preserve protocol boundaries", () => {
+  const vector = persistentVector(10, 20);
+  const emptyVector = EMPTY_VECTOR;
+  const map = persistentHashMap(["answer", 42]);
+  const set = persistentHashSet("ready");
+
+  expect(isCounted(vector)).toBe(true);
+  expect(isIndexed(vector)).toBe(true);
+  expect(isSeqable(vector)).toBe(true);
+  expect(isReducible(vector)).toBe(true);
+  expect(isReversible(vector)).toBe(true);
+  expect(isAssociative(vector)).toBe(true);
+  expect(isIndexed(map)).toBe(false);
+  expect(isReversible(map)).toBe(false);
+  expect(isAssociative(map)).toBe(true);
+  expect(isAssociative(set)).toBe(false);
+
+  expect(isEmpty(emptyVector)).toBe(true);
+  expect(isEmpty(vector)).toBe(false);
+  expect(isEmpty("")).toBe(true);
+  expect(isEmpty(new Map())).toBe(true);
+  expect(isEmpty(new Set([1]))).toBe(false);
+  expect(isEmpty(null)).toBe(true);
+  expect(notEmpty(emptyVector)).toBeNull();
+  expect(notEmpty(vector)).toBe(vector);
+
+  for (const value of [42, false, undefined, () => null]) {
+    expect(isCounted(value)).toBe(false);
+    expect(isIndexed(value)).toBe(false);
+    expect(isSeqable(value)).toBe(false);
+    expect(isReducible(value)).toBe(false);
+    expect(isReversible(value)).toBe(false);
+    expect(isAssociative(value)).toBe(false);
+  }
+  expect(() => isEmpty(42)).toThrow(ProtocolDispatchError);
+  expect(() => notEmpty(false)).toThrow(ProtocolDispatchError);
+
+  let countCalls = 0;
+  class ExternalCounted {}
+  extendProtocolType(ICounted, ExternalCounted, {
+    count: () => {
+      countCalls += 1;
+      return 0;
+    },
+  });
+  const externalCounted = new ExternalCounted();
+  expect(isCounted(externalCounted)).toBe(true);
+  expect(isSeqable(externalCounted)).toBe(false);
+  expect(countCalls).toBe(0);
+
+  let seqCalls = 0;
+  class ExternalEmpty {}
+  extendProtocolType(ISeqable, ExternalEmpty, {
+    seq: () => {
+      seqCalls += 1;
+      return null;
+    },
+  });
+  const externalEmpty = new ExternalEmpty();
+  expect(isSeqable(externalEmpty)).toBe(true);
+  expect(seqCalls).toBe(0);
+  expect(isEmpty(externalEmpty)).toBe(true);
+  expect(seqCalls).toBe(1);
 });
 
 test("key/value reduction is allocation-light, extensible, and terminates exactly", () => {

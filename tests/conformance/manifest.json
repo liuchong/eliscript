@@ -3160,6 +3160,37 @@
           "contains": "portable compiler driver reaches a reproducible fixed point"
         }
       ]
+    },
+    {
+      "id": "stdlib.collection-capability-predicates",
+      "title": "Collection capability predicates and empty value semantics",
+      "status": "stable",
+      "spec": "0162",
+      "contracts": [
+        "Inspects complete collection protocol capabilities without invoking operations",
+        "Returns false for unsupported scalar and function values",
+        "Defines emptiness through ISeqable rather than concrete type or count assumptions",
+        "Returns the original non-empty value by identity and nil for empty values",
+        "Preserves protocol dispatch errors for values without sequence support",
+        "Compiles Eliscript wrappers reproducibly and executes them under local Bun and Node hosts"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/collection-protocol.test.mjs",
+          "contains": "collection capability predicates and emptiness preserve protocol boundaries"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "Eliscript core modules compile and execute against runtime protocols"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }

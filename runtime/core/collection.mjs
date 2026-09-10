@@ -1,6 +1,7 @@
 import {
   extendProtocolCategory,
   extendProtocolType,
+  implementsProtocol,
 } from "./protocol.mjs";
 import {
   I_COUNTED,
@@ -371,6 +372,30 @@ export function count(collection) {
   return validateCollectionCount(dispatchCollectionCount(collection));
 }
 
+export function isCounted(collection) {
+  return implementsProtocol(ICounted, collection);
+}
+
+export function isIndexed(collection) {
+  return implementsProtocol(IIndexed, collection);
+}
+
+export function isSeqable(collection) {
+  return implementsProtocol(ISeqable, collection);
+}
+
+export function isReducible(collection) {
+  return implementsProtocol(IReduce, collection);
+}
+
+export function isReversible(collection) {
+  return implementsProtocol(IReversible, collection);
+}
+
+export function isAssociative(collection) {
+  return implementsProtocol(IAssociative, collection);
+}
+
 export function empty(collection) {
   return dispatchCollectionEmpty(collection);
 }
@@ -427,6 +452,14 @@ export function seq(collection) {
     throw new TypeError("ISeqable/seq must return null or an iterable sequence view");
   }
   return result;
+}
+
+export function isEmpty(collection) {
+  return seq(collection) === null;
+}
+
+export function notEmpty(collection) {
+  return isEmpty(collection) ? null : collection;
 }
 
 export function reduce(collection, reducer, ...initial) {

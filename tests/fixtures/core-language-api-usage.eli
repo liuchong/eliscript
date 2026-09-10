@@ -4,8 +4,9 @@
           implements-protocol-operation? implements-protocol?
           protocol-host-category protocol-method protocol-slot)
   (import "./stdlib/core/collection.mjs"
-          assoc collection-count collection-nth collection-seq conj contains? empty
-          lookup reduce reduced reduced? unreduced)
+          assoc associative? collection-count collection-nth collection-seq conj
+          contains? counted? empty empty? indexed? lookup not-empty reduce
+          reducible? reduced reduced? reversible? seqable? unreduced)
   (import "./stdlib/core/identifier.mjs"
           identifier-name identifier-namespace identifier? keyword keyword?
           qualified-name symbol symbol?)
@@ -130,12 +131,23 @@
       :implements-operation
       (implements-protocol-operation? IDescribe "describe" nil)
       :vector-count (collection-count vector-value)
+      :vector-counted (counted? vector-value)
+      :vector-indexed (indexed? vector-value)
+      :vector-seqable (seqable? vector-value)
+      :vector-reducible (reducible? vector-value)
+      :vector-reversible (reversible? vector-value)
+      :vector-associative (associative? vector-value)
+      :empty-vector-empty (empty? EMPTY_VECTOR)
+      :non-empty-vector-same (eq (not-empty vector-value) vector-value)
+      :empty-vector-absent (nil? (not-empty EMPTY_VECTOR))
       :vector-second (collection-nth vector-value 1)
       :vector-has-two (contains? vector-value 2)
       :vector-appended (conj vector-value 4)
       :vector-empty (empty vector-value)
       :vector-seq-count (collection-count (collection-seq vector-value))
       :map-left (lookup map-value "left")
+      :map-associative (associative? map-value)
+      :map-indexed (indexed? map-value)
       :map-missing (lookup map-value "missing" "fallback")
       :map-has-right (contains? map-value "right")
       :metadata-support (supports-metadata? annotated-vector)

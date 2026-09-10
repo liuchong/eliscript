@@ -552,6 +552,13 @@ prefer the keyed path without changing Vector/Array entry-source semantics.
 Vector/Array tail. Persistent values preserve structural sharing and their
 existing root/navigation metadata rules; native values are copied before removal.
 
+`counted?`, `indexed?`, `seqable?`, `reducible?`, `reversible?`, and
+`associative?` inspect complete protocol capabilities without invoking an
+operation. `empty?` uses `ISeqable` instead of assuming count support, while
+`not-empty` returns nil or the original non-empty value by identity. Exact
+capability and empty-value semantics are specified in
+[0162](../specs/0162-collection-capability-predicates.md).
+
 `range`, `repeat`, `repeatedly`, `iterate`, `cycle`, and `generate` create
 replayable sequence views. Finite sources publish exact counts; open sources
 are explicitly unbounded, so `collection-count` rejects them without starting

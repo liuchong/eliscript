@@ -33,7 +33,8 @@ Four new Eliscript API modules expose the runtime substrate:
   operation lookup, host-category inspection, and implementation queries; its
   dispatch implementation is completed by specification 0079.
 - `stdlib/core/collection.eli` exports the collection capabilities and
-  generic count, empty, construction, lookup, membership, indexed access,
+  generic capability predicates, emptiness tests, count, empty, construction,
+  lookup, membership, indexed access,
   bounded and unbounded sequence views, replayable reduction-only views,
   ordinary and key/value reduction, immutable map/set removal, stack access,
   and reduced-value operations.
@@ -236,6 +237,9 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
 - **ECA-22:** Maintained relational Set selection, projection, renaming,
   inversion, indexing, and joins compile from `stdlib/core/set.eli`, preserve
   value-semantic persistent rows, and agree under Bun and Node.
+- **ECA-23:** Maintained collection capability predicates, `empty?`, and
+  `not-empty` compile from `stdlib/core/collection.eli`, preserve open protocol
+  boundaries and non-empty identity, and agree under Bun and Node.
 
 ## Follow-up
 

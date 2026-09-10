@@ -16,6 +16,12 @@
   (defconst ReductionView Runtime/ReductionView)
   (defconst SequenceView Runtime/SequenceView)
   (defun collection-count (collection) (Runtime/count collection))
+  (defun counted? (collection) (Runtime/isCounted collection))
+  (defun indexed? (collection) (Runtime/isIndexed collection))
+  (defun seqable? (collection) (Runtime/isSeqable collection))
+  (defun reducible? (collection) (Runtime/isReducible collection))
+  (defun reversible? (collection) (Runtime/isReversible collection))
+  (defun associative? (collection) (Runtime/isAssociative collection))
   (defun empty (collection) (Runtime/empty collection))
   (defun conj
     (collection &rest values)
@@ -46,6 +52,8 @@
   (defun pop (collection) (Runtime/pop collection))
   (defun rseq (collection) (Runtime/rseq collection))
   (defun collection-seq (collection) (Runtime/seq collection))
+  (defun empty? (collection) (Runtime/isEmpty collection))
+  (defun not-empty (collection) (Runtime/notEmpty collection))
   (defun reduced (value) (Runtime/reduced value))
   (defun reduced? (value) (Runtime/isReduced value))
   (defun unreduced (value) (Runtime/unreduced value))
@@ -72,20 +80,28 @@
     ReductionView
     SequenceView
     assoc
+    associative?
     collection-count
     collection-nth
     collection-seq
     conj
     contains?
+    counted?
     empty
+    empty?
+    indexed?
     lookup
+    not-empty
     reduce
     reduce-kv
+    reducible?
     dissoc
     disj
     peek
     pop
     rseq
+    reversible?
+    seqable?
     reduced
     reduced?
     reduction-view
