@@ -49,6 +49,12 @@
   "Return milliseconds elapsed since float time STARTED."
   (* 1000.0 (- (float-time) started)))
 
+(defun eliscript-worker-benchmark--temporary-directory ()
+  "Return a stable temporary root for generated benchmark modules."
+  (if (and (eq system-type 'darwin) (file-directory-p "/private/tmp"))
+      "/private/tmp/"
+    temporary-file-directory))
+
 (defun eliscript-worker-benchmark--median (values)
   "Return the median of numeric VALUES."
   (let* ((sorted (sort (copy-sequence values) #'<))
@@ -88,6 +94,8 @@
           (eliscript-worker-benchmark--positive-environment
            "ELISCRIPT_BENCHMARK_ITERATIONS" 5))
          (values (make-vector size 0))
+         (temporary-file-directory
+          (eliscript-worker-benchmark--temporary-directory))
          (directory (make-temp-file "eliscript-worker-benchmark-" t))
          (fixture
           (expand-file-name "tests/fixtures/worker.eli"

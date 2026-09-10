@@ -131,6 +131,16 @@
       "source": "(import \"./multimethod.eli\" add-method! multi-fn)\n(defmacro decorate (value) `(str \"method:\" ,value))\n(defmulti render (lambda (kind value) kind) \"fallback\")\n(defmethod render \"text\" (kind value) (decorate value))\n(defmethod render \"fallback\" (kind value) (str kind \":\" value))\n(export render)"
     },
     {
+      "name": "declarative-protocol-definitions",
+      "filename": "protocol-declarations.eli",
+      "source": "(import \"./protocol.eli\" define-protocol extend-protocol-category extend-protocol-default protocol-method)\n(defmacro decorate (value) `(str \"protocol:\" ,value))\n(defprotocol IDescribe describe measure)\n(extend-category \"number\" IDescribe\n  (describe (value) (decorate value))\n  (measure (value scale) (* value scale)))\n(extend-default IDescribe\n  (describe (_value) \"default\")\n  (measure (_value _scale) 0))\n(export IDescribe describe measure)"
+    },
+    {
+      "name": "threading-and-conditional-bindings",
+      "filename": "core-forms.eli",
+      "source": "(defun pipeline (value) (-> value (1+) (* 2)))\n(defun reverse-pipeline (value) (->> value (+ 1) (* 2)))\n(defun named-pipeline (value) (as-> value item (+ item 1) (* item 2)))\n(defun truthy-binding (value) (if-let (item value) item :missing))\n(defun present-binding (value) (if-some (item value) item :missing))\n(defun truthy-body (value) (when-let (item value) (print item) (1+ item)))\n(defun present-body (value) (when-some (item value) (print item) (1+ item)))\n(export pipeline reverse-pipeline named-pipeline truthy-binding present-binding truthy-body present-body)"
+    },
+    {
       "name": "self-symbol-module",
       "filename": "bootstrap/compiler/symbol.eli",
       "file": "bootstrap/compiler/symbol.eli"
@@ -287,6 +297,30 @@
       "filename": "runaway.eli",
       "source": "(defmacro forever (value) `(forever ,value))\n(forever 1)",
       "error": "runaway.eli:2:1: macro expansion exceeded 100 steps near forever"
+    },
+    {
+      "name": "duplicate-protocol-operation",
+      "filename": "protocol-duplicate.eli",
+      "source": "(defprotocol IDescribe describe describe)",
+      "error": "protocol-duplicate.eli:1:1: defprotocol declares duplicate operation: describe"
+    },
+    {
+      "name": "malformed-protocol-method",
+      "filename": "protocol-method.eli",
+      "source": "(extend-default IDescribe describe)",
+      "error": "protocol-method.eli:1:1: extend-default method must contain an operation and parameter list: describe"
+    },
+    {
+      "name": "empty-thread-step",
+      "filename": "thread-empty.eli",
+      "source": "(-> 1 ())",
+      "error": "thread-empty.eli:1:1: thread step must be a symbol or non-empty list: nil"
+    },
+    {
+      "name": "malformed-conditional-binding",
+      "filename": "binding-shape.eli",
+      "source": "(if-some (:value 1) value)",
+      "error": "binding-shape.eli:1:1: if-some binding name must be a symbol: :value"
     }
   ]
 }

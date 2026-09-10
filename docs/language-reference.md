@@ -55,6 +55,32 @@ Functions use `defun`, `defn`, `lambda`, or `fn`. Parameters may include
 inside an asynchronous body. `defportable` defines functions whose complete
 dependency closure can execute in the restricted worker environment.
 
+## Expression Composition
+
+`->` inserts a value after each step operator, while `->>` inserts it after the
+existing step arguments. A bare symbol step becomes a one-argument call.
+`as->` binds an explicit name and rebinds it after each intermediate form:
+
+```elisp
+(-> value (normalize options) validate)
+(->> values (map transform) (reduce combine initial))
+(as-> response item (get item :body) (decode item))
+```
+
+`if-let` and `when-let` branch using ordinary Eliscript truthiness.
+`if-some` and `when-some` instead accept every value except `nil`, including
+`false` and `undefined`. Their initializer is evaluated exactly once:
+
+```elisp
+(if-some (item (lookup key))
+  (render item)
+  (render-missing key))
+```
+
+Each binding is a two-item list containing an ordinary symbol and initializer.
+The `when-*` variants accept one or more body forms and return the final body
+value or `nil`.
+
 ## Multimethod Definitions
 
 `defmulti` creates a named multimethod from a dispatch function and an optional
@@ -74,6 +100,30 @@ The imports are explicit: omitting either dependency produces the same unbound
 symbol diagnostic as any other missing binding. Method registration follows
 source order and retains all exact, hierarchy, preference, and persistent
 snapshot behavior from the multimethod standard library.
+
+## Protocol Definitions
+
+`defprotocol` declares an open protocol and binds each operation to its exact
+runtime dispatch function. `extend-type`, `extend-category`, and
+`extend-default` install exact-constructor, host-category, and fallback
+implementations in source order.
+
+```elisp
+(import "../stdlib/core/protocol.eli"
+        define-protocol extend-protocol-category extend-protocol-default
+        protocol-method)
+
+(defprotocol IDescribe describe)
+(extend-category "number" IDescribe
+  (describe (value) (str "number:" value)))
+(extend-default IDescribe
+  (describe (_value) "default"))
+```
+
+Declarations expand to the corresponding protocol standard-library calls;
+they do not add a compiler-owned dispatch engine. Runtime dispatch retains
+direct-slot, exact-type, host-category, and default priority. Imports remain
+explicit, and method parameter lists and bodies use ordinary lambda semantics.
 
 ## Control Flow
 

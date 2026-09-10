@@ -1061,6 +1061,330 @@
             (make-list lambda-items span))
           span))))
 
+  (defun thread-step (value-node step-node position context span)
+    (let ((step-items (list-items step-node)))
+      (cond
+        ((symbol-node-p step-node)
+         (make-list
+           (js-array step-node value-node)
+           (node-span step-node)))
+        ((and (not (= step-items undefined))
+              (> (get step-items :length) 0))
+         (if (= position "first")
+           (make-list
+             (js-call
+               (js-array (js-nth 0 step-items) value-node)
+               :concat (js-call step-items :slice 1))
+             (node-span step-node))
+           (make-list
+             (js-call step-items :concat (js-array value-node))
+             (node-span step-node))))
+        (t
+         (expander-fail
+           context span
+           (str "thread step must be a symbol or non-empty list: "
+                (node-display step-node)))))))
+
+  (defun desugar-thread (form-name args position context span)
+    (when (= (get args :length) 0)
+      (expander-fail
+        context span (str form-name " expects an initial expression")))
+    (let ((result (js-nth 0 args)))
+      (js-call (js-call args :slice 1) :forEach
+        (lambda (step-node)
+          (setq result
+            (thread-step result step-node position context span))))
+      result))
+
+  (defun make-let-form (name-node value-node body-node span)
+    (let* ((value-span (or (node-span value-node) span))
+           (binding
+             (make-list (js-array name-node value-node) value-span))
+           (bindings (make-list (js-array binding) value-span)))
+      (make-list
+        (js-array
+          (symbol-node "let" value-span)
+          bindings
+          body-node)
+        value-span)))
+
+  (defun desugar-as-thread (args context span)
+    (when (< (get args :length) 3)
+      (expander-fail
+        context span
+        "as-> expects an initial expression, binding name, and at least one form"))
+    (let ((initial-node (js-nth 0 args))
+          (name-node (js-nth 1 args))
+          (step-nodes (js-call args :slice 2)))
+      (unless (symbol-node-p name-node)
+        (expander-fail
+          context span
+          (str "as-> binding name must be a symbol: "
+               (node-display name-node))))
+      (let ((index (- (get step-nodes :length) 2))
+            (body-node (js-nth (1- (get step-nodes :length)) step-nodes)))
+        (while (>= index 0)
+          (setq body-node
+            (make-let-form
+              name-node (js-nth index step-nodes) body-node span))
+          (setq index (1- index)))
+        (make-let-form name-node initial-node body-node span))))
+
+  (defun conditional-binding (form-name binding-node context span)
+    (let ((binding-items (list-items binding-node)))
+      (unless (and (not (= binding-items undefined))
+                   (= (get binding-items :length) 2))
+        (expander-fail
+          context span
+          (str form-name
+               " binding must contain a name and initializer: "
+               (node-display binding-node))))
+      (unless (symbol-node-p (js-nth 0 binding-items))
+        (expander-fail
+          context span
+          (str form-name " binding name must be a symbol: "
+               (node-display (js-nth 0 binding-items)))))
+      binding-items))
+
+  (defun conditional-test (name-node some-p span)
+    (if some-p
+      (make-list
+        (js-array
+          (symbol-node "not" span)
+          (make-list
+            (js-array (symbol-node "nil?" span) name-node)
+            span))
+        span)
+      name-node))
+
+  (defun desugar-if-binding (form-name args some-p context span)
+    (when (or (< (get args :length) 2) (> (get args :length) 3))
+      (expander-fail
+        context span
+        (str form-name
+             " expects a binding, then form, and optional else form")))
+    (let* ((binding-items
+             (conditional-binding
+               form-name (js-nth 0 args) context span))
+           (name-node (js-nth 0 binding-items))
+           (initializer-node (js-nth 1 binding-items))
+           (else-node
+             (if (= (get args :length) 3)
+               (js-nth 2 args)
+               (literal-node nil span)))
+           (if-node
+             (make-list
+               (js-array
+                 (symbol-node "if" span)
+                 (conditional-test name-node some-p span)
+                 (js-nth 1 args)
+                 else-node)
+               span)))
+      (make-let-form name-node initializer-node if-node span)))
+
+  (defun desugar-when-binding (form-name args some-p context span)
+    (when (< (get args :length) 2)
+      (expander-fail
+        context span
+        (str form-name " expects a binding and at least one body form")))
+    (let* ((binding-items
+             (conditional-binding
+               form-name (js-nth 0 args) context span))
+           (name-node (js-nth 0 binding-items))
+           (initializer-node (js-nth 1 binding-items))
+           (body-node
+             (make-list
+               (js-call
+                 (js-array (symbol-node "progn" span))
+                 :concat (js-call args :slice 1))
+               span))
+           (if-node
+             (make-list
+               (js-array
+                 (symbol-node "if" span)
+                 (conditional-test name-node some-p span)
+                 body-node
+                 (literal-node nil span))
+               span)))
+      (make-let-form name-node initializer-node if-node span)))
+
+  (defun desugar-defprotocol (args context span)
+    (when (< (get args :length) 2)
+      (expander-fail
+        context span
+        "defprotocol expects a name and at least one operation"))
+    (let* ((name-node (js-nth 0 args))
+           (operation-nodes (js-call args :slice 1))
+           (seen (new (js* "Set")))
+           (operation-names (js-array))
+           (forms (js-array)))
+      (unless (symbol-node-p name-node)
+        (expander-fail
+          context span
+          (str "defprotocol name must be a symbol: "
+               (node-display name-node))))
+      (js-call operation-nodes :forEach
+        (lambda (operation-node)
+          (unless (symbol-node-p operation-node)
+            (expander-fail
+              context span
+              (str "defprotocol operation must be a symbol: "
+                   (node-display operation-node))))
+          (let ((operation-name (node-name operation-node)))
+            (when (js-call seen :has operation-name)
+              (expander-fail
+                context span
+                (str "defprotocol declares duplicate operation: "
+                     operation-name)))
+            (js-call seen :add operation-name)
+            (js-call operation-names :push
+              (literal-node operation-name (node-span operation-node))))))
+      (js-call forms :push
+        (make-list
+          (js-array
+            (symbol-node "defconst" span)
+            name-node
+            (make-list
+              (js-array
+                (symbol-node "define-protocol" span)
+                (literal-node (node-name name-node) (node-span name-node))
+                (make-list
+                  (js-call
+                    (js-array (symbol-node "js-array" span))
+                    :concat operation-names)
+                  span))
+              span))
+          span))
+      (js-call operation-nodes :forEach
+        (lambda (operation-node)
+          (js-call forms :push
+            (make-list
+              (js-array
+                (symbol-node "defconst" span)
+                operation-node
+                (make-list
+                  (js-array
+                    (symbol-node "protocol-method" span)
+                    name-node
+                    (literal-node
+                      (node-name operation-node)
+                      (node-span operation-node)))
+                  span))
+              span))))
+      forms))
+
+  (defun protocol-method-object (form-name method-nodes context span)
+    (when (= (get method-nodes :length) 0)
+      (expander-fail
+        context span (str form-name " expects at least one method")))
+    (let ((seen (new (js* "Set")))
+          (object-items (js-array (symbol-node "js-object" span))))
+      (js-call method-nodes :forEach
+        (lambda (method-node)
+          (let ((method-items (list-items method-node)))
+            (when (or (eq method-items undefined)
+                      (< (get method-items :length) 2))
+              (expander-fail
+                context span
+                (str form-name
+                     " method must contain an operation and parameter list: "
+                     (node-display method-node))))
+            (let ((operation-node (js-nth 0 method-items)))
+              (unless (symbol-node-p operation-node)
+                (expander-fail
+                  context span
+                  (str form-name " method operation must be a symbol: "
+                       (node-display operation-node))))
+              (let ((operation-name (node-name operation-node)))
+                (when (js-call seen :has operation-name)
+                  (expander-fail
+                    context span
+                    (str form-name " declares duplicate method: "
+                         operation-name)))
+                (js-call seen :add operation-name)
+                (js-call object-items :push
+                  (literal-node operation-name (node-span operation-node)))
+                (js-call object-items :push
+                  (make-list
+                    (js-call
+                      (js-array (symbol-node "lambda" (node-span method-node)))
+                      :concat (js-call method-items :slice 1))
+                    (node-span method-node))))))))
+      (make-list object-items span)))
+
+  (defun desugar-extend-type (args context span)
+    (when (< (get args :length) 3)
+      (expander-fail
+        context span
+        "extend-type expects a target, protocol, and at least one method"))
+    (let ((target-node (js-nth 0 args))
+          (protocol-node (js-nth 1 args)))
+      (unless (symbol-node-p target-node)
+        (expander-fail
+          context span
+          (str "extend-type target must be a symbol: "
+               (node-display target-node))))
+      (unless (symbol-node-p protocol-node)
+        (expander-fail
+          context span
+          (str "extend-type protocol must be a symbol: "
+               (node-display protocol-node))))
+      (make-list
+        (js-array
+          (symbol-node "extend-protocol-type" span)
+          protocol-node
+          target-node
+          (protocol-method-object
+            "extend-type" (js-call args :slice 2) context span))
+        span)))
+
+  (defun desugar-extend-category (args context span)
+    (when (< (get args :length) 3)
+      (expander-fail
+        context span
+        "extend-category expects a category, protocol, and at least one method"))
+    (let ((category-node (js-nth 0 args))
+          (protocol-node (js-nth 1 args)))
+      (unless (and (literal-node-p category-node)
+                   (= (value-type (node-value category-node)) "string")
+                   (> (get (node-value category-node) :length) 0))
+        (expander-fail
+          context span
+          (str "extend-category category must be a non-empty string: "
+               (node-display category-node))))
+      (unless (symbol-node-p protocol-node)
+        (expander-fail
+          context span
+          (str "extend-category protocol must be a symbol: "
+               (node-display protocol-node))))
+      (make-list
+        (js-array
+          (symbol-node "extend-protocol-category" span)
+          protocol-node
+          category-node
+          (protocol-method-object
+            "extend-category" (js-call args :slice 2) context span))
+        span)))
+
+  (defun desugar-extend-default (args context span)
+    (when (< (get args :length) 2)
+      (expander-fail
+        context span
+        "extend-default expects a protocol and at least one method"))
+    (let ((protocol-node (js-nth 0 args)))
+      (unless (symbol-node-p protocol-node)
+        (expander-fail
+          context span
+          (str "extend-default protocol must be a symbol: "
+               (node-display protocol-node))))
+      (make-list
+        (js-array
+          (symbol-node "extend-protocol-default" span)
+          protocol-node
+          (protocol-method-object
+            "extend-default" (js-call args :slice 1) context span))
+        span)))
+
   (defun expand-expression (form environment depth context)
     (cond
       ((= (node-kind form) "vector")
@@ -1093,6 +1417,12 @@
            ((= operator "defmethod")
             (expander-fail
               context span "defmethod is only valid at module top level"))
+           ((or (= operator "defprotocol")
+                (= operator "extend-type")
+                (= operator "extend-category")
+                (= operator "extend-default"))
+            (expander-fail
+              context span (str operator " is only valid at module top level")))
            ((and operator (js-call environment :has operator))
             (expand-expression
               (locate-generated
@@ -1101,6 +1431,34 @@
                   args depth context span)
                 span)
               environment (1+ depth) context))
+           ((= operator "->")
+            (expand-expression
+              (desugar-thread "->" args "first" context span)
+              environment depth context))
+           ((= operator "->>")
+            (expand-expression
+              (desugar-thread "->>" args "last" context span)
+              environment depth context))
+           ((= operator "as->")
+            (expand-expression
+              (desugar-as-thread args context span)
+              environment depth context))
+           ((= operator "if-let")
+            (expand-expression
+              (desugar-if-binding "if-let" args false context span)
+              environment depth context))
+           ((= operator "when-let")
+            (expand-expression
+              (desugar-when-binding "when-let" args false context span)
+              environment depth context))
+           ((= operator "if-some")
+            (expand-expression
+              (desugar-if-binding "if-some" args t context span)
+              environment depth context))
+           ((= operator "when-some")
+            (expand-expression
+              (desugar-when-binding "when-some" args t context span)
+              environment depth context))
            (t
             (let ((expanded (js-array operator-node)))
               (cond
@@ -1182,6 +1540,22 @@
           ((= operator "defmethod")
            (expand-top-level
              (desugar-defmethod args context span)
+             environment depth context))
+          ((= operator "defprotocol")
+           (expand-top-level-sequence
+             (desugar-defprotocol args context span)
+             environment depth context))
+          ((= operator "extend-type")
+           (expand-top-level
+             (desugar-extend-type args context span)
+             environment depth context))
+          ((= operator "extend-category")
+           (expand-top-level
+             (desugar-extend-category args context span)
+             environment depth context))
+          ((= operator "extend-default")
+           (expand-top-level
+             (desugar-extend-default args context span)
              environment depth context))
           ((and operator (js-call environment :has operator))
            (expand-top-level

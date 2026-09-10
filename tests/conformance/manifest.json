@@ -2569,7 +2569,7 @@
       "status": "stable",
       "spec": "0143",
       "contracts": [
-        "Freezes the exact ordered 89-case reader expander and analyzer negative language corpus",
+        "Freezes the exact ordered 93-case reader expander and analyzer negative language corpus",
         "Records complete human and version 1 structured diagnostics including start and end positions",
         "Rejects fixture inventory schema rendering code phase coordinate and SHA-256 identity drift",
         "Requires exact seed and self-hosted equality against one frozen contract in the default core suite",
@@ -3050,6 +3050,77 @@
           "kind": "fixture",
           "file": "tests/fixtures/declarative-multimethod.eli",
           "contains": "(defmulti render"
+        }
+      ]
+    },
+    {
+      "id": "language.declarative-protocol-definitions",
+      "title": "Declarative protocol definitions",
+      "status": "stable",
+      "spec": "0159",
+      "contracts": [
+        "Expands defprotocol to one canonical protocol binding and exact operation-function bindings",
+        "Expands exact-type, host-category, and default declarations to the canonical protocol library",
+        "Requires explicit protocol library bindings and never duplicates dispatch policy in the compiler",
+        "Preserves source spans and deterministic declaration diagnostics across seed and self-hosted expanders",
+        "Produces byte-identical modules and Source Maps plus identical protocol identity and dispatch under Bun and Node"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-expander-desugars-protocol-declarations"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-expander.test.mjs",
+          "contains": "bootstrapped expander matches seed syntax, spans, and diagnostics"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/declarative-protocol.test.mjs",
+          "contains": "declarative protocols preserve protocol identity and host dispatch"
+        },
+        {
+          "kind": "fixture",
+          "file": "tests/fixtures/declarative-protocol.eli",
+          "contains": "(defprotocol IDescribe describe measure)"
+        }
+      ]
+    },
+    {
+      "id": "language.threading-and-conditional-bindings",
+      "title": "Threading and conditional binding forms",
+      "status": "stable",
+      "spec": "0160",
+      "contracts": [
+        "Threads one initial expression through first, last, or explicit named positions",
+        "Evaluates conditional binding initializers exactly once",
+        "Separates Lisp truth matching from nil-only presence matching",
+        "Preserves ordered multi-form bodies and nil results for unmatched when bindings",
+        "Produces deterministic malformed-step and malformed-binding diagnostics",
+        "Produces byte-identical ESM and Source Maps plus identical Bun and Node results"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-expander-desugars-threading-and-binding-forms"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-expander.test.mjs",
+          "contains": "bootstrapped expander matches seed syntax, spans, and diagnostics"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/core-expression-forms.test.mjs",
+          "contains": "core expression forms preserve threading and single-evaluation semantics"
+        },
+        {
+          "kind": "fixture",
+          "file": "tests/fixtures/core-expression-forms.eli",
+          "contains": "(if-some (item (observed undefined))"
         }
       ]
     }

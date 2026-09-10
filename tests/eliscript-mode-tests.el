@@ -66,6 +66,11 @@
             "  (if x :yes false))\n"
             "(defmulti render (lambda (value) value))\n"
             "(defmethod render :text (value) value)\n"
+            "(defprotocol IDescribe describe)\n"
+            "(extend-category \"number\" IDescribe\n"
+            "  (describe (value) value))\n"
+            "(defun pipeline (value) (-> value (1+) (* 2)))\n"
+            "(defun present (value) (if-some (item value) item :missing))\n"
             "(defconst label \"ready\")\n"
             "; note\n")
     (font-lock-ensure)
@@ -90,6 +95,16 @@
                 'font-lock-function-name-face))
     (should (eq (eliscript-mode-tests--face-at "defmethod")
                 'font-lock-keyword-face))
+    (should (eq (eliscript-mode-tests--face-at "defprotocol")
+                'font-lock-keyword-face))
+    (should (eq (eliscript-mode-tests--face-at "IDescribe")
+                'font-lock-function-name-face))
+    (should (eq (eliscript-mode-tests--face-at "extend-category")
+                'font-lock-keyword-face))
+    (should (eq (eliscript-mode-tests--face-at "->")
+                'font-lock-keyword-face))
+    (should (eq (eliscript-mode-tests--face-at "if-some")
+                'font-lock-keyword-face))
     (should (eq (eliscript-mode-tests--face-at "label")
                 'font-lock-variable-name-face))
     (should (eq (eliscript-mode-tests--face-at "ready")
@@ -104,11 +119,13 @@
             "(defun first (x)\n  (print x))\n\n"
             "(defmacro with-value (&body body)\n  body)\n\n"
             "(defmulti render (lambda (value) value))\n\n"
+            "(defprotocol IDescribe describe)\n\n"
             "(defconst answer 42)\n")
     (font-lock-ensure)
     (let ((names (eliscript-mode-tests--imenu-names
                   (imenu--make-index-alist t))))
-      (dolist (name '("demo.core" "first" "with-value" "render" "answer"))
+      (dolist (name '("demo.core" "first" "with-value" "render"
+                      "IDescribe" "answer"))
         (should (member name names))))
     (goto-char (point-min))
     (search-forward "print")

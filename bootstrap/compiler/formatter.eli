@@ -10,11 +10,13 @@
   (defconst declaration-heads
     (js-array
       "module" "defasync" "defconst" "defmacro" "defmethod" "defmulti"
-      "defn" "defportable" "defun" "defvar" "export-default"))
+      "defn" "defportable" "defprotocol" "defun" "defvar"
+      "extend-category" "extend-default" "extend-type" "export-default"))
   (defconst operand-heads
     (js-array
-      "catch" "cond" "if" "import" "import-portable" "let" "let*"
-      "loop" "unless" "when" "while"))
+      "->" "->>" "as->" "catch" "cond" "if" "if-let" "if-some"
+      "import" "import-portable" "let" "let*" "loop" "unless" "when"
+      "when-let" "when-some" "while"))
 
   (defun formatter-error (message filename)
     (formatter-fail message filename))

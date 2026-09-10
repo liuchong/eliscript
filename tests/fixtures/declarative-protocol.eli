@@ -1,0 +1,23 @@
+(module tests.declarative-protocol
+  (import "../../stdlib/core/protocol.eli"
+          define-protocol extend-protocol-category extend-protocol-default
+          extend-protocol-type protocol-method)
+
+  (defconst Box
+    (js* "class Box { constructor(value) { this.value = value; } }"))
+
+  (defprotocol IDescribe describe measure)
+
+  (extend-type Box IDescribe
+    (describe (box) (str "box:" (get box :value)))
+    (measure (box scale) (* (get box :value) scale)))
+
+  (extend-category "number" IDescribe
+    (describe (value) (str "number:" value))
+    (measure (value scale) (* value scale)))
+
+  (extend-default IDescribe
+    (describe (_value) "default")
+    (measure (_value _scale) 0))
+
+  (export Box IDescribe describe measure))

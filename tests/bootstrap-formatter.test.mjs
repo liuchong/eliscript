@@ -64,6 +64,10 @@ test("self-hosted formatter preserves concrete syntax and core semantics", async
     const source = `; heading${trailing}\n(module   demo.format
 (import "./x.mjs"   x) ; import${trailing}
 (defun  choose (x) (if (> x 0) #{:a :b} {:x [1 2]}))
+(defprotocol   IDescribe   describe)
+(extend-category "number"   IDescribe (describe (value) (str value)))
+(defun pipeline (value) (-> value (1+) (* 2)))
+(defun present (value) (if-some (item value) item :missing))
 \`(a ,x ,@xs))
 `;
     const expected = `; heading
@@ -71,6 +75,10 @@ test("self-hosted formatter preserves concrete syntax and core semantics", async
   (import "./x.mjs" x)
   ; import
   (defun choose (x) (if (> x 0) #{:a :b} {:x [1 2]}))
+  (defprotocol IDescribe describe)
+  (extend-category "number" IDescribe (describe (value) (str value)))
+  (defun pipeline (value) (-> value (1+) (* 2)))
+  (defun present (value) (if-some (item value) item :missing))
   \`(a ,x ,@xs))
 `;
     const formatted = compiler.format_source(source, "formatter-case.eli");

@@ -163,6 +163,22 @@ test("self-hosted evaluation descriptors are closed and framework neutral", () =
     "(defmethod render :text (value) value)",
     "repl.eli",
   ).kind).toBe("expression");
+  expect(compiler.evaluation_form_description(
+    "(defprotocol IDescribe describe)",
+    "repl.eli",
+  )).toMatchObject({
+    kind: "definition",
+    name: "IDescribe",
+    runtimeBinding: true,
+  });
+  for (const source of [
+    "(extend-type Box IDescribe (describe (value) value))",
+    '(extend-category "number" IDescribe (describe (value) value))',
+    "(extend-default IDescribe (describe (value) value))",
+  ]) {
+    expect(compiler.evaluation_form_description(source, "repl.eli").kind)
+      .toBe("expression");
+  }
   for (const name of ["jsx", "fragment", "defcomponent"]) {
     expect(compiler.evaluation_form_description(
       `(${name} 1)`,
@@ -246,6 +262,16 @@ test("seed and self-hosted evaluation descriptors agree", async () => {
     {
       kind: "form",
       source: "(defmethod render :text (value) value)",
+      filename: "repl.eli",
+    },
+    {
+      kind: "form",
+      source: "(defprotocol IDescribe describe)",
+      filename: "repl.eli",
+    },
+    {
+      kind: "form",
+      source: '(extend-category "number" IDescribe (describe (value) value))',
       filename: "repl.eli",
     },
     {

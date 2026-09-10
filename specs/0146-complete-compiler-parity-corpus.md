@@ -37,7 +37,7 @@ compiler, bootstrap, macro, portable, and project feature inventory.
 - the four reader, analyzer, expander, and IR shared fixtures and case counts
 - all thirteen maintained compiler modules under `bootstrap/compiler`
 - all 57 public IR node kinds
-- all 89 source-derived negative diagnostic cases
+- all 93 source-derived negative diagnostic cases
 - the seven required parity dimensions and their executable test locators
 - one SHA-256 identity over the complete derived inventory and every bound
   source file
@@ -54,7 +54,7 @@ identifier begins with one of:
 bootstrap. compiler. language. macro. portable. project.
 ```
 
-There are currently 62 such features. A newly stable feature in one of these
+There are currently 64 such features. A newly stable feature in one of these
 domains makes the corpus stale until its source behavior is included in the
 shared fixtures or an existing bound parity test and the corpus identity is
 reviewed again.
@@ -69,7 +69,7 @@ The maintained shared fixtures contain:
 | Phase | Valid | Invalid |
 | --- | ---: | ---: |
 | Reader | 21 | 16 |
-| Expander | 37 | 16 |
+| Expander | 40 | 20 |
 | Analyzer | 30 | 57 |
 | IR and emission | 28 | 0 |
 
@@ -104,7 +104,7 @@ until their full supported matrices are recorded.
 - **CP-02:** Reader, expander, analyzer, IR, ESM, Source Map, closure, and
   project-graph evidence is present through the seven required dimensions.
 - **CP-03:** Shared fixture counts, all thirteen bootstrap modules, all 57 IR
-  kinds, and all 89 negative diagnostics match their authoritative sources.
+  kinds, and all 93 negative diagnostics match their authoritative sources.
 - **CP-04:** Every evidence locator exists and runs in the default core suite.
 - **CP-05:** One deterministic SHA-256 identity binds the complete inventory
   and every source that defines or proves it.

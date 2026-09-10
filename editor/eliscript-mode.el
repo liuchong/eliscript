@@ -61,7 +61,7 @@ Relative paths are resolved from the discovered project root."
   "Canonical project roots mapped to their live watch processes.")
 
 (defconst eliscript-mode--function-heads
-  '("defasync" "defmulti" "defn" "defportable" "defun"))
+  '("defasync" "defmulti" "defn" "defportable" "defprotocol" "defun"))
 
 (defconst eliscript-mode--macro-heads '("defmacro"))
 
@@ -69,15 +69,16 @@ Relative paths are resolved from the discovered project root."
 
 (defconst eliscript-mode--top-level-heads
   '("defasync" "defconst" "defmacro" "defmethod" "defmulti" "defn"
-    "defportable" "defun" "defvar" "export" "export-default"
+    "defportable" "defprotocol" "defun" "defvar" "export" "export-default"
+    "extend-category" "extend-default" "extend-type"
     "import" "import-portable" "module"))
 
 (defconst eliscript-mode--special-heads
-  '("and" "apply" "async" "await" "catch" "cond" "do" "finally"
-    "fn" "funcall" "if" "js*" "js-array" "js-call"
+  '("->" "->>" "and" "apply" "as->" "async" "await" "catch" "cond"
+    "do" "finally" "fn" "funcall" "if" "if-let" "if-some" "js*" "js-array" "js-call"
     "js-cons" "js-length" "js-nth" "js-object" "lambda" "let"
     "let*" "loop" "new" "or" "progn" "quote" "recur" "set!" "setq"
-    "throw" "try" "unless" "when" "while"))
+    "throw" "try" "unless" "when" "when-let" "when-some" "while"))
 
 (defconst eliscript-mode--definition-heads
   (append eliscript-mode--function-heads

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "format": "eliscript-diagnostic-corpus",
   "version": 1,
-  "identity": "5d899a6996e5888ef47603b167cdd19e58343059cc3cb8f742c3b8d2742f6ee1",
+  "identity": "24dd859354796bcd69eb999f0e7be26e64987f731135f26ee5b2e517cd3ebc8b",
   "suites": [
     {
       "id": "reader",
@@ -417,8 +417,8 @@
       "id": "expander",
       "fixture": "tests/fixtures/bootstrap-expander.json",
       "oracle": "tests/bootstrap-expander-oracle.el",
-      "validCaseCount": 38,
-      "negativeCaseCount": 16,
+      "validCaseCount": 40,
+      "negativeCaseCount": 20,
       "cases": [
         {
           "name": "missing-definition-shape",
@@ -816,6 +816,106 @@
                 "offset": 56,
                 "line": 2,
                 "column": 12
+              }
+            }
+          }
+        },
+        {
+          "name": "duplicate-protocol-operation",
+          "human": "protocol-duplicate.eli:1:1: defprotocol declares duplicate operation: describe",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "defprotocol declares duplicate operation: describe",
+            "location": {
+              "file": "protocol-duplicate.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 41,
+                "line": 1,
+                "column": 42
+              }
+            }
+          }
+        },
+        {
+          "name": "malformed-protocol-method",
+          "human": "protocol-method.eli:1:1: extend-default method must contain an operation and parameter list: describe",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "extend-default method must contain an operation and parameter list: describe",
+            "location": {
+              "file": "protocol-method.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 35,
+                "line": 1,
+                "column": 36
+              }
+            }
+          }
+        },
+        {
+          "name": "empty-thread-step",
+          "human": "thread-empty.eli:1:1: thread step must be a symbol or non-empty list: nil",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "thread step must be a symbol or non-empty list: nil",
+            "location": {
+              "file": "thread-empty.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 9,
+                "line": 1,
+                "column": 10
+              }
+            }
+          }
+        },
+        {
+          "name": "malformed-conditional-binding",
+          "human": "binding-shape.eli:1:1: if-some binding name must be a symbol: :value",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "if-some binding name must be a symbol: :value",
+            "location": {
+              "file": "binding-shape.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 26,
+                "line": 1,
+                "column": 27
               }
             }
           }

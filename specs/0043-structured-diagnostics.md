@@ -138,7 +138,7 @@ public host entry points.
 - The fixed-point compiler test proves the self-hosted CLI emits the same
   analyzer schema while Generations 1 through 3 remain reproducible.
 - The reader, expander, and analyzer bootstrap suites prove exact seed and
-  self-hosted diagnostic parity for all 89 maintained negative cases while the
+  self-hosted diagnostic parity for all 93 maintained negative cases while the
   fixtures retain their exact historical human diagnostics.
 - Specification 0143 and `contracts/diagnostic-corpus.json` freeze the complete
   ordered negative inventory and every full structured record, closing AC-03.

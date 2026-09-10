@@ -1331,6 +1331,122 @@
                (regexp-quote (cadr case))
                (error-message-string error-data))))))
 
+(ert-deftest eliscript-expander-desugars-protocol-declarations ()
+  (let ((output
+         (eliscript-compile-string
+          (concat
+           "(import \"./protocol.eli\" define-protocol protocol-method "
+           "extend-protocol-category extend-protocol-default)\n"
+           "(defprotocol IDescribe describe measure)\n"
+           "(extend-category \"number\" IDescribe "
+           "(describe (value) (str value)) "
+           "(measure (value scale) (* value scale)))\n"
+           "(extend-default IDescribe "
+           "(describe (_value) \"default\") "
+           "(measure (_value _scale) 0))\n"
+           "(export IDescribe describe measure)")
+          "declarative-protocol.eli")))
+    (should (string-match-p
+             (regexp-quote
+              "const IDescribe = define_protocol(\"IDescribe\", [\"describe\", \"measure\"]);")
+             output))
+    (should (string-match-p
+             (regexp-quote
+              "const describe = protocol_method(IDescribe, \"describe\");")
+             output))
+    (should (string-match-p
+             (regexp-quote
+              "extend_protocol_category(IDescribe, \"number\"")
+             output))
+    (should (string-match-p
+             (regexp-quote "extend_protocol_default(IDescribe") output))
+    (should-not
+     (string-match-p
+      "defprotocol\\|extend-category\\|extend-default" output))))
+
+(ert-deftest eliscript-expander-validates-protocol-declarations ()
+  (dolist (case
+           '(("(defprotocol IEmpty)"
+              "defprotocol expects a name and at least one operation")
+             ("(defprotocol \"Wrong\" describe)"
+              "defprotocol name must be a symbol")
+             ("(defprotocol IDescribe describe describe)"
+              "defprotocol declares duplicate operation: describe")
+             ("(extend-type (get registry :Box) IDescribe (describe (x) x))"
+              "extend-type target must be a symbol")
+             ("(extend-category :number IDescribe (describe (x) x))"
+              "extend-category category must be a non-empty string")
+             ("(extend-default IDescribe (describe (x) x) (describe (x) x))"
+              "extend-default declares duplicate method: describe")
+             ("(extend-default IDescribe describe)"
+              "extend-default method must contain an operation and parameter list")
+             ("(defun broken () (defprotocol INested read))"
+              "defprotocol is only valid at module top level")
+             ("(defun broken () (extend-default IDescribe (read (x) x)))"
+              "extend-default is only valid at module top level")))
+    (let ((error-data
+           (should-error
+            (eliscript-compile-string (car case) "protocol-error.eli")
+            :type 'eliscript-expand-error)))
+      (should (string-match-p
+               (regexp-quote (cadr case))
+               (error-message-string error-data))))))
+
+(ert-deftest eliscript-expander-desugars-threading-and-binding-forms ()
+  (let ((output
+         (eliscript-compile-string
+          (concat
+           "(defun first (value) (-> value (1+) (* 2)))\n"
+           "(defun last (value) (->> value (+ 1) (* 2)))\n"
+           "(defun named (value) (as-> value item (+ item 1) (* item 2)))\n"
+           "(defun truthy (value) (if-let (item value) item :missing))\n"
+           "(defun present (value) (if-some (item value) item :missing))\n"
+           "(defun bodies (value) "
+           "(when-let (item value) (print item) (1+ item)))")
+          "core-forms.eli")))
+    (should (string-match-p
+             (regexp-quote "return ((value + 1) * 2);") output))
+    (should (string-match-p
+             (regexp-quote "return (2 * (1 + value));") output))
+    (should (string-match-p
+             (regexp-quote "return ((item) => {") output))
+    (should (string-match-p
+             (regexp-quote "__eliscript_truthy(item) ? item") output))
+    (should (string-match-p
+             (regexp-quote "item === null") output))
+    (should (string-match-p
+             (regexp-quote "console.log(item);") output))
+    (should-not
+     (string-match-p
+      "if-let\|if-some\|when-let\|as->\|->>" output))))
+
+(ert-deftest eliscript-expander-validates-threading-and-binding-forms ()
+  (dolist (case
+           '(("(->)" "-> expects an initial expression")
+             ("(-> 1 ())" "thread step must be a symbol or non-empty list")
+             ("(->> 1 2)" "thread step must be a symbol or non-empty list")
+             ("(as-> 1 value)"
+              "as-> expects an initial expression, binding name, and at least one form")
+             ("(as-> 1 :value (+ value 1))"
+              "as-> binding name must be a symbol")
+             ("(if-let (value) value)"
+              "if-let binding must contain a name and initializer")
+             ("(if-some (:value 1) value)"
+              "if-some binding name must be a symbol")
+             ("(if-let (value 1) value 0 2)"
+              "if-let expects a binding, then form, and optional else form")
+             ("(when-let (value 1))"
+              "when-let expects a binding and at least one body form")
+             ("(when-some value value)"
+              "when-some binding must contain a name and initializer")))
+    (let ((error-data
+           (should-error
+            (eliscript-compile-string (car case) "core-forms-error.eli")
+            :type 'eliscript-expand-error)))
+      (should (string-match-p
+               (regexp-quote (cadr case))
+               (error-message-string error-data))))))
+
 (ert-deftest eliscript-expander-preserves-quoted-data ()
   (let ((output
          (eliscript-compile-string

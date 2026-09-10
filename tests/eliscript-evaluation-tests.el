@@ -68,6 +68,21 @@
     (should (equal (alist-get 'name definition) "render"))
     (should (eq (alist-get 'runtimeBinding definition) t))
     (should (equal (alist-get 'kind method) "expression")))
+  (let ((definition
+         (eliscript-evaluation-form-description
+          "(defprotocol IDescribe describe)" "repl.eli")))
+    (should (equal (alist-get 'kind definition) "definition"))
+    (should (equal (alist-get 'name definition) "IDescribe"))
+    (should (eq (alist-get 'runtimeBinding definition) t)))
+  (dolist (source
+           '("(extend-type Box IDescribe (describe (value) value))"
+             "(extend-category \"number\" IDescribe (describe (value) value))"
+             "(extend-default IDescribe (describe (value) value))"))
+    (should
+     (equal
+      (alist-get 'kind
+                 (eliscript-evaluation-form-description source "repl.eli"))
+      "expression")))
   (dolist (name '(jsx fragment defcomponent))
     (should
      (equal

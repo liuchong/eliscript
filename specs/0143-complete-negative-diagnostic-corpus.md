@@ -26,12 +26,12 @@ Version 1 owns these exact suites:
 | Suite | Valid control cases | Negative cases | Diagnostic codes |
 | --- | ---: | ---: | --- |
 | Reader | 21 | 16 | `ELI-R0001` |
-| Expander | 37 | 16 | `ELI-X0001` |
+| Expander | 40 | 20 | `ELI-X0001` |
 | Analyzer | 30 | 57 | `ELI-A0001`, `ELI-P0001` |
-| **Total** | **88** | **89** | - |
+| **Total** | **91** | **93** | - |
 
 The valid controls prove that the fixture is not an error-only substitute for
-phase conformance. The 89 negative entries are the complete shared stable
+phase conformance. The 93 negative entries are the complete shared stable
 language scope described by Specification 0043. CLI option and host fallback
 failures remain boundary integration cases; they are not language-conformance
 entries and do not replace any reader, expansion, or analysis case.
@@ -44,7 +44,7 @@ Each negative entry freezes:
 - source filename and exact start and end offset, line, and column
 
 The complete ordered suite payload has the version 1 SHA-256 identity
-`b352a36a4d6a3e3520a7c18ce5ef9c2edc59425a1dffe1902bf8861783730454`.
+`24dd859354796bcd69eb999f0e7be26e64987f731135f26ee5b2e517cd3ebc8b`.
 
 ## Completeness Contract
 
@@ -79,7 +79,7 @@ JSON switches select those two representations without changing semantics.
 
 ## Acceptance Criteria
 
-- **NDC-01:** The contract contains exactly 16 reader, 16 expander, and 57
+- **NDC-01:** The contract contains exactly 16 reader, 20 expander, and 57
   analyzer negative cases in canonical fixture order.
 - **NDC-02:** Every case freezes exact human text and every required version 1
   structured diagnostic field, including both source positions.

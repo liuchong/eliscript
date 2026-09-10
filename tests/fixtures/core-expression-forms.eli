@@ -1,0 +1,36 @@
+(module tests.core-expression-forms
+  (defvar calls 0)
+
+  (defun observed (value)
+    (setq calls (1+ calls))
+    value)
+
+  (defun expression-form-report ()
+    (setq calls 0)
+    (let ((thread-first (-> 3 (1+) (* 2)))
+          (thread-last (->> 3 (+ 1) (* 2)))
+          (named (as-> 3 item (+ item 1) (* item 2)))
+          (if-let-false (if-let (item (observed false)) item "missing"))
+          (if-let-value (if-let (item (observed 7)) (1+ item) "missing"))
+          (if-some-false (if-some (item (observed false)) item "missing"))
+          (if-some-undefined
+            (if-some (item (observed undefined)) "present" "missing"))
+          (if-some-nil (if-some (item (observed nil)) item "missing"))
+          (when-let-value
+            (when-let (item (observed 5)) (1+ item) (* item 3)))
+          (when-some-false
+            (when-some (item (observed false)) "present" "missing")))
+      (js-object
+        :threadFirst thread-first
+        :threadLast thread-last
+        :named named
+        :ifLetFalse if-let-false
+        :ifLetValue if-let-value
+        :ifSomeFalse if-some-false
+        :ifSomeUndefined if-some-undefined
+        :ifSomeNil if-some-nil
+        :whenLetValue when-let-value
+        :whenSomeFalse when-some-false
+        :calls calls)))
+
+  (export expression-form-report))

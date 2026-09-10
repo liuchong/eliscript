@@ -29,19 +29,19 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 157 specifications.
+The registry currently contains 160 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
 | Accepted design | 3 |
-| Stable design | 152 |
+| Stable design | 155 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 153 |
+| Implemented | 156 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 152 specifications as stable,
+Compatibility Baseline 2 separately classifies 155 specifications as stable,
 1 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
@@ -138,10 +138,15 @@ index is generated from explicit metadata and the checked public surface.
 The portable library now includes callable value-dispatched multimethods with
 value-semantic keys, immutable derivation hierarchies, transitive preferences,
 explicit ambiguity, and persistent method and preference snapshots.
+Declarative multimethod and protocol forms expose these runtime abstractions as
+top-level language constructs while retaining explicit standard-library imports
+and one canonical dispatch implementation. First-position, last-position, and
+named threading plus truthy and nil-only conditional bindings provide
+single-evaluation expression composition without a new runtime layer.
 Browser and worker platform packages now expose only named host authority,
 inject request-scoped progress and cancellation into the real worker, and keep
-frameworks outside core evidence. M11 compatibility stabilization is now
-150/151 complete. The only provisional core feature is the full supported
+frameworks outside core evidence. Core compatibility stabilization is now
+153/154 complete. The only provisional core feature is the full supported
 matrix proof for JavaScript package interoperation in specification 0142; the
 final exit audit remains open.
 
@@ -176,7 +181,7 @@ core inventory, checked local links, and five executable examples. Specification
 0138 adds canonical machine-readable and human-readable acceptance artifacts,
 five evidence summaries, a blocking-defect gate, and deterministic rejection
 of forged final results. Application and publishing documentation remains
-outside the core gate. AC-24 and final acceptance remain open because 11
+outside the core gate. AC-24 and final acceptance remain open because 10
 mandatory criteria are still incomplete.
 
 Post-M13 verification now closes PD-01 through specification 0139. Its fixed
@@ -190,11 +195,11 @@ AC-07 proof as twenty direct local compiler builds and complete core acceptance
 executions with one versioned identity. Retained run `m13-04` completes the
 criterion with twenty clean, operational, identity-equivalent executions.
 Specification 0146 closes AC-05 with a source-bound compiler parity corpus over
-62 stable compiler-relevant features, 116 valid fixtures, 89 diagnostics, all
+65 stable compiler-relevant features, 119 valid fixtures, 93 diagnostics, all
 13 bootstrap modules, all 57 public IR kinds, and seven observable parity
 dimensions. Ten mandatory criteria remain incomplete.
-Specification 0147 derives a complete stable compatibility corpus over 141
-stable core features, 543 evidence locators, 68 core fixtures, and all three
+Specification 0147 derives a complete stable compatibility corpus over 153
+stable core features, 594 evidence locators, 71 core fixtures, and all three
 migration records. It keeps AC-02 incomplete while the final core feature
 remains provisional.
 
@@ -217,6 +222,7 @@ number.
 4. [0007: Compiler IR](0007-intermediate-representation.md)
 5. [0008: Direct ESM Emission](0008-direct-ir-emission.md)
 6. [0009: Source Maps](0009-source-maps.md)
+7. [0160: Threading and Conditional Binding Forms](0160-threading-and-conditional-binding-forms.md)
 
 ### Self-hosting and Emacs
 
@@ -518,6 +524,8 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0156 | [Value-dispatched Multimethods](0156-value-dispatched-multimethods.md) | Stable | Implemented |
 | 0157 | [Persistent Dispatch Hierarchies and Preferred Multimethods](0157-persistent-dispatch-hierarchies.md) | Stable | Implemented |
 | 0158 | [Declarative Multimethod Definitions](0158-declarative-multimethod-definitions.md) | Stable | Implemented |
+| 0159 | [Declarative Protocol Definitions](0159-declarative-protocol-definitions.md) | Stable | Implemented |
+| 0160 | [Threading and Conditional Binding Forms](0160-threading-and-conditional-binding-forms.md) | Stable | Implemented |
 
 ## Adding a Specification
 

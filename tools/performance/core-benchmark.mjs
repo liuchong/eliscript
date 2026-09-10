@@ -630,7 +630,16 @@ export function validateCoreBenchmarkReport(report) {
       report.decision?.stable !== true ||
       report.decision?.withinRegressionBudgets !== true ||
       report.decision?.passed !== true || !passed) {
-    throw new TypeError("core performance benchmark decision failed");
+    const failures = Object.entries(expectedSummary)
+      .filter(([, metric]) => !metric.passed)
+      .map(([name, metric]) => {
+        const threshold = CORE_BENCHMARK_THRESHOLDS[name];
+        return `${name} median=${metric.medianMs}/${threshold.maximumMedianMs} ` +
+          `max=${metric.maximumMs}/${threshold.maximumRunMs} ` +
+          `spread=${metric.spreadRatio}/${threshold.maximumSpreadRatio}`;
+      });
+    const detail = failures.length === 0 ? "" : `: ${failures.join("; ")}`;
+    throw new TypeError(`core performance benchmark decision failed${detail}`);
   }
   return report;
 }

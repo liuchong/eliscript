@@ -80,6 +80,8 @@ test-core: check-contracts
 		tests/portable-data-text.test.mjs tests/portable-result.test.mjs \
 		tests/portable-json.test.mjs tests/portable-numeric.test.mjs \
 		tests/atom.test.mjs tests/multimethod.test.mjs \
+		tests/declarative-protocol.test.mjs \
+		tests/core-expression-forms.test.mjs \
 		tests/interop-js.test.mjs \
 		tests/interop-package.test.mjs \
 		tests/identifier.test.mjs tests/metadata.test.mjs \
