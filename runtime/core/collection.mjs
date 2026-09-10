@@ -45,10 +45,10 @@ import {
   validateCollectionCount,
 } from "./collection-internals.mjs";
 import { isPersistentList } from "./list.mjs";
-import { isPersistentHashMap } from "./map.mjs";
 import { isPersistentQueue } from "./queue.mjs";
 import { isRecord } from "./record.mjs";
-import { EMPTY_SET, isPersistentHashSet } from "./set.mjs";
+import { isPersistentMapValue, isPersistentSetValue } from "./persistent-kind.mjs";
+import { EMPTY_SET } from "./set.mjs";
 import { isPersistentVector } from "./vector.mjs";
 
 const MISSING = Symbol("eliscript.collection.missing");
@@ -407,9 +407,9 @@ export function isCollection(value) {
     isPersistentList(value) ||
     isPersistentQueue(value) ||
     isPersistentVector(value) ||
-    isPersistentHashMap(value) ||
+    isPersistentMapValue(value) ||
     isRecord(value) ||
-    isPersistentHashSet(value);
+    isPersistentSetValue(value);
 }
 
 export function isList(value) {
@@ -425,11 +425,11 @@ export function isQueue(value) {
 }
 
 export function isMap(value) {
-  return isPersistentHashMap(value) || isRecord(value);
+  return isPersistentMapValue(value) || isRecord(value);
 }
 
 export function isSet(value) {
-  return isPersistentHashSet(value);
+  return isPersistentSetValue(value);
 }
 
 export function isSequential(value) {

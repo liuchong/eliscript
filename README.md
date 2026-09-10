@@ -96,9 +96,9 @@ diagnostics, terminal REPL, and Emacs mode discovery. The complete M10 matrix,
 local onboarding exercise, and exit audit remain formal acceptance work.
 
 M11's six implementation units are complete. Reviewed metadata classifies all
-40 standard-library modules by role and owning specification; the generated
+41 standard-library modules by role and owning specification; the generated
 [API page](docs/pages/api.html) and machine-readable
-[API index](docs/pages/api-index.json) expose all 536 checked exports. The
+[API index](docs/pages/api-index.json) expose all 552 checked exports. The
 default contract gate rejects metadata, implementation, stability, or generated
 artifact drift. Explicit [browser and worker capability packages](platform/README.md)
 now grant only named host authority, inject request-scoped progress and
@@ -182,6 +182,9 @@ The completed M8 language contract provides:
 - immutable zipper locations for stack-safe tree navigation, depth-first
   enumeration, local insertion, replacement, deletion, and persistent root
   reconstruction across generic, Vector, and List hierarchies
+- persistent AVL Map and Set values with custom comparators, logarithmic
+  path-copying updates, reversible traversal, and bounded `subseq`/`rsubseq`
+  queries
 - owner-token transient Vector, Map, and Set builders with deterministic
   completion invalidation and transient-backed persistent `into`, with
   source-bound 13.474799x/17.156491x/19.092863x Vector/Map/Set builder evidence

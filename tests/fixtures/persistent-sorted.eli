@@ -1,0 +1,88 @@
+(module tests.persistent-sorted
+  (import "../../stdlib/core/sorted.eli"
+    comparator
+    empty-sorted-map
+    rsubseq
+    sorted-map
+    sorted-map-by
+    sorted-map?
+    sorted-seq
+    sorted-seq-from
+    sorted-set
+    sorted-set-by
+    sorted-set?
+    sorted?
+    subseq)
+  (import "../../runtime/core/collection.mjs" :as Collection)
+  (import "../../runtime/core/identifier.mjs" keyword)
+  (import "../../runtime/core/map.mjs" persistentHashMap)
+  (import "../../runtime/core/value.mjs" equalValues hashValue)
+  (defun to-array
+    (collection)
+    (Collection/reduce
+      collection
+      (lambda (result value) (js-call result :push value) result)
+      (js-array)))
+  (defun caught-message
+    (operation)
+    (try
+      (funcall operation)
+      (catch error (get error "message" "missing error message"))))
+  (defun report
+    ()
+    (let*
+      ((map (sorted-map 3 "c" 1 "a" 4 "d" 2 "b"))
+        (reverse-map
+          (sorted-map-by (lambda (left right) (- right left)) 1 "a" 3 "c" 2 "b"))
+        (set (sorted-set 3 1 4 2 2))
+        (folded
+          (Collection/reduceKV
+            map
+            (lambda (result key value) (str result key value))
+            ""))
+        (hashed
+          (persistentHashMap
+            (js-array 1 "a")
+            (js-array 2 "b")
+            (js-array 3 "c")
+            (js-array 4 "d"))))
+      (js-object
+        :map
+        (to-array (sorted-seq map))
+        :reverseMap
+        (to-array (sorted-seq reverse-map))
+        :set
+        (to-array (sorted-seq set))
+        :reverse
+        (to-array (Collection/rseq set))
+        :from
+        (to-array (sorted-seq-from map 3 t false))
+        :subseq
+        (to-array (subseq map (keyword ">=") 2 (keyword "<") 4))
+        :rsubseq
+        (to-array (rsubseq set (keyword ">") 1 (keyword "<=") 4))
+        :folded
+        folded
+        :classification
+        (js-array
+          (sorted-map? map)
+          (sorted-set? set)
+          (sorted? map)
+          (Collection/isMap map)
+          (Collection/isSet set)
+          (Collection/isCollection set))
+        :value
+        (js-array
+          (equalValues map hashed)
+          (equalValues hashed map)
+          (= (hashValue map) (hashValue hashed)))
+        :empty
+        (js-array
+          (= (Collection/count (empty-sorted-map)) 0)
+          (eq (comparator (Collection/empty reverse-map)) (comparator reverse-map)))
+        :errors
+        (js-array
+          (caught-message (lambda () (sorted-map 1)))
+          (caught-message (lambda () (subseq map (keyword ">") 1 (keyword ">=") 2)))
+          (caught-message (lambda () (sorted-seq map "yes")))))))
+  (export report))

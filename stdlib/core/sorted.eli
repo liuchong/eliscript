@@ -1,0 +1,53 @@
+(module eliscript.core.sorted
+  (import "../../runtime/core/sorted.mjs" :as Runtime)
+  (defun empty-sorted-map () Runtime/EMPTY_SORTED_MAP)
+  (defun empty-sorted-map-by (comparison) (Runtime/emptySortedMapBy comparison))
+  (defun empty-sorted-set () Runtime/EMPTY_SORTED_SET)
+  (defun empty-sorted-set-by (comparison) (Runtime/emptySortedSetBy comparison))
+  (defun sorted-map (&rest key-values) (apply Runtime/persistentSortedMap key-values))
+  (defun sorted-map-by
+    (comparison &rest key-values)
+    (apply Runtime/persistentSortedMapBy (js-cons comparison key-values)))
+  (defun sorted-set (&rest values) (apply Runtime/persistentSortedSet values))
+  (defun sorted-set-by
+    (comparison &rest values)
+    (apply Runtime/persistentSortedSetBy (js-cons comparison values)))
+  (defun sorted-map? (value) (Runtime/isPersistentSortedMap value))
+  (defun sorted-set? (value) (Runtime/isPersistentSortedSet value))
+  (defun sorted? (value) (Runtime/isPersistentSortedCollection value))
+  (defun comparator (collection) (Runtime/sortedComparator collection))
+  (defun sorted-seq
+    (collection &rest direction)
+    (Runtime/sortedSequence
+      collection
+      (if (= (js-length direction) 0) t (js-nth 0 direction))))
+  (defun sorted-seq-from
+    (collection key &rest options)
+    (Runtime/sortedSequenceFrom
+      collection
+      key
+      (if (= (js-length options) 0) t (js-nth 0 options))
+      (if (< (js-length options) 2) t (js-nth 1 options))))
+  (defun subseq
+    (collection &rest bounds)
+    (apply Runtime/subsequence (js-cons collection bounds)))
+  (defun rsubseq
+    (collection &rest bounds)
+    (apply Runtime/reverseSubsequence (js-cons collection bounds)))
+  (export
+    comparator
+    empty-sorted-map
+    empty-sorted-map-by
+    empty-sorted-set
+    empty-sorted-set-by
+    rsubseq
+    sorted-map
+    sorted-map-by
+    sorted-map?
+    sorted-seq
+    sorted-seq-from
+    sorted-set
+    sorted-set-by
+    sorted-set?
+    sorted?
+    subseq))

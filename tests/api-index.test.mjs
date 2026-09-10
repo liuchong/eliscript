@@ -39,8 +39,8 @@ function escapeHtml(value) {
 
 test("generated library API index matches every declared module and export", async () => {
   const index = await buildApiIndex({ root: ROOT });
-  expect(index.moduleCount).toBe(40);
-  expect(index.exportCount).toBe(536);
+  expect(index.moduleCount).toBe(41);
+  expect(index.exportCount).toBe(552);
   expect(index.modules.find(({ module }) => module === "deferred")).toEqual({
     module: "deferred",
     source: "stdlib/deferred.eli",
@@ -104,6 +104,33 @@ test("generated library API index matches every declared module and export", asy
       "vector-zipper",
       "zipper",
       "zipper?",
+    ],
+  });
+  expect(index.modules.find(({ module }) => module === "core-sorted")).toEqual({
+    module: "core-sorted",
+    source: "stdlib/core/sorted.eli",
+    spec: "0175",
+    specFile: "specs/0175-persistent-sorted-collections.md",
+    stability: "stable",
+    role: "runtime-core",
+    summary: "Persistent AVL Maps and Sets with custom comparators, reversible traversal, and bounded range queries.",
+    exports: [
+      "comparator",
+      "empty-sorted-map",
+      "empty-sorted-map-by",
+      "empty-sorted-set",
+      "empty-sorted-set-by",
+      "rsubseq",
+      "sorted-map",
+      "sorted-map-by",
+      "sorted-map?",
+      "sorted-seq",
+      "sorted-seq-from",
+      "sorted-set",
+      "sorted-set-by",
+      "sorted-set?",
+      "sorted?",
+      "subseq",
     ],
   });
   expect(index.modules.find(({ module }) => module === "persistent-vector")).toEqual({

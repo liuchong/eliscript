@@ -39,6 +39,11 @@ import {
   METADATA_READ,
   METADATA_WITH,
 } from "./metadata-internals.mjs";
+import {
+  PERSISTENT_SET_HAS_VALUE,
+  PERSISTENT_SET_KIND,
+  persistentSetValueEqual,
+} from "./persistent-kind.mjs";
 
 const SET_HASH_TAG = 0x51e7_b32d;
 
@@ -326,16 +331,16 @@ export class PersistentHashSet {
     return new Set(this);
   }
 
-  [VALUE_EQUAL](other) {
-    if (!(other instanceof PersistentHashSet) || other.count !== this.count) {
-      return false;
-    }
-    for (const value of this) {
-      if (!other.has(value)) {
-        return false;
-      }
-    }
+  [PERSISTENT_SET_HAS_VALUE](value) {
+    return this.has(value);
+  }
+
+  get [PERSISTENT_SET_KIND]() {
     return true;
+  }
+
+  [VALUE_EQUAL](other, equal) {
+    return persistentSetValueEqual(this, other, equal);
   }
 
   [VALUE_HASH](hash) {

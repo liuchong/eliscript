@@ -25,6 +25,7 @@ import {
   EMPTY_SET,
   PersistentHashSet,
 } from "./set.mjs";
+import { PersistentSortedMap, PersistentSortedSet } from "./sorted.mjs";
 import {
   assocBang,
   conjBang,
@@ -179,6 +180,8 @@ extendProtocolType(IPrint, PersistentList, { print: printList });
 extendProtocolType(IPrint, PersistentVector, { print: printVector });
 extendProtocolType(IPrint, PersistentHashMap, { print: printMap });
 extendProtocolType(IPrint, PersistentHashSet, { print: printSet });
+extendProtocolType(IPrint, PersistentSortedMap, { print: printMap });
+extendProtocolType(IPrint, PersistentSortedSet, { print: printSet });
 extendProtocolType(IPrint, PersistentQueue, { print: printQueue });
 
 function makePrintContext(options) {

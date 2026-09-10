@@ -50,6 +50,11 @@ import {
   METADATA_READ,
   METADATA_WITH,
 } from "./metadata-internals.mjs";
+import {
+  PERSISTENT_MAP_HAS_VALUE_KEY,
+  PERSISTENT_MAP_KIND,
+  persistentMapValueEqual,
+} from "./persistent-kind.mjs";
 
 const MAP_HASH_TAG = 0x6c8e_9cf5;
 const MAP_ENTRY_HASH_TAG = 0x3a91_72eb;
@@ -338,17 +343,16 @@ export class PersistentHashMap {
     return new Map(this.entries());
   }
 
-  [VALUE_EQUAL](other, equal) {
-    if (!(other instanceof PersistentHashMap) || other.count !== this.count) {
-      return false;
-    }
-    for (const entry of mapEntries(this[MAP_STATE].root)) {
-      const value = other.get(entry.key, MAP_NOT_FOUND);
-      if (value === MAP_NOT_FOUND || !equal(entry.value, value)) {
-        return false;
-      }
-    }
+  [PERSISTENT_MAP_HAS_VALUE_KEY](key) {
+    return this.has(key);
+  }
+
+  get [PERSISTENT_MAP_KIND]() {
     return true;
+  }
+
+  [VALUE_EQUAL](other, equal) {
+    return persistentMapValueEqual(this, other, equal);
   }
 
   [VALUE_HASH](hash) {

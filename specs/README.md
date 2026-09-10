@@ -540,6 +540,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0172 | [Local Recursive Functions](0172-local-recursive-functions.md) | Stable | Implemented |
 | 0173 | [Persistent Tree Walk and Rewrite](0173-persistent-tree-walk.md) | Stable | Implemented |
 | 0174 | [Persistent Zipper Navigation and Editing](0174-persistent-zipper-navigation.md) | Stable | Implemented |
+| 0175 | [Persistent Sorted Collections and Range Queries](0175-persistent-sorted-collections.md) | Stable | Implemented |
 
 ## Adding a Specification
 

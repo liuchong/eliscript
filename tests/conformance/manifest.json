@@ -3655,6 +3655,37 @@
           "contains": "persistent zippers navigate edit and rebuild stack-safe trees"
         }
       ]
+    },
+    {
+      "id": "stdlib.persistent-sorted-collections",
+      "title": "Persistent sorted collections and range queries",
+      "status": "stable",
+      "spec": "0175",
+      "contracts": [
+        "Stores immutable sorted Maps and Sets in structurally shared AVL trees",
+        "Preserves logarithmic height path copying comparator identity and metadata",
+        "Implements collection reversible value equality and hash protocols",
+        "Performs inclusive and exclusive forward and reverse range queries",
+        "Matches deterministic randomized and one hundred thousand entry scale evidence",
+        "Matches Seed self-hosted Source Maps Bun and Node execution"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-sorted.test.mjs",
+          "contains": "Eliscript sorted API agrees across compilers and local hosts"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-sorted.test.mjs",
+          "contains": "persistent sorted trees keep height work and copying logarithmic"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-sorted.test.mjs",
+          "contains": "persistent sorted trees agree with a randomized mutable model"
+        }
+      ]
     }
   ]
 }

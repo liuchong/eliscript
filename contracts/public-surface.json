@@ -800,6 +800,14 @@
       "defaultExport": false
     },
     {
+      "id": "persistent-kind-internals",
+      "spec": "0175",
+      "visibility": "internal",
+      "file": "runtime/core/persistent-kind.mjs",
+      "namedExports": ["PERSISTENT_MAP_HAS_VALUE_KEY", "PERSISTENT_MAP_KIND", "PERSISTENT_SET_HAS_VALUE", "PERSISTENT_SET_KIND", "isPersistentMapValue", "isPersistentSetValue", "persistentMapValueEqual", "persistentSetValueEqual"],
+      "defaultExport": false
+    },
+    {
       "id": "persistent-list",
       "spec": "0094",
       "visibility": "public",
@@ -829,6 +837,30 @@
       "visibility": "internal",
       "file": "runtime/testing/queue.mjs",
       "namedExports": ["inspectPersistentQueue", "persistentQueueMetrics", "resetPersistentQueueMetrics", "sharedPersistentQueueParts"],
+      "defaultExport": false
+    },
+    {
+      "id": "persistent-sorted-collections",
+      "spec": "0175",
+      "visibility": "public",
+      "file": "runtime/core/sorted.mjs",
+      "namedExports": ["EMPTY_SORTED_MAP", "EMPTY_SORTED_SET", "PersistentSortedMap", "PersistentSortedSet", "emptySortedMapBy", "emptySortedSetBy", "isPersistentSortedCollection", "isPersistentSortedMap", "isPersistentSortedSet", "persistentSortedMap", "persistentSortedMapBy", "persistentSortedSet", "persistentSortedSetBy", "reverseSubsequence", "sortedComparator", "sortedSequence", "sortedSequenceFrom", "subsequence"],
+      "defaultExport": false
+    },
+    {
+      "id": "persistent-sorted-internals",
+      "spec": "0175",
+      "visibility": "internal",
+      "file": "runtime/core/sorted-internals.mjs",
+      "namedExports": ["SORTED_MAP_STATE", "SORTED_SET_STATE", "SortedNode", "compareSortedKeys", "readSortedMetrics", "resetSortedMetrics", "sortedAssoc", "sortedDissoc", "sortedEntries", "sortedFind"],
+      "defaultExport": false
+    },
+    {
+      "id": "persistent-sorted-testing",
+      "spec": "0175",
+      "visibility": "internal",
+      "file": "runtime/testing/sorted.mjs",
+      "namedExports": ["inspectPersistentSortedCollection", "resetSortedMetrics", "sharedPersistentSortedNodes", "sortedMetrics"],
       "defaultExport": false
     },
     {
@@ -957,6 +989,7 @@
     {"module": "core-record", "spec": "0168", "file": "stdlib/core/record.eli", "exports": ["define-record-type", "record-field-names", "record-type", "record-type-name", "record-type?", "record?"]},
     {"module": "core-sequence", "spec": "0066", "file": "stdlib/core/seq.eli", "exports": ["butlast", "concat", "cycle", "dedupe", "distinct", "drop", "drop-last", "drop-while", "every?", "ffirst", "filter", "find", "first", "flatten", "fnext", "generate", "interleave", "interleave-all", "interpose", "iterate", "keep", "keep-indexed", "last", "map", "map-indexed", "mapcat", "next", "nfirst", "nnext", "not-any?", "not-every?", "nth-next", "nth-rest", "partition", "partition-all", "partition-by", "prepend", "range", "reductions", "remove", "repeat", "repeatedly", "rest", "reverse", "second", "sequence-nth", "some", "split-at", "split-with", "take", "take-last", "take-nth", "take-while", "tree-seq"]},
     {"module": "core-set", "spec": "0066", "file": "stdlib/core/set.eli", "exports": ["difference", "disjoint?", "index", "intersection", "join", "map-invert", "project", "rename", "rename-keys", "select", "set", "subset?", "superset?", "union"]},
+    {"module": "core-sorted", "spec": "0175", "file": "stdlib/core/sorted.eli", "exports": ["comparator", "empty-sorted-map", "empty-sorted-map-by", "empty-sorted-set", "empty-sorted-set-by", "rsubseq", "sorted-map", "sorted-map-by", "sorted-map?", "sorted-seq", "sorted-seq-from", "sorted-set", "sorted-set-by", "sorted-set?", "sorted?", "subseq"]},
     {"module": "core-text", "spec": "0081", "file": "stdlib/core/text.eli", "exports": ["blank?", "contains?", "empty?", "ends-with?", "join", "repeat", "slice", "starts-at?", "starts-with?", "strip-prefix", "strip-suffix", "trim", "whitespace?"]},
     {"module": "core-transducer", "spec": "0066", "file": "stdlib/core/transducer.eli", "exports": ["catting", "completing", "compose-transducers", "deduping", "distincting", "dropping", "dropping-while", "eduction", "filtering", "interposing", "into", "keeping", "keeping-indexed", "mapcatting", "mapping", "mapping-indexed", "partitioning-all", "partitioning-by", "removing", "run!", "taking", "taking-nth", "taking-while", "transduce"]},
     {"module": "core-transient", "spec": "0066", "file": "stdlib/core/transient.eli", "exports": ["IEditable", "ITransientCollection", "assoc!", "conj!", "dissoc!", "persistent!", "transient"]},
