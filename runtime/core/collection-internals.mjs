@@ -41,6 +41,8 @@ export const dispatchCollectionReduce = protocolMethod(I_REDUCE, "reduce");
 
 const NO_INITIAL = Symbol("eliscript.collection.no-initial");
 const REDUCED_STATE = Symbol("eliscript.collection.reduced-state");
+const REDUCTION_STATE = Symbol("eliscript.collection.reduction-state");
+const REDUCTION_TOKEN = Symbol("eliscript.collection.reduction-token");
 const SEQUENCE_STATE = Symbol("eliscript.collection.sequence-state");
 const SEQUENCE_TOKEN = Symbol("eliscript.collection.sequence-token");
 const UNBOUNDED_SEQUENCE = Symbol("eliscript.collection.unbounded-sequence");
@@ -150,6 +152,24 @@ export class SequenceView {
   }
 }
 
+export class ReductionView {
+  constructor(token, reduceFunction) {
+    if (token !== REDUCTION_TOKEN || typeof reduceFunction !== "function") {
+      throw new TypeError("ReductionView values must be created by reductionView");
+    }
+    this[REDUCTION_STATE] = reduceFunction;
+    Object.freeze(this);
+  }
+
+  [COLLECTION_REDUCE](reducer, ...initial) {
+    return this[REDUCTION_STATE](reducer, ...initial);
+  }
+
+  get [Symbol.toStringTag]() {
+    return "EliscriptReductionView";
+  }
+}
+
 export function sequenceView(factory, count = null) {
   if (typeof factory !== "function") {
     throw new TypeError("sequence view factory must be a function");
@@ -168,6 +188,13 @@ export function unboundedSequenceView(factory) {
     throw new TypeError("unbounded sequence view factory must be a function");
   }
   return new SequenceView(SEQUENCE_TOKEN, factory, UNBOUNDED_SEQUENCE);
+}
+
+export function reductionView(reduceFunction) {
+  if (typeof reduceFunction !== "function") {
+    throw new TypeError("reduction view function must be a function");
+  }
+  return new ReductionView(REDUCTION_TOKEN, reduceFunction);
 }
 
 export function reducedValue(value) {

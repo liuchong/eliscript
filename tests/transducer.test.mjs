@@ -7,7 +7,9 @@ import {
   IReduce,
   count,
   isReduced,
+  isReductionView,
   nth,
+  reduce,
   reduced,
   sequenceView,
   unreduced,
@@ -19,6 +21,7 @@ import {
   deduping,
   distincting,
   droppingWhile,
+  eduction,
   filtering,
   interposing,
   into,
@@ -29,11 +32,13 @@ import {
   mappingIndexed,
   partitioningAll,
   partitioningBy,
+  runBang,
   taking,
   takingNth,
   takingWhile,
   transduce,
 } from "../runtime/core/transducer.mjs";
+import { range, take } from "../runtime/core/sequence.mjs";
 import { persistentHashMap } from "../runtime/core/map.mjs";
 import { persistentHashSet } from "../runtime/core/set.mjs";
 import {
@@ -113,6 +118,75 @@ test("mapping and filtering compose in declared left-to-right order", () => {
     "",
     [1, 2, 3],
   )).toBe("123");
+});
+
+test("eduction composes replayable reduction pipelines over unbounded sources", () => {
+  let mappings = 0;
+  let predicates = 0;
+  const pipeline = eduction(
+    mapping((value) => {
+      mappings += 1;
+      return value + 1;
+    }),
+    filtering((value) => {
+      predicates += 1;
+      return value % 2 === 0;
+    }),
+    range(),
+  );
+
+  expect(isReductionView(pipeline)).toBe(true);
+  expect(Object.isFrozen(pipeline)).toBe(true);
+  expect([...take(5, pipeline)]).toEqual([2, 4, 6, 8, 10]);
+  expect([mappings, predicates]).toEqual([10, 10]);
+  expect([...take(5, pipeline)]).toEqual([2, 4, 6, 8, 10]);
+  expect([mappings, predicates]).toEqual([20, 20]);
+  expect(() => count(pipeline)).toThrow();
+
+  const doubled = eduction(mapping((value) => value * 2), [1, 2, 3]);
+  expect(reduce(doubled, (sum, value) => sum + value)).toBe(12);
+  expect(reduce(doubled, (sum, value) => sum + value, 10)).toBe(22);
+  expect(() => reduce(
+    eduction(filtering(() => false), [1, 2, 3]),
+    (sum, value) => sum + value,
+  )).toThrow("cannot reduce an empty eduction without an initial value");
+
+  let zeroInputPulls = 0;
+  const zeroInput = sequenceView(() => (function* values() {
+    zeroInputPulls += 1;
+    yield 1;
+  })(), 1);
+  expect(reduce(eduction(taking(0), zeroInput), (sum, value) => sum + value, 7))
+    .toBe(7);
+  expect(zeroInputPulls).toBe(0);
+
+  const partitioned = into(
+    EMPTY_VECTOR,
+    eduction(partitioningAll(2), [1, 2, 3]),
+  );
+  expect([...partitioned].map((part) => [...part])).toEqual([[1, 2], [3]]);
+
+  const scaled = take(
+    100_000,
+    eduction(mapping((value) => value + 1), range()),
+  );
+  expect(count(scaled)).toBe(100_000);
+  expect(nth(scaled, 0)).toBe(1);
+  expect(nth(scaled, 99_999)).toBe(100_000);
+});
+
+test("run! consumes reduction views for ordered side effects", () => {
+  const visited = [];
+  const source = eduction(mapping((value) => value * 3), [1, 2, 3]);
+  expect(runBang((value) => visited.push(value), source)).toBeNull();
+  expect(visited).toEqual([3, 6, 9]);
+  expect(() => runBang(null, source)).toThrow("run! procedure must be a function");
+  expect(() => runBang(() => null)).toThrow(
+    "run! requires a procedure and collection",
+  );
+  expect(() => eduction(source)).toThrow(
+    "eduction requires one or more transducers and a collection",
+  );
 });
 
 test("taking terminates exactly and allocates fresh state for every run", () => {
@@ -546,6 +620,8 @@ test("transducers agree under Bun and Node and stay single-pass at scale", async
     pipeline: [6, 12, 18],
     sum: 36,
     entries: [["key-1", 10], ["key-2", 20]],
+    eduction: [6, 8],
+    visits: [6, 8],
     reused: [[1, 2], [1, 2]],
     stateful: ["2:left", "3:right"],
     distinct: [1, 2, 3],

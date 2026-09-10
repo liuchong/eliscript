@@ -34,13 +34,14 @@ Four new Eliscript API modules expose the runtime substrate:
   dispatch implementation is completed by specification 0079.
 - `stdlib/core/collection.eli` exports the nine collection capabilities and
   generic count, empty, construction, lookup, membership, indexed access,
-  bounded and unbounded sequence views, reduction, and reduced-value
-  operations.
+  bounded and unbounded sequence views, replayable reduction-only views,
+  reduction, and reduced-value operations.
 - `stdlib/core/transducer.eli` exports reducer completion, composition,
   mapping, indexed mapping/keeping, filtering, removing, bounded and
   predicate-controlled take/drop, nth sampling, interposition, adjacent
   deduplication, global distinctness, persistent-Vector partitioning,
-  cat/mapcat, transduction, and `into`.
+  cat/mapcat, transduction, replayable eduction, ordered `run!` consumption,
+  and `into`.
 - `stdlib/core/transient.eli` exports editable capabilities and `transient`,
   `conj!`, `assoc!`, `dissoc!`, and `persistent!`.
 
@@ -113,7 +114,8 @@ must execute under both Bun and Node.js.
 The executable corpus covers protocol category and default extensions,
 operation slots, generic collection access, Vector and Map transients,
 post-`persistent!` invalidation, composed transducers, external `IReduce`
-sources, exact early termination, persistent partition flushing, and a
+sources, replayable reduction-only pipelines, ordered effectful consumption,
+exact early termination, persistent partition flushing, and a
 50,000-key transient Map build.
 
 ## Compatibility and Limits
@@ -194,6 +196,9 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
 - **ECA-16:** Maintained replayable sequence sources compile from
   `stdlib/core/seq.eli`, distinguish bounded and unbounded cardinality, defer
   callbacks until consumption, and match the direct runtime facade.
+- **ECA-17:** Maintained reduction views, `eduction`, and `run!` compile from
+  `stdlib/core/`, preserve replay and bounded termination over unbounded
+  sources, and match the direct runtime facade under Bun and Node.
 
 ## Follow-up
 

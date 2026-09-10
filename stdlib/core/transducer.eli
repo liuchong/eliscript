@@ -1,73 +1,57 @@
 (module eliscript.core.transducer
   (import "../../runtime/core/transducer.mjs" :as Runtime)
-
-  (defun completing (step &rest completion)
+  (defun completing
+    (step &rest completion)
     (apply Runtime/completing (js-cons step completion)))
-
-  (defun compose-transducers (&rest transducers)
+  (defun compose-transducers
+    (&rest transducers)
     (apply Runtime/composeTransducers transducers))
-
-  (defun mapping (transform)
-    (Runtime/mapping transform))
-
-  (defun mapping-indexed (transform)
-    (Runtime/mappingIndexed transform))
-
-  (defun keeping (transform)
-    (Runtime/keeping transform))
-
-  (defun keeping-indexed (transform)
-    (Runtime/keepingIndexed transform))
-
-  (defun catting ()
-    (Runtime/catting))
-
-  (defun mapcatting (transform)
-    (Runtime/mapcatting transform))
-
-  (defun filtering (predicate)
-    (Runtime/filtering predicate))
-
-  (defun removing (predicate)
-    (Runtime/removing predicate))
-
-  (defun taking (limit)
-    (Runtime/taking limit))
-
-  (defun dropping (limit)
-    (Runtime/dropping limit))
-
-  (defun taking-while (predicate)
-    (Runtime/takingWhile predicate))
-
-  (defun dropping-while (predicate)
-    (Runtime/droppingWhile predicate))
-
-  (defun taking-nth (interval)
-    (Runtime/takingNth interval))
-
-  (defun interposing (separator)
-    (Runtime/interposing separator))
-
-  (defun partitioning-all (size)
-    (Runtime/partitioningAll size))
-
-  (defun partitioning-by (classifier)
-    (Runtime/partitioningBy classifier))
-
-  (defun deduping ()
-    (Runtime/deduping))
-
-  (defun distincting ()
-    (Runtime/distincting))
-
-  (defun transduce (transducer reducer initial collection)
+  (defun mapping (transform) (Runtime/mapping transform))
+  (defun mapping-indexed (transform) (Runtime/mappingIndexed transform))
+  (defun keeping (transform) (Runtime/keeping transform))
+  (defun keeping-indexed (transform) (Runtime/keepingIndexed transform))
+  (defun catting () (Runtime/catting))
+  (defun mapcatting (transform) (Runtime/mapcatting transform))
+  (defun filtering (predicate) (Runtime/filtering predicate))
+  (defun removing (predicate) (Runtime/removing predicate))
+  (defun taking (limit) (Runtime/taking limit))
+  (defun dropping (limit) (Runtime/dropping limit))
+  (defun taking-while (predicate) (Runtime/takingWhile predicate))
+  (defun dropping-while (predicate) (Runtime/droppingWhile predicate))
+  (defun taking-nth (interval) (Runtime/takingNth interval))
+  (defun interposing (separator) (Runtime/interposing separator))
+  (defun partitioning-all (size) (Runtime/partitioningAll size))
+  (defun partitioning-by (classifier) (Runtime/partitioningBy classifier))
+  (defun deduping () (Runtime/deduping))
+  (defun distincting () (Runtime/distincting))
+  (defun transduce
+    (transducer reducer initial collection)
     (Runtime/transduce transducer reducer initial collection))
-
-  (defun into (target &rest arguments)
-    (apply Runtime/into (js-cons target arguments)))
-
-  (export catting completing compose-transducers deduping distincting dropping
-          dropping-while filtering interposing into keeping keeping-indexed
-          mapcatting mapping mapping-indexed partitioning-all partitioning-by
-          removing taking taking-nth taking-while transduce))
+  (defun eduction (&rest arguments) (apply Runtime/eduction arguments))
+  (defun run! (procedure collection) (Runtime/runBang procedure collection))
+  (defun into (target &rest arguments) (apply Runtime/into (js-cons target arguments)))
+  (export
+    catting
+    completing
+    compose-transducers
+    deduping
+    distincting
+    dropping
+    eduction
+    dropping-while
+    filtering
+    interposing
+    into
+    keeping
+    keeping-indexed
+    mapcatting
+    mapping
+    mapping-indexed
+    partitioning-all
+    partitioning-by
+    removing
+    run!
+    taking
+    taking-nth
+    taking-while
+    transduce))

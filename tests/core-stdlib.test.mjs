@@ -987,6 +987,9 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect(usage.iteration_state).toBe(4);
     expect([...usage.cycled_values]).toEqual([1, 2, 3, 1, 2, 3, 1]);
     expect([...usage.generated_values]).toEqual([0, 1, 4, 9]);
+    expect([...usage.pipeline_values]).toEqual([2, 4, 6, 8, 10]);
+    expect(usage.pipeline_total).toBe(18);
+    expect(usage.pipeline_run_result).toBeNull();
     expect(usage.indexed.get(0)).toBe(3);
     expect([...usage.grouped.get(0)]).toEqual([0, 2, 4]);
     expect(usage.counted.get(1)).toBe(2);

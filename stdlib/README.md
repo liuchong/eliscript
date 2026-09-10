@@ -457,6 +457,11 @@ are explicitly unbounded, so `collection-count` rejects them without starting
 a traversal. Producer callbacks execute only for consumed values, and `cycle`
 captures its finite `IReduce` input once as a persistent snapshot.
 
+`eduction` composes transducers into a replayable `IReduce`-only pipeline, so a
+bounded consumer can transform an unbounded source without realizing an
+intermediate Vector or tail. Reduction state is fresh for every run, while
+`run!` provides explicit ordered side-effect consumption and returns nil.
+
 These modules intentionally import `runtime/core/*.mjs` and are not yet
 eligible for portable closure extraction. They are the language-level entry
 points for the current protocol core. Exact semantics and allocation evidence
@@ -466,6 +471,8 @@ Finite selection and splitting are specified in
 [0150](../specs/0150-protocol-driven-finite-sequence-selection.md).
 Replayable bounded and unbounded sources are specified in
 [0151](../specs/0151-replayable-sequence-sources.md).
+Replayable reduction-only transducer pipelines are specified in
+[0152](../specs/0152-replayable-reducible-transducer-pipelines.md).
 
 ## Portable Sequence Compatibility Module
 

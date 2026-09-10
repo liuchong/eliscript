@@ -141,14 +141,18 @@ extension tables, while primitive String uses an explicit host category.
 Adapters do not modify prototypes. Sequence views are frozen and replayable;
 bounded views expose finite counts, while explicitly unbounded views answer
 `seq` without traversal and reject `count` immediately. Keyed elements are
-frozen entries, reduced values provide early termination, and construction
-operations preserve persistent inputs or return immutable native copies.
+frozen entries. Reduction views are frozen, replayable `IReduce`-only values
+that reject `count` and `seq` without traversal. Reduced values provide early
+termination, and construction operations preserve persistent inputs or return
+immutable native copies.
 
 ### Transducers
 
 `core/transducer.mjs` composes mapping, filtering, removing, bounded taking,
 and dropping as destination-independent reducing-function transformations.
-`transduce` delegates traversal through `IReduce`; `into` obtains an empty
+`transduce` delegates traversal through `IReduce`; `eduction` creates a
+replayable reduction-only pipeline over finite or unbounded sources;
+`runBang` performs ordered effectful consumption; and `into` obtains an empty
 target and adds logical values through `IConj` or an editable transient
 builder. Pipelines preserve reduced-value termination, run completion exactly
 once, reuse transducers with fresh reduction state, and allocate no

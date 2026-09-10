@@ -2826,6 +2826,41 @@
           "contains": "portable compiler driver reaches a reproducible fixed point"
         }
       ]
+    },
+    {
+      "id": "stdlib.replayable-reducible-transducer-pipelines",
+      "title": "Replayable reducible transducer pipelines",
+      "status": "stable",
+      "spec": "0152",
+      "contracts": [
+        "Exports immutable reduction-only views eduction pipelines and ordered run consumption across Lisp and JavaScript surfaces",
+        "Composes replayable transducer pipelines over finite or unbounded IReduce sources without intermediate collections",
+        "Creates fresh transducer state per reduction and preserves explicit or implicit initial reduction semantics",
+        "Propagates exact bounded termination and flushes stateful completion once without exposing outer completion",
+        "Produces byte-identical fixed points and identical local Bun and Node results"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/collection-protocol.test.mjs",
+          "contains": "reduction views are immutable replayable IReduce-only values"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/transducer.test.mjs",
+          "contains": "eduction composes replayable reduction pipelines over unbounded sources"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "Eliscript core modules compile and execute against runtime protocols"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }

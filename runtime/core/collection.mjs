@@ -11,6 +11,7 @@ import {
   I_ASSOCIATIVE,
   I_REDUCE,
   I_SEQABLE,
+  ReductionView as InternalReductionView,
   SequenceView as InternalSequenceView,
   dispatchCollectionCount,
   dispatchCollectionEmpty,
@@ -25,6 +26,7 @@ import {
   readCollectionEntry,
   reduceIterable,
   reducedValue,
+  reductionView as createReductionView,
   sequenceView as createSequenceView,
   unboundedSequenceView as createUnboundedSequenceView,
   unreducedValue,
@@ -239,7 +241,12 @@ export const IIndexed = I_INDEXED;
 export const ISeqable = I_SEQABLE;
 export const IReduce = I_REDUCE;
 
+export const ReductionView = InternalReductionView;
 export const SequenceView = InternalSequenceView;
+
+export function reductionView(reduceFunction) {
+  return createReductionView(reduceFunction);
+}
 
 export function sequenceView(factory, count = null) {
   return createSequenceView(factory, count);
@@ -336,4 +343,8 @@ export function unreduced(value) {
 
 export function isSequenceView(value) {
   return value instanceof InternalSequenceView;
+}
+
+export function isReductionView(value) {
+  return value instanceof InternalReductionView;
 }

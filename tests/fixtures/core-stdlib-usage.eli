@@ -50,6 +50,7 @@
     update
     update-in
     zipmap)
+  (import "./stdlib/core/transducer.mjs" eduction filtering mapping run!)
   (defconst values [0 1 2 3 4])
   (defvar generated-state 0)
   (defvar iteration-state 0)
@@ -68,6 +69,18 @@
         1)))
   (defconst cycled-values (take 7 (cycle [1 2 3])))
   (defconst generated-values (generate 4 (lambda (index) (* index index))))
+  (defconst pipeline-values
+    (take
+      5
+      (eduction
+        (mapping (lambda (value) (1+ value)))
+        (filtering (lambda (value) (= (% value 2) 0)))
+        (range))))
+  (defvar pipeline-total 0)
+  (defconst pipeline-run-result
+    (run!
+      (lambda (value) (setq pipeline-total (+ pipeline-total value)))
+      (eduction (mapping (lambda (value) (* value 3))) [1 2 3])))
   (defconst mapped (map (lambda (value) (* value 2)) values))
   (defconst filtered (filter (lambda (value) (= (% value 2) 0)) values))
   (defconst removed (remove (lambda (value) (= value 2)) values))
@@ -131,6 +144,9 @@
     iteration-state
     cycled-values
     generated-values
+    pipeline-values
+    pipeline-total
+    pipeline-run-result
     mapped
     filtered
     removed

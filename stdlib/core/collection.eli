@@ -8,6 +8,7 @@
   (defconst IIndexed Runtime/IIndexed)
   (defconst ISeqable Runtime/ISeqable)
   (defconst IReduce Runtime/IReduce)
+  (defconst ReductionView Runtime/ReductionView)
   (defconst SequenceView Runtime/SequenceView)
   (defun collection-count (collection) (Runtime/count collection))
   (defun empty (collection) (Runtime/empty collection))
@@ -35,6 +36,8 @@
     (factory &rest count)
     (apply Runtime/sequenceView (js-cons factory count)))
   (defun unbounded-sequence-view (factory) (Runtime/unboundedSequenceView factory))
+  (defun reduction-view (reduce-function) (Runtime/reductionView reduce-function))
+  (defun reduction-view? (value) (Runtime/isReductionView value))
   (export
     IAssociative
     IConj
@@ -44,6 +47,7 @@
     ILookup
     IReduce
     ISeqable
+    ReductionView
     SequenceView
     assoc
     collection-count
@@ -56,6 +60,8 @@
     reduce
     reduced
     reduced?
+    reduction-view
+    reduction-view?
     sequence-view
     unbounded-sequence-view
     unreduced))

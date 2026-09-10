@@ -619,7 +619,7 @@
       "spec": "0059",
       "visibility": "public",
       "file": "runtime/core/collection.mjs",
-      "namedExports": ["IAssociative", "IConj", "ICounted", "IEmptyable", "IIndexed", "ILookup", "IReduce", "ISeqable", "SequenceView", "assoc", "conj", "contains", "count", "empty", "get", "isReduced", "isSequenceView", "nth", "reduce", "reduced", "seq", "sequenceView", "unboundedSequenceView", "unreduced"],
+      "namedExports": ["IAssociative", "IConj", "ICounted", "IEmptyable", "IIndexed", "ILookup", "IReduce", "ISeqable", "ReductionView", "SequenceView", "assoc", "conj", "contains", "count", "empty", "get", "isReduced", "isReductionView", "isSequenceView", "nth", "reduce", "reduced", "reductionView", "seq", "sequenceView", "unboundedSequenceView", "unreduced"],
       "defaultExport": false
     },
     {
@@ -627,7 +627,7 @@
       "spec": "0061",
       "visibility": "public",
       "file": "runtime/core/transducer.mjs",
-      "namedExports": ["catting", "completing", "composeTransducers", "deduping", "distincting", "dropping", "droppingWhile", "filtering", "interposing", "into", "keeping", "keepingIndexed", "mapcatting", "mapping", "mappingIndexed", "partitioningAll", "partitioningBy", "removing", "taking", "takingNth", "takingWhile", "transduce"],
+      "namedExports": ["catting", "completing", "composeTransducers", "deduping", "distincting", "dropping", "droppingWhile", "eduction", "filtering", "interposing", "into", "keeping", "keepingIndexed", "mapcatting", "mapping", "mappingIndexed", "partitioningAll", "partitioningBy", "removing", "runBang", "taking", "takingNth", "takingWhile", "transduce"],
       "defaultExport": false
     },
     {
@@ -857,7 +857,7 @@
   ],
   "standardLibrary": [
     {"module": "bit", "spec": "0052", "file": "stdlib/bit.eli", "exports": ["bit-count", "rotate-left", "rotate-right"]},
-    {"module": "core-collection", "spec": "0066", "file": "stdlib/core/collection.eli", "exports": ["IAssociative", "IConj", "ICounted", "IEmptyable", "IIndexed", "ILookup", "IReduce", "ISeqable", "SequenceView", "assoc", "collection-count", "collection-nth", "collection-seq", "conj", "contains?", "empty", "lookup", "reduce", "reduced", "reduced?", "sequence-view", "unbounded-sequence-view", "unreduced"]},
+    {"module": "core-collection", "spec": "0066", "file": "stdlib/core/collection.eli", "exports": ["IAssociative", "IConj", "ICounted", "IEmptyable", "IIndexed", "ILookup", "IReduce", "ISeqable", "ReductionView", "SequenceView", "assoc", "collection-count", "collection-nth", "collection-seq", "conj", "contains?", "empty", "lookup", "reduce", "reduced", "reduced?", "reduction-view", "reduction-view?", "sequence-view", "unbounded-sequence-view", "unreduced"]},
     {"module": "core-data", "spec": "0066", "file": "stdlib/core/data.eli", "exports": ["assoc-in", "count-by", "frequencies", "get-in", "group-by", "index-by", "merge", "merge-with", "select-keys", "update", "update-in", "zipmap"]},
     {"module": "core-data-text", "spec": "0069", "file": "stdlib/core/data-text.eli", "exports": ["DataTextError", "IPrint", "print-value", "read-value", "read-values"]},
     {"module": "core-identifier", "spec": "0067", "file": "stdlib/core/identifier.eli", "exports": ["EliscriptSymbol", "Keyword", "identifier-name", "identifier-namespace", "identifier?", "keyword", "keyword?", "qualified-name", "symbol", "symbol?"]},
@@ -867,7 +867,7 @@
     {"module": "core-protocol", "spec": "0066", "file": "stdlib/core/protocol.eli", "exports": ["define-protocol", "define-protocol-from-definition", "extend-protocol-category", "extend-protocol-default", "extend-protocol-type", "implements-protocol-operation?", "implements-protocol?", "protocol-definition", "protocol-host-category", "protocol-method", "protocol-slot"]},
     {"module": "core-sequence", "spec": "0066", "file": "stdlib/core/seq.eli", "exports": ["butlast", "concat", "cycle", "dedupe", "distinct", "drop", "drop-last", "drop-while", "every?", "filter", "find", "first", "generate", "interpose", "iterate", "keep", "keep-indexed", "last", "map", "map-indexed", "mapcat", "partition-all", "partition-by", "range", "reductions", "remove", "repeat", "repeatedly", "reverse", "sequence-nth", "some", "split-at", "split-with", "take", "take-last", "take-nth", "take-while"]},
     {"module": "core-text", "spec": "0081", "file": "stdlib/core/text.eli", "exports": ["blank?", "contains?", "empty?", "ends-with?", "join", "repeat", "slice", "starts-at?", "starts-with?", "strip-prefix", "strip-suffix", "trim", "whitespace?"]},
-    {"module": "core-transducer", "spec": "0066", "file": "stdlib/core/transducer.eli", "exports": ["catting", "completing", "compose-transducers", "deduping", "distincting", "dropping", "dropping-while", "filtering", "interposing", "into", "keeping", "keeping-indexed", "mapcatting", "mapping", "mapping-indexed", "partitioning-all", "partitioning-by", "removing", "taking", "taking-nth", "taking-while", "transduce"]},
+    {"module": "core-transducer", "spec": "0066", "file": "stdlib/core/transducer.eli", "exports": ["catting", "completing", "compose-transducers", "deduping", "distincting", "dropping", "dropping-while", "eduction", "filtering", "interposing", "into", "keeping", "keeping-indexed", "mapcatting", "mapping", "mapping-indexed", "partitioning-all", "partitioning-by", "removing", "run!", "taking", "taking-nth", "taking-while", "transduce"]},
     {"module": "core-transient", "spec": "0066", "file": "stdlib/core/transient.eli", "exports": ["IEditable", "ITransientCollection", "assoc!", "conj!", "dissoc!", "persistent!", "transient"]},
     {"module": "data", "spec": "0027", "file": "stdlib/data.eli", "exports": ["count-by", "group-by", "index-by"]},
     {"module": "data-text", "spec": "0071", "file": "stdlib/data-text.eli", "exports": ["data-text-result-value", "print-value", "read-value", "read-values"]},

@@ -11,6 +11,7 @@ import {
   ILookup,
   IReduce,
   ISeqable,
+  ReductionView,
   assoc,
   conj,
   contains,
@@ -18,9 +19,11 @@ import {
   empty,
   get,
   isReduced,
+  isReductionView,
   isSequenceView,
   nth,
   reduce,
+  reductionView,
   reduced,
   seq,
   sequenceView,
@@ -319,6 +322,34 @@ test("seq returns replayable immutable logical views and immutable map entries",
   expect(count(mutableObjectView)).toBe(2);
   expect(() => new (vectorView.constructor)()).toThrow(
     "SequenceView values must be created by seq",
+  );
+});
+
+test("reduction views are immutable replayable IReduce-only values", () => {
+  let traversals = 0;
+  const view = reductionView((reducer, ...initial) => {
+    traversals += 1;
+    return reduce([1, 2, 3], reducer, ...initial);
+  });
+
+  expect(view).toBeInstanceOf(ReductionView);
+  expect(isReductionView(view)).toBe(true);
+  expect(isSequenceView(view)).toBe(false);
+  expect(Object.isFrozen(view)).toBe(true);
+  expect(Object.prototype.toString.call(view)).toBe("[object EliscriptReductionView]");
+  expect(implementsProtocol(IReduce, view)).toBe(true);
+  expect(implementsProtocol(ISeqable, view)).toBe(false);
+  expect(implementsProtocol(ICounted, view)).toBe(false);
+  expect(reduce(view, (sum, value) => sum + value, 0)).toBe(6);
+  expect(reduce(view, (sum, value) => sum + value)).toBe(6);
+  expect(traversals).toBe(2);
+  expect(() => count(view)).toThrow(ProtocolDispatchError);
+  expect(() => seq(view)).toThrow(ProtocolDispatchError);
+  expect(() => reductionView(null)).toThrow(
+    "reduction view function must be a function",
+  );
+  expect(() => new ReductionView()).toThrow(
+    "ReductionView values must be created by reductionView",
   );
 });
 

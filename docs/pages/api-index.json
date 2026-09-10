@@ -2,7 +2,7 @@
   "format": "eliscript-library-api-index",
   "version": 1,
   "moduleCount": 31,
-  "exportCount": 371,
+  "exportCount": 376,
   "modules": [
     {
       "module": "bit",
@@ -25,7 +25,7 @@
       "specFile": "specs/0066-eliscript-authored-core-protocol-algorithms.md",
       "stability": "stable",
       "role": "runtime-core",
-      "summary": "Protocol-driven collection capabilities, reduction, lookup, and bounded or unbounded sequence views.",
+      "summary": "Protocol-driven collection capabilities, reduction, lookup, and replayable sequence or reduction views.",
       "exports": [
         "IAssociative",
         "IConj",
@@ -35,6 +35,7 @@
         "ILookup",
         "IReduce",
         "ISeqable",
+        "ReductionView",
         "SequenceView",
         "assoc",
         "collection-count",
@@ -47,6 +48,8 @@
         "reduce",
         "reduced",
         "reduced?",
+        "reduction-view",
+        "reduction-view?",
         "sequence-view",
         "unbounded-sequence-view",
         "unreduced"
@@ -271,7 +274,7 @@
       "specFile": "specs/0066-eliscript-authored-core-protocol-algorithms.md",
       "stability": "stable",
       "role": "runtime-core",
-      "summary": "Composable single-pass, stateful, partitioning, flattening, and reducing-process transducers.",
+      "summary": "Composable single-pass transducers, replayable reducible pipelines, and effectful consumption.",
       "exports": [
         "catting",
         "completing",
@@ -280,6 +283,7 @@
         "distincting",
         "dropping",
         "dropping-while",
+        "eduction",
         "filtering",
         "interposing",
         "into",
@@ -291,6 +295,7 @@
         "partitioning-all",
         "partitioning-by",
         "removing",
+        "run!",
         "taking",
         "taking-nth",
         "taking-while",

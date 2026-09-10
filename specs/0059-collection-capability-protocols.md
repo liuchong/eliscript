@@ -34,6 +34,7 @@ collection capabilities.
 - generic operations: `count`, `get`, `nth`, `seq`, `reduce`
 - sequence values: `SequenceView`, `sequenceView`, `unboundedSequenceView`,
   `isSequenceView`
+- reduction values: `ReductionView`, `reductionView`, `isReductionView`
 - early termination: `reduced`, `isReduced`, `unreduced`
 
 The implementation identities and direct slots remain internal to
@@ -110,6 +111,13 @@ remain compatible but do not define protocol semantics.
 Every core implementation traverses its native iterator or leaf path directly;
 generic reduction does not repeatedly call `seq`, `count`, or `nth`.
 
+`ReductionView` is a frozen, replayable, reduction-only value. Its factory
+callback is invoked anew for every `reduce` call and receives the reducer plus
+zero or one explicit initial value. It implements `IReduce` directly but does
+not advertise `ICounted` or `ISeqable`, so generic `count` and `seq` reject it
+without starting traversal. This supports reusable transformed pipelines whose
+source may be unbounded without implying broad lazy-sequence behavior.
+
 ## Reduced Values
 
 `reduced(value)` wraps a completed accumulator. Returning that wrapper from a
@@ -174,6 +182,11 @@ omitted when counting by traversal is acceptable.
 that cannot terminate naturally. It preserves replayability while making
 accidental full traversal through `count` impossible.
 
+`reductionView(reduceFunction)` constructs an external reduction-only source.
+The callback must create any cursor or traversal state inside each invocation;
+the returned view is immutable and reusable but deliberately not iterable or
+countable.
+
 ## Compatibility and Limits
 
 This collection runtime surface is stable in Compatibility Baseline 2. It does
@@ -227,6 +240,9 @@ construction contract, while indexed access remains deliberately absent.
 - **CCP-11:** An explicitly unbounded sequence view answers `seq` without
   traversal, rejects `count` immediately, and composes with reduced-value
   consumers that stop at a finite boundary.
+- **CCP-12:** A reduction view is frozen and replayable, implements only direct
+  `IReduce`, and rejects `count` and `seq` without invoking its reduction
+  callback.
 
 ## Next Slice
 

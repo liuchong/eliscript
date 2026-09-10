@@ -4,6 +4,7 @@ import {
   deduping,
   distincting,
   droppingWhile,
+  eduction,
   filtering,
   interposing,
   into,
@@ -16,6 +17,7 @@ import {
   taking,
   takingNth,
   takingWhile,
+  runBang,
   transduce,
 } from "../../runtime/core/transducer.mjs";
 import { persistentHashMap } from "../../runtime/core/map.mjs";
@@ -32,11 +34,20 @@ const entries = into(
   mapping((value) => [`key-${value}`, value * 10]),
   [1, 2],
 );
+const visits = [];
+const reduciblePipeline = eduction(
+  mapping((value) => value * 2),
+  filtering((value) => value > 4),
+  [1, 2, 3, 4],
+);
+runBang((value) => visits.push(value), reduciblePipeline);
 
 console.log(JSON.stringify({
   pipeline: [...values],
   sum: transduce(pipeline, (total, value) => total + value, 0, [1, 2, 3, 4, 5, 6]),
   entries: [...entries].sort(([left], [right]) => left.localeCompare(right)),
+  eduction: [...into(EMPTY_VECTOR, reduciblePipeline)],
+  visits,
   reused: [
     transduce(taking(2), (result, value) => [...result, value], [], [1, 2, 3]),
     transduce(taking(2), (result, value) => [...result, value], [], [1, 2, 3]),

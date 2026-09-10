@@ -14,8 +14,10 @@ layer. Stateless mapping/filtering, run-local indexed/keep/prefix/sampling,
 interposition/dedupe transforms, buffered partitioning, and nested cat/mapcat
 transforms construct reusable transducers;
 `composeTransducers` combines them in one declared-order reduction;
-`transduce` executes the resulting reducing function; and `into` constructs a
-target only through `IEmptyable`, `IConj`, and `IReduce`.
+`transduce` executes the resulting reducing function; `eduction` creates a
+replayable reduction-only pipeline; `runBang` consumes values for ordered
+effects; and `into` constructs a target only through `IEmptyable`, `IConj`,
+and `IReduce`.
 
 The transformation pipeline allocates no intermediate collection. A
 transducer knows neither the input representation nor the destination. It is a
@@ -38,7 +40,7 @@ changing the observable API or results defined here.
   `distincting`, `partitioningAll`, `partitioningBy`, `catting`, and
   `mapcatting`
 - composition: `composeTransducers`
-- execution: `transduce`, `into`
+- execution: `transduce`, `eduction`, `runBang`, `into`
 
 The module imports only public collection operations. Private markers used to
 recognize completed reducing functions and zero-input pipelines are not part
@@ -227,6 +229,33 @@ The operation:
 There is no implicit-initial form. An explicit initial value keeps empty input,
 completion, and target construction deterministic.
 
+## Eduction
+
+`eduction(first, ..., collection)` composes one or more transducers in declared
+order and returns a frozen reduction view. Construction does not open or pull
+the source. Each later reduction applies the composed transducer again, so all
+indexes, counters, buffers, and distinctness state are fresh for that run.
+
+An explicit initial value is passed through ordinary transduction. Without an
+initial value, the first transformed output becomes the accumulator and an
+empty transformed output fails deterministically. The outer reducer is lifted
+with identity completion before entering the transducer chain, which lets
+stateful transducers flush exactly once without calling an outer completion
+protocol that generic `reduce` does not define.
+
+The resulting value implements only `IReduce`. It is intentionally neither
+countable nor sequenceable and therefore cannot accidentally realize an
+unbounded source through `count` or `seq`. A reduced downstream result stops
+the original source at the decisive input, and a zero-input transducer does not
+acquire the source at all.
+
+## Run Bang
+
+`runBang(procedure, collection)` reduces the collection in logical order,
+calls `procedure` once per consumed value, ignores procedure results, and
+returns `null`. It is the explicit effectful consumption boundary for a
+reduction view; errors propagate and no result collection is constructed.
+
 ## Into
 
 `into` has two call forms:
@@ -255,9 +284,11 @@ one source reduction and constructs no mapped or filtered intermediate value.
 
 ## Complexity and Allocation
 
-For `n` consumed scalar inputs and constant-time user transforms, `transduce`
-is O(n) time with O(s) reducing state, where `s` is the number of composed
-stateful stages. Indexed mapping/keeping, sampling, interposition, prefix
+For `n` consumed scalar inputs and constant-time user transforms, `transduce`,
+`eduction` consumption, and `runBang` are O(n) time with O(s) reducing state,
+where `s` is the number of composed stateful stages. An eduction retains only
+its source and transducer configuration between runs and allocates no
+intermediate result collection. Indexed mapping/keeping, sampling, interposition, prefix
 control, and adjacent dedupe use bounded counters, flags, or one previous
 value per application. Global distinctness retains O(k) value-semantic set
 state for `k` distinct inputs. Partitioning uses O(p) retained values where `p` is the
@@ -303,6 +334,7 @@ Indexed mapping/keeping, sampling, interposition, predicate-controlled
 prefixes, adjacent dedupe, partitioning, and cat/mapcat are compatible additive
 extensions to the same stable contract. Global distinctness is an additive
 extension using the same value contract. This surface does not yet provide
+JavaScript iteration or broad lazy sequence conversion for reduction views,
 async transducers, parallel fold, or implicit completion
 initializers. Those operations require concrete maintained use cases and their
 own completion or resource contracts before joining the public surface.
@@ -355,6 +387,12 @@ own completion or resource contracts before joining the public surface.
 - **TRD-19:** Global distinctness retains first occurrence order, uses
   Eliscript value equality and hashing, and allocates an empty seen set for
   every execution.
+- **TRD-20:** Eduction constructs without traversal, composes one or more
+  transducers over arbitrary `IReduce` sources, creates fresh state for every
+  reduction, and propagates bounded termination to the original source.
+- **TRD-21:** Eduction preserves explicit and implicit initial reduction
+  semantics, isolates outer completion while flushing stateful stages once,
+  and `runBang` performs ordered effects without collecting results.
 
 ## Continuation
 

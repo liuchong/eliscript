@@ -5,6 +5,7 @@ import {
   isReduced,
   reduce,
   reduced,
+  reductionView,
   unreduced,
 } from "./collection.mjs";
 import { implementsProtocolOperation } from "./protocol.mjs";
@@ -23,6 +24,7 @@ const REDUCING_FUNCTION = Symbol("eliscript.transducer.reducing-function");
 const ZERO_INPUT = Symbol("eliscript.transducer.zero-input");
 const NO_PREVIOUS_VALUE = Symbol("eliscript.transducer.no-previous-value");
 const NO_PARTITION_KEY = Symbol("eliscript.transducer.no-partition-key");
+const NO_REDUCTION_INITIAL = Symbol("eliscript.transducer.no-reduction-initial");
 
 function identity(value) {
   return value;
@@ -473,6 +475,55 @@ export function transduce(transducer, reducer, initial, collection) {
     ? seed
     : reduce(collection, transformed, seed);
   return unreduced(transformed(unreduced(result)));
+}
+
+export function eduction(...arguments_) {
+  if (arguments_.length < 2) {
+    throw new TypeError("eduction requires one or more transducers and a collection");
+  }
+  const collection = arguments_[arguments_.length - 1];
+  const transducer = composeTransducers(...arguments_.slice(0, -1));
+  return reductionView((reducer, ...initial) => {
+    requireFunction(reducer, "eduction reducer");
+    if (initial.length > 0) {
+      return transduce(
+        transducer,
+        completing(reducer),
+        initial[0],
+        collection,
+      );
+    }
+    return transduce(
+      transducer,
+      completing(
+        (result, value) => result === NO_REDUCTION_INITIAL
+          ? value
+          : reducer(result, value),
+        (result) => {
+          if (result === NO_REDUCTION_INITIAL) {
+            throw new TypeError(
+              "cannot reduce an empty eduction without an initial value",
+            );
+          }
+          return result;
+        },
+      ),
+      NO_REDUCTION_INITIAL,
+      collection,
+    );
+  });
+}
+
+export function runBang(procedure, collection) {
+  if (arguments.length !== 2) {
+    throw new TypeError("run! requires a procedure and collection");
+  }
+  requireFunction(procedure, "run! procedure");
+  reduce(collection, (_result, value) => {
+    procedure(value);
+    return null;
+  }, null);
+  return null;
 }
 
 export function into(target, ...arguments_) {
