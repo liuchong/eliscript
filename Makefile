@@ -79,7 +79,7 @@ test-core: check-contracts
 		tests/portable-value-semantics.test.mjs tests/portable-metadata.test.mjs \
 		tests/portable-data-text.test.mjs tests/portable-result.test.mjs \
 		tests/portable-json.test.mjs tests/portable-numeric.test.mjs \
-		tests/atom.test.mjs \
+		tests/atom.test.mjs tests/multimethod.test.mjs \
 		tests/interop-js.test.mjs \
 		tests/interop-package.test.mjs \
 		tests/identifier.test.mjs tests/metadata.test.mjs \

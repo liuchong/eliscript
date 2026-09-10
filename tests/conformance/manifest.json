@@ -2966,6 +2966,31 @@
           "contains": "portable compiler driver reaches a reproducible fixed point"
         }
       ]
+    },
+    {
+      "id": "stdlib.value-dispatched-multimethods",
+      "title": "Value-dispatched multimethods",
+      "status": "stable",
+      "spec": "0156",
+      "contracts": [
+        "Creates directly callable unforgeable multimethod identities with exact optional default dispatch semantics",
+        "Dispatches exactly once through value-semantic persistent method tables and explicit default methods",
+        "Adds replaces removes and clears methods while preserving prior immutable table snapshots",
+        "Preserves user callback failures and reports deterministic multimethod-owned errors",
+        "Produces byte-identical seed and self-hosted output plus identical Bun and Node results at one hundred thousand calls"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/multimethod.test.mjs",
+          "contains": "Eliscript multimethods dispatch on values with persistent method snapshots"
+        },
+        {
+          "kind": "fixture",
+          "file": "tests/fixtures/multimethod-host.mjs",
+          "contains": "scaleDispatchCalls"
+        }
+      ]
     }
   ]
 }

@@ -1,0 +1,166 @@
+(module eliscript.multimethod
+  (import-portable "./persistent-map.eli"
+    persistent-map-assoc
+    persistent-map-dissoc
+    persistent-map-get)
+  (import-portable "./value.eli" empty-value-map)
+  (defconst multi-fn-registry (js* "new WeakMap()"))
+  (defconst missing-method (js-object))
+  (defconst default-dispatch "default")
+  (defun multi-fn-fail
+    (code message name dispatch-value)
+    (throw
+      (js-object
+        :kind
+        "eliscript/multi-fn-error"
+        :code
+        code
+        :message
+        message
+        :name
+        name
+        :dispatch-value
+        dispatch-value)))
+  (defun multi-fn?
+    (candidate)
+    (if (= (value-type candidate) "function")
+      (try (js-call multi-fn-registry :has candidate) (catch _error false))
+      false))
+  (defun multi-fn-state
+    (reference)
+    (if (multi-fn? reference)
+      (js-call multi-fn-registry :get reference)
+      (multi-fn-fail
+        "ELI-MULTI-FN-INVALID-REFERENCE"
+        "operation requires a multi-fn"
+        nil
+        nil)))
+  (defun multi-fn-operation
+    (reference operation)
+    (get (multi-fn-state reference) operation nil))
+  (defun multi-fn
+    (name dispatch-function &rest default-options)
+    (when (not (= (value-type dispatch-function) "function"))
+      (multi-fn-fail
+        "ELI-MULTI-FN-INVALID-DISPATCH"
+        "multi-fn dispatch must be a function"
+        name
+        nil))
+    (when (> (js-length default-options) 1)
+      (multi-fn-fail
+        "ELI-MULTI-FN-INVALID-ARITY"
+        "multi-fn accepts one optional default dispatch value"
+        name
+        nil))
+    (let*
+      (
+        (fallback
+          (if (= (js-length default-options) 0)
+            default-dispatch
+            (aref default-options 0)))
+        (method-table (empty-value-map))
+        (reference nil)
+        (find-method nil))
+      (setq
+        find-method
+        (lambda
+          (dispatch-value)
+          (let
+            ((method (persistent-map-get method-table dispatch-value missing-method)))
+            (if (eq method missing-method)
+              (persistent-map-get method-table fallback missing-method)
+              method))))
+      (setq
+        reference
+        (lambda
+          (&rest arguments)
+          (let*
+            ((dispatch-value (apply dispatch-function arguments))
+              (method (funcall find-method dispatch-value)))
+            (if (eq method missing-method)
+              (multi-fn-fail
+                "ELI-MULTI-FN-NO-METHOD"
+                "no method for multi-fn dispatch value"
+                name
+                dispatch-value)
+              (apply method arguments)))))
+      (js-call
+        multi-fn-registry
+        :set
+        reference
+        (js-object
+          :name
+          name
+          :dispatch-function
+          dispatch-function
+          :default-dispatch-value
+          fallback
+          :dispatch-value
+          (lambda (arguments) (apply dispatch-function arguments))
+          :get-method
+          (lambda
+            (dispatch-value)
+            (let ((method (funcall find-method dispatch-value)))
+              (if (eq method missing-method) nil method)))
+          :methods
+          (lambda () method-table)
+          :add-method
+          (lambda
+            (dispatch-value method)
+            (when (not (= (value-type method) "function"))
+              (multi-fn-fail
+                "ELI-MULTI-FN-INVALID-METHOD"
+                "multi-fn method must be a function"
+                name
+                dispatch-value))
+            (setq
+              method-table
+              (persistent-map-assoc method-table dispatch-value method))
+            reference)
+          :remove-method
+          (lambda
+            (dispatch-value)
+            (setq method-table (persistent-map-dissoc method-table dispatch-value))
+            reference)
+          :remove-all-methods
+          (lambda () (setq method-table (empty-value-map)) reference)))
+      reference))
+  (defun multi-fn-name (reference) (get (multi-fn-state reference) "name" nil))
+  (defun dispatch-fn
+    (reference)
+    (get (multi-fn-state reference) "dispatch-function" nil))
+  (defun default-dispatch-value
+    (reference)
+    (get (multi-fn-state reference) "default-dispatch-value" nil))
+  (defun dispatch-value
+    (reference &rest arguments)
+    (funcall (multi-fn-operation reference "dispatch-value") arguments))
+  (defun get-method
+    (reference dispatch-value)
+    (funcall (multi-fn-operation reference "get-method") dispatch-value))
+  (defun has-method?
+    (reference dispatch-value)
+    (= (value-type (get-method reference dispatch-value)) "function"))
+  (defun methods (reference) (funcall (multi-fn-operation reference "methods")))
+  (defun add-method!
+    (reference dispatch-value method)
+    (funcall (multi-fn-operation reference "add-method") dispatch-value method))
+  (defun remove-method!
+    (reference dispatch-value)
+    (funcall (multi-fn-operation reference "remove-method") dispatch-value))
+  (defun remove-all-methods!
+    (reference)
+    (funcall (multi-fn-operation reference "remove-all-methods")))
+  (export
+    add-method!
+    default-dispatch-value
+    dispatch-fn
+    dispatch-value
+    get-method
+    has-method?
+    methods
+    multi-fn
+    multi-fn-name
+    multi-fn?
+    remove-all-methods!
+    remove-method!))

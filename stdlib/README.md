@@ -398,6 +398,31 @@ part of canonical data text or portable worker values. Exact semantics and
 cross-compiler/cross-host evidence are specified in
 [0072](../specs/0072-atomic-state-references.md).
 
+## Value-dispatched Multimethods
+
+`multimethod.eli` creates callable functions whose implementation is selected
+from the value returned by a dispatch function:
+
+```elisp
+(import "../../stdlib/multimethod.eli"
+        add-method! multi-fn methods remove-method!)
+
+(let ((render (multi-fn "render" (lambda (kind value) kind))))
+  (add-method! render "text"
+               (lambda (_kind value) (str "text:" value)))
+  (add-method! render "default"
+               (lambda (kind value) (str kind ":" value)))
+  (render "text" "hello"))
+```
+
+Dispatch keys use Eliscript value equality, so independently constructed equal
+persistent values select the same method. Method additions, replacements, and
+removals install new Persistent Map roots; a previous `methods` result remains
+an immutable snapshot. The callable identity is authenticated by a private
+weak registry, while dispatch and method exceptions keep their original
+identity. Exact behavior is specified in
+[0156](../specs/0156-value-dispatched-multimethods.md).
+
 ## JavaScript Container Interop
 
 `interop/js.eli` defines the explicit boundary between immutable persistent
