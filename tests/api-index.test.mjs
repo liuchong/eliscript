@@ -39,8 +39,8 @@ function escapeHtml(value) {
 
 test("generated library API index matches every declared module and export", async () => {
   const index = await buildApiIndex({ root: ROOT });
-  expect(index.moduleCount).toBe(39);
-  expect(index.exportCount).toBe(508);
+  expect(index.moduleCount).toBe(40);
+  expect(index.exportCount).toBe(536);
   expect(index.modules.find(({ module }) => module === "deferred")).toEqual({
     module: "deferred",
     source: "stdlib/deferred.eli",
@@ -65,6 +65,45 @@ test("generated library API index matches every declared module and export", asy
       "prewalk",
       "prewalk-replace",
       "walk",
+    ],
+  });
+  expect(index.modules.find(({ module }) => module === "core-zipper")).toEqual({
+    module: "core-zipper",
+    source: "stdlib/core/zipper.eli",
+    spec: "0174",
+    specFile: "specs/0174-persistent-zipper-navigation.md",
+    stability: "stable",
+    role: "runtime-core",
+    summary: "Immutable tree locations for stack-safe navigation, editing, and persistent root reconstruction.",
+    exports: [
+      "append-child",
+      "branch?",
+      "children",
+      "down",
+      "edit",
+      "end?",
+      "insert-child",
+      "insert-left",
+      "insert-right",
+      "left",
+      "leftmost",
+      "lefts",
+      "list-zipper",
+      "make-node",
+      "next",
+      "node",
+      "path",
+      "prev",
+      "remove",
+      "replace",
+      "right",
+      "rightmost",
+      "rights",
+      "root",
+      "up",
+      "vector-zipper",
+      "zipper",
+      "zipper?",
     ],
   });
   expect(index.modules.find(({ module }) => module === "persistent-vector")).toEqual({

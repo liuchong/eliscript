@@ -3634,6 +3634,27 @@
           "contains": "persistent tree walk is stack safe and agrees across compilers and hosts"
         }
       ]
+    },
+    {
+      "id": "stdlib.persistent-zipper",
+      "title": "Persistent zipper navigation and editing",
+      "status": "stable",
+      "spec": "0174",
+      "contracts": [
+        "Uses immutable persistent locations with generic Vector and List constructors",
+        "Navigates parents children siblings paths and depth-first order",
+        "Rebuilds roots after replacement insertion callback editing and deletion",
+        "Preserves branch metadata exact nullish values and prior locations",
+        "Uses iterative navigation and reconstruction for deeply nested trees",
+        "Matches Seed self-hosted Source Maps Bun and Node execution"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-zipper.test.mjs",
+          "contains": "persistent zippers navigate edit and rebuild stack-safe trees"
+        }
+      ]
     }
   ]
 }

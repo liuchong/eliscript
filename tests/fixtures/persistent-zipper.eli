@@ -1,0 +1,208 @@
+(module tests.persistent-zipper
+  (import "../../stdlib/core/zipper.eli"
+    append-child
+    branch?
+    children
+    down
+    edit
+    end?
+    insert-child
+    insert-left
+    insert-right
+    left
+    leftmost
+    lefts
+    list-zipper
+    next
+    node
+    path
+    prev
+    remove
+    replace
+    right
+    rightmost
+    rights
+    root
+    up
+    vector-zipper
+    zipper
+    zipper?)
+  (import "../../runtime/core/collection.mjs" :as Collection)
+  (import "../../runtime/core/identifier.mjs" keyword)
+  (import "../../runtime/core/list.mjs" first persistentList rest)
+  (import "../../runtime/core/map.mjs" persistentHashMap)
+  (import "../../runtime/core/metadata.mjs" meta withMeta)
+  (import "../../runtime/core/vector.mjs" persistentVector)
+  (defun identity (value) value)
+  (defun caught-message
+    (operation)
+    (try
+      (funcall operation)
+      (catch error (get error "message" "missing error message"))))
+  (defun node-label
+    (value)
+    (cond ((Collection/isVector value) "vector")
+      ((Collection/isList value) "list")
+      (t value)))
+  (defun map-branch?
+    (value)
+    (and (Collection/isMap value) (Collection/contains value "children")))
+  (defun map-children (value) (Collection/get value "children"))
+  (defun map-node
+    (value children-values)
+    (Collection/assoc value "children" children-values))
+  (defun zipper-report
+    ()
+    (let*
+      (
+        (source
+          (withMeta
+            (persistentVector 1 (persistentVector 2 3) 4)
+            (persistentHashMap (js-array (keyword "source") "zipper-test"))))
+        (base (vector-zipper source))
+        (first-location (down base))
+        (middle-location (right first-location))
+        (nested-first (down middle-location))
+        (nested-second (right nested-first))
+        (extreme-right (rightmost first-location))
+        (extreme-left (leftmost extreme-right))
+        (cursor base)
+        (events (js-array))
+        (end-location nil)
+        (edited-leaf
+          (insert-right
+            (insert-left
+              (edit nested-second (lambda (value amount) (+ value amount)) 27)
+              20)
+            40))
+        (edited-parent (append-child (up edited-leaf) 50))
+        (edited-root (root edited-parent))
+        (edited-nested (Collection/nth edited-root 1))
+        (prepended-root (root (insert-child middle-location 0)))
+        (prepended-nested (Collection/nth prepended-root 1))
+        (removed-after-left (remove nested-second))
+        (removed-after-first (remove nested-first))
+        (removed-left-root (root removed-after-left))
+        (removed-first-root (root removed-after-first))
+        (map-source
+          (persistentHashMap
+            (js-array "name" "root")
+            (js-array "children" (persistentVector 7 8))))
+        (map-location (zipper map-branch? map-children map-node map-source))
+        (map-edited
+          (root
+            (edit
+              (right (down map-location))
+              (lambda (value amount) (+ value amount))
+              2)))
+        (map-edited-children (Collection/get map-edited "children"))
+        (list-source
+          (withMeta
+            (persistentList (persistentList 5 6) 7)
+            (persistentHashMap (js-array (keyword "source") "list-zipper"))))
+        (list-edited (root (append-child (down (list-zipper list-source)) 8)))
+        (list-edited-child (first list-edited))
+        (undefined-root (persistentVector globalThis/undefined false nil))
+        (undefined-location (down (vector-zipper undefined-root)))
+        (deep-value 0)
+        (depth 12000))
+      (while (not (end? cursor))
+        (js-call events :push (node-label (node cursor)))
+        (setq cursor (next cursor)))
+      (setq end-location cursor)
+      (while (> depth 0)
+        (setq deep-value (persistentVector deep-value) depth (1- depth)))
+      (let ((deep-location (vector-zipper deep-value)) (remaining 12000))
+        (while (> remaining 0)
+          (setq deep-location (down deep-location) remaining (1- remaining)))
+        (let
+          ((unchanged-deep-root (root deep-location))
+            (changed-deep-root (root (replace deep-location 1))))
+          (setq remaining 12000)
+          (while (> remaining 0)
+            (setq
+              changed-deep-root
+              (Collection/nth changed-deep-root 0)
+              remaining
+              (1- remaining)))
+          (js-object
+            :recognition
+            (js-array (zipper? base) (zipper? source) (branch? base))
+            :navigation
+            (js-array
+              (node first-location)
+              (node-label (node middle-location))
+              (node nested-first)
+              (node nested-second)
+              (node (left nested-second))
+              (node extreme-right)
+              (node extreme-left)
+              (Collection/count (children base))
+              (Collection/count (path nested-second))
+              (Collection/count (lefts nested-second))
+              (Collection/count (rights nested-first)))
+            :enumeration
+            events
+            :end
+            (js-array
+              (end? end-location)
+              (eq (next end-location) end-location)
+              (node (prev end-location))
+              (node (prev (prev end-location)))
+              (nil? (prev base)))
+            :identity
+            (js-array
+              (eq (root nested-second) source)
+              (eq unchanged-deep-root deep-value)
+              (Collection/nth (Collection/nth source 1) 1)
+              (Collection/get (meta edited-root) (keyword "source")))
+            :edited
+            (js-array
+              (Collection/nth edited-root 0)
+              (Collection/nth edited-nested 0)
+              (Collection/nth edited-nested 1)
+              (Collection/nth edited-nested 2)
+              (Collection/nth edited-nested 3)
+              (Collection/nth edited-nested 4)
+              (Collection/nth edited-root 2))
+            :prepended
+            (js-array
+              (Collection/nth prepended-nested 0)
+              (Collection/nth prepended-nested 1)
+              (Collection/nth prepended-nested 2))
+            :removed
+            (js-array
+              (node removed-after-left)
+              (Collection/count (Collection/nth removed-left-root 1))
+              (Collection/isVector (node removed-after-first))
+              (Collection/nth (Collection/nth removed-first-root 1) 0))
+            :generic
+            (js-array
+              (Collection/nth map-edited-children 0)
+              (Collection/nth map-edited-children 1))
+            :list
+            (js-array
+              (Collection/isList list-edited)
+              (Collection/isList list-edited-child)
+              (first list-edited-child)
+              (first (rest list-edited-child))
+              (first (rest (rest list-edited-child)))
+              (Collection/get (meta list-edited) (keyword "source")))
+            :nullish
+            (js-array
+              (undefined? (node undefined-location))
+              (eq (node (right undefined-location)) false)
+              (nil? (node (right (right undefined-location))))
+              (eq (root undefined-location) undefined-root))
+            :deep
+            changed-deep-root
+            :errors
+            (js-array
+              (caught-message (lambda () (zipper nil identity identity source)))
+              (caught-message (lambda () (node source)))
+              (caught-message (lambda () (children first-location)))
+              (caught-message (lambda () (insert-left base 0)))
+              (caught-message (lambda () (insert-right base 0)))
+              (caught-message (lambda () (remove base)))
+              (caught-message (lambda () (replace end-location 0)))))))))
+  (export zipper-report))
