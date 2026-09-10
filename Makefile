@@ -128,6 +128,7 @@ ifneq ($(ELISCRIPT_SKIP_RETAINED_ACCEPTANCE),1)
 		--verify-run acceptance/runs/m13-01.json \
 		--verify-markdown acceptance/runs/m13-01.md
 	$(BUN) tools/acceptance/finalize.mjs --verify
+	$(BUN) tools/compatibility/matrix.mjs --verify-all
 endif
 	$(BUN) tools/acceptance/repeat.mjs --verify \
 		--json-report acceptance/runs/m13-04.json \
@@ -135,7 +136,6 @@ endif
 	$(BUN) tools/surface/check.mjs
 	$(BUN) tools/surface/generate-api.mjs --check
 	$(BUN) tools/ci/render-workflow.mjs --check
-	$(BUN) tools/compatibility/matrix.mjs --verify-all
 	$(BUN) tools/documentation/check.mjs
 	$(BUN) tools/onboarding/check.mjs \
 		--verify-run acceptance/runs/m13-02.json \

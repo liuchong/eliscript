@@ -63,7 +63,10 @@ Node.
 architecture, and actual tool versions before running anything. It rejects an
 unsupported cell, a dirty checkout, or Bun/Node version drift. The executor
 runs the contract's exact command sequence with the selected `EMACS`, `BUN`,
-and `NODE` binaries and bounded per-command timeouts.
+and `NODE` binaries and bounded per-command timeouts. During that sequence,
+retained acceptance aggregation is disabled so an older report for the cell
+being replaced cannot recursively reject the test run. Compiler, runtime,
+standard-library, conformance, and all non-retained validation still run.
 
 For example, a macOS Emacs 30 cell can be recorded with:
 

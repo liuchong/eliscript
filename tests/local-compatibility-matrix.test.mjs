@@ -18,6 +18,7 @@ const EMPTY_SHA256 = createHash("sha256").update("").digest("hex");
 const matrixBytes = await readFile(
   path.join(ROOT, "contracts/compatibility-matrix.json"),
 );
+const makefile = await readFile(path.join(ROOT, "Makefile"), "utf8");
 const matrix = JSON.parse(matrixBytes.toString("utf8"));
 const matrixSha256 = createHash("sha256").update(matrixBytes).digest("hex");
 
@@ -87,6 +88,15 @@ test("matrix command environment breaks retained-evidence recursion", () => {
     EMACS: "/opt/tools/emacs",
     ELISCRIPT_SKIP_RETAINED_ACCEPTANCE: "1",
   });
+  expect(makefile).toContain(
+    "ifneq ($(ELISCRIPT_SKIP_RETAINED_ACCEPTANCE),1)\n" +
+    "\t$(BUN) tools/acceptance/check.mjs",
+  );
+  expect(makefile).toMatch(
+    /ifneq \(\$\(ELISCRIPT_SKIP_RETAINED_ACCEPTANCE\),1\)[\s\S]*?tools\/compatibility\/matrix\.mjs --verify-all\nendif/u,
+  );
+  expect(makefile.match(/tools\/compatibility\/matrix\.mjs --verify-all/gu))
+    .toHaveLength(1);
 });
 
 test("local compatibility evidence derives all real machine cells", () => {
