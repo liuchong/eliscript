@@ -339,6 +339,15 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "function merge_with(combine, ...collections)",
         "function zipmap(keys, values)",
       ]],
+      ["stdlib/core/set.eli", [
+        "function set(...arguments$)",
+        "function union(...collections)",
+        "function intersection(...collections)",
+        "function difference(...collections)",
+        "function subset_QMARK_(...arguments$)",
+        "function superset_QMARK_(...arguments$)",
+        "function disjoint_QMARK_(...arguments$)",
+      ]],
       ["stdlib/core/order.eli", [
         "function compare_values(left, right)",
         "function comparator(comparison)",

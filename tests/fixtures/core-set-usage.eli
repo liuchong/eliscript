@@ -1,0 +1,24 @@
+(module test.core-set-usage
+  (import "./stdlib/core/set.mjs"
+    difference
+    disjoint?
+    intersection
+    set
+    subset?
+    superset?
+    union)
+  (defconst converted (set [1 2 2 3]))
+  (defconst united (union converted #{3 4} [4 5]))
+  (defconst intersected (intersection converted [2 3 4] #{0 2 3}))
+  (defconst subtracted (difference converted [2] #{8}))
+  (defconst subset-result (subset? [1 3] converted))
+  (defconst superset-result (superset? converted [1 2]))
+  (defconst disjoint-result (disjoint? converted [8 9]))
+  (export
+    converted
+    disjoint-result
+    intersected
+    subtracted
+    subset-result
+    superset-result
+    united))

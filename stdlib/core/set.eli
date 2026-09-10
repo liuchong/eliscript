@@ -1,0 +1,132 @@
+(module eliscript.core.set
+  (import "../../runtime/core/collection.mjs" :as Collection)
+  (import "../../runtime/core/set.mjs" EMPTY_SET isPersistentHashSet)
+  (import "../../runtime/core/transient.mjs"
+    conjBang
+    dissocBang
+    persistentBang
+    transient)
+  (defun require-arity
+    (arguments expected label)
+    (when (not (= (js-length arguments) expected))
+      (throw
+        (new
+          globalThis/TypeError
+          (str
+            label
+            " expects "
+            expected
+            (if (= expected 1) " collection" " collections"))))))
+  (defun require-non-empty
+    (arguments label)
+    (when (= (js-length arguments) 0)
+      (throw (new globalThis/TypeError (str label " expects at least one collection")))))
+  (defun set
+    (&rest arguments)
+    (require-arity arguments 1 "set")
+    (let ((collection (js-nth 0 arguments)))
+      (if (isPersistentHashSet collection)
+        collection
+        (let ((result (transient EMPTY_SET)))
+          (Collection/reduce
+            collection
+            (lambda (builder value) (conjBang builder value) builder)
+            result)
+          (persistentBang result)))))
+  (defun union
+    (&rest collections)
+    (if (= (js-length collections) 0)
+      EMPTY_SET
+      (let ((result (transient (set (js-nth 0 collections)))) (index 1))
+        (while (< index (js-length collections))
+          (Collection/reduce
+            (js-nth index collections)
+            (lambda (builder value) (conjBang builder value) builder)
+            result)
+          (setq index (1+ index)))
+        (persistentBang result))))
+  (defun intersect-pair
+    (left right)
+    (let*
+      ((left-set (set left))
+        (right-set (set right))
+        (candidates
+          (if (<= (Collection/count left-set) (Collection/count right-set))
+            left-set
+            right-set))
+        (membership (if (eq candidates left-set) right-set left-set))
+        (builder (transient (Collection/empty left-set))))
+      (Collection/reduce
+        candidates
+        (lambda
+          (result value)
+          (when (Collection/contains membership value) (conjBang result value))
+          result)
+        builder)
+      (let ((retained (persistentBang builder)))
+        (if (= (Collection/count retained) (Collection/count left-set))
+          left-set
+          retained))))
+  (defun intersection
+    (&rest collections)
+    (require-non-empty collections "intersection")
+    (let
+      ((result (set (js-nth 0 collections))) (index 1) (size (js-length collections)))
+      (while (and (< index size) (> (Collection/count result) 0))
+        (setq
+          result
+          (intersect-pair result (js-nth index collections))
+          index
+          (1+ index)))
+      result))
+  (defun difference
+    (&rest collections)
+    (require-non-empty collections "difference")
+    (let
+      ((result (transient (set (js-nth 0 collections))))
+        (index 1)
+        (size (js-length collections)))
+      (while (< index size)
+        (Collection/reduce
+          (js-nth index collections)
+          (lambda (builder value) (dissocBang builder value) builder)
+          result)
+        (setq index (1+ index)))
+      (persistentBang result)))
+  (defun subset?
+    (&rest arguments)
+    (require-arity arguments 2 "subset")
+    (let
+      ((candidates (set (js-nth 0 arguments))) (membership (set (js-nth 1 arguments))))
+      (if (> (Collection/count candidates) (Collection/count membership))
+        false
+        (Collection/reduce
+          candidates
+          (lambda
+            (result value)
+            (if (Collection/contains membership value)
+              result
+              (Collection/reduced false)))
+          t))))
+  (defun superset?
+    (&rest arguments)
+    (require-arity arguments 2 "superset")
+    (subset? (js-nth 1 arguments) (js-nth 0 arguments)))
+  (defun disjoint?
+    (&rest arguments)
+    (require-arity arguments 2 "disjoint")
+    (let*
+      ((left-set (set (js-nth 0 arguments)))
+        (right-set (set (js-nth 1 arguments)))
+        (candidates
+          (if (<= (Collection/count left-set) (Collection/count right-set))
+            left-set
+            right-set))
+        (membership (if (eq candidates left-set) right-set left-set)))
+      (Collection/reduce
+        candidates
+        (lambda
+          (result value)
+          (if (Collection/contains membership value) (Collection/reduced false) result))
+        t)))
+  (export difference disjoint? intersection set subset? superset? union))

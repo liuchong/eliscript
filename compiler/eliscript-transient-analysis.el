@@ -42,6 +42,7 @@
 (defconst eliscript-transient--trusted-core-sources
   '("stdlib/core/data.eli"
     "stdlib/core/seq.eli"
+    "stdlib/core/set.eli"
     "stdlib/core/transient.eli")
   "Core implementation sources that currently require unchecked sync borrows.")
 

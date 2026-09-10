@@ -471,8 +471,8 @@ Exact semantics and cross-compiler/cross-host evidence are specified in
 
 ## Protocol-driven Core
 
-`core/seq.eli` and `core/data.eli` expose the current protocol-driven runtime
-algorithms through Lisp-named Eliscript modules:
+`core/seq.eli`, `core/data.eli`, and `core/set.eli` expose the current
+protocol-driven runtime algorithms through Lisp-named Eliscript modules:
 
 ```elisp
 (import "../../stdlib/core/seq.eli"
@@ -482,6 +482,8 @@ algorithms through Lisp-named Eliscript modules:
 (import "../../stdlib/core/data.eli"
         assoc-in get-in group-by frequencies keys vals
         update-keys update-vals merge-with select-keys zipmap)
+(import "../../stdlib/core/set.eli"
+        difference disjoint? intersection set subset? superset? union)
 ```
 
 Sequence transforms accept any `IReduce` source and return persistent Vectors.
@@ -502,6 +504,11 @@ values for early termination.
 `update-keys` and `update-vals` transform keyed entries into a new persistent
 Map; source values remain unchanged and a transformed-key collision keeps the
 last traversed value.
+
+Set conversion and algebra accept arbitrary protocol collections and return
+value-semantic persistent Sets. Intersection and difference retain left-hand
+metadata; subset, superset, and disjoint checks stop as soon as the answer is
+known.
 
 `reduce-kv` passes indexes or stored keys directly through `IKVReduce`.
 Persistent Vector and HAMT Map values avoid public entry allocation, external

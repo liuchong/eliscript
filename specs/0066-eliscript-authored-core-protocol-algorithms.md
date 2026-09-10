@@ -14,7 +14,7 @@
 This specification moves the maintained core collection API and algorithm
 bodies into ordinary Eliscript modules. Applications can import protocols,
 collection operations, transducers, transient builders, sequence algorithms,
-keyed-data algorithms, and ordering algorithms from `stdlib/core/` without
+keyed-data algorithms, Set algebra, and ordering algorithms from `stdlib/core/` without
 importing camel-cased
 JavaScript APIs directly.
 
@@ -66,7 +66,13 @@ reverse sequence-nth some split-at split-with take take-last take-nth take-while
 
 ```text
 assoc-in count-by frequencies get-in group-by index-by merge merge-with
-select-keys update update-in zipmap
+keys select-keys update update-in update-keys update-vals vals zipmap
+```
+
+`stdlib/core/set.eli` now contains the maintained implementations of:
+
+```text
+difference disjoint? intersection set subset? superset? union
 ```
 
 `stdlib/core/order.eli` contains the maintained comparator adaptation, stable
@@ -86,10 +92,14 @@ value-semantic persistent Maps, retain
 source order within grouped persistent Vectors, support nested associative
 reads and updates, and provide ordered merge, combining merge, key selection,
 and key/value zipping. Owner-token transient Map builders cover bulk operations
-that do not require prior-value lookup.
+that do not require prior-value lookup. Set conversion and algebra accept
+arbitrary protocol collections, preserve value-semantic membership, retain
+left-hand metadata, and use owner-token transient Set builders. Set relations
+terminate as soon as their result is known.
 
 The source modules import lower-level runtime capabilities rather than the
-corresponding `runtime/core/sequence.mjs` or `runtime/core/data.mjs` algorithm
+corresponding `runtime/core/sequence.mjs`, `runtime/core/data.mjs`, or
+`runtime/core/set-algebra.mjs` algorithm
 modules. Ordering imports only natural protocol dispatch from
 `runtime/core/order.mjs`; comparator adaptation, stable decoration, key
 caching, and extrema remain visible Eliscript bodies. Their Source Maps
@@ -110,7 +120,7 @@ function `arguments` object.
 ## Bootstrap and Execution Contract
 
 The seed and self-hosted compilers must emit byte-identical JavaScript and
-Source Maps for all seven `stdlib/core/` modules in this slice. Generated modules
+Source Maps for all eight `stdlib/core/` modules in this slice. Generated modules
 must execute under both Bun and Node.js.
 
 The executable corpus covers protocol category and default extensions,
@@ -118,7 +128,8 @@ operation slots, generic collection access, Vector and Map transients,
 post-`persistent!` invalidation, composed transducers, external `IReduce`
 sources, replayable reduction-only pipelines, ordered effectful consumption,
 exact early termination, persistent partition flushing, and a
-50,000-key transient Map build.
+50,000-key transient Map build. It also covers persistent Set conversion,
+union, intersection, difference, and membership relations.
 
 ## Compatibility and Limits
 
@@ -144,10 +155,10 @@ non-transportable.
 ## Stabilization Evidence
 
 The default core suite verifies every lower-level protocol, collection,
-transducer, and transient contract directly. It also compiles these seven
+transducer, and transient contract directly. It also compiles these eight
 Eliscript modules as one version 2 multi-entry project through the public
 `eliscript-build` command, executes the generated modules under Bun and Node,
-and checks representative behavior across all seven module boundaries.
+and checks representative behavior across all eight module boundaries.
 
 The generated library API index owns the exact public export inventory. The
 project-level test complements the existing source-import fixture, direct
@@ -164,7 +175,7 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
 - **ECA-02:** Sequence and keyed-data algorithm bodies are maintained in
   `.eli` and do not import the corresponding JavaScript algorithm modules.
 - **ECA-03:** Generated Source Maps retain the complete Eliscript source of all
-  seven modules.
+  eight modules.
 - **ECA-04:** External protocol extensions participate in generic reduction
   and stop at the exact reduced value.
 - **ECA-05:** Vector and Map transient builders invalidate deterministically
@@ -183,7 +194,7 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
   transducer, transient, standard-library, contract, CLI, default-test, and
   strict byte-compilation suites remain green. No application framework is a
   core dependency or acceptance prerequisite.
-- **ECA-12:** The seven language-level core modules build together through the
+- **ECA-12:** The eight language-level core modules build together through the
   public multi-entry project command and execute with identical representative
   results under Bun and Node.
 - **ECA-13:** The complete maintained sequence vocabulary compiles from
@@ -210,6 +221,9 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
 - **ECA-20:** Maintained `IReversible` and `rseq` compile from
   `stdlib/core/collection.eli`; maintained `last` and `reverse` use the open
   capability without losing their one-way reduction fallback.
+- **ECA-21:** Maintained Set conversion, algebra, and relations compile from
+  `stdlib/core/set.eli`, accept protocol sources, preserve persistent value
+  semantics and left metadata, and agree under Bun and Node.
 
 ## Follow-up
 

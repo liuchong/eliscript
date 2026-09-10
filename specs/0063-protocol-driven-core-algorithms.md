@@ -9,11 +9,11 @@
 
 ## Summary
 
-This specification moves the first maintained sequence and keyed-data
+This specification moves the first maintained sequence, keyed-data, and Set
 algorithms from concrete Array/Object assumptions onto the open collection
-runtime. The algorithms accept any `IReduce` source, construct persistent
-Vector and Map results, use Eliscript truth semantics, and stop traversal
-through the shared reduced-value contract.
+runtime. The algorithms accept protocol sources, construct persistent Vector,
+Map, and Set results, use Eliscript truth semantics, and stop traversal through
+the shared reduced-value contract.
 
 The initial implementation supplied equivalent JavaScript algorithms plus
 Lisp-named source modules. Specification 0066 moves the maintained sequence
@@ -143,6 +143,20 @@ from key to dense bucket position, so equal persistent keys share one bucket
 without a native identity-key side table. Final Map construction uses one
 owner-token transient. `indexBy` uses a transient Map throughout.
 
+## Set Algorithms
+
+`runtime/core/set-algebra.mjs` exports `set`, `union`, `intersection`,
+`difference`, `subset`, `superset`, and `disjoint`. The Lisp-named predicates
+are `subset?`, `superset?`, and `disjoint?` in `stdlib/core/set.eli`.
+
+`set` converts any `IReduce` source to a value-semantic persistent Set and
+returns an existing persistent Set unchanged. Union and difference accept one
+or more protocol sources after the first Set and update one transient owner.
+Intersection repeatedly traverses the smaller persistent operand and keeps
+the first Set's metadata. Membership relations convert their operands once,
+compare cardinality where useful, and terminate on the first failed or shared
+member through reduced values. Inputs are never mutated.
+
 ## Eliscript Modules
 
 `stdlib/core/seq.eli` exports:
@@ -159,6 +173,12 @@ reverse sequence-nth some split-at split-with take take-last take-nth take-while
 ```text
 assoc-in count-by frequencies get-in group-by index-by keys merge merge-with
 select-keys update update-in update-keys update-vals vals zipmap
+```
+
+`stdlib/core/set.eli` exports:
+
+```text
+difference disjoint? intersection set subset? superset? union
 ```
 
 `runtime/core/order.mjs` defines open comparison and ordering operations:
@@ -224,6 +244,11 @@ O(k + v) traversal and O(min(k, v)) associations.
 Key and value projection is O(n) with one transient Vector completion. Key and
 value transformation is expected O(n) HAMT work with one transient Map
 completion and no intermediate entry collection.
+
+Set conversion, union, and difference are expected O(n) HAMT work over their
+consumed values. Pairwise intersection traverses the smaller operand and uses
+expected O(1) membership checks. Set relations use O(min(n, m)) membership
+work after conversion and stop at the first decisive member.
 
 These are structural allocation guarantees, not timing promises. Host timing
 depends on JavaScript engine warmup, garbage collection, and callback cost.
@@ -299,6 +324,10 @@ dispatch internals remain later work.
   `IKVReduce` sources, build persistent results through one transient, preserve
   traversal order where observable, and resolve transformed-key collisions by
   retaining the last traversed value.
+- **PCA-24:** Set conversion, algebra, and membership relations accept arbitrary
+  `IReduce` sources, preserve value semantics and left metadata, use transient
+  builders for bulk results, leave inputs unchanged, and agree under Bun and
+  Node.
 
 ## Next Slice
 

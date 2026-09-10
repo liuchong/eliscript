@@ -9,7 +9,7 @@
     (js* "(source) => { if (typeof source !== 'string' || !/(^|\\/)(stdlib|runtime)\\/core\\/transient\\.(mjs|eli)$/.test(source)) return null; return /(^|\\/)runtime\\/core\\//.test(source) ? 'runtime' : 'stdlib'; }"))
 
   (defconst trusted-core-source-p
-    (js* "(filename) => typeof filename === 'string' && ['stdlib/core/data.eli', 'stdlib/core/seq.eli', 'stdlib/core/transient.eli'].some((suffix) => filename === suffix || filename.endsWith('/' + suffix))"))
+    (js* "(filename) => typeof filename === 'string' && ['stdlib/core/data.eli', 'stdlib/core/seq.eli', 'stdlib/core/set.eli', 'stdlib/core/transient.eli'].some((suffix) => filename === suffix || filename.endsWith('/' + suffix))"))
 
   (defun symbol-node-p (node)
     (and node (= (node-kind node) "symbol")))

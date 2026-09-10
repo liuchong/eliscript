@@ -114,12 +114,13 @@ result in scope, is valid. This is the normal async construction pattern.
 
 ## Trusted Core Boundary
 
-Three package-owned implementation sources currently use synchronous higher
+Four package-owned implementation sources currently use synchronous higher
 order borrows that the language has no effect annotation for:
 
 ```text
 stdlib/core/data.eli
 stdlib/core/seq.eli
+stdlib/core/set.eli
 stdlib/core/transient.eli
 ```
 
@@ -149,7 +150,7 @@ keeping the implementation inside the self-hosted fixed-point path.
 
 This slice does not add general affine types, user-defined ownership classes,
 borrow annotations, effect inference, transient parameters, interprocedural
-summaries, or async-safe transients. It does not prove the three trusted core
+summaries, or async-safe transients. It does not prove the four trusted core
 sources. Runtime validation remains mandatory because JavaScript callers may
 invoke runtime functions without compiling Eliscript.
 
