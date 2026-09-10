@@ -1,0 +1,32 @@
+(module eliscript.persistent-queue
+  (import "../runtime/core/metadata.mjs" :as Metadata)
+  (import "../runtime/core/queue.mjs" :as Queue)
+  (defun empty-persistent-queue () Queue/EMPTY_QUEUE)
+  (defun persistent-queue (&rest values) (apply Queue/persistentQueue values))
+  (defun persistent-queue? (value) (Queue/isPersistentQueue value))
+  (defun persistent-queue-empty? (queue) (= (get queue "count") 0))
+  (defun persistent-queue-count (queue) (get queue "count"))
+  (defun persistent-queue-conj (queue value) (js-call queue :conj value))
+  (defun persistent-queue-peek
+    (queue &optional not-found)
+    (js-call queue :peek not-found))
+  (defun persistent-queue-pop (queue) (js-call queue :pop))
+  (defun persistent-queue-reduce
+    (function initial queue)
+    (js-call queue :reduce function initial))
+  (defun persistent-queue-to-array (queue) (js-call queue :toArray))
+  (defun persistent-queue-meta (queue) (Metadata/meta queue))
+  (defun persistent-queue-with-meta (queue metadata) (Metadata/withMeta queue metadata))
+  (export
+    empty-persistent-queue
+    persistent-queue
+    persistent-queue?
+    persistent-queue-empty?
+    persistent-queue-count
+    persistent-queue-conj
+    persistent-queue-peek
+    persistent-queue-pop
+    persistent-queue-reduce
+    persistent-queue-to-array
+    persistent-queue-meta
+    persistent-queue-with-meta))

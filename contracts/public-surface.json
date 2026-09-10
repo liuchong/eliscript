@@ -640,7 +640,7 @@
       "spec": "0059",
       "visibility": "public",
       "file": "runtime/core/collection.mjs",
-      "namedExports": ["IAssociative", "IConj", "ICounted", "IEmptyable", "IIndexed", "IKVReduce", "ILookup", "IMap", "IReduce", "IReversible", "ISeqable", "ISet", "IStack", "ReductionView", "SequenceView", "areDistinct", "assoc", "boundedCount", "conj", "contains", "count", "disj", "dissoc", "empty", "get", "isAssociative", "isCollection", "isCounted", "isEmpty", "isIndexed", "isList", "isMap", "isReduced", "isReducible", "isReductionView", "isReversible", "isSeqable", "isSequence", "isSequenceView", "isSequential", "isSet", "isVector", "notEmpty", "nth", "peek", "pop", "reduce", "reduceKV", "reduced", "reductionView", "rseq", "seq", "sequenceView", "unboundedSequenceView", "unreduced"],
+      "namedExports": ["IAssociative", "IConj", "ICounted", "IEmptyable", "IIndexed", "IKVReduce", "ILookup", "IMap", "IReduce", "IReversible", "ISeqable", "ISet", "IStack", "ReductionView", "SequenceView", "areDistinct", "assoc", "boundedCount", "conj", "contains", "count", "disj", "dissoc", "empty", "get", "isAssociative", "isCollection", "isCounted", "isEmpty", "isIndexed", "isList", "isMap", "isQueue", "isReduced", "isReducible", "isReductionView", "isReversible", "isSeqable", "isSequence", "isSequenceView", "isSequential", "isSet", "isVector", "notEmpty", "nth", "peek", "pop", "reduce", "reduceKV", "reduced", "reductionView", "rseq", "seq", "sequenceView", "unboundedSequenceView", "unreduced"],
       "defaultExport": false
     },
     {
@@ -788,6 +788,22 @@
       "defaultExport": false
     },
     {
+      "id": "persistent-queue",
+      "spec": "0166",
+      "visibility": "public",
+      "file": "runtime/core/queue.mjs",
+      "namedExports": ["EMPTY_QUEUE", "PersistentQueue", "isPersistentQueue", "persistentQueue"],
+      "defaultExport": false
+    },
+    {
+      "id": "persistent-queue-testing",
+      "spec": "0166",
+      "visibility": "internal",
+      "file": "runtime/testing/queue.mjs",
+      "namedExports": ["inspectPersistentQueue", "persistentQueueMetrics", "resetPersistentQueueMetrics", "sharedPersistentQueueParts"],
+      "defaultExport": false
+    },
+    {
       "id": "persistent-vector",
       "spec": "0047",
       "visibility": "public",
@@ -886,7 +902,7 @@
   ],
   "standardLibrary": [
     {"module": "bit", "spec": "0052", "file": "stdlib/bit.eli", "exports": ["bit-count", "rotate-left", "rotate-right"]},
-    {"module": "core-collection", "spec": "0066", "file": "stdlib/core/collection.eli", "exports": ["IAssociative", "IConj", "ICounted", "IEmptyable", "IIndexed", "IKVReduce", "ILookup", "IMap", "IReduce", "IReversible", "ISeqable", "ISet", "IStack", "ReductionView", "SequenceView", "assoc", "associative?", "bounded-count", "collection-count", "collection-nth", "collection-seq", "collection?", "conj", "contains?", "counted?", "disj", "dissoc", "distinct?", "empty", "empty?", "indexed?", "list?", "lookup", "map?", "not-empty", "peek", "pop", "reduce", "reduce-kv", "reduced", "reduced?", "reducible?", "reduction-view", "reduction-view?", "reversible?", "rseq", "seqable?", "sequence-view", "sequence?", "sequential?", "set?", "subvec", "unbounded-sequence-view", "unreduced", "vector?"]},
+    {"module": "core-collection", "spec": "0066", "file": "stdlib/core/collection.eli", "exports": ["IAssociative", "IConj", "ICounted", "IEmptyable", "IIndexed", "IKVReduce", "ILookup", "IMap", "IReduce", "IReversible", "ISeqable", "ISet", "IStack", "ReductionView", "SequenceView", "assoc", "associative?", "bounded-count", "collection-count", "collection-nth", "collection-seq", "collection?", "conj", "contains?", "counted?", "disj", "dissoc", "distinct?", "empty", "empty?", "indexed?", "list?", "lookup", "map?", "not-empty", "peek", "pop", "queue?", "reduce", "reduce-kv", "reduced", "reduced?", "reducible?", "reduction-view", "reduction-view?", "reversible?", "rseq", "seqable?", "sequence-view", "sequence?", "sequential?", "set?", "subvec", "unbounded-sequence-view", "unreduced", "vector?"]},
     {"module": "core-data", "spec": "0066", "file": "stdlib/core/data.eli", "exports": ["assoc-in", "count-by", "frequencies", "get-in", "group-by", "index-by", "keys", "merge", "merge-with", "select-keys", "update", "update-in", "update-keys", "update-vals", "vals", "zipmap"]},
     {"module": "core-data-text", "spec": "0069", "file": "stdlib/core/data-text.eli", "exports": ["DataTextError", "IPrint", "print-value", "read-value", "read-values"]},
     {"module": "core-identifier", "spec": "0067", "file": "stdlib/core/identifier.eli", "exports": ["EliscriptSymbol", "Keyword", "identifier-name", "identifier-namespace", "identifier?", "keyword", "keyword?", "qualified-name", "symbol", "symbol?"]},
@@ -913,6 +929,7 @@
     {"module": "object", "spec": "0026", "file": "stdlib/object.eli", "exports": ["assoc", "dissoc", "filter-values", "has?", "key-in?", "keys", "map-values", "merge", "omit", "pick", "update"]},
     {"module": "persistent-list", "spec": "0054", "file": "stdlib/persistent-list.eli", "exports": ["empty-persistent-list", "persistent-list-conj", "persistent-list-cons", "persistent-list-count", "persistent-list-empty?", "persistent-list-first", "persistent-list-from-array", "persistent-list-meta", "persistent-list-nth", "persistent-list-peek", "persistent-list-pop", "persistent-list-reduce", "persistent-list-rest", "persistent-list-reverse", "persistent-list-to-array", "persistent-list-with-meta", "persistent-list?"]},
     {"module": "persistent-map", "spec": "0055", "file": "stdlib/persistent-map.eli", "exports": ["empty-persistent-map", "persistent-map-assoc", "persistent-map-count", "persistent-map-dissoc", "persistent-map-from-entries", "persistent-map-get", "persistent-map-has?", "persistent-map-meta", "persistent-map-reduce", "persistent-map-to-entries", "persistent-map-with-meta", "persistent-map?"]},
+    {"module": "persistent-queue", "spec": "0166", "file": "stdlib/persistent-queue.eli", "exports": ["empty-persistent-queue", "persistent-queue", "persistent-queue-conj", "persistent-queue-count", "persistent-queue-empty?", "persistent-queue-meta", "persistent-queue-peek", "persistent-queue-pop", "persistent-queue-reduce", "persistent-queue-to-array", "persistent-queue-with-meta", "persistent-queue?"]},
     {"module": "persistent-set", "spec": "0056", "file": "stdlib/persistent-set.eli", "exports": ["empty-persistent-set", "persistent-set-compatible?", "persistent-set-conj", "persistent-set-count", "persistent-set-difference", "persistent-set-disj", "persistent-set-disjoint?", "persistent-set-empty?", "persistent-set-equal?", "persistent-set-from-array", "persistent-set-has?", "persistent-set-intersection", "persistent-set-meta", "persistent-set-reduce", "persistent-set-subset?", "persistent-set-superset?", "persistent-set-to-array", "persistent-set-union", "persistent-set-with-meta", "persistent-set?"]},
     {"module": "persistent-vector", "spec": "0053", "file": "stdlib/persistent-vector.eli", "exports": ["empty-persistent-vector", "persistent-vector-assoc", "persistent-vector-conj", "persistent-vector-count", "persistent-vector-from-array", "persistent-vector-meta", "persistent-vector-nth", "persistent-vector-peek", "persistent-vector-pop", "persistent-vector-reduce", "persistent-vector-to-array", "persistent-vector-with-meta", "persistent-vector?"]},
     {"module": "result", "spec": "0075", "file": "stdlib/result.eli", "exports": ["and-then", "collect-results", "err", "err?", "fold", "map-err", "map-ok", "ok", "ok?", "or-else", "result-payload", "result?", "traverse-results", "unwrap-or", "unwrap-or-else"]},

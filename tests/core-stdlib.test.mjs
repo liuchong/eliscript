@@ -42,6 +42,7 @@ import {
 import { EMPTY_MAP } from "../runtime/core/map.mjs";
 import { EMPTY_LIST } from "../runtime/core/list.mjs";
 import { extendProtocolType } from "../runtime/core/protocol.mjs";
+import { persistentQueue } from "../runtime/core/queue.mjs";
 import {
   butlast,
   concat,
@@ -1304,6 +1305,9 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect(dataMap.sourcesContent[0]).not.toContain("runtime/core/data.mjs");
 
     const api = await import(pathToFileURL(apiUsageModule).href);
+    const generatedCollection = await import(pathToFileURL(collectionModule).href);
+    expect(generatedCollection.queue_QMARK_(persistentQueue(1, 2, 3))).toBe(true);
+    expect(generatedCollection.queue_QMARK_([1, 2, 3])).toBe(false);
     expect(api.report).toMatchObject({
       "number-description": "number:7",
       "default-description": "default",
@@ -1427,6 +1431,10 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
       `const seq = await import(${JSON.stringify(pathToFileURL(seqModule).href)});`,
       `const identifier = await import(${JSON.stringify(pathToFileURL(identifierModule).href)});`,
       `const metadata = await import(${JSON.stringify(pathToFileURL(metadataModule).href)});`,
+      `const collection = await import(${JSON.stringify(pathToFileURL(collectionModule).href)});`,
+      `const queue = await import(${JSON.stringify(pathToFileURL(resolve(ROOT, "runtime/core/queue.mjs")).href)});`,
+      "if (!collection.queue_QMARK_(queue.persistentQueue(1, 2, 3))) process.exit(1);",
+      "if (collection.queue_QMARK_([1, 2, 3])) process.exit(1);",
       "if (api.report['number-description'] !== 'number:7') process.exit(1);",
       "if (!api.report['vector-counted'] || !api.report['vector-indexed']) process.exit(1);",
       "if (!api.report['vector-collection'] || !api.report['vector-vector']) process.exit(1);",

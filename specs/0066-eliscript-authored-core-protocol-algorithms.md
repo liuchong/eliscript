@@ -35,7 +35,7 @@ Four new Eliscript API modules expose the runtime substrate:
 - `stdlib/core/collection.eli` exports the collection capabilities and
   generic capability and persistent-category predicates, emptiness tests,
   bounded and complete count, value distinctness, empty, construction, lookup,
-  membership, indexed access, persistent subvector views,
+  membership, indexed access, Queue classification, persistent subvector views,
   bounded and unbounded sequence views, replayable reduction-only views,
   ordinary and key/value reduction, immutable map/set removal, stack access,
   and reduced-value operations.
@@ -253,6 +253,9 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
   `stdlib/core/collection.eli`, preserves O(1) Vector view construction,
   protocol behavior, structural sharing, and selected-path updates, and agrees
   under Bun and Node.
+- **ECA-27:** Maintained `queue?` compiles from
+  `stdlib/core/collection.eli`, classifies persistent Queue values through the
+  runtime collection facade, and agrees under Bun and Node.
 
 ## Follow-up
 

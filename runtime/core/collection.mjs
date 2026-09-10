@@ -46,6 +46,7 @@ import {
 } from "./collection-internals.mjs";
 import { isPersistentList } from "./list.mjs";
 import { isPersistentHashMap } from "./map.mjs";
+import { isPersistentQueue } from "./queue.mjs";
 import { EMPTY_SET, isPersistentHashSet } from "./set.mjs";
 import { isPersistentVector } from "./vector.mjs";
 
@@ -403,6 +404,7 @@ export function isAssociative(collection) {
 export function isCollection(value) {
   return value instanceof InternalSequenceView ||
     isPersistentList(value) ||
+    isPersistentQueue(value) ||
     isPersistentVector(value) ||
     isPersistentHashMap(value) ||
     isPersistentHashSet(value);
@@ -416,6 +418,10 @@ export function isVector(value) {
   return isPersistentVector(value);
 }
 
+export function isQueue(value) {
+  return isPersistentQueue(value);
+}
+
 export function isMap(value) {
   return isPersistentHashMap(value);
 }
@@ -427,6 +433,7 @@ export function isSet(value) {
 export function isSequential(value) {
   return value instanceof InternalSequenceView ||
     isPersistentList(value) ||
+    isPersistentQueue(value) ||
     isPersistentVector(value);
 }
 

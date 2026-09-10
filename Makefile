@@ -96,7 +96,7 @@ test-core: check-contracts
 		tests/core-order.test.mjs \
 		tests/core-set.test.mjs \
 		tests/core-stdlib.test.mjs \
-		tests/persistent-list.test.mjs tests/persistent-vector.test.mjs tests/value-semantics.test.mjs \
+		tests/persistent-list.test.mjs tests/persistent-queue.test.mjs tests/persistent-vector.test.mjs tests/value-semantics.test.mjs \
 		tests/persistent-map.test.mjs tests/persistent-set.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/project-cli-test.sh

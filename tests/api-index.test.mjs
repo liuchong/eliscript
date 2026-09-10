@@ -39,8 +39,8 @@ function escapeHtml(value) {
 
 test("generated library API index matches every declared module and export", async () => {
   const index = await buildApiIndex({ root: ROOT });
-  expect(index.moduleCount).toBe(35);
-  expect(index.exportCount).toBe(477);
+  expect(index.moduleCount).toBe(36);
+  expect(index.exportCount).toBe(490);
   expect(index.modules.find(({ module }) => module === "deferred")).toEqual({
     module: "deferred",
     source: "stdlib/deferred.eli",
@@ -73,6 +73,29 @@ test("generated library API index matches every declared module and export", asy
       "persistent-vector-to-array",
       "persistent-vector-with-meta",
       "persistent-vector?",
+    ],
+  });
+  expect(index.modules.find(({ module }) => module === "persistent-queue")).toEqual({
+    module: "persistent-queue",
+    source: "stdlib/persistent-queue.eli",
+    spec: "0166",
+    specFile: "specs/0166-persistent-queue.md",
+    stability: "stable",
+    role: "runtime-core",
+    summary: "Persistent FIFO queues with shared Vector views, constant-time dequeue, and amortized constant-time enqueue.",
+    exports: [
+      "empty-persistent-queue",
+      "persistent-queue",
+      "persistent-queue-conj",
+      "persistent-queue-count",
+      "persistent-queue-empty?",
+      "persistent-queue-meta",
+      "persistent-queue-peek",
+      "persistent-queue-pop",
+      "persistent-queue-reduce",
+      "persistent-queue-to-array",
+      "persistent-queue-with-meta",
+      "persistent-queue?",
     ],
   });
   expect(await readFile(path.join(ROOT, "docs/pages/api-index.json"), "utf8"))

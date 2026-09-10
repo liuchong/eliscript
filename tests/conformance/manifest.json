@@ -3312,6 +3312,58 @@
           "contains": "portable compiler driver reaches a reproducible fixed point"
         }
       ]
+    },
+    {
+      "id": "stdlib.persistent-queue",
+      "title": "Persistent FIFO queue",
+      "status": "stable",
+      "spec": "0166",
+      "contracts": [
+        "Stores persistent Vector front views and rears behind validated immutable state",
+        "Appends at the rear and removes from the front without mutating retained Queue values",
+        "Implements collection sequencing reduction ordered value semantics and immutable metadata",
+        "Shares unaffected front and rear structure across ordinary updates",
+        "Promotes the rear by identity without traversal when the front is exhausted",
+        "Preserves FIFO behavior under a deterministic randomized model and at one million values",
+        "Compiles the Eliscript API and produces identical local Bun and Node results"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-queue.test.mjs",
+          "contains": "persistent queue preserves FIFO order and immutable front operations"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-queue.test.mjs",
+          "contains": "persistent queue implements collection value and metadata protocols"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-queue.test.mjs",
+          "contains": "persistent queue promotes its rear without traversal or node allocation"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-queue.test.mjs",
+          "contains": "persistent queue agrees with a mutable FIFO reference model"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-queue.test.mjs",
+          "contains": "persistent queue stays iterative at one million values"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-queue.test.mjs",
+          "contains": "persistent queue runtime agrees under Bun and Node"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-queue.test.mjs",
+          "contains": "Eliscript persistent queue API compiles and runs on both hosts"
+        }
+      ]
     }
   ]
 }

@@ -291,6 +291,7 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "function not_empty(collection)",
         "function peek(collection)",
         "function pop(collection)",
+        "function queue_QMARK_(value)",
         "function reducible_QMARK_(collection)",
         "function rseq(collection)",
         "function reversible_QMARK_(collection)",

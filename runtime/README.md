@@ -54,6 +54,16 @@ collection capability: its convenience `nth` method is linear-time. Internal
 allocation and sharing observations live in `testing/list.mjs` and are not
 application APIs.
 
+### Persistent Queue
+
+`core/queue.mjs` combines a persistent Vector front view with a persistent
+Vector rear. Enqueue preserves the front; dequeue advances an O(1) subvector
+view, and front exhaustion promotes the rear by identity without traversal or
+node allocation. Queue values participate in collection protocols,
+ordered value equality and hashing, immutable metadata, and iterative
+million-scale traversal. Structural observations are isolated in
+`testing/queue.mjs`.
+
 ### Value Semantics
 
 `core/value.mjs` defines provisional coercion-free value equality and unsigned

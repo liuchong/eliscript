@@ -44,6 +44,11 @@ host objects by identity. Exact classification and traversal semantics are in
 structural-sharing, metadata, and value behavior; see
 [0165](../specs/0165-persistent-subvector-views.md).
 
+`persistent-queue.eli` exposes an immutable FIFO collection backed by shared
+Vector views. Its append and removal operations compose with the
+same collection, value, and metadata protocols; see
+[0166](../specs/0166-persistent-queue.md).
+
 ## Core Ordering
 
 `core/order.eli` provides the maintained language-level comparison and sorting
