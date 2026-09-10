@@ -26,11 +26,15 @@ import {
   getIn,
   groupBy,
   indexBy,
+  keys as dataKeys,
   merge as mergeData,
   mergeWith,
   selectKeys,
   update as updateData,
   updateIn,
+  updateKeys,
+  updateVals,
+  vals as dataVals,
   zipmap,
 } from "../runtime/core/data.mjs";
 import { EMPTY_MAP } from "../runtime/core/map.mjs";
@@ -865,6 +869,40 @@ test("associative data algorithms preserve nested and value-semantic behavior", 
     "updateIn transform must be a function",
   );
 
+  expect([...dataKeys([10, 20, 30])]).toEqual([0, 1, 2]);
+  expect([...dataVals(new KeyValueSource([
+    ["first", 10],
+    ["second", undefined],
+  ]))]).toEqual([10, undefined]);
+  expect([...dataKeys(null)]).toEqual([]);
+  expect([...dataVals(null)]).toEqual([]);
+
+  const keySource = new Map([["left", 1], ["right", 2]]);
+  const renamed = updateKeys(keySource, (key) => `field:${key}`);
+  expect(renamed.get("field:left")).toBe(1);
+  expect(renamed.get("field:right")).toBe(2);
+  expect(keySource.has("field:left")).toBe(false);
+  const collided = updateKeys(keySource, () => "same");
+  expect(collided.count).toBe(1);
+  expect(collided.get("same")).toBe(2);
+
+  const valueSource = { left: 2, unset: undefined };
+  const mappedValues = updateVals(
+    valueSource,
+    (value) => value === undefined ? "missing" : value * 10,
+  );
+  expect(mappedValues.get("left")).toBe(20);
+  expect(mappedValues.get("unset")).toBe("missing");
+  expect(valueSource).toEqual({ left: 2, unset: undefined });
+  expect(updateKeys(null, (key) => key)).toBe(EMPTY_MAP);
+  expect(updateVals(null, (value) => value)).toBe(EMPTY_MAP);
+  expect(() => updateKeys(nested, null)).toThrow(
+    "updateKeys transform must be a function",
+  );
+  expect(() => updateVals(nested, null)).toThrow(
+    "updateVals transform must be a function",
+  );
+
   const selected = selectKeys(
     { left: 1, unset: undefined, ignored: 3 },
     source("unset", "left", "missing"),
@@ -1018,6 +1056,12 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect(usage.frequencies_result.get(1)).toBe(3);
     expect(usage.nested_value).toBe(5);
     expect(usage.updated_result.get("visits")).toBe(3);
+    expect([...usage.keyed_keys]).toEqual([0, 1, 2]);
+    expect(new Set(usage.keyed_vals)).toEqual(new Set([1, 2]));
+    expect(usage.renamed_result.get("field:left")).toBe(1);
+    expect(usage.renamed_result.get("field:right")).toBe(2);
+    expect(usage.mapped_vals_result.get("left")).toBe(10);
+    expect(usage.mapped_vals_result.get("right")).toBe(20);
     expect(usage.selected_result.count).toBe(1);
     expect(usage.selected_result.get("right")).toBe(2);
     expect(usage.merged_result.get("overwritten")).toBe(3);

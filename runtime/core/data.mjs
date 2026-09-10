@@ -15,6 +15,7 @@ import {
 } from "./map.mjs";
 import {
   assocBang,
+  conjBang,
   persistentBang,
   transient,
 } from "./transient.mjs";
@@ -178,6 +179,44 @@ export function updateIn(collection, path, transform, ...arguments_) {
     path,
     transform(getIn(collection, path), ...arguments_),
   );
+}
+
+export function keys(collection) {
+  const result = transient(EMPTY_VECTOR);
+  reduceKV(collection, (builder, key) => {
+    conjBang(builder, key);
+    return builder;
+  }, result);
+  return persistentBang(result);
+}
+
+export function vals(collection) {
+  const result = transient(EMPTY_VECTOR);
+  reduceKV(collection, (builder, _key, value) => {
+    conjBang(builder, value);
+    return builder;
+  }, result);
+  return persistentBang(result);
+}
+
+export function updateKeys(collection, transform) {
+  requireFunction(transform, "updateKeys transform");
+  const result = transient(EMPTY_MAP);
+  reduceKV(collection, (builder, key, value) => {
+    assocBang(builder, transform(key), value);
+    return builder;
+  }, result);
+  return persistentBang(result);
+}
+
+export function updateVals(collection, transform) {
+  requireFunction(transform, "updateVals transform");
+  const result = transient(EMPTY_MAP);
+  reduceKV(collection, (builder, key, value) => {
+    assocBang(builder, key, transform(value));
+    return builder;
+  }, result);
+  return persistentBang(result);
 }
 
 export function selectKeys(collection, keys) {

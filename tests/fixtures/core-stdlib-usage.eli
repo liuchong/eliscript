@@ -44,11 +44,15 @@
     get-in
     group-by
     index-by
+    keys
     merge
     merge-with
     select-keys
     update
     update-in
+    update-keys
+    update-vals
+    vals
     zipmap)
   (import "./stdlib/core/collection.mjs" disj dissoc peek pop reduce-kv rseq)
   (import "./stdlib/core/transducer.mjs" eduction filtering mapping run!)
@@ -129,6 +133,12 @@
       (lambda (value amount) (+ value amount))
       4))
   (defconst updated-result (update {"visits" 2} "visits" (lambda (value) (1+ value))))
+  (defconst keyed-keys (keys [10 20 30]))
+  (defconst keyed-vals (vals {"left" 1 "right" 2}))
+  (defconst renamed-result
+    (update-keys {"left" 1 "right" 2} (lambda (key) (str "field:" key))))
+  (defconst mapped-vals-result
+    (update-vals {"left" 1 "right" 2} (lambda (value) (* value 10))))
   (defconst selected-result (select-keys {"left" 1 "right" 2} ["right" "missing"]))
   (defconst merged-result
     (merge {"left" 1 "overwritten" 1} {"right" 2 "overwritten" 3}))
@@ -198,6 +208,10 @@
     nested-result
     nested-update-result
     updated-result
+    keyed-keys
+    keyed-vals
+    renamed-result
+    mapped-vals-result
     selected-result
     merged-result
     combined-result

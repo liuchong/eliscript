@@ -3,7 +3,11 @@
   (import "../../runtime/core/map.mjs" EMPTY_MAP)
   (import "../../runtime/core/protocol.mjs" :as Protocol)
   (import "../../runtime/core/transducer.mjs" into)
-  (import "../../runtime/core/transient.mjs" assocBang persistentBang transient)
+  (import "../../runtime/core/transient.mjs"
+    assocBang
+    conjBang
+    persistentBang
+    transient)
   (import "../../runtime/core/vector.mjs" EMPTY_VECTOR)
   (defconst missing-value (js-object))
   (defun require-function
@@ -183,6 +187,46 @@
       collection
       path
       (apply transform (js-cons (get-in collection path) arguments))))
+  (defun keys
+    (collection)
+    (let ((result (transient EMPTY_VECTOR)))
+      (Collection/reduceKV
+        collection
+        (lambda (builder key _value) (conjBang builder key) builder)
+        result)
+      (persistentBang result)))
+  (defun vals
+    (collection)
+    (let ((result (transient EMPTY_VECTOR)))
+      (Collection/reduceKV
+        collection
+        (lambda (builder _key value) (conjBang builder value) builder)
+        result)
+      (persistentBang result)))
+  (defun update-keys
+    (collection transform)
+    (require-function transform "updateKeys transform")
+    (let ((result (transient EMPTY_MAP)))
+      (Collection/reduceKV
+        collection
+        (lambda
+          (builder key value)
+          (assocBang builder (funcall transform key) value)
+          builder)
+        result)
+      (persistentBang result)))
+  (defun update-vals
+    (collection transform)
+    (require-function transform "updateVals transform")
+    (let ((result (transient EMPTY_MAP)))
+      (Collection/reduceKV
+        collection
+        (lambda
+          (builder key value)
+          (assocBang builder key (funcall transform value))
+          builder)
+        result)
+      (persistentBang result)))
   (defun select-keys
     (collection keys)
     (let ((result (transient EMPTY_MAP)))
@@ -250,9 +294,13 @@
     get-in
     group-by
     index-by
+    keys
     merge
     merge-with
     select-keys
     update
     update-in
+    update-keys
+    update-vals
+    vals
     zipmap))

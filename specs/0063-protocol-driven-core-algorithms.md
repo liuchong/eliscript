@@ -96,6 +96,10 @@ captures its finite protocol source once as a persistent Vector snapshot.
 - `assocIn(collection, path, value)`
 - `update(collection, key, transform, ...arguments)`
 - `updateIn(collection, path, transform, ...arguments)`
+- `keys(collection)`
+- `vals(collection)`
+- `updateKeys(collection, transform)`
+- `updateVals(collection, transform)`
 - `selectKeys(collection, keys)`
 - `merge(...collections)`
 - `mergeWith(combine, ...collections)`
@@ -113,6 +117,12 @@ root for an empty path, preserves every existing associative container, and
 creates persistent Maps for missing or nullish intermediate levels. `update`
 and `updateIn` validate their transform before lookup, pass additional
 arguments unchanged, and observe `null` for a missing value.
+
+`keys` and `vals` project any `IKVReduce` source into a persistent Vector in
+source traversal order. `updateKeys` and `updateVals` transform one side of
+each keyed entry into a persistent Map without mutating the source. A key
+collision retains the last traversed value. Transform functions are validated
+before traversal and called exactly once per entry.
 
 `selectKeys`, `merge`, `mergeWith`, and `zipmap` return value-semantic
 persistent Maps. Selection distinguishes a present `undefined` value from an
@@ -147,8 +157,8 @@ reverse sequence-nth some split-at split-with take take-last take-nth take-while
 `stdlib/core/data.eli` exports:
 
 ```text
-assoc-in count-by frequencies get-in group-by index-by merge merge-with
-select-keys update update-in zipmap
+assoc-in count-by frequencies get-in group-by index-by keys merge merge-with
+select-keys update update-in update-keys update-vals vals zipmap
 ```
 
 `runtime/core/order.mjs` defines open comparison and ordering operations:
@@ -210,6 +220,10 @@ transient Map completion. Combining merge performs persistent associations so
 each repeated key can use value-semantic lookup. `zipmap` materializes both
 reducible inputs as persistent Vectors, then constructs one transient Map, for
 O(k + v) traversal and O(min(k, v)) associations.
+
+Key and value projection is O(n) with one transient Vector completion. Key and
+value transformation is expected O(n) HAMT work with one transient Map
+completion and no intermediate entry collection.
 
 These are structural allocation guarantees, not timing promises. Host timing
 depends on JavaScript engine warmup, garbage collection, and callback cost.
@@ -281,6 +295,10 @@ dispatch internals remain later work.
 - **PCA-22:** Keyed merging prefers non-indexed `IKVReduce` sources without
   allocating public entry pairs, accepts key/value-only external types, and
   preserves indexed entry-source behavior.
+- **PCA-23:** Key and value projection and transformation accept arbitrary
+  `IKVReduce` sources, build persistent results through one transient, preserve
+  traversal order where observable, and resolve transformed-key collisions by
+  retaining the last traversed value.
 
 ## Next Slice
 

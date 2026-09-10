@@ -480,7 +480,8 @@ algorithms through Lisp-named Eliscript modules:
         reductions repeat repeatedly
         first sequence-nth take-last drop-last split-at split-with)
 (import "../../stdlib/core/data.eli"
-        assoc-in get-in group-by frequencies merge-with select-keys zipmap)
+        assoc-in get-in group-by frequencies keys vals
+        update-keys update-vals merge-with select-keys zipmap)
 ```
 
 Sequence transforms accept any `IReduce` source and return persistent Vectors.
@@ -496,6 +497,11 @@ container shapes and create persistent Maps for missing levels. Selection,
 plain merge, and zipping use owner-token builders; combining merge retains
 value-semantic prior-value lookup. Searches and bounded transforms use reduced
 values for early termination.
+
+`keys` and `vals` project any keyed protocol source into persistent Vectors.
+`update-keys` and `update-vals` transform keyed entries into a new persistent
+Map; source values remain unchanged and a transformed-key collision keeps the
+last traversed value.
 
 `reduce-kv` passes indexes or stored keys directly through `IKVReduce`.
 Persistent Vector and HAMT Map values avoid public entry allocation, external
