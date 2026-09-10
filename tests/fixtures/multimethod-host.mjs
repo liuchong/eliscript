@@ -3,7 +3,9 @@ import { pathToFileURL } from "node:url";
 const [modulePath] = process.argv.slice(2);
 const moduleUrl = pathToFileURL(modulePath);
 const multimethodModule = await import(moduleUrl.href);
+const hierarchyModule = await import(new URL("./hierarchy.eli", moduleUrl).href);
 const mapModule = await import(new URL("./persistent-map.eli", moduleUrl).href);
+const setModule = await import(new URL("./persistent-set.eli", moduleUrl).href);
 const vectorModule = await import(
   new URL("./persistent-vector.eli", moduleUrl).href
 );
@@ -11,21 +13,43 @@ const vectorModule = await import(
 const {
   add_method_BANG_: addMethod,
   default_dispatch_value: defaultDispatchValue,
+  derive_BANG_: deriveMethod,
   dispatch_fn: dispatchFn,
   dispatch_value: dispatchValue,
   get_method: getMethod,
   has_method_QMARK_: hasMethod,
   methods,
   multi_fn: multiFn,
+  multi_fn_hierarchy: multiFnHierarchy,
   multi_fn_name: multiFnName,
   multi_fn_QMARK_: isMultiFn,
+  prefer_method_BANG_: preferMethod,
+  preferences,
+  preferred_method_QMARK_: preferredMethod,
   remove_all_methods_BANG_: removeAllMethods,
+  remove_all_preferences_BANG_: removeAllPreferences,
   remove_method_BANG_: removeMethod,
+  remove_preference_BANG_: removePreference,
+  set_hierarchy_BANG_: setHierarchy,
+  underive_BANG_: underiveMethod,
 } = multimethodModule;
+const {
+  ancestors,
+  derive,
+  descendants,
+  empty_hierarchy: emptyHierarchy,
+  hierarchy_QMARK_: isHierarchy,
+  is_a_QMARK_: isA,
+  parents,
+  underive,
+} = hierarchyModule;
 const {
   persistent_map_count: mapCount,
   persistent_map_get: mapGet,
 } = mapModule;
+const {
+  persistent_set_count: setCount,
+} = setModule;
 const {
   persistent_vector_from_array: vectorFromArray,
 } = vectorModule;
@@ -39,6 +63,19 @@ function captureError(operation) {
       code: error?.code ?? String(error),
       name: error?.name ?? null,
       dispatchValue: error?.["dispatch-value"] ?? null,
+    };
+  }
+}
+
+function captureHierarchyError(operation) {
+  try {
+    operation();
+    return null;
+  } catch (error) {
+    return {
+      code: error?.code ?? String(error),
+      child: error?.child ?? null,
+      parent: error?.parent ?? null,
     };
   }
 }
@@ -154,6 +191,87 @@ for (let index = 0; index < 100_000; index += 1) {
   scaleTotal += parity(index);
 }
 
+const hierarchy0 = emptyHierarchy();
+const hierarchy1 = derive(hierarchy0, "mammal", "animal");
+const hierarchy2 = derive(hierarchy1, "cat", "mammal");
+const hierarchy3 = derive(hierarchy2, "dog", "mammal");
+const duplicateHierarchy = derive(hierarchy3, "dog", "mammal");
+const hierarchy4 = underive(hierarchy3, "mammal", "animal");
+const diamond0 = derive(hierarchy0, "left", "root");
+const diamond1 = derive(diamond0, "right", "root");
+const diamond2 = derive(diamond1, "leaf", "left");
+const diamond3 = derive(diamond2, "leaf", "right");
+const diamond4 = underive(diamond3, "left", "root");
+const vectorChild = vectorFromArray(["cat", "online"]);
+const vectorParent = vectorFromArray(["animal", "online"]);
+
+const taxonomy = multiFn("taxonomy", (value) => value);
+const deriveResult = deriveMethod(taxonomy, "mammal", "animal");
+deriveMethod(taxonomy, "cat", "mammal");
+addMethod(taxonomy, "animal", (value) => `animal:${value}`);
+addMethod(taxonomy, "mammal", (value) => `mammal:${value}`);
+addMethod(taxonomy, defaultDispatchValue(taxonomy), (value) => `default:${value}`);
+const mammalResult = taxonomy("cat");
+const specificResult = taxonomy("cat");
+removeMethod(taxonomy, "mammal");
+const cacheInvalidatedByRemoval = taxonomy("cat");
+addMethod(taxonomy, "mammal", (value) => `mammal:${value}`);
+const cacheInvalidatedByAddition = taxonomy("cat");
+addMethod(taxonomy, "cat", (value) => `exact:${value}`);
+const exactOverridesAncestor = taxonomy("cat");
+removeMethod(taxonomy, "cat");
+const removingExactRestoresAncestor = taxonomy("cat");
+const hierarchicalFallbackResult = taxonomy("mineral");
+const setHierarchyResult = setHierarchy(taxonomy, hierarchy3);
+const externalHierarchyIdentity =
+  setHierarchyResult === taxonomy && multiFnHierarchy(taxonomy) === hierarchy3;
+const underiveResult = underiveMethod(taxonomy, "cat", "mammal");
+const underivedFallback = taxonomy("cat");
+
+const chooser = multiFn("chooser", (value) => value);
+deriveMethod(chooser, "chimera", "mammal");
+deriveMethod(chooser, "chimera", "machine");
+addMethod(chooser, "mammal", (value) => `mammal:${value}`);
+addMethod(chooser, "machine", (value) => `machine:${value}`);
+const ambiguous = captureError(() => chooser("chimera"));
+const preferResult = preferMethod(chooser, "mammal", "machine");
+const preferredResult = chooser("chimera");
+preferMethod(chooser, "machine", "artifact");
+const preferenceSnapshot = preferences(chooser);
+const directPreference = preferredMethod(chooser, "mammal", "machine");
+const transitivePreference = preferredMethod(chooser, "mammal", "artifact");
+const preferenceSelf = captureError(() =>
+  preferMethod(chooser, "mammal", "mammal"));
+const preferenceConflict = captureError(() =>
+  preferMethod(chooser, "machine", "mammal"));
+const invalidHierarchy = captureError(() => setHierarchy(chooser, {}));
+const hierarchyConflict = captureError(() =>
+  deriveMethod(chooser, "machine", "mammal"));
+const conflictHierarchy = derive(hierarchy0, "machine", "mammal");
+const externalHierarchyConflict = captureError(() =>
+  setHierarchy(chooser, conflictHierarchy));
+const removePreferenceResult = removePreference(chooser, "mammal", "machine");
+const removedPreferenceError = captureError(() => chooser("chimera"));
+const clearPreferencesResult = removeAllPreferences(chooser);
+
+const invalidHierarchyValue = captureHierarchyError(() => parents({}, "cat"));
+const selfHierarchy = captureHierarchyError(() =>
+  derive(hierarchy0, "animal", "animal"));
+const cycleHierarchy = captureHierarchyError(() =>
+  derive(hierarchy3, "animal", "cat"));
+
+let hierarchicalScaleCalls = 0;
+const hierarchicalScale = multiFn("hierarchical-scale", (value) => {
+  hierarchicalScaleCalls += 1;
+  return "leaf";
+});
+deriveMethod(hierarchicalScale, "leaf", "root");
+addMethod(hierarchicalScale, "root", (value) => value);
+let hierarchicalScaleTotal = 0;
+for (let index = 0; index < 100_000; index += 1) {
+  hierarchicalScaleTotal += hierarchicalScale(index);
+}
+
 console.log(JSON.stringify({
   identity: {
     multiFn: isMultiFn(render),
@@ -212,5 +330,60 @@ console.log(JSON.stringify({
   scale: {
     calls: scaleDispatchCalls,
     total: scaleTotal,
+  },
+  hierarchy: {
+    identity: isHierarchy(hierarchy0),
+    forged: isHierarchy({}),
+    duplicateRetainsIdentity: duplicateHierarchy === hierarchy3,
+    directParentCount: setCount(parents(hierarchy3, "cat")),
+    transitiveAncestorCount: setCount(ancestors(hierarchy3, "cat")),
+    transitiveDescendantCount: setCount(descendants(hierarchy3, "animal")),
+    catIsAnimal: isA(hierarchy3, "cat", "animal"),
+    vectorIsA: isA(hierarchy3, vectorChild, vectorParent),
+    oldSnapshotRetainsRelation: isA(hierarchy3, "cat", "animal"),
+    underiveRemovesTransitiveRelation: !isA(hierarchy4, "cat", "animal"),
+    underiveRetainsDirectRelation: isA(hierarchy4, "cat", "mammal"),
+    diamondRetainsAlternatePath: isA(diamond4, "leaf", "root"),
+  },
+  hierarchyErrors: {
+    invalid: invalidHierarchyValue,
+    self: selfHierarchy,
+    cycle: cycleHierarchy,
+  },
+  hierarchicalDispatch: {
+    deriveReturnsIdentity: deriveResult === taxonomy,
+    mammalResult,
+    specificResult,
+    cacheInvalidatedByRemoval,
+    cacheInvalidatedByAddition,
+    exactOverridesAncestor,
+    removingExactRestoresAncestor,
+    fallbackResult: hierarchicalFallbackResult,
+    externalHierarchyIdentity,
+    underiveReturnsIdentity: underiveResult === taxonomy,
+    underivedFallback,
+  },
+  preferences: {
+    ambiguous: ambiguous.code,
+    preferReturnsIdentity: preferResult === chooser,
+    preferredResult,
+    directPreference,
+    transitivePreference,
+    snapshotCount: mapCount(preferenceSnapshot),
+    removeReturnsIdentity: removePreferenceResult === chooser,
+    removedIsAmbiguous: removedPreferenceError.code,
+    clearReturnsIdentity: clearPreferencesResult === chooser,
+    clearedCount: mapCount(preferences(chooser)),
+  },
+  preferenceErrors: {
+    self: preferenceSelf.code,
+    conflict: preferenceConflict.code,
+    invalidHierarchy: invalidHierarchy.code,
+    hierarchyConflict: hierarchyConflict.code,
+    externalHierarchyConflict: externalHierarchyConflict.code,
+  },
+  hierarchicalScale: {
+    calls: hierarchicalScaleCalls,
+    total: hierarchicalScaleTotal,
   },
 }));

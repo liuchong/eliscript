@@ -1,0 +1,200 @@
+(module eliscript.hierarchy
+  (import-portable "./persistent-map.eli"
+    persistent-map-assoc
+    persistent-map-dissoc
+    persistent-map-get
+    persistent-map-reduce)
+  (import-portable "./persistent-set.eli"
+    persistent-set-conj
+    persistent-set-count
+    persistent-set-disj
+    persistent-set-has?
+    persistent-set-reduce
+    persistent-set-union)
+  (import-portable "./persistent-vector.eli"
+    persistent-vector?
+    persistent-vector-count
+    persistent-vector-nth)
+  (import-portable "./value.eli" empty-value-map empty-value-set value-equal?)
+  (defconst hierarchy-registry (js* "new WeakMap()"))
+  (defconst hierarchy-missing (js-object))
+  (defun hierarchy-fail
+    (code message child parent)
+    (throw
+      (js-object
+        :kind
+        "eliscript/hierarchy-error"
+        :code
+        code
+        :message
+        message
+        :child
+        child
+        :parent
+        parent)))
+  (defun hierarchy?
+    (candidate)
+    (let ((type (value-type candidate)))
+      (if (or (= type "object") (= type "function"))
+        (try (js-call hierarchy-registry :has candidate) (catch _error false))
+        false)))
+  (defun hierarchy-state
+    (hierarchy)
+    (if (hierarchy? hierarchy)
+      (js-call hierarchy-registry :get hierarchy)
+      (hierarchy-fail "ELI-HIERARCHY-INVALID" "operation requires a hierarchy" nil nil)))
+  (defun hierarchy-close-ancestors
+    (direct-parents)
+    (let ((result direct-parents) (changed t))
+      (while changed
+        (setq changed false)
+        (setq
+          result
+          (persistent-map-reduce
+            (lambda
+              (next child known-ancestors)
+              (let
+                (
+                  (expanded
+                    (persistent-set-reduce
+                      (lambda
+                        (values ancestor)
+                        (let
+                          (
+                            (ancestor-values
+                              (persistent-map-get result ancestor hierarchy-missing)))
+                          (if (eq ancestor-values hierarchy-missing)
+                            values
+                            (persistent-set-union values ancestor-values))))
+                      known-ancestors
+                      known-ancestors)))
+                (when
+                  (>
+                    (persistent-set-count expanded)
+                    (persistent-set-count known-ancestors))
+                  (setq changed t))
+                (persistent-map-assoc next child expanded)))
+            result
+            result)))
+      result))
+  (defun hierarchy-invert-ancestors
+    (ancestor-table)
+    (persistent-map-reduce
+      (lambda
+        (result child child-ancestors)
+        (persistent-set-reduce
+          (lambda
+            (next ancestor)
+            (let ((known (persistent-map-get next ancestor hierarchy-missing)))
+              (persistent-map-assoc
+                next
+                ancestor
+                (persistent-set-conj
+                  (if (eq known hierarchy-missing) (empty-value-set) known)
+                  child))))
+          result
+          child-ancestors))
+      (empty-value-map)
+      ancestor-table))
+  (defun hierarchy-make
+    (direct-parents)
+    (let*
+      ((ancestor-table (hierarchy-close-ancestors direct-parents))
+        (descendant-table (hierarchy-invert-ancestors ancestor-table))
+        (hierarchy (js-object)))
+      (js-call
+        hierarchy-registry
+        :set
+        hierarchy
+        (js-object
+          :parents
+          direct-parents
+          :ancestors
+          ancestor-table
+          :descendants
+          descendant-table))
+      hierarchy))
+  (defun empty-hierarchy () (hierarchy-make (empty-value-map)))
+  (defun hierarchy-relation
+    (hierarchy relation value)
+    (persistent-map-get (get (hierarchy-state hierarchy) relation nil) value nil))
+  (defun parents (hierarchy value) (hierarchy-relation hierarchy "parents" value))
+  (defun ancestors (hierarchy value) (hierarchy-relation hierarchy "ancestors" value))
+  (defun descendants
+    (hierarchy value)
+    (hierarchy-relation hierarchy "descendants" value))
+  (defun is-a?
+    (hierarchy child parent)
+    (hierarchy-state hierarchy)
+    (if (value-equal? child parent)
+      t
+      (let ((known-ancestors (ancestors hierarchy child)))
+        (if (and known-ancestors (persistent-set-has? known-ancestors parent))
+          t
+          (if
+            (and
+              (persistent-vector? child)
+              (persistent-vector? parent)
+              (= (persistent-vector-count child) (persistent-vector-count parent)))
+            (let ((matches t) (index 0))
+              (while (and matches (< index (persistent-vector-count child)))
+                (setq
+                  matches
+                  (is-a?
+                    hierarchy
+                    (persistent-vector-nth child index nil)
+                    (persistent-vector-nth parent index nil))
+                  index
+                  (1+ index)))
+              matches)
+            false)))))
+  (defun derive
+    (hierarchy child parent)
+    (let*
+      ((state (hierarchy-state hierarchy))
+        (direct-parents (get state "parents" nil))
+        (known (persistent-map-get direct-parents child hierarchy-missing)))
+      (when (value-equal? child parent)
+        (hierarchy-fail
+          "ELI-HIERARCHY-SELF-DERIVATION"
+          "a hierarchy value cannot derive from itself"
+          child
+          parent))
+      (if (and (not (eq known hierarchy-missing)) (persistent-set-has? known parent))
+        hierarchy
+        (progn
+          (when (is-a? hierarchy parent child)
+            (hierarchy-fail
+              "ELI-HIERARCHY-CYCLE"
+              "hierarchy derivation would create a cycle"
+              child
+              parent))
+          (hierarchy-make
+            (persistent-map-assoc
+              direct-parents
+              child
+              (persistent-set-conj
+                (if (eq known hierarchy-missing) (empty-value-set) known)
+                parent)))))))
+  (defun underive
+    (hierarchy child parent)
+    (let*
+      ((state (hierarchy-state hierarchy))
+        (direct-parents (get state "parents" nil))
+        (known (persistent-map-get direct-parents child hierarchy-missing)))
+      (if (or (eq known hierarchy-missing) (not (persistent-set-has? known parent)))
+        hierarchy
+        (let ((remaining (persistent-set-disj known parent)))
+          (hierarchy-make
+            (if (= (persistent-set-count remaining) 0)
+              (persistent-map-dissoc direct-parents child)
+              (persistent-map-assoc direct-parents child remaining)))))))
+  (export
+    ancestors
+    derive
+    descendants
+    empty-hierarchy
+    hierarchy?
+    is-a?
+    parents
+    underive))

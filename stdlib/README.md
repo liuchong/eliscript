@@ -423,6 +423,27 @@ weak registry, while dispatch and method exceptions keep their original
 identity. Exact behavior is specified in
 [0156](../specs/0156-value-dispatched-multimethods.md).
 
+`hierarchy.eli` adds immutable derivation snapshots, and multimethods can use
+those snapshots for ancestor dispatch with explicit preferences:
+
+```elisp
+(import "../../stdlib/multimethod.eli"
+        add-method! derive! multi-fn prefer-method!)
+
+(let ((render (multi-fn "render" (lambda (kind) kind))))
+  (derive! render "photo" "media")
+  (derive! render "photo" "visual")
+  (add-method! render "media" (lambda (_kind) "media"))
+  (add-method! render "visual" (lambda (_kind) "visual"))
+  (prefer-method! render "visual" "media")
+  (render "photo"))
+```
+
+Unordered matching ancestors raise an ambiguity error. Exact methods remain
+the fast path, and every method, hierarchy, or preference mutation invalidates
+derived cache entries. Full behavior is specified in
+[0157](../specs/0157-persistent-dispatch-hierarchies.md).
+
 ## JavaScript Container Interop
 
 `interop/js.eli` defines the explicit boundary between immutable persistent

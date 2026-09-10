@@ -2991,6 +2991,31 @@
           "contains": "scaleDispatchCalls"
         }
       ]
+    },
+    {
+      "id": "stdlib.persistent-dispatch-hierarchies",
+      "title": "Persistent dispatch hierarchies and preferred multimethods",
+      "status": "stable",
+      "spec": "0157",
+      "contracts": [
+        "Creates authenticated immutable derivation hierarchies with direct ancestor and descendant snapshots",
+        "Resolves exact ancestor vector and default dispatch while detecting unordered ambiguity",
+        "Maintains transitive method preferences as persistent snapshots and rejects contradictory precedence",
+        "Invalidates derived dispatch caches after every method hierarchy or preference mutation",
+        "Produces byte-identical seed and self-hosted output plus identical Bun and Node results"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/multimethod.test.mjs",
+          "contains": "Eliscript multimethods dispatch on values with persistent method snapshots"
+        },
+        {
+          "kind": "fixture",
+          "file": "tests/fixtures/multimethod-host.mjs",
+          "contains": "transitivePreference"
+        }
+      ]
     }
   ]
 }

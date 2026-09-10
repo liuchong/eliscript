@@ -90,11 +90,12 @@ Multimethod-owned failures are plain inspectable objects with kind
 
 ## Compatibility and Limits
 
-This first stable surface provides exact value dispatch and a default method.
-It does not define derivation hierarchies, ancestor matching, preferred methods,
-ambiguity ordering, method combinations, compiler-level `defmulti` syntax, or
-metadata on multimethod identities. Those capabilities require separate
-contracts and must preserve this exact-dispatch baseline.
+This stable baseline provides exact value dispatch and a default method.
+Specification [0157](0157-persistent-dispatch-hierarchies.md) adds derivation
+hierarchies, ancestor matching, preferred methods, and explicit ambiguity while
+preserving this exact-dispatch behavior. Method combinations, compiler-level
+`defmulti` syntax, and metadata on multimethod identities remain outside the
+current contract.
 
 ## Acceptance Criteria
 

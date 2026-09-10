@@ -144,7 +144,7 @@ target.
 | `loop` and `recur` | adopt | supports predictable stack-safe collection algorithms |
 | metadata | adopt after collection roots stabilize | useful for tooling without affecting equality |
 | atoms | adopt one event-loop-safe reference type | cleanly separates immutable values from changing identity |
-| multimethods | adopt exact value dispatch | protocols are mature; hierarchy and preference semantics remain separately staged |
+| multimethods | adopt immutable hierarchy and preferred multiple dispatch | exact dispatch, ancestor resolution, transitive preferences, and explicit ambiguity are stable |
 | records and user-defined runtime types | defer unless applications require them | protocols plus maps cover the initial product needs |
 | pervasive lazy sequences | defer | eager reduce and transducers have clearer host and resource behavior |
 | software transactional memory | exclude from 1.0 | JavaScript's event loop and Emacs worker boundary need a different model |

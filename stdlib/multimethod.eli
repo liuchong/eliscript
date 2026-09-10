@@ -1,9 +1,17 @@
 (module eliscript.multimethod
+  (import-portable "./hierarchy.eli" derive empty-hierarchy hierarchy? is-a? underive)
   (import-portable "./persistent-map.eli"
     persistent-map-assoc
     persistent-map-dissoc
-    persistent-map-get)
-  (import-portable "./value.eli" empty-value-map)
+    persistent-map-get
+    persistent-map-reduce)
+  (import-portable "./persistent-set.eli"
+    persistent-set-conj
+    persistent-set-count
+    persistent-set-disj
+    persistent-set-has?
+    persistent-set-reduce)
+  (import-portable "./value.eli" empty-value-map empty-value-set value-equal?)
   (defconst multi-fn-registry (js* "new WeakMap()"))
   (defconst missing-method (js-object))
   (defconst default-dispatch "default")
@@ -38,6 +46,80 @@
   (defun multi-fn-operation
     (reference operation)
     (get (multi-fn-state reference) operation nil))
+  (defun multi-fn-preferred?
+    (preference-table preferred other)
+    (let
+      ((visited (empty-value-set))
+        (pending (js-array preferred))
+        (index 0)
+        (found false))
+      (while (and (not found) (< index (js-length pending)))
+        (let*
+          ((candidate (get pending index))
+            (next (persistent-map-get preference-table candidate nil)))
+          (setq index (1+ index))
+          (when next
+            (setq
+              found
+              (persistent-set-has? next other)
+              pending
+              (persistent-set-reduce
+                (lambda
+                  (values value)
+                  (if (persistent-set-has? visited value)
+                    values
+                    (progn
+                      (setq visited (persistent-set-conj visited value))
+                      (js-call values :push value)
+                      values)))
+                pending
+                next)))))
+      found))
+  (defun multi-fn-dominates?
+    (dispatch-hierarchy preference-table preferred other)
+    (or
+      (multi-fn-preferred? preference-table preferred other)
+      (is-a? dispatch-hierarchy preferred other)))
+  (defun multi-fn-preference-conflict?
+    (dispatch-hierarchy preference-table)
+    (persistent-map-reduce
+      (lambda
+        (conflict preferred direct-values)
+        (if conflict
+          t
+          (let
+            ((visited (empty-value-set))
+              (pending
+                (persistent-set-reduce
+                  (lambda (values value) (js-call values :push value) values)
+                  (js-array)
+                  direct-values))
+              (index 0)
+              (found false))
+            (while (and (not found) (< index (js-length pending)))
+              (let*
+                ((other (get pending index))
+                  (next (persistent-map-get preference-table other nil)))
+                (setq index (1+ index))
+                (if (is-a? dispatch-hierarchy other preferred)
+                  (setq found t)
+                  (when next
+                    (setq
+                      pending
+                      (persistent-set-reduce
+                        (lambda
+                          (values value)
+                          (if (persistent-set-has? visited value)
+                            values
+                            (progn
+                              (setq visited (persistent-set-conj visited value))
+                              (js-call values :push value)
+                              values)))
+                        pending
+                        next))))))
+            found)))
+      false
+      preference-table))
   (defun multi-fn
     (name dispatch-function &rest default-options)
     (when (not (= (value-type dispatch-function) "function"))
@@ -59,6 +141,9 @@
             default-dispatch
             (aref default-options 0)))
         (method-table (empty-value-map))
+        (dispatch-hierarchy (empty-hierarchy))
+        (preference-table (empty-value-map))
+        (method-cache (empty-value-map))
         (reference nil)
         (find-method nil))
       (setq
@@ -68,7 +153,84 @@
           (let
             ((method (persistent-map-get method-table dispatch-value missing-method)))
             (if (eq method missing-method)
-              (persistent-map-get method-table fallback missing-method)
+              (let
+                (
+                  (cached
+                    (persistent-map-get method-cache dispatch-value missing-method)))
+                (if (not (eq cached missing-method))
+                  cached
+                  (let
+                    (
+                      (applicable
+                        (persistent-map-reduce
+                          (lambda
+                            (result method-dispatch candidate-method)
+                            (if
+                              (and
+                                (not (value-equal? method-dispatch fallback))
+                                (is-a?
+                                  dispatch-hierarchy
+                                  dispatch-value
+                                  method-dispatch))
+                              (progn
+                                (js-call
+                                  result
+                                  :push
+                                  (js-object
+                                    :dispatch-value
+                                    method-dispatch
+                                    :method
+                                    candidate-method))
+                                result)
+                              result))
+                          (js-array)
+                          method-table)))
+                    (if (= (js-length applicable) 0)
+                      (persistent-map-get method-table fallback missing-method)
+                      (let ((winner missing-method) (candidate-index 0))
+                        (while (< candidate-index (js-length applicable))
+                          (let*
+                            ((candidate (get applicable candidate-index))
+                              (candidate-dispatch (get candidate "dispatch-value" nil))
+                              (dominates-all t)
+                              (other-index 0))
+                            (while
+                              (and dominates-all (< other-index (js-length applicable)))
+                              (let
+                                (
+                                  (other-dispatch
+                                    (get
+                                      (get applicable other-index)
+                                      "dispatch-value"
+                                      nil)))
+                                (when
+                                  (and
+                                    (not
+                                      (value-equal? candidate-dispatch other-dispatch))
+                                    (not
+                                      (multi-fn-dominates?
+                                        dispatch-hierarchy
+                                        preference-table
+                                        candidate-dispatch
+                                        other-dispatch)))
+                                  (setq dominates-all false)))
+                              (setq other-index (1+ other-index)))
+                            (when dominates-all (setq winner candidate)))
+                          (setq candidate-index (1+ candidate-index)))
+                        (if (eq winner missing-method)
+                          (multi-fn-fail
+                            "ELI-MULTI-FN-AMBIGUOUS-METHOD"
+                            "multiple multimethod dispatch values match without preference"
+                            name
+                            dispatch-value)
+                          (let ((resolved (get winner "method" nil)))
+                            (setq
+                              method-cache
+                              (persistent-map-assoc
+                                method-cache
+                                dispatch-value
+                                resolved))
+                            resolved)))))))
               method))))
       (setq
         reference
@@ -104,6 +266,14 @@
               (if (eq method missing-method) nil method)))
           :methods
           (lambda () method-table)
+          :hierarchy
+          (lambda () dispatch-hierarchy)
+          :preferences
+          (lambda () preference-table)
+          :preferred-method
+          (lambda
+            (preferred other)
+            (multi-fn-preferred? preference-table preferred other))
           :add-method
           (lambda
             (dispatch-value method)
@@ -115,15 +285,109 @@
                 dispatch-value))
             (setq
               method-table
-              (persistent-map-assoc method-table dispatch-value method))
+              (persistent-map-assoc method-table dispatch-value method)
+              method-cache
+              (empty-value-map))
             reference)
           :remove-method
           (lambda
             (dispatch-value)
-            (setq method-table (persistent-map-dissoc method-table dispatch-value))
+            (setq
+              method-table
+              (persistent-map-dissoc method-table dispatch-value)
+              method-cache
+              (empty-value-map))
             reference)
           :remove-all-methods
-          (lambda () (setq method-table (empty-value-map)) reference)))
+          (lambda
+            ()
+            (setq method-table (empty-value-map) method-cache (empty-value-map))
+            reference)
+          :set-hierarchy
+          (lambda
+            (next-hierarchy)
+            (when (not (hierarchy? next-hierarchy))
+              (multi-fn-fail
+                "ELI-MULTI-FN-INVALID-HIERARCHY"
+                "multi-fn hierarchy must be a hierarchy"
+                name
+                nil))
+            (when (multi-fn-preference-conflict? next-hierarchy preference-table)
+              (multi-fn-fail
+                "ELI-MULTI-FN-PREFERENCE-CONFLICT"
+                "multi-fn hierarchy conflicts with existing preferences"
+                name
+                nil))
+            (setq dispatch-hierarchy next-hierarchy method-cache (empty-value-map))
+            reference)
+          :derive
+          (lambda
+            (child parent)
+            (let ((next-hierarchy (derive dispatch-hierarchy child parent)))
+              (when (multi-fn-preference-conflict? next-hierarchy preference-table)
+                (multi-fn-fail
+                  "ELI-MULTI-FN-PREFERENCE-CONFLICT"
+                  "multi-fn derivation conflicts with existing preferences"
+                  name
+                  child))
+              (setq dispatch-hierarchy next-hierarchy method-cache (empty-value-map)))
+            reference)
+          :underive
+          (lambda
+            (child parent)
+            (setq
+              dispatch-hierarchy
+              (underive dispatch-hierarchy child parent)
+              method-cache
+              (empty-value-map))
+            reference)
+          :prefer-method
+          (lambda
+            (preferred other)
+            (when (value-equal? preferred other)
+              (multi-fn-fail
+                "ELI-MULTI-FN-SELF-PREFERENCE"
+                "a multimethod dispatch value cannot prefer itself"
+                name
+                preferred))
+            (when
+              (or
+                (multi-fn-preferred? preference-table other preferred)
+                (is-a? dispatch-hierarchy other preferred))
+              (multi-fn-fail
+                "ELI-MULTI-FN-PREFERENCE-CONFLICT"
+                "multimethod preference conflicts with existing precedence"
+                name
+                preferred))
+            (let ((known (persistent-map-get preference-table preferred nil)))
+              (setq
+                preference-table
+                (persistent-map-assoc
+                  preference-table
+                  preferred
+                  (persistent-set-conj (if known known (empty-value-set)) other))
+                method-cache
+                (empty-value-map)))
+            reference)
+          :remove-preference
+          (lambda
+            (preferred other)
+            (let ((known (persistent-map-get preference-table preferred nil)))
+              (when known
+                (let ((remaining (persistent-set-disj known other)))
+                  (setq
+                    preference-table
+                    (if (= (persistent-set-count remaining) 0)
+                      (persistent-map-dissoc preference-table preferred)
+                      (persistent-map-assoc preference-table preferred remaining))
+                    method-cache
+                    (empty-value-map)))))
+            reference)
+          :remove-all-preferences
+          (lambda
+            ()
+            (setq preference-table (empty-value-map) method-cache (empty-value-map))
+            reference)))
       reference))
   (defun multi-fn-name (reference) (get (multi-fn-state reference) "name" nil))
   (defun dispatch-fn
@@ -142,6 +406,13 @@
     (reference dispatch-value)
     (= (value-type (get-method reference dispatch-value)) "function"))
   (defun methods (reference) (funcall (multi-fn-operation reference "methods")))
+  (defun multi-fn-hierarchy
+    (reference)
+    (funcall (multi-fn-operation reference "hierarchy")))
+  (defun preferences (reference) (funcall (multi-fn-operation reference "preferences")))
+  (defun preferred-method?
+    (reference preferred other)
+    (funcall (multi-fn-operation reference "preferred-method") preferred other))
   (defun add-method!
     (reference dispatch-value method)
     (funcall (multi-fn-operation reference "add-method") dispatch-value method))
@@ -151,16 +422,43 @@
   (defun remove-all-methods!
     (reference)
     (funcall (multi-fn-operation reference "remove-all-methods")))
+  (defun set-hierarchy!
+    (reference hierarchy)
+    (funcall (multi-fn-operation reference "set-hierarchy") hierarchy))
+  (defun derive!
+    (reference child parent)
+    (funcall (multi-fn-operation reference "derive") child parent))
+  (defun underive!
+    (reference child parent)
+    (funcall (multi-fn-operation reference "underive") child parent))
+  (defun prefer-method!
+    (reference preferred other)
+    (funcall (multi-fn-operation reference "prefer-method") preferred other))
+  (defun remove-preference!
+    (reference preferred other)
+    (funcall (multi-fn-operation reference "remove-preference") preferred other))
+  (defun remove-all-preferences!
+    (reference)
+    (funcall (multi-fn-operation reference "remove-all-preferences")))
   (export
     add-method!
     default-dispatch-value
+    derive!
     dispatch-fn
     dispatch-value
     get-method
     has-method?
     methods
     multi-fn
+    multi-fn-hierarchy
     multi-fn-name
     multi-fn?
+    prefer-method!
+    preferences
+    preferred-method?
     remove-all-methods!
-    remove-method!))
+    remove-all-preferences!
+    remove-method!
+    remove-preference!
+    set-hierarchy!
+    underive!))

@@ -29,19 +29,19 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 156 specifications.
+The registry currently contains 157 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
 | Accepted design | 3 |
-| Stable design | 151 |
+| Stable design | 152 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 152 |
+| Implemented | 153 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 151 specifications as stable,
+Compatibility Baseline 2 separately classifies 152 specifications as stable,
 1 as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
@@ -133,14 +133,15 @@ refreshes matching Flymake buffers. The verified onboarding guide executes the
 documented project, compiler, host, REPL, and editor path. The complete AC-12
 matrix and M10 exit audit remain formal acceptance work.
 
-M11 has all 6/6 implementation units complete. Its 32-module, 399-export API
+M11 has all 6/6 implementation units complete. Its 33-module, 416-export API
 index is generated from explicit metadata and the checked public surface.
 The portable library now includes callable value-dispatched multimethods with
-value-semantic keys and immutable method-table snapshots.
+value-semantic keys, immutable derivation hierarchies, transitive preferences,
+explicit ambiguity, and persistent method and preference snapshots.
 Browser and worker platform packages now expose only named host authority,
 inject request-scoped progress and cancellation into the real worker, and keep
 frameworks outside core evidence. M11 compatibility stabilization is now
-149/150 complete. The only provisional core feature is the full supported
+150/151 complete. The only provisional core feature is the full supported
 matrix proof for JavaScript package interoperation in specification 0142; the
 final exit audit remains open.
 
@@ -515,6 +516,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0154 | [Map, Set, and Stack Capability Protocols](0154-map-set-stack-capability-protocols.md) | Stable | Implemented |
 | 0155 | [Reversible Collection Traversal](0155-reversible-collection-traversal.md) | Stable | Implemented |
 | 0156 | [Value-dispatched Multimethods](0156-value-dispatched-multimethods.md) | Stable | Implemented |
+| 0157 | [Persistent Dispatch Hierarchies and Preferred Multimethods](0157-persistent-dispatch-hierarchies.md) | Stable | Implemented |
 
 ## Adding a Specification
 

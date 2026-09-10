@@ -1,8 +1,8 @@
 {
   "format": "eliscript-library-api-index",
   "version": 1,
-  "moduleCount": 32,
-  "exportCount": 399,
+  "moduleCount": 33,
+  "exportCount": 416,
   "modules": [
     {
       "module": "bit",
@@ -382,6 +382,25 @@
       ]
     },
     {
+      "module": "hierarchy",
+      "source": "stdlib/hierarchy.eli",
+      "spec": "0157",
+      "specFile": "specs/0157-persistent-dispatch-hierarchies.md",
+      "stability": "stable",
+      "role": "portable",
+      "summary": "Authenticated immutable derivation hierarchies with transitive and vector relation queries.",
+      "exports": [
+        "ancestors",
+        "derive",
+        "descendants",
+        "empty-hierarchy",
+        "hierarchy?",
+        "is-a?",
+        "parents",
+        "underive"
+      ]
+    },
+    {
       "module": "identifier",
       "source": "stdlib/identifier.eli",
       "spec": "0070",
@@ -461,24 +480,33 @@
     {
       "module": "multimethod",
       "source": "stdlib/multimethod.eli",
-      "spec": "0156",
-      "specFile": "specs/0156-value-dispatched-multimethods.md",
+      "spec": "0157",
+      "specFile": "specs/0157-persistent-dispatch-hierarchies.md",
       "stability": "stable",
       "role": "portable",
-      "summary": "Callable value-dispatched multimethods with persistent method snapshots and explicit mutation.",
+      "summary": "Callable multimethods with exact and hierarchical dispatch, transitive preferences, ambiguity detection, and persistent snapshots.",
       "exports": [
         "add-method!",
         "default-dispatch-value",
+        "derive!",
         "dispatch-fn",
         "dispatch-value",
         "get-method",
         "has-method?",
         "methods",
         "multi-fn",
+        "multi-fn-hierarchy",
         "multi-fn-name",
         "multi-fn?",
+        "prefer-method!",
+        "preferences",
+        "preferred-method?",
         "remove-all-methods!",
-        "remove-method!"
+        "remove-all-preferences!",
+        "remove-method!",
+        "remove-preference!",
+        "set-hierarchy!",
+        "underive!"
       ]
     },
     {

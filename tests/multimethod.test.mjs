@@ -16,6 +16,7 @@ const dependencies = [
   "persistent-map",
   "persistent-set",
   "value",
+  "hierarchy",
 ];
 const emacs = process.env.EMACS ?? "emacs";
 
@@ -200,6 +201,73 @@ test("Eliscript multimethods dispatch on values with persistent method snapshots
         calls: 100_000,
         total: -50_000,
       },
+      hierarchy: {
+        identity: true,
+        forged: false,
+        duplicateRetainsIdentity: true,
+        directParentCount: 1,
+        transitiveAncestorCount: 2,
+        transitiveDescendantCount: 3,
+        catIsAnimal: true,
+        vectorIsA: true,
+        oldSnapshotRetainsRelation: true,
+        underiveRemovesTransitiveRelation: true,
+        underiveRetainsDirectRelation: true,
+        diamondRetainsAlternatePath: true,
+      },
+      hierarchyErrors: {
+        invalid: {
+          code: "ELI-HIERARCHY-INVALID",
+          child: null,
+          parent: null,
+        },
+        self: {
+          code: "ELI-HIERARCHY-SELF-DERIVATION",
+          child: "animal",
+          parent: "animal",
+        },
+        cycle: {
+          code: "ELI-HIERARCHY-CYCLE",
+          child: "animal",
+          parent: "cat",
+        },
+      },
+      hierarchicalDispatch: {
+        deriveReturnsIdentity: true,
+        mammalResult: "mammal:cat",
+        specificResult: "mammal:cat",
+        cacheInvalidatedByRemoval: "animal:cat",
+        cacheInvalidatedByAddition: "mammal:cat",
+        exactOverridesAncestor: "exact:cat",
+        removingExactRestoresAncestor: "mammal:cat",
+        fallbackResult: "default:mineral",
+        externalHierarchyIdentity: true,
+        underiveReturnsIdentity: true,
+        underivedFallback: "default:cat",
+      },
+      preferences: {
+        ambiguous: "ELI-MULTI-FN-AMBIGUOUS-METHOD",
+        preferReturnsIdentity: true,
+        preferredResult: "mammal:chimera",
+        directPreference: true,
+        transitivePreference: true,
+        snapshotCount: 2,
+        removeReturnsIdentity: true,
+        removedIsAmbiguous: "ELI-MULTI-FN-AMBIGUOUS-METHOD",
+        clearReturnsIdentity: true,
+        clearedCount: 0,
+      },
+      preferenceErrors: {
+        self: "ELI-MULTI-FN-SELF-PREFERENCE",
+        conflict: "ELI-MULTI-FN-PREFERENCE-CONFLICT",
+        invalidHierarchy: "ELI-MULTI-FN-INVALID-HIERARCHY",
+        hierarchyConflict: "ELI-MULTI-FN-PREFERENCE-CONFLICT",
+        externalHierarchyConflict: "ELI-MULTI-FN-PREFERENCE-CONFLICT",
+      },
+      hierarchicalScale: {
+        calls: 100_000,
+        total: 4_999_950_000,
+      },
     });
 
     const sourceMap = await Bun.file(
@@ -208,6 +276,11 @@ test("Eliscript multimethods dispatch on values with persistent method snapshots
     expect(sourceMap.sourcesContent).toHaveLength(1);
     expect(sourceMap.sourcesContent[0]).toContain("(defun multi-fn\n");
     expect(sourceMap.sourcesContent[0]).toContain("(defun add-method!\n");
+    const hierarchySourceMap = await Bun.file(
+      resolve(seedDirectory, "hierarchy.eli.map"),
+    ).json();
+    expect(hierarchySourceMap.sourcesContent[0])
+      .toContain("(defun derive\n");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
