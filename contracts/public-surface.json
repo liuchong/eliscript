@@ -45,6 +45,13 @@
         "names": ["defprotocol", "extend-category", "extend-default", "extend-type"]
       },
       {
+        "id": "protocol-implementation-values",
+        "spec": "0169",
+        "sources": ["bootstrap/compiler/expander.eli", "compiler/eliscript-expander.el"],
+        "verifyNames": true,
+        "names": ["deftype", "reify"]
+      },
+      {
         "id": "record-declarations",
         "spec": "0168",
         "sources": ["bootstrap/compiler/expander.eli", "compiler/eliscript-expander.el"],
@@ -851,6 +858,14 @@
       "defaultExport": false
     },
     {
+      "id": "protocol-implementation-values",
+      "spec": "0169",
+      "visibility": "public",
+      "file": "runtime/core/type.mjs",
+      "namedExports": ["defineType", "isType", "isTypeValue", "reifyProtocols", "typeFieldNames", "typeName", "typeOf"],
+      "defaultExport": false
+    },
+    {
       "id": "record-types",
       "spec": "0168",
       "visibility": "public",
@@ -931,6 +946,7 @@
     {"module": "core-text", "spec": "0081", "file": "stdlib/core/text.eli", "exports": ["blank?", "contains?", "empty?", "ends-with?", "join", "repeat", "slice", "starts-at?", "starts-with?", "strip-prefix", "strip-suffix", "trim", "whitespace?"]},
     {"module": "core-transducer", "spec": "0066", "file": "stdlib/core/transducer.eli", "exports": ["catting", "completing", "compose-transducers", "deduping", "distincting", "dropping", "dropping-while", "eduction", "filtering", "interposing", "into", "keeping", "keeping-indexed", "mapcatting", "mapping", "mapping-indexed", "partitioning-all", "partitioning-by", "removing", "run!", "taking", "taking-nth", "taking-while", "transduce"]},
     {"module": "core-transient", "spec": "0066", "file": "stdlib/core/transient.eli", "exports": ["IEditable", "ITransientCollection", "assoc!", "conj!", "dissoc!", "persistent!", "transient"]},
+    {"module": "core-type", "spec": "0169", "file": "stdlib/core/type.eli", "exports": ["define-type", "defined-type-fields", "defined-type-name", "reify-protocols", "type-definition?", "type-of", "type-value?"]},
     {"module": "data", "spec": "0027", "file": "stdlib/data.eli", "exports": ["count-by", "group-by", "index-by"]},
     {"module": "data-text", "spec": "0071", "file": "stdlib/data-text.eli", "exports": ["data-text-result-value", "print-value", "read-value", "read-values"]},
     {"module": "deferred", "spec": "0161", "file": "stdlib/deferred.eli", "exports": ["delay", "delay?", "force", "memoize", "realized?"]},

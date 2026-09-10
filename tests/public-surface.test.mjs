@@ -30,14 +30,14 @@ async function validationErrors(surface) {
 test("repository public surface matches every tracked implementation", async () => {
   expect(await checkPublicSurface({ root: ROOT })).toEqual({
     schemaVersion: 1,
-    language: { groups: 16, entries: 189 },
+    language: { groups: 17, entries: 191 },
     ir: { nodeKinds: 58 },
     commands: { commands: 9, options: 47 },
     schemas: { total: 30 },
     adapters: { adapters: 9, exports: 32 },
     platformPackages: { packages: 2, exports: 37 },
-    runtimeModules: { modules: 35, exports: 367, public: 25, internal: 10 },
-    standardLibrary: { modules: 37, exports: 496 },
+    runtimeModules: { modules: 36, exports: 374, public: 26, internal: 10 },
+    standardLibrary: { modules: 38, exports: 503 },
     emacs: {
       functions: 158,
       records: 47,

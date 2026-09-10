@@ -55,6 +55,12 @@ constructors `->Person` and `map->Person`, and the predicate `Person?`.
 Records compose with persistent Map operations, value equality and hashing,
 metadata, and `extend-type`; see [0168](../specs/0168-immutable-record-types.md).
 
+`core/type.eli` is the lower-level protocol implementation layer. `deftype`
+creates frozen positional identity values with direct protocol methods, while
+`reify` creates a frozen anonymous implementation whose methods capture lexical
+bindings. Both require complete protocol implementations; see
+[0169](../specs/0169-protocol-implementation-values.md).
+
 ## Core Ordering
 
 `core/order.eli` provides the maintained language-level comparison and sorting

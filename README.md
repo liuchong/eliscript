@@ -24,8 +24,9 @@ modules, and bootstraps a compiler written in Eliscript itself.
 
 Eliscript has a working Emacs Lisp seed compiler, a reproducible self-hosted
 compiler, self-hosted multi-file graph planning and incremental reuse,
-persistent values, declarative immutable Record types, protocols, and a
-long-lived Emacs-to-JavaScript worker. The
+persistent values, declarative immutable Record types, low-level `deftype` and
+lexical `reify` protocol values, protocols, and a long-lived
+Emacs-to-JavaScript worker. The
 repository also carries React, Org, and optional bundler probes as replaceable
 application-level evidence. The project has completed all implementation units
 in **M8: Language Contract Closure**, **M9: Compiler and Build Convergence**,
@@ -93,9 +94,9 @@ diagnostics, terminal REPL, and Emacs mode discovery. The complete M10 matrix,
 local onboarding exercise, and exit audit remain formal acceptance work.
 
 M11's six implementation units are complete. Reviewed metadata classifies all
-37 standard-library modules by role and owning specification; the generated
+38 standard-library modules by role and owning specification; the generated
 [API page](docs/pages/api.html) and machine-readable
-[API index](docs/pages/api-index.json) expose all 496 checked exports. The
+[API index](docs/pages/api-index.json) expose all 503 checked exports. The
 default contract gate rejects metadata, implementation, stability, or generated
 artifact drift. Explicit [browser and worker capability packages](platform/README.md)
 now grant only named host authority, inject request-scoped progress and

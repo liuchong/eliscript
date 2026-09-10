@@ -1,0 +1,19 @@
+(module eliscript.core.type
+  (import "../../runtime/core/type.mjs" :as Runtime)
+  (defun define-type (name fields protocol-plans)
+    (Runtime/defineType name fields protocol-plans))
+  (defun reify-protocols (protocol-plans)
+    (Runtime/reifyProtocols protocol-plans))
+  (defun type-definition? (value) (Runtime/isType value))
+  (defun type-value? (value) (Runtime/isTypeValue value))
+  (defun type-of (value) (Runtime/typeOf value))
+  (defun defined-type-name (value) (Runtime/typeName value))
+  (defun defined-type-fields (value) (Runtime/typeFieldNames value))
+  (export
+    define-type
+    reify-protocols
+    type-definition?
+    type-value?
+    type-of
+    defined-type-name
+    defined-type-fields))

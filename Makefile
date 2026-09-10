@@ -82,6 +82,7 @@ test-core: check-contracts
 		tests/portable-json.test.mjs tests/portable-numeric.test.mjs \
 		tests/atom.test.mjs tests/multimethod.test.mjs \
 		tests/declarative-protocol.test.mjs tests/declarative-record.test.mjs \
+		tests/declarative-type.test.mjs \
 		tests/core-expression-forms.test.mjs \
 		tests/interop-js.test.mjs \
 		tests/interop-package.test.mjs \
@@ -98,7 +99,7 @@ test-core: check-contracts
 		tests/core-stdlib.test.mjs \
 		tests/persistent-list.test.mjs tests/persistent-queue.test.mjs tests/persistent-vector.test.mjs tests/value-semantics.test.mjs \
 		tests/persistent-map.test.mjs tests/persistent-set.test.mjs \
-		tests/record.test.mjs
+		tests/record.test.mjs tests/type.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/project-cli-test.sh
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/check-cli-test.sh

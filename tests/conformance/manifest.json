@@ -3454,6 +3454,46 @@
           "contains": "defrecord is identical across seed and self-hosted compilers"
         }
       ]
+    },
+    {
+      "id": "language.protocol-implementation-values",
+      "title": "Protocol implementation values",
+      "status": "stable",
+      "spec": "0169",
+      "contracts": [
+        "Declares frozen positional identity types with exact predicates",
+        "Constructs frozen lexical anonymous values in expression position",
+        "Installs complete direct methods for multiple protocols without extension mutation",
+        "Accepts public protocol identities across independent compiler output roots",
+        "Matches Seed and self-hosted ESM Source Maps Bun and Node execution"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-expander-desugars-type-and-reify-forms"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-expander-validates-type-and-reify-forms"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/type.test.mjs",
+          "contains": "defined types install complete direct protocol implementations"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/type.test.mjs",
+          "contains": "reified values implement multiple protocols with lexical closures"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/declarative-type.test.mjs",
+          "contains": "deftype and reify agree across compilers and hosts"
+        }
+      ]
     }
   ]
 }

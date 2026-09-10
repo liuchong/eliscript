@@ -1487,6 +1487,62 @@
                (regexp-quote (cadr case))
                (error-message-string error-data))))))
 
+(ert-deftest eliscript-expander-desugars-type-and-reify-forms ()
+  (let ((output
+         (eliscript-compile-string
+          (concat
+           "(import \"./protocol.eli\" define-protocol protocol-method)\n"
+           "(import \"./type.eli\" define-type reify-protocols)\n"
+           "(defprotocol IRead read)\n"
+           "(deftype Box [value] IRead (read (box) (get box :value)))\n"
+           "(defun captured (prefix) "
+           "(reify IRead (read (_self suffix) (str prefix suffix))))\n"
+           "(export Box ->Box Box? captured)")
+          "declarative-type.eli")))
+    (should (string-match-p
+             (regexp-quote
+              "const Box = define_type(\"Box\", [\"value\"], [[IRead")
+             output))
+    (should (string-match-p
+             (regexp-quote "const __GT_Box = (value) =>") output))
+    (should (string-match-p
+             (regexp-quote "(Box)[\"create\"](value)") output))
+    (should (string-match-p
+             (regexp-quote "const Box_QMARK_ = (value) =>") output))
+    (should (string-match-p
+             (regexp-quote "return reify_protocols([[IRead") output))
+    (should-not (string-match-p "deftype\|reify " output))))
+
+(ert-deftest eliscript-expander-validates-type-and-reify-forms ()
+  (dolist (case
+           '(("(deftype Box)"
+              "deftype expects a name, field vector")
+             ("(deftype domain/Box [value])"
+              "deftype name must be an unqualified symbol")
+             ("(deftype Box (value))"
+              "deftype fields must be a vector")
+             ("(deftype Box [value value])"
+              "deftype declares duplicate field: value")
+             ("(deftype Box [] \"IRead\" (read (x) x))"
+              "deftype protocol must be a symbol")
+             ("(deftype Box [] IRead)"
+              "deftype protocol IRead expects at least one method")
+             ("(deftype Box [] IRead (read () nil))"
+              "deftype method must declare a receiver parameter")
+             ("(reify)"
+              "reify expects at least one protocol implementation")
+             ("(reify IRead (read (x) x) IRead (read (x) x))"
+              "reify declares duplicate protocol: IRead")
+             ("(defun broken () (deftype Nested []))"
+              "deftype is only valid at module top level")))
+    (let ((error-data
+           (should-error
+            (eliscript-compile-string (car case) "type-error.eli")
+            :type 'eliscript-expand-error)))
+      (should (string-match-p
+               (regexp-quote (cadr case))
+               (error-message-string error-data))))))
+
 (ert-deftest eliscript-expander-desugars-threading-and-binding-forms ()
   (let ((output
          (eliscript-compile-string

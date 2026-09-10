@@ -77,6 +77,17 @@ the Record type, while removing a declared field returns a persistent HashMap.
 The runtime has no framework or transport dependency; exact semantics are in
 [0168](../specs/0168-immutable-record-types.md).
 
+### Protocol Implementation Values
+
+`core/type.mjs` provides exact low-level types with immutable positional
+fields and frozen anonymous protocol values. `deftype` produces a type,
+positional constructor, and exact predicate; `reify` produces a lexical
+closure-backed identity object in expression position. Both install complete
+direct protocol Symbol slots without changing global extension tables. Defined
+types deliberately retain host identity semantics rather than Record value
+semantics. Exact behavior is specified in
+[0169](../specs/0169-protocol-implementation-values.md).
+
 ### Value Semantics
 
 `core/value.mjs` defines provisional coercion-free value equality and unsigned

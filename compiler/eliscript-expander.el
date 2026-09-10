@@ -585,7 +585,8 @@
              (eliscript-expander--generated-form ':isInstance)
              value-form))))))))))
 
-(defun eliscript-expander--protocol-method-object (form-name method-forms)
+(defun eliscript-expander--protocol-method-object
+    (form-name method-forms &optional require-receiver)
   "Build an implementation object for FORM-NAME from METHOD-FORMS."
   (unless method-forms
     (eliscript-expander--fail
@@ -598,6 +599,12 @@
           (eliscript-expander--fail
            "%s method must contain an operation and parameter list: %S"
            form-name (eliscript-form-strip method-form)))
+        (when require-receiver
+          (let ((parameters (eliscript-form-value (nth 1 method))))
+            (unless (and (proper-list-p parameters) parameters)
+              (eliscript-expander--fail
+               "%s method must declare a receiver parameter: %S"
+               form-name (eliscript-form-strip method-form)))))
         (let* ((operation-form (car method))
                (operation (eliscript-form-value operation-form)))
           (unless (eliscript-macro-eval-symbol-p operation)
@@ -623,6 +630,151 @@
                      method-form))))))))
     (eliscript-expander--generated-form
      (cons (eliscript-expander--generated-form 'js-object) object-items))))
+
+(defun eliscript-expander--protocol-implementation-plans
+    (form-name implementation-forms &optional allow-empty)
+  "Build protocol implementation plans for FORM-NAME."
+  (unless (or allow-empty implementation-forms)
+    (eliscript-expander--fail
+     "%s expects at least one protocol implementation" form-name))
+  (let ((remaining implementation-forms)
+        (seen (make-hash-table :test #'equal))
+        plans)
+    (while remaining
+      (let* ((protocol-form (pop remaining))
+             (protocol (eliscript-form-value protocol-form)))
+        (unless (eliscript-macro-eval-symbol-p protocol)
+          (eliscript-expander--fail
+           "%s protocol must be a symbol: %S"
+           form-name (eliscript-form-strip protocol-form)))
+        (let ((protocol-name (symbol-name protocol))
+              methods)
+          (when (gethash protocol-name seen)
+            (eliscript-expander--fail
+             "%s declares duplicate protocol: %s" form-name protocol-name))
+          (puthash protocol-name t seen)
+          (while (and remaining
+                      (consp (eliscript-form-value (car remaining)))
+                      (proper-list-p (eliscript-form-value (car remaining))))
+            (push (pop remaining) methods))
+          (setq methods (nreverse methods))
+          (unless methods
+            (eliscript-expander--fail
+             "%s protocol %s expects at least one method"
+             form-name protocol-name))
+          (push
+           (eliscript-expander--generated-form
+            (list
+             (eliscript-expander--generated-form 'js-array)
+             protocol-form
+             (eliscript-expander--protocol-method-object
+              form-name methods t)))
+           plans))))
+    (eliscript-expander--generated-form
+     (cons (eliscript-expander--generated-form 'js-array)
+           (nreverse plans)))))
+
+(defun eliscript-expander--desugar-deftype (arguments)
+  "Return core declarations represented by deftype ARGUMENTS."
+  (when (< (length arguments) 2)
+    (eliscript-expander--fail
+     "deftype expects a name, field vector, and optional protocol implementations"))
+  (let* ((name-form (nth 0 arguments))
+         (name (eliscript-form-value name-form))
+         (fields-form (nth 1 arguments))
+         (fields (eliscript-form-value fields-form))
+         (seen (make-hash-table :test #'equal))
+         field-names)
+    (unless (and (eliscript-macro-eval-symbol-p name)
+                 (not (string-match-p "/" (symbol-name name))))
+      (eliscript-expander--fail
+       "deftype name must be an unqualified symbol: %S"
+       (eliscript-form-strip name-form)))
+    (unless (vectorp fields)
+      (eliscript-expander--fail
+       "deftype fields must be a vector: %S"
+       (eliscript-form-strip fields-form)))
+    (dolist (field-form (append fields nil))
+      (let ((field (eliscript-form-value field-form)))
+        (unless (and (eliscript-macro-eval-symbol-p field)
+                     (not (string-match-p "/" (symbol-name field))))
+          (eliscript-expander--fail
+           "deftype fields must be unqualified symbols: %S"
+           (eliscript-form-strip field-form)))
+        (let ((field-name (symbol-name field)))
+          (when (gethash field-name seen)
+            (eliscript-expander--fail
+             "deftype declares duplicate field: %s" field-name))
+          (puthash field-name t seen)
+          (push (eliscript-expander--generated-form-at
+                 field-name field-form)
+                field-names))))
+    (setq field-names (nreverse field-names))
+    (let* ((name-string (symbol-name name))
+           (field-forms (append fields nil))
+           (parameter-form
+            (eliscript-expander--generated-form-at field-forms fields-form))
+           (constructor-form
+            (eliscript-expander--generated-form-at
+             (intern (concat "->" name-string)) name-form))
+           (predicate-form
+            (eliscript-expander--generated-form-at
+             (intern (concat name-string "?")) name-form))
+           (value-form
+            (eliscript-expander--generated-form-at 'value name-form))
+           (plans-form
+            (eliscript-expander--protocol-implementation-plans
+             "deftype" (nthcdr 2 arguments) t)))
+      (list
+       (eliscript-expander--generated-form
+        (list
+         (eliscript-expander--generated-form 'defconst)
+         name-form
+         (eliscript-expander--generated-form
+          (list
+           (eliscript-expander--generated-form 'define-type)
+           (eliscript-expander--generated-form-at name-string name-form)
+           (eliscript-expander--generated-form
+            (cons (eliscript-expander--generated-form 'js-array)
+                  field-names))
+           plans-form))))
+       (eliscript-expander--generated-form
+        (list
+         (eliscript-expander--generated-form 'defconst)
+         constructor-form
+         (eliscript-expander--generated-form
+          (list
+           (eliscript-expander--generated-form 'lambda)
+           parameter-form
+           (eliscript-expander--generated-form
+            (append
+             (list
+              (eliscript-expander--generated-form 'js-call)
+              name-form
+              (eliscript-expander--generated-form ':create))
+             field-forms))))))
+       (eliscript-expander--generated-form
+        (list
+         (eliscript-expander--generated-form 'defconst)
+         predicate-form
+         (eliscript-expander--generated-form
+          (list
+           (eliscript-expander--generated-form 'lambda)
+           (eliscript-expander--generated-form (list value-form))
+           (eliscript-expander--generated-form
+            (list
+             (eliscript-expander--generated-form 'js-call)
+             name-form
+             (eliscript-expander--generated-form ':isInstance)
+             value-form))))))))))
+
+(defun eliscript-expander--desugar-reify (arguments)
+  "Return the protocol-backed anonymous value represented by ARGUMENTS."
+  (eliscript-expander--generated-form
+   (list
+    (eliscript-expander--generated-form 'reify-protocols)
+    (eliscript-expander--protocol-implementation-plans
+     "reify" arguments))))
 
 (defun eliscript-expander--desugar-extend-type (arguments)
   "Return the core exact-type extension represented by ARGUMENTS."
@@ -778,7 +930,7 @@
           (eliscript-expander--fail
            "defmethod is only valid at module top level"))
          ((memq operator
-                '(defrecord defprotocol extend-type extend-category
+                '(deftype defrecord defprotocol extend-type extend-category
                   extend-default))
           (eliscript-expander--fail
            "%s is only valid at module top level" operator))
@@ -841,6 +993,10 @@
           (eliscript-expander--expand-expression
            (eliscript-expander--desugar-when-binding
             "when-some" arguments t)
+           environment depth))
+         ((eq operator 'reify)
+          (eliscript-expander--expand-expression
+           (eliscript-expander--desugar-reify arguments)
            environment depth))
          (t
           (eliscript-form-inherit
@@ -926,6 +1082,10 @@
          ((eq operator 'defprotocol)
           (eliscript-expander--expand-top-level-sequence
            (eliscript-expander--desugar-defprotocol arguments)
+           environment depth))
+         ((eq operator 'deftype)
+          (eliscript-expander--expand-top-level-sequence
+           (eliscript-expander--desugar-deftype arguments)
            environment depth))
          ((eq operator 'defrecord)
           (eliscript-expander--expand-top-level-sequence

@@ -1,0 +1,55 @@
+(module tests.declarative-type
+  (import "../../stdlib/core/protocol.eli"
+    define-protocol protocol-method)
+  (import "../../stdlib/core/type.eli"
+    define-type reify-protocols type-definition? type-value?
+    type-of defined-type-name defined-type-fields)
+
+  (defprotocol IDescribe describe)
+  (defprotocol IMeasure measure)
+
+  (deftype Box [value]
+    IDescribe
+    (describe (box prefix) (str prefix ":" (get box :value)))
+    IMeasure
+    (measure (box scale) (* (get box :value) scale)))
+
+  (defun make-probe (prefix offset)
+    (reify
+      IDescribe
+      (describe (_probe suffix) (str prefix ":" suffix))
+      IMeasure
+      (measure (_probe input) (+ offset input))))
+
+  (defun type-report ()
+    (let ((box (->Box 7))
+          (probe (make-probe "captured" 10)))
+      (js-object
+        :type
+        (js-object
+          :name (defined-type-name Box)
+          :valueName (defined-type-name box)
+          :definition (type-definition? Box)
+          :instance (type-value? box)
+          :predicate (Box? box)
+          :sameType (eq (type-of box) Box)
+          :fields (defined-type-fields box)
+          :field (get box :value)
+          :description (describe box "box")
+          :measurement (measure box 3))
+        :reify
+        (js-object
+          :description (describe probe "ok")
+          :measurement (measure probe 5)
+          :frozen (js* "Object.isFrozen(probe)")))))
+
+  (export
+    Box
+    ->Box
+    Box?
+    IDescribe
+    describe
+    IMeasure
+    measure
+    make-probe
+    type-report))
