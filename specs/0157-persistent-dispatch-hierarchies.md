@@ -31,6 +31,13 @@ identity. Self derivation and cycles are rejected. `underive` removes one
 direct edge and rebuilds transitive closure from all remaining edges; removing
 an absent edge also returns the original identity.
 
+Derivation updates transitive closure incrementally. It adds the parent and its
+ancestors only to the child and existing descendants, and adds the child and
+its descendants only to the parent and existing ancestors. Unrelated relation
+entries retain their persistent roots; ordinary derivation does not rescan the
+complete hierarchy. Underivation deliberately rebuilds closure because edge
+removal can reveal alternate paths whose retained reachability must be proved.
+
 `parents`, `ancestors`, and `descendants` return persistent Set snapshots or nil
 when no relation exists. The returned collections and every earlier hierarchy
 identity remain unchanged after later derivation operations.
@@ -123,3 +130,6 @@ not wrapped by hierarchy-aware resolution.
   multimethod modules and Source Maps, and Bun and Node reports agree exactly.
 - **PDH-10:** Public-surface, API-index, compatibility, conformance,
   documentation, strict byte compilation, and complete local core gates pass.
+- **PDH-11:** Ten thousand independent children can be derived under one parent
+  with exact descendant count, final-edge reachability, and unchanged empty
+  base snapshot across both compilers and both JavaScript hosts.

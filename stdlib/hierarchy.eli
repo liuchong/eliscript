@@ -96,12 +96,9 @@
           child-ancestors))
       (empty-value-map)
       ancestor-table))
-  (defun hierarchy-make
-    (direct-parents)
-    (let*
-      ((ancestor-table (hierarchy-close-ancestors direct-parents))
-        (descendant-table (hierarchy-invert-ancestors ancestor-table))
-        (hierarchy (js-object)))
+  (defun hierarchy-register
+    (direct-parents ancestor-table descendant-table)
+    (let ((hierarchy (js-object)))
       (js-call
         hierarchy-registry
         :set
@@ -114,7 +111,37 @@
           :descendants
           descendant-table))
       hierarchy))
-  (defun empty-hierarchy () (hierarchy-make (empty-value-map)))
+  (defun hierarchy-rebuild
+    (direct-parents)
+    (let ((ancestor-table (hierarchy-close-ancestors direct-parents)))
+      (hierarchy-register
+        direct-parents
+        ancestor-table
+        (hierarchy-invert-ancestors ancestor-table))))
+  (defun hierarchy-update-transitive
+    (table source source-relations target target-relations)
+    (let*
+      ((source-values (persistent-map-get source-relations source nil))
+        (target-values (persistent-map-get target-relations target nil))
+        (affected
+          (persistent-set-conj
+            (if source-values source-values (empty-value-set))
+            source))
+        (additions
+          (persistent-set-conj
+            (if target-values target-values (empty-value-set))
+            target)))
+      (persistent-set-reduce
+        (lambda
+          (result value)
+          (let ((known (persistent-map-get result value nil)))
+            (persistent-map-assoc
+              result
+              value
+              (persistent-set-union (if known known (empty-value-set)) additions))))
+        table
+        affected)))
+  (defun empty-hierarchy () (hierarchy-rebuild (empty-value-map)))
   (defun hierarchy-relation
     (hierarchy relation value)
     (persistent-map-get (get (hierarchy-state hierarchy) relation nil) value nil))
@@ -169,13 +196,31 @@
               "hierarchy derivation would create a cycle"
               child
               parent))
-          (hierarchy-make
-            (persistent-map-assoc
-              direct-parents
-              child
-              (persistent-set-conj
-                (if (eq known hierarchy-missing) (empty-value-set) known)
-                parent)))))))
+          (let*
+            ((ancestor-table (get state "ancestors" nil))
+              (descendant-table (get state "descendants" nil))
+              (next-parents
+                (persistent-map-assoc
+                  direct-parents
+                  child
+                  (persistent-set-conj
+                    (if (eq known hierarchy-missing) (empty-value-set) known)
+                    parent)))
+              (next-ancestors
+                (hierarchy-update-transitive
+                  ancestor-table
+                  child
+                  descendant-table
+                  parent
+                  ancestor-table))
+              (next-descendants
+                (hierarchy-update-transitive
+                  descendant-table
+                  parent
+                  ancestor-table
+                  child
+                  descendant-table)))
+            (hierarchy-register next-parents next-ancestors next-descendants))))))
   (defun underive
     (hierarchy child parent)
     (let*
@@ -185,7 +230,7 @@
       (if (or (eq known hierarchy-missing) (not (persistent-set-has? known parent)))
         hierarchy
         (let ((remaining (persistent-set-disj known parent)))
-          (hierarchy-make
+          (hierarchy-rebuild
             (if (= (persistent-set-count remaining) 0)
               (persistent-map-dissoc direct-parents child)
               (persistent-map-assoc direct-parents child remaining)))))))

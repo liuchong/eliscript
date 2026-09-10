@@ -202,8 +202,15 @@ const diamond1 = derive(diamond0, "right", "root");
 const diamond2 = derive(diamond1, "leaf", "left");
 const diamond3 = derive(diamond2, "leaf", "right");
 const diamond4 = underive(diamond3, "left", "root");
+const lateAncestor0 = derive(hierarchy0, "child", "parent");
+const lateAncestor1 = derive(lateAncestor0, "grandchild", "child");
+const lateAncestor2 = derive(lateAncestor1, "parent", "late-root");
 const vectorChild = vectorFromArray(["cat", "online"]);
 const vectorParent = vectorFromArray(["animal", "online"]);
+let wideHierarchy = hierarchy0;
+for (let index = 0; index < 10_000; index += 1) {
+  wideHierarchy = derive(wideHierarchy, `leaf-${index}`, "wide-root");
+}
 
 const taxonomy = multiFn("taxonomy", (value) => value);
 const deriveResult = deriveMethod(taxonomy, "mammal", "animal");
@@ -344,6 +351,13 @@ console.log(JSON.stringify({
     underiveRemovesTransitiveRelation: !isA(hierarchy4, "cat", "animal"),
     underiveRetainsDirectRelation: isA(hierarchy4, "cat", "mammal"),
     diamondRetainsAlternatePath: isA(diamond4, "leaf", "root"),
+    lateAncestorReachesGrandchild:
+      isA(lateAncestor2, "grandchild", "late-root"),
+    lateAncestorDescendantCount:
+      setCount(descendants(lateAncestor2, "late-root")),
+    wideDescendantCount: setCount(descendants(wideHierarchy, "wide-root")),
+    wideLastLeafMatches: isA(wideHierarchy, "leaf-9999", "wide-root"),
+    wideBaseRemainsEmpty: descendants(hierarchy0, "wide-root") === null,
   },
   hierarchyErrors: {
     invalid: invalidHierarchyValue,

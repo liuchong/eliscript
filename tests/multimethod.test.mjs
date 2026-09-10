@@ -214,6 +214,11 @@ test("Eliscript multimethods dispatch on values with persistent method snapshots
         underiveRemovesTransitiveRelation: true,
         underiveRetainsDirectRelation: true,
         diamondRetainsAlternatePath: true,
+        lateAncestorReachesGrandchild: true,
+        lateAncestorDescendantCount: 3,
+        wideDescendantCount: 10_000,
+        wideLastLeafMatches: true,
+        wideBaseRemainsEmpty: true,
       },
       hierarchyErrors: {
         invalid: {
