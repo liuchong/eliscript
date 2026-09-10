@@ -1648,6 +1648,46 @@
                (regexp-quote (cadr case))
                (error-message-string error-data))))))
 
+(ert-deftest eliscript-expander-desugars-multi-arity-functions ()
+  (let ((output
+         (eliscript-compile-string
+          (concat
+           "(defun choose (() :zero) ((value) value))\n"
+           "(defn alias (() :zero) ((value) value))\n"
+           "(defportable portable (() :zero) ((value) value))\n"
+           "(defasync asynchronous (() :zero) ((value) value))\n"
+           "(defconst chooser (lambda (() :zero) ((value) value)))\n"
+           "(defconst alias-chooser (fn (() :zero) ((value) value)))\n"
+           "(defconst async-chooser (async (() :zero) ((value) value)))")
+          "multi-arity.eli")))
+    (should (string-match-p "arity_arguments\$G[0-9]+" output))
+    (should (string-match-p
+             (regexp-quote "received unsupported arity:") output))
+    (should-not
+     (string-match-p "(lambda (()\|(fn (()\|(async (()" output))))
+
+(ert-deftest eliscript-expander-validates-multi-arity-functions ()
+  (dolist (case
+           '(("(defun choose ((value) value))"
+              "multi-arity function requires at least two clauses")
+             ("(defun choose ((value) value) ((other) other))"
+              "multi-arity function declares duplicate fixed arity: 1")
+             ("(defun choose ((x &rest xs) x) ((y &rest ys) y))"
+              "multi-arity function declares more than one variadic clause")
+             ("(defun choose ((x &rest xs) x) ((x y) y))"
+              "multi-arity fixed arity 2 is unreachable behind variadic arity 1")
+             ("(defun choose ((x &optional y) y) ((x y z) z))"
+              "multi-arity clauses do not support &optional")
+             ("(defun choose ((x)) ((x y) y))"
+              "multi-arity clause requires a parameter list and body")))
+    (let ((error-data
+           (should-error
+            (eliscript-compile-string (car case) "multi-arity-error.eli")
+            :type 'eliscript-expand-error)))
+      (should (string-match-p
+               (regexp-quote (cadr case))
+               (error-message-string error-data))))))
+
 (ert-deftest eliscript-expander-preserves-quoted-data ()
   (let ((output
          (eliscript-compile-string

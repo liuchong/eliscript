@@ -1024,6 +1024,12 @@
        (eliscript-ir-emitter--require-arity node 1 1)
        (format "((%s) ?? []).length"
                (eliscript-ir-emitter-emit-expression (car nodes))))
+      ('__eliscript_arity_error
+       (eliscript-ir-emitter--require-arity node 2 2)
+       (format
+        "((label, arity) => { throw new TypeError(label + \" received unsupported arity: \" + arity); })(%s, %s)"
+        (eliscript-ir-emitter-emit-expression (nth 0 nodes))
+        (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
       ('object-keys
        (eliscript-ir-emitter--require-arity node 1 1)
        (format "Object.keys((%s) ?? {})"

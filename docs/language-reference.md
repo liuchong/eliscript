@@ -55,6 +55,25 @@ Functions use `defun`, `defn`, `lambda`, or `fn`. Parameters may include
 inside an asynchronous body. `defportable` defines functions whose complete
 dependency closure can execute in the restricted worker environment.
 
+Named `defun`, `defn`, `defportable`, and `defasync` forms and anonymous
+`lambda`, `fn`, and `async` forms may instead contain two or more
+parameter/body clauses. Calls select one fixed clause by exact argument count,
+or one final-rest clause by its minimum count:
+
+```elisp
+(defun describe
+  (() "empty")
+  ((value) (str "one:" value))
+  ((left right &rest remaining)
+    (+ left right (length remaining))))
+```
+
+Each fixed count may appear once, and only one variadic clause is allowed.
+Overlapping clauses are rejected. Multi-arity clauses support required,
+vector-destructured, map-destructured, and final `&rest` parameters, but not
+`&optional` or `&body`. `recur` stays local to the selected clause. A call that
+matches no clause throws a named `TypeError` with the supplied argument count.
+
 ## Expression Composition
 
 `->` inserts a value after each step operator, while `->>` inserts it after the

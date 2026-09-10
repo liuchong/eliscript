@@ -70,6 +70,10 @@ test("self-hosted formatter preserves concrete syntax and core semantics", async
 (defun conditional (value enabled) (cond-> value enabled (1+) t (* 2)))
 (defun dispatch (value) (case value (1 2) :small :other))
 (defun predicate-dispatch (predicate value) (condp predicate value 1 :one :other))
+(defun choose-many
+(() :none)
+((value) value)
+((left right &rest remaining) (+ left right (length remaining))))
 (defun present-pipeline (value) (some-> value (1+) (* 2)))
 (defun present (value) (if-some (item value) item :missing))
 \`(a ,x ,@xs))
@@ -85,6 +89,10 @@ test("self-hosted formatter preserves concrete syntax and core semantics", async
   (defun conditional (value enabled) (cond-> value enabled (1+) t (* 2)))
   (defun dispatch (value) (case value (1 2) :small :other))
   (defun predicate-dispatch (predicate value) (condp predicate value 1 :one :other))
+  (defun choose-many
+    (() :none)
+    ((value) value)
+    ((left right &rest remaining) (+ left right (length remaining))))
   (defun present-pipeline (value) (some-> value (1+) (* 2)))
   (defun present (value) (if-some (item value) item :missing))
   \`(a ,x ,@xs))

@@ -20,7 +20,7 @@
     string-to-number string-to-bigint number-float64-words
     eq equal null nil? undefined? nullish?
     car cdr cons js-cons nth js-nth aref length js-length
-    object-keys object-has? object-assoc)
+    object-keys object-has? object-assoc __eliscript_arity_error)
   "Operators represented by the generic intrinsic IR node.")
 
 (defvar eliscript-lower--recur-targets nil)

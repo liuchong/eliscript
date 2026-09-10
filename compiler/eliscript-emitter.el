@@ -1027,6 +1027,13 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
        (eliscript-emitter--require-arity "js-length" arguments 1 1)
        (format "((%s) ?? []).length"
                (eliscript-emitter-emit-expression (car arguments))))
+      ('__eliscript_arity_error
+       (eliscript-emitter--require-arity
+        "__eliscript_arity_error" arguments 2 2)
+       (format
+        "((label, arity) => { throw new TypeError(label + \" received unsupported arity: \" + arity); })(%s, %s)"
+        (eliscript-emitter-emit-expression (nth 0 arguments))
+        (eliscript-emitter-emit-expression (nth 1 arguments))))
       ('object-keys
        (eliscript-emitter--require-arity "object-keys" arguments 1 1)
        (format "Object.keys((%s) ?? {})"

@@ -66,6 +66,13 @@
   (defun vector-node-p (node)
     (and node (= (node-kind node) "vector")))
 
+  (defun map-node-p (node)
+    (and node
+         (= (node-kind node) "list")
+         (> (get (node-items node) :length) 0)
+         (symbol-node-p (js-nth 0 (node-items node)))
+         (= (node-name (js-nth 0 (node-items node))) "hash-map")))
+
   (defun list-items (node)
     (cond
       ((null-node-p node) (js-array))
@@ -1448,6 +1455,188 @@
           (make-let-form dispatch-name dispatch-node body-node span)
           span))))
 
+  (defun multi-arity-clause-p (node)
+    (let ((items (list-items node)))
+      (and (not (eq items undefined))
+           (> (get items :length) 0)
+           (list-node-p (js-nth 0 items))
+           (not (map-node-p (js-nth 0 items))))))
+
+  (defun multi-arity-layout (parameters context span)
+    (let ((items (list-items parameters))
+          (required 0)
+          (variadic false)
+          (index 0))
+      (when (eq items undefined)
+        (expander-fail
+          context span "multi-arity clause parameters must be a list"))
+      (while (< index (get items :length))
+        (let* ((parameter (js-nth index items))
+               (name (and (symbol-node-p parameter) (node-name parameter))))
+          (cond
+            ((or (= name "&optional") (= name "&body"))
+             (expander-fail
+               context (or (node-span parameter) span)
+               (str "multi-arity clauses do not support " name)))
+            ((= name "&rest")
+             (let ((rest-node (js-nth (1+ index) items)))
+               (unless (and (= (+ index 2) (get items :length))
+                            (symbol-node-p rest-node)
+                            (not (js-call
+                                   (js-array "&optional" "&rest" "&body")
+                                   :includes (node-name rest-node))))
+                 (expander-fail
+                   context (or (node-span parameter) span)
+                   "multi-arity clause requires one final &rest symbol"))
+               (setq variadic t)
+               (setq index (get items :length))))
+            (t
+             (setq required (1+ required))
+             (setq index (1+ index))))))
+      (js-object :required required :variadic variadic)))
+
+  (defun multi-arity-clauses (forms context span)
+    (when (< (get forms :length) 2)
+      (expander-fail
+        context span "multi-arity function requires at least two clauses"))
+    (let ((fixed (new (js* "Set")))
+          (fixed-arities (js-array))
+          (variadic false)
+          (variadic-minimum nil)
+          (clauses (js-array))
+          (index 0))
+      (while (< index (get forms :length))
+        (let* ((form (js-nth index forms))
+               (items (list-items form)))
+          (when (or (eq items undefined)
+                    (< (get items :length) 2)
+                    (not (list-node-p (js-nth 0 items))))
+            (expander-fail
+              context (or (node-span form) span)
+              "multi-arity clause requires a parameter list and body"))
+          (let* ((layout
+                   (multi-arity-layout
+                     (js-nth 0 items) context (or (node-span form) span)))
+                 (required (get layout :required))
+                 (variadic-clause (get layout :variadic))
+                 (clause
+                   (js-object
+                     :form form
+                     :parameters (js-nth 0 items)
+                     :body (js-call items :slice 1)
+                     :required required
+                     :variadic variadic-clause)))
+            (if variadic-clause
+                (progn
+                  (when variadic
+                    (expander-fail
+                      context (or (node-span form) span)
+                      "multi-arity function declares more than one variadic clause"))
+                  (setq variadic t)
+                  (setq variadic-minimum required))
+              (progn
+                (when (js-call fixed :has required)
+                  (expander-fail
+                    context (or (node-span form) span)
+                    (str "multi-arity function declares duplicate fixed arity: "
+                         required)))
+                (js-call fixed :add required)
+                (js-call fixed-arities :push required)))
+            (js-call clauses :push clause)))
+        (setq index (1+ index)))
+      (when variadic
+        (let ((arity-index 0))
+          (while (< arity-index (get fixed-arities :length))
+            (let ((arity (js-nth arity-index fixed-arities)))
+              (when (>= arity variadic-minimum)
+                (expander-fail
+                  context span
+                  (str "multi-arity fixed arity " arity
+                       " is unreachable behind variadic arity "
+                       variadic-minimum))))
+            (setq arity-index (1+ arity-index)))))
+      clauses))
+
+  (defun desugar-multi-arity
+      (operator-node name-node clause-forms source-node context span)
+    (let* ((operator (node-name operator-node))
+           (clauses (multi-arity-clauses clause-forms context span))
+           (arguments-name (fresh-name-node "arity-arguments" context span))
+           (arity-name (fresh-name-node "arity-count" context span))
+           (branch-operator
+             (if (or (= operator "async") (= operator "defasync"))
+               "async" "lambda"))
+           (label (if name-node (node-display name-node) "anonymous function"))
+           (cond-clauses (js-array))
+           (index 0))
+      (while (< index (get clauses :length))
+        (let* ((clause (js-nth index clauses))
+               (clause-node (get clause :form))
+               (clause-span (or (node-span clause-node) span))
+               (comparison
+                 (make-list
+                   (js-array
+                     (symbol-node
+                       (if (get clause :variadic) ">=" "=") clause-span)
+                     arity-name
+                     (literal-node (get clause :required) clause-span))
+                   clause-span))
+               (branch-items
+                 (js-array
+                   (symbol-node branch-operator clause-span)
+                   (get clause :parameters)))
+               (branch nil)
+               (selected nil))
+          (js-call (get clause :body) :forEach
+            (lambda (body-node) (js-call branch-items :push body-node)))
+          (setq branch (make-list branch-items clause-span))
+          (setq selected
+            (make-list
+              (js-array
+                (symbol-node "apply" clause-span)
+                branch
+                arguments-name)
+              clause-span))
+          (js-call cond-clauses :push
+            (make-list (js-array comparison selected) clause-span)))
+        (setq index (1+ index)))
+      (js-call cond-clauses :push
+        (make-list
+          (js-array
+            (literal-node t span)
+            (make-list
+              (js-array
+                (symbol-node "__eliscript_arity_error" span)
+                (literal-node label span)
+                arity-name)
+              span))
+          span))
+      (let* ((arity-value
+               (make-list
+                 (js-array
+                   (symbol-node "js-length" span)
+                   arguments-name)
+                 span))
+             (dispatch
+               (make-let-form
+                 arity-name
+                 arity-value
+                 (make-list
+                   (js-call
+                     (js-array (symbol-node "cond" span))
+                     :concat cond-clauses)
+                   span)
+                 span))
+             (parameters
+               (make-list
+                 (js-array (symbol-node "&rest" span) arguments-name)
+                 span))
+             (result-items (js-array operator-node)))
+        (when name-node (js-call result-items :push name-node))
+        (js-call result-items :push parameters)
+        (js-call result-items :push dispatch)
+        (make-list result-items (node-span source-node)))))
+
   (defun desugar-defprotocol (args context span)
     (when (< (get args :length) 2)
       (expander-fail
@@ -2016,6 +2205,14 @@
             (expand-expression
               (desugar-condp args context span)
               environment depth context))
+           ((and (or (= operator "lambda") (= operator "fn")
+                     (= operator "async"))
+                 (> (get args :length) 0)
+                 (multi-arity-clause-p (js-nth 0 args)))
+            (expand-expression
+              (desugar-multi-arity
+                operator-node nil args form context span)
+              environment depth context))
            ((= operator "reify")
             (expand-expression
               (desugar-reify args context span)
@@ -2125,6 +2322,15 @@
           ((= operator "extend-default")
            (expand-top-level
              (desugar-extend-default args context span)
+             environment depth context))
+          ((and (or (= operator "defun") (= operator "defn")
+                    (= operator "defportable") (= operator "defasync"))
+                (>= (get args :length) 2)
+                (multi-arity-clause-p (js-nth 1 args)))
+           (expand-top-level
+             (desugar-multi-arity
+               operator-node (js-nth 0 args) (js-call args :slice 1)
+               form context span)
              environment depth context))
           ((and operator (js-call environment :has operator))
            (expand-top-level

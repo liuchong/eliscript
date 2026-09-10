@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "format": "eliscript-diagnostic-corpus",
   "version": 1,
-  "identity": "7b0f54841ece10e57eebf2ad80d5d9bcd7f6f6c909e207c65042ca1901ac6aef",
+  "identity": "3a74f866b9488c8ee56bb66f6b901120272799ce49d292024e48be0e9992433d",
   "suites": [
     {
       "id": "reader",
@@ -443,7 +443,7 @@
       "fixture": "tests/fixtures/bootstrap-expander.json",
       "oracle": "tests/bootstrap-expander-oracle.el",
       "validCaseCount": 40,
-      "negativeCaseCount": 24,
+      "negativeCaseCount": 30,
       "cases": [
         {
           "name": "missing-definition-shape",
@@ -1041,6 +1041,156 @@
                 "offset": 29,
                 "line": 1,
                 "column": 30
+              }
+            }
+          }
+        },
+        {
+          "name": "single-multi-arity-clause",
+          "human": "multi-arity-single.eli:1:1: multi-arity function requires at least two clauses",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "multi-arity function requires at least two clauses",
+            "location": {
+              "file": "multi-arity-single.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 30,
+                "line": 1,
+                "column": 31
+              }
+            }
+          }
+        },
+        {
+          "name": "duplicate-fixed-arity",
+          "human": "multi-arity-duplicate.eli:1:31: multi-arity function declares duplicate fixed arity: 1",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "multi-arity function declares duplicate fixed arity: 1",
+            "location": {
+              "file": "multi-arity-duplicate.eli",
+              "start": {
+                "offset": 30,
+                "line": 1,
+                "column": 31
+              },
+              "end": {
+                "offset": 45,
+                "line": 1,
+                "column": 46
+              }
+            }
+          }
+        },
+        {
+          "name": "multiple-variadic-arities",
+          "human": "multi-arity-variadic.eli:1:32: multi-arity function declares more than one variadic clause",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "multi-arity function declares more than one variadic clause",
+            "location": {
+              "file": "multi-arity-variadic.eli",
+              "start": {
+                "offset": 31,
+                "line": 1,
+                "column": 32
+              },
+              "end": {
+                "offset": 47,
+                "line": 1,
+                "column": 48
+              }
+            }
+          }
+        },
+        {
+          "name": "unreachable-fixed-arity",
+          "human": "multi-arity-unreachable.eli:1:1: multi-arity fixed arity 2 is unreachable behind variadic arity 1",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "multi-arity fixed arity 2 is unreachable behind variadic arity 1",
+            "location": {
+              "file": "multi-arity-unreachable.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 41,
+                "line": 1,
+                "column": 42
+              }
+            }
+          }
+        },
+        {
+          "name": "optional-multi-arity-parameter",
+          "human": "multi-arity-optional.eli:1:19: multi-arity clauses do not support &optional",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "multi-arity clauses do not support &optional",
+            "location": {
+              "file": "multi-arity-optional.eli",
+              "start": {
+                "offset": 18,
+                "line": 1,
+                "column": 19
+              },
+              "end": {
+                "offset": 27,
+                "line": 1,
+                "column": 28
+              }
+            }
+          }
+        },
+        {
+          "name": "empty-multi-arity-body",
+          "human": "multi-arity-body.eli:1:15: multi-arity clause requires a parameter list and body",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "multi-arity clause requires a parameter list and body",
+            "location": {
+              "file": "multi-arity-body.eli",
+              "start": {
+                "offset": 14,
+                "line": 1,
+                "column": 15
+              },
+              "end": {
+                "offset": 19,
+                "line": 1,
+                "column": 20
               }
             }
           }

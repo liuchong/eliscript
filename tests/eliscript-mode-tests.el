@@ -50,10 +50,10 @@
 (ert-deftest eliscript-mode-indentation-matches-formatter-structure ()
   (with-temp-buffer
     (eliscript-mode)
-    (insert "(module demo\n(defun answer (x)\n(if x\n(print :yes)\n(print :no))))\n")
+    (insert "(module demo\n(defun answer (x)\n(if x\n(print :yes)\n(print :no)))\n(defun choose\n(() :none)\n((value) value)))\n")
     (indent-region (point-min) (point-max))
     (let ((canonical
-           "(module demo\n  (defun answer (x)\n    (if x\n      (print :yes)\n      (print :no))))\n"))
+           "(module demo\n  (defun answer (x)\n    (if x\n      (print :yes)\n      (print :no)))\n  (defun choose\n    (() :none)\n    ((value) value)))\n"))
       (should (equal (buffer-string) canonical))
       (indent-region (point-min) (point-max))
       (should (equal (buffer-string) canonical)))))

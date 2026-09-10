@@ -1074,6 +1074,13 @@
         ((= name "js-length")
          (require-node-arity node 1 1)
          (combine (js-array "((" (emit-expression (js-nth 0 nodes)) ") ?? []).length")))
+        ((= name "__eliscript_arity_error")
+         (require-node-arity node 2 2)
+         (combine
+           (js-array
+             "((label, arity) => { throw new TypeError(label + \" received unsupported arity: \" + arity); })("
+             (emit-expression (js-nth 0 nodes)) ", "
+             (emit-expression (js-nth 1 nodes)) ")")))
         ((= name "object-keys")
          (require-node-arity node 1 1)
          (combine (js-array "Object.keys((" (emit-expression (js-nth 0 nodes)) ") ?? {})")))

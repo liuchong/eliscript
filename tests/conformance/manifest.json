@@ -3534,6 +3534,46 @@
           "contains": "self-hosted formatter preserves concrete syntax and core semantics"
         }
       ]
+    },
+    {
+      "id": "language.multi-arity-functions",
+      "title": "Multi-arity functions",
+      "status": "stable",
+      "spec": "0171",
+      "contracts": [
+        "Dispatches named and anonymous functions by supplied argument count",
+        "Supports exact fixed clauses and one non-overlapping final-rest clause",
+        "Keeps destructuring and stack-safe recur local to the selected clause",
+        "Preserves async and portable function analysis after expansion",
+        "Matches Seed self-hosted Source Maps Bun and Node execution"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-expander-desugars-multi-arity-functions"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-expander-validates-multi-arity-functions"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/multi-arity.test.mjs",
+          "contains": "multi-arity functions agree across compilers and local hosts"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-indentation-matches-formatter-structure"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-formatter.test.mjs",
+          "contains": "self-hosted formatter preserves concrete syntax and core semantics"
+        }
+      ]
     }
   ]
 }

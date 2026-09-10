@@ -26,7 +26,7 @@ Eliscript has a working Emacs Lisp seed compiler, a reproducible self-hosted
 compiler, self-hosted multi-file graph planning and incremental reuse,
 persistent values, declarative immutable Record types, low-level `deftype` and
 lexical `reify` protocol values, value-dispatching `case` and `condp` forms,
-protocols, and a long-lived
+multi-arity named, anonymous, async, and portable functions, protocols, and a long-lived
 Emacs-to-JavaScript worker. The
 repository also carries React, Org, and optional bundler probes as replaceable
 application-level evidence. The project has completed all implementation units
@@ -405,6 +405,17 @@ explicit JavaScript host boundary:
 
   (print (factorial 5 1))
   (export factorial))
+```
+
+Functions can select a fixed or variadic clause from the supplied argument
+count while keeping `recur` local to the selected clause:
+
+```elisp
+(defun describe
+  (() "empty")
+  ((value) (str "one:" value))
+  ((left right &rest remaining)
+    (+ left right (length remaining))))
 ```
 
 Portable source modules can be imported directly:

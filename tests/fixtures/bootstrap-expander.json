@@ -345,6 +345,42 @@
       "filename": "condp-redirect.eli",
       "source": "(condp predicate value 1 :>>)",
       "error": "condp-redirect.eli:1:1: condp :>> clause requires a result function"
+    },
+    {
+      "name": "single-multi-arity-clause",
+      "filename": "multi-arity-single.eli",
+      "source": "(defun choose ((value) value))",
+      "error": "multi-arity-single.eli:1:1: multi-arity function requires at least two clauses"
+    },
+    {
+      "name": "duplicate-fixed-arity",
+      "filename": "multi-arity-duplicate.eli",
+      "source": "(defun choose ((value) value) ((other) other))",
+      "error": "multi-arity-duplicate.eli:1:31: multi-arity function declares duplicate fixed arity: 1"
+    },
+    {
+      "name": "multiple-variadic-arities",
+      "filename": "multi-arity-variadic.eli",
+      "source": "(defun choose ((x &rest xs) x) ((y &rest ys) y))",
+      "error": "multi-arity-variadic.eli:1:32: multi-arity function declares more than one variadic clause"
+    },
+    {
+      "name": "unreachable-fixed-arity",
+      "filename": "multi-arity-unreachable.eli",
+      "source": "(defun choose ((x &rest xs) x) ((x y) y))",
+      "error": "multi-arity-unreachable.eli:1:1: multi-arity fixed arity 2 is unreachable behind variadic arity 1"
+    },
+    {
+      "name": "optional-multi-arity-parameter",
+      "filename": "multi-arity-optional.eli",
+      "source": "(defun choose ((x &optional y) y) ((x y z) z))",
+      "error": "multi-arity-optional.eli:1:19: multi-arity clauses do not support &optional"
+    },
+    {
+      "name": "empty-multi-arity-body",
+      "filename": "multi-arity-body.eli",
+      "source": "(defun choose ((x)) ((x y) y))",
+      "error": "multi-arity-body.eli:1:15: multi-arity clause requires a parameter list and body"
     }
   ]
 }

@@ -1,0 +1,50 @@
+(module tests.multi-arity
+  (defun classify
+    (() "zero")
+    ((value) (str "one:" value))
+    ((left right &rest remaining)
+      (+ left right (js-length remaining))))
+
+  (defun countdown
+    ((value)
+      (if (= value 0)
+        "done"
+        (recur (1- value))))
+    ((value suffix) (str value suffix)))
+
+  (defun destructure
+    (([left right]) (+ left right))
+    (({:keys [value]} suffix) (str value suffix)))
+
+  (defconst anonymous-choice
+    (lambda
+      (() "anonymous-zero")
+      ((value) (str "anonymous:" value))))
+
+  (defportable portable-choice
+    (() "portable-zero")
+    ((value) (str "portable:" value)))
+
+  (defasync async-choice
+    (() "async-zero")
+    ((value) (str "async:" value)))
+
+  (defun report ()
+    (js-object
+      :zero (classify)
+      :one (classify 7)
+      :variadic (classify 3 4 5 6)
+      :recursive (countdown 10000)
+      :destructuredVector (destructure [8 9])
+      :destructuredMap (destructure {:value 10} "!")
+      :anonymousZero (funcall anonymous-choice)
+      :anonymousOne (funcall anonymous-choice 11)
+      :portableZero (portable-choice)
+      :portableOne (portable-choice 12)))
+
+  (defasync async-report ()
+    (js-object
+      :zero (await (async-choice))
+      :one (await (async-choice 13))))
+
+  (export report async-report countdown))

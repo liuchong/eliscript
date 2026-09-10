@@ -583,6 +583,189 @@
        (eliscript-expander--let-form
         dispatch-name dispatch-form body)))))
 
+(defun eliscript-expander--multi-arity-clause-p (form)
+  "Return non-nil when FORM starts with a function parameter list."
+  (let* ((items (eliscript-form-value form))
+         (parameters (and (consp items)
+                          (eliscript-form-value (car items)))))
+    (and (consp items)
+         (proper-list-p items)
+         (proper-list-p parameters)
+         (not (and parameters
+                   (eq (eliscript-form-value (car parameters))
+                       'hash-map))))))
+
+(defun eliscript-expander--multi-arity-layout (parameters)
+  "Return required and variadic arity metadata for PARAMETERS."
+  (let ((items (eliscript-form-value parameters))
+        (required 0)
+        variadic)
+    (unless (proper-list-p items)
+      (eliscript-expander--fail
+       "multi-arity clause parameters must be a list"))
+    (while items
+      (let* ((parameter (pop items))
+             (eliscript-expander--current-span
+              (or (eliscript-form-span parameter)
+                  eliscript-expander--current-span))
+             (name (eliscript-form-value parameter)))
+        (cond
+         ((memq name '(&optional &body))
+          (eliscript-expander--fail
+           "multi-arity clauses do not support %s" name))
+         ((eq name '&rest)
+          (unless (and (= (length items) 1)
+                       (eliscript-macro-eval-symbol-p
+                        (eliscript-form-value (car items))))
+            (eliscript-expander--fail
+             "multi-arity clause requires one final &rest symbol"))
+          (setq variadic t
+                items nil))
+         (t (setq required (1+ required))))))
+    (list :required required :variadic variadic)))
+
+(defun eliscript-expander--multi-arity-clauses (forms)
+  "Validate multi-arity clause FORMS and return normalized metadata."
+  (when (< (length forms) 2)
+    (eliscript-expander--fail
+     "multi-arity function requires at least two clauses"))
+  (let ((fixed (make-hash-table :test #'eql))
+        fixed-arities
+        variadic
+        clauses)
+    (dolist (form forms)
+      (let* ((eliscript-expander--current-span
+              (or (eliscript-form-span form)
+                  eliscript-expander--current-span))
+             (items (eliscript-form-value form)))
+        (unless (and (consp items)
+                     (proper-list-p items)
+                     (cdr items)
+                     (proper-list-p (eliscript-form-value (car items))))
+          (eliscript-expander--fail
+           "multi-arity clause requires a parameter list and body"))
+        (let* ((layout
+                (eliscript-expander--multi-arity-layout (car items)))
+               (required (plist-get layout :required))
+               (variadic-p (plist-get layout :variadic))
+               (clause
+                (list :form form
+                      :parameters (car items)
+                      :body (cdr items)
+                      :required required
+                      :variadic variadic-p)))
+          (if variadic-p
+              (if variadic
+                  (eliscript-expander--fail
+                   "multi-arity function declares more than one variadic clause")
+                (setq variadic clause))
+            (when (gethash required fixed)
+              (eliscript-expander--fail
+               "multi-arity function declares duplicate fixed arity: %d"
+               required))
+            (puthash required t fixed)
+            (push required fixed-arities))
+          (push clause clauses))))
+    (when variadic
+      (let ((minimum (plist-get variadic :required)))
+        (dolist (arity (nreverse fixed-arities))
+          (when (>= arity minimum)
+            (eliscript-expander--fail
+             "multi-arity fixed arity %d is unreachable behind variadic arity %d"
+             arity minimum)))))
+    (nreverse clauses)))
+
+(defun eliscript-expander--desugar-multi-arity
+    (operator-form name-form clause-forms source-form)
+  "Return one function dispatching CLAUSE-FORMS by argument count."
+  (let* ((operator (eliscript-form-value operator-form))
+         (clauses
+          (eliscript-expander--multi-arity-clauses clause-forms))
+         (arguments-name
+          (eliscript-expander--fresh-name-form "arity-arguments"))
+         (arity-name
+          (eliscript-expander--fresh-name-form "arity-count"))
+         (branch-operator (if (memq operator '(async defasync)) 'async 'lambda))
+         (label
+          (if name-form
+              (format "%s" (eliscript-form-strip name-form))
+            "anonymous function"))
+         cond-clauses)
+    (dolist (clause clauses)
+      (let* ((clause-form (plist-get clause :form))
+             (required (plist-get clause :required))
+             (comparison
+              (eliscript-expander--generated-form-at
+               (list
+                (eliscript-expander--generated-form-at
+                 (if (plist-get clause :variadic) '>= '=) clause-form)
+                arity-name
+                (eliscript-expander--generated-form-at required clause-form))
+               clause-form))
+             (branch
+              (eliscript-expander--generated-form-at
+               (append
+                (list
+                 (eliscript-expander--generated-form-at
+                  branch-operator clause-form)
+                 (plist-get clause :parameters))
+                (plist-get clause :body))
+               clause-form))
+             (selected
+              (eliscript-expander--generated-form-at
+               (list
+                (eliscript-expander--generated-form-at 'apply clause-form)
+                branch
+                arguments-name)
+               clause-form)))
+        (push
+         (eliscript-expander--generated-form-at
+          (list comparison selected) clause-form)
+         cond-clauses)))
+    (setq cond-clauses (nreverse cond-clauses))
+    (setq cond-clauses
+          (append
+           cond-clauses
+           (list
+            (eliscript-expander--generated-form-at
+             (list
+              (eliscript-expander--generated-form-at t source-form)
+              (eliscript-expander--generated-form-at
+               (list
+                (eliscript-expander--generated-form-at
+                 '__eliscript_arity_error source-form)
+                (eliscript-expander--generated-form-at label source-form)
+                arity-name)
+               source-form))
+             source-form))))
+    (let* ((arity-value
+            (eliscript-expander--generated-form-at
+             (list
+              (eliscript-expander--generated-form-at 'js-length source-form)
+              arguments-name)
+             source-form))
+           (dispatch
+            (eliscript-expander--let-form
+             arity-name
+             arity-value
+             (eliscript-expander--generated-form-at
+              (cons
+               (eliscript-expander--generated-form-at 'cond source-form)
+               cond-clauses)
+              source-form)))
+           (parameters
+            (eliscript-expander--generated-form-at
+             (list
+              (eliscript-expander--generated-form-at '&rest source-form)
+              arguments-name)
+             source-form)))
+      (eliscript-expander--generated-form-at
+       (append
+        (list operator-form)
+        (when name-form (list name-form))
+        (list parameters dispatch))
+       source-form))))
+
 (defun eliscript-expander--desugar-defprotocol (arguments)
   "Return core declarations represented by defprotocol ARGUMENTS."
   (when (< (length arguments) 2)
@@ -1166,6 +1349,13 @@
           (eliscript-expander--expand-expression
            (eliscript-expander--desugar-condp arguments)
            environment depth))
+         ((and (memq operator '(lambda fn async))
+               arguments
+               (eliscript-expander--multi-arity-clause-p (car arguments)))
+          (eliscript-expander--expand-expression
+           (eliscript-expander--desugar-multi-arity
+            operator-form nil arguments form)
+           environment depth))
          ((eq operator 'reify)
           (eliscript-expander--expand-expression
            (eliscript-expander--desugar-reify arguments)
@@ -1274,6 +1464,14 @@
          ((eq operator 'extend-default)
           (eliscript-expander--expand-top-level
            (eliscript-expander--desugar-extend-default arguments)
+           environment depth))
+         ((and (memq operator '(defun defn defportable defasync))
+               (>= (length arguments) 2)
+               (eliscript-expander--multi-arity-clause-p
+                (nth 1 arguments)))
+          (eliscript-expander--expand-top-level
+           (eliscript-expander--desugar-multi-arity
+            operator-form (car arguments) (cdr arguments) form)
            environment depth))
          ((and (symbolp operator) (gethash operator environment))
           (eliscript-expander--expand-top-level
