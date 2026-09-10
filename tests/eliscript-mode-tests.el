@@ -70,6 +70,8 @@
             "(extend-category \"number\" IDescribe\n"
             "  (describe (value) value))\n"
             "(defun pipeline (value) (-> value (1+) (* 2)))\n"
+            "(defun conditional (value) (cond-> value t (1+)))\n"
+            "(defun present-pipeline (value) (some-> value (1+)))\n"
             "(defun present (value) (if-some (item value) item :missing))\n"
             "(defconst label \"ready\")\n"
             "; note\n")
@@ -102,6 +104,10 @@
     (should (eq (eliscript-mode-tests--face-at "extend-category")
                 'font-lock-keyword-face))
     (should (eq (eliscript-mode-tests--face-at "->")
+                'font-lock-keyword-face))
+    (should (eq (eliscript-mode-tests--face-at "cond->")
+                'font-lock-keyword-face))
+    (should (eq (eliscript-mode-tests--face-at "some->")
                 'font-lock-keyword-face))
     (should (eq (eliscript-mode-tests--face-at "if-some")
                 'font-lock-keyword-face))

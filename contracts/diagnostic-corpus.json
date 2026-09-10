@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "format": "eliscript-diagnostic-corpus",
   "version": 1,
-  "identity": "24dd859354796bcd69eb999f0e7be26e64987f731135f26ee5b2e517cd3ebc8b",
+  "identity": "25697255af3f0d0257b63e1ab824f35ca3adac4f5001da6686fe329acb0fffe2",
   "suites": [
     {
       "id": "reader",
@@ -418,7 +418,7 @@
       "fixture": "tests/fixtures/bootstrap-expander.json",
       "oracle": "tests/bootstrap-expander-oracle.el",
       "validCaseCount": 40,
-      "negativeCaseCount": 20,
+      "negativeCaseCount": 22,
       "cases": [
         {
           "name": "missing-definition-shape",
@@ -916,6 +916,56 @@
                 "offset": 26,
                 "line": 1,
                 "column": 27
+              }
+            }
+          }
+        },
+        {
+          "name": "unpaired-conditional-thread",
+          "human": "thread-pairs.eli:1:1: cond-> expects test and step pairs",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "cond-> expects test and step pairs",
+            "location": {
+              "file": "thread-pairs.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 12,
+                "line": 1,
+                "column": 13
+              }
+            }
+          }
+        },
+        {
+          "name": "missing-some-thread-initializer",
+          "human": "some-thread-empty.eli:1:1: some->> expects an initial expression",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "some->> expects an initial expression",
+            "location": {
+              "file": "some-thread-empty.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 9,
+                "line": 1,
+                "column": 10
               }
             }
           }

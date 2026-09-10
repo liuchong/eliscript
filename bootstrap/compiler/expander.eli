@@ -1096,6 +1096,14 @@
             (thread-step result step-node position context span))))
       result))
 
+  (defun fresh-name-node (prefix context span)
+    (symbol-node
+      (node-name
+        (allocate-name
+          (make-eval-scope nil context)
+          (literal-node prefix nil)))
+      span))
+
   (defun make-let-form (name-node value-node body-node span)
     (let* ((value-span (or (node-span value-node) span))
            (binding
@@ -1129,6 +1137,67 @@
               name-node (js-nth index step-nodes) body-node span))
           (setq index (1- index)))
         (make-let-form name-node initial-node body-node span))))
+
+  (defun desugar-cond-thread (form-name args position context span)
+    (when (= (get args :length) 0)
+      (expander-fail
+        context span (str form-name " expects an initial expression")))
+    (let ((clause-count (1- (get args :length))))
+      (when (= (% clause-count 2) 1)
+        (expander-fail
+          context span (str form-name " expects test and step pairs")))
+      (if (= clause-count 0)
+          (js-nth 0 args)
+        (let ((name-node (fresh-name-node "thread" context span))
+              (body-node undefined)
+              (index (- (get args :length) 2)))
+          (setq body-node name-node)
+          (while (>= index 1)
+            (let* ((test-node (js-nth index args))
+                   (step-node (js-nth (1+ index) args))
+                   (if-node
+                     (make-list
+                       (js-array
+                         (symbol-node "if" span)
+                         test-node
+                         (thread-step
+                           name-node step-node position context span)
+                         name-node)
+                       span)))
+              (setq body-node
+                (make-let-form name-node if-node body-node span)))
+            (setq index (- index 2)))
+          (make-let-form name-node (js-nth 0 args) body-node span)))))
+
+  (defun desugar-some-thread (form-name args position context span)
+    (when (= (get args :length) 0)
+      (expander-fail
+        context span (str form-name " expects an initial expression")))
+    (if (= (get args :length) 1)
+        (js-nth 0 args)
+      (let ((name-node (fresh-name-node "thread" context span))
+            (body-node undefined)
+            (index (1- (get args :length))))
+        (setq body-node name-node)
+        (while (>= index 1)
+          (let* ((step-node (js-nth index args))
+                 (next-node
+                   (make-let-form
+                     name-node
+                     (thread-step
+                       name-node step-node position context span)
+                     body-node
+                     span)))
+            (setq body-node
+              (make-list
+                (js-array
+                  (symbol-node "if" span)
+                  (conditional-test name-node t span)
+                  next-node
+                  (literal-node nil span))
+                span)))
+          (setq index (1- index)))
+        (make-let-form name-node (js-nth 0 args) body-node span))))
 
   (defun conditional-binding (form-name binding-node context span)
     (let ((binding-items (list-items binding-node)))
@@ -1442,6 +1511,22 @@
            ((= operator "as->")
             (expand-expression
               (desugar-as-thread args context span)
+              environment depth context))
+           ((= operator "cond->")
+            (expand-expression
+              (desugar-cond-thread "cond->" args "first" context span)
+              environment depth context))
+           ((= operator "cond->>")
+            (expand-expression
+              (desugar-cond-thread "cond->>" args "last" context span)
+              environment depth context))
+           ((= operator "some->")
+            (expand-expression
+              (desugar-some-thread "some->" args "first" context span)
+              environment depth context))
+           ((= operator "some->>")
+            (expand-expression
+              (desugar-some-thread "some->>" args "last" context span)
               environment depth context))
            ((= operator "if-let")
             (expand-expression

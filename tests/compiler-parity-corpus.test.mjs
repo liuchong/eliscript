@@ -33,7 +33,7 @@ test("complete compiler parity corpus closes every local parity dimension", asyn
     stableFeatures: 65,
     fixtures: 4,
     validCases: 119,
-    diagnosticCases: 93,
+    diagnosticCases: 95,
     bootstrapSources: 13,
     irKinds: 57,
     dimensions: 7,

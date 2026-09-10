@@ -62,3 +62,25 @@ precedence over parent rules when they address the same decision.
   hosting, and similar application infrastructure are replaceable application
   validation only. They never increase core progress, satisfy a core milestone,
   or weaken an unmet core acceptance criterion.
+
+## Function-First Development
+
+- **DELIVERY-01** - Unless a concrete defect or acceptance blocker takes
+  precedence, each engineering turn must advance one executable language,
+  compiler, runtime, standard-library, tooling, or Emacs-integration capability.
+  Documentation-only and report-only turns do not count as feature progress.
+- **DELIVERY-02** - Implement work as a complete vertical slice: observable
+  semantics, seed and self-hosted behavior where applicable, focused tests,
+  required public-surface documentation, and a signed pushed commit. Avoid
+  broad design work before the next executable behavior is understood.
+- **DELIVERY-03** - Keep routine governance proportional to the changed
+  surface. Refresh generated contracts touched by the slice immediately, but
+  defer unrelated performance reports, broad matrices, and maturity audits to
+  their milestone gate or to the point where they block a required check.
+- **DELIVERY-04** - Lines of code are not a completion metric, but repeated
+  turns without new executable behavior are a development-strategy warning.
+  When that occurs, stop expanding process artifacts, identify the smallest
+  high-value core feature, and ship its locally verified slice first.
+- **DELIVERY-05** - Prefer several small, independently reviewable feature
+  commits over one large speculative batch. Every slice must preserve local
+  compiler parity and leave the repository in a directly testable state.

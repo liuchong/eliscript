@@ -1,15 +1,44 @@
 (module tests.core-expression-forms
   (defvar calls 0)
+  (defvar events (js-array))
 
   (defun observed (value)
     (setq calls (1+ calls))
     value)
 
+  (defun marked (label value)
+    (js-call events :push label)
+    value)
+
+  (defun marked-step (value label)
+    (js-call events :push label)
+    value)
+
   (defun expression-form-report ()
     (setq calls 0)
+    (setq events (js-array))
     (let ((thread-first (-> 3 (1+) (* 2)))
           (thread-last (->> 3 (+ 1) (* 2)))
           (named (as-> 3 item (+ item 1) (* item 2)))
+          (conditional-first
+            (cond-> (marked "initial" (observed 3))
+              (marked "test-false" (observed false)) (marked-step "skipped")
+              (marked "test-true" (observed t)) (marked-step "selected")
+              t (js-array 1 2)))
+          (conditional-last
+            (cond->> (observed 3)
+              (observed t) (js-array 1 2)))
+          (some-first (some-> (observed 3) (js-array 1 2)))
+          (some-last (some->> (observed 3) (js-array 1 2)))
+          (some-nil (some-> (observed nil) (observed) (1+)))
+          (some-false (some-> (observed false) (observed)))
+          (some-undefined
+            (some-> (observed undefined) (observed) (progn "continued")))
+          (capture-safe
+            (let ((thread$G1 10))
+              (cond-> (observed 1) t (+ thread$G1))))
+          (conditional-noop (cond-> 4))
+          (some-noop (some-> 5))
           (if-let-false (if-let (item (observed false)) item "missing"))
           (if-let-value (if-let (item (observed 7)) (1+ item) "missing"))
           (if-some-false (if-some (item (observed false)) item "missing"))
@@ -24,6 +53,17 @@
         :threadFirst thread-first
         :threadLast thread-last
         :named named
+        :conditionalFirst conditional-first
+        :conditionalLast conditional-last
+        :someFirst some-first
+        :someLast some-last
+        :someNil some-nil
+        :someFalse some-false
+        :someUndefined some-undefined
+        :captureSafe capture-safe
+        :conditionalNoop conditional-noop
+        :someNoop some-noop
+        :events events
         :ifLetFalse if-let-false
         :ifLetValue if-let-value
         :ifSomeFalse if-some-false

@@ -3095,6 +3095,8 @@
       "spec": "0160",
       "contracts": [
         "Threads one initial expression through first, last, or explicit named positions",
+        "Conditionally threads in source order without repeating the accumulated value",
+        "Stops some-thread pipelines only when the accumulated value is nil",
         "Evaluates conditional binding initializers exactly once",
         "Separates Lisp truth matching from nil-only presence matching",
         "Preserves ordered multi-form bodies and nil results for unmatched when bindings",
@@ -3120,7 +3122,7 @@
         {
           "kind": "fixture",
           "file": "tests/fixtures/core-expression-forms.eli",
-          "contains": "(if-some (item (observed undefined))"
+          "contains": "(some-> (observed undefined)"
         }
       ]
     }

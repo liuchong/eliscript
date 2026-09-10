@@ -243,6 +243,14 @@
             (eliscript-expander--thread-step
              result step-form position)))))
 
+(defun eliscript-expander--fresh-name-form (prefix)
+  "Return a capture-safe generated symbol using PREFIX."
+  (eliscript-expander--generated-form
+   (eliscript-macro-eval--allocate-name
+    (eliscript-macro-eval--make-scope
+     nil eliscript-expander--macro-context)
+    prefix)))
+
 (defun eliscript-expander--let-form (name-form value-form body-form)
   "Return a generated let binding NAME-FORM to VALUE-FORM around BODY-FORM."
   (let* ((binding
@@ -277,6 +285,64 @@
               (eliscript-expander--let-form
                name-form step-form body)))
       (eliscript-expander--let-form name-form initial-form body))))
+
+(defun eliscript-expander--desugar-cond-thread
+    (form-name arguments position)
+  "Return conditional FORM-NAME ARGUMENTS threaded at POSITION."
+  (unless arguments
+    (eliscript-expander--fail "%s expects an initial expression" form-name))
+  (let ((clauses (cdr arguments)))
+    (when (= (% (length clauses) 2) 1)
+      (eliscript-expander--fail
+       "%s expects test and step pairs" form-name))
+    (if (null clauses)
+        (car arguments)
+      (let ((name-form (eliscript-expander--fresh-name-form "thread"))
+            (body nil)
+            (index (- (length arguments) 2)))
+        (setq body name-form)
+        (while (>= index 1)
+          (let ((test-form (nth index arguments))
+                (step-form (nth (1+ index) arguments)))
+            (setq body
+                  (eliscript-expander--let-form
+                   name-form
+                   (eliscript-expander--generated-form
+                    (list
+                     (eliscript-expander--generated-form 'if)
+                     test-form
+                     (eliscript-expander--thread-step
+                      name-form step-form position)
+                     name-form))
+                   body))
+            (setq index (- index 2))))
+        (eliscript-expander--let-form
+         name-form (car arguments) body)))))
+
+(defun eliscript-expander--desugar-some-thread
+    (form-name arguments position)
+  "Return nil-short-circuiting FORM-NAME ARGUMENTS threaded at POSITION."
+  (unless arguments
+    (eliscript-expander--fail "%s expects an initial expression" form-name))
+  (if (null (cdr arguments))
+      (car arguments)
+    (let ((name-form (eliscript-expander--fresh-name-form "thread"))
+          (body nil))
+      (setq body name-form)
+      (dolist (step-form (reverse (cdr arguments)))
+        (setq body
+              (eliscript-expander--generated-form
+               (list
+                (eliscript-expander--generated-form 'if)
+                (eliscript-expander--conditional-test name-form t)
+                (eliscript-expander--let-form
+                 name-form
+                 (eliscript-expander--thread-step
+                  name-form step-form position)
+                 body)
+                (eliscript-expander--generated-form nil)))))
+      (eliscript-expander--let-form
+       name-form (car arguments) body))))
 
 (defun eliscript-expander--conditional-binding (form-name binding-form)
   "Validate FORM-NAME BINDING-FORM and return its name and initializer."
@@ -625,6 +691,26 @@
          ((eq operator 'as->)
           (eliscript-expander--expand-expression
            (eliscript-expander--desugar-as-thread arguments)
+           environment depth))
+         ((eq operator 'cond->)
+          (eliscript-expander--expand-expression
+           (eliscript-expander--desugar-cond-thread
+            "cond->" arguments 'first)
+           environment depth))
+         ((eq operator 'cond->>)
+          (eliscript-expander--expand-expression
+           (eliscript-expander--desugar-cond-thread
+            "cond->>" arguments 'last)
+           environment depth))
+         ((eq operator 'some->)
+          (eliscript-expander--expand-expression
+           (eliscript-expander--desugar-some-thread
+            "some->" arguments 'first)
+           environment depth))
+         ((eq operator 'some->>)
+          (eliscript-expander--expand-expression
+           (eliscript-expander--desugar-some-thread
+            "some->>" arguments 'last)
            environment depth))
          ((eq operator 'if-let)
           (eliscript-expander--expand-expression

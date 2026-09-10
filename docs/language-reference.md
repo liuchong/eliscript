@@ -67,6 +67,20 @@ existing step arguments. A bare symbol step becomes a one-argument call.
 (as-> response item (get item :body) (decode item))
 ```
 
+`cond->` and `cond->>` take test/step pairs. Every test runs in source order;
+only the step paired with a truthy test changes the accumulated value. The
+initial expression and each selected step are evaluated once:
+
+```elisp
+(cond-> request
+  authenticated? authorize
+  compressed? (encode options))
+```
+
+`some->` and `some->>` continue threading while the accumulated value is not
+`nil`. They stop before the next step when it becomes `nil`; `false` and
+`undefined` continue through the pipeline.
+
 `if-let` and `when-let` branch using ordinary Eliscript truthiness.
 `if-some` and `when-some` instead accept every value except `nil`, including
 `false` and `undefined`. Their initializer is evaluated exactly once:

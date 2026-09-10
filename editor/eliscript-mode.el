@@ -74,11 +74,11 @@ Relative paths are resolved from the discovered project root."
     "import" "import-portable" "module"))
 
 (defconst eliscript-mode--special-heads
-  '("->" "->>" "and" "apply" "as->" "async" "await" "catch" "cond"
+  '("->" "->>" "and" "apply" "as->" "async" "await" "catch" "cond" "cond->" "cond->>"
     "do" "finally" "fn" "funcall" "if" "if-let" "if-some" "js*" "js-array" "js-call"
     "js-cons" "js-length" "js-nth" "js-object" "lambda" "let"
     "let*" "loop" "new" "or" "progn" "quote" "recur" "set!" "setq"
-    "throw" "try" "unless" "when" "when-let" "when-some" "while"))
+    "some->" "some->>" "throw" "try" "unless" "when" "when-let" "when-some" "while"))
 
 (defconst eliscript-mode--definition-heads
   (append eliscript-mode--function-heads

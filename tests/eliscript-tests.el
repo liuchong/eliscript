@@ -1399,6 +1399,8 @@
            "(defun first (value) (-> value (1+) (* 2)))\n"
            "(defun last (value) (->> value (+ 1) (* 2)))\n"
            "(defun named (value) (as-> value item (+ item 1) (* item 2)))\n"
+           "(defun conditional (value) (cond-> value t (1+) false (* 2)))\n"
+           "(defun present-pipeline (value) (some-> value (1+) (* 2)))\n"
            "(defun truthy (value) (if-let (item value) item :missing))\n"
            "(defun present (value) (if-some (item value) item :missing))\n"
            "(defun bodies (value) "
@@ -1410,6 +1412,7 @@
              (regexp-quote "return (2 * (1 + value));") output))
     (should (string-match-p
              (regexp-quote "return ((item) => {") output))
+    (should (string-match-p "thread\\$G[0-9]+" output))
     (should (string-match-p
              (regexp-quote "__eliscript_truthy(item) ? item") output))
     (should (string-match-p
@@ -1418,13 +1421,21 @@
              (regexp-quote "console.log(item);") output))
     (should-not
      (string-match-p
-      "if-let\|if-some\|when-let\|as->\|->>" output))))
+      (regexp-opt
+       '("cond->" "some->" "if-let" "if-some" "when-let" "as->" "->>"))
+      output))))
 
 (ert-deftest eliscript-expander-validates-threading-and-binding-forms ()
   (dolist (case
            '(("(->)" "-> expects an initial expression")
              ("(-> 1 ())" "thread step must be a symbol or non-empty list")
              ("(->> 1 2)" "thread step must be a symbol or non-empty list")
+             ("(cond->)" "cond-> expects an initial expression")
+             ("(cond-> 1 t)" "cond-> expects test and step pairs")
+             ("(cond->> 1 t)" "cond->> expects test and step pairs")
+             ("(some->)" "some-> expects an initial expression")
+             ("(some->> 1 ())"
+              "thread step must be a symbol or non-empty list")
              ("(as-> 1 value)"
               "as-> expects an initial expression, binding name, and at least one form")
              ("(as-> 1 :value (+ value 1))"

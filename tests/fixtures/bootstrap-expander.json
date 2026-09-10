@@ -138,7 +138,7 @@
     {
       "name": "threading-and-conditional-bindings",
       "filename": "core-forms.eli",
-      "source": "(defun pipeline (value) (-> value (1+) (* 2)))\n(defun reverse-pipeline (value) (->> value (+ 1) (* 2)))\n(defun named-pipeline (value) (as-> value item (+ item 1) (* item 2)))\n(defun truthy-binding (value) (if-let (item value) item :missing))\n(defun present-binding (value) (if-some (item value) item :missing))\n(defun truthy-body (value) (when-let (item value) (print item) (1+ item)))\n(defun present-body (value) (when-some (item value) (print item) (1+ item)))\n(export pipeline reverse-pipeline named-pipeline truthy-binding present-binding truthy-body present-body)"
+      "source": "(defun pipeline (value) (-> value (1+) (* 2)))\n(defun reverse-pipeline (value) (->> value (+ 1) (* 2)))\n(defun named-pipeline (value) (as-> value item (+ item 1) (* item 2)))\n(defun conditional-pipeline (value enabled) (cond-> value enabled (1+) t (* 2)))\n(defun conditional-reverse-pipeline (value enabled) (cond->> value enabled (+ 1) t (* 2)))\n(defun present-pipeline (value) (some-> value (1+) (* 2)))\n(defun present-reverse-pipeline (value) (some->> value (+ 1) (* 2)))\n(defun truthy-binding (value) (if-let (item value) item :missing))\n(defun present-binding (value) (if-some (item value) item :missing))\n(defun truthy-body (value) (when-let (item value) (print item) (1+ item)))\n(defun present-body (value) (when-some (item value) (print item) (1+ item)))\n(export pipeline reverse-pipeline named-pipeline conditional-pipeline conditional-reverse-pipeline present-pipeline present-reverse-pipeline truthy-binding present-binding truthy-body present-body)"
     },
     {
       "name": "self-symbol-module",
@@ -321,6 +321,18 @@
       "filename": "binding-shape.eli",
       "source": "(if-some (:value 1) value)",
       "error": "binding-shape.eli:1:1: if-some binding name must be a symbol: :value"
+    },
+    {
+      "name": "unpaired-conditional-thread",
+      "filename": "thread-pairs.eli",
+      "source": "(cond-> 1 t)",
+      "error": "thread-pairs.eli:1:1: cond-> expects test and step pairs"
+    },
+    {
+      "name": "missing-some-thread-initializer",
+      "filename": "some-thread-empty.eli",
+      "source": "(some->>)",
+      "error": "some-thread-empty.eli:1:1: some->> expects an initial expression"
     }
   ]
 }

@@ -67,6 +67,8 @@ test("self-hosted formatter preserves concrete syntax and core semantics", async
 (defprotocol   IDescribe   describe)
 (extend-category "number"   IDescribe (describe (value) (str value)))
 (defun pipeline (value) (-> value (1+) (* 2)))
+(defun conditional (value enabled) (cond-> value enabled (1+) t (* 2)))
+(defun present-pipeline (value) (some-> value (1+) (* 2)))
 (defun present (value) (if-some (item value) item :missing))
 \`(a ,x ,@xs))
 `;
@@ -78,6 +80,8 @@ test("self-hosted formatter preserves concrete syntax and core semantics", async
   (defprotocol IDescribe describe)
   (extend-category "number" IDescribe (describe (value) (str value)))
   (defun pipeline (value) (-> value (1+) (* 2)))
+  (defun conditional (value enabled) (cond-> value enabled (1+) t (* 2)))
+  (defun present-pipeline (value) (some-> value (1+) (* 2)))
   (defun present (value) (if-some (item value) item :missing))
   \`(a ,x ,@xs))
 `;
