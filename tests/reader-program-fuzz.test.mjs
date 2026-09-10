@@ -62,7 +62,7 @@ test("100000 deterministic reader and program mutations preserve every invariant
       accepted: 10_171,
       rejected: 39_829,
       structuredDiagnostics: 39_829,
-      resultDigest: "af90ba331d5427987ce5420e57304e4361f040fbc78240a191dd0161b5b35295",
+      resultDigest: "4fb6c781f78ad6237a8d7c3fae85841bf717fe6b2e938eaf24e5e6501a530130",
     },
     corpusDigest: "4b49f0e21a825e41344fc29387b5298462d17cd1140b2f1f06076a18fe1f8cab",
   });

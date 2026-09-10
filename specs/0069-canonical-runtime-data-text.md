@@ -16,7 +16,7 @@ canonical spelling; `read-value` reconstructs an equal value; printing the
 reconstructed value produces byte-identical text.
 
 The format covers nullish and numeric scalar edges, strings, Keyword and Symbol
-values, persistent List/Vector/Map/Set values, and immutable metadata. It is
+values, persistent List/Vector/Map/Set/Queue values, and immutable metadata. It is
 separate from the compiler source reader, generated JavaScript serialization,
 the versioned Emacs value codec, and the portable collection text
 implementation defined by 0071. Specification 0086 extends the original
@@ -38,7 +38,8 @@ DataTextError IPrint print-value read-value read-values
 
 `IPrint` is an open single-operation protocol. Core scalar categories use host
 category extensions; Keyword, Symbol, List, Vector, Map, and Set use exact runtime
-type extensions. External types may implement printing through the existing
+type extensions. Queue support is added by specification 0167. External types
+may implement printing through the existing
 protocol extension API, but only the core grammar below is guaranteed to be
 readable and round-trippable.
 
@@ -61,6 +62,7 @@ The canonical spellings are:
 | Vector | `[value ...]` |
 | Map | `{key value ...}` |
 | Set | `#{value ...}` |
+| Queue | `#queue [value ...]` |
 | annotated value | `^metadata-map value` |
 
 Whitespace separates adjacent values. The reader also accepts commas as
@@ -84,8 +86,8 @@ unambiguous and otherwise chooses the tagged form.
 
 ## Deterministic Collection Order
 
-List and Vector order is logical sequence order. Map and Set insertion/trie traversal
-order is never observable in canonical text:
+List, Vector, and Queue order is logical sequence order. Map and Set
+insertion/trie traversal order is never observable in canonical text:
 
 - each Map key and value is printed once
 - entries sort by printed key, then printed value
@@ -162,8 +164,8 @@ this text format as an unframed wire protocol.
 
 ## Acceptance Criteria
 
-- **CDT-01:** Scalar, Keyword, Symbol, List, Vector, Map, Set, and metadata values
-  have one documented canonical text form.
+- **CDT-01:** Scalar, Keyword, Symbol, List, Vector, Map, Set, Queue, and
+  metadata values have one documented canonical text form.
 - **CDT-02:** Printing then reading every supported value produces an equal
   value and byte-identical reprinted text.
 - **CDT-03:** Map and Set text is independent of insertion and HAMT traversal

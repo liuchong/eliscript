@@ -16,6 +16,7 @@ import { persistentList } from "../runtime/core/list.mjs";
 import { persistentHashMap } from "../runtime/core/map.mjs";
 import { meta, withMeta } from "../runtime/core/metadata.mjs";
 import { extendProtocolType } from "../runtime/core/protocol.mjs";
+import { isPersistentQueue, persistentQueue } from "../runtime/core/queue.mjs";
 import { persistentHashSet } from "../runtime/core/set.mjs";
 import { equalValues } from "../runtime/core/value.mjs";
 import { persistentVector } from "../runtime/core/vector.mjs";
@@ -115,6 +116,12 @@ test("collections print in deterministic logical order", () => {
   );
   expect(printValue(reordered)).toBe(printValue(value));
   roundTrip(value);
+
+  const queue = persistentQueue(1, keyword("ready"), persistentVector(2, 3));
+  expect(printValue(queue)).toBe("#queue [1 :ready [2 3]]");
+  const restoredQueue = roundTrip(queue);
+  expect(isPersistentQueue(restoredQueue)).toBe(true);
+  expect([...restoredQueue]).toEqual([...queue]);
 });
 
 test("metadata and unsafe identifiers have lossless explicit forms", () => {
@@ -182,6 +189,7 @@ test("reader rejects malformed, duplicate, and unsupported data", () => {
     ["{:a 1 :b}", "map requires a value for every key"],
     ["{:a 1 :a 2}", "duplicate map key"],
     ["#{1 1}", "duplicate set value"],
+    ["#queue (1 2)", "queue tag requires a vector"],
     ["^[] [1]", "metadata prefix requires a persistent map"],
     ["^{} :keyword", "value does not support metadata"],
     ["#unknown 1", "unknown dispatch #unknown"],
@@ -254,7 +262,7 @@ test("canonical data text agrees under Bun and Node", async () => {
   expect(nodeReport).toEqual(bunReport);
   expect(bunReport).toEqual({
     text: '^{:source "host"} {:list (1 :two) :map {:a 1 :b 2} ' +
-      ':set #{1 2 3} :vector [1 two]}',
+      ':queue #queue [1 :two [3]] :set #{1 2 3} :vector [1 two]}',
     stable: true,
     equal: true,
     source: "host",

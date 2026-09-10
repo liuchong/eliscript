@@ -35,11 +35,11 @@ test("complete negative diagnostic corpus is frozen and source-derived", async (
     suite.validCaseCount,
     suite.negativeCaseCount,
   ])).toEqual([
-    ["reader", 21, 16],
+    ["reader", 23, 17],
     ["expander", 40, 22],
     ["analyzer", 30, 57],
   ]);
-  expect(checked.suites.flatMap((suite) => suite.cases)).toHaveLength(95);
+  expect(checked.suites.flatMap((suite) => suite.cases)).toHaveLength(96);
   expect(checked.identity).toMatch(/^[0-9a-f]{64}$/u);
 });
 
@@ -48,7 +48,7 @@ test("diagnostic corpus rejects missing cases and fixture drift", async () => {
   value.suites[0].cases.pop();
 
   const errors = await validationErrors(value);
-  expect(errors).toContain("suite reader must contain exactly 16 negative cases");
+  expect(errors).toContain("suite reader must contain exactly 17 negative cases");
   expect(errors).toContain(
     "suite reader cases must exactly match the ordered invalid fixture cases",
   );

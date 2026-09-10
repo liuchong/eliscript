@@ -142,6 +142,31 @@
     (state start)
     (while (not (delimiter-code-p (peek-code state))) (advance state))
     (js-call (get state :source) :slice (get start :index) (get state :index)))
+  (defun queue-opening-index
+    (state)
+    (let*
+      ((source (get state :source)) (start (get state :index)) (tag-end (+ start 6)))
+      (if (not (= (js-call source :slice start tag-end) "#queue"))
+        -1
+        (let ((cursor tag-end) (done false))
+          (while (and (< cursor (get source :length)) (not done))
+            (let ((code (js-call source :codePointAt cursor)))
+              (cond
+                ((reference-whitespace-code-p code)
+                  (setq cursor (+ cursor (if (> code 65535) 2 1))))
+                ((= code 59)
+                  (while
+                    (and
+                      (< cursor (get source :length))
+                      (not (= (js-call source :codePointAt cursor) 10)))
+                    (setq cursor (1+ cursor))))
+                (t (setq done t)))))
+          (if
+            (and
+              (< cursor (get source :length))
+              (= (js-call source :codePointAt cursor) 91))
+            cursor
+            -1)))))
   (defun number-token-p (token) (js-call number-pattern :test token))
   (defun valid-keyword-name-p
     (name)
@@ -165,7 +190,9 @@
           (let ((name (js-call token :slice 1)))
             (unless (valid-keyword-name-p name)
               (fail-at
-                state start (str "invalid keyword literal: " token)
+                state
+                start
+                (str "invalid keyword literal: " token)
                 (- (get state :offset) (get start :offset))))
             (keyword-node name span)))
         ((number-token-p token) (literal-node (funcall (js* "Number") token) span))
@@ -204,7 +231,7 @@
           (js-array (symbol-node name prefix-span) child)
           (span-from state start)))))
   (defun read-collection
-    (state start closing kind)
+    (state start closing kind &optional tagged-opening-span)
     (advance state)
     (let ((opening-span (span-from state start)) (items (js-array)) (done false))
       (while (not done)
@@ -219,7 +246,9 @@
           ((= kind "map")
             (when (= (% (get items :length) 2) 1)
               (fail-at
-                state start "map literal must contain an even number of forms"
+                state
+                start
+                "map literal must contain an even number of forms"
                 (- (get state :offset) (get start :offset))))
             (let ((form-items (js-array (symbol-node "hash-map" opening-span))))
               (js-call items :forEach (lambda (item) (js-call form-items :push item)))
@@ -228,13 +257,28 @@
             (let ((form-items (js-array (symbol-node "hash-set" opening-span))))
               (js-call items :forEach (lambda (item) (js-call form-items :push item)))
               (collection-node "list" form-items span)))
+          ((= kind "queue")
+            (let
+              (
+                (form-items
+                  (js-array (symbol-node "queue" (or tagged-opening-span opening-span)))))
+              (js-call items :forEach (lambda (item) (js-call form-items :push item)))
+              (collection-node "list" form-items span)))
           ((and (= kind "list") (= (get items :length) 0)) (literal-node nil span))
           (t (collection-node kind items span))))))
+  (defun read-queue
+    (state start opening)
+    (let ((tag-end (+ (get start :index) 6)))
+      (while (< (get state :index) tag-end) (advance state))
+      (let ((tag-span (span-from state start)))
+        (while (< (get state :index) opening) (advance state))
+        (read-collection state start 93 "queue" tag-span))))
   (defun read-dispatch
     (state start)
-    (let ((next (peek-code-ahead state 1)))
+    (let ((next (peek-code-ahead state 1)) (queue-opening (queue-opening-index state)))
       (cond ((= next 39) (read-prefix state start "function" 2))
         ((= next 123) (advance state) (read-collection state start 125 "set"))
+        ((>= queue-opening 0) (read-queue state start queue-opening))
         (t
           (fail-at
             state

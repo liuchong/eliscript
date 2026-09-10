@@ -327,6 +327,10 @@
            (eliscript-lower--node
             'persistent-set-literal form nil
             (mapcar #'eliscript-lower-expression arguments)))
+          ('queue
+           (eliscript-lower--node
+            'persistent-queue-literal form nil
+            (mapcar #'eliscript-lower-expression arguments)))
           ('list
            (eliscript-lower--node
             'persistent-list-literal form nil

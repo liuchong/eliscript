@@ -321,6 +321,51 @@
           (hash-set :name (vector 1 2) (hash-set :nested)
                     (hash-map :ready t) :name)))))))
 
+(ert-deftest eliscript-lowers-queue-syntax-to-persistent-queue-literals ()
+  (let* ((source
+          "(defconst data
+  #queue [1 [2] #queue[3] {:ready t}])")
+         (located (eliscript-read-located-string source "queues.eli"))
+         (program (eliscript-compile-ir-string source "queues.eli"))
+         (output (eliscript-compile-string source "queues.eli"))
+         kinds)
+    (eliscript-ir-walk
+     program
+     (lambda (node) (push (eliscript-ir-node-kind node) kinds)))
+    (should
+     (equal (mapcar #'eliscript-form-strip located)
+            '((defconst data
+                (queue 1 [2] (queue 3) (hash-map :ready t))))))
+    (let* ((declaration (car located))
+           (queue-form (nth 2 (eliscript-form-value declaration)))
+           (operator (car (eliscript-form-value queue-form)))
+           (queue-span (eliscript-form-span queue-form))
+           (operator-span (eliscript-form-span operator)))
+      (should (string-prefix-p
+               "#queue"
+               (substring source
+                          (eliscript-source-span-start queue-span)
+                          (eliscript-source-span-end queue-span))))
+      (should (equal
+               (substring source
+                          (eliscript-source-span-start operator-span)
+                          (eliscript-source-span-end operator-span))
+               "#queue")))
+    (should (= (cl-count 'persistent-queue-literal kinds) 2))
+    (should (= (cl-count 'persistent-map-literal kinds) 1))
+    (should (= (cl-count 'persistent-vector-literal kinds) 1))
+    (should (= (length (split-string output "eliscript/runtime/literals" t))
+               2))
+    (should (string-match-p "__eliscript_queue" output))
+    (should (equal output
+                   (eliscript-tests--legacy-compile-string
+                    source "queues.eli")))
+    (should
+     (equal
+      (eliscript-ir-program-to-forms program)
+      '((defconst data
+          (queue 1 (vector 2) (queue 3) (hash-map :ready t))))))))
+
 (ert-deftest eliscript-distinguishes-nullish-values ()
   (let* ((source
           "(defun classify (value)

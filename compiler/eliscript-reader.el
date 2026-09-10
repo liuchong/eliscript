@@ -23,6 +23,56 @@
   children
   kind)
 
+(defun eliscript-reader--queue-opening-index (source index)
+  "Return the opening bracket index for a Queue tag at INDEX in SOURCE."
+  (let ((tag-end (+ index 6)))
+    (when (and (<= tag-end (length source))
+               (string= (substring source index tag-end) "#queue"))
+      (let ((cursor tag-end)
+            done)
+        (while (and (< cursor (length source)) (not done))
+          (let ((character (aref source cursor)))
+            (cond
+             ((memq character '(32 9 10 13 12))
+              (setq cursor (1+ cursor)))
+             ((= character ?\;)
+              (while (and (< cursor (length source))
+                          (/= (aref source cursor) ?\n))
+                (setq cursor (1+ cursor))))
+             (t (setq done t)))))
+        (and (< cursor (length source))
+             (= (aref source cursor) ?\[)
+             cursor)))))
+
+(defun eliscript-reader--queue-closing-index (source opening)
+  "Return the bracket closing Queue OPENING in SOURCE, or nil."
+  (let ((cursor (1+ opening))
+        (stack (list ?\]))
+        in-string escaped in-comment result)
+    (while (and (< cursor (length source)) stack)
+      (let ((character (aref source cursor)))
+        (cond
+         (in-comment
+          (when (= character ?\n) (setq in-comment nil)))
+         (in-string
+          (cond
+           (escaped (setq escaped nil))
+           ((= character ?\\) (setq escaped t))
+           ((= character ?\") (setq in-string nil))))
+         ((= character ?\;) (setq in-comment t))
+         ((= character ?\") (setq in-string t))
+         ((= character ?\() (push ?\) stack))
+         ((= character ?\[) (push ?\] stack))
+         ((= character ?\{) (push ?\} stack))
+         ((memq character '(?\) ?\] ?\}))
+          (if (= character (car stack))
+              (progn
+                (pop stack)
+                (unless stack (setq result cursor)))
+            (setq stack nil result nil)))))
+      (setq cursor (1+ cursor)))
+    result))
+
 (defun eliscript-reader--emacs-source (source)
   "Return a length-preserving Emacs-readable copy of SOURCE.
 
@@ -48,6 +98,15 @@ reader has produced a list."
            ((= character ?\") (setq in-string nil))))
          ((= character ?\;) (setq in-comment t))
          ((= character ?\") (setq in-string t))
+         ((let ((opening
+                 (eliscript-reader--queue-opening-index source index)))
+            (when opening
+              (aset result index ?\()
+              (aset result opening ?\s)
+              (let ((closing
+                     (eliscript-reader--queue-closing-index source opening)))
+                (when closing (aset result closing ?\))))
+              t)))
          ((and (= character ?#)
                (< (1+ index) (length result))
                (= (aref result (1+ index)) ?\{))
@@ -85,11 +144,23 @@ reader has produced a list."
    ((eq (char-after) ?,)
     (if (eq (char-after (1+ (point))) ?@) 2 1))))
 
+(defun eliscript-reader--queue-opening-position ()
+  "Return the Queue payload opening position at point, or nil."
+  (let ((start (point)))
+    (when (and (<= (+ start 6) (point-max))
+               (string= (buffer-substring-no-properties start (+ start 6))
+                        "#queue"))
+      (save-excursion
+        (goto-char (+ start 6))
+        (forward-comment (point-max))
+        (and (eq (char-after) ?\[) (point))))))
+
 (defun eliscript-reader--scan-node (filename)
   "Scan one source node at point for FILENAME and return its location tree."
   (forward-comment (point-max))
   (let* ((start (point))
          (prefix-length (eliscript-reader--prefix-length))
+         (queue-opening (eliscript-reader--queue-opening-position))
          children)
     (cond
      (prefix-length
@@ -107,6 +178,23 @@ reader has produced a list."
          :span (eliscript-reader--span start end filename)
          :children children
          :kind 'prefix)))
+     (queue-opening
+      (goto-char queue-opening)
+      (forward-char 1)
+      (forward-comment (point-max))
+      (while (and (char-after) (not (eq (char-after) ?\])))
+        (when (memq (char-after) '(?\) ?\}))
+          (eliscript-diagnostic-signal
+           'eliscript-read-error "ELI-R0001" "reader"
+           filename (eliscript-reader--span start (+ start 6) filename)
+           "Invalid read syntax: %S" (char-to-string (char-after))))
+        (push (eliscript-reader--scan-node filename) children)
+        (forward-comment (point-max)))
+      (when (eq (char-after) ?\]) (forward-char 1))
+      (eliscript-reader--node-create
+       :span (eliscript-reader--span start (point) filename)
+       :children (nreverse children)
+       :kind 'queue))
      ((and (eq (char-after) ?#)
            (eq (char-after (1+ (point))) ?\{))
       (forward-char 2)
@@ -182,6 +270,17 @@ reader has produced a list."
    :end-line (eliscript-source-span-line span)
    :end-column (+ 2 (eliscript-source-span-column span))))
 
+(defun eliscript-reader--queue-operator-span (span)
+  "Return the Queue tag operator span within Queue SPAN."
+  (eliscript-source-span-create
+   :filename (eliscript-source-span-filename span)
+   :start (eliscript-source-span-start span)
+   :end (+ 6 (eliscript-source-span-start span))
+   :line (eliscript-source-span-line span)
+   :column (eliscript-source-span-column span)
+   :end-line (eliscript-source-span-line span)
+   :end-column (+ 6 (eliscript-source-span-column span))))
+
 (defun eliscript-reader--valid-keyword-name-p (name)
   "Return non-nil when NAME is a valid source Keyword name."
   (let ((slash-count (cl-count ?/ name)))
@@ -223,6 +322,13 @@ reader has produced a list."
         (eliscript-form-wrap
          'hash-set (eliscript-reader--set-operator-span span))
         (cl-mapcar #'eliscript-reader--locate-value value children))
+       span))
+     ((eq kind 'queue)
+      (eliscript-form-wrap
+       (cons
+        (eliscript-form-wrap
+         'queue (eliscript-reader--queue-operator-span span))
+        (cl-mapcar #'eliscript-reader--locate-value (cdr value) children))
        span))
      ((and (vectorp value) (= (length value) (length children)))
       (eliscript-form-wrap

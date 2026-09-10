@@ -94,6 +94,7 @@ test("persistent literals and quoted data preserve language value categories", a
     expect(javascript).toContain("__eliscript_vector(");
     expect(javascript).toContain("__eliscript_hash_map(");
     expect(javascript).toContain("__eliscript_hash_set(");
+    expect(javascript).toContain("__eliscript_queue(");
     expect(javascript).toContain("__eliscript_keyword(");
     expect(javascript).toContain("__eliscript_list(");
     expect(javascript).toContain("__eliscript_symbol(");
@@ -142,6 +143,14 @@ test("persistent literals and quoted data preserve language value categories", a
         macroKeyword: true,
         macroValue: true,
       },
+      queue: {
+        explicitPersistent: true,
+        explicitValues: ["explicit", [5, 6]],
+        literalPersistent: true,
+        literalValues: ["source", [7, 8], { ready: true }],
+        evaluationOrder: "12",
+        text: '#queue ["source" [7 8] {:ready true}]',
+      },
       keyword: {
         value: true,
         interned: true,
@@ -172,6 +181,7 @@ test("persistent literals and quoted data preserve language value categories", a
         text: '(alpha :beta [1 undefined] () #eliscript/symbol [nil "false"])',
         mapSyntax: "(hash-map :ready true)",
         setSyntax: "(hash-set :ready [1 undefined])",
+        queueSyntax: "(queue 1 :ready)",
       },
       list: {
         persistent: true,

@@ -14,6 +14,7 @@ import {
 } from "./map.mjs";
 import { PersistentList } from "./list.mjs";
 import { meta, withMeta } from "./metadata.mjs";
+import { PersistentQueue, persistentQueue } from "./queue.mjs";
 import {
   defineProtocol,
   extendProtocolCategory,
@@ -156,6 +157,10 @@ function printSet(value, context) {
   return `#{${items.join(" ")}}`;
 }
 
+function printQueue(value, context) {
+  return `#queue [${[...value].map((item) => context.print(item)).join(" ")}]`;
+}
+
 extendProtocolCategory(IPrint, "null", { print: () => "nil" });
 extendProtocolCategory(IPrint, "undefined", { print: () => "undefined" });
 extendProtocolCategory(IPrint, "boolean", {
@@ -174,6 +179,7 @@ extendProtocolType(IPrint, PersistentList, { print: printList });
 extendProtocolType(IPrint, PersistentVector, { print: printVector });
 extendProtocolType(IPrint, PersistentHashMap, { print: printMap });
 extendProtocolType(IPrint, PersistentHashSet, { print: printSet });
+extendProtocolType(IPrint, PersistentQueue, { print: printQueue });
 
 function makePrintContext(options) {
   const state = { values: 0 };
@@ -406,6 +412,15 @@ class Reader {
     }
   }
 
+  taggedQueue(depth, start) {
+    this.skipIgnored();
+    const payload = this.value(depth + 1);
+    if (!isPersistentVector(payload)) {
+      this.fail("queue tag requires a vector", start);
+    }
+    return persistentQueue(...payload);
+  }
+
   dispatch(depth, start) {
     if (this.peek(1) === "{") {
       this.advance();
@@ -421,6 +436,7 @@ class Reader {
     if (token === "#eliscript/symbol") {
       return this.taggedIdentifier("symbol", depth, start);
     }
+    if (token === "#queue") return this.taggedQueue(depth, start);
     this.fail(`unknown dispatch ${token}`, start);
   }
 

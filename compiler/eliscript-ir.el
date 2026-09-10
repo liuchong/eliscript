@@ -30,7 +30,7 @@
     array-binding-pattern map-binding-pattern map-binding-entry
     binding-name binding-hole reference literal
     array-literal persistent-list-literal persistent-vector-literal
-    persistent-map-literal persistent-set-literal
+    persistent-map-literal persistent-set-literal persistent-queue-literal
     quoted-literal function-expression await-expression
     throw-expression try-expression catch-clause catch-binding finally-clause
     conditional conditional-sugar
@@ -179,6 +179,10 @@
                    (eliscript-ir-node-children node))))
     ('persistent-set-literal
      (cons 'hash-set
+           (mapcar #'eliscript-ir-node-to-form
+                   (eliscript-ir-node-children node))))
+    ('persistent-queue-literal
+     (cons 'queue
            (mapcar #'eliscript-ir-node-to-form
                    (eliscript-ir-node-children node))))
     ('module-declaration

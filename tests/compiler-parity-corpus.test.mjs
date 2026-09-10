@@ -30,15 +30,15 @@ async function validationErrors(value) {
 test("complete compiler parity corpus closes every local parity dimension", async () => {
   expect(await checkCompilerParityCorpus({ root: ROOT })).toEqual({
     schemaVersion: 1,
-    stableFeatures: 65,
+    stableFeatures: 66,
     fixtures: 4,
-    validCases: 119,
-    diagnosticCases: 95,
+    validCases: 122,
+    diagnosticCases: 96,
     bootstrapSources: 13,
-    irKinds: 57,
+    irKinds: 58,
     dimensions: 7,
     evidence: 11,
-    sourceFiles: 136,
+    sourceFiles: 137,
     identity: expect.stringMatching(/^[0-9a-f]{64}$/u),
   });
 });

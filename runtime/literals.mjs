@@ -1,5 +1,6 @@
 import { persistentList } from "./core/list.mjs";
 import { persistentHashMap } from "./core/map.mjs";
+import { persistentQueue } from "./core/queue.mjs";
 import { persistentHashSet } from "./core/set.mjs";
 import { persistentVector } from "./core/vector.mjs";
 
@@ -26,4 +27,8 @@ export function hashMap(...keyValues) {
 
 export function hashSet(...values) {
   return persistentHashSet(...values);
+}
+
+export function queue(...values) {
+  return persistentQueue(...values);
 }

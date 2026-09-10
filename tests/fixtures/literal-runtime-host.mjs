@@ -10,6 +10,7 @@ import {
   qualifiedIdentifierName,
 } from "../../runtime/core/identifier.mjs";
 import { isPersistentList } from "../../runtime/core/list.mjs";
+import { isPersistentQueue } from "../../runtime/core/queue.mjs";
 import { isPersistentHashSet } from "../../runtime/core/set.mjs";
 import { printValue } from "../../runtime/core/data-text.mjs";
 import {
@@ -34,6 +35,12 @@ const quotedData = generated.quoted_data;
 const quotedValues = [...quotedData];
 const literalSetMap = [...generated.set_literal]
   .find((value) => isPersistentHashMap(value));
+
+function reportValue(value) {
+  if (isPersistentVector(value)) return [...value];
+  if (isPersistentHashMap(value)) return { ready: value.get(readyKeyword) };
+  return value;
+}
 
 console.log(JSON.stringify({
   vector: {
@@ -76,6 +83,14 @@ console.log(JSON.stringify({
     macroKeyword: generated.macro_set.has(keyword("macro/value")),
     macroValue: generated.macro_set.has(persistentVector(9)),
   },
+  queue: {
+    explicitPersistent: isPersistentQueue(generated.queue_value),
+    explicitValues: [...generated.queue_value].map(reportValue),
+    literalPersistent: isPersistentQueue(generated.queue_literal),
+    literalValues: [...generated.queue_literal].map(reportValue),
+    evaluationOrder: generated.queue_evaluation_order,
+    text: printValue(generated.queue_literal),
+  },
   keyword: {
     value: isKeyword(generated.keyword_value),
     interned: generated.keyword_value === qualifiedKeyword,
@@ -106,6 +121,7 @@ console.log(JSON.stringify({
     text: printValue(quotedData),
     mapSyntax: printValue(generated.quoted_map),
     setSyntax: printValue(generated.quoted_set),
+    queueSyntax: printValue(generated.quoted_queue),
   },
   list: {
     persistent: isPersistentList(generated.list_value),

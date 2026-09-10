@@ -532,6 +532,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0164 | [Persistent Collection Classification and Bounded Inspection](0164-persistent-collection-classification.md) | Stable | Implemented |
 | 0165 | [Persistent Subvector Views](0165-persistent-subvector-views.md) | Stable | Implemented |
 | 0166 | [Persistent Queue](0166-persistent-queue.md) | Stable | Implemented |
+| 0167 | [Persistent Queue Language Literals](0167-persistent-queue-language-literals.md) | Stable | Implemented |
 
 ## Adding a Specification
 

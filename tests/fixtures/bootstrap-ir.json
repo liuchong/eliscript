@@ -21,6 +21,11 @@
       "source": "(defconst data {:name \"Eliscript\" [1 2] {:nested [3]}})\n(export data)"
     },
     {
+      "name": "persistent-queue-source-literal",
+      "filename": "queue-literal.eli",
+      "source": "(defconst explicit (queue 1 2))\n(defconst tagged #queue [1 :ready [2 3] {:nested t}])\n(export explicit tagged)"
+    },
+    {
       "name": "function-parameter-kinds",
       "filename": "parameters.eli",
       "source": "(defun collect (required &optional optional &rest rest)\n  [required optional rest])\n(defconst invoke\n  (lambda (first &optional second &rest tail)\n    [first second tail]))"

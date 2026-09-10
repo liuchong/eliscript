@@ -12,7 +12,7 @@
   (import "./source-map.mjs" create-source-map)
 
   (defconst literal-runtime-import
-    "import { hashMap as __eliscript_hash_map, hashSet as __eliscript_hash_set, keyword as __eliscript_keyword, list as __eliscript_list, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n")
+    "import { hashMap as __eliscript_hash_map, hashSet as __eliscript_hash_set, keyword as __eliscript_keyword, list as __eliscript_list, queue as __eliscript_queue, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n")
   (defconst collection-runtime-import
     "import { count as __eliscript_count, nth as __eliscript_nth } from \"eliscript/runtime/core/collection.mjs\";\n")
   (defconst list-runtime-import
@@ -1212,6 +1212,8 @@
            (combine (js-array "__eliscript_hash_map(" (emit-arguments nodes) ")")))
           ((= kind "persistent-set-literal")
            (combine (js-array "__eliscript_hash_set(" (emit-arguments nodes) ")")))
+          ((= kind "persistent-queue-literal")
+           (combine (js-array "__eliscript_queue(" (emit-arguments nodes) ")")))
           ((= kind "quoted-literal") (emit-quoted (ir-value node)))
           ((= kind "function-expression") (emit-function node))
           ((= kind "await-expression")
@@ -1374,6 +1376,7 @@
           (= kind "persistent-vector-literal")
           (= kind "persistent-map-literal")
           (= kind "persistent-set-literal")
+          (= kind "persistent-queue-literal")
           (and (= kind "quoted-literal")
                (quoted-uses-literal-runtime-p (ir-value node)))
           (and (= kind "literal")
@@ -1535,7 +1538,8 @@
               (or (= kind "persistent-list-literal")
                   (= kind "persistent-vector-literal")
                   (= kind "persistent-map-literal")
-                  (= kind "persistent-set-literal")))
+                  (= kind "persistent-set-literal")
+                  (= kind "persistent-queue-literal")))
          (put requirements :literal t))
         ((and (not suppress-literal)
               (= kind "quoted-literal")

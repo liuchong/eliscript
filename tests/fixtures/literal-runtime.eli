@@ -25,6 +25,15 @@
       [7 8]
       {:ready t}})
   (defconst macro-set (generated-set))
+  (defconst queue-value (queue "explicit" [5 6]))
+  (defvar queue-evaluation-order "")
+  (defun record-queue-value (label value)
+    (setq queue-evaluation-order (str queue-evaluation-order label))
+    value)
+  (defconst queue-literal
+    #queue [(record-queue-value "1" "source")
+            (record-queue-value "2" [7 8])
+            {:ready t}])
   (defconst keyword-value :article/title)
   (defconst keyword-map
     {:article/title "qualified"
@@ -34,6 +43,7 @@
   (defconst quoted-data '(alpha :beta [1 undefined] nil false))
   (defconst quoted-map '{:ready t})
   (defconst quoted-set '#{:ready [1 undefined]})
+  (defconst quoted-queue '#queue [1 :ready])
   (defconst list-value (list 1 2 3))
   (defconst list-first (car list-value))
   (defconst list-rest (cdr list-value))
@@ -50,8 +60,10 @@
 
   (export
     vector-value map-value map-literal set-value set-literal macro-set
-    set-evaluation-order keyword-value keyword-map
+    set-evaluation-order queue-value queue-literal queue-evaluation-order
+    keyword-value keyword-map
     macro-keyword quoted-keyword quoted-data quoted-map quoted-set
+    quoted-queue
     list-value list-first list-rest list-cons empty-list-rest
     array-value prepended-array object-value
     vector-first vector-count array-second array-count))

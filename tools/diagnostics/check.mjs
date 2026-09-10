@@ -16,8 +16,8 @@ const SUITES = [
     fixture: "tests/fixtures/bootstrap-reader.json",
     oracle: "tests/bootstrap-reader-oracle.el",
     environment: "ELISCRIPT_READER_FIXTURE",
-    validCaseCount: 21,
-    negativeCaseCount: 16,
+    validCaseCount: 23,
+    negativeCaseCount: 17,
   },
   {
     id: "expander",
@@ -179,8 +179,8 @@ export async function validateDiagnosticCorpus(contract, options = {}) {
     }
   }
 
-  if (seenNames.size !== 95) {
-    errors.push("corpus must contain exactly 95 uniquely named negative cases");
+  if (seenNames.size !== 96) {
+    errors.push("corpus must contain exactly 96 uniquely named negative cases");
   }
   if (!/^[0-9a-f]{64}$/u.test(contract.identity ?? "") ||
       contract.identity !== digest(contract.suites)) {

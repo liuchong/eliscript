@@ -3364,6 +3364,57 @@
           "contains": "Eliscript persistent queue API compiles and runs on both hosts"
         }
       ]
+    },
+    {
+      "id": "language.persistent-queue-literals",
+      "title": "Persistent Queue language literals",
+      "status": "stable",
+      "spec": "0167",
+      "contracts": [
+        "Constructs persistent Queue values from explicit and tagged source forms",
+        "Preserves FIFO order left-to-right evaluation and quoted constructor syntax",
+        "Lowers to dedicated Queue IR and conditionally links the literal runtime ABI",
+        "Round trips canonical Queue data text with bounded malformed-input rejection",
+        "Matches Seed and self-hosted readers diagnostics IR ESM Source Maps and fixed points",
+        "Keeps worker transport and portable closures closed until separately versioned"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-lowers-queue-syntax-to-persistent-queue-literals"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-reader.test.mjs",
+          "contains": "bootstrapped reader matches normalized seed syntax and diagnostics"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-ir.test.mjs",
+          "contains": "bootstrapped lowerer matches complete seed IR trees and spans"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-emitter.test.mjs",
+          "contains": "bootstrapped emitter matches seed ESM and Source Map output"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/literal-runtime.test.mjs",
+          "contains": "persistent literals and quoted data preserve language value categories"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/data-text.test.mjs",
+          "contains": "collections print in deterministic logical order"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }

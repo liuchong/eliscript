@@ -22,8 +22,8 @@ contains no UI-framework wrapper, element constructor, or bundler adapter.
 ### Literal Runtime ABI
 
 `literals.mjs` is the package-owned standard ESM link for generated persistent
-constructors. It exports `list`, `vector`, `hashMap`, `hashSet`, `keyword`, and
-`symbol`,
+constructors. It exports `list`, `vector`, `hashMap`, `hashSet`, `queue`,
+`keyword`, and `symbol`,
 delegating directly to the canonical persistent collection and identifier
 implementations. The compiler imports it only when evaluated source or quoted
 data constructs one of those runtime values. Static JavaScript property keys
@@ -61,7 +61,9 @@ Vector rear. Enqueue preserves the front; dequeue advances an O(1) subvector
 view, and front exhaustion promotes the rear by identity without traversal or
 node allocation. Queue values participate in collection protocols,
 ordered value equality and hashing, immutable metadata, and iterative
-million-scale traversal. Structural observations are isolated in
+million-scale traversal. Generated `(queue ...)` and `#queue [...]` forms use
+the literal ABI, while canonical data text uses `#queue [...]`. Structural
+observations are isolated in
 `testing/queue.mjs`.
 
 ### Value Semantics
@@ -101,8 +103,9 @@ Exact semantics and evidence are specified in
 
 `core/data-text.mjs` supplies the open `IPrint` protocol and canonical
 `printValue`, `readValue`, and `readValues` operations. Scalar edges,
-identifiers, persistent List/Vector/Map/Set values, and metadata round-trip through
-readable Lisp-shaped text. Map entries and Set members sort by canonical text,
+identifiers, persistent List/Vector/Map/Set/Queue values, and metadata
+round-trip through readable Lisp-shaped text. Map entries and Set members sort
+by canonical text,
 unsafe identifiers use explicit tags, and duplicate or malformed input fails
 with a located `DataTextError`. Depth, UTF-16 length, and value-count limits
 bound both directions.

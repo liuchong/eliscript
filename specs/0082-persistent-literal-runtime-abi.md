@@ -36,6 +36,7 @@ list(...values)
 vector(...values)
 hashMap(...keyValues)
 hashSet(...values)
+queue(...values)
 keyword(name)
 symbol(name)
 ```
@@ -48,6 +49,7 @@ and interned Keyword implementations and does not define another value
 representation. Specification 0085 adds `keyword` to this ABI without changing
 the Vector or Map contracts. Specification 0092 adds `hashSet`, delegating to
 the canonical map-backed persistent Set without changing the existing ABI.
+Specification 0167 adds `queue`, delegating to the canonical persistent Queue.
 
 The compiler inserts one named ESM import only when a module constructs a
 persistent literal, identifier value, or persistent quoted datum. Modules
@@ -63,6 +65,8 @@ the ABI `vector` constructor. `(hash-map key value...)` lowers to
 The analyzer rejects an incomplete final Map pair before emission.
 `(hash-set value...)` lowers to `persistent-set-literal` and emits one call to
 the ABI `hashSet` constructor.
+`(queue value...)` and `#queue [value...]` lower to
+`persistent-queue-literal` and emit one call to the ABI `queue` constructor.
 
 `(js-array value...)` constructs a native mutable JavaScript Array.
 `(js-object key value...)` constructs a native ordinary JavaScript Object,
@@ -86,7 +90,8 @@ Portable worker closures may construct `(vector ...)`, square-bracket Vector
 values, `(hash-map ...)`, source Keywords, and persistent quoted data. Calls
 that carry those values select the explicit worker value codec from 0088;
 legacy JSON calls remain limited to JSON-compatible results. Explicit native
-arrays remain portable in either mode.
+arrays remain portable in either mode. Queue construction is not portable
+until a separately versioned worker codec extension defines Queue transport.
 
 ## Architecture Boundary
 

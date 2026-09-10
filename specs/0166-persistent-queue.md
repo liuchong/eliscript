@@ -74,11 +74,11 @@ versions.
 
 ## Boundaries
 
-Queue has no reader literal and no implicit host-container conversion. Data
-text, JSON, worker transport, and JavaScript conversion must reject or handle it
-through their explicit extension boundaries until a separately specified
-encoding is introduced. The structure has no framework, I/O, publishing, or
-host-global dependency.
+Specification 0167 adds `(queue ...)`, `#queue [...]`, and canonical Queue data
+text. Queue still has no implicit host-container conversion. JSON, worker
+transport, portable closures, and JavaScript conversion must reject or handle
+it through their explicit extension boundaries until separately specified.
+The structure has no framework, I/O, publishing, or host-global dependency.
 
 ## Acceptance Criteria
 

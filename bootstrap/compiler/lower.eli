@@ -514,6 +514,10 @@
             (make-node
               "persistent-set-literal" (node-span form) nil
               (lower-sequence args) nil))
+           ((= operator "queue")
+            (make-node
+              "persistent-queue-literal" (node-span form) nil
+              (lower-sequence args) nil))
            ((= operator "list")
             (make-node
               "persistent-list-literal" (node-span form) nil

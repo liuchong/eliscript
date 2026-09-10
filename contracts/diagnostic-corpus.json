@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "format": "eliscript-diagnostic-corpus",
   "version": 1,
-  "identity": "25697255af3f0d0257b63e1ab824f35ca3adac4f5001da6686fe329acb0fffe2",
+  "identity": "e69ecae64738279969ab7cd31db760b5f57d1b42379d96f3abd00a20055c75c1",
   "suites": [
     {
       "id": "reader",
       "fixture": "tests/fixtures/bootstrap-reader.json",
       "oracle": "tests/bootstrap-reader-oracle.el",
-      "validCaseCount": 21,
-      "negativeCaseCount": 16,
+      "validCaseCount": 23,
+      "negativeCaseCount": 17,
       "cases": [
         {
           "name": "unclosed-list",
@@ -98,6 +98,31 @@
             "message": "unexpected end of input",
             "location": {
               "file": "unclosed-set.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 1,
+                "line": 1,
+                "column": 2
+              }
+            }
+          }
+        },
+        {
+          "name": "unclosed-queue",
+          "human": "unclosed-queue.eli:1:1: unexpected end of input",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-R0001",
+            "severity": "error",
+            "phase": "reader",
+            "message": "unexpected end of input",
+            "location": {
+              "file": "unclosed-queue.eli",
               "start": {
                 "offset": 0,
                 "line": 1,
