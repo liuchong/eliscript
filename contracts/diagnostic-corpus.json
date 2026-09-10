@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "format": "eliscript-diagnostic-corpus",
   "version": 1,
-  "identity": "e69ecae64738279969ab7cd31db760b5f57d1b42379d96f3abd00a20055c75c1",
+  "identity": "7b0f54841ece10e57eebf2ad80d5d9bcd7f6f6c909e207c65042ca1901ac6aef",
   "suites": [
     {
       "id": "reader",
@@ -443,7 +443,7 @@
       "fixture": "tests/fixtures/bootstrap-expander.json",
       "oracle": "tests/bootstrap-expander-oracle.el",
       "validCaseCount": 40,
-      "negativeCaseCount": 22,
+      "negativeCaseCount": 24,
       "cases": [
         {
           "name": "missing-definition-shape",
@@ -991,6 +991,56 @@
                 "offset": 9,
                 "line": 1,
                 "column": 10
+              }
+            }
+          }
+        },
+        {
+          "name": "duplicate-case-constant",
+          "human": "case-duplicate.eli:1:1: case declares duplicate match constant: 2",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "case declares duplicate match constant: 2",
+            "location": {
+              "file": "case-duplicate.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 34,
+                "line": 1,
+                "column": 35
+              }
+            }
+          }
+        },
+        {
+          "name": "missing-condp-redirect-function",
+          "human": "condp-redirect.eli:1:1: condp :>> clause requires a result function",
+          "diagnostic": {
+            "format": "eliscript-diagnostic",
+            "version": 1,
+            "code": "ELI-X0001",
+            "severity": "error",
+            "phase": "expansion",
+            "message": "condp :>> clause requires a result function",
+            "location": {
+              "file": "condp-redirect.eli",
+              "start": {
+                "offset": 0,
+                "line": 1,
+                "column": 1
+              },
+              "end": {
+                "offset": 29,
+                "line": 1,
+                "column": 30
               }
             }
           }

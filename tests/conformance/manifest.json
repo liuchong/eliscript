@@ -3494,6 +3494,46 @@
           "contains": "deftype and reify agree across compilers and hosts"
         }
       ]
+    },
+    {
+      "id": "language.value-dispatch-forms",
+      "title": "Value dispatch forms",
+      "status": "stable",
+      "spec": "0170",
+      "contracts": [
+        "Matches case constants and groups through Eliscript value equality",
+        "Evaluates case dispatch once and only the selected result",
+        "Evaluates condp predicate dispatch and tests with exact short circuit order",
+        "Passes the exact condp predicate result through lazy redirect clauses",
+        "Matches Seed self-hosted Source Maps Bun and Node execution"
+      ],
+      "evidence": [
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-expander-desugars-value-dispatch-forms"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-tests.el",
+          "contains": "eliscript-expander-validates-value-dispatch-forms"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/value-dispatch.test.mjs",
+          "contains": "case and condp agree across compilers and local hosts"
+        },
+        {
+          "kind": "ert",
+          "file": "tests/eliscript-mode-tests.el",
+          "contains": "eliscript-mode-font-locks-semantic-categories"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-formatter.test.mjs",
+          "contains": "self-hosted formatter preserves concrete syntax and core semantics"
+        }
+      ]
     }
   ]
 }

@@ -333,6 +333,18 @@
       "filename": "some-thread-empty.eli",
       "source": "(some->>)",
       "error": "some-thread-empty.eli:1:1: some->> expects an initial expression"
+    },
+    {
+      "name": "duplicate-case-constant",
+      "filename": "case-duplicate.eli",
+      "source": "(case 2 (1 2) :small 2 :duplicate)",
+      "error": "case-duplicate.eli:1:1: case declares duplicate match constant: 2"
+    },
+    {
+      "name": "missing-condp-redirect-function",
+      "filename": "condp-redirect.eli",
+      "source": "(condp predicate value 1 :>>)",
+      "error": "condp-redirect.eli:1:1: condp :>> clause requires a result function"
     }
   ]
 }

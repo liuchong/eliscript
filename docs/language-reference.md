@@ -95,6 +95,22 @@ Each binding is a two-item list containing an ordinary symbol and initializer.
 The `when-*` variants accept one or more body forms and return the final body
 value or `nil`.
 
+`case` evaluates one dispatch expression and compares it with source constants
+using Eliscript value equality. Parenthesized constants form a match group;
+the final unpaired expression is an optional default:
+
+```elisp
+(case status
+  :ready (start job)
+  (:waiting :blocked) (retain job)
+  (reject job))
+```
+
+`condp` evaluates a predicate and dispatch expression once, then invokes the
+predicate with each test and the dispatch value until one result is truthy. A
+`:>>` clause calls its result function with that exact predicate result. With
+no default, an unmatched `condp` throws a located `TypeError`.
+
 ## Multimethod Definitions
 
 `defmulti` creates a named multimethod from a dispatch function and an optional
@@ -141,10 +157,11 @@ explicit, and method parameter lists and bodies use ordinary lambda semantics.
 
 ## Control Flow
 
-The core forms are `if`, `when`, `unless`, `cond`, `and`, `or`, `progn`,
-`while`, `loop`, `recur`, `try`, `catch`, `finally`, and `throw`. `recur` is
-valid only in a tail position owned by the nearest compatible function or
-loop target. Argument evaluation and loop rebinding remain deterministic.
+The core forms are `if`, `when`, `unless`, `cond`, `case`, `condp`, `and`, `or`,
+`progn`, `while`, `loop`, `recur`, `try`, `catch`, `finally`, and `throw`.
+`recur` is valid only in a tail position owned by the nearest compatible
+function or loop target. Argument evaluation and loop rebinding remain
+deterministic.
 
 ## Modules
 

@@ -1,0 +1,59 @@
+(module tests.value-dispatch
+  (defvar observations 0)
+  (defvar predicate-creations 0)
+  (defvar predicate-calls 0)
+
+  (defun observe (value)
+    (setq observations (1+ observations))
+    value)
+
+  (defun predicate-factory ()
+    (setq predicate-creations (1+ predicate-creations))
+    (lambda (test value)
+      (setq predicate-calls (1+ predicate-calls))
+      (if (= test value) (str "hit-" test) false)))
+
+  (defun dispatch-report ()
+    (setq observations 0
+          predicate-creations 0
+          predicate-calls 0)
+    (let*
+      ((grouped
+         (case (observe 2)
+           (1 2) (observe "small")
+           3 (observe "three")
+           (observe "other")))
+       (case-observations observations)
+       (symbol-value (case 'ready ready "symbol" "other"))
+       (vector-value (case [1 2] [1 2] "vector" "other"))
+       (case-default (case 9 1 "one" "fallback"))
+       (case-nil (case 9 1 "one"))
+       (redirected
+         (condp (predicate-factory) (observe 3)
+           1 "one"
+           3 :>> (lambda (matched) (str "matched:" matched))
+           4 "four"
+           "other"))
+       (condp-observations (- observations case-observations))
+       (condp-default
+         (condp (lambda (test value) (= test value)) 9
+           1 "one"
+           "fallback")))
+      (js-object
+        :grouped grouped
+        :symbol symbol-value
+        :vector vector-value
+        :caseDefault case-default
+        :caseNil case-nil
+        :caseObservations case-observations
+        :redirected redirected
+        :condpDefault condp-default
+        :condpObservations condp-observations
+        :predicateCreations predicate-creations
+        :predicateCalls predicate-calls)))
+
+  (defun no-condp-match ()
+    (condp (lambda (test value) (= test value)) 9
+      1 "one"))
+
+  (export dispatch-report no-condp-match))

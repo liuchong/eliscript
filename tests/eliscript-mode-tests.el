@@ -71,6 +71,9 @@
             "  (describe (value) value))\n"
             "(defun pipeline (value) (-> value (1+) (* 2)))\n"
             "(defun conditional (value) (cond-> value t (1+)))\n"
+            "(defun dispatch (value) (case value 1 :one :other))\n"
+            "(defun predicate-dispatch (predicate value) "
+            "  (condp predicate value 1 :one :other))\n"
             "(defun present-pipeline (value) (some-> value (1+)))\n"
             "(defun present (value) (if-some (item value) item :missing))\n"
             "(defconst label \"ready\")\n"
@@ -106,6 +109,10 @@
     (should (eq (eliscript-mode-tests--face-at "->")
                 'font-lock-keyword-face))
     (should (eq (eliscript-mode-tests--face-at "cond->")
+                'font-lock-keyword-face))
+    (should (eq (eliscript-mode-tests--face-at "case")
+                'font-lock-keyword-face))
+    (should (eq (eliscript-mode-tests--face-at "condp")
                 'font-lock-keyword-face))
     (should (eq (eliscript-mode-tests--face-at "some->")
                 'font-lock-keyword-face))

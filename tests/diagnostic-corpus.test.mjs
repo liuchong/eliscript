@@ -36,10 +36,10 @@ test("complete negative diagnostic corpus is frozen and source-derived", async (
     suite.negativeCaseCount,
   ])).toEqual([
     ["reader", 23, 17],
-    ["expander", 40, 22],
+    ["expander", 40, 24],
     ["analyzer", 30, 57],
   ]);
-  expect(checked.suites.flatMap((suite) => suite.cases)).toHaveLength(96);
+  expect(checked.suites.flatMap((suite) => suite.cases)).toHaveLength(98);
   expect(checked.identity).toMatch(/^[0-9a-f]{64}$/u);
 });
 

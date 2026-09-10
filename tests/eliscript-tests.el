@@ -1609,6 +1609,45 @@
                (regexp-quote (cadr case))
                (error-message-string error-data))))))
 
+(ert-deftest eliscript-expander-desugars-value-dispatch-forms ()
+  (let ((output
+         (eliscript-compile-string
+          (concat
+           "(defun choose (value) "
+           "(case value (1 2) :small ready :ready :other))\n"
+           "(defun select (predicate value) "
+           "(condp predicate value 1 :one 2 :>> (lambda (match) match) :other))")
+          "value-dispatch.eli")))
+    (should (string-match-p "case_value\$G[0-9]+" output))
+    (should (string-match-p
+             (regexp-quote "__eliscript_equal(case_value") output))
+    (should (string-match-p "condp_predicate\$G[0-9]+" output))
+    (should (string-match-p
+             (regexp-quote "new globalThis.TypeError(\"condp found no matching clause\")")
+             (eliscript-compile-string
+              "(defun select (predicate value) (condp predicate value 1 :one))"
+              "value-dispatch-no-default.eli")))
+    (should-not
+     (string-match-p "\\_<case\\_>\\|\\_<condp\\_>" output))))
+
+(ert-deftest eliscript-expander-validates-value-dispatch-forms ()
+  (dolist (case
+           '(("(case 1)"
+              "case expects a dispatch expression and at least one match/result pair")
+             ("(case 2 (1 2) :small 2 :duplicate)"
+              "case declares duplicate match constant: 2")
+             ("(condp predicate value)"
+              "condp expects a predicate, dispatch expression, and at least one clause")
+             ("(condp predicate value 1 :>>)"
+              "condp :>> clause requires a result function")))
+    (let ((error-data
+           (should-error
+            (eliscript-compile-string (car case) "value-dispatch-error.eli")
+            :type 'eliscript-expand-error)))
+      (should (string-match-p
+               (regexp-quote (cadr case))
+               (error-message-string error-data))))))
+
 (ert-deftest eliscript-expander-preserves-quoted-data ()
   (let ((output
          (eliscript-compile-string

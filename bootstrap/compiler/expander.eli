@@ -1277,6 +1277,177 @@
                span)))
       (make-let-form name-node initializer-node if-node span)))
 
+  (defun quoted-value (node span)
+    (make-list
+      (js-array (symbol-node "quote" (node-span node)) node)
+      (or (node-span node) span)))
+
+  (defun case-constants (match-node)
+    (let ((items (list-items match-node)))
+      (if (and (not (eq items undefined)) (> (get items :length) 0))
+        items
+        (js-array match-node))))
+
+  (defun desugar-case (args context span)
+    (when (< (get args :length) 3)
+      (expander-fail
+        context span
+        "case expects a dispatch expression and at least one match/result pair"))
+    (let* ((dispatch-node (js-nth 0 args))
+           (remaining (js-call args :slice 1))
+           (has-default (= (% (get remaining :length) 2) 1))
+           (default-node
+             (if has-default
+               (js-nth (1- (get remaining :length)) remaining)
+               (literal-node nil span)))
+           (pair-limit
+             (if has-default
+               (1- (get remaining :length))
+               (get remaining :length)))
+           (dispatch-name (fresh-name-node "case-value" context span))
+           (seen (new (js* "Set")))
+           (cond-items (js-array))
+           (index 0))
+      (while (< index pair-limit)
+        (let* ((match-node (js-nth index remaining))
+               (result-node (js-nth (1+ index) remaining))
+               (constants (case-constants match-node))
+               (comparisons (js-array))
+               (constant-index 0))
+          (while (< constant-index (get constants :length))
+            (let* ((constant-node (js-nth constant-index constants))
+                   (identity (node-display constant-node)))
+              (when (js-call seen :has identity)
+                (expander-fail
+                  context span
+                  (str "case declares duplicate match constant: " identity)))
+              (js-call seen :add identity)
+              (js-call comparisons :push
+                (make-list
+                  (js-array
+                    (symbol-node "equal" (node-span constant-node))
+                    dispatch-name
+                    (quoted-value constant-node span))
+                  (or (node-span constant-node) span))))
+            (setq constant-index (1+ constant-index)))
+          (js-call cond-items :push
+            (make-list
+              (js-array
+                (if (= (get comparisons :length) 1)
+                  (js-nth 0 comparisons)
+                  (make-list
+                    (js-call
+                      (js-array (symbol-node "or" (node-span match-node)))
+                      :concat comparisons)
+                    (or (node-span match-node) span)))
+                result-node)
+              (or (node-span match-node) span))))
+        (setq index (+ index 2)))
+      (js-call cond-items :push
+        (make-list (js-array (literal-node t span) default-node) span))
+      (make-let-form
+        dispatch-name
+        dispatch-node
+        (make-list
+          (js-call (js-array (symbol-node "cond" span)) :concat cond-items)
+          span)
+        span)))
+
+  (defun condp-redirect-p (node)
+    (and (keyword-node-p node) (= (node-name node) ">>")))
+
+  (defun condp-no-match-form (span)
+    (make-list
+      (js-array
+        (symbol-node "throw" span)
+        (make-list
+          (js-array
+            (symbol-node "new" span)
+            (symbol-node "globalThis/TypeError" span)
+            (literal-node "condp found no matching clause" span))
+          span))
+      span))
+
+  (defun desugar-condp (args context span)
+    (when (< (get args :length) 4)
+      (expander-fail
+        context span
+        "condp expects a predicate, dispatch expression, and at least one clause"))
+    (let ((predicate-node (js-nth 0 args))
+          (dispatch-node (js-nth 1 args))
+          (remaining (js-call args :slice 2))
+          (clauses (js-array))
+          (index 0))
+      (while (< (1+ index) (get remaining :length))
+        (let ((test-node (js-nth index remaining))
+              (result-or-marker (js-nth (1+ index) remaining)))
+          (if (condp-redirect-p result-or-marker)
+            (progn
+              (when (>= (+ index 2) (get remaining :length))
+                (expander-fail
+                  context span "condp :>> clause requires a result function"))
+              (js-call clauses :push
+                (js-object
+                  :test test-node
+                  :result (js-nth (+ index 2) remaining)
+                  :redirect t))
+              (setq index (+ index 3)))
+            (progn
+              (js-call clauses :push
+                (js-object :test test-node :result result-or-marker :redirect false))
+              (setq index (+ index 2))))))
+      (when (= (get clauses :length) 0)
+        (expander-fail
+          context span
+          "condp expects a predicate, dispatch expression, and at least one clause"))
+      (let ((default-node
+              (if (< index (get remaining :length))
+                (js-nth index remaining)
+                (condp-no-match-form span)))
+            (predicate-name (fresh-name-node "condp-predicate" context span))
+            (dispatch-name (fresh-name-node "condp-value" context span))
+            (body-node nil)
+            (clause-index (1- (get clauses :length))))
+        (setq body-node default-node)
+        (while (>= clause-index 0)
+          (let* ((clause (js-nth clause-index clauses))
+                 (test-node (get clause :test))
+                 (result-node (get clause :result))
+                 (match-name (fresh-name-node "condp-result" context span))
+                 (predicate-call
+                   (make-list
+                     (js-array
+                       (symbol-node "funcall" (node-span test-node))
+                       predicate-name
+                       test-node
+                       dispatch-name)
+                     (or (node-span test-node) span)))
+                 (selected-node
+                   (if (get clause :redirect)
+                     (make-list
+                       (js-array
+                         (symbol-node "funcall" (node-span result-node))
+                         result-node
+                         match-name)
+                       (or (node-span result-node) span))
+                     result-node))
+                 (if-node
+                   (make-list
+                     (js-array
+                       (symbol-node "if" (node-span test-node))
+                       match-name
+                       selected-node
+                       body-node)
+                     (or (node-span test-node) span))))
+            (setq body-node
+              (make-let-form match-name predicate-call if-node span)))
+          (setq clause-index (1- clause-index)))
+        (make-let-form
+          predicate-name
+          predicate-node
+          (make-let-form dispatch-name dispatch-node body-node span)
+          span))))
+
   (defun desugar-defprotocol (args context span)
     (when (< (get args :length) 2)
       (expander-fail
@@ -1836,6 +2007,14 @@
            ((= operator "when-some")
             (expand-expression
               (desugar-when-binding "when-some" args t context span)
+              environment depth context))
+           ((= operator "case")
+            (expand-expression
+              (desugar-case args context span)
+              environment depth context))
+           ((= operator "condp")
+            (expand-expression
+              (desugar-condp args context span)
               environment depth context))
            ((= operator "reify")
             (expand-expression

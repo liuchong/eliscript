@@ -83,6 +83,7 @@ test-core: check-contracts
 		tests/atom.test.mjs tests/multimethod.test.mjs \
 		tests/declarative-protocol.test.mjs tests/declarative-record.test.mjs \
 		tests/declarative-type.test.mjs \
+		tests/value-dispatch.test.mjs \
 		tests/core-expression-forms.test.mjs \
 		tests/interop-js.test.mjs \
 		tests/interop-package.test.mjs \

@@ -419,6 +419,170 @@
             (eliscript-expander--generated-form nil)))))
     (eliscript-expander--let-form name-form initializer-form if-form)))
 
+(defun eliscript-expander--quoted-value (form)
+  "Return FORM as generated quoted data."
+  (eliscript-expander--generated-form-at
+   (list (eliscript-expander--generated-form-at 'quote form) form)
+   form))
+
+(defun eliscript-expander--case-constants (match-form)
+  "Return the constant forms represented by MATCH-FORM."
+  (let ((value (eliscript-form-value match-form)))
+    (if (and (consp value) (proper-list-p value)) value (list match-form))))
+
+(defun eliscript-expander--desugar-case (arguments)
+  "Return value-dispatch code represented by case ARGUMENTS."
+  (when (< (length arguments) 3)
+    (eliscript-expander--fail
+     "case expects a dispatch expression and at least one match/result pair"))
+  (let* ((dispatch-form (car arguments))
+         (remaining (cdr arguments))
+         (default-form
+          (when (= (% (length remaining) 2) 1)
+            (car (last remaining))))
+         (pairs
+          (if default-form (butlast remaining) remaining))
+         (dispatch-name (eliscript-expander--fresh-name-form "case-value"))
+         (seen (make-hash-table :test #'equal))
+         cond-items)
+    (while pairs
+      (let* ((match-form (pop pairs))
+             (result-form (pop pairs))
+             (constants (eliscript-expander--case-constants match-form))
+             comparisons)
+        (dolist (constant constants)
+          (let ((identity (prin1-to-string (eliscript-form-strip constant))))
+            (when (gethash identity seen)
+              (eliscript-expander--fail
+               "case declares duplicate match constant: %s" identity))
+            (puthash identity t seen))
+          (push
+           (eliscript-expander--generated-form-at
+            (list
+             (eliscript-expander--generated-form-at 'equal constant)
+             dispatch-name
+             (eliscript-expander--quoted-value constant))
+            constant)
+           comparisons))
+        (setq comparisons (nreverse comparisons))
+        (setq cond-items
+              (append
+               cond-items
+               (list
+                (eliscript-expander--generated-form-at
+                 (list
+                  (if (cdr comparisons)
+                      (eliscript-expander--generated-form-at
+                       (cons
+                        (eliscript-expander--generated-form-at 'or match-form)
+                        comparisons)
+                       match-form)
+                    (car comparisons))
+                  result-form)
+                 match-form))))))
+    (setq cond-items
+          (append
+           cond-items
+           (list
+            (eliscript-expander--generated-form
+             (list
+              (eliscript-expander--generated-form t)
+              (or default-form
+                  (eliscript-expander--generated-form nil)))))))
+    (eliscript-expander--let-form
+     dispatch-name
+     dispatch-form
+     (eliscript-expander--generated-form
+      (cons (eliscript-expander--generated-form 'cond) cond-items)))))
+
+(defun eliscript-expander--condp-redirect-p (form)
+  "Return non-nil when FORM is the condp :>> marker."
+  (eq (eliscript-form-value form) :>>))
+
+(defun eliscript-expander--condp-no-match-form ()
+  "Return the generated condp no-match failure."
+  (eliscript-expander--generated-form
+   (list
+    (eliscript-expander--generated-form 'throw)
+    (eliscript-expander--generated-form
+     (list
+      (eliscript-expander--generated-form 'new)
+      (eliscript-expander--generated-form 'globalThis/TypeError)
+      (eliscript-expander--generated-form
+       "condp found no matching clause"))))))
+
+(defun eliscript-expander--desugar-condp (arguments)
+  "Return predicate-dispatch code represented by condp ARGUMENTS."
+  (when (< (length arguments) 4)
+    (eliscript-expander--fail
+     "condp expects a predicate, dispatch expression, and at least one clause"))
+  (let ((predicate-form (nth 0 arguments))
+        (dispatch-form (nth 1 arguments))
+        (remaining (nthcdr 2 arguments))
+        clauses
+        default-form)
+    (while (> (length remaining) 1)
+      (let ((test-form (pop remaining))
+            (result-or-marker (pop remaining)))
+        (if (eliscript-expander--condp-redirect-p result-or-marker)
+            (progn
+              (unless remaining
+                (eliscript-expander--fail
+                 "condp :>> clause requires a result function"))
+              (push (list test-form (pop remaining) t) clauses))
+          (push (list test-form result-or-marker nil) clauses))))
+    (setq default-form (car remaining))
+    (setq clauses (nreverse clauses))
+    (unless clauses
+      (eliscript-expander--fail
+       "condp expects a predicate, dispatch expression, and at least one clause"))
+    (let ((predicate-name
+           (eliscript-expander--fresh-name-form "condp-predicate"))
+          (dispatch-name
+           (eliscript-expander--fresh-name-form "condp-value"))
+          (body (or default-form
+                    (eliscript-expander--condp-no-match-form))))
+      (dolist (clause (reverse clauses))
+        (let* ((test-form (nth 0 clause))
+               (result-form (nth 1 clause))
+               (redirect-p (nth 2 clause))
+               (match-name
+                (eliscript-expander--fresh-name-form "condp-result"))
+               (predicate-call
+                (eliscript-expander--generated-form-at
+                 (list
+                  (eliscript-expander--generated-form-at 'funcall test-form)
+                  predicate-name
+                  test-form
+                  dispatch-name)
+                 test-form))
+               (selected
+                (if redirect-p
+                    (eliscript-expander--generated-form-at
+                     (list
+                      (eliscript-expander--generated-form-at
+                       'funcall result-form)
+                      result-form
+                      match-name)
+                     result-form)
+                  result-form))
+               (if-form
+                (eliscript-expander--generated-form-at
+                 (list
+                  (eliscript-expander--generated-form-at 'if test-form)
+                  match-name
+                  selected
+                  body)
+                 test-form)))
+          (setq body
+                (eliscript-expander--let-form
+                 match-name predicate-call if-form))))
+      (eliscript-expander--let-form
+       predicate-name
+       predicate-form
+       (eliscript-expander--let-form
+        dispatch-name dispatch-form body)))))
+
 (defun eliscript-expander--desugar-defprotocol (arguments)
   "Return core declarations represented by defprotocol ARGUMENTS."
   (when (< (length arguments) 2)
@@ -993,6 +1157,14 @@
           (eliscript-expander--expand-expression
            (eliscript-expander--desugar-when-binding
             "when-some" arguments t)
+           environment depth))
+         ((eq operator 'case)
+          (eliscript-expander--expand-expression
+           (eliscript-expander--desugar-case arguments)
+           environment depth))
+         ((eq operator 'condp)
+          (eliscript-expander--expand-expression
+           (eliscript-expander--desugar-condp arguments)
            environment depth))
          ((eq operator 'reify)
           (eliscript-expander--expand-expression
