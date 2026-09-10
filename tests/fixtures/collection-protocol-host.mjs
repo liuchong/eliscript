@@ -8,6 +8,7 @@ import {
   isSequenceView,
   nth,
   reduce,
+  reduceKV,
   reduced,
   seq,
 } from "../../runtime/core/collection.mjs";
@@ -37,6 +38,8 @@ console.log(JSON.stringify({
     set: reduce(set, (values, value) => [...values, value], []).sort(),
     early: reduce(vector, (total, value) =>
       value === 6 ? reduced(total + value) : total + value, 0),
+    indexed: reduceKV(vector, (total, index, value) => total + index + value, 0),
+    keyed: reduceKV(map, (total, key, value) => total + key.length + value, 0),
   },
   construction: {
     vector: [...conj(vector, 10)],

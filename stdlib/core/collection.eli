@@ -8,6 +8,7 @@
   (defconst IIndexed Runtime/IIndexed)
   (defconst ISeqable Runtime/ISeqable)
   (defconst IReduce Runtime/IReduce)
+  (defconst IKVReduce Runtime/IKVReduce)
   (defconst ReductionView Runtime/ReductionView)
   (defconst SequenceView Runtime/SequenceView)
   (defun collection-count (collection) (Runtime/count collection))
@@ -28,6 +29,9 @@
   (defun reduce
     (collection reducer &rest initial)
     (apply Runtime/reduce (js-cons collection (js-cons reducer initial))))
+  (defun reduce-kv
+    (collection reducer initial)
+    (Runtime/reduceKV collection reducer initial))
   (defun collection-seq (collection) (Runtime/seq collection))
   (defun reduced (value) (Runtime/reduced value))
   (defun reduced? (value) (Runtime/isReduced value))
@@ -46,6 +50,7 @@
     IIndexed
     ILookup
     IReduce
+    IKVReduce
     ISeqable
     ReductionView
     SequenceView
@@ -58,6 +63,7 @@
     empty
     lookup
     reduce
+    reduce-kv
     reduced
     reduced?
     reduction-view

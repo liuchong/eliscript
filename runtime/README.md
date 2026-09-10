@@ -135,7 +135,7 @@ object and its implementations cannot.
 
 `core/collection.mjs` defines the generic collection capability layer:
 `ICounted`, `IEmptyable`, `IConj`, `ILookup`, `IAssociative`, `IIndexed`,
-`ISeqable`, and `IReduce`. Persistent List, Vector, Map, and Set values use direct
+`ISeqable`, `IReduce`, and `IKVReduce`. Persistent List, Vector, Map, and Set values use direct
 Symbol slots; native Array, Map, Set, and ordinary Object values use exact-type
 extension tables, while primitive String uses an explicit host category.
 Adapters do not modify prototypes. Sequence views are frozen and replayable;
@@ -145,6 +145,11 @@ frozen entries. Reduction views are frozen, replayable `IReduce`-only values
 that reject `count` and `seq` without traversal. Reduced values provide early
 termination, and construction operations preserve persistent inputs or return
 immutable native copies.
+
+`reduceKV` passes indexes or stored keys directly to a three-argument reducer.
+Persistent Vector leaf arrays and persistent Map HAMT entries are traversed
+without constructing public pair values; native Array, Map, Object, nil, and
+externally extended values participate through the same open protocol.
 
 ### Transducers
 

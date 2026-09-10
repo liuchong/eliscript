@@ -3,9 +3,13 @@ import {
   contains,
   count,
   get,
+  IIndexed,
+  IKVReduce,
   nth,
   reduce,
+  reduceKV,
 } from "./collection.mjs";
+import { implementsProtocolOperation } from "./protocol.mjs";
 import {
   EMPTY_MAP,
 } from "./map.mjs";
@@ -35,6 +39,17 @@ function readEntry(entry) {
     throw new TypeError("data entries must contain exactly one key/value pair");
   }
   return [nth(entry, 0), nth(entry, 1)];
+}
+
+function reduceEntries(collection, reducer, initial) {
+  if (implementsProtocolOperation(IKVReduce, "reduceKV", collection) &&
+      !implementsProtocolOperation(IIndexed, "nth", collection)) {
+    return reduceKV(collection, reducer, initial);
+  }
+  return reduce(collection, (result, entry) => {
+    const [key, value] = readEntry(entry);
+    return reducer(result, key, value);
+  }, initial);
 }
 
 function collectBuckets(keyFunction, collection, createBucket, updateBucket) {
@@ -179,8 +194,7 @@ export function selectKeys(collection, keys) {
 export function merge(...collections) {
   const result = transient(EMPTY_MAP);
   for (const collection of collections) {
-    reduce(collection, (builder, entry) => {
-      const [key, value] = readEntry(entry);
+    reduceEntries(collection, (builder, key, value) => {
       assocBang(builder, key, value);
       return builder;
     }, result);
@@ -192,8 +206,7 @@ export function mergeWith(combine, ...collections) {
   requireFunction(combine, "mergeWith combine function");
   let result = EMPTY_MAP;
   for (const collection of collections) {
-    result = reduce(collection, (current, entry) => {
-      const [key, value] = readEntry(entry);
+    result = reduceEntries(collection, (current, key, value) => {
       return assoc(
         current,
         key,

@@ -1,6 +1,7 @@
 (module eliscript.core.data
   (import "../../runtime/core/collection.mjs" :as Collection)
   (import "../../runtime/core/map.mjs" EMPTY_MAP)
+  (import "../../runtime/core/protocol.mjs" :as Protocol)
   (import "../../runtime/core/transducer.mjs" into)
   (import "../../runtime/core/transient.mjs" assocBang persistentBang transient)
   (import "../../runtime/core/vector.mjs" EMPTY_VECTOR)
@@ -20,6 +21,24 @@
         (new
           globalThis/TypeError
           "data entries must contain exactly one key/value pair"))))
+  (defun reduce-entries
+    (collection reducer initial)
+    (if
+      (and
+        (Protocol/implementsProtocolOperation
+          Collection/IKVReduce
+          "reduceKV"
+          collection)
+        (not
+          (Protocol/implementsProtocolOperation Collection/IIndexed "nth" collection)))
+      (Collection/reduceKV collection reducer initial)
+      (Collection/reduce
+        collection
+        (lambda
+          (result entry)
+          (let ((pair (read-entry entry)))
+            (funcall reducer result (get pair :key) (get pair :value))))
+        initial)))
   (defun collect-buckets
     (key-function collection create-bucket update-bucket)
     (require-function key-function "data key function")
@@ -180,13 +199,9 @@
     (&rest collections)
     (let ((result (transient EMPTY_MAP)) (index 0))
       (while (< index (js-length collections))
-        (Collection/reduce
+        (reduce-entries
           (js-nth index collections)
-          (lambda
-            (builder entry)
-            (let ((pair (read-entry entry)))
-              (assocBang builder (get pair :key) (get pair :value)))
-            builder)
+          (lambda (builder key value) (assocBang builder key value) builder)
           result)
         (setq index (1+ index)))
       (persistentBang result)))
@@ -197,20 +212,16 @@
       (while (< index (js-length collections))
         (setq
           result
-          (Collection/reduce
+          (reduce-entries
             (js-nth index collections)
             (lambda
-              (current entry)
-              (let*
-                ((pair (read-entry entry))
-                  (key (get pair :key))
-                  (value (get pair :value)))
-                (Collection/assoc
-                  current
-                  key
-                  (if (Collection/contains current key)
-                    (funcall combine (Collection/get current key) value)
-                    value))))
+              (current key value)
+              (Collection/assoc
+                current
+                key
+                (if (Collection/contains current key)
+                  (funcall combine (Collection/get current key) value)
+                  value)))
             result)
           index
           (1+ index)))

@@ -271,6 +271,7 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "function assoc(collection, key, value, ...key_values)",
         "function collection_count(collection)",
         "function reduce(collection, reducer, ...initial)",
+        "function reduce_kv(collection, reducer, initial)",
         "function reduction_view(reduce_function)",
         "function reduction_view_QMARK_(value)",
         "function unbounded_sequence_view(factory)",

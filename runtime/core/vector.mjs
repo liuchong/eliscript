@@ -33,9 +33,12 @@ import {
   COLLECTION_CONTAINS,
   COLLECTION_NTH,
   COLLECTION_REDUCE,
+  COLLECTION_REDUCE_KV,
   COLLECTION_SEQ,
+  isReducedValue,
   reduceIterable,
   sequenceView,
+  unreducedValue,
 } from "./collection-internals.mjs";
 import {
   EDITABLE_TRANSIENT,
@@ -564,6 +567,23 @@ export class PersistentVector {
 
   [COLLECTION_REDUCE](reducer, ...initial) {
     return reduceIterable(this, reducer, ...initial);
+  }
+
+  [COLLECTION_REDUCE_KV](reducer, initial) {
+    const state = this[VECTOR_STATE];
+    let result = initial;
+    let index = 0;
+    while (index < state.count) {
+      const chunk = arrayFor(state, index);
+      const chunkStart = index & BRANCH_MASK;
+      const chunkLength = Math.min(chunk.length, state.count - (index - chunkStart));
+      for (let offset = chunkStart; offset < chunkLength; offset += 1) {
+        result = reducer(result, index, chunk[offset]);
+        index += 1;
+        if (isReducedValue(result)) return unreducedValue(result);
+      }
+    }
+    return result;
   }
 
   [EDITABLE_TRANSIENT]() {

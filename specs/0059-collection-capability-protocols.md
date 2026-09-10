@@ -13,7 +13,7 @@
 
 This specification turns the generic protocol mechanism into the first shared
 collection capability layer. It defines `ICounted`, `ILookup`, `IIndexed`,
-`ISeqable`, and `IReduce`; installs direct Symbol methods on persistent Vector,
+`ISeqable`, `IReduce`, and `IKVReduce`; installs direct Symbol methods on persistent Vector,
 Map, and Set values; and supplies external adapters for native JavaScript
 Array, Map, Set, String, and exact ordinary Object values without modifying
 their prototypes.
@@ -30,8 +30,9 @@ collection capabilities.
 
 `runtime/core/collection.mjs` exports:
 
-- protocols: `ICounted`, `ILookup`, `IIndexed`, `ISeqable`, `IReduce`
-- generic operations: `count`, `get`, `nth`, `seq`, `reduce`
+- protocols: `ICounted`, `ILookup`, `IIndexed`, `ISeqable`, `IReduce`,
+  `IKVReduce`
+- generic operations: `count`, `get`, `nth`, `seq`, `reduce`, `reduceKV`
 - sequence values: `SequenceView`, `sequenceView`, `unboundedSequenceView`,
   `isSequenceView`
 - reduction values: `ReductionView`, `reductionView`, `isReductionView`
@@ -116,7 +117,14 @@ callback is invoked anew for every `reduce` call and receives the reducer plus
 zero or one explicit initial value. It implements `IReduce` directly but does
 not advertise `ICounted` or `ISeqable`, so generic `count` and `seq` reject it
 without starting traversal. This supports reusable transformed pipelines whose
-source may be unbounded without implying broad lazy-sequence behavior.
+  source may be unbounded without implying broad lazy-sequence behavior.
+
+### IKVReduce
+
+`reduceKV(collection, reducer, initial)` passes accumulator, key, and value
+without constructing public entry pairs. Vector and Array keys are indexes;
+Map and Object keys are their logical keys. The operation always requires an
+explicit initial value and shares `reduced` early termination with `reduce`.
 
 ## Reduced Values
 
@@ -137,9 +145,9 @@ inventing a second termination channel.
 
 Persistent types install direct Symbol-keyed protocol methods:
 
-- Vector: all five capabilities
+- Vector: all sequence capabilities plus `IKVReduce`
 - List: `ICounted`, `ISeqable`, `IReduce`
-- Map: `ICounted`, `ILookup`, `ISeqable`, `IReduce`
+- Map: `ICounted`, `ILookup`, `ISeqable`, `IReduce`, `IKVReduce`
 - Set: `ICounted`, `ILookup`, `ISeqable`, `IReduce`
 
 Direct methods delegate traversal to existing representation-native iterators.
@@ -215,9 +223,9 @@ construction contract, while indexed access remains deliberately absent.
 
 ## Acceptance Criteria
 
-- **CCP-01:** All five protocol objects and operation functions are immutable
+- **CCP-01:** All collection protocol objects and operation functions are immutable
   and use the 0058 dispatch contract.
-- **CCP-02:** Persistent Vector implements all five direct capabilities; Map
+- **CCP-02:** Persistent Vector implements every applicable direct capability; Map
   and Set implement every applicable direct capability without exposing node
   internals.
 - **CCP-03:** Count, lookup, and indexed operations preserve stored
@@ -243,6 +251,9 @@ construction contract, while indexed access remains deliberately absent.
 - **CCP-12:** A reduction view is frozen and replayable, implements only direct
   `IReduce`, and rejects `count` and `seq` without invoking its reduction
   callback.
+- **CCP-13:** Key/value reduction passes indexes or stored keys directly,
+  supports open external extension and reduced termination, and remains
+  stack-constant at one million indexed values.
 
 ## Next Slice
 

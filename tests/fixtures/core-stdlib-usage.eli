@@ -50,6 +50,7 @@
     update
     update-in
     zipmap)
+  (import "./stdlib/core/collection.mjs" reduce-kv)
   (import "./stdlib/core/transducer.mjs" eduction filtering mapping run!)
   (defconst values [0 1 2 3 4])
   (defvar generated-state 0)
@@ -134,6 +135,11 @@
   (defconst combined-result
     (merge-with (lambda (left right) (+ left right)) {"hits" 2} {"hits" 5}))
   (defconst zipped-result (zipmap ["a" "b" "unused"] [10 20]))
+  (defconst keyed-total
+    (reduce-kv
+      {"left" 3 "right" 5}
+      (lambda (total key value) (+ total (js-length key) value))
+      0))
   (defconst nested-value (get-in nested-update-result ["profile" "visits"] "missing"))
   (export
     finite-range
@@ -189,4 +195,5 @@
     merged-result
     combined-result
     zipped-result
+    keyed-total
     nested-value))

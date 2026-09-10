@@ -451,6 +451,11 @@ plain merge, and zipping use owner-token builders; combining merge retains
 value-semantic prior-value lookup. Searches and bounded transforms use reduced
 values for early termination.
 
+`reduce-kv` passes indexes or stored keys directly through `IKVReduce`.
+Persistent Vector and HAMT Map values avoid public entry allocation, external
+keyed types can implement the capability independently, and merge operations
+prefer the keyed path without changing Vector/Array entry-source semantics.
+
 `range`, `repeat`, `repeatedly`, `iterate`, `cycle`, and `generate` create
 replayable sequence views. Finite sources publish exact counts; open sources
 are explicitly unbounded, so `collection-count` rejects them without starting
@@ -473,6 +478,8 @@ Replayable bounded and unbounded sources are specified in
 [0151](../specs/0151-replayable-sequence-sources.md).
 Replayable reduction-only transducer pipelines are specified in
 [0152](../specs/0152-replayable-reducible-transducer-pipelines.md).
+Key/value reduction is specified in
+[0153](../specs/0153-key-value-reduction-protocol.md).
 
 ## Portable Sequence Compatibility Module
 

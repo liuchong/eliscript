@@ -30,10 +30,13 @@ import {
   COLLECTION_ASSOC,
   COLLECTION_CONTAINS,
   COLLECTION_REDUCE,
+  COLLECTION_REDUCE_KV,
   COLLECTION_SEQ,
+  isReducedValue,
   reduceIterable,
   readCollectionEntry,
   sequenceView,
+  unreducedValue,
 } from "./collection-internals.mjs";
 import {
   EDITABLE_TRANSIENT,
@@ -311,6 +314,15 @@ export class PersistentHashMap {
 
   [COLLECTION_REDUCE](reducer, ...initial) {
     return reduceIterable(this, reducer, ...initial);
+  }
+
+  [COLLECTION_REDUCE_KV](reducer, initial) {
+    let result = initial;
+    for (const entry of mapEntries(this[MAP_STATE].root)) {
+      result = reducer(result, entry.key, entry.value);
+      if (isReducedValue(result)) return unreducedValue(result);
+    }
+    return result;
   }
 
   [EDITABLE_TRANSIENT]() {

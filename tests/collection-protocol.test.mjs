@@ -8,6 +8,7 @@ import {
   ICounted,
   IEmptyable,
   IIndexed,
+  IKVReduce,
   ILookup,
   IReduce,
   ISeqable,
@@ -23,6 +24,7 @@ import {
   isSequenceView,
   nth,
   reduce,
+  reduceKV,
   reductionView,
   reduced,
   seq,
@@ -71,7 +73,7 @@ test("collection protocols are frozen capabilities with direct persistent method
   const map = persistentHashMap(["answer", 42]);
   const set = persistentHashSet("ready");
 
-  for (const protocol of [ICounted, ILookup, IIndexed, ISeqable, IReduce]) {
+  for (const protocol of [ICounted, ILookup, IIndexed, ISeqable, IReduce, IKVReduce]) {
     expect(Object.isFrozen(protocol)).toBe(true);
   }
   expect(implementsProtocol(ICounted, vector)).toBe(true);
@@ -81,10 +83,62 @@ test("collection protocols are frozen capabilities with direct persistent method
   expect(implementsProtocol(IReduce, vector)).toBe(true);
   expect(implementsProtocol(IIndexed, map)).toBe(false);
   expect(implementsProtocol(IIndexed, set)).toBe(false);
+  expect(implementsProtocol(IKVReduce, vector)).toBe(true);
+  expect(implementsProtocol(IKVReduce, map)).toBe(true);
+  expect(implementsProtocol(IKVReduce, set)).toBe(false);
 
   expect(vector[protocolSlot(ICounted, "count")]()).toBe(2);
   expect(map[protocolSlot(ILookup, "get")]("answer", null)).toBe(42);
   expect(set[protocolSlot(ILookup, "get")]("ready", null)).toBe("ready");
+  expect(map[protocolSlot(IKVReduce, "reduceKV")]((sum, _key, value) =>
+    sum + value, 0)).toBe(42);
+});
+
+test("key/value reduction is allocation-light, extensible, and terminates exactly", () => {
+  const vector = persistentVector(2, 4, 6);
+  const map = persistentHashMap(["left", 3], ["right", 5]);
+  expect(reduceKV(vector, (result, index, value) =>
+    [...result, [index, value]], [])).toEqual([[0, 2], [1, 4], [2, 6]]);
+  expect(reduceKV(map, (sum, _key, value) => sum + value, 0)).toBe(8);
+  expect(reduceKV([3, 5], (sum, index, value) => sum + index + value, 0)).toBe(9);
+  expect(reduceKV(new Map([["a", 2], ["b", 4]]),
+    (sum, key, value) => sum + key.length + value, 0)).toBe(8);
+  expect(reduceKV({ left: 3, right: 5 }, (keys, key) => [...keys, key], []))
+    .toEqual(["left", "right"]);
+  expect(reduceKV(null, () => "unreachable", "initial")).toBe("initial");
+
+  let calls = 0;
+  expect(reduceKV(vector, (sum, _index, value) => {
+    calls += 1;
+    return value === 4 ? reduced(sum + value) : sum + value;
+  }, 0)).toBe(6);
+  expect(calls).toBe(2);
+
+  class ExternalKeyValues {
+    constructor(entries) {
+      this.entries = Object.freeze(entries.map((entry) => Object.freeze(entry)));
+      Object.freeze(this);
+    }
+  }
+  extendProtocolType(IKVReduce, ExternalKeyValues, {
+    reduceKV: (source, reducer, initial) => {
+      let result = initial;
+      for (const [key, value] of source.entries) {
+        result = reducer(result, key, value);
+        if (isReduced(result)) return unreduced(result);
+      }
+      return result;
+    },
+  });
+  const external = new ExternalKeyValues([["x", 7], ["y", 9]]);
+  expect(reduceKV(external, (sum, _key, value) => sum + value, 0)).toBe(16);
+  expect(implementsProtocol(IReduce, external)).toBe(false);
+  expect(() => reduceKV(vector, null, 0)).toThrow(
+    "key/value reducer must be a function",
+  );
+  expect(() => reduceKV(vector, () => null)).toThrow(
+    "reduceKV requires a collection, reducer, and initial value",
+  );
 });
 
 test("construction protocols are frozen capabilities with direct persistent methods", () => {
@@ -559,6 +613,8 @@ test("collection capabilities agree under Bun and Node and reduce at million sca
       map: 8,
       set: ["alpha", "beta"],
       early: 12,
+      indexed: 26,
+      keyed: 17,
     },
     construction: {
       vector: [2, 4, 6, 8, 10],
@@ -573,6 +629,8 @@ test("collection capabilities agree under Bun and Node and reduce at million sca
   const values = Array.from({ length: 1_000_000 }, (_value, index) => index);
   expect(reduce(values, (total, value) => total + value, 0))
     .toBe(499_999_500_000);
+  expect(reduceKV(values, (total, index, value) => total + index + value, 0))
+    .toBe(999_999_000_000);
 }, 30_000);
 
 test("generic construction reaches one million values without stack growth", () => {

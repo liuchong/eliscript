@@ -122,6 +122,11 @@ combines repeated keys, including keys whose prior value is `undefined`.
 shorter materialized input. Every merged entry must contain exactly one key
 and one value.
 
+Map-like `IKVReduce` sources pass keys and values directly to merge reducers.
+Indexed `IKVReduce` sources retain their established role as collections of
+entries, so Vector and Array compatibility is unchanged. External map-like
+types may implement only key/value reduction and still participate.
+
 Each key function is validated before traversal and called exactly once per
 source value. Group and count discovery uses a value-semantic persistent index
 from key to dense bucket position, so equal persistent keys share one bucket
@@ -273,6 +278,9 @@ dispatch internals remain later work.
 - **PCA-21:** Replayable finite and unbounded sequence sources expose explicit
   count behavior, defer callback execution until consumption, and compose with
   bounded protocol reduction without stack growth.
+- **PCA-22:** Keyed merging prefers non-indexed `IKVReduce` sources without
+  allocating public entry pairs, accepts key/value-only external types, and
+  preserves indexed entry-source behavior.
 
 ## Next Slice
 

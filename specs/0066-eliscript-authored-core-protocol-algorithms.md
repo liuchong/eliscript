@@ -32,10 +32,10 @@ Four new Eliscript API modules expose the runtime substrate:
 - `stdlib/core/protocol.eli` exposes protocol construction, extension,
   operation lookup, host-category inspection, and implementation queries; its
   dispatch implementation is completed by specification 0079.
-- `stdlib/core/collection.eli` exports the nine collection capabilities and
+- `stdlib/core/collection.eli` exports the collection capabilities and
   generic count, empty, construction, lookup, membership, indexed access,
   bounded and unbounded sequence views, replayable reduction-only views,
-  reduction, and reduced-value operations.
+  ordinary and key/value reduction, and reduced-value operations.
 - `stdlib/core/transducer.eli` exports reducer completion, composition,
   mapping, indexed mapping/keeping, filtering, removing, bounded and
   predicate-controlled take/drop, nth sampling, interposition, adjacent
@@ -199,6 +199,9 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
 - **ECA-17:** Maintained reduction views, `eduction`, and `run!` compile from
   `stdlib/core/`, preserve replay and bounded termination over unbounded
   sources, and match the direct runtime facade under Bun and Node.
+- **ECA-18:** Maintained `IKVReduce` and `reduce-kv` compile from
+  `stdlib/core/collection.eli`, preserve exact key/value and early-termination
+  semantics, and support keyed data algorithms under Bun and Node.
 
 ## Follow-up
 

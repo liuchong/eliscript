@@ -10,6 +10,7 @@ import {
   I_LOOKUP,
   I_ASSOCIATIVE,
   I_REDUCE,
+  I_KV_REDUCE,
   I_SEQABLE,
   ReductionView as InternalReductionView,
   SequenceView as InternalSequenceView,
@@ -21,6 +22,7 @@ import {
   dispatchCollectionContains,
   dispatchCollectionNth,
   dispatchCollectionReduce,
+  dispatchCollectionReduceKV,
   dispatchCollectionSeq,
   isReducedValue,
   readCollectionEntry,
@@ -144,6 +146,33 @@ function objectSequence(value) {
     );
 }
 
+function reduceIndexedValues(values, reducer, initial) {
+  let result = initial;
+  for (let index = 0; index < values.length; index += 1) {
+    result = reducer(result, index, values[index]);
+    if (isReducedValue(result)) return unreducedValue(result);
+  }
+  return result;
+}
+
+function reduceMapValues(values, reducer, initial) {
+  let result = initial;
+  for (const [key, value] of values) {
+    result = reducer(result, key, value);
+    if (isReducedValue(result)) return unreducedValue(result);
+  }
+  return result;
+}
+
+function reduceObjectValues(value, reducer, initial) {
+  let result = initial;
+  for (const key of Object.keys(value)) {
+    result = reducer(result, key, value[key]);
+    if (isReducedValue(result)) return unreducedValue(result);
+  }
+  return result;
+}
+
 extendProtocolCategory(I_COUNTED, "string", {
   count: (value) => value.length,
 });
@@ -179,6 +208,7 @@ extendProtocolType(I_REDUCE, Object, {
   reduce: (value, reducer, ...initial) =>
     reduceIterable(objectSequence(value) ?? [], reducer, ...initial),
 });
+extendProtocolType(I_KV_REDUCE, Object, { reduceKV: reduceObjectValues });
 
 extendProtocolType(I_COUNTED, Array, { count: (values) => values.length });
 extendProtocolType(I_EMPTYABLE, Array, { empty: () => [] });
@@ -195,6 +225,7 @@ extendProtocolType(I_ASSOCIATIVE, Array, {
 extendProtocolType(I_INDEXED, Array, { nth: indexedValue });
 extendProtocolType(I_SEQABLE, Array, { seq: arraySequence });
 extendProtocolType(I_REDUCE, Array, { reduce: reduceIterable });
+extendProtocolType(I_KV_REDUCE, Array, { reduceKV: reduceIndexedValues });
 
 extendProtocolType(I_COUNTED, Map, { count: (values) => values.size });
 extendProtocolType(I_EMPTYABLE, Map, { empty: () => new Map() });
@@ -212,6 +243,7 @@ extendProtocolType(I_REDUCE, Map, {
   reduce: (values, reducer, ...initial) =>
     reduceIterable(mapSequence(values) ?? [], reducer, ...initial),
 });
+extendProtocolType(I_KV_REDUCE, Map, { reduceKV: reduceMapValues });
 
 extendProtocolType(I_COUNTED, Set, { count: (values) => values.size });
 extendProtocolType(I_EMPTYABLE, Set, { empty: () => new Set() });
@@ -231,6 +263,9 @@ extendProtocolCategory(I_SEQABLE, "null", { seq: () => null });
 extendProtocolCategory(I_REDUCE, "null", {
   reduce: (_value, reducer, ...initial) => reduceIterable([], reducer, ...initial),
 });
+extendProtocolCategory(I_KV_REDUCE, "null", {
+  reduceKV: (_value, _reducer, initial) => initial,
+});
 
 export const ICounted = I_COUNTED;
 export const IEmptyable = I_EMPTYABLE;
@@ -240,6 +275,7 @@ export const IAssociative = I_ASSOCIATIVE;
 export const IIndexed = I_INDEXED;
 export const ISeqable = I_SEQABLE;
 export const IReduce = I_REDUCE;
+export const IKVReduce = I_KV_REDUCE;
 
 export const ReductionView = InternalReductionView;
 export const SequenceView = InternalSequenceView;
@@ -327,6 +363,16 @@ export function reduce(collection, reducer, ...initial) {
       ? dispatchCollectionReduce(collection, reducer)
       : dispatchCollectionReduce(collection, reducer, initial[0]),
   );
+}
+
+export function reduceKV(collection, reducer, initial) {
+  if (arguments.length !== 3) {
+    throw new TypeError("reduceKV requires a collection, reducer, and initial value");
+  }
+  if (typeof reducer !== "function") {
+    throw new TypeError("key/value reducer must be a function");
+  }
+  return unreducedValue(dispatchCollectionReduceKV(collection, reducer, initial));
 }
 
 export function reduced(value) {

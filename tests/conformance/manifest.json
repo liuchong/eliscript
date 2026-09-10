@@ -2861,6 +2861,41 @@
           "contains": "portable compiler driver reaches a reproducible fixed point"
         }
       ]
+    },
+    {
+      "id": "stdlib.key-value-reduction-protocol",
+      "title": "Key value reduction protocol",
+      "status": "stable",
+      "spec": "0153",
+      "contracts": [
+        "Exports open IKVReduce and explicit-initial reduce-kv across JavaScript and Lisp collection surfaces",
+        "Passes exact indexes for vectors and arrays and exact logical keys for maps and objects",
+        "Traverses persistent Vector leaves and HAMT entries without public pair allocation and stops on reduced",
+        "Preserves indexed entry-source merge compatibility while admitting external key-value-only map sources",
+        "Produces byte-identical fixed points and identical local Bun and Node results"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/collection-protocol.test.mjs",
+          "contains": "key/value reduction is allocation-light, extensible, and terminates exactly"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "associative data algorithms preserve nested and value-semantic behavior"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "Eliscript core modules compile and execute against runtime protocols"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }

@@ -10,6 +10,7 @@ import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
+  IKVReduce,
   IReduce,
   count as collectionCount,
   isReduced,
@@ -813,6 +814,22 @@ test("associative data algorithms preserve nested and value-semantic behavior", 
     },
   });
   const source = (...values) => new ProtocolValues(values);
+  class KeyValueSource {
+    constructor(entries) {
+      this.entries = Object.freeze(entries.map((entry) => Object.freeze(entry)));
+      Object.freeze(this);
+    }
+  }
+  extendProtocolType(IKVReduce, KeyValueSource, {
+    reduceKV: (keyed, reducer, initial) => {
+      let result = initial;
+      for (const [key, value] of keyed.entries) {
+        result = reducer(result, key, value);
+        if (isReduced(result)) return unreduced(result);
+      }
+      return result;
+    },
+  });
 
   const nested = EMPTY_MAP.assoc(
     "profile",
@@ -867,6 +884,11 @@ test("associative data algorithms preserve nested and value-semantic behavior", 
   );
   expect(merged.count).toBe(3);
   expect(merged.get("overwritten")).toBe(3);
+  const mergedKeyValues = mergeData(
+    new KeyValueSource([["direct", 4], ["overwritten", 8]]),
+  );
+  expect(mergedKeyValues.get("direct")).toBe(4);
+  expect(mergedKeyValues.get("overwritten")).toBe(8);
   const combined = mergeWith(
     (left, right) => left + right,
     new Map([[valueKey, 2], ["unset", undefined]]),
@@ -1002,6 +1024,7 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect(usage.combined_result.get("hits")).toBe(7);
     expect(usage.zipped_result.count).toBe(2);
     expect(usage.zipped_result.get("b")).toBe(20);
+    expect(usage.keyed_total).toBe(17);
 
     const generatedUsage = await readFile(usageModule, "utf8");
     expect(generatedUsage).toContain("first_even");
