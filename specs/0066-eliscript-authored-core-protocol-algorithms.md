@@ -57,11 +57,12 @@ implementations. The protocol module now additionally owns its policy.
 `stdlib/core/seq.eli` now contains the maintained implementations of:
 
 ```text
-butlast concat cycle dedupe distinct drop drop-last drop-while every? filter
-find first flatten generate interleave interleave-all interpose iterate keep
-keep-indexed last map map-indexed mapcat not-any? not-every? partition
-partition-all partition-by range reductions remove repeat repeatedly reverse
-sequence-nth some split-at split-with take take-last take-nth take-while tree-seq
+butlast concat cycle dedupe distinct drop drop-last drop-while every? ffirst
+filter find first flatten fnext generate interleave interleave-all interpose
+iterate keep keep-indexed last map map-indexed mapcat next nfirst nnext not-any?
+not-every? nth-next nth-rest partition partition-all partition-by prepend range
+reductions remove repeat repeatedly rest reverse second sequence-nth some
+split-at split-with take take-last take-nth take-while tree-seq
 ```
 
 `stdlib/core/data.eli` now contains the maintained implementations of:
@@ -240,6 +241,9 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
 - **ECA-23:** Maintained collection capability predicates, `empty?`, and
   `not-empty` compile from `stdlib/core/collection.eli`, preserve open protocol
   boundaries and non-empty identity, and agree under Bun and Node.
+- **ECA-24:** Maintained sequence head/tail composition compiles from
+  `stdlib/core/seq.eli`, preserves replayability and bounded/unbounded count
+  semantics, and agrees with the direct runtime facade under Bun and Node.
 
 ## Follow-up
 

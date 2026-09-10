@@ -565,6 +565,14 @@ are explicitly unbounded, so `collection-count` rejects them without starting
 a traversal. Producer callbacks execute only for consumed values, and `cycle`
 captures its finite `IReduce` input once as a persistent snapshot.
 
+`rest`, `next`, `prepend`, `second`, `ffirst`, `nfirst`, `fnext`, `nnext`,
+`nth-rest`, and `nth-next` compose replayable sequence views without realizing
+their tails. `rest` and `nth-rest` return possibly-empty sequence values;
+`next` and `nth-next` return nil when no value remains. Bounded, unknown, and
+unbounded cardinality remain explicit across slicing and prepending. Exact
+semantics are specified in
+[0163](../specs/0163-replayable-sequence-head-tail-views.md).
+
 `eduction` composes transducers into a replayable `IReduce`-only pipeline, so a
 bounded consumer can transform an unbounded source without realizing an
 intermediate Vector or tail. Reduction state is fresh for every run, while

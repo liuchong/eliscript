@@ -9,9 +9,11 @@
     drop-last
     drop-while
     every?
+    ffirst
     filter
     find
     first
+    fnext
     generate
     interpose
     keep
@@ -21,15 +23,23 @@
     map
     map-indexed
     mapcat
+    next
+    nfirst
+    nnext
+    nth-next
+    nth-rest
     sequence-nth
     partition-all
     partition-by
+    prepend
     reductions
     remove
     repeat
     repeatedly
+    rest
     reverse
     range
+    second
     some
     split-at
     split-with
@@ -114,6 +124,17 @@
   (defconst zero-truth (some (lambda (value) (if (= value 2) 0 nil)) values))
   (defconst all-truth (every? (lambda (value) (if (= value 3) "" 0)) values))
   (defconst first-value (first values "missing"))
+  (defconst rest-values (rest values))
+  (defconst next-values (next values))
+  (defconst prepended-values (prepend -1 values))
+  (defconst second-value (second values "missing"))
+  (defconst second-missing (second [0] "missing"))
+  (defconst first-first-value (ffirst [[1 2] [3 4]]))
+  (defconst next-first-values (nfirst [[1 2] [3 4]]))
+  (defconst first-next-value (fnext [[1 2] [3 4]]))
+  (defconst next-next-values (nnext values))
+  (defconst nth-rest-values (nth-rest 3 values))
+  (defconst nth-next-values (nth-next 3 values))
   (defconst last-value (last values "missing"))
   (defconst third-value (sequence-nth 2 values "missing"))
   (defconst tail-values (take-last 2 values))
@@ -194,6 +215,17 @@
     zero-truth
     all-truth
     first-value
+    rest-values
+    next-values
+    prepended-values
+    second-value
+    second-missing
+    first-first-value
+    next-first-values
+    first-next-value
+    next-next-values
+    nth-rest-values
+    nth-next-values
     last-value
     third-value
     tail-values

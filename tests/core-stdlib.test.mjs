@@ -17,6 +17,8 @@ import {
   isSequenceView,
   reduced,
   seq,
+  sequenceView,
+  unboundedSequenceView,
   unreduced,
 } from "../runtime/core/collection.mjs";
 import {
@@ -38,6 +40,7 @@ import {
   zipmap,
 } from "../runtime/core/data.mjs";
 import { EMPTY_MAP } from "../runtime/core/map.mjs";
+import { EMPTY_LIST } from "../runtime/core/list.mjs";
 import { extendProtocolType } from "../runtime/core/protocol.mjs";
 import {
   butlast,
@@ -49,9 +52,11 @@ import {
   dropLast,
   dropWhile,
   every,
+  ffirst,
   filter,
   find,
   flatten,
+  fnext,
   first,
   generate,
   interleave,
@@ -64,18 +69,26 @@ import {
   map,
   mapIndexed,
   mapcat,
+  next,
+  nfirst,
+  nnext,
   notAny,
   notEvery,
+  nthNext,
+  nthRest,
   partition,
   sequenceNth,
   partitionAll,
   partitionBy,
+  prepend,
   reductions,
   remove,
   repeat,
   repeatedly,
+  rest,
   reverse,
   range,
+  second,
   some,
   splitAt,
   splitWith,
@@ -739,6 +752,116 @@ test("finite sequence selection is single-pass, bounded, and nullish-safe", () =
   expect(dropLast(3, large).count).toBe(99_997);
 });
 
+test("replayable sequence heads and tails preserve bounded source semantics", () => {
+  const values = persistentVector(1, 2, 3, 4);
+  expect([...rest(values)]).toEqual([2, 3, 4]);
+  expect([...next(values)]).toEqual([2, 3, 4]);
+  expect(rest(persistentVector(1))).toBe(EMPTY_LIST);
+  expect(next(persistentVector(1))).toBeNull();
+  expect(rest(null)).toBe(EMPTY_LIST);
+  expect(next(null)).toBeNull();
+
+  const prepended = prepend(0, values);
+  expect([...prepended]).toEqual([0, 1, 2, 3, 4]);
+  expect([...prepended]).toEqual([0, 1, 2, 3, 4]);
+  expect(collectionCount(prepended)).toBe(5);
+  expect([...prepend(undefined, null)]).toEqual([undefined]);
+
+  expect(second([0, undefined], "missing")).toBeUndefined();
+  expect(second([0], "missing")).toBe("missing");
+  const nested = persistentVector(
+    persistentVector(1, 2),
+    persistentVector(3, 4),
+  );
+  expect(ffirst(nested)).toBe(1);
+  expect([...nfirst(nested)]).toEqual([2]);
+  expect([...fnext(nested)]).toEqual([3, 4]);
+  expect([...nnext(values)]).toEqual([3, 4]);
+
+  expect(nthRest(0, values)).toBe(values);
+  expect([...nthRest(2, values)]).toEqual([3, 4]);
+  expect(nthRest(4, values)).toBe(EMPTY_LIST);
+  expect(nthRest(20, values)).toBe(EMPTY_LIST);
+  expect([...nthNext(0, values)]).toEqual([1, 2, 3, 4]);
+  expect([...nthNext(2, values)]).toEqual([3, 4]);
+  expect(nthNext(4, values)).toBeNull();
+
+  let factories = 0;
+  let pulls = 0;
+  let closes = 0;
+  const unknown = sequenceView(() => {
+    factories += 1;
+    let value = 0;
+    return {
+      next() {
+        pulls += 1;
+        return value < 100
+          ? { value: value++, done: false }
+          : { value: undefined, done: true };
+      },
+      return() {
+        closes += 1;
+        return { value: undefined, done: true };
+      },
+    };
+  });
+  expect(seq(unknown)).toBe(unknown);
+  expect(factories).toBe(1);
+  expect(pulls).toBe(1);
+  expect(closes).toBe(1);
+  expect([...take(3, nthRest(10, unknown))]).toEqual([10, 11, 12]);
+
+  let dynamicCount = 4;
+  const dynamic = sequenceView(() => [1, 2, 3, 4][Symbol.iterator](),
+    () => dynamicCount);
+  expect(collectionCount(nthRest(2, dynamic))).toBe(2);
+  expect(collectionCount(prepend(0, dynamic))).toBe(5);
+  dynamicCount = 3;
+  expect(collectionCount(nthRest(2, dynamic))).toBe(1);
+  expect(collectionCount(prepend(0, dynamic))).toBe(4);
+
+  let emptyPulls = 0;
+  const emptyUnknown = sequenceView(() => ({
+    next() {
+      emptyPulls += 1;
+      return { value: undefined, done: true };
+    },
+  }));
+  expect(seq(emptyUnknown)).toBeNull();
+  expect(emptyPulls).toBe(1);
+
+  let unboundedFactories = 0;
+  let unboundedPulls = 0;
+  const unbounded = unboundedSequenceView(() => {
+    unboundedFactories += 1;
+    let value = 0;
+    return {
+      next() {
+        unboundedPulls += 1;
+        return { value: value++, done: false };
+      },
+    };
+  });
+  const unboundedPrepended = prepend(-1, unbounded);
+  expect(unboundedFactories).toBe(0);
+  expect(unboundedPulls).toBe(0);
+  expect(() => collectionCount(unboundedPrepended)).toThrow(
+    "unbounded sequence does not have a finite count",
+  );
+  expect(unboundedFactories).toBe(0);
+  expect([...take(5, nthNext(3, unboundedPrepended))]).toEqual([2, 3, 4, 5, 6]);
+
+  const untouched = unboundedSequenceView(() => {
+    throw new Error("invalid limit must not realize the source");
+  });
+  for (const operation of [
+    () => nthRest(-1, untouched),
+    () => nthNext(1.5, untouched),
+  ]) {
+    expect(operation).toThrow("must be a non-negative safe integer");
+  }
+});
+
 test("replayable sequence sources compose lazily with bounded reduction", () => {
   const unboundedRange = range();
   expect(isSequenceView(unboundedRange)).toBe(true);
@@ -1107,6 +1230,17 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect(usage.zero_truth).toBe(0);
     expect(usage.all_truth).toBe(true);
     expect(usage.first_value).toBe(0);
+    expect([...usage.rest_values]).toEqual([1, 2, 3, 4]);
+    expect([...usage.next_values]).toEqual([1, 2, 3, 4]);
+    expect([...usage.prepended_values]).toEqual([-1, 0, 1, 2, 3, 4]);
+    expect(usage.second_value).toBe(1);
+    expect(usage.second_missing).toBe("missing");
+    expect(usage.first_first_value).toBe(1);
+    expect([...usage.next_first_values]).toEqual([2]);
+    expect([...usage.first_next_value]).toEqual([3, 4]);
+    expect([...usage.next_next_values]).toEqual([2, 3, 4]);
+    expect([...usage.nth_rest_values]).toEqual([3, 4]);
+    expect([...usage.nth_next_values]).toEqual([3, 4]);
     expect(usage.last_value).toBe(4);
     expect(usage.third_value).toBe(2);
     expect([...usage.tail_values]).toEqual([3, 4]);
@@ -1348,6 +1482,18 @@ test("protocol standard-library algorithms agree under Bun and Node", async () =
       [0, 1, 2, 3],
       [[0, 1], [2, 3, 4]],
       [[0, 1, 2], [3, 4]],
+    ],
+    headTail: [
+      [1, 2, 3, 4],
+      [1, 2, 3, 4],
+      [-1, 0, 1, 2, 3, 4],
+      1,
+      1,
+      [2],
+      [3, 4],
+      [2, 3, 4],
+      [3, 4],
+      [3, 4],
     ],
     sources: [
       [1, 3, 5, 7],

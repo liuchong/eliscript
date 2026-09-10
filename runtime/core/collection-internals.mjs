@@ -136,6 +136,32 @@ function sequenceCount(state) {
   return count;
 }
 
+function slicedSequenceCount(state, offset) {
+  if (state.count === UNBOUNDED_SEQUENCE) {
+    return UNBOUNDED_SEQUENCE;
+  }
+  if (typeof state.count === "function") {
+    return () => Math.max(0, sequenceCount(state) - offset);
+  }
+  if (state.count === null) {
+    return null;
+  }
+  return Math.max(0, state.count - offset);
+}
+
+function prependedSequenceCount(state) {
+  if (state.count === UNBOUNDED_SEQUENCE) {
+    return UNBOUNDED_SEQUENCE;
+  }
+  if (typeof state.count === "function") {
+    return () => checkedCount(sequenceCount(state) + 1);
+  }
+  if (state.count === null) {
+    return null;
+  }
+  return checkedCount(state.count + 1);
+}
+
 export class SequenceView {
   constructor(token, factory, count) {
     if (token !== SEQUENCE_TOKEN || typeof factory !== "function") {
@@ -150,8 +176,19 @@ export class SequenceView {
   }
 
   [COLLECTION_SEQ]() {
-    if (this[SEQUENCE_STATE].count === UNBOUNDED_SEQUENCE) {
+    const state = this[SEQUENCE_STATE];
+    if (state.count === UNBOUNDED_SEQUENCE) {
       return this;
+    }
+    if (state.count === null) {
+      const iterator = iteratorFromFactory(state.factory);
+      try {
+        return iterator.next().done ? null : this;
+      } finally {
+        if (typeof iterator.return === "function") {
+          iterator.return();
+        }
+      }
     }
     return this[COLLECTION_COUNT]() === 0 ? null : this;
   }
@@ -205,6 +242,57 @@ export function unboundedSequenceView(factory) {
     throw new TypeError("unbounded sequence view factory must be a function");
   }
   return new SequenceView(SEQUENCE_TOKEN, factory, UNBOUNDED_SEQUENCE);
+}
+
+export function sliceSequenceView(sequence, offset) {
+  if (sequence === null) {
+    return null;
+  }
+  if (!(sequence instanceof SequenceView)) {
+    throw new TypeError("sequence slice expects a SequenceView or nil");
+  }
+  checkedCount(offset);
+  if (offset === 0) {
+    return sequence;
+  }
+
+  const state = sequence[SEQUENCE_STATE];
+  const factory = () => {
+    const iterator = sequence[Symbol.iterator]();
+    let remaining = offset;
+    while (remaining > 0) {
+      if (iterator.next().done) {
+        return iterator;
+      }
+      remaining -= 1;
+    }
+    return iterator;
+  };
+  const count = slicedSequenceCount(state, offset);
+  return count === UNBOUNDED_SEQUENCE
+    ? unboundedSequenceView(factory)
+    : sequenceView(factory, count);
+}
+
+export function prependSequenceView(value, sequence) {
+  if (sequence !== null && !(sequence instanceof SequenceView)) {
+    throw new TypeError("sequence prepend expects a SequenceView or nil");
+  }
+
+  const factory = () => (function* prependedValues() {
+    yield value;
+    if (sequence !== null) {
+      yield* sequence;
+    }
+  })();
+  if (sequence === null) {
+    return sequenceView(factory, 1);
+  }
+
+  const count = prependedSequenceCount(sequence[SEQUENCE_STATE]);
+  return count === UNBOUNDED_SEQUENCE
+    ? unboundedSequenceView(factory)
+    : sequenceView(factory, count);
 }
 
 export function reductionView(reduceFunction) {

@@ -7,11 +7,15 @@
     reduce
     reduced
     rseq
+    seq
     sequenceView
     unboundedSequenceView
     unreduced)
   (import "../../runtime/core/protocol.mjs" implementsProtocolOperation)
-  (import "../../runtime/core/list.mjs" isPersistentList)
+  (import "../../runtime/core/collection-internals.mjs"
+    prependSequenceView
+    sliceSequenceView)
+  (import "../../runtime/core/list.mjs" EMPTY_LIST isPersistentList)
   (import "../../runtime/core/transducer.mjs"
     deduping
     distincting
@@ -280,6 +284,31 @@
             (lambda (missing value) (reduced (js-object :value value)))
             not-found)))
       (if (eq result not-found) not-found-value (get result :value))))
+  (defun nth-rest
+    (limit collection)
+    (require-non-negative-safe-integer limit "nth-rest limit")
+    (if (= limit 0)
+      collection
+      (let ((result (sliceSequenceView (seq collection) limit)))
+        (if (nil? result) EMPTY_LIST result))))
+  (defun nth-next
+    (limit collection)
+    (require-non-negative-safe-integer limit "nth-next limit")
+    (let
+      (
+        (result
+          (if (= limit 0) (seq collection) (sliceSequenceView (seq collection) limit))))
+      (if (nil? result) nil (seq result))))
+  (defun rest (collection) (nth-rest 1 collection))
+  (defun next (collection) (nth-next 1 collection))
+  (defun prepend (value collection) (prependSequenceView value (seq collection)))
+  (defun second
+    (collection &optional not-found-value)
+    (first (next collection) not-found-value))
+  (defun ffirst (collection) (first (first collection)))
+  (defun nfirst (collection) (next (first collection)))
+  (defun fnext (collection) (first (next collection)))
+  (defun nnext (collection) (next (next collection)))
   (defun sequence-nth
     (index collection &optional not-found-value)
     (require-non-negative-safe-integer index "sequence-nth index")
@@ -625,9 +654,11 @@
     drop-last
     drop-while
     every?
+    ffirst
     filter
     find
     flatten
+    fnext
     first
     generate
     interpose
@@ -640,17 +671,25 @@
     map
     map-indexed
     mapcat
+    next
+    nfirst
+    nnext
     not-any?
     not-every?
     partition
     partition-all
     partition-by
+    prepend
     reductions
     remove
     repeat
     repeatedly
+    rest
     reverse
     range
+    second
+    nth-next
+    nth-rest
     sequence-nth
     some
     split-at

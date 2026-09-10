@@ -6,11 +6,16 @@ import {
   reduce,
   reduced,
   rseq,
+  seq,
   sequenceView,
   unboundedSequenceView,
   unreduced,
 } from "./collection.mjs";
-import { isPersistentList } from "./list.mjs";
+import {
+  prependSequenceView,
+  sliceSequenceView,
+} from "./collection-internals.mjs";
+import { EMPTY_LIST, isPersistentList } from "./list.mjs";
 import { implementsProtocolOperation } from "./protocol.mjs";
 import {
   deduping,
@@ -247,6 +252,52 @@ export function first(collection, notFound = null) {
   const result = reduce(collection, (missing, value) =>
     reduced({ value }), NOT_FOUND);
   return result === NOT_FOUND ? notFound : result.value;
+}
+
+export function nthRest(limit, collection) {
+  requireNonNegativeSafeInteger(limit, "nthRest limit");
+  if (limit === 0) return collection;
+  return sliceSequenceView(seq(collection), limit) ?? EMPTY_LIST;
+}
+
+export function nthNext(limit, collection) {
+  requireNonNegativeSafeInteger(limit, "nthNext limit");
+  const result = limit === 0
+    ? seq(collection)
+    : sliceSequenceView(seq(collection), limit);
+  return result === null ? null : seq(result);
+}
+
+export function rest(collection) {
+  return nthRest(1, collection);
+}
+
+export function next(collection) {
+  return nthNext(1, collection);
+}
+
+export function prepend(value, collection) {
+  return prependSequenceView(value, seq(collection));
+}
+
+export function second(collection, notFound = null) {
+  return first(next(collection), notFound);
+}
+
+export function ffirst(collection) {
+  return first(first(collection));
+}
+
+export function nfirst(collection) {
+  return next(first(collection));
+}
+
+export function fnext(collection) {
+  return first(next(collection));
+}
+
+export function nnext(collection) {
+  return next(next(collection));
 }
 
 export function sequenceNth(index, collection, notFound = null) {

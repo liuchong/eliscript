@@ -3191,6 +3191,43 @@
           "contains": "portable compiler driver reaches a reproducible fixed point"
         }
       ]
+    },
+    {
+      "id": "stdlib.replayable-sequence-head-tail-views",
+      "title": "Replayable sequence head and tail views",
+      "status": "stable",
+      "spec": "0163",
+      "contracts": [
+        "Exports ten composable head and tail operations on both language surfaces",
+        "Distinguishes possibly-empty rest values from nil-normalized next values",
+        "Preserves present undefined values and persistent List cons semantics",
+        "Retains replayability and finite unknown or unbounded cardinality categories",
+        "Probes one step for unknown sequence emptiness and never counts an unbounded source",
+        "Rejects invalid offsets before source normalization or traversal",
+        "Produces byte-identical compiled functions and matching local Bun and Node results"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "replayable sequence heads and tails preserve bounded source semantics"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "Eliscript core modules compile and execute against runtime protocols"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "protocol standard-library algorithms agree under Bun and Node"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }
