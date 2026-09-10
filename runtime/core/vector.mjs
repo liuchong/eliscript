@@ -36,6 +36,7 @@ import {
   COLLECTION_REDUCE_KV,
   COLLECTION_PEEK,
   COLLECTION_POP,
+  COLLECTION_RSEQ,
   COLLECTION_SEQ,
   isReducedValue,
   reduceIterable,
@@ -69,6 +70,24 @@ function tailOffset(count) {
   return count < BRANCH_WIDTH
     ? 0
     : ((count - 1) >>> BRANCH_BITS) << BRANCH_BITS;
+}
+
+function reverseVectorIterator(state) {
+  let index = state.count - 1;
+  let chunk = EMPTY_TAIL;
+  let chunkStart = state.count;
+  return {
+    next() {
+      if (index < 0) return { value: undefined, done: true };
+      if (index < chunkStart) {
+        chunk = arrayFor(state, index);
+        chunkStart = index - (index & BRANCH_MASK);
+      }
+      const value = chunk[index - chunkStart];
+      index -= 1;
+      return { value, done: false };
+    },
+  };
 }
 
 function newPath(level, node) {
@@ -549,6 +568,13 @@ export class PersistentVector {
 
   [COLLECTION_POP]() {
     return this.pop();
+  }
+
+  [COLLECTION_RSEQ]() {
+    const state = this[VECTOR_STATE];
+    return state.count === 0
+      ? null
+      : sequenceView(() => reverseVectorIterator(state), state.count);
   }
 
   [COLLECTION_GET](index, notFound = null) {

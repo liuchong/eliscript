@@ -10,6 +10,7 @@ const {
   ILookup,
   IMap,
   IReduce,
+  IReversible,
   ISet,
   ISeqable,
   IStack,
@@ -31,6 +32,7 @@ const slots = [
   protocolSlot(ISet, "disj"),
   protocolSlot(IStack, "peek"),
   protocolSlot(IStack, "pop"),
+  protocolSlot(IReversible, "rseq"),
 ];
 
 console.log(JSON.stringify({

@@ -135,7 +135,8 @@ object and its implementations cannot.
 
 `core/collection.mjs` defines the generic collection capability layer:
 `ICounted`, `IEmptyable`, `IConj`, `ILookup`, `IAssociative`, `IIndexed`,
-`ISeqable`, `IReduce`, `IKVReduce`, `IMap`, `ISet`, and `IStack`. Persistent
+`ISeqable`, `IReduce`, `IKVReduce`, `IMap`, `ISet`, `IStack`, and
+`IReversible`. Persistent
 List, Vector, Map, and Set values use direct Symbol slots; native Array, Map,
 Set, and ordinary Object values use exact-type
 extension tables, while primitive String uses an explicit host category.
@@ -156,6 +157,10 @@ externally extended values participate through the same open protocol.
 Persistent Map and Set values reuse HAMT paths, while native containers are
 copied. `peek` and `pop` use the shared List head or the Vector/Array tail;
 external values can implement each capability independently.
+
+`rseq` returns a replayable reverse view for Persistent Vector, native Array,
+String, and nil. Vector traversal caches one 32-value leaf at a time, allowing
+`last` and `reverse` to avoid a complete forward copy.
 
 ### Transducers
 

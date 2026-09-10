@@ -14,6 +14,7 @@ import {
   reduce,
   reduceKV,
   reduced,
+  rseq,
   seq,
 } from "../../runtime/core/collection.mjs";
 import { persistentHashMap } from "../../runtime/core/map.mjs";
@@ -65,5 +66,11 @@ console.log(JSON.stringify({
     vector: [peek(vector), [...pop(vector)]],
     array: [peek([2, 4, 6]), pop([2, 4, 6])],
     nil: [peek(null), pop(null)],
+  },
+  reversible: {
+    vector: [...rseq(vector)],
+    array: [...rseq([2, 4, 6])],
+    string: [...rseq("abc")],
+    nil: rseq(null),
   },
 }));

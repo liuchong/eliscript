@@ -12,10 +12,12 @@ import {
   ILookup,
   IMap,
   IReduce,
+  IReversible,
   ISet,
   ISeqable,
   IStack,
   ReductionView,
+  SequenceView,
   assoc,
   conj,
   contains,
@@ -34,6 +36,7 @@ import {
   reduceKV,
   reductionView,
   reduced,
+  rseq,
   seq,
   sequenceView,
   unboundedSequenceView,
@@ -63,6 +66,7 @@ import {
   EMPTY_VECTOR,
   persistentVector,
 } from "../runtime/core/vector.mjs";
+import { last, reverse } from "../runtime/core/sequence.mjs";
 
 async function runHost(command, fixture) {
   const child = Bun.spawn([command, fixture], {
@@ -309,6 +313,72 @@ test("external values can implement removal and stack capabilities independently
   expect(pop(stack).values).toEqual([1, 2]);
   expect(implementsProtocol(IConj, stack)).toBe(false);
   expect(implementsProtocol(IIndexed, stack)).toBe(false);
+});
+
+test("reversible collections expose replayable reverse traversal without copying roots", () => {
+  const vector = persistentVector(1, 2, 3, 4);
+  const reversed = rseq(vector);
+
+  expect(Object.isFrozen(IReversible)).toBe(true);
+  expect(implementsProtocol(IReversible, vector)).toBe(true);
+  expect(implementsProtocol(IReversible, [1, 2])).toBe(true);
+  expect(implementsProtocol(IReversible, "ab")).toBe(true);
+  expect(implementsProtocol(IReversible, persistentList(1, 2))).toBe(false);
+  expect(vector[protocolSlot(IReversible, "rseq")]()).toBeInstanceOf(
+    SequenceView,
+  );
+  expect(isSequenceView(reversed)).toBe(true);
+  expect(count(reversed)).toBe(4);
+  expect([...reversed]).toEqual([4, 3, 2, 1]);
+  expect([...reversed]).toEqual([4, 3, 2, 1]);
+  expect([...vector]).toEqual([1, 2, 3, 4]);
+
+  expect([...rseq([1, 2, 3])]).toEqual([3, 2, 1]);
+  expect([...rseq("\ud83d\ude00A")]).toEqual(["A", "\ude00", "\ud83d"]);
+  expect(rseq(EMPTY_VECTOR)).toBe(null);
+  expect(rseq([])).toBe(null);
+  expect(rseq("")).toBe(null);
+  expect(rseq(null)).toBe(null);
+  expect(() => rseq(persistentList(1))).toThrow(ProtocolDispatchError);
+  expect(() => rseq()).toThrow("rseq requires exactly one collection");
+  expect(() => rseq(vector, 1)).toThrow("rseq requires exactly one collection");
+
+  let reversePulls = 0;
+  class ReverseOnly {
+    constructor(values) {
+      this.values = Object.freeze(values);
+      Object.freeze(this);
+    }
+  }
+  extendProtocolType(IReversible, ReverseOnly, {
+    rseq: (source) => sequenceView(
+      () => {
+        let index = source.values.length;
+        return {
+          next() {
+            if (index === 0) return { value: undefined, done: true };
+            index -= 1;
+            reversePulls += 1;
+            return { value: source.values[index], done: false };
+          },
+        };
+      },
+      source.values.length,
+    ),
+  });
+  const external = new ReverseOnly([2, 4, 6]);
+  expect(implementsProtocol(IReversible, external)).toBe(true);
+  expect(implementsProtocol(IReduce, external)).toBe(false);
+  expect(last(external, "missing")).toBe(6);
+  expect(reversePulls).toBe(1);
+  expect([...reverse(external)]).toEqual([6, 4, 2]);
+  expect(reversePulls).toBe(4);
+
+  class InvalidReverse {}
+  extendProtocolType(IReversible, InvalidReverse, { rseq: () => 42 });
+  expect(() => rseq(new InvalidReverse())).toThrow(
+    "IReversible/rseq must return null or an iterable sequence view",
+  );
 });
 
 test("empty preserves logical collection categories and canonical persistent values", () => {
@@ -705,6 +775,7 @@ test("native adapters are exact, realm-explicit, and prototype preserving", asyn
   expect(() => count(remote)).toThrow(ProtocolDispatchError);
   expect(() => empty(remote)).toThrow(ProtocolDispatchError);
   expect(() => peek(remote)).toThrow(ProtocolDispatchError);
+  expect(() => rseq(remote)).toThrow(ProtocolDispatchError);
   extendProtocolType(ICounted, remote.constructor, {
     count: (values) => values.length,
   });
@@ -715,10 +786,17 @@ test("native adapters are exact, realm-explicit, and prototype preserving", asyn
     peek: (values) => values.at(-1) ?? null,
     pop: (values) => values.slice(0, -1),
   });
+  extendProtocolType(IReversible, remote.constructor, {
+    rseq: (values) => sequenceView(
+      () => values.slice().reverse()[Symbol.iterator](),
+      values.length,
+    ),
+  });
   expect(count(remote)).toBe(3);
   expect(empty(remote)).toEqual([]);
   expect(peek(remote)).toBe(8);
   expect(pop(remote)).toEqual([3, 5]);
+  expect([...rseq(remote)]).toEqual([8, 5, 3]);
   expect(Reflect.ownKeys(Array.prototype)).toEqual(arrayPrototypeKeys);
   expect(Reflect.ownKeys(Map.prototype)).toEqual(mapPrototypeKeys);
   expect(Reflect.ownKeys(Set.prototype)).toEqual(setPrototypeKeys);
@@ -786,6 +864,12 @@ test("collection capabilities agree under Bun and Node and reduce at million sca
       array: [6, [2, 4]],
       nil: [null, null],
     },
+    reversible: {
+      vector: [8, 6, 4, 2],
+      array: [6, 4, 2],
+      string: ["c", "b", "a"],
+      nil: null,
+    },
   });
 
   const values = Array.from({ length: 1_000_000 }, (_value, index) => index);
@@ -811,4 +895,17 @@ test("generic construction reaches one million values without stack growth", () 
   expect(count(shortened)).toBe(999_999);
   expect(peek(shortened)).toBe(999_998);
   expect(peek(vector)).toBe(999_999);
+  const reverseReport = reduce(rseq(vector), (report, value) => {
+    if (report.count === 0) report.first = value;
+    report.last = value;
+    report.count += 1;
+    report.sum += value;
+    return report;
+  }, { count: 0, first: null, last: null, sum: 0 });
+  expect(reverseReport).toEqual({
+    count: 1_000_000,
+    first: 999_999,
+    last: 0,
+    sum: 499_999_500_000,
+  });
 }, 30_000);

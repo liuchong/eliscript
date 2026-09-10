@@ -134,6 +134,11 @@ Specification [0154](0154-map-set-stack-capability-protocols.md) adds `IMap`,
 List, Vector, and Array gain representation-appropriate stack access. These
 capabilities remain independent from traversal and construction protocols.
 
+Specification [0155](0155-reversible-collection-traversal.md) adds
+`IReversible/rseq`. Persistent Vector, Array, String, and nil expose replayable
+reverse traversal without assigning an artificial reverse order to Map, Set,
+List, or arbitrary sequence views.
+
 ## Reduced Values
 
 `reduced(value)` wraps a completed accumulator. Returning that wrapper from a
@@ -153,7 +158,8 @@ inventing a second termination channel.
 
 Persistent types install direct Symbol-keyed protocol methods:
 
-- Vector: all sequence capabilities plus `IKVReduce` and `IStack`
+- Vector: all sequence capabilities plus `IKVReduce`, `IStack`, and
+  `IReversible`
 - List: `ICounted`, `ISeqable`, `IReduce`, `IStack`
 - Map: `ICounted`, `ILookup`, `ISeqable`, `IReduce`, `IKVReduce`, `IMap`
 - Set: `ICounted`, `ILookup`, `ISeqable`, `IReduce`, `ISet`
@@ -222,7 +228,9 @@ adapters through specifications
 [0073](0073-native-javascript-container-interop.md),
 [0079](0079-eliscript-protocol-dispatch-policy.md),
 [0080](0080-canonical-generated-protocol-runtime.md), and
-[0081](0081-protocol-driven-text-object.md). Persistent collection literal
+[0081](0081-protocol-driven-text-object.md). Reversible traversal and its
+sequence fast paths are specified by
+[0155](0155-reversible-collection-traversal.md). Persistent collection literal
 migration, compiler specialization, and a transport-safe protocol
 representation remain later compiler work. Specification
 [0086](0086-optimized-runtime-persistent-list.md) adds the optimized runtime
@@ -265,6 +273,8 @@ construction contract, while indexed access remains deliberately absent.
 - **CCP-14:** Map, Set, and Stack capabilities dispatch independently, preserve
   persistent sharing and native inputs, and remain extensible by external
   immutable types.
+- **CCP-15:** Reversible traversal dispatches independently, returns replayable
+  finite views, and avoids a complete source copy for Persistent Vector.
 
 ## Next Slice
 

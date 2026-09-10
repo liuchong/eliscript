@@ -50,7 +50,7 @@
     update
     update-in
     zipmap)
-  (import "./stdlib/core/collection.mjs" disj dissoc peek pop reduce-kv)
+  (import "./stdlib/core/collection.mjs" disj dissoc peek pop reduce-kv rseq)
   (import "./stdlib/core/transducer.mjs" eduction filtering mapping run!)
   (defconst values [0 1 2 3 4])
   (defvar generated-state 0)
@@ -146,6 +146,7 @@
   (defconst vector-stack-rest (pop [1 2 3]))
   (defconst list-stack-top (peek (list 1 2 3)))
   (defconst list-stack-rest (pop (list 1 2 3)))
+  (defconst reverse-sequence (rseq [1 2 3]))
   (defconst nested-value (get-in nested-update-result ["profile" "visits"] "missing"))
   (export
     finite-range
@@ -208,4 +209,5 @@
     vector-stack-rest
     list-stack-top
     list-stack-rest
+    reverse-sequence
     nested-value))

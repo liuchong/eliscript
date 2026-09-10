@@ -50,8 +50,8 @@ functions and are invoked exactly once for each value reaching their stage.
 Every source is traversed only through generic `reduce`. Transform results are
 persistent Vectors. `map`, `filter`, `remove`, `take`, and `drop` delegate to
 transducers and transient-backed `into`. `concat` holds one transient Vector
-builder across all sources. `reverse` uses one private temporary buffer before
-constructing the final persistent Vector; no mutable buffer escapes.
+builder across all sources. `last` and `reverse` consume `IReversible/rseq`
+when available; one-way sources retain the private forward-buffer fallback.
 
 `some` returns the first truthy predicate result, not the source element.
 `every` returns a Boolean. `find` returns the first source element whose
@@ -185,8 +185,8 @@ ineligible for `--portable` closure extraction.
 For `n` consumed values and constant-time callbacks, sequence transforms and
 searches are O(n). Transform construction uses one final persistent Vector;
 transient-backed operations reuse owner-selected trie paths. `reverse` uses
-O(n) private temporary storage because the current protocol set has no
-reversible traversal capability.
+no complete temporary source copy for reversible values; one-way sources use
+O(n) private temporary storage.
 
 Tail selection traverses in O(n), uses O(min(n, k)) private ring storage for
 limit `k`, and never performs repeated front removal. Splitting traverses once,

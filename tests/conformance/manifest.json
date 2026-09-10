@@ -2931,6 +2931,41 @@
           "contains": "portable compiler driver reaches a reproducible fixed point"
         }
       ]
+    },
+    {
+      "id": "stdlib.reversible-collection-traversal",
+      "title": "Reversible collection traversal",
+      "status": "stable",
+      "spec": "0155",
+      "contracts": [
+        "Exports open IReversible and exact-arity rseq across JavaScript and Lisp collection surfaces",
+        "Traverses Persistent Vector leaves from tail to root without copying the complete source",
+        "Provides replayable reverse views for Vector Array String and nil with deterministic validation",
+        "Lets reverse-only external values drive last and reverse without unrelated collection capabilities",
+        "Produces byte-identical fixed points and identical local Bun and Node results at million-value scale"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/collection-protocol.test.mjs",
+          "contains": "reversible collections expose replayable reverse traversal without copying roots"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/collection-protocol.test.mjs",
+          "contains": "generic construction reaches one million values without stack growth"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "Eliscript core modules compile and execute against runtime protocols"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }

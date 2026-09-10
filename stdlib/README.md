@@ -487,6 +487,8 @@ Key/value reduction is specified in
 [0153](../specs/0153-key-value-reduction-protocol.md).
 Map, Set, and Stack capabilities are specified in
 [0154](../specs/0154-map-set-stack-capability-protocols.md).
+Reversible traversal and the `last`/`reverse` fast path are specified in
+[0155](../specs/0155-reversible-collection-traversal.md).
 
 ## Portable Sequence Compatibility Module
 

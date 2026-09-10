@@ -19,6 +19,7 @@ export const I_KV_REDUCE = defineProtocol("IKVReduce", ["reduceKV"]);
 export const I_MAP = defineProtocol("IMap", ["dissoc"]);
 export const I_SET = defineProtocol("ISet", ["disj"]);
 export const I_STACK = defineProtocol("IStack", ["peek", "pop"]);
+export const I_REVERSIBLE = defineProtocol("IReversible", ["rseq"]);
 
 export const COLLECTION_COUNT = protocolSlot(I_COUNTED, "count");
 export const COLLECTION_EMPTY = protocolSlot(I_EMPTYABLE, "empty");
@@ -34,6 +35,7 @@ export const COLLECTION_DISSOC = protocolSlot(I_MAP, "dissoc");
 export const COLLECTION_DISJ = protocolSlot(I_SET, "disj");
 export const COLLECTION_PEEK = protocolSlot(I_STACK, "peek");
 export const COLLECTION_POP = protocolSlot(I_STACK, "pop");
+export const COLLECTION_RSEQ = protocolSlot(I_REVERSIBLE, "rseq");
 
 export const dispatchCollectionCount = protocolMethod(I_COUNTED, "count");
 export const dispatchCollectionEmpty = protocolMethod(I_EMPTYABLE, "empty");
@@ -52,6 +54,7 @@ export const dispatchCollectionDissoc = protocolMethod(I_MAP, "dissoc");
 export const dispatchCollectionDisj = protocolMethod(I_SET, "disj");
 export const dispatchCollectionPeek = protocolMethod(I_STACK, "peek");
 export const dispatchCollectionPop = protocolMethod(I_STACK, "pop");
+export const dispatchCollectionRseq = protocolMethod(I_REVERSIBLE, "rseq");
 
 const NO_INITIAL = Symbol("eliscript.collection.no-initial");
 const REDUCED_STATE = Symbol("eliscript.collection.reduced-state");

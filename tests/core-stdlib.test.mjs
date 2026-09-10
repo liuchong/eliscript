@@ -1031,12 +1031,16 @@ test("Eliscript core modules compile and execute against runtime protocols", asy
     expect([...usage.vector_stack_rest]).toEqual([1, 2]);
     expect(usage.list_stack_top).toBe(1);
     expect([...usage.list_stack_rest]).toEqual([2, 3]);
+    expect([...usage.reverse_sequence]).toEqual([3, 2, 1]);
 
     const generatedUsage = await readFile(usageModule, "utf8");
     expect(generatedUsage).toContain("first_even");
 
     const seqMap = await Bun.file(`${seqModule}.map`).json();
     expect(seqMap.sourcesContent[0]).toContain("(defun reverse\n    (collection)");
+    expect(seqMap.sourcesContent[0]).toContain(
+      "(implementsProtocolOperation IReversible \"rseq\" collection)",
+    );
     expect(seqMap.sourcesContent[0]).toContain("(defun some\n    (predicate collection");
     expect(seqMap.sourcesContent[0]).not.toContain("runtime/core/sequence.mjs");
     const dataMap = await Bun.file(`${dataModule}.map`).json();

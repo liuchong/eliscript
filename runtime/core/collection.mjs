@@ -14,6 +14,7 @@ import {
   I_MAP,
   I_SET,
   I_STACK,
+  I_REVERSIBLE,
   I_SEQABLE,
   ReductionView as InternalReductionView,
   SequenceView as InternalSequenceView,
@@ -30,6 +31,7 @@ import {
   dispatchCollectionDisj,
   dispatchCollectionPeek,
   dispatchCollectionPop,
+  dispatchCollectionRseq,
   dispatchCollectionSeq,
   isReducedValue,
   readCollectionEntry,
@@ -132,6 +134,24 @@ function arrayPop(values) {
   return values.slice(0, -1);
 }
 
+function indexedReverseSequence(values) {
+  return values.length === 0
+    ? null
+    : createSequenceView(
+      () => {
+        let index = values.length;
+        return {
+          next() {
+            if (index === 0) return { value: undefined, done: true };
+            index -= 1;
+            return { value: values[index], done: false };
+          },
+        };
+      },
+      () => values.length,
+    );
+}
+
 function arraySequence(values) {
   return values.length === 0
     ? null
@@ -225,6 +245,9 @@ extendProtocolCategory(I_REDUCE, "string", {
   reduce: (value, reducer, ...initial) =>
     reduceIterable(stringSequence(value) ?? [], reducer, ...initial),
 });
+extendProtocolCategory(I_REVERSIBLE, "string", {
+  rseq: indexedReverseSequence,
+});
 
 extendProtocolType(I_COUNTED, Object, {
   count: (value) => Object.keys(value).length,
@@ -267,6 +290,7 @@ extendProtocolType(I_SEQABLE, Array, { seq: arraySequence });
 extendProtocolType(I_REDUCE, Array, { reduce: reduceIterable });
 extendProtocolType(I_KV_REDUCE, Array, { reduceKV: reduceIndexedValues });
 extendProtocolType(I_STACK, Array, { peek: arrayPeek, pop: arrayPop });
+extendProtocolType(I_REVERSIBLE, Array, { rseq: indexedReverseSequence });
 
 extendProtocolType(I_COUNTED, Map, { count: (values) => values.size });
 extendProtocolType(I_EMPTYABLE, Map, { empty: () => new Map() });
@@ -312,6 +336,7 @@ extendProtocolCategory(I_KV_REDUCE, "null", {
 extendProtocolCategory(I_MAP, "null", { dissoc: () => null });
 extendProtocolCategory(I_SET, "null", { disj: () => null });
 extendProtocolCategory(I_STACK, "null", { peek: () => null, pop: () => null });
+extendProtocolCategory(I_REVERSIBLE, "null", { rseq: () => null });
 
 export const ICounted = I_COUNTED;
 export const IEmptyable = I_EMPTYABLE;
@@ -325,6 +350,7 @@ export const IKVReduce = I_KV_REDUCE;
 export const IMap = I_MAP;
 export const ISet = I_SET;
 export const IStack = I_STACK;
+export const IReversible = I_REVERSIBLE;
 
 export const ReductionView = InternalReductionView;
 export const SequenceView = InternalSequenceView;
@@ -452,6 +478,22 @@ export function pop(collection) {
     throw new TypeError("pop requires exactly one collection");
   }
   return dispatchCollectionPop(collection);
+}
+
+export function rseq(collection) {
+  if (arguments.length !== 1) {
+    throw new TypeError("rseq requires exactly one collection");
+  }
+  const result = dispatchCollectionRseq(collection);
+  if (result === null) {
+    return null;
+  }
+  if (result === undefined || typeof result[Symbol.iterator] !== "function") {
+    throw new TypeError(
+      "IReversible/rseq must return null or an iterable sequence view",
+    );
+  }
+  return result;
 }
 
 export function reduced(value) {

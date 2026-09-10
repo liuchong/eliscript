@@ -2,12 +2,15 @@
   (import "../../runtime/core/collection.mjs"
     count
     isReduced
+    IReversible
     nth
     reduce
     reduced
+    rseq
     sequenceView
     unboundedSequenceView
     unreduced)
+  (import "../../runtime/core/protocol.mjs" implementsProtocolOperation)
   (import "../../runtime/core/transducer.mjs"
     deduping
     distincting
@@ -232,14 +235,16 @@
       (if (eq result not-found) not-found-value (get result :value))))
   (defun last
     (collection &optional not-found-value)
-    (let
-      (
-        (result
-          (reduce
-            collection
-            (lambda (missing value) (js-object :value value))
-            not-found)))
-      (if (eq result not-found) not-found-value (get result :value))))
+    (if (implementsProtocolOperation IReversible "rseq" collection)
+      (first (rseq collection) not-found-value)
+      (let
+        (
+          (result
+            (reduce
+              collection
+              (lambda (missing value) (js-object :value value))
+              not-found)))
+        (if (eq result not-found) not-found-value (get result :value)))))
   (defun take-last
     (limit collection)
     (require-non-negative-safe-integer limit "take-last limit")
@@ -313,15 +318,17 @@
       (persistentVector (persistentBang left) (persistentBang right))))
   (defun reverse
     (collection)
-    (let
-      (
-        (values
-          (reduce
-            collection
-            (lambda (result value) (js-call result :push value) result)
-            (js-array))))
-      (js-call values :reverse)
-      (into EMPTY_VECTOR values)))
+    (if (implementsProtocolOperation IReversible "rseq" collection)
+      (into EMPTY_VECTOR (rseq collection))
+      (let
+        (
+          (values
+            (reduce
+              collection
+              (lambda (result value) (js-call result :push value) result)
+              (js-array))))
+        (js-call values :reverse)
+        (into EMPTY_VECTOR values))))
   (defun map (transform collection) (into EMPTY_VECTOR (mapping transform) collection))
   (defun map-indexed
     (transform collection)

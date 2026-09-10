@@ -1,13 +1,16 @@
 import {
   count as collectionCount,
+  IReversible,
   isReduced,
   nth as collectionNth,
   reduce,
   reduced,
+  rseq,
   sequenceView,
   unboundedSequenceView,
   unreduced,
 } from "./collection.mjs";
+import { implementsProtocolOperation } from "./protocol.mjs";
 import {
   deduping,
   distincting,
@@ -195,6 +198,9 @@ export function sequenceNth(index, collection, notFound = null) {
 }
 
 export function last(collection, notFound = null) {
+  if (implementsProtocolOperation(IReversible, "rseq", collection)) {
+    return first(rseq(collection), notFound);
+  }
   const result = reduce(collection, (missing, value) => ({ value }), NOT_FOUND);
   return result === NOT_FOUND ? notFound : result.value;
 }
@@ -281,6 +287,9 @@ export function splitWith(predicate, collection) {
 }
 
 export function reverse(collection) {
+  if (implementsProtocolOperation(IReversible, "rseq", collection)) {
+    return into(EMPTY_VECTOR, rseq(collection));
+  }
   const values = reduce(collection, (result, value) => {
     result.push(value);
     return result;

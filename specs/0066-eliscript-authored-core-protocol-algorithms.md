@@ -80,7 +80,8 @@ IComparable comparator compare-values max-key min-key reverse-comparator sort so
 The sequence algorithms reduce arbitrary protocol sources, preserve Eliscript
 truth semantics, terminate through reduced values, and construct persistent
 Vectors. Their sequence constructors expose replayable finite and explicitly
-unbounded views with lazy callback execution. The data algorithms construct
+unbounded views with lazy callback execution. `last` and `reverse` use open
+reversible traversal when available. The data algorithms construct
 value-semantic persistent Maps, retain
 source order within grouped persistent Vectors, support nested associative
 reads and updates, and provide ordered merge, combining merge, key selection,
@@ -206,6 +207,9 @@ ineligibility is an explicit host-capability boundary, not missing evidence.
 - **ECA-19:** Maintained `IMap`, `ISet`, `IStack`, `dissoc`, `disj`, `peek`,
   and `pop` compile from `stdlib/core/collection.eli`, preserve persistent and
   native category behavior, and support open extension under Bun and Node.
+- **ECA-20:** Maintained `IReversible` and `rseq` compile from
+  `stdlib/core/collection.eli`; maintained `last` and `reverse` use the open
+  capability without losing their one-way reduction fallback.
 
 ## Follow-up
 

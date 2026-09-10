@@ -344,6 +344,11 @@ The collection layer begins with these focused protocols:
 - `IIndexed`: `nth`
 - `ISeqable`: `seq`
 - `IReduce`: `reduce`
+- `IKVReduce`: `reduce-kv`
+- `IMap`: `dissoc`
+- `ISet`: `disj`
+- `IStack`: `peek`, `pop`
+- `IReversible`: `rseq`
 - `IEditable`: `transient`
 - `ITransientCollection`: `conj!`, `assoc!`, `dissoc!`, `persistent!`
 - `IEquiv`: `equal?`
@@ -368,6 +373,10 @@ yield members.
 Host arrays and iterables may be adapted, but mutation after adaptation is
 documented as host behavior. `from-js` is required when a persistent snapshot
 is needed.
+
+`rseq` adds a separate replayable reverse view for representations with direct
+reverse traversal. Persistent Vector caches each visited 32-value leaf, so
+reverse algorithms avoid copying the complete source into a host Array.
 
 ### Reduction and Transducers
 
