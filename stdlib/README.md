@@ -16,6 +16,30 @@ The generated API index is the exact current module/export inventory. Its
 stability labels come from each module's owning specification and remain
 provisional wherever the label is `accepted`.
 
+## Core Collections
+
+`core/collection.eli` exposes open collection capabilities alongside exact
+persistent value categories. Capability predicates such as `counted?` and
+`seqable?` can recognize supported host values, while `collection?`, `list?`,
+`vector?`, `map?`, `set?`, `sequential?`, and `sequence?` describe Eliscript's
+own persistent values and logical sequence views:
+
+```elisp
+(import "../../stdlib/core/collection.eli"
+        bounded-count collection? distinct? sequence? vector?)
+
+[(collection? [1 2 3])
+ (vector? [1 2 3])
+ (sequence? [1 2 3])
+ (bounded-count 2 [1 2 3])
+ (distinct? [1 2] [1 2])]
+```
+
+`bounded-count` consumes at most its non-negative safe-integer limit, including
+for unbounded views. `distinct?` compares persistent values structurally and
+host objects by identity. Exact classification and traversal semantics are in
+[0164](../specs/0164-persistent-collection-classification.md).
+
 ## Core Ordering
 
 `core/order.eli` provides the maintained language-level comparison and sorting

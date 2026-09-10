@@ -1,5 +1,7 @@
 import {
+  areDistinct,
   assoc,
+  boundedCount,
   conj,
   contains,
   count,
@@ -7,7 +9,14 @@ import {
   dissoc,
   empty,
   get,
+  isCollection,
+  isList,
+  isMap,
+  isSequence,
   isSequenceView,
+  isSequential,
+  isSet,
+  isVector,
   nth,
   peek,
   pop,
@@ -31,6 +40,25 @@ const constructedMap = [...conj(map, ["third", 7])]
   .sort(([left], [right]) => left.localeCompare(right));
 
 console.log(JSON.stringify({
+  classification: [
+    isCollection(list),
+    isCollection(vector),
+    isCollection(map),
+    isCollection(set),
+    isList(list),
+    isVector(vector),
+    isMap(map),
+    isSet(set),
+    isSequential(vector),
+    isSequence(seq(vector)),
+    isCollection([]),
+    isVector([]),
+  ],
+  bounded: [boundedCount(2, vector), boundedCount(10, vector)],
+  distinct: [
+    areDistinct(1, 2, 3),
+    areDistinct(persistentVector(1, 2), persistentVector(1, 2)),
+  ],
   counts: [count(vector), count(map), count(set), count([1, 2]), count(null)],
   lookup: [get(vector, 2), get(map, "right"), get(set, "alpha"), nth(vector, 9, "missing")],
   sequence: {

@@ -18,7 +18,9 @@ import {
   IStack,
   ReductionView,
   SequenceView,
+  areDistinct,
   assoc,
+  boundedCount,
   conj,
   contains,
   count,
@@ -27,15 +29,22 @@ import {
   empty,
   get,
   isAssociative,
+  isCollection,
   isCounted,
   isEmpty,
   isIndexed,
+  isList,
+  isMap,
   isReducible,
   isReduced,
   isReversible,
   isReductionView,
   isSeqable,
+  isSequence,
   isSequenceView,
+  isSequential,
+  isSet,
+  isVector,
   notEmpty,
   nth,
   peek,
@@ -181,6 +190,89 @@ test("collection capability predicates and emptiness preserve protocol boundarie
   expect(seqCalls).toBe(0);
   expect(isEmpty(externalEmpty)).toBe(true);
   expect(seqCalls).toBe(1);
+});
+
+test("collection classification bounded count and distinct values preserve language boundaries", () => {
+  const list = persistentList(1, 2);
+  const vector = persistentVector(1, 2);
+  const map = persistentHashMap(["left", 1]);
+  const set = persistentHashSet(1, 2);
+  const sequence = sequenceView(() => [1, 2][Symbol.iterator](), 2);
+
+  for (const value of [list, vector, map, set, sequence]) {
+    expect(isCollection(value)).toBe(true);
+  }
+  expect(isList(list)).toBe(true);
+  expect(isVector(vector)).toBe(true);
+  expect(isMap(map)).toBe(true);
+  expect(isSet(set)).toBe(true);
+  expect(isSequential(list)).toBe(true);
+  expect(isSequential(vector)).toBe(true);
+  expect(isSequential(sequence)).toBe(true);
+  expect(isSequence(list)).toBe(true);
+  expect(isSequence(sequence)).toBe(true);
+
+  for (const value of [[], new Map(), new Set(), {}, "text", null, 42]) {
+    expect(isCollection(value)).toBe(false);
+    expect(isList(value)).toBe(false);
+    expect(isVector(value)).toBe(false);
+    expect(isMap(value)).toBe(false);
+    expect(isSet(value)).toBe(false);
+    expect(isSequential(value)).toBe(false);
+    expect(isSequence(value)).toBe(false);
+  }
+  expect(isList(vector)).toBe(false);
+  expect(isVector(list)).toBe(false);
+  expect(isMap(set)).toBe(false);
+  expect(isSet(map)).toBe(false);
+  expect(isSequence(vector)).toBe(false);
+
+  expect(boundedCount(3, null)).toBe(0);
+  expect(boundedCount(3, persistentVector(1, 2))).toBe(2);
+  expect(boundedCount(2, persistentVector(1, 2, 3, 4))).toBe(2);
+  expect(boundedCount(0, 42)).toBe(0);
+
+  let pulls = 0;
+  let closes = 0;
+  const unbounded = unboundedSequenceView(() => ({
+    next() {
+      pulls += 1;
+      return { value: pulls, done: false };
+    },
+    return() {
+      closes += 1;
+      return { value: undefined, done: true };
+    },
+  }));
+  expect(boundedCount(4, unbounded)).toBe(4);
+  expect(pulls).toBe(4);
+  expect(closes).toBe(1);
+  expect(() => boundedCount(-1, unbounded)).toThrow(
+    "boundedCount limit must be a non-negative safe integer",
+  );
+  expect(pulls).toBe(4);
+
+  let failedCloses = 0;
+  const failing = sequenceView(() => ({
+    next() {
+      throw new Error("count source failed");
+    },
+    return() {
+      failedCloses += 1;
+      return { value: undefined, done: true };
+    },
+  }));
+  expect(() => boundedCount(1, failing)).toThrow("count source failed");
+  expect(failedCloses).toBe(1);
+
+  expect(areDistinct()).toBe(true);
+  expect(areDistinct(1)).toBe(true);
+  expect(areDistinct(1, 2, undefined, null)).toBe(true);
+  expect(areDistinct(persistentVector(1, 2), persistentVector(1, 2)))
+    .toBe(false);
+  const identity = {};
+  expect(areDistinct(identity, {})).toBe(true);
+  expect(areDistinct(identity, identity)).toBe(false);
 });
 
 test("key/value reduction is allocation-light, extensible, and terminates exactly", () => {
@@ -902,6 +994,11 @@ test("collection capabilities agree under Bun and Node and reduce at million sca
   const node = await runHost("node", fixture);
   expect(bun).toEqual(node);
   expect(bun).toEqual({
+    classification: [
+      true, true, true, true, true, true, true, true, true, true, false, false,
+    ],
+    bounded: [2, 4],
+    distinct: [true, false],
     counts: [4, 2, 2, 2, 0],
     lookup: [6, 5, "alpha", "missing"],
     sequence: {

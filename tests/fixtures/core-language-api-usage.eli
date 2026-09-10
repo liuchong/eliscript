@@ -1,48 +1,90 @@
 (module test.core-language-api-usage
   (import "./stdlib/core/protocol.mjs"
-          define-protocol extend-protocol-category extend-protocol-default
-          implements-protocol-operation? implements-protocol?
-          protocol-host-category protocol-method protocol-slot)
+    define-protocol
+    extend-protocol-category
+    extend-protocol-default
+    implements-protocol-operation?
+    implements-protocol?
+    protocol-host-category
+    protocol-method
+    protocol-slot)
   (import "./stdlib/core/collection.mjs"
-          assoc associative? collection-count collection-nth collection-seq conj
-          contains? counted? empty empty? indexed? lookup not-empty reduce
-          reducible? reduced reduced? reversible? seqable? unreduced)
+    assoc
+    associative?
+    bounded-count
+    collection-count
+    collection-nth
+    collection-seq
+    collection?
+    conj
+    contains?
+    counted?
+    distinct?
+    empty
+    empty?
+    indexed?
+    list?
+    lookup
+    map?
+    not-empty
+    reduce
+    reducible?
+    reduced
+    reduced?
+    reversible?
+    sequence?
+    sequential?
+    seqable?
+    set?
+    unreduced
+    vector?)
   (import "./stdlib/core/identifier.mjs"
-          identifier-name identifier-namespace identifier? keyword keyword?
-          qualified-name symbol symbol?)
-  (import "./stdlib/core/data-text.mjs"
-          print-value read-value)
-  (import "./stdlib/core/metadata.mjs"
-          meta supports-metadata? vary-meta with-meta)
-  (import "./stdlib/core/transient.mjs"
-          assoc! conj! persistent! transient)
+    identifier-name
+    identifier-namespace
+    identifier?
+    keyword
+    keyword?
+    qualified-name
+    symbol
+    symbol?)
+  (import "./stdlib/core/data-text.mjs" print-value read-value)
+  (import "./stdlib/core/metadata.mjs" meta supports-metadata? vary-meta with-meta)
+  (import "./stdlib/core/transient.mjs" assoc! conj! persistent! transient)
   (import "./stdlib/core/transducer.mjs"
-          catting compose-transducers deduping distincting dropping-while
-          filtering into interposing keeping keeping-indexed mapcatting mapping
-          mapping-indexed partitioning-all partitioning-by taking-nth
-          taking-while)
+    catting
+    compose-transducers
+    deduping
+    distincting
+    dropping-while
+    filtering
+    into
+    interposing
+    keeping
+    keeping-indexed
+    mapcatting
+    mapping
+    mapping-indexed
+    partitioning-all
+    partitioning-by
+    taking-nth
+    taking-while)
   (import "./runtime/core/map.mjs" EMPTY_MAP)
   (import "./runtime/core/vector.mjs" EMPTY_VECTOR)
-
   (defconst IDescribe (define-protocol "IDescribe" (js-array "describe")))
   (defconst describe (protocol-method IDescribe "describe"))
-
   (extend-protocol-category
     IDescribe
     "number"
     (js-object :describe (lambda (value) (str "number:" value))))
-  (extend-protocol-default
-    IDescribe
-    (js-object :describe (lambda (_value) "default")))
-
+  (extend-protocol-default IDescribe (js-object :describe (lambda (_value) "default")))
   (defconst vector-builder (transient EMPTY_VECTOR))
   (conj! vector-builder 1 2 3)
   (defconst vector-value (persistent! vector-builder))
-
   (defconst map-builder (transient EMPTY_MAP))
   (assoc! map-builder "left" 10 "right" 20)
   (defconst map-value (persistent! map-builder))
-
+  (defconst list-value (list 1 2 3))
+  (defconst set-value #{1 2 3})
   (defconst annotated-vector (with-meta vector-value map-value))
   (defconst varied-vector
     (vary-meta
@@ -52,21 +94,17 @@
       30))
   (defconst printed-annotated-vector (print-value annotated-vector))
   (defconst read-annotated-vector (read-value printed-annotated-vector))
-
   (defconst title-keyword (keyword "article/title"))
   (defconst title-symbol (symbol "article" "title"))
-
   (defconst observed (js-array))
   (defconst bounded-sum
     (reduce
       [1 2 3 4]
-      (lambda (result value)
+      (lambda
+        (result value)
         (js-call observed :push value)
-        (if (= value 3)
-            (reduced (+ result value))
-          (+ result value)))
+        (if (= value 3) (reduced (+ result value)) (+ result value)))
       0))
-
   (defconst transformed
     (into
       EMPTY_VECTOR
@@ -74,108 +112,161 @@
         (mapping (lambda (value) (* value 2)))
         (filtering (lambda (value) (> value 4))))
       [1 2 3 4]))
-
   (defconst stateful-transformed
     (into
       EMPTY_VECTOR
       (compose-transducers
         (deduping)
         (mapping-indexed (lambda (index value) [index value]))
-        (keeping
-          (lambda (pair)
-            (if (nil? (collection-nth pair 1)) nil pair)))
-        (dropping-while
-          (lambda (pair) (= (collection-nth pair 1) 0)))
-        (taking-while
-          (lambda (pair) (< (collection-nth pair 1) 9))))
+        (keeping (lambda (pair) (if (nil? (collection-nth pair 1)) nil pair)))
+        (dropping-while (lambda (pair) (= (collection-nth pair 1) 0)))
+        (taking-while (lambda (pair) (< (collection-nth pair 1) 9))))
       [0 0 nil 2 2 4 9]))
-
   (defconst flattened
-    (into EMPTY_VECTOR (mapcatting (lambda (value) [value (* value 10)]))
-          [1 2]))
-
-  (defconst concatenated
-    (into EMPTY_VECTOR (catting) [["left"] ["right"]]))
-
+    (into EMPTY_VECTOR (mapcatting (lambda (value) [value (* value 10)])) [1 2]))
+  (defconst concatenated (into EMPTY_VECTOR (catting) [["left"] ["right"]]))
   (defconst sampled
     (into
       EMPTY_VECTOR
       (compose-transducers
-        (keeping-indexed
-          (lambda (index value) (if (= value 0) nil [index value])))
+        (keeping-indexed (lambda (index value) (if (= value 0) nil [index value])))
         (taking-nth 2))
       [5 0 6 7 8]))
-
-  (defconst interposed
-    (into EMPTY_VECTOR (interposing "between") ["left" "right"]))
-
-  (defconst unique-transformed
-    (into EMPTY_VECTOR (distincting) [1 2 1 3 2]))
-
-  (defconst partitioned
-    (into EMPTY_VECTOR (partitioning-all 2) [1 2 3]))
-
+  (defconst interposed (into EMPTY_VECTOR (interposing "between") ["left" "right"]))
+  (defconst unique-transformed (into EMPTY_VECTOR (distincting) [1 2 1 3 2]))
+  (defconst partitioned (into EMPTY_VECTOR (partitioning-all 2) [1 2 3]))
   (defconst grouped
-    (into
-      EMPTY_VECTOR
-      (partitioning-by (lambda (value) (> value 2)))
-      [1 2 3 4]))
-
+    (into EMPTY_VECTOR (partitioning-by (lambda (value) (> value 2))) [1 2 3 4]))
   (defconst report
     (js-object
-      :number-description (funcall describe 7)
-      :default-description (funcall describe "text")
-      :number-category (protocol-host-category 7)
-      :method-slot-type (value-type (protocol-slot IDescribe "describe"))
-      :implements-number (implements-protocol? IDescribe 1)
+      :number-description
+      (funcall describe 7)
+      :default-description
+      (funcall describe "text")
+      :number-category
+      (protocol-host-category 7)
+      :method-slot-type
+      (value-type (protocol-slot IDescribe "describe"))
+      :implements-number
+      (implements-protocol? IDescribe 1)
       :implements-operation
       (implements-protocol-operation? IDescribe "describe" nil)
-      :vector-count (collection-count vector-value)
-      :vector-counted (counted? vector-value)
-      :vector-indexed (indexed? vector-value)
-      :vector-seqable (seqable? vector-value)
-      :vector-reducible (reducible? vector-value)
-      :vector-reversible (reversible? vector-value)
-      :vector-associative (associative? vector-value)
-      :empty-vector-empty (empty? EMPTY_VECTOR)
-      :non-empty-vector-same (eq (not-empty vector-value) vector-value)
-      :empty-vector-absent (nil? (not-empty EMPTY_VECTOR))
-      :vector-second (collection-nth vector-value 1)
-      :vector-has-two (contains? vector-value 2)
-      :vector-appended (conj vector-value 4)
-      :vector-empty (empty vector-value)
-      :vector-seq-count (collection-count (collection-seq vector-value))
-      :map-left (lookup map-value "left")
-      :map-associative (associative? map-value)
-      :map-indexed (indexed? map-value)
-      :map-missing (lookup map-value "missing" "fallback")
-      :map-has-right (contains? map-value "right")
-      :metadata-support (supports-metadata? annotated-vector)
-      :keyword-metadata-support (supports-metadata? title-keyword)
-      :metadata-left (lookup (meta annotated-vector) "left")
-      :metadata-varied-left (lookup (meta varied-vector) "left")
-      :metadata-preserved (= (meta (conj annotated-vector 4)) map-value)
-      :printed-annotated-vector printed-annotated-vector
-      :read-metadata-left (lookup (meta read-annotated-vector) "left")
-      :bounded-sum bounded-sum
-      :observed observed
-      :transformed transformed
-      :stateful-transformed stateful-transformed
-      :flattened flattened
-      :concatenated concatenated
-      :sampled sampled
-      :interposed interposed
-      :unique-transformed unique-transformed
-      :partitioned partitioned
-      :grouped grouped
-      :reduced-state (reduced? (reduced 1))
-      :unreduced-value (unreduced (reduced 9))
-      :keyword-string (str title-keyword)
-      :symbol-name (qualified-name title-symbol)
-      :identifier-name (identifier-name title-keyword)
-      :identifier-namespace (identifier-namespace title-symbol)
-      :keyword-state (keyword? title-keyword)
-      :symbol-state (symbol? title-symbol)
-      :identifier-state (identifier? title-keyword)))
-
+      :vector-count
+      (collection-count vector-value)
+      :vector-counted
+      (counted? vector-value)
+      :vector-indexed
+      (indexed? vector-value)
+      :vector-seqable
+      (seqable? vector-value)
+      :vector-reducible
+      (reducible? vector-value)
+      :vector-reversible
+      (reversible? vector-value)
+      :vector-associative
+      (associative? vector-value)
+      :vector-collection
+      (collection? vector-value)
+      :vector-vector
+      (vector? vector-value)
+      :vector-sequential
+      (sequential? vector-value)
+      :vector-sequence
+      (sequence? vector-value)
+      :list-list
+      (list? list-value)
+      :list-sequence
+      (sequence? list-value)
+      :map-map
+      (map? map-value)
+      :set-set
+      (set? set-value)
+      :native-array-collection
+      (collection? (js-array 1 2 3))
+      :bounded-vector-count
+      (bounded-count 2 vector-value)
+      :distinct-scalars
+      (distinct? 1 2 3)
+      :distinct-vectors
+      (distinct? [1 2] [1 2])
+      :empty-vector-empty
+      (empty? EMPTY_VECTOR)
+      :non-empty-vector-same
+      (eq (not-empty vector-value) vector-value)
+      :empty-vector-absent
+      (nil? (not-empty EMPTY_VECTOR))
+      :vector-second
+      (collection-nth vector-value 1)
+      :vector-has-two
+      (contains? vector-value 2)
+      :vector-appended
+      (conj vector-value 4)
+      :vector-empty
+      (empty vector-value)
+      :vector-seq-count
+      (collection-count (collection-seq vector-value))
+      :map-left
+      (lookup map-value "left")
+      :map-associative
+      (associative? map-value)
+      :map-indexed
+      (indexed? map-value)
+      :map-missing
+      (lookup map-value "missing" "fallback")
+      :map-has-right
+      (contains? map-value "right")
+      :metadata-support
+      (supports-metadata? annotated-vector)
+      :keyword-metadata-support
+      (supports-metadata? title-keyword)
+      :metadata-left
+      (lookup (meta annotated-vector) "left")
+      :metadata-varied-left
+      (lookup (meta varied-vector) "left")
+      :metadata-preserved
+      (= (meta (conj annotated-vector 4)) map-value)
+      :printed-annotated-vector
+      printed-annotated-vector
+      :read-metadata-left
+      (lookup (meta read-annotated-vector) "left")
+      :bounded-sum
+      bounded-sum
+      :observed
+      observed
+      :transformed
+      transformed
+      :stateful-transformed
+      stateful-transformed
+      :flattened
+      flattened
+      :concatenated
+      concatenated
+      :sampled
+      sampled
+      :interposed
+      interposed
+      :unique-transformed
+      unique-transformed
+      :partitioned
+      partitioned
+      :grouped
+      grouped
+      :reduced-state
+      (reduced? (reduced 1))
+      :unreduced-value
+      (unreduced (reduced 9))
+      :keyword-string
+      (str title-keyword)
+      :symbol-name
+      (qualified-name title-symbol)
+      :identifier-name
+      (identifier-name title-keyword)
+      :identifier-namespace
+      (identifier-namespace title-symbol)
+      :keyword-state
+      (keyword? title-keyword)
+      :symbol-state
+      (symbol? title-symbol)
+      :identifier-state
+      (identifier? title-keyword)))
   (export report))

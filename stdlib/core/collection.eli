@@ -22,6 +22,15 @@
   (defun reducible? (collection) (Runtime/isReducible collection))
   (defun reversible? (collection) (Runtime/isReversible collection))
   (defun associative? (collection) (Runtime/isAssociative collection))
+  (defun collection? (value) (Runtime/isCollection value))
+  (defun list? (value) (Runtime/isList value))
+  (defun vector? (value) (Runtime/isVector value))
+  (defun map? (value) (Runtime/isMap value))
+  (defun set? (value) (Runtime/isSet value))
+  (defun sequential? (value) (Runtime/isSequential value))
+  (defun sequence? (value) (Runtime/isSequence value))
+  (defun bounded-count (limit collection) (Runtime/boundedCount limit collection))
+  (defun distinct? (&rest values) (apply Runtime/areDistinct values))
   (defun empty (collection) (Runtime/empty collection))
   (defun conj
     (collection &rest values)
@@ -81,31 +90,40 @@
     SequenceView
     assoc
     associative?
+    bounded-count
     collection-count
     collection-nth
     collection-seq
+    collection?
     conj
     contains?
     counted?
     empty
     empty?
     indexed?
+    list?
     lookup
+    map?
     not-empty
     reduce
     reduce-kv
     reducible?
     dissoc
     disj
+    distinct?
     peek
     pop
     rseq
     reversible?
+    sequence?
+    sequential?
     seqable?
+    set?
     reduced
     reduced?
     reduction-view
     reduction-view?
     sequence-view
     unbounded-sequence-view
-    unreduced))
+    unreduced
+    vector?))

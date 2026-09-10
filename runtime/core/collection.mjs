@@ -44,6 +44,10 @@ import {
   unreducedValue,
   validateCollectionCount,
 } from "./collection-internals.mjs";
+import { isPersistentList } from "./list.mjs";
+import { isPersistentHashMap } from "./map.mjs";
+import { EMPTY_SET, isPersistentHashSet } from "./set.mjs";
+import { isPersistentVector } from "./vector.mjs";
 
 const MISSING = Symbol("eliscript.collection.missing");
 
@@ -394,6 +398,76 @@ export function isReversible(collection) {
 
 export function isAssociative(collection) {
   return implementsProtocol(IAssociative, collection);
+}
+
+export function isCollection(value) {
+  return value instanceof InternalSequenceView ||
+    isPersistentList(value) ||
+    isPersistentVector(value) ||
+    isPersistentHashMap(value) ||
+    isPersistentHashSet(value);
+}
+
+export function isList(value) {
+  return isPersistentList(value);
+}
+
+export function isVector(value) {
+  return isPersistentVector(value);
+}
+
+export function isMap(value) {
+  return isPersistentHashMap(value);
+}
+
+export function isSet(value) {
+  return isPersistentHashSet(value);
+}
+
+export function isSequential(value) {
+  return value instanceof InternalSequenceView ||
+    isPersistentList(value) ||
+    isPersistentVector(value);
+}
+
+export function isSequence(value) {
+  return value instanceof InternalSequenceView || isPersistentList(value);
+}
+
+export function boundedCount(limit, collection) {
+  if (!Number.isSafeInteger(limit) || limit < 0) {
+    throw new TypeError("boundedCount limit must be a non-negative safe integer");
+  }
+  if (limit === 0) return 0;
+
+  const sequence = seq(collection);
+  if (sequence === null) return 0;
+  const iterator = sequence[Symbol.iterator]();
+  let result = 0;
+  let complete = false;
+  try {
+    while (result < limit && !iterator.next().done) {
+      result += 1;
+    }
+    complete = true;
+  } finally {
+    if (
+      (!complete || result === limit) &&
+      typeof iterator.return === "function"
+    ) {
+      iterator.return();
+    }
+  }
+  return result;
+}
+
+export function areDistinct(...values) {
+  let seen = EMPTY_SET;
+  for (const value of values) {
+    if (seen.has(value)) return false;
+    seen = seen.conj(value);
+  }
+  return true;
 }
 
 export function empty(collection) {

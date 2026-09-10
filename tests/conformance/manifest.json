@@ -3228,6 +3228,43 @@
           "contains": "portable compiler driver reaches a reproducible fixed point"
         }
       ]
+    },
+    {
+      "id": "stdlib.persistent-collection-classification",
+      "title": "Persistent collection classification and bounded inspection",
+      "status": "stable",
+      "spec": "0164",
+      "contracts": [
+        "Exports exact persistent collection category predicates on both language surfaces",
+        "Separates persistent value classification from open native collection capabilities",
+        "Distinguishes sequential Vectors from List and SequenceView sequence values",
+        "Counts finite unknown and unbounded sources with a strict traversal limit",
+        "Rejects invalid limits before traversal and closes iterators on early stop or failure",
+        "Tests argument distinctness with persistent value equality and host object identity",
+        "Produces byte-identical compiled functions and matching local Bun and Node results"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/collection-protocol.test.mjs",
+          "contains": "collection classification bounded count and distinct values preserve language boundaries"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "Eliscript core modules compile and execute against runtime protocols"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/core-stdlib.test.mjs",
+          "contains": "protocol standard-library algorithms agree under Bun and Node"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/bootstrap-compiler.test.mjs",
+          "contains": "portable compiler driver reaches a reproducible fixed point"
+        }
+      ]
     }
   ]
 }
