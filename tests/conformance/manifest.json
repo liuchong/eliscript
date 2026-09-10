@@ -3613,6 +3613,27 @@
           "contains": "self-hosted formatter preserves concrete syntax and core semantics"
         }
       ]
+    },
+    {
+      "id": "stdlib.persistent-tree-walk",
+      "title": "Persistent tree walk and rewrite",
+      "status": "stable",
+      "spec": "0173",
+      "contracts": [
+        "Walks persistent List Vector Queue Map Record and Set branches while keeping host containers opaque",
+        "Preserves unchanged identity concrete persistent types order and metadata",
+        "Distinguishes one-level pre-order and post-order transformation semantics",
+        "Supports presence-aware pre-order and post-order replacement",
+        "Uses an explicit traversal stack for deeply nested persistent values",
+        "Matches Seed self-hosted Source Maps Bun and Node execution"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/persistent-tree-walk.test.mjs",
+          "contains": "persistent tree walk is stack safe and agrees across compilers and hosts"
+        }
+      ]
     }
   ]
 }

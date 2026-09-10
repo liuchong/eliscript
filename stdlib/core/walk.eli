@@ -1,0 +1,195 @@
+(module eliscript.core.walk
+  (import "../../runtime/core/collection.mjs" :as Collection)
+  (import "../../runtime/core/list.mjs" persistentList)
+  (import "../../runtime/core/metadata.mjs" meta withMeta)
+  (import "../../runtime/core/record.mjs" isRecord)
+  (import "../../runtime/core/value.mjs" equalValues)
+  (defconst walk-list-kind "list")
+  (defconst walk-vector-kind "vector")
+  (defconst walk-queue-kind "queue")
+  (defconst walk-record-kind "record")
+  (defconst walk-map-kind "map")
+  (defconst walk-set-kind "set")
+  (defun require-function
+    (value label)
+    (if (= (value-type value) "function")
+      value
+      (throw (new globalThis/TypeError (str label " must be a function")))))
+  (defun walk-collection-kind
+    (value)
+    (cond ((Collection/isList value) walk-list-kind)
+      ((Collection/isVector value) walk-vector-kind)
+      ((Collection/isQueue value) walk-queue-kind)
+      ((isRecord value) walk-record-kind)
+      ((Collection/isMap value) walk-map-kind)
+      ((Collection/isSet value) walk-set-kind)
+      (t nil)))
+  (defun walk-children
+    (kind value)
+    (let ((children (js-array)))
+      (cond
+        (
+          (or
+            (= kind walk-list-kind)
+            (= kind walk-vector-kind)
+            (= kind walk-queue-kind)
+            (= kind walk-set-kind))
+          (Collection/reduce
+            value
+            (lambda (result child) (js-call result :push child) result)
+            children))
+        ((or (= kind walk-record-kind) (= kind walk-map-kind))
+          (Collection/reduceKV
+            value
+            (lambda (result key child) (js-call result :push key child) result)
+            children)))
+      children))
+  (defun walk-children-identical?
+    (children transformed)
+    (let ((index 0) (identical t))
+      (while (and identical (< index (js-length children)))
+        (unless (eq (aref children index) (aref transformed index))
+          (setq identical false))
+        (setq index (1+ index)))
+      identical))
+  (defun walk-rebuild-linear
+    (value transformed)
+    (let ((result (Collection/empty value)) (index 0))
+      (while (< index (js-length transformed))
+        (setq result (Collection/conj result (aref transformed index)) index (1+ index)))
+      result))
+  (defun walk-rebuild-map
+    (value transformed)
+    (let ((result (Collection/empty value)) (index 0))
+      (while (< index (js-length transformed))
+        (setq
+          result
+          (Collection/assoc
+            result
+            (aref transformed index)
+            (aref transformed (1+ index)))
+          index
+          (+ index 2)))
+      result))
+  (defun walk-record-keys-identical?
+    (children transformed)
+    (let ((index 0) (identical t))
+      (while (and identical (< index (js-length children)))
+        (unless (equalValues (aref children index) (aref transformed index))
+          (setq identical false))
+        (setq index (+ index 2)))
+      identical))
+  (defun walk-rebuild-record
+    (value children transformed)
+    (if (not (walk-record-keys-identical? children transformed))
+      (walk-rebuild-map value transformed)
+      (let ((result value) (index 0))
+        (while (< index (js-length transformed))
+          (setq
+            result
+            (Collection/assoc
+              result
+              (aref transformed index)
+              (aref transformed (1+ index)))
+            index
+            (+ index 2)))
+        result)))
+  (defun walk-rebuild
+    (kind value children transformed)
+    (if (or (nil? kind) (walk-children-identical? children transformed))
+      value
+      (cond
+        ((= kind walk-list-kind)
+          (withMeta (apply persistentList transformed) (meta value)))
+        ((or (= kind walk-vector-kind) (= kind walk-queue-kind) (= kind walk-set-kind))
+          (walk-rebuild-linear value transformed))
+        ((= kind walk-record-kind) (walk-rebuild-record value children transformed))
+        (t (walk-rebuild-map value transformed)))))
+  (defun walk-value
+    (inner outer form)
+    (let*
+      ((kind (walk-collection-kind form))
+        (children (walk-children kind form))
+        (transformed (js-array))
+        (index 0))
+      (while (< index (js-length children))
+        (js-call transformed :push (funcall inner (aref children index)))
+        (setq index (1+ index)))
+      (funcall outer (walk-rebuild kind form children transformed))))
+  (defun walk
+    (inner outer form)
+    (walk-value
+      (require-function inner "walk inner")
+      (require-function outer "walk outer")
+      form))
+  (defun walk-frame
+    (value)
+    (let ((kind (walk-collection-kind value)))
+      (js-object
+        :value
+        value
+        :kind
+        kind
+        :children
+        (walk-children kind value)
+        :transformed
+        (js-array)
+        :index
+        0)))
+  (defun walk-tree
+    (transform form preorder)
+    (let*
+      ((initial (if preorder (funcall transform form) form))
+        (stack (js-array (walk-frame initial)))
+        (result initial))
+      (while (> (js-length stack) 0)
+        (let*
+          ((frame (aref stack (1- (js-length stack))))
+            (children (get frame :children))
+            (index (get frame :index)))
+          (if (< index (js-length children))
+            (progn
+              (put frame :index (1+ index))
+              (let ((child (aref children index)))
+                (js-call
+                  stack
+                  :push
+                  (walk-frame (if preorder (funcall transform child) child)))))
+            (let
+              (
+                (completed
+                  (walk-rebuild
+                    (get frame :kind)
+                    (get frame :value)
+                    children
+                    (get frame :transformed))))
+              (setq result (if preorder completed (funcall transform completed)))
+              (js-call stack :pop)
+              (when (> (js-length stack) 0)
+                (js-call
+                  (get (aref stack (1- (js-length stack))) :transformed)
+                  :push
+                  result))))))
+      result))
+  (defun prewalk
+    (transform form)
+    (walk-tree (require-function transform "prewalk transform") form t))
+  (defun postwalk
+    (transform form)
+    (walk-tree (require-function transform "postwalk transform") form false))
+  (defun walk-replacer
+    (replacements label)
+    (when (not (Collection/isMap replacements))
+      (throw (new globalThis/TypeError (str label " replacements must be a map"))))
+    (lambda
+      (value)
+      (if (Collection/contains replacements value)
+        (Collection/get replacements value)
+        value)))
+  (defun prewalk-replace
+    (replacements form)
+    (prewalk (walk-replacer replacements "prewalk-replace") form))
+  (defun postwalk-replace
+    (replacements form)
+    (postwalk (walk-replacer replacements "postwalk-replace") form))
+  (export postwalk postwalk-replace prewalk prewalk-replace walk))

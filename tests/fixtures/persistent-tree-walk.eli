@@ -1,0 +1,165 @@
+(module tests.persistent-tree-walk
+  (import "../../stdlib/core/walk.eli"
+    postwalk
+    postwalk-replace
+    prewalk
+    prewalk-replace
+    walk)
+  (import "../../runtime/core/collection.mjs" :as Collection)
+  (import "../../runtime/core/identifier.mjs" identifierName isKeyword keyword)
+  (import "../../runtime/core/list.mjs" first persistentList rest)
+  (import "../../runtime/core/map.mjs" persistentHashMap)
+  (import "../../runtime/core/metadata.mjs" meta withMeta)
+  (import "../../runtime/core/queue.mjs" persistentQueue)
+  (import "../../runtime/core/record.mjs" defineRecordType isRecord)
+  (import "../../runtime/core/set.mjs" persistentHashSet)
+  (import "../../runtime/core/vector.mjs" persistentVector)
+  (defun identity (value) value)
+  (defun caught-message
+    (operation)
+    (try
+      (funcall operation)
+      (catch error (get error "message" "missing error message"))))
+  (defun increment-number (value) (if (= (value-type value) "number") (1+ value) value))
+  (defun rename-age
+    (value)
+    (if (and (isKeyword value) (= (identifierName value) "age"))
+      (keyword "years")
+      value))
+  (defun value-label
+    (value)
+    (cond ((= (value-type value) "number") value)
+      ((Collection/isVector value) "vector")
+      (t "value")))
+  (defun undefined-at?
+    (collection target-index)
+    (let ((index 0) (matches false))
+      (Collection/reduce
+        collection
+        (lambda
+          (result value)
+          (when (= index target-index) (setq matches (undefined? value)))
+          (setq index (1+ index))
+          result)
+        nil)
+      matches))
+  (defun traversal-events
+    (traversal form)
+    (let ((events (js-array)))
+      (funcall
+        traversal
+        (lambda (value) (js-call events :push (value-label value)) value)
+        form)
+      events))
+  (defun walk-report
+    ()
+    (let*
+      ((host-array (js-array 8))
+        (source
+          (persistentVector
+            1
+            (persistentList 2 (persistentVector 3))
+            (persistentHashMap (js-array "nested" (persistentQueue 4 5)))
+            (persistentHashSet 6 7)
+            host-array))
+        (located
+          (withMeta
+            source
+            (persistentHashMap (js-array (keyword "source") "walk-test"))))
+        (one-level (walk increment-number identity located))
+        (post (postwalk increment-number located))
+        (list-value (Collection/nth post 1))
+        (nested-vector (first (rest list-value)))
+        (nested-map (Collection/nth post 2))
+        (nested-queue (Collection/get nested-map "nested"))
+        (nested-set (Collection/nth post 3))
+        (metadata (meta post))
+        (map-walk
+          (postwalk
+            increment-number
+            (persistentHashMap (js-array 1 (persistentVector 2)))))
+        (Person (defineRecordType "WalkPerson" (js-array "age")))
+        (person (js-call Person :create 40))
+        (walked-person (postwalk increment-number person))
+        (renamed-person (postwalk rename-age person))
+        (replacement-map
+          (persistentHashMap (js-array "a" (persistentVector "b")) (js-array "b" "c")))
+        (replacement-source "a")
+        (pre-replacement (prewalk-replace replacement-map replacement-source))
+        (post-replacement (postwalk-replace replacement-map replacement-source))
+        (nullish-replacements
+          (postwalk-replace
+            (persistentHashMap
+              (js-array "nil" nil)
+              (js-array "false" false)
+              (js-array "undefined" globalThis/undefined))
+            (persistentVector "nil" "false" "undefined" "missing")))
+        (deep-value 0)
+        (depth 12000))
+      (while (> depth 0)
+        (setq deep-value (persistentVector deep-value) depth (1- depth)))
+      (setq deep-value (postwalk increment-number deep-value) depth 12000)
+      (while (> depth 0)
+        (setq deep-value (Collection/nth deep-value 0) depth (1- depth)))
+      (js-object
+        :identityPreserved
+        (eq (walk identity identity located) located)
+        :oneLevel
+        (js-array
+          (Collection/nth one-level 0)
+          (first (Collection/nth one-level 1))
+          (eq (Collection/nth one-level 4) host-array))
+        :post
+        (js-array
+          (Collection/nth post 0)
+          (first list-value)
+          (Collection/nth nested-vector 0)
+          (Collection/peek nested-queue)
+          (Collection/peek (Collection/pop nested-queue))
+          (Collection/contains nested-set 7)
+          (Collection/contains nested-set 8)
+          (js-nth 0 (Collection/nth post 4)))
+        :metadata
+        (Collection/get metadata (keyword "source"))
+        :types
+        (js-array
+          (Collection/isVector post)
+          (Collection/isList list-value)
+          (Collection/isVector nested-vector)
+          (Collection/isMap nested-map)
+          (Collection/isQueue nested-queue)
+          (Collection/isSet nested-set))
+        :map
+        (js-array
+          (Collection/contains map-walk 2)
+          (Collection/nth (Collection/get map-walk 2) 0))
+        :record
+        (js-array
+          (isRecord walked-person)
+          (Collection/get walked-person (keyword "age"))
+          (isRecord renamed-person)
+          (Collection/get renamed-person (keyword "years")))
+        :preorder
+        (traversal-events prewalk (persistentVector 1 (persistentVector 2)))
+        :postorder
+        (traversal-events postwalk (persistentVector 1 (persistentVector 2)))
+        :preReplace
+        (Collection/nth pre-replacement 0)
+        :postReplace
+        (Collection/nth post-replacement 0)
+        :nullishReplace
+        (js-array
+          (nil? (Collection/nth nullish-replacements 0))
+          (eq (Collection/nth nullish-replacements 1) false)
+          (undefined-at? nullish-replacements 2)
+          (Collection/nth nullish-replacements 3))
+        :errors
+        (js-array
+          (caught-message (lambda () (walk nil identity source)))
+          (caught-message (lambda () (prewalk nil source)))
+          (caught-message (lambda () (postwalk nil source)))
+          (caught-message (lambda () (prewalk-replace source source)))
+          (caught-message (lambda () (postwalk-replace source source))))
+        :deep
+        deep-value)))
+  (export walk-report))
