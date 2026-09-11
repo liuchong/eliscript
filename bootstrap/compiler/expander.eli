@@ -2478,11 +2478,24 @@
       result))
 
   (defun collect-symbol-names (node names)
-    (cond
-      ((symbol-node-p node) (js-call names :add (node-name node)))
-      ((or (= (node-kind node) "list") (= (node-kind node) "vector"))
-       (js-call (node-items node) :forEach
-         (lambda (item) (collect-symbol-names item names)))))
+    (let ((pending (js-array node))
+          (current nil)
+          (kind nil)
+          (items nil)
+          (index 0))
+      (while (> (get pending :length) 0)
+        (setq current (js-call pending :pop))
+        (cond
+          ((symbol-node-p current)
+           (js-call names :add (node-name current)))
+          (t
+           (setq kind (node-kind current))
+           (when (or (= kind "list") (= kind "vector"))
+             (setq items (node-items current))
+             (setq index (1- (get items :length)))
+             (while (>= index 0)
+               (js-call pending :push (js-nth index items))
+               (setq index (1- index))))))))
     names)
 
   (defun expand-module (forms filename &optional macro-context)

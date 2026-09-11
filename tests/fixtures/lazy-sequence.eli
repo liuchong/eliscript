@@ -1,0 +1,47 @@
+(module eliscript.fixture.lazy-sequence
+  (import "../../stdlib/core/lazy-sequence.eli"
+    lazy-cons
+    lazy-seq?
+    realized-count
+    realized?)
+  (import "../../stdlib/core/transducer.eli"
+    compose-transducers
+    filtering
+    mapping
+    partitioning-all
+    sequence
+    taking
+    into)
+  (defun naturals (value) (lazy-cons value (lambda () (naturals (1+ value)))))
+  (defun run
+    ()
+    (let*
+      ((source (naturals 1))
+        (before (js-array (realized? source) (realized-count source)))
+        (values
+          (sequence
+            (compose-transducers
+              (mapping (lambda (value) (* value 3)))
+              (filtering (lambda (value) (= (mod value 2) 0)))
+              (taking 4))
+            source))
+        (host-values (into (js-array) values))
+        (after (js-array (realized? values) (realized-count values)))
+        (groups
+          (sequence
+            (compose-transducers
+              (partitioning-all 3)
+              (mapping (lambda (group) (into (js-array) group))))
+            (js-array 1 2 3 4 5))))
+      (js-object
+        :before
+        before
+        :values
+        host-values
+        :after
+        after
+        :groups
+        (into (js-array) groups)
+        :predicate
+        (lazy-seq? values))))
+  (export run))

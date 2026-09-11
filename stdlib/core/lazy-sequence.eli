@@ -1,0 +1,9 @@
+(module eliscript.core.lazy-sequence
+  (import "../../runtime/core/lazy-sequence.mjs" :as Runtime)
+  (defun lazy-seq (thunk) (Runtime/lazySequence thunk))
+  (defun lazy-cons (value tail-thunk) (Runtime/lazyCons value tail-thunk))
+  (defun lazy-seq? (value) (Runtime/isLazySequence value))
+  (defun realized? (value) (Runtime/isLazySequenceRealized value))
+  (defun realized-count (value) (Runtime/realizedLazySequenceCount value))
+  (defun realize (value) (Runtime/realizeLazySequence value))
+  (export lazy-cons lazy-seq lazy-seq? realize realized-count realized?))

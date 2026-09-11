@@ -18,6 +18,7 @@ import {
   I_REVERSIBLE,
   I_SEQABLE,
   ReductionView as InternalReductionView,
+  MemoizedSequenceView as InternalMemoizedSequenceView,
   SequenceView as InternalSequenceView,
   dispatchCollectionCount,
   dispatchCollectionEmpty,
@@ -39,6 +40,7 @@ import {
   reduceIterable,
   reducedValue,
   reductionView as createReductionView,
+  memoizedSequenceView as createMemoizedSequenceView,
   sequenceView as createSequenceView,
   unboundedSequenceView as createUnboundedSequenceView,
   unreducedValue,
@@ -360,10 +362,15 @@ export const IStack = I_STACK;
 export const IReversible = I_REVERSIBLE;
 
 export const ReductionView = InternalReductionView;
+export const MemoizedSequenceView = InternalMemoizedSequenceView;
 export const SequenceView = InternalSequenceView;
 
 export function reductionView(reduceFunction) {
   return createReductionView(reduceFunction);
+}
+
+export function memoizedSequenceView(factory, count = null) {
+  return createMemoizedSequenceView(factory, count);
 }
 
 export function sequenceView(factory, count = null) {
@@ -404,6 +411,7 @@ export function isAssociative(collection) {
 
 export function isCollection(value) {
   return value instanceof InternalSequenceView ||
+    value instanceof InternalMemoizedSequenceView ||
     isPersistentList(value) ||
     isPersistentQueue(value) ||
     isPersistentVector(value) ||
@@ -434,13 +442,16 @@ export function isSet(value) {
 
 export function isSequential(value) {
   return value instanceof InternalSequenceView ||
+    value instanceof InternalMemoizedSequenceView ||
     isPersistentList(value) ||
     isPersistentQueue(value) ||
     isPersistentVector(value);
 }
 
 export function isSequence(value) {
-  return value instanceof InternalSequenceView || isPersistentList(value);
+  return value instanceof InternalSequenceView ||
+    value instanceof InternalMemoizedSequenceView ||
+    isPersistentList(value);
 }
 
 export function boundedCount(limit, collection) {
@@ -625,7 +636,8 @@ export function unreduced(value) {
 }
 
 export function isSequenceView(value) {
-  return value instanceof InternalSequenceView;
+  return value instanceof InternalSequenceView ||
+    value instanceof InternalMemoizedSequenceView;
 }
 
 export function isReductionView(value) {

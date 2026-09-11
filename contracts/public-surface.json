@@ -668,7 +668,7 @@
       "spec": "0059",
       "visibility": "public",
       "file": "runtime/core/collection.mjs",
-      "namedExports": ["IAssociative", "IConj", "ICounted", "IEmptyable", "IIndexed", "IKVReduce", "ILookup", "IMap", "IReduce", "IReversible", "ISeqable", "ISet", "IStack", "ReductionView", "SequenceView", "areDistinct", "assoc", "boundedCount", "conj", "contains", "count", "disj", "dissoc", "empty", "get", "isAssociative", "isCollection", "isCounted", "isEmpty", "isIndexed", "isList", "isMap", "isQueue", "isReduced", "isReducible", "isReductionView", "isReversible", "isSeqable", "isSequence", "isSequenceView", "isSequential", "isSet", "isVector", "notEmpty", "nth", "peek", "pop", "reduce", "reduceKV", "reduced", "reductionView", "rseq", "seq", "sequenceView", "unboundedSequenceView", "unreduced"],
+      "namedExports": ["IAssociative", "IConj", "ICounted", "IEmptyable", "IIndexed", "IKVReduce", "ILookup", "IMap", "IReduce", "IReversible", "ISeqable", "ISet", "IStack", "MemoizedSequenceView", "ReductionView", "SequenceView", "areDistinct", "assoc", "boundedCount", "conj", "contains", "count", "disj", "dissoc", "empty", "get", "isAssociative", "isCollection", "isCounted", "isEmpty", "isIndexed", "isList", "isMap", "isQueue", "isReduced", "isReducible", "isReductionView", "isReversible", "isSeqable", "isSequence", "isSequenceView", "isSequential", "isSet", "isVector", "memoizedSequenceView", "notEmpty", "nth", "peek", "pop", "reduce", "reduceKV", "reduced", "reductionView", "rseq", "seq", "sequenceView", "unboundedSequenceView", "unreduced"],
       "defaultExport": false
     },
     {
@@ -676,7 +676,7 @@
       "spec": "0061",
       "visibility": "public",
       "file": "runtime/core/transducer.mjs",
-      "namedExports": ["catting", "completing", "composeTransducers", "deduping", "distincting", "dropping", "droppingWhile", "eduction", "filtering", "interposing", "into", "keeping", "keepingIndexed", "mapcatting", "mapping", "mappingIndexed", "partitioningAll", "partitioningBy", "removing", "runBang", "taking", "takingNth", "takingWhile", "transduce"],
+      "namedExports": ["catting", "completing", "composeTransducers", "deduping", "distincting", "dropping", "droppingWhile", "eduction", "filtering", "interposing", "into", "keeping", "keepingIndexed", "mapcatting", "mapping", "mappingIndexed", "partitioningAll", "partitioningBy", "removing", "runBang", "sequence", "taking", "takingNth", "takingWhile", "transduce"],
       "defaultExport": false
     },
     {
@@ -749,6 +749,14 @@
       "visibility": "public",
       "file": "runtime/literals.mjs",
     "namedExports": ["hashMap", "hashSet", "keyword", "list", "queue", "symbol", "vector"],
+      "defaultExport": false
+    },
+    {
+      "id": "memoized-lazy-sequences",
+      "spec": "0176",
+      "visibility": "public",
+      "file": "runtime/core/lazy-sequence.mjs",
+      "namedExports": ["isLazySequence", "isLazySequenceRealized", "lazyCons", "lazySequence", "realizeLazySequence", "realizedLazySequenceCount"],
       "defaultExport": false
     },
     {
@@ -982,6 +990,7 @@
     {"module": "core-data", "spec": "0066", "file": "stdlib/core/data.eli", "exports": ["assoc-in", "count-by", "frequencies", "get-in", "group-by", "index-by", "keys", "merge", "merge-with", "select-keys", "update", "update-in", "update-keys", "update-vals", "vals", "zipmap"]},
     {"module": "core-data-text", "spec": "0069", "file": "stdlib/core/data-text.eli", "exports": ["DataTextError", "IPrint", "print-value", "read-value", "read-values"]},
     {"module": "core-identifier", "spec": "0067", "file": "stdlib/core/identifier.eli", "exports": ["EliscriptSymbol", "Keyword", "identifier-name", "identifier-namespace", "identifier?", "keyword", "keyword?", "qualified-name", "symbol", "symbol?"]},
+    {"module": "core-lazy-sequence", "spec": "0176", "file": "stdlib/core/lazy-sequence.eli", "exports": ["lazy-cons", "lazy-seq", "lazy-seq?", "realize", "realized-count", "realized?"]},
     {"module": "core-metadata", "spec": "0068", "file": "stdlib/core/metadata.eli", "exports": ["IMeta", "IWithMeta", "meta", "supports-metadata?", "vary-meta", "with-meta"]},
     {"module": "core-object", "spec": "0081", "file": "stdlib/core/object.eli", "exports": ["assoc", "dissoc", "filter-values", "has?", "key-in?", "keys", "map-values", "merge", "omit", "pick", "update"]},
     {"module": "core-order", "spec": "0066", "file": "stdlib/core/order.eli", "exports": ["IComparable", "comparator", "compare-values", "max-key", "min-key", "reverse-comparator", "sort", "sort-by"]},
@@ -991,7 +1000,7 @@
     {"module": "core-set", "spec": "0066", "file": "stdlib/core/set.eli", "exports": ["difference", "disjoint?", "index", "intersection", "join", "map-invert", "project", "rename", "rename-keys", "select", "set", "subset?", "superset?", "union"]},
     {"module": "core-sorted", "spec": "0175", "file": "stdlib/core/sorted.eli", "exports": ["comparator", "empty-sorted-map", "empty-sorted-map-by", "empty-sorted-set", "empty-sorted-set-by", "rsubseq", "sorted-map", "sorted-map-by", "sorted-map?", "sorted-seq", "sorted-seq-from", "sorted-set", "sorted-set-by", "sorted-set?", "sorted?", "subseq"]},
     {"module": "core-text", "spec": "0081", "file": "stdlib/core/text.eli", "exports": ["blank?", "contains?", "empty?", "ends-with?", "join", "repeat", "slice", "starts-at?", "starts-with?", "strip-prefix", "strip-suffix", "trim", "whitespace?"]},
-    {"module": "core-transducer", "spec": "0066", "file": "stdlib/core/transducer.eli", "exports": ["catting", "completing", "compose-transducers", "deduping", "distincting", "dropping", "dropping-while", "eduction", "filtering", "interposing", "into", "keeping", "keeping-indexed", "mapcatting", "mapping", "mapping-indexed", "partitioning-all", "partitioning-by", "removing", "run!", "taking", "taking-nth", "taking-while", "transduce"]},
+    {"module": "core-transducer", "spec": "0066", "file": "stdlib/core/transducer.eli", "exports": ["catting", "completing", "compose-transducers", "deduping", "distincting", "dropping", "dropping-while", "eduction", "filtering", "interposing", "into", "keeping", "keeping-indexed", "mapcatting", "mapping", "mapping-indexed", "partitioning-all", "partitioning-by", "removing", "run!", "sequence", "taking", "taking-nth", "taking-while", "transduce"]},
     {"module": "core-transient", "spec": "0066", "file": "stdlib/core/transient.eli", "exports": ["IEditable", "ITransientCollection", "assoc!", "conj!", "dissoc!", "persistent!", "transient"]},
     {"module": "core-type", "spec": "0169", "file": "stdlib/core/type.eli", "exports": ["define-type", "defined-type-fields", "defined-type-name", "reify-protocols", "type-definition?", "type-of", "type-value?"]},
     {"module": "core-walk", "spec": "0173", "file": "stdlib/core/walk.eli", "exports": ["postwalk", "postwalk-replace", "prewalk", "prewalk-replace", "walk"]},

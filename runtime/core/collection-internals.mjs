@@ -60,6 +60,15 @@ const NO_INITIAL = Symbol("eliscript.collection.no-initial");
 const REDUCED_STATE = Symbol("eliscript.collection.reduced-state");
 const REDUCTION_STATE = Symbol("eliscript.collection.reduction-state");
 const REDUCTION_TOKEN = Symbol("eliscript.collection.reduction-token");
+const MEMOIZED_SEQUENCE_STATE = Symbol(
+  "eliscript.collection.memoized-sequence-state",
+);
+const MEMOIZED_SEQUENCE_TOKEN = Symbol(
+  "eliscript.collection.memoized-sequence-token",
+);
+const NO_MEMOIZED_SEQUENCE_FAILURE = Symbol(
+  "eliscript.collection.no-memoized-sequence-failure",
+);
 const SEQUENCE_STATE = Symbol("eliscript.collection.sequence-state");
 const SEQUENCE_TOKEN = Symbol("eliscript.collection.sequence-token");
 const UNBOUNDED_SEQUENCE = Symbol("eliscript.collection.unbounded-sequence");
@@ -78,6 +87,82 @@ function iteratorFromFactory(factory) {
     throw new TypeError("sequence view factory must return an iterator");
   }
   return iterator;
+}
+
+class MemoizedSequenceSource {
+  constructor(factory) {
+    this.factory = factory;
+    this.source = null;
+    this.values = [];
+    this.started = false;
+    this.complete = false;
+    this.failure = NO_MEMOIZED_SEQUENCE_FAILURE;
+  }
+
+  read(index) {
+    if (index < this.values.length) {
+      return { value: this.values[index], done: false };
+    }
+    if (this.failure !== NO_MEMOIZED_SEQUENCE_FAILURE) throw this.failure;
+    if (this.complete) return { value: undefined, done: true };
+    if (!this.started) {
+      this.started = true;
+      try {
+        this.source = iteratorFromFactory(this.factory);
+        this.factory = null;
+      } catch (error) {
+        this.failure = error;
+        throw error;
+      }
+    }
+    try {
+      const result = this.source.next();
+      if (result === null || typeof result !== "object" ||
+          typeof result.done !== "boolean") {
+        throw new TypeError("sequence iterator must return an iterator result");
+      }
+      if (result.done) {
+        this.complete = true;
+        this.source = null;
+        return { value: undefined, done: true };
+      }
+      this.values.push(result.value);
+      return { value: result.value, done: false };
+    } catch (error) {
+      const source = this.source;
+      this.failure = error;
+      this.source = null;
+      if (source !== null && typeof source.return === "function") {
+        try {
+          source.return();
+        } catch {
+          // Preserve the original realization failure as the stable result.
+        }
+      }
+      throw error;
+    }
+  }
+
+  iterator() {
+    const source = this;
+    let index = 0;
+    let closed = false;
+    return {
+      next() {
+        if (closed) return { value: undefined, done: true };
+        const result = source.read(index);
+        if (!result.done) index += 1;
+        return result;
+      },
+      return(value) {
+        closed = true;
+        return { value, done: true };
+      },
+      [Symbol.iterator]() {
+        return this;
+      },
+    };
+  }
 }
 
 export function readCollectionEntry(entry) {
@@ -206,6 +291,49 @@ export class SequenceView {
   }
 }
 
+export class MemoizedSequenceView {
+  constructor(token, factory, count) {
+    if (token !== MEMOIZED_SEQUENCE_TOKEN || typeof factory !== "function") {
+      throw new TypeError(
+        "MemoizedSequenceView values must be created by memoizedSequenceView",
+      );
+    }
+    this[MEMOIZED_SEQUENCE_STATE] = Object.freeze({
+      source: new MemoizedSequenceSource(factory),
+      count,
+    });
+    Object.freeze(this);
+  }
+
+  [COLLECTION_COUNT]() {
+    return sequenceCount({
+      factory: () => this[Symbol.iterator](),
+      count: this[MEMOIZED_SEQUENCE_STATE].count,
+    });
+  }
+
+  [COLLECTION_SEQ]() {
+    const iterator = this[Symbol.iterator]();
+    try {
+      return iterator.next().done ? null : this;
+    } finally {
+      iterator.return();
+    }
+  }
+
+  [COLLECTION_REDUCE](reducer, ...initial) {
+    return reduceIterable(this, reducer, ...initial);
+  }
+
+  [Symbol.iterator]() {
+    return this[MEMOIZED_SEQUENCE_STATE].source.iterator();
+  }
+
+  get [Symbol.toStringTag]() {
+    return "EliscriptMemoizedSequenceView";
+  }
+}
+
 export class ReductionView {
   constructor(token, reduceFunction) {
     if (token !== REDUCTION_TOKEN || typeof reduceFunction !== "function") {
@@ -244,11 +372,36 @@ export function unboundedSequenceView(factory) {
   return new SequenceView(SEQUENCE_TOKEN, factory, UNBOUNDED_SEQUENCE);
 }
 
+export function memoizedSequenceView(factory, count = null) {
+  if (typeof factory !== "function") {
+    throw new TypeError("memoized sequence view factory must be a function");
+  }
+  if (count !== null) {
+    checkedCount(count);
+    if (count === 0) return null;
+  }
+  return new MemoizedSequenceView(MEMOIZED_SEQUENCE_TOKEN, factory, count);
+}
+
+export function memoizedSequenceStatus(value) {
+  if (!(value instanceof MemoizedSequenceView)) {
+    throw new TypeError("expected a memoized sequence view");
+  }
+  const source = value[MEMOIZED_SEQUENCE_STATE].source;
+  return Object.freeze({
+    started: source.started,
+    complete: source.complete,
+    failed: source.failure !== NO_MEMOIZED_SEQUENCE_FAILURE,
+    realizedCount: source.values.length,
+  });
+}
+
 export function sliceSequenceView(sequence, offset) {
   if (sequence === null) {
     return null;
   }
-  if (!(sequence instanceof SequenceView)) {
+  if (!(sequence instanceof SequenceView) &&
+      !(sequence instanceof MemoizedSequenceView)) {
     throw new TypeError("sequence slice expects a SequenceView or nil");
   }
   checkedCount(offset);
@@ -256,7 +409,12 @@ export function sliceSequenceView(sequence, offset) {
     return sequence;
   }
 
-  const state = sequence[SEQUENCE_STATE];
+  const state = sequence instanceof SequenceView
+    ? sequence[SEQUENCE_STATE]
+    : {
+        factory: () => sequence[Symbol.iterator](),
+        count: sequence[MEMOIZED_SEQUENCE_STATE].count,
+      };
   const factory = () => {
     const iterator = sequence[Symbol.iterator]();
     let remaining = offset;
@@ -275,7 +433,8 @@ export function sliceSequenceView(sequence, offset) {
 }
 
 export function prependSequenceView(value, sequence) {
-  if (sequence !== null && !(sequence instanceof SequenceView)) {
+  if (sequence !== null && !(sequence instanceof SequenceView) &&
+      !(sequence instanceof MemoizedSequenceView)) {
     throw new TypeError("sequence prepend expects a SequenceView or nil");
   }
 
@@ -289,7 +448,13 @@ export function prependSequenceView(value, sequence) {
     return sequenceView(factory, 1);
   }
 
-  const count = prependedSequenceCount(sequence[SEQUENCE_STATE]);
+  const state = sequence instanceof SequenceView
+    ? sequence[SEQUENCE_STATE]
+    : {
+        factory: () => sequence[Symbol.iterator](),
+        count: sequence[MEMOIZED_SEQUENCE_STATE].count,
+      };
+  const count = prependedSequenceCount(state);
   return count === UNBOUNDED_SEQUENCE
     ? unboundedSequenceView(factory)
     : sequenceView(factory, count);

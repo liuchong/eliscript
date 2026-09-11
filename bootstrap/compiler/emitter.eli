@@ -43,18 +43,27 @@
 
   (defun combine (parts)
     (let ((text "")
-          (marks (js-array)))
-      (js-call parts :forEach
-        (lambda (part)
-          (let* ((fragment (as-fragment part))
-                 (offset (get text :length)))
-            (js-call (get fragment :marks) :forEach
-              (lambda (mark)
-                (js-call marks :push
-                  (js-object
-                    :offset (+ offset (get mark :offset))
-                    :span (get mark :span)))))
-            (setq text (str text (get fragment :text))))))
+          (marks (js-array))
+          (part-index 0)
+          (fragment nil)
+          (offset 0)
+          (fragment-marks nil)
+          (mark-index 0)
+          (mark nil))
+      (while (< part-index (get parts :length))
+        (setq fragment (as-fragment (js-nth part-index parts)))
+        (setq offset (get text :length))
+        (setq fragment-marks (get fragment :marks))
+        (setq mark-index 0)
+        (while (< mark-index (get fragment-marks :length))
+          (setq mark (js-nth mark-index fragment-marks))
+          (js-call marks :push
+            (js-object
+              :offset (+ offset (get mark :offset))
+              :span (get mark :span)))
+          (setq mark-index (1+ mark-index)))
+        (setq text (str text (get fragment :text)))
+        (setq part-index (1+ part-index)))
       (make-fragment text marks)))
 
   (defun join-fragments (parts separator)
@@ -356,16 +365,31 @@
       (join-fragments parts "\n")))
 
   (defun contains-await-p (value)
-    (cond
-      ((node-p value)
-       (let ((kind (ir-kind value)))
-         (cond
-           ((= kind "await-expression") t)
-           ((= kind "function-expression") false)
-           (t (js-call (children value) :some contains-await-p)))))
-      ((js* "Array.isArray(value)")
-       (js-call value :some contains-await-p))
-      (t false)))
+    (let ((pending (js-array value))
+          (current nil)
+          (kind nil)
+          (nodes nil)
+          (index 0)
+          (found false))
+      (while (and (not found) (> (get pending :length) 0))
+        (setq current (js-call pending :pop))
+        (cond
+          ((node-p current)
+           (setq kind (ir-kind current))
+           (cond
+             ((= kind "await-expression") (setq found t))
+             ((not (= kind "function-expression"))
+              (setq nodes (children current))
+              (setq index (1- (get nodes :length)))
+              (while (>= index 0)
+                (js-call pending :push (js-nth index nodes))
+                (setq index (1- index))))))
+          ((js* "Array.isArray(current)")
+           (setq index (1- (get current :length)))
+           (while (>= index 0)
+             (js-call pending :push (js-nth index current))
+             (setq index (1- index))))))
+      found))
 
   (defun emit-iife (parameters body invocation asynchronous)
     (if asynchronous
@@ -404,22 +428,33 @@
          "\n}"))))
 
   (defun contains-recur-target-p (value target-kind)
-    (cond
-      ((node-p value)
-       (let ((kind (ir-kind value)))
-         (cond
-           ((= kind "recur")
-            (= (ir-property value "targetKind") target-kind))
-           ((= kind "function-expression") false)
-           (t
-            (js-call (children value) :some
-              (lambda (child)
-                (contains-recur-target-p child target-kind)))))))
-      ((js* "Array.isArray(value)")
-       (js-call value :some
-         (lambda (child)
-           (contains-recur-target-p child target-kind))))
-      (t false)))
+    (let ((pending (js-array value))
+          (current nil)
+          (kind nil)
+          (nodes nil)
+          (index 0)
+          (found false))
+      (while (and (not found) (> (get pending :length) 0))
+        (setq current (js-call pending :pop))
+        (cond
+          ((node-p current)
+           (setq kind (ir-kind current))
+           (cond
+             ((= kind "recur")
+              (when (= (ir-property current "targetKind") target-kind)
+                (setq found t)))
+             ((not (= kind "function-expression"))
+              (setq nodes (children current))
+              (setq index (1- (get nodes :length)))
+              (while (>= index 0)
+                (js-call pending :push (js-nth index nodes))
+                (setq index (1- index))))))
+          ((js* "Array.isArray(current)")
+           (setq index (1- (get current :length)))
+           (while (>= index 0)
+             (js-call pending :push (js-nth index current))
+             (setq index (1- index))))))
+      found))
 
   (defun emit-rebinding-target (binding temporary)
     (let ((target (emit-binding-target binding)))
@@ -1533,11 +1568,12 @@
 
   (defun collect-runtime-requirements
       (node requirements suppress-literal)
-    (let* ((kind (ir-kind node))
+    (let ((kind (ir-kind node))
            (value (ir-value node))
            (nodes (children node))
            (static-key-index (literal-runtime-static-key-index node))
-          (index 0))
+          (index 0)
+          (child nil))
       (cond
         ((= kind "map-binding-pattern")
          (put requirements :binding t))
@@ -1567,12 +1603,12 @@
            ((= value "equal")
             (put requirements :value t)))))
       (while (< index (get nodes :length))
-        (let ((child (js-nth index nodes)))
-          (collect-runtime-requirements
-            child
-            requirements
-            (or suppress-literal
-                (static-literal-key-p child index static-key-index))))
+        (setq child (js-nth index nodes))
+        (collect-runtime-requirements
+          child
+          requirements
+          (or suppress-literal
+              (static-literal-key-p child index static-key-index)))
         (setq index (1+ index))))
     requirements)
 

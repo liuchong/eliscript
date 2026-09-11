@@ -3686,6 +3686,42 @@
           "contains": "persistent sorted trees agree with a randomized mutable model"
         }
       ]
+    },
+    {
+      "id": "stdlib.memoized-lazy-sequences",
+      "title": "Memoized lazy sequences and pull transduction",
+      "status": "stable",
+      "spec": "0176",
+      "contracts": [
+        "Starts lazy producers and tails only on demand and at most once",
+        "Shares one cached prefix across independent interleaved traversals",
+        "Flattens recursive lazy cons chains without JavaScript stack growth",
+        "Pulls transducer input only until the next output is available",
+        "Preserves zero input early termination completion and failure cleanup",
+        "Matches Seed self-hosted Source Maps Bun and Node execution"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/lazy-sequence.test.mjs",
+          "contains": "Eliscript lazy sequences agree across compilers and local hosts"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/lazy-sequence.test.mjs",
+          "contains": "lazy cons defers tails and remains stack safe for recursive streams"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/lazy-sequence.test.mjs",
+          "contains": "transducer sequence pulls only enough input and memoizes output"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/lazy-sequence.test.mjs",
+          "contains": "transducer sequence closes its input when transformation fails"
+        }
+      ]
     }
   ]
 }

@@ -623,6 +623,16 @@ bounded consumer can transform an unbounded source without realizing an
 intermediate Vector or tail. Reduction state is fresh for every run, while
 `run!` provides explicit ordered side-effect consumption and returns nil.
 
+`core/lazy-sequence.eli` adds `lazy-seq`, `lazy-cons`, `lazy-seq?`, `realized?`,
+`realized-count`, and `realize`. Producers and recursive tails start only when
+their next value is requested; every traversal shares one cached prefix and
+stable failure position. Transducer `sequence` exposes mapping, filtering,
+bounded termination, and completion output as the same memoized pull sequence,
+so bounded consumers can process infinite inputs without an intermediate
+collection. Recursive `lazy-cons` chains are flattened iteratively. Exact
+semantics are specified in
+[0176](../specs/0176-memoized-lazy-sequences.md).
+
 These modules intentionally import `runtime/core/*.mjs` and are not yet
 eligible for portable closure extraction. They are the language-level entry
 points for the current protocol core. Exact semantics and allocation evidence

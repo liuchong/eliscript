@@ -1,8 +1,8 @@
 {
   "format": "eliscript-library-api-index",
   "version": 1,
-  "moduleCount": 41,
-  "exportCount": 552,
+  "moduleCount": 42,
+  "exportCount": 559,
   "modules": [
     {
       "module": "bit",
@@ -147,6 +147,23 @@
         "qualified-name",
         "symbol",
         "symbol?"
+      ]
+    },
+    {
+      "module": "core-lazy-sequence",
+      "source": "stdlib/core/lazy-sequence.eli",
+      "spec": "0176",
+      "specFile": "specs/0176-memoized-lazy-sequences.md",
+      "stability": "stable",
+      "role": "runtime-core",
+      "summary": "Demand-driven memoized sequences, deferred recursive tails, and explicit realization inspection.",
+      "exports": [
+        "lazy-cons",
+        "lazy-seq",
+        "lazy-seq?",
+        "realize",
+        "realized-count",
+        "realized?"
       ]
     },
     {
@@ -394,7 +411,7 @@
       "specFile": "specs/0066-eliscript-authored-core-protocol-algorithms.md",
       "stability": "stable",
       "role": "runtime-core",
-      "summary": "Composable single-pass transducers, replayable reducible pipelines, and effectful consumption.",
+      "summary": "Composable single-pass transducers, replayable reducible pipelines, memoized pull sequences, and effectful consumption.",
       "exports": [
         "catting",
         "completing",
@@ -416,6 +433,7 @@
         "partitioning-by",
         "removing",
         "run!",
+        "sequence",
         "taking",
         "taking-nth",
         "taking-while",

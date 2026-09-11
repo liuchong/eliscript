@@ -3,9 +3,11 @@ import {
   contains,
   empty,
   isReduced,
+  memoizedSequenceView,
   reduce,
   reduced,
   reductionView,
+  seq,
   unreduced,
 } from "./collection.mjs";
 import { implementsProtocolOperation } from "./protocol.mjs";
@@ -512,6 +514,115 @@ export function eduction(...arguments_) {
       collection,
     );
   });
+}
+
+function transformedSequenceIterator(transducer, collection) {
+  const output = [];
+  let outputIndex = 0;
+  let input = null;
+  let transformed = null;
+  let accumulator = null;
+  let initialized = false;
+  let complete = false;
+
+  function closeInput() {
+    if (input !== null && typeof input.return === "function") input.return();
+    input = null;
+  }
+
+  function finish() {
+    if (complete) return;
+    complete = true;
+    closeInput();
+    accumulator = unreduced(transformed(unreduced(accumulator)));
+  }
+
+  function initialize() {
+    if (initialized) return;
+    initialized = true;
+    transformed = applyTransducer(
+      transducer,
+      completing((result, value) => {
+        output.push(value);
+        return result;
+      }),
+    );
+    if (transducer[ZERO_INPUT] === true) {
+      finish();
+      return;
+    }
+    const source = seq(collection);
+    if (source === null) {
+      finish();
+      return;
+    }
+    input = source[Symbol.iterator]();
+  }
+
+  function pump() {
+    initialize();
+    while (outputIndex === output.length && !complete) {
+      output.length = 0;
+      outputIndex = 0;
+      let next;
+      try {
+        next = input.next();
+      } catch (error) {
+        closeInput();
+        complete = true;
+        throw error;
+      }
+      if (next.done) {
+        finish();
+        continue;
+      }
+      let stepped;
+      try {
+        stepped = transformed(accumulator, next.value);
+      } catch (error) {
+        closeInput();
+        complete = true;
+        throw error;
+      }
+      if (isReduced(stepped)) {
+        accumulator = unreduced(stepped);
+        finish();
+      } else {
+        accumulator = stepped;
+      }
+    }
+  }
+
+  return {
+    next() {
+      pump();
+      if (outputIndex === output.length) {
+        return { value: undefined, done: true };
+      }
+      const value = output[outputIndex];
+      outputIndex += 1;
+      return { value, done: false };
+    },
+    return(value) {
+      output.length = 0;
+      outputIndex = 0;
+      complete = true;
+      closeInput();
+      return { value, done: true };
+    },
+    [Symbol.iterator]() {
+      return this;
+    },
+  };
+}
+
+export function sequence(transducer, collection) {
+  if (arguments.length !== 2) {
+    throw new TypeError("sequence requires a transducer and collection");
+  }
+  requireFunction(transducer, "sequence transducer");
+  return memoizedSequenceView(() =>
+    transformedSequenceIterator(transducer, collection));
 }
 
 export function runBang(procedure, collection) {

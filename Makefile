@@ -88,6 +88,7 @@ test-core: check-contracts
 		tests/persistent-tree-walk.test.mjs \
 		tests/persistent-zipper.test.mjs \
 		tests/persistent-sorted.test.mjs \
+		tests/lazy-sequence.test.mjs \
 		tests/core-expression-forms.test.mjs \
 		tests/interop-js.test.mjs \
 		tests/interop-package.test.mjs \

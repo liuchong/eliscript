@@ -28,6 +28,7 @@
     (transducer reducer initial collection)
     (Runtime/transduce transducer reducer initial collection))
   (defun eduction (&rest arguments) (apply Runtime/eduction arguments))
+  (defun sequence (transducer collection) (Runtime/sequence transducer collection))
   (defun run! (procedure collection) (Runtime/runBang procedure collection))
   (defun into (target &rest arguments) (apply Runtime/into (js-cons target arguments)))
   (export
@@ -51,6 +52,7 @@
     partitioning-by
     removing
     run!
+    sequence
     taking
     taking-nth
     taking-while
