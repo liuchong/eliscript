@@ -98,7 +98,7 @@ local onboarding exercise, and exit audit remain formal acceptance work.
 M11's six implementation units are complete. Reviewed metadata classifies all
 42 standard-library modules by role and owning specification; the generated
 [API page](docs/pages/api.html) and machine-readable
-[API index](docs/pages/api-index.json) expose all 559 checked exports. The
+[API index](docs/pages/api-index.json) expose all 576 checked exports. The
 default contract gate rejects metadata, implementation, stability, or generated
 artifact drift. Explicit [browser and worker capability packages](platform/README.md)
 now grant only named host authority, inject request-scoped progress and
@@ -179,6 +179,8 @@ The completed M8 language contract provides:
 - memoized lazy sequences with demand-driven producers, deferred stack-safe
   recursive tails, shared realization caches, and pull-based transducer
   `sequence` output over finite or unbounded sources
+- direct lazy mapping, keeping, filtering, prefix selection, sampling,
+  interposition, deduplication, concatenation, and partitioning combinators
 - stack-safe one-level, pre-order, and post-order persistent tree rewriting
   across List, Vector, Queue, Map, Record, and Set values while native
   JavaScript containers remain explicit opaque leaves

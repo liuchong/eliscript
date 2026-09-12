@@ -65,8 +65,8 @@ are cached by the lazy output at their exact realization position.
 This contract does not change the existing eager return types of `map`,
 `filter`, `take`, or related finite sequence helpers. It does not add asynchronous
 iteration, weak caches, chunked realization, worker transport tags, or implicit
-parallel evaluation. Those are separate semantic choices and require their own
-contracts.
+parallel evaluation. Direct lazy transformation helpers are specified
+separately in specification 0177.
 
 ## Acceptance Criteria
 

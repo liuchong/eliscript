@@ -2,8 +2,62 @@
   (import "../../runtime/core/lazy-sequence.mjs" :as Runtime)
   (defun lazy-seq (thunk) (Runtime/lazySequence thunk))
   (defun lazy-cons (value tail-thunk) (Runtime/lazyCons value tail-thunk))
+  (defun lazy-map (transform collection) (Runtime/lazyMap transform collection))
+  (defun lazy-map-indexed
+    (transform collection)
+    (Runtime/lazyMapIndexed transform collection))
+  (defun lazy-keep (transform collection) (Runtime/lazyKeep transform collection))
+  (defun lazy-keep-indexed
+    (transform collection)
+    (Runtime/lazyKeepIndexed transform collection))
+  (defun lazy-filter (predicate collection) (Runtime/lazyFilter predicate collection))
+  (defun lazy-remove (predicate collection) (Runtime/lazyRemove predicate collection))
+  (defun lazy-take (limit collection) (Runtime/lazyTake limit collection))
+  (defun lazy-drop (limit collection) (Runtime/lazyDrop limit collection))
+  (defun lazy-take-while
+    (predicate collection)
+    (Runtime/lazyTakeWhile predicate collection))
+  (defun lazy-drop-while
+    (predicate collection)
+    (Runtime/lazyDropWhile predicate collection))
+  (defun lazy-take-nth (interval collection) (Runtime/lazyTakeNth interval collection))
+  (defun lazy-interpose
+    (separator collection)
+    (Runtime/lazyInterpose separator collection))
+  (defun lazy-dedupe (collection) (Runtime/lazyDedupe collection))
+  (defun lazy-distinct (collection) (Runtime/lazyDistinct collection))
+  (defun lazy-mapcat (transform collection) (Runtime/lazyMapcat transform collection))
+  (defun lazy-partition-all
+    (size collection)
+    (Runtime/lazyPartitionAll size collection))
+  (defun lazy-partition-by
+    (classifier collection)
+    (Runtime/lazyPartitionBy classifier collection))
   (defun lazy-seq? (value) (Runtime/isLazySequence value))
   (defun realized? (value) (Runtime/isLazySequenceRealized value))
   (defun realized-count (value) (Runtime/realizedLazySequenceCount value))
   (defun realize (value) (Runtime/realizeLazySequence value))
-  (export lazy-cons lazy-seq lazy-seq? realize realized-count realized?))
+  (export
+    lazy-cons
+    lazy-dedupe
+    lazy-distinct
+    lazy-drop
+    lazy-drop-while
+    lazy-filter
+    lazy-interpose
+    lazy-keep
+    lazy-keep-indexed
+    lazy-map
+    lazy-map-indexed
+    lazy-mapcat
+    lazy-partition-all
+    lazy-partition-by
+    lazy-remove
+    lazy-seq
+    lazy-seq?
+    lazy-take
+    lazy-take-nth
+    lazy-take-while
+    realize
+    realized-count
+    realized?))

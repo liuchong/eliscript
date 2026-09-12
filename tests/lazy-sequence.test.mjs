@@ -17,7 +17,24 @@ import {
   isLazySequence,
   isLazySequenceRealized,
   lazyCons,
+  lazyDedupe,
+  lazyDistinct,
+  lazyDrop,
+  lazyDropWhile,
+  lazyFilter,
+  lazyInterpose,
+  lazyKeep,
+  lazyKeepIndexed,
+  lazyMap,
+  lazyMapcat,
+  lazyMapIndexed,
+  lazyPartitionAll,
+  lazyPartitionBy,
+  lazyRemove,
   lazySequence,
+  lazyTake,
+  lazyTakeNth,
+  lazyTakeWhile,
   realizeLazySequence,
   realizedLazySequenceCount,
 } from "../runtime/core/lazy-sequence.mjs";
@@ -305,6 +322,90 @@ test("transducer sequence closes its input when transformation fails", () => {
   expect(closed).toBe(1);
 });
 
+test("lazy combinators compose infinite inputs without eager realization", () => {
+  let starts = 0;
+  let pulls = 0;
+  const source = lazySequence(() => {
+    starts += 1;
+    return unboundedSequenceView(() => (function* naturals() {
+      let value = 1;
+      while (true) {
+        pulls += 1;
+        yield value;
+        value += 1;
+      }
+    })());
+  });
+  const output = lazyTake(
+    3,
+    lazyFilter(
+      (value) => value % 2 === 0,
+      lazyMap((value) => value * 3, source),
+    ),
+  );
+
+  expect(isLazySequence(output)).toBe(true);
+  expect([starts, pulls]).toEqual([0, 0]);
+  const first = output[Symbol.iterator]();
+  const second = output[Symbol.iterator]();
+  expect(first.next()).toEqual({ value: 6, done: false });
+  expect([starts, pulls]).toEqual([1, 2]);
+  expect(second.next()).toEqual({ value: 6, done: false });
+  expect(pulls).toBe(2);
+  expect([...output]).toEqual([6, 12, 18]);
+  expect(pulls).toBe(6);
+});
+
+test("lazy combinator family preserves transducer semantics", () => {
+  expect([...lazyMapIndexed((index, value) => index + value, [10, 20, 30])])
+    .toEqual([10, 21, 32]);
+  expect([...lazyKeep((value) => value % 2 === 0 ? value * 10 : null,
+    [1, 2, 3, 4])]).toEqual([20, 40]);
+  expect([...lazyKeepIndexed((index, value) => index % 2 === 0 ? value : null,
+    [10, 20, 30, 40])]).toEqual([10, 30]);
+  expect([...lazyRemove((value) => value % 2 === 0, [1, 2, 3, 4])])
+    .toEqual([1, 3]);
+  expect([...lazyDrop(2, [1, 2, 3, 4])]).toEqual([3, 4]);
+  expect([...lazyTakeWhile((value) => value < 4, [1, 2, 3, 4, 1])])
+    .toEqual([1, 2, 3]);
+  expect([...lazyDropWhile((value) => value < 3, [1, 2, 3, 1])])
+    .toEqual([3, 1]);
+  expect([...lazyTakeNth(2, [1, 2, 3, 4, 5])]).toEqual([1, 3, 5]);
+  expect([...lazyInterpose("|", [1, 2, 3])]).toEqual([1, "|", 2, "|", 3]);
+  expect([...lazyDedupe([1, 1, 2, 1, 1])]).toEqual([1, 2, 1]);
+  expect([...lazyDistinct([1, 2, 1, 3, 2])]).toEqual([1, 2, 3]);
+  expect([...lazyMapcat((value) => [value, value * 10], [1, 2])])
+    .toEqual([1, 10, 2, 20]);
+  expect([...lazyPartitionAll(2, [1, 2, 3])].map((group) => [...group]))
+    .toEqual([[1, 2], [3]]);
+  expect([...lazyPartitionBy((value) => value % 2, [1, 3, 2, 4, 5])]
+    .map((group) => [...group])).toEqual([[1, 3], [2, 4], [5]]);
+});
+
+test("lazy combinators validate before consuming their inputs", () => {
+  let starts = 0;
+  const source = lazySequence(() => {
+    starts += 1;
+    return [1, 2, 3];
+  });
+  expect(seq(lazyTake(0, source))).toBeNull();
+  expect(starts).toBe(0);
+  expect(() => lazyMap((value) => value)).toThrow(
+    "lazyMap requires exactly 2 arguments",
+  );
+  expect(() => lazyDedupe([], [])).toThrow(
+    "lazyDedupe requires exactly 1 argument",
+  );
+  expect(() => lazyFilter(42, source)).toThrow("must be a function");
+  expect(() => lazyTake(-1, source)).toThrow(
+    "must be a non-negative safe integer",
+  );
+  expect(() => lazyPartitionAll(0, source)).toThrow(
+    "must be a positive safe integer",
+  );
+  expect(starts).toBe(0);
+});
+
 test("lazy sequence APIs reject malformed producers and calls", () => {
   expect(() => lazySequence()).toThrow("requires exactly one thunk");
   expect(() => lazySequence(42)).toThrow("must be a function");
@@ -357,6 +458,20 @@ test("Eliscript lazy sequences agree across compilers and local hosts", async ()
       values: [6, 12, 18, 24],
       after: [true, 4],
       groups: [[1, 2, 3], [4, 5]],
+      indexed: [10, 21, 32],
+      kept: [20, 40],
+      "kept-indexed": [10, 30],
+      removed: [1, 3],
+      dropped: [3, 4],
+      "taken-while": [1, 2, 3],
+      "dropped-while": [3, 1],
+      sampled: [1, 3, 5],
+      interposed: [1, "|", 2, "|", 3],
+      deduped: [1, 2, 1],
+      distinct: [1, 2, 3],
+      "mapped-cat": [1, 10, 2, 20],
+      partitioned: [[1, 2], [3]],
+      "partitioned-by": [[1, 3], [2, 4], [5]],
       predicate: true,
     });
   } finally {

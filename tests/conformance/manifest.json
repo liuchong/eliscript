@@ -3722,6 +3722,42 @@
           "contains": "transducer sequence closes its input when transformation fails"
         }
       ]
+    },
+    {
+      "id": "stdlib.lazy-sequence-combinators",
+      "title": "Lazy sequence combinators",
+      "status": "stable",
+      "spec": "0177",
+      "contracts": [
+        "Exports seventeen direct memoized lazy transformations across Lisp and JavaScript surfaces",
+        "Composes unbounded inputs without construction-time traversal or excess pulling",
+        "Shares callback results and realized prefixes across repeated traversals",
+        "Preserves indexed nil-removal equality partitioning and early-termination semantics",
+        "Rejects malformed calls before consuming source values",
+        "Matches Seed self-hosted Source Maps Bun and Node execution"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/lazy-sequence.test.mjs",
+          "contains": "lazy combinators compose infinite inputs without eager realization"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/lazy-sequence.test.mjs",
+          "contains": "lazy combinator family preserves transducer semantics"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/lazy-sequence.test.mjs",
+          "contains": "lazy combinators validate before consuming their inputs"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/lazy-sequence.test.mjs",
+          "contains": "Eliscript lazy sequences agree across compilers and local hosts"
+        }
+      ]
     }
   ]
 }

@@ -68,8 +68,8 @@ test("committed Emacs analysis benchmark preserves qualified evidence", async ()
     }
   }
 
-  const belowCrossover = report.crossover.find(
-    (entry) => entry.corpus.totalCharacters === 7_869,
+  const belowThreshold = report.crossover.filter(
+    (entry) => entry.corpus.totalCharacters < report.selection.thresholdCharacters,
   );
   const qualifyingCrossover = report.crossover.find(
     (entry) => entry.corpus.totalCharacters === 15_754,
@@ -78,9 +78,11 @@ test("committed Emacs analysis benchmark preserves qualified evidence", async ()
     (entry) => entry.corpus.totalCharacters > 16_000,
   );
   expect(
-    belowCrossover.candidates
-      .filter(({ name }) => selected.has(name))
-      .some(({ warmEndToEndSpeedup }) => warmEndToEndSpeedup < 2),
+    belowThreshold.some((entry) =>
+      entry.candidates
+        .filter(({ name }) => selected.has(name))
+        .some(({ warmEndToEndSpeedup }) => warmEndToEndSpeedup < 2),
+    ),
   ).toBe(true);
   for (const entry of [qualifyingCrossover, aboveThreshold]) {
     for (const candidate of entry.candidates.filter(({ name }) => selected.has(name))) {

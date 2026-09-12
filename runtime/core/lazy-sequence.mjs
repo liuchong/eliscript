@@ -4,6 +4,26 @@ import {
   seq,
 } from "./collection.mjs";
 import { memoizedSequenceStatus } from "./collection-internals.mjs";
+import {
+  deduping,
+  distincting,
+  dropping,
+  droppingWhile,
+  filtering,
+  interposing,
+  keeping,
+  keepingIndexed,
+  mapcatting,
+  mapping,
+  mappingIndexed,
+  partitioningAll,
+  partitioningBy,
+  removing,
+  sequence as transducerSequence,
+  taking,
+  takingNth,
+  takingWhile,
+} from "./transducer.mjs";
 
 const lazyConsStates = new WeakMap();
 const NO_LAZY_CONS_FAILURE = Symbol("eliscript.lazy-cons.no-failure");
@@ -13,6 +33,13 @@ function requireThunk(value, label) {
     throw new TypeError(`${label} must be a function`);
   }
   return value;
+}
+
+function requireArity(actual, expected, name) {
+  if (actual !== expected) {
+    const unit = expected === 1 ? "argument" : "arguments";
+    throw new TypeError(`${name} requires exactly ${expected} ${unit}`);
+  }
 }
 
 function sequenceIterator(value) {
@@ -102,6 +129,91 @@ export function lazyCons(value, tailThunk) {
   const result = memoizedSequenceView(() => lazyConsIterator(state));
   lazyConsStates.set(result, state);
   return result;
+}
+
+export function lazyMap(transform, collection) {
+  requireArity(arguments.length, 2, "lazyMap");
+  return transducerSequence(mapping(transform), collection);
+}
+
+export function lazyMapIndexed(transform, collection) {
+  requireArity(arguments.length, 2, "lazyMapIndexed");
+  return transducerSequence(mappingIndexed(transform), collection);
+}
+
+export function lazyKeep(transform, collection) {
+  requireArity(arguments.length, 2, "lazyKeep");
+  return transducerSequence(keeping(transform), collection);
+}
+
+export function lazyKeepIndexed(transform, collection) {
+  requireArity(arguments.length, 2, "lazyKeepIndexed");
+  return transducerSequence(keepingIndexed(transform), collection);
+}
+
+export function lazyFilter(predicate, collection) {
+  requireArity(arguments.length, 2, "lazyFilter");
+  return transducerSequence(filtering(predicate), collection);
+}
+
+export function lazyRemove(predicate, collection) {
+  requireArity(arguments.length, 2, "lazyRemove");
+  return transducerSequence(removing(predicate), collection);
+}
+
+export function lazyTake(limit, collection) {
+  requireArity(arguments.length, 2, "lazyTake");
+  return transducerSequence(taking(limit), collection);
+}
+
+export function lazyDrop(limit, collection) {
+  requireArity(arguments.length, 2, "lazyDrop");
+  return transducerSequence(dropping(limit), collection);
+}
+
+export function lazyTakeWhile(predicate, collection) {
+  requireArity(arguments.length, 2, "lazyTakeWhile");
+  return transducerSequence(takingWhile(predicate), collection);
+}
+
+export function lazyDropWhile(predicate, collection) {
+  requireArity(arguments.length, 2, "lazyDropWhile");
+  return transducerSequence(droppingWhile(predicate), collection);
+}
+
+export function lazyTakeNth(interval, collection) {
+  requireArity(arguments.length, 2, "lazyTakeNth");
+  return transducerSequence(takingNth(interval), collection);
+}
+
+export function lazyInterpose(separator, collection) {
+  requireArity(arguments.length, 2, "lazyInterpose");
+  return transducerSequence(interposing(separator), collection);
+}
+
+export function lazyDedupe(collection) {
+  requireArity(arguments.length, 1, "lazyDedupe");
+  return transducerSequence(deduping(), collection);
+}
+
+export function lazyDistinct(collection) {
+  requireArity(arguments.length, 1, "lazyDistinct");
+  return transducerSequence(distincting(), collection);
+}
+
+export function lazyMapcat(transform, collection) {
+  requireArity(arguments.length, 2, "lazyMapcat");
+  return transducerSequence(mapcatting(transform), collection);
+}
+
+export function lazyPartitionAll(size, collection) {
+  requireArity(arguments.length, 2, "lazyPartitionAll");
+  return transducerSequence(partitioningAll(size), collection);
+}
+
+export function lazyPartitionBy(classifier, collection) {
+  requireArity(arguments.length, 2, "lazyPartitionBy");
+  return transducerSequence(partitioningBy(classifier), collection);
 }
 
 export function isLazySequence(value) {

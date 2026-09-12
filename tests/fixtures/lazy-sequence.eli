@@ -1,7 +1,24 @@
 (module eliscript.fixture.lazy-sequence
   (import "../../stdlib/core/lazy-sequence.eli"
     lazy-cons
+    lazy-dedupe
+    lazy-distinct
+    lazy-drop
+    lazy-drop-while
+    lazy-filter
+    lazy-interpose
+    lazy-keep
+    lazy-keep-indexed
+    lazy-map
+    lazy-map-indexed
+    lazy-mapcat
+    lazy-partition-all
+    lazy-partition-by
+    lazy-remove
     lazy-seq?
+    lazy-take
+    lazy-take-nth
+    lazy-take-while
     realized-count
     realized?)
   (import "../../stdlib/core/transducer.eli"
@@ -19,12 +36,11 @@
       ((source (naturals 1))
         (before (js-array (realized? source) (realized-count source)))
         (values
-          (sequence
-            (compose-transducers
-              (mapping (lambda (value) (* value 3)))
-              (filtering (lambda (value) (= (mod value 2) 0)))
-              (taking 4))
-            source))
+          (lazy-take
+            4
+            (lazy-filter
+              (lambda (value) (= (mod value 2) 0))
+              (lazy-map (lambda (value) (* value 3)) source))))
         (host-values (into (js-array) values))
         (after (js-array (realized? values) (realized-count values)))
         (groups
@@ -42,6 +58,60 @@
         after
         :groups
         (into (js-array) groups)
+        :indexed
+        (into
+          (js-array)
+          (lazy-map-indexed (lambda (index value) (+ index value)) (js-array 10 20 30)))
+        :kept
+        (into
+          (js-array)
+          (lazy-keep
+            (lambda (value) (if (= (mod value 2) 0) (* value 10) nil))
+            (js-array 1 2 3 4)))
+        :kept-indexed
+        (into
+          (js-array)
+          (lazy-keep-indexed
+            (lambda (index value) (if (= (mod index 2) 0) value nil))
+            (js-array 10 20 30 40)))
+        :removed
+        (into
+          (js-array)
+          (lazy-remove (lambda (value) (= (mod value 2) 0)) (js-array 1 2 3 4)))
+        :dropped
+        (into (js-array) (lazy-drop 2 (js-array 1 2 3 4)))
+        :taken-while
+        (into
+          (js-array)
+          (lazy-take-while (lambda (value) (< value 4)) (js-array 1 2 3 4 1)))
+        :dropped-while
+        (into
+          (js-array)
+          (lazy-drop-while (lambda (value) (< value 3)) (js-array 1 2 3 1)))
+        :sampled
+        (into (js-array) (lazy-take-nth 2 (js-array 1 2 3 4 5)))
+        :interposed
+        (into (js-array) (lazy-interpose "|" (js-array 1 2 3)))
+        :deduped
+        (into (js-array) (lazy-dedupe (js-array 1 1 2 1 1)))
+        :distinct
+        (into (js-array) (lazy-distinct (js-array 1 2 1 3 2)))
+        :mapped-cat
+        (into
+          (js-array)
+          (lazy-mapcat (lambda (value) (js-array value (* value 10))) (js-array 1 2)))
+        :partitioned
+        (into
+          (js-array)
+          (lazy-map
+            (lambda (group) (into (js-array) group))
+            (lazy-partition-all 2 (js-array 1 2 3))))
+        :partitioned-by
+        (into
+          (js-array)
+          (lazy-map
+            (lambda (group) (into (js-array) group))
+            (lazy-partition-by (lambda (value) (mod value 2)) (js-array 1 3 2 4 5))))
         :predicate
         (lazy-seq? values))))
   (export run))

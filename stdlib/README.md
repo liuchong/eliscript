@@ -633,6 +633,13 @@ collection. Recursive `lazy-cons` chains are flattened iteratively. Exact
 semantics are specified in
 [0176](../specs/0176-memoized-lazy-sequences.md).
 
+The same module exposes direct `lazy-map`, `lazy-filter`, `lazy-keep`,
+`lazy-take`, `lazy-drop`, indexed, predicate, sampling, interposition,
+deduplication, mapcat, and partitioning variants. Each operation returns a
+memoized pull sequence, so ordinary function composition works on unbounded
+inputs without forcing an intermediate collection. Exact semantics are
+specified in [0177](../specs/0177-lazy-sequence-combinators.md).
+
 These modules intentionally import `runtime/core/*.mjs` and are not yet
 eligible for portable closure extraction. They are the language-level entry
 points for the current protocol core. Exact semantics and allocation evidence

@@ -40,7 +40,7 @@ function escapeHtml(value) {
 test("generated library API index matches every declared module and export", async () => {
   const index = await buildApiIndex({ root: ROOT });
   expect(index.moduleCount).toBe(42);
-  expect(index.exportCount).toBe(559);
+  expect(index.exportCount).toBe(576);
   expect(index.modules.find(({ module }) => module === "deferred")).toEqual({
     module: "deferred",
     source: "stdlib/deferred.eli",
@@ -141,11 +141,28 @@ test("generated library API index matches every declared module and export", asy
       specFile: "specs/0176-memoized-lazy-sequences.md",
       stability: "stable",
       role: "runtime-core",
-      summary: "Demand-driven memoized sequences, deferred recursive tails, and explicit realization inspection.",
+      summary: "Demand-driven memoized sequences, deferred recursive tails, direct lazy transformations, and realization inspection.",
       exports: [
         "lazy-cons",
+        "lazy-dedupe",
+        "lazy-distinct",
+        "lazy-drop",
+        "lazy-drop-while",
+        "lazy-filter",
+        "lazy-interpose",
+        "lazy-keep",
+        "lazy-keep-indexed",
+        "lazy-map",
+        "lazy-map-indexed",
+        "lazy-mapcat",
+        "lazy-partition-all",
+        "lazy-partition-by",
+        "lazy-remove",
         "lazy-seq",
         "lazy-seq?",
+        "lazy-take",
+        "lazy-take-nth",
+        "lazy-take-while",
         "realize",
         "realized-count",
         "realized?",
