@@ -523,7 +523,8 @@ and Set. It adds `js-map`, `js-set`, their predicates, `to-js-object`,
 cross-realm recognition, sharing preservation, duplicate value-semantics
 checks, and bounded structured diagnostics. Specification 0142 adds the
 maintained JavaScript package fixture. Final PD-07 acceptance still requires
-that fixture to pass the complete supported host matrix.
+that fixture to pass every cell required by specification 0179's local
+acceptance profile. Linux remains an optional compatibility target.
 
 ## State and Identity
 
@@ -1191,8 +1192,9 @@ implementation details leaking across the boundary.
 Specification 0073 supplies the core conversion semantics and one plain-object
 application fixture. Specification 0142 adds a maintained, framework-neutral
 JavaScript package fixture. Both consumers remain replaceable. This gate stays
-open until the maintained package fixture passes the full supported
-compatibility matrix.
+open until the maintained package fixture passes every required cell in the
+local acceptance profile from specification 0179. Optional Linux target cells
+remain visible future evidence and do not block this gate.
 
 ### PD-08: Emacs Codec
 

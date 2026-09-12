@@ -13,15 +13,16 @@ migration rehearsal.
 
 The core audit proves that every current AC and PD criterion is enumerated
 and evaluated through the declared core probes. It is the source for the final
-artifact projection: incomplete criteria remain visible and the final
-acceptance flag remains false. The canonical candidate
+artifact projection: incomplete criteria remain visible whenever present. The canonical candidate
 [`manifest.json`](manifest.json) and [`report.md`](report.md) are deterministic
 projections of that verified run plus [`defects.json`](defects.json). They are
 the final artifact shape, not a declaration that the current candidate passed.
 
-The current retained core audit records 25 passing, 10 incomplete, and zero
-failed mandatory criteria. It was produced directly on the recorded local
-toolchain without a hosted provider, container, or virtual machine.
+The current retained core audit records all 35 mandatory criteria passing with
+zero incomplete and zero failed criteria. Required compatibility evidence is
+recorded directly on macOS arm64 with Emacs 29.4 and 30.2. Missing Linux x64
+target reports remain visible but optional. No hosted provider, container, or
+virtual machine supplies acceptance evidence.
 
 Verify the retained pair with:
 

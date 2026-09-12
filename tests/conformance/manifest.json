@@ -442,7 +442,7 @@
       "contracts": ["Defines the complete Linux/macOS and Emacs 29/30 matrix as versioned data", "Runs the complete suite and strict byte compilation directly on each real machine", "Binds every retained cell to one clean source tree and exact Emacs Bun and Node versions", "Keeps a deterministic workflow as an optional projection rather than acceptance authority"],
       "evidence": [
         { "kind": "bun-test", "file": "tests/ci-contract.test.mjs", "contains": "repository compatibility matrix renders the committed CI workflow" },
-        { "kind": "bun-test", "file": "tests/local-compatibility-matrix.test.mjs", "contains": "one direct local report remains an explicitly incomplete matrix" },
+        { "kind": "bun-test", "file": "tests/local-compatibility-matrix.test.mjs", "contains": "one required local report remains an explicitly incomplete acceptance matrix" },
         { "kind": "fixture", "file": "contracts/compatibility-matrix.json", "contains": "\"format\": \"eliscript-compatibility-matrix\"" }
       ]
     },
@@ -2560,7 +2560,7 @@
     {
       "id": "quality.javascript-package-interop",
       "title": "Maintained JavaScript package interop",
-      "status": "accepted",
+      "status": "stable",
       "spec": "0142",
       "contracts": ["Resolves Eliscript and an independent consumer through package names", "Passes only native Object, Array, Map, and Set values across the package boundary", "Keeps persistent sources unchanged after host-package mutation", "Matches seed and self-hosted artifacts under Bun and Node without a framework or network service"],
       "evidence": [
@@ -3797,6 +3797,35 @@
           "kind": "bun-test",
           "file": "tests/regex.test.mjs",
           "contains": "Eliscript regex APIs agree across compilers and local hosts"
+        }
+      ]
+    },
+    {
+      "id": "quality.compatibility-acceptance-profile",
+      "title": "Local acceptance compatibility profile",
+      "status": "stable",
+      "spec": "0179",
+      "contracts": [
+        "Separates maintained compatibility targets from acceptance-required operating systems",
+        "Requires macOS arm64 with Emacs 29.4 and 30.2 for the current local final gate",
+        "Keeps Linux x64 cells generated validated and visibly optional",
+        "Rejects invalid acceptance profiles and validates every retained report identically"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/ci-contract.test.mjs",
+          "contains": "matrix rejects an empty or unknown acceptance operating system"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/local-compatibility-matrix.test.mjs",
+          "contains": "optional Linux reports are validated but do not block acceptance"
+        },
+        {
+          "kind": "fixture",
+          "file": "contracts/compatibility-matrix.json",
+          "contains": "\"acceptanceOperatingSystems\": [\"macos\"]"
         }
       ]
     }

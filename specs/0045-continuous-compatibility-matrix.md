@@ -28,6 +28,7 @@ reproducible without a container, virtual machine, sandbox, or hosted service.
 
 - the workflow path
 - supported operating-system runners and architectures
+- the operating systems required by the current local acceptance profile
 - supported Emacs release versions
 - the reference JavaScript host and exact CI version
 - the exact Node host used by generated ESM package-boundary tests
@@ -83,8 +84,10 @@ tree. Reports use format `eliscript-local-compatibility-cell` version 1.
 mixed source-content identities, and marks historical reports stale when
 tracked source outside the report directory has changed. Report-only commits
 may differ because the comparison excludes the retained report directory.
-AC-21 remains incomplete until all four exact cells bind the current source
-content identity.
+Specification 0179 separates target cells from acceptance-required cells.
+AC-21 is complete when every required cell binds the current source content
+identity. Missing optional target cells remain visible and do not block the
+current final gate.
 
 ## Deterministic Workflow Projection
 
@@ -129,7 +132,8 @@ An Action update requires all of the following:
 2. replace the immutable revision and review label in the matrix contract
 3. regenerate the workflow
 4. run focused contract tests and the complete local suite
-5. collect all four direct local reports before treating support as accepted
+5. collect every direct local report required by the current acceptance profile
+   before treating that profile as accepted
 
 The matrix validator rejects branch names, major tags, shortened revisions,
 missing required Actions, and duplicate or unsorted Action identifiers.
@@ -154,6 +158,7 @@ bytecode produced by another Emacs release.
 The default tests reject:
 
 - omission of Linux or macOS
+- an empty, unknown, duplicate, or unsorted acceptance operating-system set
 - omission of Emacs 29 or Emacs 30
 - malformed or mutable Action revisions
 - weakening or reordering the required command sequence
@@ -169,6 +174,11 @@ Compatibility may be broadened by adding matrix entries with passing direct
 local evidence. Removing an operating system, Emacs release line, or
 architecture is an incompatible support-policy change and requires a
 superseding specification with migration rationale.
+
+Specification 0179 is the migration authority for the current additive
+acceptance profile. It keeps Linux in the maintained target matrix while making
+macOS arm64 the required local acceptance system; this does not remove Linux
+support or permit retained Linux evidence to bypass validation.
 
 Patch-level runner substitutions are allowed only through an explicit contract
 change. A temporary upstream outage may be retried, but it does not justify
@@ -186,5 +196,6 @@ silently skipping a matrix cell or weakening a required command.
   `.elc` files behind.
 - `make test` executes the compatibility checker before the complete local
   test suite.
-- Four retained direct local reports on one source identity are the only
-  authoritative completion evidence for the environment matrix.
+- Every required direct local report on one source identity is authoritative
+  completion evidence for the current acceptance profile. Optional target gaps
+  remain explicit in the same report.

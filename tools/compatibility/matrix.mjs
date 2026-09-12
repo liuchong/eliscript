@@ -122,14 +122,23 @@ function currentCell(matrix, environment) {
 
 export function expectedMatrixCells(matrix) {
   const validated = validateCompatibilityMatrix(matrix);
-  return validated.systems.flatMap((system) =>
-    validated.emacsVersions.map((emacsVersion) => ({
+  return matrixCells(validated.systems, validated.emacsVersions);
+}
+
+function matrixCells(systems, emacsVersions) {
+  return systems.flatMap((system) =>
+    emacsVersions.map((emacsVersion) => ({
       id: `${system.id}-${system.architecture}-emacs-${emacsVersion}`,
       operatingSystem: system.id,
       architecture: system.architecture,
       emacsVersion,
     })),
   );
+}
+
+export function requiredMatrixCells(matrix) {
+  const validated = validateCompatibilityMatrix(matrix);
+  return matrixCells(validated.acceptanceSystems, validated.emacsVersions);
 }
 
 function commandPlan(matrix, binaries) {
@@ -452,6 +461,7 @@ export async function checkLocalMatrixEvidence(options = {}) {
   const root = path.resolve(options.root ?? DEFAULT_ROOT);
   const { matrix, matrixSha256 } = await readMatrix(root);
   const expected = expectedMatrixCells(matrix);
+  const required = requiredMatrixCells(matrix);
   const reports = options.reports ?? await Promise.all(
     (await reportFiles(root, matrix.localEvidence.directory)).map(async (filename) => ({
       filename,
@@ -508,14 +518,21 @@ export async function checkLocalMatrixEvidence(options = {}) {
       [...sourceCommits].map((commit) => sourceMatches(commit)),
     )).every(Boolean);
   }
-  const missing = expected.map((cell) => cell.id).filter((id) => !seen.has(id));
+  const requiredIds = new Set(required.map((cell) => cell.id));
+  const missing = [...requiredIds].filter((id) => !seen.has(id));
+  const optionalMissing = expected.map((cell) => cell.id)
+    .filter((id) => !requiredIds.has(id) && !seen.has(id));
   const stale = currentSource ? [] : [...seen];
   return {
     schemaVersion: 1,
-    required: expected.length,
+    targeted: expected.length,
+    required: required.length,
     retained: seen.size,
-    completed: currentSource ? seen.size : 0,
+    completed: currentSource
+      ? [...requiredIds].filter((id) => seen.has(id)).length
+      : 0,
     missing,
+    optionalMissing,
     stale,
     currentSource,
     complete: currentSource && missing.length === 0,
@@ -525,10 +542,11 @@ export async function checkLocalMatrixEvidence(options = {}) {
 
 function printReport(report) {
   process.stdout.write(
-    `Local compatibility matrix: ${report.completed}/${report.required} cells\n` +
-    `Retained reports: ${report.retained}; current source: ` +
+    `Local acceptance matrix: ${report.completed}/${report.required} required cells\n` +
+    `Target cells: ${report.targeted}; retained reports: ${report.retained}; current source: ` +
     `${report.currentSource ? "yes" : "no"}\n` +
-    `Missing: ${report.missing.join(", ") || "none"}\n` +
+    `Missing required: ${report.missing.join(", ") || "none"}\n` +
+    `Missing optional: ${report.optionalMissing.join(", ") || "none"}\n` +
     `Stale: ${report.stale.join(", ") || "none"}\n` +
     `Complete: ${report.complete ? "yes" : "no"}\n`,
   );

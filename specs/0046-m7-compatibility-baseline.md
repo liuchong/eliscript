@@ -92,10 +92,9 @@ other explicitly non-identity observations remain implementation details.
 
 ## Provisional Contract
 
-One implemented specification and feature remains provisional: specification
-0142 and `quality.javascript-package-interop`. Its local package fixture and
-host-neutral ESM behavior are implemented, but its required supported-matrix
-evidence remains incomplete.
+No implemented core specification or feature remains provisional.
+Specification 0142 and `quality.javascript-package-interop` became stable after
+the required local acceptance profile was made explicit by specification 0179.
 
 Provisional does not mean untested. Every item continues to own executable
 evidence and remains in the public-surface inventory where applicable. It
@@ -175,13 +174,13 @@ agree in one change.
 | normalized JSON diagnostics | `eliscript-diagnostic` v1 across seed, project, and self-hosted CLIs |
 | public versus internal interfaces | `contracts/public-surface.json`, exact implementation comparisons |
 | documentation consistency | specification metadata parity and required/forbidden documentation assertions |
-| macOS/Linux and Emacs 29/30 checks | deterministic four-cell compatibility workflow |
+| target and required environment checks | deterministic four-cell target workflow and explicit two-cell local acceptance profile |
 | generated coverage matrices | conformance, public-surface, and compatibility reports before every suite |
 | stable/provisional boundary | `contracts/compatibility-baseline.json` and baseline parity checks |
 
 The M7 evidence recorded a complete local suite and the then-current four-cell
-compatibility matrix. Final 1.0 acceptance requires fresh source-bound evidence
-for every supported cell; historical M7 results do not satisfy that gate.
+compatibility matrix. Final acceptance uses the source-bound required profile
+from specification 0179; historical M7 results do not satisfy that gate.
 
 M7 completion does not imply M8 language closure or 1.0 completion. It means
 the existing project now has an explicit, enforceable boundary from which
@@ -194,8 +193,8 @@ those changes can proceed without accidental compatibility claims.
 - Stable specification and feature statuses agree bidirectionally.
 - Negative tests reject missing baseline entries and partially promoted
   stable contracts.
-- Historical M7 evidence recorded a passing local suite and four-cell
-  compatibility matrix; current final matrix acceptance remains separately
-  open and requires fresh source-bound evidence.
+- Historical M7 evidence recorded a passing local suite and four-cell target
+  matrix; current final acceptance requires fresh source-bound evidence for
+  every required profile cell.
 - Every later promotion remains explicit in the owning specification,
   conformance manifest, public-surface registry, and versioned baseline.

@@ -10,6 +10,7 @@ import {
   commandEnvironment,
   expectedMatrixCells,
   LocalCompatibilityMatrixError,
+  requiredMatrixCells,
   validateLocalMatrixReport,
 } from "../tools/compatibility/matrix.mjs";
 
@@ -126,10 +127,24 @@ test("local compatibility evidence derives all real machine cells", () => {
       emacsVersion: "30.2",
     },
   ]);
+  expect(requiredMatrixCells(matrix)).toEqual([
+    {
+      id: "macos-arm64-emacs-29.4",
+      operatingSystem: "macos",
+      architecture: "arm64",
+      emacsVersion: "29.4",
+    },
+    {
+      id: "macos-arm64-emacs-30.2",
+      operatingSystem: "macos",
+      architecture: "arm64",
+      emacsVersion: "30.2",
+    },
+  ]);
 });
 
-test("one direct local report remains an explicitly incomplete matrix", async () => {
-  const value = report();
+test("one required local report remains an explicitly incomplete acceptance matrix", async () => {
+  const value = report(requiredMatrixCells(matrix)[0]);
   expect(await validateLocalMatrixReport(value, validationOptions)).toEqual({
     cell: value.cell,
     source: value.source,
@@ -141,13 +156,16 @@ test("one direct local report remains an explicitly incomplete matrix", async ()
     sourceMatches: async () => true,
   })).toEqual({
     schemaVersion: 1,
-    required: 4,
+    targeted: 4,
+    required: 2,
     retained: 1,
     completed: 1,
     missing: [
-      "linux-x64-emacs-30.2",
-      "macos-arm64-emacs-29.4",
       "macos-arm64-emacs-30.2",
+    ],
+    optionalMissing: [
+      "linux-x64-emacs-29.4",
+      "linux-x64-emacs-30.2",
     ],
     stale: [],
     currentSource: true,
@@ -157,18 +175,37 @@ test("one direct local report remains an explicitly incomplete matrix", async ()
 });
 
 test("historical reports do not count for changed source", async () => {
-  const value = report();
+  const value = report(requiredMatrixCells(matrix)[0]);
   expect(await checkLocalMatrixEvidence({
     ...validationOptions,
     reports: [value],
     sourceMatches: async () => false,
   })).toMatchObject({
-    required: 4,
+    targeted: 4,
+    required: 2,
     retained: 1,
     completed: 0,
     stale: [value.cell.id],
     currentSource: false,
     complete: false,
+  });
+});
+
+test("optional Linux reports are validated but do not block acceptance", async () => {
+  const requiredReports = requiredMatrixCells(matrix).map((cell) => report(cell));
+  const optionalReport = report(expectedMatrixCells(matrix)[0]);
+  expect(await checkLocalMatrixEvidence({
+    ...validationOptions,
+    reports: [...requiredReports, optionalReport],
+    sourceMatches: async () => true,
+  })).toMatchObject({
+    targeted: 4,
+    required: 2,
+    retained: 3,
+    completed: 2,
+    missing: [],
+    optionalMissing: ["linux-x64-emacs-30.2"],
+    complete: true,
   });
 });
 

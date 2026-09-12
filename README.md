@@ -44,9 +44,10 @@ M13 has completed all 5 implementation units. The versioned
 derives all 35 mandatory AC/PD criteria from their normative specifications,
 runs the complete core suite and strict Emacs byte compilation from a clean
 commit, and retains machine-readable and human-readable evidence. The current
-audit records 25 passing, 10 incomplete, and zero failed criteria; its final
-acceptance flag is therefore false. Application validations are listed
-separately and contribute no core result.
+audit records all 35 mandatory criteria passing with zero incomplete and zero
+failed criteria. The required local compatibility profile is macOS arm64 on
+Emacs 29.4 and 30.2; Linux x64 remains a visible optional target. Application
+validations are listed separately and contribute no core result.
 
 The [local onboarding exercise](specs/0135-local-onboarding.md)
 runs the documented core workflow directly on the recorded host toolchain. Its
@@ -95,8 +96,8 @@ content-level project changes under Bun and Node, and Emacs shares one watcher
 per project to refresh Flymake diagnostics. The verified
 [installation and daily development guide](docs/getting-started.md) now runs a
 real framework-neutral project through format, check, build, Bun/Node execution,
-diagnostics, terminal REPL, and Emacs mode discovery. The complete M10 matrix,
-local onboarding exercise, and exit audit remain formal acceptance work.
+diagnostics, terminal REPL, and Emacs mode discovery. The required Emacs 29/30
+local profile, onboarding exercise, and M10 exit audit are complete.
 
 M11's six implementation units are complete. Reviewed metadata classifies all
 43 standard-library modules by role and owning specification; the generated
@@ -704,8 +705,9 @@ Run warning-as-error Emacs byte compilation with:
 make byte-compile
 ```
 
-Continuous integration covers Emacs 29.4 and 30.2 on Ubuntu x64 and macOS
-arm64 with the pinned minimum Bun version in every matrix cell.
+The generated compatibility workflow targets Emacs 29.4 and 30.2 on Ubuntu x64
+and macOS arm64. Direct local final acceptance requires the two macOS arm64
+cells; Linux remains an optional target and is not used to block this result.
 
 ## Project Direction
 

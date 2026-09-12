@@ -33,7 +33,9 @@ describe("compatibility matrix contract", () => {
   test("repository compatibility matrix renders the committed CI workflow", async () => {
     const report = await checkCompatibilityWorkflow({ root });
     expect(report.jobs).toBe(4);
+    expect(report.acceptanceJobs).toBe(2);
     expect(report.systems.map((system) => system.id)).toEqual(["linux", "macos"]);
+    expect(report.acceptanceSystems.map((system) => system.id)).toEqual(["macos"]);
     expect(report.emacsVersions).toEqual(["29.4", "30.2"]);
     expect(report.javascriptHost).toEqual({ name: "bun", version: "1.4.0" });
     expect(report.nodeHost).toEqual({ name: "node", version: "24.20.0" });
@@ -50,6 +52,16 @@ describe("compatibility matrix contract", () => {
     const matrix = copyBaseline();
     matrix.emacsVersions = ["30.2"];
     expectMatrixFailure(matrix, /cover Emacs 29 and Emacs 30/);
+  });
+
+  test("matrix rejects an empty or unknown acceptance operating system", () => {
+    const empty = copyBaseline();
+    empty.acceptanceOperatingSystems = [];
+    expectMatrixFailure(empty, /must be a non-empty string array/);
+
+    const unknown = copyBaseline();
+    unknown.acceptanceOperatingSystems = ["windows"];
+    expectMatrixFailure(unknown, /must exist in operatingSystems/);
   });
 
   test("matrix rejects mutable action references", () => {

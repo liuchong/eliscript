@@ -106,6 +106,22 @@ export function validateCompatibilityMatrix(matrix) {
     errors.push("operatingSystems must include linux and macos");
   }
 
+  const acceptanceSystemIds = Array.isArray(matrix.acceptanceOperatingSystems)
+    ? matrix.acceptanceOperatingSystems
+    : [];
+  if (acceptanceSystemIds.length === 0 ||
+      acceptanceSystemIds.some((id) => typeof id !== "string")) {
+    errors.push("acceptanceOperatingSystems must be a non-empty string array");
+  }
+  sortedUnique(acceptanceSystemIds, "acceptance operating system ids", errors);
+  for (const id of acceptanceSystemIds) {
+    if (!systemIds.includes(id)) {
+      errors.push(`acceptance operating system ${id} must exist in operatingSystems`);
+    }
+  }
+  const acceptanceSystems = systems.filter((system) =>
+    acceptanceSystemIds.includes(system.id));
+
   const emacsVersions = Array.isArray(matrix.emacsVersions)
     ? matrix.emacsVersions
     : [];
@@ -162,12 +178,14 @@ export function validateCompatibilityMatrix(matrix) {
   return {
     schemaVersion: 1,
     systems,
+    acceptanceSystems,
     emacsVersions,
     javascriptHost: matrix.javascriptHost,
     localEvidence,
     actions,
     commands,
     jobs: systems.length * emacsVersions.length,
+    acceptanceJobs: acceptanceSystems.length * emacsVersions.length,
     workflow: matrix.workflow,
   };
 }
@@ -261,11 +279,15 @@ export async function checkCompatibilityWorkflow(options = {}) {
     systems: validated.systems.map(({ id, architecture, runner }) => ({
       id, architecture, runner,
     })),
+    acceptanceSystems: validated.acceptanceSystems.map(
+      ({ id, architecture, runner }) => ({ id, architecture, runner }),
+    ),
     emacsVersions: validated.emacsVersions,
     javascriptHost: validated.javascriptHost,
     nodeHost: validated.localEvidence.nodeHost,
     localEvidenceDirectory: validated.localEvidence.directory,
     jobs: validated.jobs,
+    acceptanceJobs: validated.acceptanceJobs,
     workflow: validated.workflow,
   };
 }
@@ -274,13 +296,18 @@ export function humanCompatibilityReport(report) {
   const systems = report.systems
     .map((system) => `${system.id}/${system.architecture}`)
     .join(", ");
+  const acceptanceSystems = report.acceptanceSystems
+    .map((system) => `${system.id}/${system.architecture}`)
+    .join(", ");
   return [
     "Compatibility matrix:",
     `  Systems        ${systems}`,
+    `  Acceptance     ${acceptanceSystems}`,
     `  Emacs          ${report.emacsVersions.join(", ")}`,
     `  JS host        ${report.javascriptHost.name} ${report.javascriptHost.version}`,
     `  Node host      ${report.nodeHost.name} ${report.nodeHost.version}`,
     `  Matrix jobs    ${report.jobs}`,
+    `  Required jobs  ${report.acceptanceJobs}`,
     `  Local evidence ${report.localEvidenceDirectory}`,
     `  Workflow       ${report.workflow}`,
   ].join("\n");

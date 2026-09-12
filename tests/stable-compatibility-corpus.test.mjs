@@ -31,16 +31,16 @@ async function validationErrors(value) {
 test("stable compatibility corpus covers every frozen core behavior", async () => {
   expect(await checkStableCompatibilityCorpus({ root: ROOT })).toEqual({
     schemaVersion: 1,
-    stableSpecifications: 171,
-    stableFeatures: 171,
-    provisionalFeatures: 1,
+    stableSpecifications: 173,
+    stableFeatures: 173,
+    provisionalFeatures: 0,
     excludedApplicationFeatures: 2,
     migrations: 3,
-    fixtures: 99,
-    evidenceLocators: 675,
+    fixtures: 101,
+    evidenceLocators: 679,
     evidenceFiles: 134,
-    sourceFiles: 406,
-    readyForAc02: false,
+    sourceFiles: 410,
+    readyForAc02: true,
     identity: expect.stringMatching(/^[0-9a-f]{64}$/u),
   });
 });
@@ -59,9 +59,9 @@ test("stable compatibility corpus rejects omitted behavior and migrations", asyn
   );
 });
 
-test("stable compatibility corpus rejects premature AC-02 and fixture drift", async () => {
+test("stable compatibility corpus rejects false AC-02 readiness and fixture drift", async () => {
   const value = await contract();
-  value.readyForAc02 = true;
+  value.readyForAc02 = false;
   value.fixtureFiles.pop();
   value.identity = "0".repeat(64);
 

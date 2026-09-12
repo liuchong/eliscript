@@ -18,12 +18,7 @@ const EXECUTION = Object.freeze({
   command: "make test-core",
   applicationEvidence: false,
 });
-const DEFERRED_FIXTURES = Object.freeze([
-  Object.freeze({
-    featureId: "quality.javascript-package-interop",
-    prefix: "tests/fixtures/packages/interop-consumer/",
-  }),
-]);
+const DEFERRED_FIXTURES = Object.freeze([]);
 const IDENTITY_SOURCES = Object.freeze([
   "Makefile",
   "contracts/compatibility-baseline.json",

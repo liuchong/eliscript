@@ -15,9 +15,10 @@ every currently stable Eliscript core behavior. The corpus derives its scope
 from the compatibility baseline and conformance manifest instead of accepting
 a hand-maintained subset.
 
-The corpus prepares AC-02 but does not complete it while any core feature is
-provisional. The maintained JavaScript package interop fixture remains
-explicitly deferred, and application adapters remain outside core evidence.
+The corpus completes AC-02 when every core feature is stable and one clean
+retained acceptance run passes. The maintained JavaScript package interop
+fixture is now part of the stable corpus, while application adapters remain
+outside core evidence.
 
 ## Versioned Contract
 
@@ -43,10 +44,10 @@ The exclusions currently contain Org publishing and the Vite adapter. They do
 not contribute specifications, evidence, fixtures, or maturity credit to this
 corpus.
 
-The JavaScript package interop fixture remains core but provisional. Its
-fixture prefix is recorded as deferred. The checker rejects that deferral as
-soon as the owning feature is no longer provisional, forcing the final corpus
-to absorb those files before AC-02 can pass.
+The JavaScript package interop fixture is stable core evidence. Its package
+files are included in the fixture inventory and source-bound identity. The
+checker retains generic provisional-fixture rules so a future provisional core
+feature cannot enter the stable corpus silently.
 
 ## Evidence Closure
 
@@ -78,8 +79,9 @@ evidence from specification 0136.
 only when the provisional core feature inventory is empty. AC-02 additionally
 requires one clean retained core acceptance run against that ready corpus.
 
-At this revision the corpus is complete for all stable behavior, but one core
-feature remains provisional. Therefore AC-02 remains partial.
+At this revision the provisional core inventory is empty. The corpus is ready
+for AC-02, and the final clean retained acceptance run supplies its execution
+evidence.
 
 ## Acceptance Criteria
 

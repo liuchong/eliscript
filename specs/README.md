@@ -29,20 +29,20 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 160 specifications.
+The registry currently contains 179 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 1 |
-| Accepted design | 3 |
-| Stable design | 155 |
+| Accepted design | 2 |
+| Stable design | 175 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 156 |
+| Implemented | 175 |
 | Superseded implementation | 1 |
 
-Compatibility Baseline 2 separately classifies 155 specifications as stable,
-1 as provisional, 3 as planning, and 1 as superseded. That baseline is
+Compatibility Baseline 2 separately classifies 175 specifications as stable,
+none as provisional, 3 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -146,9 +146,9 @@ single-evaluation expression composition without a new runtime layer.
 Browser and worker platform packages now expose only named host authority,
 inject request-scoped progress and cancellation into the real worker, and keep
 frameworks outside core evidence. Core compatibility stabilization is now
-153/154 complete. The only provisional core feature is the full supported
-matrix proof for JavaScript package interoperation in specification 0142; the
-final exit audit remains open.
+173/173 complete. The JavaScript package interoperation fixture in
+specification 0142 is stable under the required local acceptance profile from
+specification 0179. Linux x64 remains a visible optional target.
 
 M12 has all 6/6 implementation units complete through specifications 0127
 through 0132. The fixed 100,000-input corpus checks seed/self-hosted reader agreement,
@@ -171,18 +171,19 @@ formal acceptance work.
 M13 has completed all 5/5 implementation units through specification 0138. Its
 versioned corpus derives all 35 mandatory AC/PD criteria from normative
 headings, maps each criterion to bounded probes and tracked evidence, and
-retains one clean audit with 25 pass, 10 incomplete, and zero failed criteria.
-The final acceptance flag remains false. Specification 0135 records the local,
+retains one clean audit with all 35 mandatory criteria passing and no incomplete
+or failed criteria. Specification 0135 records the local,
 source-bound onboarding exercise for M13-02 with all six steps passing within
 the active-step budget. Specification 0136 records the passing direct local
-migration rehearsal for M13-03 while explicitly leaving AC-02 incomplete.
+migration rehearsal for M13-03; its original run left AC-02 incomplete before
+the final stability promotion.
 Specification 0137 completes M13-04 and AC-23 with an exact eleven-document
 core inventory, checked local links, and five executable examples. Specification
 0138 adds canonical machine-readable and human-readable acceptance artifacts,
 five evidence summaries, a blocking-defect gate, and deterministic rejection
 of forged final results. Application and publishing documentation remains
-outside the core gate. AC-24 and final acceptance remain open because 10
-mandatory criteria are still incomplete.
+outside the core gate. AC-24 and all 35 mandatory criteria are now complete
+under the explicit local acceptance profile.
 
 Post-M13 verification now closes PD-01 through specification 0139. Its fixed
 cross-host corpus executes 100,000 independently replayable operation
@@ -197,11 +198,10 @@ criterion with twenty clean, operational, identity-equivalent executions.
 Specification 0146 closes AC-05 with a source-bound compiler parity corpus over
 65 stable compiler-relevant features, 119 valid fixtures, 93 diagnostics, all
 13 bootstrap modules, all 57 public IR kinds, and seven observable parity
-dimensions. Ten mandatory criteria remain incomplete.
-Specification 0147 derives a complete stable compatibility corpus over 153
-stable core features, 594 evidence locators, 71 core fixtures, and all three
-migration records. It keeps AC-02 incomplete while the final core feature
-remains provisional.
+dimensions. Specification 0147 now derives a complete stable compatibility
+corpus over 173 stable core features, 679 evidence locators, 101 core fixtures,
+and all three migration records. Its provisional inventory is empty and AC-02
+is complete after the clean retained acceptance run.
 
 ## Reading Paths
 
@@ -507,7 +507,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0139 | [Deterministic Persistent Semantics Corpus](0139-deterministic-persistent-semantics-corpus.md) | Stable | Implemented |
 | 0140 | [Clean Configured Project Workflow](0140-clean-configured-project-workflow.md) | Stable | Implemented |
 | 0141 | [Repeated Core Determinism Evidence](0141-repeated-core-determinism.md) | Stable | Implemented |
-| 0142 | [Maintained JavaScript Package Interop Fixture](0142-maintained-javascript-package-interop.md) | Accepted | Implemented |
+| 0142 | [Maintained JavaScript Package Interop Fixture](0142-maintained-javascript-package-interop.md) | Stable | Implemented |
 | 0143 | [Complete Negative Diagnostic Corpus](0143-complete-negative-diagnostic-corpus.md) | Stable | Implemented |
 | 0144 | [Source-level Failure Mapping](0144-source-level-failure-mapping.md) | Stable | Implemented |
 | 0145 | [Language Value Equality](0145-language-value-equality.md) | Stable | Implemented |
@@ -544,6 +544,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0176 | [Memoized Lazy Sequences and Pull Transduction](0176-memoized-lazy-sequences.md) | Stable | Implemented |
 | 0177 | [Lazy Sequence Combinators](0177-lazy-sequence-combinators.md) | Stable | Implemented |
 | 0178 | [Immutable Regex Text Processing](0178-immutable-regex-text-processing.md) | Stable | Implemented |
+| 0179 | [Local Acceptance Compatibility Profile](0179-local-acceptance-compatibility-profile.md) | Stable | Implemented |
 
 ## Adding a Specification
 

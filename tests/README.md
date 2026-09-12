@@ -21,12 +21,12 @@ test file cannot silently stop running while remaining present in the tree.
 
 The same pre-test gate compares the versioned public-surface registry with
 language forms, IR kinds, commands, schemas, adapters, standard-library
-exports, and Emacs APIs. It also validates the Linux/macOS and Emacs 29/30
-compatibility contract, verifies retained reports produced directly on real
-machines, and keeps the committed workflow equal to its optional deterministic
-projection. Negative Bun tests cover missing matrix cells, host-version drift,
-forged completion, mutable Action revisions, weakened commands, and workflow
-drift.
+exports, and Emacs APIs. It validates the Linux/macOS target matrix, the macOS
+arm64 Emacs 29/30 required acceptance profile, retained reports produced
+directly on real machines, and the optional deterministic workflow projection.
+Negative Bun tests cover invalid acceptance profiles, missing required cells,
+host-version drift, forged completion, mutable Action revisions, weakened
+commands, and workflow drift.
 Compatibility Baseline 1 then requires every specification and feature to be
 classified as stable, provisional, or planning, with stable ownership and
 feature status agreeing in both directions.

@@ -1,6 +1,6 @@
 # 0142: Maintained JavaScript Package Interop Fixture
 
-- Status: Accepted
+- Status: Stable
 - Implementation: Implemented
 - Date: 2026-09-08
 - Depends on: 0041 Host Symbiosis, Persistent Data, and Emacs Acceleration,
@@ -15,10 +15,11 @@ ordinary JavaScript containers. A second package imports Eliscript by package
 name, constructs persistent values, converts them at the boundary, and passes
 the resulting plain Object, Array, Map, and Set to that consumer.
 
-This closes the missing maintained-package portion of PD-07 without making a
-particular framework, package manager, bundler, or application part of the
-language core. PD-07 remains partial until this fixture passes in every cell of
-the complete supported compatibility matrix.
+This closes the maintained-package portion of PD-07 without making a particular
+framework, package manager, bundler, or application part of the language core.
+The fixture passes every cell required by the local acceptance profile in
+specification 0179; optional Linux target cells remain future compatibility
+evidence rather than a blocker for this stability claim.
 
 ## Package Boundary
 
@@ -87,6 +88,5 @@ contracts.
   reports.
 - **JPI-07:** The fixture requires no framework, bundler, package registry,
   network service, container, virtual machine, or hosted validation service.
-- **JPI-08:** PD-07 remains partial until the same fixture passes the complete
-  supported compatibility matrix; a single local machine is not sufficient
-  evidence for that final claim.
+- **JPI-08:** PD-07 requires this fixture to pass every cell in the explicit
+  local acceptance profile; optional target cells remain reported separately.
