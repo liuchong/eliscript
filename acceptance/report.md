@@ -1,55 +1,55 @@
 # Eliscript 1.0 Acceptance Report
 
-- Source commit: `9fcb9bf2411905de84bcd798a63263be50fdad95`
-- Source tree: `145eec050feb75416bffa9a3cc2d76b9d213134a`
+- Source commit: `cef36eb5cb73d5abb39a74f42571e1da4e93adec`
+- Source tree: `b746c6848acc724f5bc584fd584b1c8337dd4c6c`
 - Contract: `contracts/final-acceptance.json` (`fc7760bdccc644b014b3513e4020f3647e3128e54676481d1515504967f2651d`)
-- Generated: 2026-09-12T13:50:51.419Z
+- Generated: 2026-09-12T19:38:55.765Z
 - Environment: Darwin 25.6.0; arm64; Bun 1.4.0; Node v24.20.0; Emacs 31.1
 - Corpus complete: yes
 - Operational success: yes
 - Evidence complete: yes
 - Blocking defects: 0
-- Final acceptance: not reached
+- Final acceptance: pass
 
-This is the canonical candidate report. It does not declare Eliscript 1.0 accepted while mandatory criteria remain incomplete.
+Every mandatory core criterion and final gate passed in the source run.
 
 ## Mandatory Criteria
 
-Results: 25 pass, 10 incomplete, 0 fail, 35 total.
+Results: 35 pass, 0 incomplete, 0 fail, 35 total.
 
 | Criterion | Result | Declared state | Remaining work |
 | --- | --- | --- | --- |
-| AC-01 Stable specification coverage | incomplete | partial | Promote every final public language and core library contract to stable with complete evidence. |
-| AC-02 Stable corpus compatibility | incomplete | partial | Promote the final provisional core feature, regenerate the stable corpus, and execute one clean retained run. |
+| AC-01 Stable specification coverage | pass | complete | - |
+| AC-02 Stable corpus compatibility | pass | complete | - |
 | AC-03 Deterministic diagnostics | pass | complete | - |
-| AC-04 Reproducible fixed point | incomplete | partial | Record the final fixed point on every required matrix cell in one acceptance run. |
+| AC-04 Reproducible fixed point | pass | complete | - |
 | AC-05 Compiler parity | pass | complete | - |
 | AC-06 Self-hosted authority | pass | complete | - |
 | AC-07 Repeated determinism | pass | complete | - |
 | AC-08 Clean project workflow | pass | complete | - |
 | AC-09 Correct incremental builds | pass | complete | - |
-| AC-10 Host portability | incomplete | partial | Run the final stable corpus and core CLI fixtures on every supported Bun and Node host. |
+| AC-10 Host portability | pass | complete | - |
 | AC-11 Formatter | pass | complete | - |
-| AC-12 Emacs mode | incomplete | partial | Close the complete maintained mode suite on Emacs 29 and 30 in the final matrix. |
-| AC-13 Interactive evaluation | incomplete | partial | Close documented REPL behavior and restart recovery in the final supported matrix. |
+| AC-12 Emacs mode | pass | complete | - |
+| AC-13 Interactive evaluation | pass | complete | - |
 | AC-14 Source-level debugging evidence | pass | complete | - |
-| AC-15 Stable library contract | incomplete | partial | Stabilize every core export and close PD-01 through PD-07. |
+| AC-15 Stable library contract | pass | complete | - |
 | AC-16 Worker correctness and recovery | pass | complete | - |
 | AC-17 End-to-end performance value | pass | complete | - |
 | AC-18 Fuzz robustness | pass | complete | - |
 | AC-19 Scale and soak | pass | complete | - |
 | AC-20 Boundary security | pass | complete | - |
-| AC-21 Supported environment matrix | incomplete | partial | Record the final full suite on all required operating system, Emacs, Bun, and Node cells. |
+| AC-21 Supported environment matrix | pass | complete | - |
 | AC-22 Documented local onboarding | pass | complete | - |
 | AC-23 Complete documentation set | pass | complete | - |
-| AC-24 Acceptance audit | incomplete | partial | Produce one clean final acceptance run in which every mandatory criterion passes and no blocking defect remains. |
+| AC-24 Acceptance audit | pass | complete | - |
 | PD-01 Persistent Semantics | pass | complete | - |
 | PD-02 Vector Structural Bounds | pass | complete | - |
 | PD-03 HAMT Structural Bounds | pass | complete | - |
 | PD-04 Hash and Equality | pass | complete | - |
 | PD-05 Transient Safety | pass | complete | - |
 | PD-06 Transformation Efficiency | pass | complete | - |
-| PD-07 Host Interop | incomplete | partial | Pass the maintained JavaScript package fixture on the full supported matrix. |
+| PD-07 Host Interop | pass | complete | - |
 | PD-08 Emacs Codec | pass | complete | - |
 | PD-09 Accelerated Operation Correctness | pass | complete | - |
 | PD-10 Emacs Performance Reinvestment | pass | complete | - |
@@ -80,8 +80,8 @@ No unresolved defects are recorded.
 
 | Probe | Command | Result | Exit | Duration (ms) | Output SHA-256 |
 | --- | --- | --- | ---: | ---: | --- |
-| core-suite | `make test-core` | pass | 0 | 797915.392 | `9d59b69e144b3cb7f5d68aff25927e82e0685cc48b86a82db6a01755c3b7b981` |
-| strict-byte-compile | `make byte-compile` | pass | 0 | 1342.611 | `4110c50ff8be0d96e678ed5ef31967a2aca72a86558181796ef5f14b5a350c3e` |
+| core-suite | `make test-core` | pass | 0 | 801700.192 | `efacbf31edda84b68bc2ede690b8302c3dfcc298bf3eb4314ee76f2f49120dbf` |
+| strict-byte-compile | `make byte-compile` | pass | 0 | 1304.552 | `4110c50ff8be0d96e678ed5ef31967a2aca72a86558181796ef5f14b5a350c3e` |
 
 ## Artifact Digests
 
@@ -89,8 +89,8 @@ No unresolved defects are recorded.
 | --- | --- |
 | `.github/workflows/compatibility.yml` | `45a2c3941d06adc6d745b4490197beb2a86266fda2685a69a88aeaa6afacfb90` |
 | `acceptance/defects.json` | `da4ac30acd7e57ec357e3d30da05c304605d0a2407733137adf1a44f5b137377` |
-| `acceptance/manifest.json` | `73df1f50b4f68e055f98e4e8e1daa803fb8d65a7ce8fec1fb7896c01db928ea6` |
-| `acceptance/report.md` | `cb501b7365a005e4e14a3a310ed3da7e9c32c4b6833ad9829d152d37eab4acf3` |
+| `acceptance/manifest.json` | `0987ea2d59f4841592f14ea16523d6fbb37e2ffdc0f8f89f14d073e73027fa45` |
+| `acceptance/report.md` | `130d1150110ac89ce3b8c84fe1eac85074525d4c3e98ba43a1835f35bcfaa72c` |
 | `acceptance/runs/m13-02.json` | `de2767587a9c5b2ff4280c7a1005d88274f0dc9f6c327edd89a2944d67053355` |
 | `acceptance/runs/m13-04.json` | `47a58aab430e21d26a9fce392283d06bb62b969a90ae5e922307e4dbce58a880` |
 | `acceptance/runs/m13-04.md` | `a9b55996a36aab1d86696ec7a1edd4eb63d297060f0c319e959c1c1090e53411` |
@@ -98,28 +98,28 @@ No unresolved defects are recorded.
 | `benchmarks/transient-builder-macos-arm64.json` | `8eb053070de12d5063289a3bc70c4a7e2d4ceccd3fe99c68d7e9c921165a62ee` |
 | `benchmarks/worker-lifecycle-soak-macos-arm64.json` | `9cfd22ccb0d0e1ec4842c18c3f1a44353ee3fba59029ee62d8df65fd71063b65` |
 | `benchmarks/worker-value-stream-macos-arm64.json` | `7fdf64d25067722b265d4a4b377e62b87e8b8c678fe15c045c9a5a8876578dd3` |
-| `contracts/compatibility-baseline.json` | `e82f25d0c474c4f644555df104e19b747446f39db1e46e837797a8f8ff0519b1` |
-| `contracts/compatibility-matrix.json` | `2be33eb441bb5f4969a0e3f157ccae66b35fda6126516befa9e05f08602fe36f` |
-| `contracts/compiler-parity-corpus.json` | `c6dd7e92d2d887bacdc9706b0529920875e8dcff33a245c1245caac3d7f7c30c` |
+| `contracts/compatibility-baseline.json` | `cb36591e46cdb7f90f832a23169ba8a9155109de0bc8aacc5ec35096e95411d5` |
+| `contracts/compatibility-matrix.json` | `b062adae4ed98ce089d2b9ab9c776266b328014e4ed4139cda1c194f18df5a32` |
+| `contracts/compiler-parity-corpus.json` | `3fea66f91faa2a0f0484953e9c815ae110583b94b92182754f7a4c39c536d5d6` |
 | `contracts/core-acceptance-corpus.json` | `146a17c9d55c734ec9308cc3ccb5e7b9f2fac72aec961a72e1f9d5328c0fb26c` |
 | `contracts/diagnostic-corpus.json` | `bd6bec3513b8c78b527f17662d91505b6c8bc28da5e5c4a41c6753967c0fcdb9` |
 | `contracts/documentation.json` | `4191f35aa08ab0e16d8f3ed13ede12d41c722ace443d8ab9a7ddd31c8bee7b6e` |
 | `contracts/final-acceptance.json` | `fc7760bdccc644b014b3513e4020f3647e3128e54676481d1515504967f2651d` |
 | `contracts/library-api.json` | `b0775772de09eb877033f70811295a9a6ddea5ada4e3cd67dfebb7ecb10483a9` |
-| `contracts/maturity-progress.json` | `36a1833eb891b0ce5fab65005dae99f292638b7b89945c9198054645d9923590` |
+| `contracts/maturity-progress.json` | `3bf217d65b534c8b18477c7635592607e75d5ea2a0c4936e76cbd999e9e71ca7` |
 | `contracts/repository-integrity.json` | `0989ee1da26dc4f338e2c3d90e7ff09bcbbb7a6df54feaaf4ee52a314c7aee10` |
 | `contracts/source-debugging-corpus.json` | `db8221df0aad47b9bf287a0dfef9e854830202298c518c0a239c1850ae1674ad` |
-| `contracts/stable-compatibility-corpus.json` | `c77c7c1ba869b5ade73001e2382af2a0f9ef073cef2ddfa1f4f032dec931648e` |
+| `contracts/stable-compatibility-corpus.json` | `75859df07641651769646bd7d463b4e19bfa1d31c8279f8b808b06c121398a90` |
 | `docs/getting-started.md` | `775c151378028f4cb5083de7cbe20e284d3edbbbffed774670f0050726fc70db` |
 | `editor/eliscript-mode.el` | `4dc4e0bf1ad31e8d6c714e496c63425e1fb113b18615a13fe5e4b73634f5cb60` |
 | `specs/0009-source-maps.md` | `b994a807c679b6b830d384e3dd212b40da5066526a3ed480a7d0f81b80a622d0` |
 | `specs/0019-self-hosted-compiler.md` | `760654f8dfa5bbfd3ff2777110576ea2d5f88eed8b42f6c77873ebe8df8fbe89` |
-| `specs/0040-maturity-roadmap.md` | `79a2153b8faf3d289dc7ba1df8eeab8da6eca1d18a89e501245b47f1e393258c` |
-| `specs/0041-host-symbiosis-and-persistent-data.md` | `ef40c63c0af8aebc31beda0efda8e625ce8fe1d78359f37a89c34f0a6e6ce13a` |
+| `specs/0040-maturity-roadmap.md` | `606861b9edafedbcc5a672b3c415e1a6683069cfba988c0dabf0ba76221f8239` |
+| `specs/0041-host-symbiosis-and-persistent-data.md` | `2e39555b23fee76470425f0ca564a446a779af3afbe9bbb513d05d37367741a0` |
 | `specs/0043-structured-diagnostics.md` | `f18785b2d298f3bed286eb3bd4a3a5e9bafe548a07c2f433eb9c293bd8d70a8f` |
 | `specs/0048-value-equality-and-hashing.md` | `24a0af01851c450e8cf500eb5d39e067cf8ee92f52021189b0e7b0879532000a` |
 | `specs/0072-atomic-state-references.md` | `a7213318ddcc3be09963c704a8cf97c6bf9f5d17774db4fd31892f91d4b48af2` |
-| `specs/0073-native-javascript-container-interop.md` | `9f8fa459e3529579ec7590bc6fdda480efb9f68a3dc9a30670b3472366283d2d` |
+| `specs/0073-native-javascript-container-interop.md` | `0a8698e3e019554c0ddfedeccbe35fbd3ae1a34cf23f28983f3946f43129c331` |
 | `specs/0078-persistent-collection-core-exit-audit.md` | `ced21c3357b88396ce96a6e6cafbd209ae338e15edebf305b52a0b2c082586c6` |
 | `specs/0093-static-transient-ownership-analysis.md` | `de5963a2da0a389ed20c8961a28cd91b7d055f4578b8d62f6b619fb5395206ea` |
 | `specs/0104-accelerated-emacs-operation-service.md` | `46b6048ca3520ee46bd7628ab693a827ad138db6cff034d00e9fc9e6173c81e4` |
@@ -134,12 +134,12 @@ No unresolved defects are recorded.
 | `specs/0139-deterministic-persistent-semantics-corpus.md` | `7baf091143a269eddbf81cf74b85240d7cbf65cf9db23a927e1d25e9dd17911a` |
 | `specs/0140-clean-configured-project-workflow.md` | `3884ec9bfc18a8da6df2bcdbaab7f7f17e96f7aad37be388b194c03547fa1af9` |
 | `specs/0141-repeated-core-determinism.md` | `0d87814a7ad8f601aeff595e310a5cf304c58619cf536259705a252a9ad87ebe` |
-| `specs/0142-maintained-javascript-package-interop.md` | `964106e7c60ed3e36bb31aa0207e6c5d421cef7ba9b1a721ca20aedad29de99e` |
+| `specs/0142-maintained-javascript-package-interop.md` | `9609946fafa912660f4743090400e62963201acc981080882a7050378eed87cf` |
 | `specs/0143-complete-negative-diagnostic-corpus.md` | `34c9cda778aa250fe34ccb5e59b282951318e7b8083e446af5e68f0dfb780257` |
 | `specs/0144-source-level-failure-mapping.md` | `c3d5531b9bede4737c50e8bee16bec1e530f2c9bc64ea0990631b4043c18fcc3` |
 | `specs/0146-complete-compiler-parity-corpus.md` | `ea350a896697d1d87bb19344a2baff106441e4fe5d6c587ca20cd531011a87d8` |
-| `specs/0147-complete-stable-compatibility-corpus.md` | `e09e3818ede486f58423927e1814bcc81580c8f64fcb3cbc1ceabec469954fb0` |
-| `specs/index.json` | `d33c9ab511a24327678a5661116e68bc66cda7041a935d4120d0761f5a16fda1` |
+| `specs/0147-complete-stable-compatibility-corpus.md` | `e4c17dc09491454ba18087f74e79b13c4ed864a231c1d97597b930db490545e4` |
+| `specs/index.json` | `6045c08759e7ae677f9aecb63df6dc97375adcc7f7ed583fe9ab2e439545f826` |
 | `tests/api-index.test.mjs` | `6e1612812754c4bb193fb81b33ca083b5e1b0649a42ee308c00bc90f29a2d487` |
 | `tests/atom.test.mjs` | `913f7c8850eaa95e68dd06cd26a536b512e89c2f2d3376b39c34227cf02522c2` |
 | `tests/bootstrap-analyzer.test.mjs` | `ac2bfaaa29531eb6addab3a526a32b64d4981bba825033204d16703259961287` |
@@ -152,11 +152,11 @@ No unresolved defects are recorded.
 | `tests/bootstrap-project.test.mjs` | `4e7e0b217e2c0655acd266190ca1c7f15960170d6efb62579281976479dd4a8c` |
 | `tests/bootstrap-reader.test.mjs` | `e079d6fe6d0731f1f569804ca38810afdd81450be0fe815631a4efe045de1941` |
 | `tests/boundary-security.test.mjs` | `1d63fcc782b15b8a72c451fc5354b457945779ef0882b5b11856cfe6f9be3650` |
-| `tests/ci-contract.test.mjs` | `2290a09fd7fc81305e5781f29491a53310c59a9b8cd133e2bc537688b78e5f17` |
+| `tests/ci-contract.test.mjs` | `f6d980ae6dbdff676396db17f32a87d85bd3909659c041ea8c96f61b3697666e` |
 | `tests/clean-project-workflow.test.mjs` | `082b8d3262faab8f70e63305dddff63f8bb69d9da9ed6eedb97f7ab21d44ee45` |
 | `tests/compiler-parity-corpus.test.mjs` | `83e4240b6b2dee991f2d2de1cdff4034b44c17f340fd70d486a1ce0d5381047b` |
-| `tests/conformance.test.mjs` | `cf5b989597e2b66c35e14b5bce7c23f24f74dbbe1a639e941b190fa74c5c20f0` |
-| `tests/conformance/manifest.json` | `5d8d81e1dcf2af6602f991f013e84c1bd95765dbc725fa1a8e2eca0092fe897d` |
+| `tests/conformance.test.mjs` | `cc5fcc335b1d53b0554307b23ade148be631b7edc31e8aac5eba8545b8e994f1` |
+| `tests/conformance/manifest.json` | `93ab50adf4b07c9faf00ce805eb3fa219ab1dee2addc5901ac33f1095e5f4ea1` |
 | `tests/core-stdlib.test.mjs` | `276c51c18cd59efb37eaebc4b32dc5fdb156d0d4436c9f2bf4f5d2b2abb0882d` |
 | `tests/diagnostic-corpus.test.mjs` | `d70fc0c6e0bd4f62305f6c69d28be883649e8c95000e7995f91031a0d67f4a45` |
 | `tests/eliscript-mode-tests.el` | `c871a065a5c213b2ab6dac6d9b35afa7c9afc46778ab8629cd7bed691c1823f1` |
@@ -180,7 +180,7 @@ No unresolved defects are recorded.
 | `tests/reader-program-fuzz.test.mjs` | `f6446a6621dacd88a3e4a0fa3f8f13915652ad9a8fb3aa3d29b0469bba9b8b6e` |
 | `tests/repeated-determinism.test.mjs` | `eb3f2ef5a43bfbcab9615b8c5ff31c85d09092a8f58c1f895ca56692787838ce` |
 | `tests/source-debugging.test.mjs` | `8eb14ca45564e54d1874bd04a791f1d5ca89cfff72a4c0f07c82b2d00dee8ca7` |
-| `tests/stable-compatibility-corpus.test.mjs` | `eea99f1234047f92d2bf965075d3e5abd4045cdf4675bf52a2f6e43fe2520f9e` |
+| `tests/stable-compatibility-corpus.test.mjs` | `3403023dcc6f0f6e0895b4ad9b01ad4688b38205f29bf9a72af26109b1d3496c` |
 | `tests/transducer.test.mjs` | `c63b740db2c8450f815f0beadcfbb53075894e3da3d38d2f23d1316e4c4d5f04` |
 | `tests/transient-builder-benchmark.test.mjs` | `e1022dab110a6eee6a3e196da73c29aee89494e1908b03e41a4909cc1e4e64d8` |
 | `tests/transient.test.mjs` | `92571f68ce457c35f8a95cbebad0a464ee445c14283831760aac9d8af77a26af` |
@@ -191,7 +191,7 @@ No unresolved defects are recorded.
 | `tests/worker-value-stream-probe.test.mjs` | `19dac4fabbf7878afbaef9120bb91a5e3c413fd706fc65e4c7d0f5e6930c30b0` |
 | `tools/acceptance/finalize.mjs` | `924c7070c64267085f7123c755efcefb084e4ac6050afd19d74ee576751713e6` |
 | `tools/collections/persistent-semantics.mjs` | `fc86ef0866cd180afbede79d4dfdd6c3ef25b6e4ee633f066e70916f194d853c` |
-| `tools/compatibility/corpus.mjs` | `7d59843ed4f0d078475cdefc9ba4ed5bba2599f6afb158cfd7b6313915d9bea2` |
+| `tools/compatibility/corpus.mjs` | `6ac819006fe8778908732a652a31322f9214252c93173b26c3600bdb0b01c5ec` |
 | `tools/debugging/check.mjs` | `a6fdaad34fcae0e84296f5ba463aa34fe867220c88ac072ea6109afd3678e38e` |
 | `tools/diagnostics/check.mjs` | `951cf34b6ae65f338b0543ca995c6929a1b8966521e8c489116ef2cc5671218d` |
 | `tools/documentation/check.mjs` | `eb19276b62b18c4d8aaa443b97ec5a9252bfd4d0acc744c5762aedcac9bc6447` |

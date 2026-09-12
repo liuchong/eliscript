@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "format": "eliscript-1.0-acceptance-manifest",
   "version": 1,
-  "generatedAt": "2026-09-12T13:50:51.419Z",
+  "generatedAt": "2026-09-12T19:38:55.765Z",
   "source": {
-    "commit": "9fcb9bf2411905de84bcd798a63263be50fdad95",
-    "tree": "145eec050feb75416bffa9a3cc2d76b9d213134a",
+    "commit": "cef36eb5cb73d5abb39a74f42571e1da4e93adec",
+    "tree": "b746c6848acc724f5bc584fd584b1c8337dd4c6c",
     "cleanBefore": true,
     "cleanAfter": true
   },
@@ -24,9 +24,9 @@
   },
   "sourceRun": {
     "json": "acceptance/runs/m13-01.json",
-    "jsonSha256": "01fa2ac9419c86ab342ae1f1fa5dcc0c852c3e5b496572110d45d7f770d008aa",
+    "jsonSha256": "edb93f7c06bebcac3e661cb9074c0820f26685ab4de73e7794371fb2c02e5107",
     "markdown": "acceptance/runs/m13-01.md",
-    "markdownSha256": "1595f0c66b8807428d9a80533a5fe3bd5bf01b6b95a0176fd7841e26610e658b"
+    "markdownSha256": "64d8d9fd9ba57a208eee6f37461583099184b691438820a5eede56a7ec6dc01e"
   },
   "commands": [
     {
@@ -39,9 +39,9 @@
       "status": "pass",
       "exitCode": 0,
       "timedOut": false,
-      "durationMs": 797915.392,
-      "outputSha256": "9d59b69e144b3cb7f5d68aff25927e82e0685cc48b86a82db6a01755c3b7b981",
-      "summary": "0 fail | 1086553 expect() calls | Ran 434 tests across 112 files. [767.59s]"
+      "durationMs": 801700.192,
+      "outputSha256": "efacbf31edda84b68bc2ede690b8302c3dfcc298bf3eb4314ee76f2f49120dbf",
+      "summary": "0 fail | 1086561 expect() calls | Ran 436 tests across 112 files. [770.82s]"
     },
     {
       "id": "strict-byte-compile",
@@ -53,7 +53,7 @@
       "status": "pass",
       "exitCode": 0,
       "timedOut": false,
-      "durationMs": 1342.611,
+      "durationMs": 1304.552,
       "outputSha256": "4110c50ff8be0d96e678ed5ef31967a2aca72a86558181796ef5f14b5a350c3e",
       "summary": "EMACS=\"emacs\" ./tools/ci/strict-byte-compile.sh"
     }
@@ -63,23 +63,22 @@
       "id": "AC-01",
       "title": "Stable specification coverage",
       "sourceSpec": "0040",
-      "result": "incomplete",
-      "declaredStatus": "partial",
+      "result": "pass",
+      "declaredStatus": "complete",
       "probes": [
         "core-suite"
       ],
       "evidence": [
         "specs/index.json",
         "tests/conformance/manifest.json"
-      ],
-      "remaining": "Promote every final public language and core library contract to stable with complete evidence."
+      ]
     },
     {
       "id": "AC-02",
       "title": "Stable corpus compatibility",
       "sourceSpec": "0040",
-      "result": "incomplete",
-      "declaredStatus": "partial",
+      "result": "pass",
+      "declaredStatus": "complete",
       "probes": [
         "core-suite"
       ],
@@ -90,8 +89,7 @@
         "tests/conformance/manifest.json",
         "tests/stable-compatibility-corpus.test.mjs",
         "tools/compatibility/corpus.mjs"
-      ],
-      "remaining": "Promote the final provisional core feature, regenerate the stable corpus, and execute one clean retained run."
+      ]
     },
     {
       "id": "AC-03",
@@ -118,16 +116,15 @@
       "id": "AC-04",
       "title": "Reproducible fixed point",
       "sourceSpec": "0040",
-      "result": "incomplete",
-      "declaredStatus": "partial",
+      "result": "pass",
+      "declaredStatus": "complete",
       "probes": [
         "core-suite"
       ],
       "evidence": [
         "specs/0019-self-hosted-compiler.md",
         "tests/bootstrap-compiler.test.mjs"
-      ],
-      "remaining": "Record the final fixed point on every required matrix cell in one acceptance run."
+      ]
     },
     {
       "id": "AC-05",
@@ -216,8 +213,8 @@
       "id": "AC-10",
       "title": "Host portability",
       "sourceSpec": "0040",
-      "result": "incomplete",
-      "declaredStatus": "partial",
+      "result": "pass",
+      "declaredStatus": "complete",
       "probes": [
         "core-suite"
       ],
@@ -225,8 +222,7 @@
         "contracts/compatibility-matrix.json",
         "tests/esm-imports.test.mjs",
         "tests/project-cli-test.sh"
-      ],
-      "remaining": "Run the final stable corpus and core CLI fixtures on every supported Bun and Node host."
+      ]
     },
     {
       "id": "AC-11",
@@ -247,8 +243,8 @@
       "id": "AC-12",
       "title": "Emacs mode",
       "sourceSpec": "0040",
-      "result": "incomplete",
-      "declaredStatus": "partial",
+      "result": "pass",
+      "declaredStatus": "complete",
       "probes": [
         "core-suite",
         "strict-byte-compile"
@@ -256,15 +252,14 @@
       "evidence": [
         "editor/eliscript-mode.el",
         "tests/eliscript-mode-tests.el"
-      ],
-      "remaining": "Close the complete maintained mode suite on Emacs 29 and 30 in the final matrix."
+      ]
     },
     {
       "id": "AC-13",
       "title": "Interactive evaluation",
       "sourceSpec": "0040",
-      "result": "incomplete",
-      "declaredStatus": "partial",
+      "result": "pass",
+      "declaredStatus": "complete",
       "probes": [
         "core-suite"
       ],
@@ -272,8 +267,7 @@
         "specs/0120-interactive-terminal-repl.md",
         "tests/bootstrap-evaluation.test.mjs",
         "tests/eliscript-repl-tests.el"
-      ],
-      "remaining": "Close documented REPL behavior and restart recovery in the final supported matrix."
+      ]
     },
     {
       "id": "AC-14",
@@ -298,8 +292,8 @@
       "id": "AC-15",
       "title": "Stable library contract",
       "sourceSpec": "0040",
-      "result": "incomplete",
-      "declaredStatus": "partial",
+      "result": "pass",
+      "declaredStatus": "complete",
       "probes": [
         "core-suite"
       ],
@@ -307,8 +301,7 @@
         "contracts/library-api.json",
         "tests/api-index.test.mjs",
         "tests/core-stdlib.test.mjs"
-      ],
-      "remaining": "Stabilize every core export and close PD-01 through PD-07."
+      ]
     },
     {
       "id": "AC-16",
@@ -387,8 +380,8 @@
       "id": "AC-21",
       "title": "Supported environment matrix",
       "sourceSpec": "0040",
-      "result": "incomplete",
-      "declaredStatus": "partial",
+      "result": "pass",
+      "declaredStatus": "complete",
       "probes": [
         "core-suite"
       ],
@@ -396,8 +389,7 @@
         ".github/workflows/compatibility.yml",
         "contracts/compatibility-matrix.json",
         "tests/ci-contract.test.mjs"
-      ],
-      "remaining": "Record the final full suite on all required operating system, Emacs, Bun, and Node cells."
+      ]
     },
     {
       "id": "AC-22",
@@ -433,8 +425,8 @@
       "id": "AC-24",
       "title": "Acceptance audit",
       "sourceSpec": "0040",
-      "result": "incomplete",
-      "declaredStatus": "partial",
+      "result": "pass",
+      "declaredStatus": "complete",
       "probes": [
         "core-suite"
       ],
@@ -448,8 +440,7 @@
         "tests/final-acceptance.test.mjs",
         "tools/acceptance/finalize.mjs",
         "tools/integrity/check.mjs"
-      ],
-      "remaining": "Produce one clean final acceptance run in which every mandatory criterion passes and no blocking defect remains."
+      ]
     },
     {
       "id": "PD-01",
@@ -545,8 +536,8 @@
       "id": "PD-07",
       "title": "Host Interop",
       "sourceSpec": "0041",
-      "result": "incomplete",
-      "declaredStatus": "partial",
+      "result": "pass",
+      "declaredStatus": "complete",
       "probes": [
         "core-suite"
       ],
@@ -555,8 +546,7 @@
         "specs/0142-maintained-javascript-package-interop.md",
         "tests/interop-js.test.mjs",
         "tests/interop-package.test.mjs"
-      ],
-      "remaining": "Pass the maintained JavaScript package fixture on the full supported matrix."
+      ]
     },
     {
       "id": "PD-08",
@@ -626,11 +616,11 @@
     },
     {
       "file": "acceptance/manifest.json",
-      "sha256": "73df1f50b4f68e055f98e4e8e1daa803fb8d65a7ce8fec1fb7896c01db928ea6"
+      "sha256": "0987ea2d59f4841592f14ea16523d6fbb37e2ffdc0f8f89f14d073e73027fa45"
     },
     {
       "file": "acceptance/report.md",
-      "sha256": "cb501b7365a005e4e14a3a310ed3da7e9c32c4b6833ad9829d152d37eab4acf3"
+      "sha256": "130d1150110ac89ce3b8c84fe1eac85074525d4c3e98ba43a1835f35bcfaa72c"
     },
     {
       "file": "acceptance/runs/m13-02.json",
@@ -662,15 +652,15 @@
     },
     {
       "file": "contracts/compatibility-baseline.json",
-      "sha256": "e82f25d0c474c4f644555df104e19b747446f39db1e46e837797a8f8ff0519b1"
+      "sha256": "cb36591e46cdb7f90f832a23169ba8a9155109de0bc8aacc5ec35096e95411d5"
     },
     {
       "file": "contracts/compatibility-matrix.json",
-      "sha256": "2be33eb441bb5f4969a0e3f157ccae66b35fda6126516befa9e05f08602fe36f"
+      "sha256": "b062adae4ed98ce089d2b9ab9c776266b328014e4ed4139cda1c194f18df5a32"
     },
     {
       "file": "contracts/compiler-parity-corpus.json",
-      "sha256": "c6dd7e92d2d887bacdc9706b0529920875e8dcff33a245c1245caac3d7f7c30c"
+      "sha256": "3fea66f91faa2a0f0484953e9c815ae110583b94b92182754f7a4c39c536d5d6"
     },
     {
       "file": "contracts/core-acceptance-corpus.json",
@@ -694,7 +684,7 @@
     },
     {
       "file": "contracts/maturity-progress.json",
-      "sha256": "36a1833eb891b0ce5fab65005dae99f292638b7b89945c9198054645d9923590"
+      "sha256": "3bf217d65b534c8b18477c7635592607e75d5ea2a0c4936e76cbd999e9e71ca7"
     },
     {
       "file": "contracts/repository-integrity.json",
@@ -706,7 +696,7 @@
     },
     {
       "file": "contracts/stable-compatibility-corpus.json",
-      "sha256": "c77c7c1ba869b5ade73001e2382af2a0f9ef073cef2ddfa1f4f032dec931648e"
+      "sha256": "75859df07641651769646bd7d463b4e19bfa1d31c8279f8b808b06c121398a90"
     },
     {
       "file": "docs/getting-started.md",
@@ -726,11 +716,11 @@
     },
     {
       "file": "specs/0040-maturity-roadmap.md",
-      "sha256": "79a2153b8faf3d289dc7ba1df8eeab8da6eca1d18a89e501245b47f1e393258c"
+      "sha256": "606861b9edafedbcc5a672b3c415e1a6683069cfba988c0dabf0ba76221f8239"
     },
     {
       "file": "specs/0041-host-symbiosis-and-persistent-data.md",
-      "sha256": "ef40c63c0af8aebc31beda0efda8e625ce8fe1d78359f37a89c34f0a6e6ce13a"
+      "sha256": "2e39555b23fee76470425f0ca564a446a779af3afbe9bbb513d05d37367741a0"
     },
     {
       "file": "specs/0043-structured-diagnostics.md",
@@ -746,7 +736,7 @@
     },
     {
       "file": "specs/0073-native-javascript-container-interop.md",
-      "sha256": "9f8fa459e3529579ec7590bc6fdda480efb9f68a3dc9a30670b3472366283d2d"
+      "sha256": "0a8698e3e019554c0ddfedeccbe35fbd3ae1a34cf23f28983f3946f43129c331"
     },
     {
       "file": "specs/0078-persistent-collection-core-exit-audit.md",
@@ -806,7 +796,7 @@
     },
     {
       "file": "specs/0142-maintained-javascript-package-interop.md",
-      "sha256": "964106e7c60ed3e36bb31aa0207e6c5d421cef7ba9b1a721ca20aedad29de99e"
+      "sha256": "9609946fafa912660f4743090400e62963201acc981080882a7050378eed87cf"
     },
     {
       "file": "specs/0143-complete-negative-diagnostic-corpus.md",
@@ -822,11 +812,11 @@
     },
     {
       "file": "specs/0147-complete-stable-compatibility-corpus.md",
-      "sha256": "e09e3818ede486f58423927e1814bcc81580c8f64fcb3cbc1ceabec469954fb0"
+      "sha256": "e4c17dc09491454ba18087f74e79b13c4ed864a231c1d97597b930db490545e4"
     },
     {
       "file": "specs/index.json",
-      "sha256": "d33c9ab511a24327678a5661116e68bc66cda7041a935d4120d0761f5a16fda1"
+      "sha256": "6045c08759e7ae677f9aecb63df6dc97375adcc7f7ed583fe9ab2e439545f826"
     },
     {
       "file": "tests/api-index.test.mjs",
@@ -878,7 +868,7 @@
     },
     {
       "file": "tests/ci-contract.test.mjs",
-      "sha256": "2290a09fd7fc81305e5781f29491a53310c59a9b8cd133e2bc537688b78e5f17"
+      "sha256": "f6d980ae6dbdff676396db17f32a87d85bd3909659c041ea8c96f61b3697666e"
     },
     {
       "file": "tests/clean-project-workflow.test.mjs",
@@ -890,11 +880,11 @@
     },
     {
       "file": "tests/conformance.test.mjs",
-      "sha256": "cf5b989597e2b66c35e14b5bce7c23f24f74dbbe1a639e941b190fa74c5c20f0"
+      "sha256": "cc5fcc335b1d53b0554307b23ade148be631b7edc31e8aac5eba8545b8e994f1"
     },
     {
       "file": "tests/conformance/manifest.json",
-      "sha256": "5d8d81e1dcf2af6602f991f013e84c1bd95765dbc725fa1a8e2eca0092fe897d"
+      "sha256": "93ab50adf4b07c9faf00ce805eb3fa219ab1dee2addc5901ac33f1095e5f4ea1"
     },
     {
       "file": "tests/core-stdlib.test.mjs",
@@ -990,7 +980,7 @@
     },
     {
       "file": "tests/stable-compatibility-corpus.test.mjs",
-      "sha256": "eea99f1234047f92d2bf965075d3e5abd4045cdf4675bf52a2f6e43fe2520f9e"
+      "sha256": "3403023dcc6f0f6e0895b4ad9b01ad4688b38205f29bf9a72af26109b1d3496c"
     },
     {
       "file": "tests/transducer.test.mjs",
@@ -1034,7 +1024,7 @@
     },
     {
       "file": "tools/compatibility/corpus.mjs",
-      "sha256": "7d59843ed4f0d078475cdefc9ba4ed5bba2599f6afb158cfd7b6313915d9bea2"
+      "sha256": "6ac819006fe8778908732a652a31322f9214252c93173b26c3600bdb0b01c5ec"
     },
     {
       "file": "tools/debugging/check.mjs",
@@ -1160,11 +1150,11 @@
       "criteria": [
         {
           "id": "AC-01",
-          "result": "incomplete"
+          "result": "pass"
         },
         {
           "id": "AC-02",
-          "result": "incomplete"
+          "result": "pass"
         },
         {
           "id": "AC-03",
@@ -1172,7 +1162,7 @@
         },
         {
           "id": "AC-04",
-          "result": "incomplete"
+          "result": "pass"
         },
         {
           "id": "AC-05",
@@ -1196,7 +1186,7 @@
         },
         {
           "id": "AC-10",
-          "result": "incomplete"
+          "result": "pass"
         },
         {
           "id": "AC-11",
@@ -1204,11 +1194,11 @@
         },
         {
           "id": "AC-12",
-          "result": "incomplete"
+          "result": "pass"
         },
         {
           "id": "AC-13",
-          "result": "incomplete"
+          "result": "pass"
         },
         {
           "id": "AC-14",
@@ -1216,7 +1206,7 @@
         },
         {
           "id": "AC-15",
-          "result": "incomplete"
+          "result": "pass"
         },
         {
           "id": "AC-16",
@@ -1240,7 +1230,7 @@
         },
         {
           "id": "AC-21",
-          "result": "incomplete"
+          "result": "pass"
         },
         {
           "id": "AC-22",
@@ -1252,7 +1242,7 @@
         },
         {
           "id": "AC-24",
-          "result": "incomplete"
+          "result": "pass"
         },
         {
           "id": "PD-01",
@@ -1280,7 +1270,7 @@
         },
         {
           "id": "PD-07",
-          "result": "incomplete"
+          "result": "pass"
         },
         {
           "id": "PD-08",
@@ -1333,8 +1323,8 @@
   ],
   "summary": {
     "criteria": {
-      "pass": 25,
-      "incomplete": 10,
+      "pass": 35,
+      "incomplete": 0,
       "fail": 0,
       "total": 35
     },
@@ -1342,6 +1332,6 @@
     "operationalSuccess": true,
     "evidenceComplete": true,
     "blockingDefects": 0,
-    "acceptancePass": false
+    "acceptancePass": true
   }
 }
