@@ -31,15 +31,15 @@ async function validationErrors(value) {
 test("stable compatibility corpus covers every frozen core behavior", async () => {
   expect(await checkStableCompatibilityCorpus({ root: ROOT })).toEqual({
     schemaVersion: 1,
-    stableSpecifications: 170,
-    stableFeatures: 170,
+    stableSpecifications: 171,
+    stableFeatures: 171,
     provisionalFeatures: 1,
     excludedApplicationFeatures: 2,
     migrations: 3,
-    fixtures: 97,
-    evidenceLocators: 670,
-    evidenceFiles: 133,
-    sourceFiles: 402,
+    fixtures: 99,
+    evidenceLocators: 675,
+    evidenceFiles: 134,
+    sourceFiles: 406,
     readyForAc02: false,
     identity: expect.stringMatching(/^[0-9a-f]{64}$/u),
   });

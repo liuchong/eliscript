@@ -29,6 +29,9 @@ lexical `reify` protocol values, value-dispatching `case` and `condp` forms,
 multi-arity named, anonymous, async, and portable functions, mutually recursive
 local functions, protocols, and a long-lived
 Emacs-to-JavaScript worker. The
+runtime standard library also includes frozen regular-expression patterns,
+capture-aware matching, memoized lazy scanning, and deterministic replacement.
+The
 repository also carries React, Org, and optional bundler probes as replaceable
 application-level evidence. The project has completed all implementation units
 in **M8: Language Contract Closure**, **M9: Compiler and Build Convergence**,
@@ -96,9 +99,9 @@ diagnostics, terminal REPL, and Emacs mode discovery. The complete M10 matrix,
 local onboarding exercise, and exit audit remain formal acceptance work.
 
 M11's six implementation units are complete. Reviewed metadata classifies all
-42 standard-library modules by role and owning specification; the generated
+43 standard-library modules by role and owning specification; the generated
 [API page](docs/pages/api.html) and machine-readable
-[API index](docs/pages/api-index.json) expose all 576 checked exports. The
+[API index](docs/pages/api-index.json) expose all 584 checked exports. The
 default contract gate rejects metadata, implementation, stability, or generated
 artifact drift. Explicit [browser and worker capability packages](platform/README.md)
 now grant only named host authority, inject request-scoped progress and

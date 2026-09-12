@@ -245,6 +245,13 @@ population count, and rotations under Bun and Node. ERT separately proves that
 portable selection includes transitive helpers while excluding unrelated
 operations.
 
+The regex suite validates frozen authenticated patterns, normalized portable
+flags, full and offset matching, persistent capture Vectors, nil optional
+groups, memoized lazy scanning, zero-width Unicode progress, and literal or
+callback replacement. It then compiles the Lisp surface with both compiler
+generations, compares ESM and Source Maps byte-for-byte, and executes both
+artifacts under Bun and Node.
+
 The portable persistent-vector suite compiles the complete trie from `.eli`
 with both seed and self-hosted compilers, compares ESM and Source Maps
 byte-for-byte, then executes both outputs under Bun and Node. Twenty thousand

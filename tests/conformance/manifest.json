@@ -3758,6 +3758,47 @@
           "contains": "Eliscript lazy sequences agree across compilers and local hosts"
         }
       ]
+    },
+    {
+      "id": "stdlib.immutable-regex-text-processing",
+      "title": "Immutable regex text processing",
+      "status": "stable",
+      "spec": "0178",
+      "contracts": [
+        "Authenticates frozen patterns and normalizes a closed portable flag set",
+        "Returns scalar matches or persistent capture Vectors with nil absence",
+        "Scans through memoized lazy sequences without mutable matcher leakage",
+        "Advances zero-width Unicode matches without looping or splitting code points",
+        "Performs global literal or callback replacement with deterministic validation",
+        "Matches Seed self-hosted Source Maps Bun and Node execution"
+      ],
+      "evidence": [
+        {
+          "kind": "bun-test",
+          "file": "tests/regex.test.mjs",
+          "contains": "regex patterns are immutable deterministic values"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/regex.test.mjs",
+          "contains": "regex matching preserves captures absence and start offsets"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/regex.test.mjs",
+          "contains": "regex sequences are memoized and advance zero-width Unicode matches"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/regex.test.mjs",
+          "contains": "regex replacement is global literal and callback driven"
+        },
+        {
+          "kind": "bun-test",
+          "file": "tests/regex.test.mjs",
+          "contains": "Eliscript regex APIs agree across compilers and local hosts"
+        }
+      ]
     }
   ]
 }

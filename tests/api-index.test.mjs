@@ -39,8 +39,27 @@ function escapeHtml(value) {
 
 test("generated library API index matches every declared module and export", async () => {
   const index = await buildApiIndex({ root: ROOT });
-  expect(index.moduleCount).toBe(42);
-  expect(index.exportCount).toBe(576);
+  expect(index.moduleCount).toBe(43);
+  expect(index.exportCount).toBe(584);
+  expect(index.modules.find(({ module }) => module === "core-regex")).toEqual({
+    module: "core-regex",
+    source: "stdlib/core/regex.eli",
+    spec: "0178",
+    specFile: "specs/0178-immutable-regex-text-processing.md",
+    stability: "stable",
+    role: "runtime-core",
+    summary: "Immutable regular-expression patterns, capture-aware matching, memoized lazy scanning, and literal or callback replacement.",
+    exports: [
+      "re-find",
+      "re-matches",
+      "re-replace",
+      "re-seq",
+      "regex",
+      "regex-flags",
+      "regex-source",
+      "regex?",
+    ],
+  });
   expect(index.modules.find(({ module }) => module === "deferred")).toEqual({
     module: "deferred",
     source: "stdlib/deferred.eli",

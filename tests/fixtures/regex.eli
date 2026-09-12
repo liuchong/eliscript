@@ -1,0 +1,32 @@
+(module eliscript.fixture.regex
+  (import "../../stdlib/core/regex.eli"
+    re-find
+    re-matches
+    re-replace
+    re-seq
+    regex
+    regex-flags
+    regex-source
+    regex?)
+  (import "../../runtime/core/transducer.mjs" into)
+  (defun run
+    ()
+    (let ((pattern (regex "[a-z]+" "mi")))
+      (js-object
+        :pattern
+        (regex? pattern)
+        :source
+        (regex-source pattern)
+        :flags
+        (regex-flags pattern)
+        :matches
+        (re-matches pattern "Alpha")
+        :find
+        (re-find pattern "12 beta 34")
+        :from
+        (re-find pattern "first SECOND" 6)
+        :sequence
+        (into (js-array) (re-seq pattern "one 2 THREE"))
+        :replaced
+        (re-replace (regex "[0-9]+") "#" "a12b3"))))
+  (export run))

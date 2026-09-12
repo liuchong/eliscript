@@ -1,0 +1,17 @@
+(module eliscript.core.regex
+  (import "../../runtime/core/regex.mjs" :as Runtime)
+  (defun regex (&rest arguments) (apply Runtime/compileRegex arguments))
+  (defun regex? (value) (Runtime/isRegexPattern value))
+  (defun regex-source (pattern) (Runtime/regexSource pattern))
+  (defun regex-flags (pattern) (Runtime/regexFlags pattern))
+  (defun re-matches (pattern text) (Runtime/regexMatches pattern text))
+  (defun re-find
+    (pattern text &rest start)
+    (apply Runtime/regexFind (js-cons pattern (js-cons text start))))
+  (defun re-seq
+    (pattern text &rest start)
+    (apply Runtime/regexSequence (js-cons pattern (js-cons text start))))
+  (defun re-replace
+    (pattern replacement text)
+    (Runtime/regexReplace pattern replacement text))
+  (export re-find re-matches re-replace re-seq regex regex-flags regex-source regex?))

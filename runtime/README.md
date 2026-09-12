@@ -138,6 +138,16 @@ in `stdlib/data-text.eli` over the same common grammar. Exact
 semantics are specified in [0069](../specs/0069-canonical-runtime-data-text.md)
 and [0071](../specs/0071-canonical-portable-data-text.md).
 
+### Immutable Regex Text Processing
+
+`core/regex.mjs` owns frozen opaque regex patterns and creates a fresh native
+matcher for every operation. Stable `i`, `m`, `s`, and `u` flags are
+canonicalized; stateful native flags are rejected. Full matching and offset
+search return strings or persistent capture Vectors, memoized lazy scanning
+handles zero-width Unicode matches without looping, and global replacement is
+literal or callback-driven without exposing `lastIndex`. Exact semantics are
+specified in [0178](../specs/0178-immutable-regex-text-processing.md).
+
 ### Persistent Map
 
 `core/map.mjs` builds on that key contract with a provisional persistent HAMT.

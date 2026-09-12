@@ -640,6 +640,14 @@ memoized pull sequence, so ordinary function composition works on unbounded
 inputs without forcing an intermediate collection. Exact semantics are
 specified in [0177](../specs/0177-lazy-sequence-combinators.md).
 
+`core/regex.eli` exposes frozen authenticated patterns through `regex`,
+`regex?`, source and flag inspection, complete matching, offset search,
+memoized lazy scanning, and global replacement. Native matcher state is private;
+capture groups become persistent Vectors, absent groups become nil, string
+replacement is literal, and zero-width Unicode scans advance without looping.
+Exact semantics are specified in
+[0178](../specs/0178-immutable-regex-text-processing.md).
+
 These modules intentionally import `runtime/core/*.mjs` and are not yet
 eligible for portable closure extraction. They are the language-level entry
 points for the current protocol core. Exact semantics and allocation evidence
