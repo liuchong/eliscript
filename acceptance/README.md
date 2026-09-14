@@ -2,7 +2,8 @@
 
 [Project README](../README.md) | [1.0 roadmap](../specs/0040-maturity-roadmap.md) |
 [Corpus specification](../specs/0134-versioned-core-acceptance-corpus.md) |
-[Final artifact specification](../specs/0138-versioned-final-acceptance-artifacts.md)
+[Final artifact specification](../specs/0138-versioned-final-acceptance-artifacts.md) |
+[Platform records](platforms/README.md)
 
 This directory retains source-revision-specific core maturity and onboarding
 audits. `runs/m13-01.json` is the machine-readable core audit and
@@ -23,6 +24,11 @@ zero incomplete and zero failed criteria. Required compatibility evidence is
 recorded directly on macOS arm64 with Emacs 29.4 and 30.2. Missing Linux x64
 target reports remain visible but optional. No hosted provider, container, or
 virtual machine supplies acceptance evidence.
+
+Human-readable [platform records](platforms/README.md) summarize the retained
+macOS reports and the supplemental Linux arm64 validation performed in a
+temporary local virtual machine. That supplemental record contributes no core
+acceptance result and does not replace the still-missing Linux x64 matrix cells.
 
 Verify the retained pair with:
 
