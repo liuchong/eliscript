@@ -251,4 +251,5 @@ emission are stable across seed and self-hosted compilers.
 
 General tail-call optimization, mutual recurrence, named jumps, and implicit
 self-call rewriting remain outside this contract. They require separate syntax
-and compatibility specifications.
+and compatibility specifications. The future work is now tracked by draft
+[0180: General Tail-Call Optimization](0180-general-tail-call-optimization.md).

@@ -545,6 +545,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0177 | [Lazy Sequence Combinators](0177-lazy-sequence-combinators.md) | Stable | Implemented |
 | 0178 | [Immutable Regex Text Processing](0178-immutable-regex-text-processing.md) | Stable | Implemented |
 | 0179 | [Local Acceptance Compatibility Profile](0179-local-acceptance-compatibility-profile.md) | Stable | Implemented |
+| 0180 | [General Tail-Call Optimization](0180-general-tail-call-optimization.md) | Draft | Pending |
 
 ## Adding a Specification
 

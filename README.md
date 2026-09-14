@@ -196,7 +196,9 @@ The completed M8 language contract provides:
   queries
 - owner-token transient Vector, Map, and Set builders with deterministic
   completion invalidation and transient-backed persistent `into`, with
-  source-bound 13.474799x/17.156491x/19.092863x Vector/Map/Set builder evidence
+  source-bound evidence that every maintained bulk builder exceeds its declared
+  1.5x speedup floor while using at most one third of persistent-path node
+  allocations
 - protocol, collection, transducer, and transient APIs exposed through
   Lisp-named Eliscript modules, with sequence and keyed-data algorithm bodies
   maintained in `stdlib/core/`
@@ -741,6 +743,11 @@ fixed point, and language conformance results unchanged.
 - Replacing ESM, UI libraries, or host package systems with proprietary
   equivalents.
 - Hiding JavaScript semantics where explicit interoperation is clearer.
+
+General automatic tail-call optimization is tracked as future language work in
+[specification 0180](specs/0180-general-tail-call-optimization.md). The draft
+does not change the stable explicit `recur` or standard-library `trampoline`
+contracts and contributes no current completion credit.
 
 The mandatory 1.0 acceptance criteria are defined in
 [specification 0040](specs/0040-maturity-roadmap.md#final-10-acceptance-standard).
