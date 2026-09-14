@@ -1,0 +1,113 @@
+# dogfood
+
+[Examples](../README.md) | [Design specifications](specs/README.md)
+
+dogfood is a GitHub-native static blog and the production application proving
+ground for Eliscript. It is designed to combine repository Markdown, GitHub
+Issues, and GitHub Discussions as independently enabled article sources, then
+attach native or external comment channels in any valid combination.
+
+The system has two executable programs:
+
+1. **Renderer:** Eliscript rendering logic compiled to JavaScript. It transforms
+   one normalized blog model into static HTML and the optional browser runtime.
+2. **Builder:** an Eliscript build program compiled to JavaScript and executed
+   by GitHub Actions. It converts Markdown, Issues, Discussions, and comments
+   into the normalized model, then calls the renderer.
+
+Packaged JavaScript under `dist/` is compiler output, not handwritten source.
+
+## Current Status
+
+| Track | Complete | Remaining | Evidence |
+| --- | ---: | ---: | --- |
+| Product and architecture design | 9/9 (100%) | 0/9 (0%) | [Specification index](specs/README.md) |
+| Executable implementation gates | 0/8 (0%) | 8/8 (100%) | [Delivery plan](specs/0009-delivery-and-acceptance.md) |
+| Final application acceptance | 0/12 (0%) | 12/12 (100%) | [Acceptance standard](specs/0009-delivery-and-acceptance.md#final-acceptance-standard) |
+
+This is a design-complete scaffold, not yet a working Action or site. No
+`action.yml`, generated Action bundle, release tag, Pages deployment, or
+Marketplace listing is claimed in this state.
+
+## Required Capabilities
+
+- Enable Markdown, Issues, and Discussions independently or together.
+- Use Issue comments and Discussion comments/replies as native comment channels.
+- Bind Markdown posts to Issue or Discussion comment threads explicitly.
+- Mount one or more external comment providers beside native channels.
+- Pre-render every article with a static fallback and add optional live
+  enhancement in the browser.
+- Coalesce comment changes without starting one full build per comment.
+- Build a standalone Node 24 JavaScript Action entirely from Eliscript source.
+- Export this directory as a repository root suitable for a later Marketplace
+  release.
+
+## Design Decisions
+
+1. **Static article authority.** Every published post receives a deterministic
+   HTML page. Live GitHub data may refresh the page, but it never removes the
+   static fallback.
+2. **Explicit identity.** Cross-source duplicates use a configured canonical id.
+   Similar titles never imply that two posts are the same.
+3. **Comment channels, not one lossy list.** Issue comments, Discussion threads,
+   and external providers remain separately attributable and may be displayed
+   as tabs or adjacent sections.
+4. **No credential in the browser.** Private GitHub content can be snapshotted
+   during a build; it cannot be fetched by shipping a token to visitors.
+5. **No comment-triggered build by default.** Live comments use browser loading
+   or an external provider. Static comment snapshots are reconciled on a bounded
+   schedule or manually.
+6. **Two-program boundary.** The builder owns GitHub and filesystem effects; the
+   renderer owns deterministic presentation and cannot fetch source data.
+7. **Build and deploy are separate.** The Marketplace Action generates a site
+   artifact and evidence manifest. The consumer workflow owns Pages deployment.
+8. **Application isolation.** GitHub, React, Markdown, and hosting integrations
+   stay below this directory and contribute no Eliscript core maturity credit.
+
+## Planned Standalone Layout
+
+```text
+dogfood/
+  action.yml
+  package.json
+  bun.lock
+  dogfood.config.eli
+  AGENTS.md
+  README.md
+  content/posts/
+  assets/
+  src/builder/main.eli
+  src/builder/config/
+  src/builder/content/
+  src/builder/comments/
+  src/builder/state/
+  src/renderer/server.eli
+  src/renderer/browser.eli
+  src/renderer/components/
+  src/renderer/theme/
+  templates/workflows/
+  tests/
+  specs/
+  toolchain/
+  dist/action/index.js
+  dist/site/browser.js
+```
+
+`action.yml`, `dist/action/index.js`, and `dist/site/browser.js` will be added
+together when the Action gate is executable. The Action entry contains the
+compiled builder and server renderer. The site bundle contains the compiled
+browser renderer. A consumer runner does not need Emacs or Bun.
+
+## Specification Map
+
+| Specification | Decision |
+| --- | --- |
+| [0001](specs/0001-product-contract.md) | Product scope, modes, and boundaries |
+| [0002](specs/0002-system-architecture.md) | Static and live engines, modules, and build flow |
+| [0003](specs/0003-content-and-comment-model.md) | Canonical posts, provenance, conflicts, and comments |
+| [0004](specs/0004-eliscript-configuration.md) | Eliscript configuration schema and validation |
+| [0005](specs/0005-actions-and-comment-coalescing.md) | Trigger policy, comment coalescing, and quota bounds |
+| [0006](specs/0006-site-experience.md) | Information architecture and visual behavior |
+| [0007](specs/0007-action-and-marketplace-package.md) | Action contract and standalone publication shape |
+| [0008](specs/0008-security-and-privacy.md) | Trust, permissions, sanitization, and private data |
+| [0009](specs/0009-delivery-and-acceptance.md) | Implementation gates and final acceptance standard |
