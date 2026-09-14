@@ -20,7 +20,7 @@
           <a href="getting-started.html">Start</a>
           <a href="language.html" aria-current="page">Language</a>
           <a href="api.html">API</a>
-          <a class="nav-optional" href="publishing.html">Publishing</a>
+          <a class="nav-optional" href="specifications.html">Specs</a>
           <a class="nav-optional" href="roadmap.html">Roadmap</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
         </div>
@@ -30,9 +30,9 @@
     <main id="main">
       <header class="doc-hero">
         <div class="doc-hero-inner">
-          <p class="eyebrow">Core language · M1</p>
-          <h1>Lisp-shaped, lexically scoped, ECMAScript-bound.</h1>
-          <p class="doc-lede">Eliscript begins near Emacs Lisp, then chooses explicit semantics that fit modules, browsers, and modern JavaScript runtimes.</p>
+          <p class="eyebrow">Stable language core</p>
+          <h1>Lisp-shaped, value-oriented, ECMAScript-bound.</h1>
+          <p class="doc-lede">Eliscript keeps the programmable shape of Emacs Lisp while adding persistent data, explicit modules, open protocols, and semantics designed for modern JavaScript runtimes.</p>
         </div>
       </header>
 
@@ -43,10 +43,9 @@
           <a href="#forms">Forms</a>
           <a href="#macros">Macros</a>
           <a href="#modules">Modules</a>
+          <a href="#collections">Collections</a>
           <a href="#sequences">Sequences</a>
-          <a href="#text">Text</a>
-          <a href="#objects">Objects</a>
-          <a href="#react">React</a>
+          <a href="#recursion">Recursion</a>
           <a href="#differences">Differences</a>
         </nav>
 
@@ -62,8 +61,10 @@
                 <tr><td>numbers and strings</td><td>ECMAScript numbers and strings</td></tr>
                 <tr><td>evaluated keywords</td><td>interned immutable Keyword values</td></tr>
                 <tr><td>vector expressions</td><td>persistent immutable Vectors</td></tr>
-                <tr><td>quoted lists</td><td>syntax-data arrays</td></tr>
-                <tr><td><code>(js-object ...)</code></td><td>plain object literal</td></tr>
+                <tr><td>list expressions and quoted lists</td><td>persistent linked Lists</td></tr>
+                <tr><td>map and set literals</td><td>persistent HAMT Maps and Sets</td></tr>
+                <tr><td><code>#queue [...]</code></td><td>persistent FIFO Queue</td></tr>
+                <tr><td><code>(js-array ...)</code> / <code>(js-object ...)</code></td><td>explicit native containers</td></tr>
               </tbody>
             </table>
             <div class="callout"><p>Truthiness is Lisp-like: only <code>false</code>, <code>null</code>, and <code>undefined</code> are false. Zero and empty strings remain true.</p></div>
@@ -107,11 +108,12 @@
               </div>
               <div class="language-panel" data-language-panel="data" hidden>
                 <div class="form-list">
-                  <article class="form-item"><code>list / vector / array</code><p>Ordered values represented as ECMAScript arrays.</p></article>
-                  <article class="form-item"><code>car / cdr / cons / nth</code><p>Basic Lisp collection operations with empty-list handling.</p></article>
+                  <article class="form-item"><code>list / vector / hash-map / hash-set</code><p>Canonical immutable persistent collection constructors.</p></article>
+                  <article class="form-item"><code>[...] / {...} / #{...} / #queue [...]</code><p>Persistent Vector, Map, Set, and Queue literals.</p></article>
+                  <article class="form-item"><code>car / cdr / cons / nth</code><p>Protocol-backed List and indexed collection operations.</p></article>
                   <article class="form-item"><code>nil? / undefined? / nullish?</code><p>Strict null and undefined checks, plus an explicit combined nullish check. <code>null</code> remains a compatibility alias.</p></article>
-                  <article class="form-item"><code>object</code><p>Plain object literals with keyword, string, or computed keys.</p></article>
-                  <article class="form-item"><code>get / put</code><p>Property access, fallback, and assignment.</p></article>
+                  <article class="form-item"><code>js-array / js-object</code><p>Explicit native JavaScript container construction.</p></article>
+                  <article class="form-item"><code>get / put</code><p>Explicit host property access, fallback, and assignment.</p></article>
                   <article class="form-item"><code>object-keys / object-has? / object-assoc</code><p>Portable own-key discovery, own-property checks, and shallow immutable association.</p></article>
                 </div>
               </div>
@@ -145,7 +147,23 @@
 
 (export Component helper)
 (export-default Component)</code></pre>
-            <p>One Eliscript source file emits one ESM file. Vite resolves <code>.eli</code> imports during browser builds; the Emacs project builder recursively resolves root-contained relative source imports, preserves their directory tree, and rewrites them to <code>.mjs</code>. Other specifiers remain host-defined.</p>
+            <p>One Eliscript source file emits one ESM file. The project builder recursively resolves root-contained relative source imports, preserves their directory tree, rewrites them to <code>.mjs</code>, emits Source Maps, and records deterministic graph identity. Package and JavaScript specifiers remain host-defined.</p>
+          </section>
+
+          <section id="collections">
+            <h2>Persistent collections</h2>
+            <table class="fact-table">
+              <thead><tr><th>Value</th><th>Implementation</th></tr></thead>
+              <tbody>
+                <tr><td>List</td><td>Singly linked nodes with O(1) front operations and exact suffix sharing</td></tr>
+                <tr><td>Vector</td><td>32-way bit-partitioned trie with a tail and O(log32 n) indexed updates</td></tr>
+                <tr><td>Map / Set</td><td>HAMT with bitmap, dense array, collision nodes, and path copying</td></tr>
+                <tr><td>Queue</td><td>Persistent front/rear Vectors with iterative million-value behavior</td></tr>
+                <tr><td>Sorted Map / Set</td><td>Structurally shared AVL trees with custom comparators and range queries</td></tr>
+              </tbody>
+            </table>
+            <p>All collection families participate in value equality, hashing, metadata, canonical data text, generic lookup, reduction, construction, stack, and reversible traversal protocols where applicable. Records extend persistent Map behavior without surrendering their declared type identity.</p>
+            <p>Owner-token Transient Vector, Map, and Set builders support efficient isolated construction. <code>persistent!</code> completes the builder once; later mutation or reuse is rejected, and static compiler analysis prevents transient ownership from escaping trusted construction scopes.</p>
           </section>
 
           <section id="sequences">
@@ -176,18 +194,14 @@
             <p>The runtime-backed <code>stdlib/core/data.eli</code> surface returns value-semantic persistent Maps and persistent Vector groups, adds frequencies, and uses transient builders for efficient final construction.</p>
           </section>
 
-          <section id="react">
-            <h2>React elements</h2>
-            <pre><code>(import "react" useState StrictMode)
-
-(defcomponent Counter (props)
-  (let* ((state (useState 0))
-         (count (nth 0 state)))
-    (jsx StrictMode nil
-      (jsx :button
-        (object :type "button")
-        (str (get props :label "Count") ": " count)))))</code></pre>
-            <p><code>defcomponent</code> defines an ordinary function component. <code>jsx</code> accepts host tags or resolved component expressions, props, and children; <code>fragment</code> groups children without a host node. Modules using these forms import <code>react/jsx-runtime</code> automatically.</p>
+          <section id="recursion">
+            <h2>Recursion and constant stack</h2>
+            <pre><code>(defun sum-to (n total)
+  (if (= n 0)
+      total
+    (recur (1- n) (+ total n))))</code></pre>
+            <p><code>recur</code> is checked at compile time and lowers self recurrence or a lexical <code>loop</code> to an iterative transfer with constant JavaScript stack use. The standard-library <code>trampoline</code> runs returned zero-argument thunks and supports open or mutual recursion with a fixed stack.</p>
+            <div class="callout callout-coral"><p>Ordinary calls in tail position remain ordinary JavaScript calls. General self and mutual tail-call optimization is recorded as Draft <a href="https://github.com/liuchong/eliscript/blob/master/specs/0180-general-tail-call-optimization.md">specification 0180</a> and receives no current implementation credit.</p></div>
           </section>
 
           <section id="differences">
@@ -195,7 +209,7 @@
             <ul>
               <li>Lexical scope is mandatory; dynamic scope is not inherited.</li>
               <li>Numbers follow ECMAScript behavior rather than Emacs integer semantics.</li>
-              <li>Lists and vectors currently share an array representation.</li>
+              <li>Lists, Vectors, Maps, Sets, Queues, and Records are distinct persistent value categories.</li>
               <li><code>false</code> is distinct from <code>nil</code>.</li>
               <li>Modules, objects, promises, and browser APIs are explicit language concerns.</li>
             </ul>

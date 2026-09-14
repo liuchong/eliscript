@@ -465,6 +465,10 @@ structured unsaved-source diagnostics, evaluation, persistent terminal state,
 and Emacs mode discovery. This is executable documentation evidence, not the
 separate final local onboarding acceptance exercise.
 
+`pages-site.test.mjs` fixes the complete Pages inventory, verifies every local
+page, asset, and fragment target, requires one consistent core navigation, and
+rejects stale milestone, library-surface, and collection-representation claims.
+
 `repository-integrity.test.mjs` runs the complete dependency and artifact audit
 against the real tracked repository. Negative cases prove that package boundary
 violations, undeclared packages, stale benchmark digests, missing generated

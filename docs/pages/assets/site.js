@@ -1,37 +1,36 @@
 const examples = {
-  factorial: {
-    source: `(defun factorial (n)
-  (if (<= n 1)
-      1
-    (* n (factorial (1- n)))))`,
-    output: `function factorial(n) {
-  return (__eliscript_truthy(n <= 1)
-    ? 1
-    : n * factorial(n - 1));
-}`,
+  recur: {
+    source: `(defun sum-to (n total)
+  (if (= n 0)
+      total
+    (recur (1- n) (+ total n))))`,
+    output: `tail position verified
+arguments evaluated once, left to right
+function frame reused as a loop
+constant JavaScript stack`,
   },
   data: {
-    source: `(defvar result
-  (object
-    :message "hello"
-    :values [1 2 3]
-    :active t))`,
-    output: `let result = {
-  "message": "hello",
-  "values": [1, 2, 3],
-  "active": true
-};`,
+    source: `(import "./collection.eli" assoc)
+
+(defconst before {:name "Eliscript"})
+(defconst after
+  (assoc before :status :stable))
+
+(print (equal before {:name "Eliscript"}))`,
+    output: `before remains unchanged
+after shares the unchanged HAMT path
+keys use Eliscript value equality
+hashes are cached on immutable roots`,
   },
   interop: {
-    source: `(js-call [1 2 3]
+    source: `(js-call (js-array 1 2 3)
   :map
   (lambda (value)
     (* value 2)))`,
-    output: `[1, 2, 3]["map"](
-  (value) => {
-    return value * 2;
-  }
-);`,
+    output: `native container requested explicitly
+receiver-preserving method call
+ordinary JavaScript callback boundary
+standard ESM host behavior`,
   },
 };
 

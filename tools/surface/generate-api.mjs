@@ -228,7 +228,7 @@ export function renderApiHtml(index) {
           <a href="getting-started.html">Start</a>
           <a href="language.html">Language</a>
           <a href="api.html" aria-current="page">API</a>
-          <a class="nav-optional" href="publishing.html">Publishing</a>
+          <a class="nav-optional" href="specifications.html">Specs</a>
           <a class="nav-optional" href="roadmap.html">Roadmap</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
         </div>

@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Eliscript is an Emacs Lisp-flavored language that compiles to modern ECMAScript modules.">
+    <meta name="description" content="Eliscript is an Emacs-first functional Lisp that compiles to readable, standard ECMAScript modules.">
     <meta name="theme-color" content="#181916">
     <meta property="og:title" content="Eliscript">
-    <meta property="og:description" content="A Lisp-shaped path from Emacs to modern ECMAScript.">
+    <meta property="og:description" content="Persistent Lisp values, a self-hosted compiler, and standard ECMAScript reach.">
     <meta property="og:image" content="pages/assets/eliscript-hero.jpg">
-    <title>Eliscript — Emacs Lisp to ECMAScript</title>
+    <title>Eliscript · A functional Lisp for ECMAScript</title>
     <link rel="icon" type="image/png" href="pages/assets/favicon.png">
     <link rel="apple-touch-icon" href="pages/assets/eliscript-logo.png">
     <link rel="stylesheet" href="pages/assets/site.css">
@@ -26,7 +26,7 @@
           <a href="pages/getting-started.html">Start</a>
           <a href="pages/language.html">Language</a>
           <a href="pages/api.html">API</a>
-          <a class="nav-optional" href="pages/publishing.html">Publishing</a>
+          <a class="nav-optional" href="pages/specifications.html">Specs</a>
           <a class="nav-optional" href="pages/roadmap.html">Roadmap</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
         </div>
@@ -39,86 +39,95 @@
           <span class="hero-logo" aria-hidden="true">
             <img src="pages/assets/eliscript-logo-light.png" alt="">
           </span>
-          <p class="eyebrow">Emacs Lisp → ECMAScript</p>
+          <p class="eyebrow">Emacs-first · standard ECMAScript</p>
           <h1 id="hero-title">Eliscript</h1>
           <p class="hero-copy">
-            A Lisp-shaped language compiled by Emacs into readable, standard ESM.
-            Built to grow beyond Emacs Lisp without losing its programmable spirit.
+            A functional Lisp with persistent values, a compiler written in
+            itself, and direct access to the modern JavaScript ecosystem.
           </p>
           <div class="hero-actions">
             <a class="button button-light" href="pages/getting-started.html">Get started</a>
-            <a class="button button-outline-light" href="https://github.com/liuchong/eliscript">View source</a>
+            <a class="button button-outline-light" href="pages/language.html">Explore the language</a>
           </div>
+        </div>
+      </section>
+
+      <section class="status-band" aria-label="Checked project status">
+        <div class="status-grid">
+          <div class="status-metric"><strong>175</strong><span>stable specifications</span></div>
+          <div class="status-metric"><strong>584</strong><span>checked library exports</span></div>
+          <div class="status-metric"><strong>35/35</strong><span>core criteria retained passing</span></div>
+          <div class="status-metric"><strong>2</strong><span>convergent compiler generations</span></div>
         </div>
       </section>
 
       <section class="band band-white" aria-labelledby="pipeline-title">
         <div class="section-shell">
           <div class="section-heading">
-            <h2 id="pipeline-title">A small compiler with a long path.</h2>
+            <h2 id="pipeline-title">One language, two compiler generations.</h2>
             <p>
-              The first generation is intentionally direct: Emacs reads Lisp forms,
-              Eliscript emits standard modules, and Bun or a browser runs the result.
+              Plain Emacs builds the seed. The seed builds the compiler written
+              in Eliscript. Both lower the same checked program through explicit
+              IR into readable, source-mapped ESM.
             </p>
           </div>
           <div class="pipeline" aria-label="Compilation pipeline">
             <article class="pipeline-step">
               <span class="step-number">01</span>
-              <h3>Write Lisp</h3>
-              <p>Use lexical bindings, functions, data forms, modules, and explicit JavaScript interop.</p>
+              <h3>Read Lisp</h3>
+              <p>Parse located forms, persistent literals, modules, macros, and explicit host boundaries.</p>
             </article>
             <article class="pipeline-step">
               <span class="step-number">02</span>
-              <h3>Expand and analyze</h3>
-              <p>Emacs interprets deterministic compile-time macros, resolves lexical bindings, and rejects invalid modules before output.</p>
+              <h3>Prove semantics</h3>
+              <p>Expand deterministically, resolve lexical identities, validate ownership, and reject invalid control flow.</p>
             </article>
             <article class="pipeline-step">
               <span class="step-number">03</span>
-              <h3>Emit ESM</h3>
-              <p>A dedicated backend emits explicit IR as readable, inspectable modules without reconstructing source forms.</p>
+              <h3>Lower explicit IR</h3>
+              <p>Both generations produce the same versioned representation, diagnostics, and Source Map locations.</p>
             </article>
             <article class="pipeline-step">
               <span class="step-number">04</span>
-              <h3>Run anywhere</h3>
-              <p>Bun is the reference host; the React counter also runs interactively in the browser through Vite.</p>
+              <h3>Run standard ESM</h3>
+              <p>Generated modules use ordinary JavaScript imports and execute under Bun, Node, browsers, and compatible tools.</p>
             </article>
           </div>
         </div>
       </section>
 
-      <section class="band band-dark" aria-labelledby="compiler-title">
+      <section class="band band-dark" aria-labelledby="semantics-title">
         <div class="section-shell">
           <div class="section-heading">
-            <h2 id="compiler-title">See the compiler think.</h2>
+            <h2 id="semantics-title">Small forms, strong guarantees.</h2>
             <p>
-              The output is ordinary ECMAScript. Switch between real language forms
-              to inspect how the current seed compiler lowers them.
+              Switch between language mechanisms. The right pane describes the
+              behavior the compiler and runtime preserve across both hosts.
             </p>
           </div>
           <div class="code-lab">
             <div class="code-toolbar">
-              <span class="code-toolbar-label">compiler / vertical slice</span>
-              <div class="segments" role="tablist" aria-label="Code examples">
-                <button class="segment" type="button" role="tab" aria-selected="true" data-example="factorial">factorial</button>
-                <button class="segment" type="button" role="tab" aria-selected="false" data-example="data">data</button>
+              <span class="code-toolbar-label">language / executable semantics</span>
+              <div class="segments" role="tablist" aria-label="Language examples">
+                <button class="segment" type="button" role="tab" aria-selected="true" data-example="recur">recur</button>
+                <button class="segment" type="button" role="tab" aria-selected="false" data-example="data">persistent data</button>
                 <button class="segment" type="button" role="tab" aria-selected="false" data-example="interop">interop</button>
               </div>
             </div>
             <div class="code-grid">
               <div class="code-pane">
                 <span class="code-label">Eliscript</span>
-                <pre><code data-source-code>(defun factorial (n)
-  (if (&lt;= n 1)
-      1
-    (* n (factorial (1- n)))))</code></pre>
+                <pre><code data-source-code>(defun sum-to (n total)
+  (if (= n 0)
+      total
+    (recur (1- n) (+ total n))))</code></pre>
               </div>
               <div class="code-pane">
-                <span class="code-label">ECMAScript</span>
-                <pre><code data-output-code>function factorial(n) {
-  return (__eliscript_truthy(n &lt;= 1)
-    ? 1
-    : n * factorial(n - 1));
-}</code></pre>
+                <span class="code-label">Runtime contract</span>
+                <pre><code data-output-code>tail position verified
+arguments evaluated once, left to right
+function frame reused as a loop
+constant JavaScript stack</code></pre>
               </div>
             </div>
           </div>
@@ -128,43 +137,43 @@
       <section class="band" aria-labelledby="core-title">
         <div class="section-shell">
           <div class="section-heading">
-            <h2 id="core-title">The core that exists today.</h2>
+            <h2 id="core-title">A language core built around values.</h2>
             <p>
-              M0 through M5 are complete. This is a working compiler with a
-              deliberately small, documented language surface plus a portable,
-              reproducibly self-hosted compiler written in itself.
+              Immutable data, open abstractions, deterministic tooling, and
+              explicit host access form one coherent system. Frameworks remain
+              consumers, never compiler architecture.
             </p>
           </div>
           <div class="feature-grid">
             <article class="feature">
-              <span class="feature-kicker">Bindings</span>
-              <h3>Lexical by design</h3>
-              <p>Module, function, and local scopes are validated before emission, including mutability and name collisions.</p>
+              <span class="feature-kicker">Persistent data</span>
+              <h3>Share structure, not mutation</h3>
+              <p>Linked Lists, 32-way Vectors, HAMT Maps and Sets, Queues, AVL-sorted collections, Records, metadata, and value hashing.</p>
             </article>
             <article class="feature">
-              <span class="feature-kicker">Control</span>
-              <h3>Lisp truthiness</h3>
-              <p><code>if</code>, <code>cond</code>, <code>while</code>, <code>and</code>, and <code>or</code> preserve Lisp value semantics.</p>
+              <span class="feature-kicker">Construction</span>
+              <h3>Transient when isolated</h3>
+              <p>Owner-token Vector, Map, and Set builders reduce allocation while the compiler rejects lifecycle escape and reuse.</p>
             </article>
             <article class="feature">
-              <span class="feature-kicker">Data</span>
-              <h3>Host-friendly values</h3>
-              <p>Host-friendly values plus composable portable libraries for transforms, matching, indexing, grouping, and worker-executed module graphs.</p>
+              <span class="feature-kicker">Abstraction</span>
+              <h3>Protocols stay open</h3>
+              <p>Collection protocols, transducers, lazy sequences, multimethods, and external type extensions compose without hidden framework rules.</p>
             </article>
             <article class="feature">
-              <span class="feature-kicker">Modules</span>
-              <h3>Standard ESM</h3>
-              <p>Standard ESM imports plus graph-verified portable edges and dependency-pruned local source builds.</p>
+              <span class="feature-kicker">Compiler</span>
+              <h3>Self-hosted and reproducible</h3>
+              <p>Reader, expansion, analysis, IR, emission, project planning, formatting, and evaluation converge across seed and self-hosted builds.</p>
             </article>
             <article class="feature">
-              <span class="feature-kicker">React</span>
-              <h3>Elements without a wrapper</h3>
-              <p>Components, props, children, hooks, events, and fragments compile directly to the automatic JSX runtime.</p>
+              <span class="feature-kicker">Emacs</span>
+              <h3>Editor and execution loop</h3>
+              <p>A major mode, Flymake diagnostics, persistent REPL, project watch, and a resilient worker return JavaScript performance to Emacs workflows.</p>
             </article>
             <article class="feature">
-              <span class="feature-kicker">Publishing</span>
-              <h3>Org into React</h3>
-              <p>Pure Emacs turns validated Org articles into deterministic ESM for a custom Eliscript React site with live content updates.</p>
+              <span class="feature-kicker">Host boundary</span>
+              <h3>JavaScript remains visible</h3>
+              <p>Standard ESM, packages, promises, native containers, browser capabilities, and host calls are explicit and directly interoperable.</p>
             </article>
           </div>
         </div>
@@ -172,27 +181,19 @@
 
       <section class="band band-cyan">
         <div class="section-shell roadmap-strip">
-          <h2>Self-hosted. Growing its own library.</h2>
+          <h2>The maturity baseline is real. The language keeps moving.</h2>
           <div>
             <p>
-              Symbol mapping, serializable syntax, reading, deterministic macro
-              expansion, lexical analysis, explicit IR lowering, direct ESM,
-              Source Maps, and the compiler driver are written in Eliscript.
-              The generated compiler reproduces itself byte-for-byte, and a
-              measured long-lived worker executes statically checked
-              <code>defportable</code> workloads for Emacs with module caching,
-              automatic recovery, and source-mapped diagnostics. Portable
-              sequence, text, object, and data modules now coexist with a
-              protocol-driven persistent collection core whose public protocol
-              APIs and maintained sequence/data algorithms now live in
-              Eliscript. Stack-safe
-              <code>loop</code>/<code>recur</code> now serves both functions and
-              lexical binding loops. Deterministic <code>gensym</code> and
-              trailing-<code>$</code> templates give macros collision-free local
-              bindings, and the same source graphs resolve through Vite or a
-              pure Emacs project build.
+              All 42 implementation units, 35 mandatory verification criteria,
+              and 173 stabilization units are complete in the retained core
+              evidence. Future work is tracked without retroactively inflating
+              that result; general automatic tail-call optimization begins as a
+              Draft and Pending specification.
             </p>
-            <a class="button" href="pages/roadmap.html">Read the roadmap</a>
+            <div class="button-row">
+              <a class="button" href="pages/roadmap.html">Read the roadmap</a>
+              <a class="text-link" href="pages/specifications.html">Browse specifications</a>
+            </div>
           </div>
         </div>
       </section>
@@ -200,10 +201,10 @@
 
     <footer class="site-footer">
       <div class="footer-shell">
-        <p>Eliscript · Lisp ideas, ECMAScript reach.</p>
+        <p>Eliscript · Persistent values, ECMAScript reach.</p>
         <div class="footer-links">
           <a href="pages/language.html">Language</a>
-          <a href="pages/publishing.html">Publishing</a>
+          <a href="pages/publishing.html">Applications</a>
           <a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
           <span>© <span data-year>2026</span></span>

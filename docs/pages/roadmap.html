@@ -20,7 +20,7 @@
           <a href="getting-started.html">Start</a>
           <a href="language.html">Language</a>
           <a href="api.html">API</a>
-          <a class="nav-optional" href="publishing.html">Publishing</a>
+          <a class="nav-optional" href="specifications.html">Specs</a>
           <a class="nav-optional" href="roadmap.html" aria-current="page">Roadmap</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
         </div>
@@ -31,8 +31,8 @@
       <header class="doc-hero">
         <div class="doc-hero-inner">
           <p class="eyebrow">Roadmap</p>
-          <h1>From self-hosting to a mature hosted Lisp.</h1>
-          <p class="doc-lede">The next horizon stabilizes the language, adds efficient persistent values and first-class Emacs tools, converges the compiler, and proves the result against a mandatory acceptance contract.</p>
+          <h1>A mature core with an explicit next frontier.</h1>
+          <p class="doc-lede">The retained maturity baseline closes implementation, verification, and stabilization. New language work begins as visible Draft specifications without rewriting that evidence.</p>
         </div>
       </header>
 
@@ -45,6 +45,7 @@
           <a href="#bootstrap">Bootstrap</a>
           <a href="#acceleration">Acceleration</a>
           <a href="#acceptance">Acceptance</a>
+          <a href="#next">Next frontier</a>
           <a href="#principles">Principles</a>
         </nav>
 
@@ -62,10 +63,10 @@
               <article class="milestone"><span class="milestone-id">M7</span><div><h3>Contract baseline</h3><p>Specification, evidence, public-surface, compatibility, diagnostics, and supported-platform contracts are versioned and executable.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M8</span><div><h3>Language closure</h3><p>Persistent values, stable ESM imports, explicit host interop, stack-safe loop/recur, deterministic generated names, and declared digest-tracked macro file inputs complete the language contract.</p></div><span class="status status-done">Complete</span></article>
               <article class="milestone"><span class="milestone-id">M9</span><div><h3>Compiler convergence</h3><p>Self-hosted graph planning, canonical IR and reports, deterministic incremental cache, Bun plus Node hosts, and versioned multi-entry public operations complete compiler convergence.</p></div><span class="status status-done">Complete</span></article>
-              <article class="milestone"><span class="milestone-id">M10</span><div><h3>Daily development</h3><p>The formatter, Emacs mode, project diagnostics, persistent evaluation, terminal REPL, host-neutral watch, and verified installation and troubleshooting guide complete all implementation units; final matrix acceptance remains separate.</p></div><span class="status status-done">Implementation complete</span></article>
-              <article class="milestone"><span class="milestone-id">M11</span><div><h3>Data and libraries</h3><p>Persistent collections, protocols, transducers, the generated 29-module API index, and explicit browser and worker capability packages complete all implementation units; compatibility stabilization remains.</p></div><span class="status status-done">Implementation complete</span></article>
-              <article class="milestone"><span class="milestone-id">M12</span><div><h3>Reliability</h3><p>The 100,000-input fuzz contract, exact 1,000-module scale suite, 100,000-request real Emacs worker lifecycle soak, hostile-boundary security matrix, source-bound performance budgets, and closed repository-integrity audit complete all implementation units; final acceptance remains separate.</p></div><span class="status status-done">Implementation complete</span></article>
-              <article class="milestone"><span class="milestone-id">M13</span><div><h3>Real-world proof</h3><p>Core acceptance and local onboarding are complete; compatibility rehearsal and the final maturity audit remain.</p></div><span class="status status-next">In progress</span></article>
+              <article class="milestone"><span class="milestone-id">M10</span><div><h3>Daily development</h3><p>The formatter, Emacs mode, project diagnostics, persistent evaluation, terminal REPL, host-neutral watch, and verified onboarding workflow are complete.</p></div><span class="status status-done">Complete</span></article>
+              <article class="milestone"><span class="milestone-id">M11</span><div><h3>Data and libraries</h3><p>Persistent collections, protocols, transducers, 43 standard-library modules with 584 checked exports, and explicit platform capabilities are complete and stabilized.</p></div><span class="status status-done">Complete</span></article>
+              <article class="milestone"><span class="milestone-id">M12</span><div><h3>Reliability</h3><p>The 100,000-input fuzz corpus, 1,000-module scale suite, 100,000-request Emacs worker soak, security matrix, performance budgets, and repository-integrity audit are complete.</p></div><span class="status status-done">Complete</span></article>
+              <article class="milestone"><span class="milestone-id">M13</span><div><h3>Core acceptance</h3><p>All 42 implementation units, 35 mandatory verification criteria, and 173 compatibility stabilization units are complete in the retained evidence.</p></div><span class="status status-done">35/35 pass</span></article>
             </div>
           </section>
 
@@ -78,7 +79,7 @@
 
           <section id="persistent-data">
             <h2>A stronger data model</h2>
-            <p>Eliscript will keep JavaScript directly reachable while making immutable persistent collections the default composite values. Vectors use a 32-way bit-partitioned trie with a tail, maps and sets use a HAMT, and transient owner tokens make isolated bulk construction efficient without exposing mutable shared values.</p>
+            <p>Eliscript keeps JavaScript directly reachable while making immutable persistent collections the default composite values. Lists use linked nodes, Vectors use a 32-way bit-partitioned trie with a tail, Maps and Sets use a HAMT, Queues compose persistent Vectors, and sorted collections use structurally shared AVL trees.</p>
             <p>Focused protocols define counting, lookup, association, traversal, reduction, equality, hashing, and transient construction. Transducers compose collection transformations without allocating intermediate arrays. Native JavaScript arrays and objects remain explicit interop types with shallow and deep conversion.</p>
             <div class="callout"><p>The goal is host symbiosis: improve JavaScript's programming model without hiding its libraries or runtime. The complete algorithms, complexity targets, migration steps, and structural acceptance checks are in <a href="https://github.com/liuchong/eliscript/blob/master/specs/0041-host-symbiosis-and-persistent-data.md">specification 0041</a>.</p></div>
           </section>
@@ -93,7 +94,7 @@ Emacs Lisp seed + compiler.eli → compiler.js
 
 Generation 2
 compiler.js + compiler.eli → next-compiler.js</code></pre>
-            <p>Self-hosting is complete only when both compilers pass the same conformance suite and the generated compiler can reproduce itself without semantic drift.</p>
+            <p>Both compiler generations pass the same conformance suite, and the generated compiler reproduces itself without semantic drift.</p>
             <div class="callout"><p>Generation 1 builds Generation 2, and Generation 2 builds the same Generation 3. All ten ESM modules and all ten Source Maps match byte-for-byte.</p></div>
           </section>
 
@@ -107,9 +108,15 @@ compiler.js + compiler.eli → next-compiler.js</code></pre>
 
           <section id="acceptance">
             <h2>Final acceptance is all or nothing</h2>
-            <p>The maturity target is reached only when AC-01 through AC-24 and PD-01 through PD-11 pass in one clean, traceable run. The gate covers stable semantics, seed and self-hosted parity, reproducible bootstrap, deterministic projects, formatter and Emacs mode behavior, source-level debugging, persistent collection correctness and structural bounds, host portability, fuzzing, scale, security, worker soak, documentation, and real applications.</p>
-            <p>Two maintained Emacs workloads must each demonstrate at least a 2x median warm end-to-end speedup over equivalent Emacs Lisp implementations across 30 runs. At least one must use the persistent collection and transducer layer. Engine-only timing does not satisfy the requirement.</p>
-            <div class="callout"><p>A failed mandatory criterion means the final goal has not been reached. Milestone count, feature count, and elapsed time do not replace acceptance evidence.</p></div>
+            <p>The retained maturity target records AC-01 through AC-24 and PD-01 through PD-11 passing in one clean, traceable run. The gate covers stable semantics, seed and self-hosted parity, reproducible bootstrap, deterministic projects, formatter and Emacs mode behavior, source-level debugging, persistent collection correctness and structural bounds, host portability, fuzzing, scale, security, worker soak, and documentation.</p>
+            <p>Two maintained Emacs analysis workloads each exceed the required 2x median warm end-to-end speedup over equivalent Emacs Lisp implementations across 30 runs. The evidence includes persistent collections and transducers, and measures the complete transport and client path rather than engine-only timing.</p>
+            <div class="callout"><p>The current canonical report retains 35/35 passing criteria and no blocking defects. That result belongs to its recorded source identity; a changed revision must refresh its compatibility evidence before making the same host-matrix claim.</p></div>
+          </section>
+
+          <section id="next">
+            <h2>The next frontier</h2>
+            <p>General automatic tail-call optimization is now tracked by <a href="https://github.com/liuchong/eliscript/blob/master/specs/0180-general-tail-call-optimization.md">specification 0180</a>. Direct self-tail calls and closed mutual-recursion groups are separate candidates. Both must preserve argument evaluation, arity, destructuring, exceptions, async ordering, Source Maps, interoperation, and compiler parity.</p>
+            <p>Until that Draft becomes an implemented and stabilized contract, explicit <code>recur</code> remains the preferred self-recursion mechanism and <code>trampoline</code> remains the mechanism for dynamic or mutual thunk chains.</p>
           </section>
 
           <section id="principles">

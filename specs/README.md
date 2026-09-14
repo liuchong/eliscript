@@ -29,20 +29,21 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 179 specifications.
+The registry currently contains 180 specifications.
 
 | Classification | Count |
 | --- | ---: |
-| Draft design | 1 |
+| Draft design | 2 |
 | Accepted design | 2 |
 | Stable design | 175 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
 | Implemented | 175 |
+| Pending implementation | 1 |
 | Superseded implementation | 1 |
 
 Compatibility Baseline 2 separately classifies 175 specifications as stable,
-none as provisional, 3 as planning, and 1 as superseded. That baseline is
+none as provisional, 4 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -83,8 +84,9 @@ source-mark location, direct binary comparison emission, bounded reader
 character classification, and ordered Source Map cursors now remove four more
 generated hot paths while preserving independent semantic and historical
 baselines. P4 now closes with source-bound transient bulk-builder evidence:
-Vector, Map, and Set are value-equivalent to repeated persistent construction
-while recording 12.329933x, 17.486689x, and 17.937565x median speedups.
+Vector, Map, and Set are value-equivalent to repeated persistent construction,
+every maintained builder exceeds its 1.5x median-speedup floor, and each
+allocates no more than one third of the persistent-path nodes.
 The P6 accelerated-operation service now owns reference/worker routing,
 continuous result verification, module generations, cancellation, stale-buffer
 rejection, and transactional application. Its maintained index integration
@@ -130,10 +132,10 @@ recoverable diagnostics, prompt policy, and equivalent Bun/Node behavior.
 A versioned project watch stream now normalizes content-level source changes
 across Bun and Node, while the Emacs mode shares one process per project and
 refreshes matching Flymake buffers. The verified onboarding guide executes the
-documented project, compiler, host, REPL, and editor path. The complete AC-12
-matrix and M10 exit audit remain formal acceptance work.
+documented project, compiler, host, REPL, and editor path. The AC-12 matrix and
+M10 exit audit are complete in the retained acceptance evidence.
 
-M11 has all 6/6 implementation units complete. Its 33-module, 416-export API
+M11 has all 6/6 implementation units complete. Its 43-module, 584-export API
 index is generated from explicit metadata and the checked public surface.
 The portable library now includes callable value-dispatched multimethods with
 value-semantic keys, immutable derivation hierarchies, transitive preferences,
@@ -165,8 +167,8 @@ and protocols, and physical output isolation across Emacs seed, Bun, and Node.
 AC-20 is complete. Source-bound performance evidence retains three independent
 compiler, project-build, worker, and persistent-data workload runs under fixed
 budgets. Repository integrity checks dependency boundaries, regenerated
-artifacts, and every benchmark source binding. The final M12 exit audit remains
-formal acceptance work.
+artifacts, and every benchmark source binding. The M12 exit audit is complete
+in the retained acceptance evidence.
 
 M13 has completed all 5/5 implementation units through specification 0138. Its
 versioned corpus derives all 35 mandatory AC/PD criteria from normative
@@ -196,8 +198,8 @@ AC-07 proof as twenty direct local compiler builds and complete core acceptance
 executions with one versioned identity. Retained run `m13-04` completes the
 criterion with twenty clean, operational, identity-equivalent executions.
 Specification 0146 closes AC-05 with a source-bound compiler parity corpus over
-65 stable compiler-relevant features, 119 valid fixtures, 93 diagnostics, all
-13 bootstrap modules, all 57 public IR kinds, and seven observable parity
+71 stable compiler-relevant features, 122 valid fixtures, 110 diagnostics, all
+13 bootstrap modules, all 58 public IR kinds, and seven observable parity
 dimensions. Specification 0147 now derives a complete stable compatibility
 corpus over 173 stable core features, 679 evidence locators, 101 core fixtures,
 and all three migration records. Its provisional inventory is empty and AC-02

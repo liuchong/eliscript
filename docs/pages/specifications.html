@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="How Eliscript specifications define language behavior, implementation state, compatibility, and evidence.">
+    <meta name="theme-color" content="#f2f0e8">
+    <title>Specifications · Eliscript</title>
+    <link rel="icon" type="image/png" href="assets/favicon.png">
+    <link rel="apple-touch-icon" href="assets/eliscript-logo.png">
+    <link rel="stylesheet" href="assets/site.css">
+    <script defer src="assets/site.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <nav class="nav-shell" aria-label="Primary navigation">
+        <a class="brand" href="../index.html"><img class="brand-mark" src="assets/eliscript-logo.png" alt=""><span>Eliscript</span></a>
+        <div class="nav-links">
+          <a href="getting-started.html">Start</a>
+          <a href="language.html">Language</a>
+          <a href="api.html">API</a>
+          <a class="nav-optional" href="specifications.html" aria-current="page">Specs</a>
+          <a class="nav-optional" href="roadmap.html">Roadmap</a>
+          <a href="https://github.com/liuchong/eliscript">GitHub</a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <header class="doc-hero">
+        <div class="doc-hero-inner">
+          <p class="eyebrow">Design authority</p>
+          <h1>Behavior is specified before it becomes a promise.</h1>
+          <p class="doc-lede">Every language, compiler, runtime, library, and toolchain capability has an explicit owner, delivery state, and executable evidence boundary.</p>
+        </div>
+      </header>
+
+      <div class="doc-shell">
+        <nav class="doc-nav" aria-label="On this page">
+          <p class="doc-nav-title">On this page</p>
+          <a href="#snapshot">Snapshot</a>
+          <a href="#states">States</a>
+          <a href="#paths">Reading paths</a>
+          <a href="#evidence">Evidence</a>
+          <a href="#future">Future work</a>
+          <a href="https://github.com/liuchong/eliscript/blob/master/specs/README.md">Full catalog</a>
+        </nav>
+
+        <article class="doc-content">
+          <section id="snapshot">
+            <h2>Current registry snapshot</h2>
+            <table class="fact-table">
+              <thead><tr><th>Classification</th><th>Count</th></tr></thead>
+              <tbody>
+                <tr><td>All specifications</td><td>180</td></tr>
+                <tr><td>Stable and implemented</td><td>175</td></tr>
+                <tr><td>Accepted design</td><td>2</td></tr>
+                <tr><td>Draft design</td><td>2</td></tr>
+                <tr><td>Implementation in progress</td><td>3</td></tr>
+                <tr><td>Pending implementation</td><td>1</td></tr>
+                <tr><td>Superseded</td><td>1</td></tr>
+              </tbody>
+            </table>
+            <div class="callout"><p>The stable baseline contains 175 specifications and 175 conformance features. Planning and Draft records are visible, but they contribute no implementation, verification, stabilization, or acceptance credit.</p></div>
+          </section>
+
+          <section id="states">
+            <h2>Two independent states</h2>
+            <p>A specification separates design maturity from implementation delivery. This prevents an approved idea from being presented as working software and prevents working experiments from silently becoming compatibility promises.</p>
+            <table class="fact-table">
+              <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td><code>Draft</code></td><td>The design is under investigation and may change freely.</td></tr>
+                <tr><td><code>Accepted</code></td><td>The direction is approved but is not yet compatibility-frozen.</td></tr>
+                <tr><td><code>Stable</code></td><td>The behavior belongs to the maintained compatibility contract.</td></tr>
+                <tr><td><code>Pending</code></td><td>No implementation credit is claimed.</td></tr>
+                <tr><td><code>In progress</code></td><td>Some planned acceptance units remain open.</td></tr>
+                <tr><td><code>Implemented</code></td><td>The required behavior and named evidence are present.</td></tr>
+              </tbody>
+            </table>
+          </section>
+
+          <section id="paths">
+            <h2>Read by intent</h2>
+            <div class="milestones">
+              <article class="milestone"><span class="milestone-id">Core</span><div><h3>Language and compiler</h3><p>Start with the language boundary, implemented forms, lexical analysis, explicit IR, direct ESM emission, and Source Maps.</p><p><a href="https://github.com/liuchong/eliscript/blob/master/specs/0001-language-and-toolchain.md">0001</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0003-core-language-v0.md">0003</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0007-intermediate-representation.md">0007</a></p></div><span class="status status-done">Stable core</span></article>
+              <article class="milestone"><span class="milestone-id">Data</span><div><h3>Persistent values</h3><p>Follow the host-symbiosis design into Vector tries, Lists, HAMT Maps and Sets, Transients, Queues, Records, sorted collections, and the million-value exit audit.</p><p><a href="https://github.com/liuchong/eliscript/blob/master/specs/0041-host-symbiosis-and-persistent-data.md">0041</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0078-persistent-collection-core-exit-audit.md">0078</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0175-persistent-sorted-collections.md">0175</a></p></div><span class="status status-done">Implemented</span></article>
+              <article class="milestone"><span class="milestone-id">Host</span><div><h3>Self-hosting and Emacs</h3><p>Read the bootstrap foundation, self-hosted compiler, worker protocol, accelerated operation service, and measured Emacs reinvestment.</p><p><a href="https://github.com/liuchong/eliscript/blob/master/specs/0013-bootstrap-foundation.md">0013</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0019-self-hosted-compiler.md">0019</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0105-emacs-analysis-performance-reinvestment.md">0105</a></p></div><span class="status status-done">Implemented</span></article>
+              <article class="milestone"><span class="milestone-id">Gate</span><div><h3>Maturity and acceptance</h3><p>The roadmap defines denominators; the compatibility corpus, documentation contract, retained runs, and final manifest provide the evidence.</p><p><a href="https://github.com/liuchong/eliscript/blob/master/specs/0040-maturity-roadmap.md">0040</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0134-versioned-core-acceptance-corpus.md">0134</a> · <a href="https://github.com/liuchong/eliscript/blob/master/specs/0138-versioned-final-acceptance-artifacts.md">0138</a></p></div><span class="status status-done">35/35</span></article>
+            </div>
+          </section>
+
+          <section id="evidence">
+            <h2>Executable evidence</h2>
+            <p>The registry is checked against conformance ownership, source locators, the public surface, generated API metadata, compatibility classifications, diagnostics, compiler parity, documentation, and repository integrity. Generated artifacts carry source identities so stale reports cannot silently certify changed code.</p>
+            <pre><code>bun run check:contracts
+bun run progress
+make test-core
+make byte-compile</code></pre>
+            <div class="callout callout-coral"><p>A retained passing report proves its recorded source identity. Editing a specification, test, document, or bound implementation requires regenerating the affected evidence before the new revision can claim the same matrix result.</p></div>
+          </section>
+
+          <section id="future">
+            <h2>Future work stays explicit</h2>
+            <p><a href="https://github.com/liuchong/eliscript/blob/master/specs/0180-general-tail-call-optimization.md">Specification 0180</a> records general automatic tail-call optimization as Draft and Pending. Existing explicit <code>recur</code> and standard-library <code>trampoline</code> behavior remains stable; the proposal receives no current progress credit.</p>
+            <p>Application projects such as browser UI, publishing, and blog generators are kept outside the core denominator. They can prove usability through public ESM boundaries without changing what the language must be.</p>
+          </section>
+        </article>
+      </div>
+    </main>
+
+    <footer class="site-footer"><div class="footer-shell"><p>Eliscript · Specifications</p><div class="footer-links"><a href="language.html">Language</a><a href="roadmap.html">Roadmap</a><a href="publishing.html">Applications</a><a href="https://github.com/liuchong/eliscript/blob/master/LICENSE">GPL-3.0+</a><span>© <span data-year>2026</span></span></div></div></footer>
+  </body>
+</html>

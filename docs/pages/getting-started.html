@@ -20,7 +20,7 @@
           <a href="getting-started.html" aria-current="page">Start</a>
           <a href="language.html">Language</a>
           <a href="api.html">API</a>
-          <a class="nav-optional" href="publishing.html">Publishing</a>
+          <a class="nav-optional" href="specifications.html">Specs</a>
           <a class="nav-optional" href="roadmap.html">Roadmap</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
         </div>
@@ -43,8 +43,8 @@
           <a href="#compile">Compile</a>
           <a href="#run">Run</a>
           <a href="#project">Project</a>
-          <a href="#react">React</a>
-          <a href="#publishing">Publishing</a>
+          <a href="#persistent">Persistent data</a>
+          <a href="#applications">Applications</a>
           <a href="#bootstrap">Bootstrap</a>
           <a href="#worker">Worker</a>
           <a href="#test">Test</a>
@@ -95,8 +95,24 @@ bun run dist/project/examples/stdlib-cli/main.mjs</code></pre>
             <p>Timings are observational and never enter the deterministic manifest or cache identity. Without <code>--json</code>, successful builds continue to print only the generated entry path.</p>
           </section>
 
-          <section id="react">
-            <h2>Run the React counter</h2>
+          <section id="persistent">
+            <h2>Use persistent values</h2>
+            <pre><code>(module collections
+  (import "../stdlib/core/collection.eli" assoc lookup)
+
+  (defconst original {:name "Eliscript" :tags #{:lisp :esm}})
+  (defconst updated (assoc original :status :stable))
+
+  (print (lookup original :status :missing))
+  (print (lookup updated :status)))</code></pre>
+            <p>Vector, Map, Set, List, Queue, Record, and sorted collection values are immutable. Updates return a new root while sharing unchanged internal structure. Generic collection operations dispatch through open protocols, and Transient builders provide an isolated high-throughput construction path for Vector, Map, and Set.</p>
+            <p><a class="button" href="language.html#collections">Inspect collection semantics</a></p>
+          </section>
+
+          <section id="applications">
+            <h2>Run optional applications</h2>
+            <p>Application examples consume public ESM and host boundaries. They are useful interoperability probes, but no framework or bundler is part of the language compiler, runtime, standard library, or core maturity result.</p>
+            <h3>React counter</h3>
             <pre><code>bun run compile:react-counter
 bun run react-counter</code></pre>
             <p>The first command emits a source-mapped ESM module through <code>react/jsx-runtime</code>. The second renders it with <code>react-dom/server</code>, proving the generated element tree without a bundler.</p>
@@ -104,16 +120,14 @@ bun run react-counter</code></pre>
             <pre><code>bun run dev:react-counter
 bun run build:react-counter</code></pre>
             <p>The Vite adapter compiles <code>.eli</code> modules, composes source maps, handles CSS and image assets, and enables React Fast Refresh.</p>
-          </section>
-
-          <section id="publishing">
-            <h2>Publish Org content</h2>
+            <h3>Org publishing</h3>
             <p>Export the example articles through Emacs as a deterministic ESM data module:</p>
             <pre><code>bun run org:export</code></pre>
             <p>Run the fully custom React publishing site or create its static production bundle:</p>
             <pre><code>bun run dev:org-site
 bun run build:org-site</code></pre>
-            <p>The application itself is written in Eliscript. Vite exposes the Org directory as <code>virtual:eliscript-org</code> and reloads article changes during development.</p>
+            <p>The application itself is written in Eliscript. Its adapter exposes the Org directory as a virtual module and reloads article changes during development.</p>
+            <p><a class="text-link" href="publishing.html">Read the optional publishing guide</a></p>
           </section>
 
           <section id="bootstrap">
@@ -146,8 +160,8 @@ bun run build:org-site</code></pre>
           <section id="test">
             <h2>Run the test suite</h2>
             <pre><code>bun run test</code></pre>
-            <p>This runs the Emacs ERT suite, Vite adapter tests, public CLI fixtures, deterministic snapshots, source-map validation, runtime execution, React server rendering, and a production browser build.</p>
-            <div class="callout callout-coral"><p>The portable standard library and protocol-driven persistent collection core run through the same Eliscript module pipeline. Source graphs execute through Vite or as ordinary generated ESM trees.</p></div>
+            <p>This runs the Emacs ERT suite, compiler and runtime tests, public CLI fixtures, deterministic snapshots, source-map validation, Bun/Node execution, and separately partitioned application checks.</p>
+            <div class="callout callout-coral"><p>The portable standard library and protocol-driven persistent collection core run through the same Eliscript module pipeline. Application adapters are tested separately and contribute no core maturity credit.</p></div>
           </section>
         </article>
       </div>

@@ -20,6 +20,7 @@ test-core: check-contracts
 		tests/stable-compatibility-corpus.test.mjs \
 		tests/public-surface.test.mjs \
 		tests/api-index.test.mjs \
+		tests/pages-site.test.mjs \
 		tests/compatibility-rehearsal.test.mjs \
 		tests/onboarding-docs.test.mjs \
 		tests/clean-project-workflow.test.mjs \

@@ -19,11 +19,12 @@ operations, and IR kinds.
 
 ## Values And Collections
 
-Numbers and strings use JavaScript scalar representation. Lists, Vectors,
-Maps, Sets, Keywords, and Symbols are immutable Eliscript values with value
-equality and deterministic hashing where specified. Their canonical source
-constructors are `list`, `vector`, `hash-map`, and `hash-set`; vector, map, and
-set literals use `[...]`, `{...}`, and `#{...}`.
+Numbers and strings use JavaScript scalar representation. Lists, Vectors, Maps,
+Sets, Queues, sorted collections, Records, Keywords, and Symbols are immutable
+Eliscript values with value equality and deterministic hashing where specified.
+Canonical constructors include `list`, `vector`, `hash-map`, `hash-set`, and
+`persistent-queue`; Vector, Map, Set, and Queue literals use `[...]`, `{...}`,
+`#{...}`, and `#queue [...]`.
 
 `car`, `cdr`, and `cons` operate on persistent Lists. `nth` and `length`
 dispatch through collection protocols. Native JavaScript containers are
@@ -33,6 +34,25 @@ explicit through forms such as `js-array` and are documented in
 `eq` compares identity. `equal` compares Eliscript values recursively:
 independently constructed persistent collections can be equal, `NaN` equals
 `NaN`, signed zeroes are equal, and opaque host objects remain identity-based.
+
+The default immutable collection implementations use structural sharing rather
+than full copying:
+
+| Value | Representation | Principal bound |
+| --- | --- | --- |
+| List | Singly linked persistent nodes | O(1) front operations and suffix sharing |
+| Vector | 32-way bit-partitioned trie with tail | O(log32 n) indexed updates |
+| Map | 32-way HAMT with bitmap, array, and collision nodes | O(log32 n) expected lookup and update |
+| Set | Persistent HAMT Map membership index | Map-equivalent lookup and update |
+| Queue | Persistent front and rear Vectors | Iterative FIFO progression without input mutation |
+| Sorted Map / Set | Structurally shared AVL tree | O(log n) update and bounded range traversal |
+
+`transient`, `conj!`, `assoc!`, `dissoc!`, and `persistent!` provide an
+owner-token bulk-construction phase for Vector, Map, and Set. Completion is
+one-way, and compiler ownership analysis rejects escaping or reused transient
+values. Persistent source values remain unchanged throughout construction.
+Records, metadata, canonical data text, collection protocols, transducers, and
+lazy sequences preserve the same immutable value boundary.
 
 <!-- eliscript-snippet:language-values -->
 ```elisp
@@ -182,6 +202,14 @@ The core forms are `if`, `when`, `unless`, `cond`, `case`, `condp`, `and`, `or`,
 function or loop target. Argument evaluation and loop rebinding remain
 deterministic.
 
+`recur` is the allocation-free mechanism for stack-safe self recurrence and
+lexical loops. The standard-library `trampoline` repeatedly invokes returned
+zero-argument thunks and supports dynamic or mutual recurrence without growing
+the JavaScript stack. Ordinary function calls retain ordinary JavaScript call
+semantics, including calls written in tail position. General automatic
+tail-call optimization is future work tracked by
+[specification 0180](../specs/0180-general-tail-call-optimization.md).
+
 ## Modules
 
 Every maintained source file declares a module. `import` supports named,
@@ -204,7 +232,7 @@ named output file.
 ## Compatibility Status
 
 `Stable` specifications and matching stable conformance features form the
-compatibility promise. `Accepted` behavior is implemented and tested but may
-still change before the final 1.0 freeze. Consult the
+compatibility promise. `Accepted` planning documents govern ongoing direction,
+while `Draft` work contributes no implementation or maturity credit. Consult the
 [compatibility baseline](../specs/0046-m7-compatibility-baseline.md) instead of
 inferring stability from this overview.

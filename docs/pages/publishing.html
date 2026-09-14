@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Compile Org articles with Emacs and render them in a custom Eliscript React site.">
+    <meta name="description" content="Optional Eliscript publishing applications built through public language and ESM boundaries.">
     <meta name="theme-color" content="#f2f0e8">
     <title>Publishing · Eliscript</title>
     <link rel="icon" type="image/png" href="assets/favicon.png">
@@ -20,7 +20,7 @@
           <a href="getting-started.html">Start</a>
           <a href="language.html">Language</a>
           <a href="api.html">API</a>
-          <a class="nav-optional" href="publishing.html" aria-current="page">Publishing</a>
+          <a class="nav-optional" href="specifications.html">Specs</a>
           <a class="nav-optional" href="roadmap.html">Roadmap</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
         </div>
@@ -30,9 +30,9 @@
     <main id="main">
       <header class="doc-hero">
         <div class="doc-hero-inner">
-          <p class="eyebrow">Org publishing · M3</p>
-          <h1>Write in Org. Design the site without limits.</h1>
-          <p class="doc-lede">Emacs compiles article metadata and HTML into deterministic ESM. Eliscript and React own the interface, with no blog framework between them.</p>
+          <p class="eyebrow">Optional application validation</p>
+          <h1>Publishing without changing the language core.</h1>
+          <p class="doc-lede">Org export and the Dogfood design consume ordinary compiler, runtime, and ESM boundaries. They prove custom applications without turning a blog stack into language architecture.</p>
         </div>
       </header>
 
@@ -44,6 +44,7 @@
           <a href="#module">Module</a>
           <a href="#vite">Vite</a>
           <a href="#site">Custom site</a>
+          <a href="#dogfood">Dogfood design</a>
         </nav>
 
         <article class="doc-content">
@@ -111,6 +112,15 @@ export default {
 bun run build:org-site</code></pre>
             <p>The example application is written in Eliscript and compiles through the same React and Vite path as any other browser program. It implements responsive article navigation, hash routes, tags, and trusted Org HTML rendering. Navigation uses portable sequence, text, and immutable object source modules for mapping, hash-prefix removal, browser options, and a prebuilt slug index with direct lookups. Drafts do not enter the production bundle.</p>
             <p><a class="button" href="https://github.com/liuchong/eliscript/tree/master/examples/org-site">Inspect the example</a></p>
+          </section>
+
+          <section id="dogfood">
+            <h2>Dogfood hybrid blog design</h2>
+            <p>The planned <code>examples/dogfood</code> project separates two Eliscript programs. A build program runs in Actions and normalizes local Markdown, authorized GitHub Issues, and authorized Discussions into static blog and comment data. A browser program renders the resulting site after compilation to standard JavaScript.</p>
+            <p>Sources can be enabled independently or together. By default, only the repository owner may publish an Issue or Discussion as an article; a configured author list can extend that authority. Other participants may comment on an existing article or use a configured external comment provider, but cannot silently promote their content into a blog post.</p>
+            <p>Comment events are coalesced before rebuilding so bursts do not consume one Actions run per reply. Static output remains the fallback, while optional dynamic enhancement can refresh comments without changing core language semantics.</p>
+            <div class="callout callout-coral"><p>Dogfood is currently a complete design package, not an implemented or production-accepted application. Its status never contributes to the Eliscript core percentage.</p></div>
+            <p><a class="button" href="https://github.com/liuchong/eliscript/tree/master/examples/dogfood">Read the Dogfood design</a></p>
           </section>
         </article>
       </div>

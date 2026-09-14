@@ -36,8 +36,8 @@ repository also carries React, Org, and optional bundler probes as replaceable
 application-level evidence. The project has completed all implementation units
 in **M8: Language Contract Closure**, **M9: Compiler and Build Convergence**,
 **M10: Daily Development Experience**, **M11: Standard and Platform
-Libraries**, and **M12: Reliability, Security, and Performance**. Final
-stability and acceptance remain open.
+Libraries**, and **M12: Reliability, Security, and Performance**. Core
+stabilization and the retained acceptance audit are complete.
 
 M13 has completed all 5 implementation units. The versioned
 [core acceptance corpus](specs/0134-versioned-core-acceptance-corpus.md)
@@ -49,21 +49,31 @@ failed criteria. The required local compatibility profile is macOS arm64 on
 Emacs 29.4 and 30.2; Linux x64 remains a visible optional target. Application
 validations are listed separately and contribute no core result.
 
+| Checked surface | Current inventory |
+| --- | ---: |
+| Specifications | 180 |
+| Stable specifications and conformance features | 175 / 175 |
+| Standard-library modules and exports | 43 / 584 |
+| Runtime modules and exports | 42 / 448 |
+| Core implementation units | 42 / 42 complete |
+| Core verification criteria | 35 / 35 passing |
+| Stabilized compatibility features | 173 / 173 |
+
 The [local onboarding exercise](specs/0135-local-onboarding.md)
 runs the documented core workflow directly on the recorded host toolchain. Its
 retained report records all six steps passing within the active-step budget.
 The [local compatibility migration rehearsal](specs/0136-local-compatibility-migration-rehearsal.md)
 rebuilds frozen core source with both compiler generations, executes it under
 Bun and Node, and verifies source-rewrite, automatic cache, and contract
-replacement transitions. It excludes application evidence and leaves the final
-AC-02 corpus closure open. The [complete core documentation set](docs/README.md)
+replacement transitions. It excludes application evidence; the later complete
+stable compatibility corpus closes AC-02. The [complete core documentation set](docs/README.md)
 now covers all eleven AC-23 categories, validates every local link, and executes
 five marked language, macro, interop, configuration, and REPL examples directly
 through maintained local commands. Canonical
 [`acceptance/manifest.json`](acceptance/manifest.json) and
-[`acceptance/report.md`](acceptance/report.md) now provide the final artifact
-shape and preserve the current incomplete result. AC-24 and final 1.0
-acceptance remain open until every mandatory criterion passes together.
+[`acceptance/report.md`](acceptance/report.md) provide the final artifact shape
+and retain a 35/35 passing core result with no blocking defects. The evidence is
+revision-bound and must be regenerated when its source identity changes.
 
 M9 compiler convergence is complete: it includes canonical project requests,
 graph planning, IR serialization, build reports, v1-to-v2 cache migration,
@@ -110,7 +120,7 @@ cancellation into the real worker, and re-export the canonical worker codecs.
 The portable library also provides directly callable value-dispatched
 multimethods with immutable derivation hierarchies, transitive preferences,
 explicit ambiguity, and persistent state snapshots.
-Compatibility stabilization and the final M11 exit audit remain open.
+Compatibility stabilization and the M11 exit audit are complete.
 
 M12 reliability work now has all six implementation units complete. The
 deterministic reader/program fuzz suite replays 100,000 grammar-aware and
@@ -137,8 +147,8 @@ repository-integrity contract now pins dependency boundaries, requires zero
 third-party packages in core roots, reproduces generated outputs, checks
 generator-owned API and workflow files, and validates the exact source-bound
 benchmark inventory. See
-[0132](specs/0132-repository-integrity-audits.md). The final quantitative M12
-exit audit remains separate from implementation completion.
+[0132](specs/0132-repository-integrity-audits.md). The quantitative M12 exit
+audit and all six implementation units are complete.
 
 Run `bun run progress` for the current evidence-derived core progress report.
 It reports implementation, verification, and stabilization independently;
