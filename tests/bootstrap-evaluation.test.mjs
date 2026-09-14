@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -24,6 +25,7 @@ const fixture = resolve(
 );
 const node = process.env.NODE ?? "node";
 const bun = process.execPath;
+const emacs = process.env.EMACS ?? "emacs";
 
 let directory;
 let compilerDirectory;
@@ -281,15 +283,22 @@ test("seed and self-hosted evaluation descriptors agree", async () => {
     },
     { kind: "module", source: moduleSource, filename: "sample.eli" },
   ];
+  const oracleInput = join(directory, "evaluation-oracle-input.json");
+  writeFileSync(oracleInput, JSON.stringify(cases));
   const seed = await run([
-    "emacs",
+    emacs,
     "--batch",
     "-Q",
     "-L",
     resolve(projectDirectory, "compiler"),
     "--script",
     evaluationOracle,
-  ], { stdin: JSON.stringify(cases) });
+  ], {
+    env: {
+      ...process.env,
+      ELISCRIPT_EVALUATION_ORACLE_INPUT: oracleInput,
+    },
+  });
   expect(seed.exitCode).toBe(0);
   expect(seed.stderr).toBe("");
 

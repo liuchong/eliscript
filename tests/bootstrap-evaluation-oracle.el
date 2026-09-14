@@ -36,9 +36,10 @@
         . ,(eliscript-diagnostic-to-alist
             (eliscript-diagnostic-from-error error-data)))))))
 
-(let* ((input
+(let* ((input-file (getenv "ELISCRIPT_EVALUATION_ORACLE_INPUT"))
+       (input
         (with-temp-buffer
-          (insert-file-contents-literally "/dev/stdin")
+          (insert-file-contents-literally input-file)
           (json-parse-buffer
            :object-type 'alist
            :array-type 'list
