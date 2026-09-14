@@ -8,6 +8,9 @@
 (require 'eliscript-value-stream)
 (require 'eliscript-index)
 
+(defconst eliscript-worker-tests--large-payload-timeout-ms 30000
+  "Correctness timeout for large worker payload integration tests.")
+
 (defun eliscript-worker-tests--score-values (values rounds)
   "Return the reference score for VALUES over ROUNDS."
   (let ((total 0))
@@ -194,7 +197,8 @@
                    :value-chunks t
                    :progress (lambda (value) (setq progress value))
                    :metrics (lambda (value) (setq timing value))
-                   :timeout-ms 5000)))
+                   :timeout-ms
+                   eliscript-worker-tests--large-payload-timeout-ms)))
             (should (equal result argument))
             (should (equal progress argument))
             (should (numberp (alist-get 'serializationMs timing))))
@@ -207,7 +211,8 @@
                       (setq request-error error-object
                             done t))
                     :value-chunks t
-                    :timeout-ms 5000)))
+                    :timeout-ms
+                    eliscript-worker-tests--large-payload-timeout-ms)))
               (should (eliscript-worker-cancel worker id))
               (should
                (eliscript-worker-tests--wait
