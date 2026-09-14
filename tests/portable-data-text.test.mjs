@@ -15,6 +15,7 @@ const stdlibDirectory = resolve(projectDirectory, "stdlib");
 const compiler = resolve(projectDirectory, "bin/eliscript");
 const bootstrapBuilder = resolve(projectDirectory, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(projectDirectory, "bin/eliscript-portable");
+const bun = process.env.BUN ?? process.execPath;
 const sources = [
   "bit",
   "identifier",
@@ -118,7 +119,7 @@ test("portable canonical data text is byte-identical and host-independent", asyn
     for (const outputDirectory of [seedDirectory, selfHostedDirectory]) {
       const modulePath = resolve(outputDirectory, "data-text.mjs");
       reports.push(await runFixture(
-        "/Users/liu/.bun/bin/bun",
+        bun,
         fixture,
         modulePath,
         ["--preload", bunPreload],
