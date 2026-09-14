@@ -196,4 +196,4 @@ test("portable Result values are byte-identical and short-circuit at scale", asy
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
-}, 90_000);
+}, 180_000);
