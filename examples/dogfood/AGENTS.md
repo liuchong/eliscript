@@ -38,6 +38,12 @@ These rules apply to the `examples/dogfood/` application project.
   another.
 - Preserve source provenance and native comment topology. Discussion replies
   must not be silently flattened into Issue-style comments.
+- Remote articles may be published only by the configured site owner or an
+  explicitly listed coauthor. Repository association, labels, categories, and
+  article metadata never grant publication authority.
+- An Issue or Discussion used as a comment carrier must be classified before
+  article selection and can never become an article through overlapping labels,
+  categories, metadata, or author authority.
 
 ## Security
 

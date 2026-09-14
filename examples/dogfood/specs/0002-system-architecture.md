@@ -39,13 +39,15 @@ owns reliable publication and host effects:
 1. Load and validate `dogfood.config.eli`.
 2. Read Markdown posts from configured repository paths.
 3. Fetch selected Issues and Discussions with complete pagination.
-4. Fetch comments only when a static snapshot policy requests them.
-5. Normalize every source into canonical post and comment values.
-6. Resolve explicit projections, aliases, ordering, and conflicts.
-7. Render Markdown through a sanitized GitHub Flavored Markdown pipeline.
-8. Compute the canonical publishable model and fingerprint.
-9. Call the compiled renderer with that model.
-10. Write into a staging directory and atomically replace the output only after
+4. Resolve configured publisher identities and classify comment carriers.
+5. Authorize remote article candidates before parsing article metadata.
+6. Fetch comments only when a static snapshot policy requests them.
+7. Normalize authorized sources into canonical post and comment values.
+8. Resolve explicit projections, aliases, ordering, and conflicts.
+9. Render Markdown through a sanitized GitHub Flavored Markdown pipeline.
+10. Compute the canonical publishable model and fingerprint.
+11. Call the compiled renderer with that model.
+12. Write into a staging directory and atomically replace the output only after
     every check passes.
 
 The builder never owns visual layout or emits ad hoc page fragments. It may emit
@@ -92,6 +94,8 @@ no provider implementation or raw provider record.
 config
   -> source plans
   -> paginated raw records
+  -> comment-carrier classification
+  -> remote article author authorization
   -> normalized posts and comment channels
   -> explicit identity resolution
   -> publishable content fingerprint
@@ -104,6 +108,12 @@ config
 
 Raw API records never reach rendering components. Renderers consume only the
 normalized model from specification 0003.
+
+Publication authorization is a builder capability and is never delegated to
+the renderer or browser. Markdown publication authority comes from the trusted
+repository revision and workflow boundary. Issue and Discussion publication
+authority comes from the global owner-plus-coauthor policy in specification
+0010.
 
 ## GitHub API Boundary
 

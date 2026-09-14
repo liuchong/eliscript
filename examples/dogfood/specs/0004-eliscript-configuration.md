@@ -25,6 +25,9 @@ files, start processes, access the network, or inspect secrets.
       :base-url "https://owner.github.io/repository/"
       :language "zh-CN"
       :theme :system}
+     :publishing
+     {:owner {:login "owner"}
+      :coauthors []}
      :sources
      [{:id :local :kind :markdown :enabled true :directory "content/posts"}
       {:id :notes :kind :issues :enabled true
@@ -37,6 +40,7 @@ files, start processes, access the network, or inspect secrets.
       :channels
       [{:id :issue-native :kind :issue :enabled true :mode :live}
        {:id :discussion-native :kind :discussion :enabled true :mode :snapshot}
+       {:id :utterances :kind :utterances :enabled false :mode :embed}
        {:id :giscus :kind :giscus :enabled false :mode :embed}]}
      :refresh
      {:articles :event
@@ -56,13 +60,38 @@ Every source has `id`, `kind`, and `enabled`.
 Markdown sources configure repository-relative directories, include/exclude
 patterns, front-matter defaults, asset roots, and required metadata.
 
-Issue sources configure repository, publication labels, state policy,
-author-association policy, API page size, and content failure policy.
+Issue sources configure repository, publication labels, state policy, API page
+size, and content failure policy. Author association may be retained as
+descriptive metadata or a non-authorizing filter.
 
 Discussion sources configure repository, categories, answer-state policy,
-author-association policy, API page size, and content failure policy.
+API page size, and content failure policy. Author association may be retained as
+descriptive metadata or a non-authorizing filter.
 
 Multiple providers of the same kind are allowed. Provider ids must be unique.
+
+## Publishing Authorization
+
+`publishing.owner` is required whenever an Issue or Discussion article source
+is enabled. The effective publisher set is exactly the owner plus the entries
+in `publishing.coauthors`. The default coauthor list is empty, so only the owner
+may publish remote articles.
+
+Each publisher descriptor has a required GitHub user `login` and may pin the
+account's immutable provider id. Logins are compared with GitHub's
+case-insensitive normalization. When an immutable id is configured, both login
+and id must match the API author record. Bot, app, deleted, and unresolved
+identities are denied article publication.
+
+Wildcards, source-local grants, repository associations, organization
+membership, collaborator status, labels, categories, reactions, and content
+metadata cannot expand the publisher set. Removing a coauthor excludes that
+author's remote articles on the next successful reconciliation; there is no
+implicit grandfathering.
+
+Markdown files are authorized by the checked repository revision and workflow
+trust boundary. Front-matter `authors` are display attribution only and do not
+grant GitHub publication authority.
 
 ## Comment Configuration
 
@@ -82,8 +111,9 @@ article itself came from that provider. Markdown and cross-provider bindings
 must be explicit.
 
 External providers implement a declared adapter protocol. Initial delivery
-targets Giscus and a generic script/embed adapter. Additional systems do not
-require a core or renderer rewrite.
+targets Utterances for Issue-backed comments, Giscus for Discussion-backed
+comments, and a generic script/embed adapter. Additional systems do not require
+a core or renderer rewrite.
 
 ## Article Refresh Policy
 
@@ -121,6 +151,8 @@ Validation is closed-schema and fail-fast:
 - all paths must be repository-relative and contained;
 - at least one article source must be enabled;
 - provider ids, post ids, channel ids, and slugs must be unique;
+- publisher logins must be unique after case normalization;
+- pinned publisher login and id must match a fetched GitHub user account;
 - live GitHub access to private repositories fails configuration validation;
 - comment bindings must match adapter requirements;
 - snapshot schedules must be represented in the consumer workflow;

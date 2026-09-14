@@ -22,6 +22,13 @@ Any non-empty subset of the three article sources is valid. Native comments,
 external comments, both, or no comments are valid when their required bindings
 are satisfied.
 
+Issue and Discussion articles are owner-only by default. Configuration may add
+an explicit list of coauthors. GitHub users outside that effective publisher
+set can participate through comments on an existing article channel or through
+a configured external provider that provisions a post-specific Issue or
+Discussion as a comment carrier. Such carriers are comments infrastructure and
+never article candidates.
+
 ## Two Programs
 
 dogfood is implemented by two executable Eliscript programs:
@@ -50,6 +57,10 @@ service or a generic CMS.
 - Treating title similarity as content identity.
 - Mirroring private comments into a public artifact without explicit policy.
 - Running one complete Pages build for every comment event.
+- Treating repository membership, collaborator association, labels, categories,
+  or article-shaped metadata as publication authority.
+- Treating an arbitrary new Issue or Discussion as a comment without an
+  explicit post binding or configured external-provider binding.
 - Owning Pages deployment inside the build Action.
 - Claiming Marketplace publication while the canonical repository is private.
 
@@ -100,6 +111,12 @@ zero posts is valid and produces an empty-state site.
 - A live enhancement failure leaves the static article intact.
 - Comment provider failure does not make article content unavailable.
 - Configuration errors fail before output replacement.
+- Remote article publication requires the original record author to be in the
+  effective publisher set at build time.
+- Users outside the publisher set can contribute comments but cannot create or
+  replace canonical article content.
+- Comment carriers are classified before article filters and never enter the
+  canonical post collection.
 - Build output is deterministic for identical normalized inputs.
 - Generated files never contain a GitHub token or private API response outside
   the explicitly publishable fields.

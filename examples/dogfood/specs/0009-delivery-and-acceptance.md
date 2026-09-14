@@ -2,7 +2,7 @@
 
 - Status: Accepted design
 - Implementation: Not started
-- Depends on: 0001 through 0008
+- Depends on: 0001 through 0008, 0010 Publishing Authorization
 
 ## Progress Model
 
@@ -10,8 +10,8 @@ Design, implementation, verification, publication, and real site acceptance are
 separate tracks. File count, line count, commit count, elapsed time, and an
 Action process exit are not completion measures.
 
-Current design status is 9/9 accepted specifications. Executable implementation
-is 0/8 gates. Final application acceptance is 0/12 criteria.
+Current design status is 10/10 accepted specifications. Executable
+implementation is 0/8 gates. Final application acceptance is 0/13 criteria.
 
 ## Implementation Gates
 
@@ -32,20 +32,22 @@ builder passes only the canonical model across the boundary.
 ### I3: Issue Provider
 
 Implement authenticated build-time pagination, publication filters, metadata,
-provenance, edit/delete reconciliation, native flat comments, public live
-loading, and Markdown post bindings.
+owner/coauthor authorization, comment-carrier exclusion, provenance,
+edit/delete reconciliation, native flat comments, public live loading, and
+Markdown post bindings.
 
 ### I4: Discussion Provider
 
 Implement GraphQL pagination, category and author filters, metadata, provenance,
-edit/delete reconciliation, nested comment snapshots, external authenticated
-live-channel bindings, and Markdown post bindings.
+owner/coauthor authorization, comment-carrier exclusion, edit/delete
+reconciliation, nested comment snapshots, external authenticated live-channel
+bindings, and Markdown post bindings.
 
 ### I5: Hybrid Identity And Comment Channels
 
 Implement seven article-source subsets, explicit projections, fail-closed
-conflicts, multi-channel presentation, Giscus, generic external adapters,
-snapshot/live/hybrid policies, and channel-local degraded states.
+conflicts, multi-channel presentation, Utterances, Giscus, generic external
+adapters, snapshot/live/hybrid policies, and channel-local degraded states.
 
 ### I6: Production Site Experience
 
@@ -82,6 +84,9 @@ The maintained suite covers:
 - more than one API page for every GitHub provider and comment topology;
 - empty sources, partial provider failure, stale snapshots, and no-change runs;
 - public and private source policies;
+- owner-only publication, multi-author allowlists, author removal, identity
+  mismatch, unauthorized projections, and comment-only users;
+- external provider Issue/Discussion carriers that overlap article filters;
 - Node 24 standalone Action execution without Emacs or Bun;
 - Chromium, Firefox, and WebKit desktop and mobile viewports;
 - JavaScript-disabled article reading;
@@ -108,6 +113,7 @@ on one source identity:
 | DF-10 | Browser and accessibility quality | Three-engine desktop/mobile acceptance and accessibility audit |
 | DF-11 | Pages operational result | Exact artifact deployment, canonical routes, refresh, and rollback proof |
 | DF-12 | Marketplace package result | Public standalone repository, accepted metadata, signed release, live listing |
+| DF-13 | Publication authorization | Owner-only default, coauthor allowlist, deny-by-default bypass corpus, and carrier isolation |
 
 DF-11 and DF-12 require explicit authorization and external-state evidence.
 Local implementation cannot mark them complete.
@@ -170,6 +176,6 @@ Every local link and checked command is executable in the exported repository.
 
 ## Completion Reporting
 
-Progress reports use the eight implementation gates and twelve final criteria
+Progress reports use the eight implementation gates and thirteen final criteria
 as denominators. They report completed, remaining, blocked, and externally gated
 units separately. Core Eliscript progress remains unchanged by dogfood work.

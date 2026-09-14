@@ -17,6 +17,7 @@ compiler, runtime, or standard-library semantics.
 | [0007](0007-action-and-marketplace-package.md) | Action And Marketplace Package | Accepted design |
 | [0008](0008-security-and-privacy.md) | Security And Privacy | Accepted design |
 | [0009](0009-delivery-and-acceptance.md) | Delivery And Acceptance | Accepted design |
+| [0010](0010-publishing-authorization.md) | Publishing Authorization | Accepted design |
 
 An accepted design is not implementation evidence. Executable status is tracked
 only by the gates and artifacts defined in specification 0009.

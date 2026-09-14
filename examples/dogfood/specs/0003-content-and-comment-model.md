@@ -45,8 +45,10 @@ revision. File names do not define identity.
 ### Issues
 
 An Issue is eligible when it belongs to the configured repository, carries the
-configured publication label, is not a pull request, and satisfies the author
-or association policy. The Issue number is provenance, not the cross-source id.
+configured publication label, is not a pull request or comment carrier, and its
+original author is in the effective publisher set. The Issue number is
+provenance, not the cross-source id. Repository association is descriptive
+metadata and never grants publication authority.
 
 Metadata is read from a fenced `dogfood` header or a machine marker at the top
 of the Issue body. Required canonical metadata is validated before the remaining
@@ -55,8 +57,10 @@ body is rendered. Labels may project to tags only through configuration.
 ### Discussions
 
 A Discussion is eligible when it belongs to the configured repository, matches
-an allowed category, and satisfies the author or association policy. The
-Discussion number and category are provenance.
+an allowed category, is not a comment carrier, and its original author is in
+the effective publisher set. The Discussion number and category are
+provenance. Repository association is descriptive metadata and never grants
+publication authority.
 
 Metadata uses the same body header as Issues. Answer state, reactions, and
 category data remain namespaced provider metadata and cannot silently change
@@ -124,6 +128,23 @@ A Markdown post may bind to:
 
 Creation of an Issue or Discussion is an explicit provisioning command, never a
 side effect of a read-only site build.
+
+An external provider may provision a new Issue or Discussion for one specific
+post. The carrier must be bound by an explicit number or by a validated adapter
+mapping that includes the canonical post id or URL and the configured provider
+identity. A matching title, article label, category, or body marker alone is not
+a binding.
+
+Carrier classification precedes article eligibility. Once a record is bound as
+a carrier, it is excluded from every article provider even if its creator is an
+authorized publisher or its labels and metadata also match article filters.
+Users outside the publisher set may author carrier comments; neither the
+carrier body nor its comments can override canonical post fields.
+
+The initial Issue-backed carrier is the Utterances adapter. Its generated Issue
+is represented as an `utterances` comment channel with Issue provenance, not as
+an `issue` article source. Giscus follows the same rule for its Discussion-backed
+carrier. Generic adapters must declare their carrier resource kind explicitly.
 
 ## Ordering
 

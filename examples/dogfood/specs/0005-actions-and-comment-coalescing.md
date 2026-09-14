@@ -26,6 +26,12 @@ The default Pages workflow responds to:
 
 It does not subscribe to `issue_comment` or `discussion_comment`.
 
+Issue and Discussion events are classified from trusted API records before a
+full build. Events for unauthorized article authors or records classified as
+comment carriers produce a skipped decision with no render, upload, or deploy.
+Because event delivery itself has already started a workflow, these skips are
+reported separately from the zero-build guarantee for comment events.
+
 Issue comments may use credential-free browser REST loading for public
 repositories. Native Discussion comments use scheduled static snapshots unless
 an external app/embed adapter owns live authentication. External providers own
@@ -125,6 +131,10 @@ The comment policy must pass deterministic simulations:
    source fingerprint.
 5. A manual force run builds even when the content fingerprint is unchanged and
    records `reason=forced`.
+6. One hundred Issue or Discussion article-shaped records from unauthorized
+   authors produce zero renders, uploads, or deployments.
+7. A comment-provider-created Issue with an article label remains a comment
+   carrier and produces zero article routes.
 
 Tests count requested builds, renders, uploads, and deploy decisions separately.
 

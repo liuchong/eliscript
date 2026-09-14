@@ -21,9 +21,9 @@ Packaged JavaScript under `dist/` is compiler output, not handwritten source.
 
 | Track | Complete | Remaining | Evidence |
 | --- | ---: | ---: | --- |
-| Product and architecture design | 9/9 (100%) | 0/9 (0%) | [Specification index](specs/README.md) |
+| Product and architecture design | 10/10 (100%) | 0/10 (0%) | [Specification index](specs/README.md) |
 | Executable implementation gates | 0/8 (0%) | 8/8 (100%) | [Delivery plan](specs/0009-delivery-and-acceptance.md) |
-| Final application acceptance | 0/12 (0%) | 12/12 (100%) | [Acceptance standard](specs/0009-delivery-and-acceptance.md#final-acceptance-standard) |
+| Final application acceptance | 0/13 (0%) | 13/13 (100%) | [Acceptance standard](specs/0009-delivery-and-acceptance.md#final-acceptance-standard) |
 
 This is a design-complete scaffold, not yet a working Action or site. No
 `action.yml`, generated Action bundle, release tag, Pages deployment, or
@@ -32,8 +32,12 @@ Marketplace listing is claimed in this state.
 ## Required Capabilities
 
 - Enable Markdown, Issues, and Discussions independently or together.
+- Publish Issue and Discussion articles only for the owner and configured
+  coauthors; all other GitHub users remain comment-only participants.
 - Use Issue comments and Discussion comments/replies as native comment channels.
 - Bind Markdown posts to Issue or Discussion comment threads explicitly.
+- Treat externally provisioned post-specific Issues or Discussions as comment
+  carriers, never as articles.
 - Mount one or more external comment providers beside native channels.
 - Pre-render every article with a static fallback and add optional live
   enhancement in the browser.
@@ -63,6 +67,10 @@ Marketplace listing is claimed in this state.
    artifact and evidence manifest. The consumer workflow owns Pages deployment.
 8. **Application isolation.** GitHub, React, Markdown, and hosting integrations
    stay below this directory and contribute no Eliscript core maturity credit.
+9. **Owner-first publication authority.** The owner is the only remote article
+   publisher by default. A checked allowlist may add coauthors; labels,
+   categories, repository roles, and comment-provider records do not grant
+   article publication authority.
 
 ## Planned Standalone Layout
 
@@ -111,3 +119,4 @@ browser renderer. A consumer runner does not need Emacs or Bun.
 | [0007](specs/0007-action-and-marketplace-package.md) | Action contract and standalone publication shape |
 | [0008](specs/0008-security-and-privacy.md) | Trust, permissions, sanitization, and private data |
 | [0009](specs/0009-delivery-and-acceptance.md) | Implementation gates and final acceptance standard |
+| [0010](specs/0010-publishing-authorization.md) | Owner, coauthor, comment-only, and carrier authorization |

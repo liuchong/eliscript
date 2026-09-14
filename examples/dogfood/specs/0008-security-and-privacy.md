@@ -67,6 +67,30 @@ permits the field.
   the default build Action.
 - Event payload fields are untrusted and never interpolated into shell source.
 
+## Publication Authorization
+
+Remote article authorization is deny-by-default. The original Issue or
+Discussion author must match the configured owner or one explicit coauthor.
+`authorAssociation`, repository permissions, organization membership, labels,
+categories, reactions, assignees, and article metadata are never authorization
+evidence.
+
+Unauthorized article candidates are excluded with a bounded, redacted
+diagnostic instead of failing the build, so untrusted users cannot deny service
+by creating article-shaped records. A trusted configuration projection that
+points to an unauthorized article source fails closed because it contradicts
+the publication policy.
+
+Comment authorization is independent. By default, GitHub or the configured
+external provider decides who may comment and moderate. Commenters do not enter
+the publisher set, and no comment body, carrier body, provider mapping, or
+external script may mutate canonical article fields.
+
+Externally provisioned Issue or Discussion carriers require a configured
+adapter binding to an existing canonical post. Carrier classification takes
+precedence over article selection, preventing a carrier from becoming a post
+through a publication label, category, or authorized creator.
+
 ## Privacy Policies
 
 The configuration must declare whether GitHub source repositories are public and
@@ -97,7 +121,10 @@ Exceeding a required-source limit fails closed with source provenance.
 Tests include script injection, malformed Markdown, unsafe links, HTML
 clobbering, oversized bodies, pagination loops, forged cursors, private-data
 projection, token-like output, hostile Action inputs, and external provider
-origin changes.
+origin changes. Authorization tests cover owner-only defaults, coauthor
+allowlists, case normalization, immutable-id mismatch, bot/app identity,
+deleted identities, association bypass attempts, unauthorized projections, and
+carrier/article confusion.
 
 The final site tree and Action bundle receive a secret scan and absolute-path
 scan before publication.
