@@ -28,7 +28,7 @@
     (js* "((script) => (script && script.dataset && script.dataset.eliscript) || '')"))
   (defconst source-url
     (let ((declared (funcall declared-source (js* "document.currentScript"))))
-      (if (= declared "") (funcall relative-to script-url "site.eli")
+      (if (= declared "") (funcall relative-to (js* "document.baseURI") "site.eli")
         (funcall relative-to (js* "document.baseURI") declared))))
   (defconst start-worker (js* "(url) => new Worker(url, { type: 'module' })"))
   (defconst blob-url-of

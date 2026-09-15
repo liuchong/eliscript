@@ -56,9 +56,9 @@ test("the site publishes a loader and the source it compiles", async () => {
   await expect(readFile(resolve(ROOT, "docs/pages/assets/site.js"), "utf8"))
     .rejects.toThrow();
 
-  // The behaviours themselves ship as source, and the loader is what compiles
-  // them in the browser.
-  const source = await readFile(resolve(artifact, "pages/assets/site.eli"), "utf8");
+  // The behaviours ship as source where the pages live, and the loader is what
+  // compiles them in the browser.
+  const source = await readFile(resolve(artifact, "pages/site.eli"), "utf8");
   expect(source).toContain("(module docs.site");
 
   // A reader looking at the page's source sees the Eliscript it runs, not only
@@ -69,7 +69,7 @@ test("the site publishes a loader and the source it compiles", async () => {
     expect(html).toContain("eliscript-loader.js");
     expect(html).not.toContain("assets/site.js");
   }
-  expect(await readFile(resolve(ROOT, "examples/docs-site/src/loader.eli"), "utf8"))
+  expect(await readFile(resolve(ROOT, "docs/pages/loader.eli"), "utf8"))
     .toContain("(module docs.loader");
 });
 
@@ -102,7 +102,7 @@ test("the page compiles the source in the browser", async () => {
     // The loader fetches the Eliscript source and the compiler the site
     // already serves for its playground, rather than shipping the behaviours
     // compiled.
-    expect(requests.some((url) => url.endsWith("pages/assets/site.eli"))).toBe(true);
+    expect(requests.some((url) => url.endsWith("/site.eli"))).toBe(true);
     expect(requests.some((url) => url.includes("browser/worker.mjs"))).toBe(true);
     expect(requests.some((url) => url.includes("dist/browser/compiler.js"))).toBe(true);
   });

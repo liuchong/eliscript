@@ -220,7 +220,7 @@ export function renderApiHtml(index) {
     <!-- The page's behaviours are Eliscript: this loader compiles the source
          it names and runs the result. Nothing here is handwritten JavaScript. -->
     <script defer src="assets/eliscript-loader.js"
-            data-eliscript="assets/site.eli"></script>
+            data-eliscript="site.eli"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>

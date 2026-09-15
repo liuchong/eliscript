@@ -66,20 +66,16 @@ export function rebasePage(html, assetVersions = new Map()) {
   for (const [asset, version] of assetVersions) {
     result = result.split(`assets/${asset}`).join(`assets/${asset}?v=${version}`);
   }
-  // The script the pages defer is a loader, and saying so in its name keeps the
-  // page honest about what it is loading.
-  result = result.split("assets/site.js").join("assets/eliscript-loader.js");
   return result;
 }
 
 /**
- * The site's loader, compiled ahead of time, and the Eliscript source it
- * fetches and compiles in the browser. The repository keeps the source; the
- * loader is the only JavaScript the site ships, and it exists to start the
- * compiler the site already serves for its playground.
+ * The site's loader, compiled ahead of time from `docs/pages/loader.eli`. The
+ * pages publish their own Eliscript sources where they live, and the loader is
+ * the only JavaScript the site ships: it exists to start the compiler the site
+ * already serves for its playground.
  */
 export const SITE_SCRIPT = "dist/docs-site/site.js";
-export const SITE_SOURCE_FILE = "examples/docs-site/src/site.eli";
 
 /** The digests that stamp the site's own stylesheet and script. */
 export async function assetVersions({ root, siteDirectory }) {
@@ -126,8 +122,6 @@ export async function assemblePages({ root, outDir }) {
   await copySite(resolve(source, SITE_SOURCE), target, versions);
   await mkdir(resolve(target, "pages/assets"), { recursive: true });
   await writeFile(resolve(target, "pages/assets/eliscript-loader.js"), await readFile(script));
-  await writeFile(resolve(target, "pages/assets/site.eli"),
-                  await readFile(resolve(source, SITE_SOURCE_FILE)));
   await writePreviousAddresses(target, resolve(source, SITE_SOURCE));
   // The supporting trees are copied into the same directory, so a site entry
   // that shares a name with one of them would be silently replaced.

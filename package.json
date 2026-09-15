@@ -52,7 +52,7 @@
     "check:source-debugging": "bun tools/debugging/check.mjs",
     "check:dogfood:browsers": "bun tools/browser/matrix.mjs --site examples/dogfood/_site --out examples/dogfood/evidence/browser-matrix.json",
     "check:dogfood": "./bin/eliscript --output dist/dogfood-spec-check.mjs examples/dogfood/tools/spec-check.eli && bun dist/dogfood-spec-check.mjs --root examples/dogfood",
-    "build:docs-site": "./bin/eliscript --output dist/docs-site/loader.mjs examples/docs-site/src/loader.eli && bun build dist/docs-site/loader.mjs --target=browser --format=iife --outfile dist/docs-site/site.js",
+    "build:docs-site": "./bin/eliscript --output dist/docs-site/loader.mjs docs/pages/loader.eli && bun build dist/docs-site/loader.mjs --target=browser --format=iife --outfile dist/docs-site/site.js",
     "build:dogfood-browser": "./bin/eliscript-build --root examples/dogfood --out-dir examples/dogfood/dist/dogfood-browser examples/dogfood/src/renderer/browser.eli && bun build examples/dogfood/dist/dogfood-browser/src/renderer/browser.mjs --target=browser --format=iife --outfile examples/dogfood/dist/site/browser.js",
     "build:browser-playground": "./bin/eliscript-build --root examples/browser-playground/src --out-dir dist/browser-playground examples/browser-playground/src/playground.eli && cp examples/browser-playground/index.html examples/browser-playground/site.css dist/browser-playground/",
     "preview": "python3 -m http.server 8787 --bind 127.0.0.1",
