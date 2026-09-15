@@ -117,6 +117,7 @@ export async function assemblePages({ root, outDir }) {
   await copySite(resolve(source, SITE_SOURCE), target, versions);
   await mkdir(resolve(target, "pages/assets"), { recursive: true });
   await writeFile(resolve(target, "pages/assets/site.js"), await readFile(script));
+  await writePreviousAddresses(target, resolve(source, SITE_SOURCE));
   // The supporting trees are copied into the same directory, so a site entry
   // that shares a name with one of them would be silently replaced.
   for (const entry of PUBLISHED_TREES) {
@@ -137,6 +138,51 @@ export async function assemblePages({ root, outDir }) {
 }
 
 /** Copies one directory into another, rebasing the HTML it contains. */
+/**
+ * The site used to be published under `docs/`, because the artifact kept the
+ * repository shape. A reader who kept one of those addresses now gets a 404,
+ * which reads as a blank page rather than as a move, so each old address
+ * redirects to the page it named.
+ */
+async function writePreviousAddresses(artifact, siteDirectory) {
+  const { readdir } = await import("node:fs/promises");
+  const walk = async (from, relative) => {
+    for (const entry of await readdir(from, { withFileTypes: true })) {
+      const child = resolve(from, entry.name);
+      const name = relative ? `${relative}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        await walk(child, name);
+      } else if (entry.name.endsWith(".html")) {
+        const target = name === "index.html" ? "/" : `/${name}`;
+        const stub = resolve(artifact, PREVIOUS_PREFIX, name);
+        await mkdir(dirname(stub), { recursive: true });
+        await writeFile(stub, redirectDocument(target));
+      }
+    }
+  };
+  await walk(siteDirectory, "");
+}
+
+/** One redirect document, which needs no script to work. */
+export function redirectDocument(target) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url=${target}">
+<link rel="canonical" href="${target}">
+<title>Moved</title>
+</head>
+<body>
+<p>This page moved to <a href="${target}">${target}</a>.</p>
+</body>
+</html>
+`;
+}
+
+/** Where the site used to live, relative to the artifact root. */
+export const PREVIOUS_PREFIX = "docs";
+
 async function copySite(from, to, versions) {
   const { readdir } = await import("node:fs/promises");
   await mkdir(to, { recursive: true });

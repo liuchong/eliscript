@@ -80,6 +80,22 @@ test("the published root is the documentation site", async () => {
   }
 });
 
+test("the addresses the site used to have still lead somewhere", async () => {
+  // The site was published under `docs/` before it became the artifact root. A
+  // reader who kept one of those addresses must not meet a 404.
+  for (const [previous, target] of [
+    ["docs/index.html", "/"],
+    ["docs/pages/language.html", "/pages/language.html"],
+    ["docs/pages/playground.html", "/pages/playground.html"],
+  ]) {
+    const stub = await readFile(resolve(artifact, previous), "utf8");
+    expect(stub).toContain(`url=${target}`);
+    expect(stub).toContain(`<link rel="canonical" href="${target}">`);
+    // A redirect that needs a script is not a redirect.
+    expect(stub).not.toContain("<script");
+  }
+});
+
 test("every local reference in every published page resolves", async () => {
   const { readdir } = await import("node:fs/promises");
   const pages = [];
