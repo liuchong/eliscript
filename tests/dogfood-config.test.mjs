@@ -242,6 +242,37 @@ test("a hybrid channel is accepted", async () => {
   expect(failure).toBeUndefined();
 });
 
+test("an article refresh policy outside the specification fails", async () => {
+  const { failure } = await load(
+    BASE(`[${MARKDOWN}]`).replace(":articles :push", ":articles :sometimes"),
+  );
+  expect(failure.code).toBe("DOGFOOD-CONFIG-015");
+  expect(failure.message).toContain("refresh.articles");
+});
+
+test("a comment refresh policy outside the specification fails", async () => {
+  const { failure } = await load(
+    BASE(`[${MARKDOWN}]`).replace(":comments :runtime", ":comments :whenever"),
+  );
+  expect(failure.code).toBe("DOGFOOD-CONFIG-015");
+  expect(failure.message).toContain("refresh.comments");
+});
+
+test("every documented refresh policy is accepted", async () => {
+  for (const policy of ["push", "event", "scheduled", "manual", "hybrid"]) {
+    const { failure } = await load(
+      BASE(`[${MARKDOWN}]`).replace(":articles :push", `:articles :${policy}`),
+    );
+    expect(failure).toBeUndefined();
+  }
+  for (const policy of ["runtime", "external", "scheduled", "manual", "hybrid", "event"]) {
+    const { failure } = await load(
+      BASE(`[${MARKDOWN}]`).replace(":comments :runtime", `:comments :${policy}`),
+    );
+    expect(failure).toBeUndefined();
+  }
+});
+
 test("an unsupported schema version fails", async () => {
   const { failure } = await load(
     BASE(`[${MARKDOWN}]`).replace(":schema-version 1", ":schema-version 2"),

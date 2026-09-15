@@ -113,10 +113,66 @@ test("events are classified by their subject", () => {
   expect(fieldOf(events.classify_event("star", {}), "action", "")).toBe("");
 });
 
+test("the article policy decides which events rebuild the site", () => {
+  const builds = (policy, event) => events.article_builds_QMARK_(keyword(policy), event);
+  // Repository content only.
+  expect(builds("push", "push")).toBe(true);
+  expect(builds("push", "schedule")).toBe(false);
+  expect(builds("push", "issues")).toBe(false);
+  // Eligible content events only.
+  expect(builds("event", "issues")).toBe(true);
+  expect(builds("event", "push")).toBe(false);
+  // Bounded polling.
+  expect(builds("scheduled", "schedule")).toBe(true);
+  expect(builds("scheduled", "push")).toBe(false);
+  // Dispatch only.
+  expect(builds("manual", "push")).toBe(false);
+  expect(builds("manual", "schedule")).toBe(false);
+  // Push, content events, and scheduled reconciliation.
+  for (const event of ["push", "issues", "release", "schedule"]) {
+    expect(builds("hybrid", event)).toBe(true);
+  }
+  // A dispatched run is a request, whatever the policy says.
+  for (const policy of ["push", "event", "scheduled", "manual", "hybrid"]) {
+    expect(builds(policy, "workflow_dispatch")).toBe(true);
+  }
+});
+
+test("the policy decides a real classification, not just the helper", () => {
+  const decide = (policy, eventName) => {
+    const config = hashMap(keyword("refresh"), hashMap(keyword("articles"), keyword(policy)));
+    return fieldOf(events.build_decision(config, events.classify_event(eventName, {}), false), "build", null);
+  };
+  expect(decide("push", "push")).toBe(true);
+  expect(decide("push", "schedule")).toBe(false);
+  expect(decide("scheduled", "schedule")).toBe(true);
+  expect(decide("manual", "push")).toBe(false);
+  expect(decide("hybrid", "release")).toBe(true);
+});
+
+test("only the opt-in comment policy builds on a comment event", () => {
+  const decide = (policy) => {
+    const config = hashMap(keyword("refresh"), hashMap(keyword("comments"), keyword(policy)));
+    return fieldOf(
+      events.build_decision(config, events.classify_event("issue_comment", {}), false),
+      "build", null,
+    );
+  };
+  for (const policy of ["runtime", "external", "scheduled", "manual", "hybrid"]) {
+    expect(decide(policy)).toBe(false);
+  }
+  // `:event` is the documented opt-in that lets a comment start a build.
+  expect(decide("event")).toBe(true);
+});
+
 test("a comment subject defers for both runtime and snapshot channels", () => {
   // The classification is a persistent map, so a plain object would silently
   // read as the default and defer for the wrong reason.
-  const classified = (subject) => hashMap(keyword("subject"), keyword(subject));
+  // A classification carries the event it came from: the policy is a function
+  // of both.
+  const classified = (subject, eventName = "push") => hashMap(
+    keyword("subject"), keyword(subject), keyword("event"), eventName,
+  );
   const comments = classified("comments");
   const runtime = events.build_decision({ refresh: {} }, comments, false);
   expect(fieldOf(runtime, "build", null)).toBe(false);

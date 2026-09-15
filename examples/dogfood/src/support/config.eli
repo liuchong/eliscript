@@ -18,7 +18,7 @@
   (import "node:fs" readFileSync)
   (import "./diagnostics.eli" fail)
   (import "./text.eli"
-          blank char-code digit-code? empty-value? slice split-on startsWith
+          blank char-code digit-code? empty-value? join slice split-on startsWith
           text-length to-lowercase trim)
 
   (defconst open-paren 40)
@@ -36,6 +36,11 @@
   ;; `adapters` was read by the providers but not listed here, so no valid
   ;; configuration could declare one: the key was rejected before it reached
   ;; the rule in specification 0011 that validates its carrier kind.
+  (defconst refresh-article-policies [:push :event :scheduled :manual :hybrid])
+
+  (defconst refresh-comment-policies
+    [:runtime :external :scheduled :manual :hybrid :event])
+
   (defconst known-keys
     [:schema-version :site :publishing :sources :identity :comments :adapters
      :refresh :output])
@@ -466,6 +471,36 @@
   ;; An adapter declares how a comment provider is reached and, for a native
   ;; carrier, how that carrier is identified. Specification 0011 requires a
   ;; native kind to say how it is identified and an unknown kind to fail.
+  ;; Specification 0004 names the accepted policies for both settings. An
+  ;; unknown one would silently behave like the default.
+  (defun check-refresh (config)
+    (let ((refresh (Collection/get config :refresh nil)))
+      (when (not (nil? refresh))
+        (require-map refresh "config.refresh")
+        (check-policy refresh :articles refresh-article-policies "articles")
+        (check-policy refresh :comments refresh-comment-policies "comments"))))
+
+  (defun check-policy (declaration key allowed label)
+    (let ((value (Collection/get declaration key nil)))
+      (when (and (not (nil? value)) (not (member-of? allowed value)))
+        (fail "DOGFOOD-CONFIG-015"
+              (str "refresh." label " must be one of "
+                   (join-keywords allowed))))))
+
+  (defun join-keywords (values)
+    (let ((parts [])
+          (index 0))
+      (while (< index (Collection/count values))
+        (setq parts (Collection/conj parts (collection-name (Collection/nth values index))))
+        (setq index (1+ index)))
+      (join ", " parts)))
+
+  (defun collection-name (value)
+    (let ((text (str value)))
+      (if (and (> (text-length text) 0) (= (char-code text 0) 58))
+          (slice 1 (text-length text) text)
+        text)))
+
   (defun check-adapters (config)
     (let ((adapters (Collection/get config :adapters [])))
       (unless (isVector adapters)
@@ -568,6 +603,7 @@
         (fail "DOGFOOD-CONFIG-008"
               "site.base-url must be an absolute https URL for production"))
     (check-sources (require-key config :sources "config.sources"))
+    (check-refresh config)
     (check-adapters config)
     (check-comments config)
     (check-publishing config)

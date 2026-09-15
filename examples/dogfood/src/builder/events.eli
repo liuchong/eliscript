@@ -1,15 +1,18 @@
 ;; Event classification.
 ;;
-;; A workflow runs for many reasons, and not all of them change the site. A new
-;; comment does not: live channels are read in the reader's browser and
-;; snapshots come from the snapshot schedule, so a comment event must not become
-;; a build. Classification turns the event name and payload into that decision
-;; before anything is rendered or written.
+;; A workflow runs for many reasons, and not all of them change the site. The
+;; configuration decides which ones do: `refresh.articles` and
+;; `refresh.comments` are separate policies, so a repository can rebuild its
+;; articles on every push while never spending a runner on a comment.
+;;
+;; Classification turns the event name and payload into that decision before
+;; anything is rendered or written.
 
 (module dogfood.builder.events
   (import "eliscript/runtime/core/collection.mjs" :as Collection)
 
-  ;; Events whose subject is an article.
+  ;; Events whose subject is an article, with the payload action that reached
+  ;; the workflow.
   (defconst article-events
     ["push" "schedule" "workflow_dispatch" "issues" "release"])
 
@@ -17,7 +20,14 @@
   (defconst comment-events
     ["issue_comment" "discussion_comment" "discussions"])
 
-  (defun contains-string? (values needle)
+  ;; Eligible content events, per the article refresh policy.
+  (defconst content-events ["issues" "release"])
+
+  (defconst article-policies [:push :event :scheduled :manual :hybrid])
+  (defconst comment-policies
+    [:runtime :external :scheduled :manual :hybrid :event])
+
+  (defun member? (values needle)
     (let ((index 0)
           (found false))
       (while (and (< index (Collection/count values)) (not found))
@@ -32,9 +42,9 @@
   (defun classify-event (event-name payload)
     (let ((action (Collection/get payload "action" "")))
       (cond
-        ((contains-string? article-events event-name)
+        ((member? article-events event-name)
          (classification :articles event-name action))
-        ((contains-string? comment-events event-name)
+        ((member? comment-events event-name)
          (classification :comments event-name action))
         (t (classification :unknown event-name action)))))
 
@@ -42,27 +52,50 @@
     (let ((refresh (Collection/get config :refresh {})))
       (Collection/get refresh area fallback)))
 
+  ;; A dispatched run is a request, so it always builds the articles. Every
+  ;; other event is judged by the policy.
+  (defun article-builds? (policy event-name)
+    (cond
+      ((= event-name "workflow_dispatch") t)
+      ((= policy :push) (= event-name "push"))
+      ((= policy :event) (member? content-events event-name))
+      ((= policy :scheduled) (= event-name "schedule"))
+      ((= policy :manual) false)
+      ((= policy :hybrid)
+       (or (= event-name "push")
+           (= event-name "schedule")
+           (member? content-events event-name)))
+      (t false)))
+
   ;; -> {:build bool :reason "..." :subject ...}
   ;;
   ;; `changed` means the site is rendered. `deferred` means this event cannot
-  ;; change the site, so the run ends without writing output.
+  ;; change the site under the configured policy, so the run ends without
+  ;; writing output.
   (defun build-decision (config classification forced)
-    (cond
-      (forced
-       {:build t :reason "forced" :subject (Collection/get classification :subject :unknown)})
-      ((= (Collection/get classification :subject :unknown) :articles)
-       {:build t :reason "changed" :subject :articles})
-      ((= (Collection/get classification :subject :unknown) :comments)
-       (let ((comments (refresh-value config :comments :runtime)))
-         ;; A live channel changes nothing in the tree. A snapshot channel
-         ;; changes it on the snapshot schedule, and that schedule arrives as
-         ;; its own event, so a comment event still defers.
-         {:build false :reason "deferred" :subject :comments :refresh comments}))
-      (t {:build false :reason "deferred" :subject :unknown})))
+    (let ((subject (Collection/get classification :subject :unknown))
+          (event-name (Collection/get classification :event "")))
+      (cond
+        (forced {:build t :reason "forced" :subject subject})
+        ((= subject :articles)
+         (let ((policy (refresh-value config :articles :push)))
+           (if (article-builds? policy event-name)
+               {:build t :reason "changed" :subject :articles}
+             {:build false :reason "deferred" :subject :articles :refresh policy})))
+        ((= subject :comments)
+         (let ((policy (refresh-value config :comments :runtime)))
+           ;; A live channel changes nothing in the tree, and a snapshot channel
+           ;; changes it when the schedule says so. Only the opt-in `:event`
+           ;; policy lets a comment itself trigger a build.
+           (if (= policy :event)
+               {:build t :reason "changed" :subject :comments}
+             {:build false :reason "deferred" :subject :comments :refresh policy})))
+        (t {:build false :reason "deferred" :subject :unknown}))))
 
   ;; A run without an event file, as when a maintainer builds locally, is a
   ;; requested build rather than a reaction to something.
   (defun requested-event ()
     (classification :articles "workflow_dispatch" "requested"))
 
-  (export build-decision classify-event requested-event))
+  (export article-builds? article-policies build-decision classify-event
+          comment-policies requested-event))
