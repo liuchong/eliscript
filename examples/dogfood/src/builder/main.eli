@@ -23,6 +23,7 @@
   (import "./discussions.eli" collect-discussions)
   (import "./events.eli" build-decision classify-event requested-event)
   (import "./identity.eli" resolve-identity)
+  (import "./sources.eli" enabled-sources identity-list source-posts)
   (import "../support/config.eli" load-config)
   (import "../support/diagnostics.eli" fail)
   (import "../support/text.eli" join slice string-value? text-length)
@@ -243,26 +244,9 @@
 
   ;; ------------------------------------------------------------------ sources
 
-  (defun enabled-sources (config)
-    (Sequence/filter (lambda (source) (Collection/get source :enabled false))
-                     (Collection/get config :sources [])))
 
-  ;; Carrier bindings name a canonical post, so every identity already known
-  ;; in this build is offered to the classifier before article filters run.
-  (defun identity-list (posts)
-    (let ((result [])
-          (index 0))
-      (while (< index (Collection/count posts))
-        (let* ((post (Collection/nth posts index))
-               (aliases (get post :aliases))
-               (alias-index 0))
-          (setq result (Collection/conj result (get post :id)))
-          (while (< alias-index (Collection/count aliases))
-            (setq result (Collection/conj result
-                                         (Collection/nth aliases alias-index)))
-            (setq alias-index (1+ alias-index))))
-        (setq index (1+ index)))
-      result))
+
+
 
   (defun request-headers (token)
     (if (nil? token)
@@ -291,29 +275,7 @@
          :headers (js-object :link (js-call (get response "headers") :get "link"))
          :body (await (js-call response :json))})))
 
-  (defasync source-posts (root config source transport identities)
-    (let ((kind (Collection/get source :kind :markdown)))
-      (cond
-        ((= kind :markdown)
-         {:posts (read-posts root (Collection/get source :directory "content/posts"))
-          :carriers 0
-          :unauthorized 0})
-        ((= kind :issues)
-         (await (collect-issues {:source source
-                                 :publishing (Collection/get config :publishing)
-                                 :adapters (Collection/get config :adapters [])
-                                 :identities identities
-                                 :comments (Collection/get config :comments {})
-                                 :transport transport})))
-        ((= kind :discussions)
-         (await (collect-discussions {:source source
-                                      :publishing (Collection/get config :publishing)
-                                      :adapters (Collection/get config :adapters [])
-                                      :identities identities
-                                      :comments (Collection/get config :comments {})
-                                      :transport transport})))
-        (t (fail "DOGFOOD-SOURCE-001"
-                 (str "unsupported source kind: " kind))))))
+
 
   ;; --------------------------------------------------------------- action glue
 
