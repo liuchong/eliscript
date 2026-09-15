@@ -617,6 +617,13 @@ code {
   font-size: 20px;
 }
 
+/* A sticky header covers the first 69px of the viewport, so an anchor target
+   has to stay clear of it when a reader follows a link to a section. */
+.doc-section,
+.doc-content > [id] {
+  scroll-margin-top: 88px;
+}
+
 .doc-shell {
   width: min(calc(100% - 40px), var(--max-width));
   margin: 0 auto;
@@ -1009,7 +1016,14 @@ code {
     border-left: 1px solid var(--line);
   }
 
-  .doc-shell {
+  /* A sticky header covers the first 69px of the viewport, so an anchor target
+   has to stay clear of it when a reader follows a link to a section. */
+.doc-section,
+.doc-content > [id] {
+  scroll-margin-top: 88px;
+}
+
+.doc-shell {
     grid-template-columns: 180px minmax(0, 1fr);
     gap: 42px;
   }
@@ -1061,7 +1075,14 @@ code {
   .section-shell,
   .footer-shell,
   .doc-hero-inner,
-  .doc-shell {
+  /* A sticky header covers the first 69px of the viewport, so an anchor target
+   has to stay clear of it when a reader follows a link to a section. */
+.doc-section,
+.doc-content > [id] {
+  scroll-margin-top: 88px;
+}
+
+.doc-shell {
     width: min(calc(100% - 28px), var(--max-width));
   }
 
@@ -1179,7 +1200,14 @@ code {
     font-size: 18px;
   }
 
-  .doc-shell {
+  /* A sticky header covers the first 69px of the viewport, so an anchor target
+   has to stay clear of it when a reader follows a link to a section. */
+.doc-section,
+.doc-content > [id] {
+  scroll-margin-top: 88px;
+}
+
+.doc-shell {
     grid-template-columns: minmax(0, 1fr);
     gap: 36px;
     padding-top: 34px;

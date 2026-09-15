@@ -99,8 +99,10 @@ test("every local reference in every published page resolves", async () => {
     const directory = posix.dirname(path.replace(`${artifact}/`, ""));
     for (const [, reference] of source.matchAll(/(?:href|src)="([^"]+)"/gu)) {
       if (/^[a-z]+:/iu.test(reference) || reference.startsWith("#")) continue;
-      // A fragment names a place inside the target document.
-      const [path_] = reference.split("#");
+      // A fragment names a place inside the target document, and a query
+      // string is a cache stamp rather than part of the file name.
+      const [withoutFragment] = reference.split("#");
+      const [path_] = withoutFragment.split("?");
       if (path_ === "") continue;
       const target = path_.startsWith("/")
         ? path_.slice(1)

@@ -10,6 +10,7 @@
 // `tests/pages-assembly.test.mjs` assembles the artifact and resolves every
 // reference the playground page carries.
 
+import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
@@ -52,11 +53,32 @@ export const ROOT_REFERENCES = Object.freeze([
   ['import("../../', 'import("../'],
 ]);
 
-/** Rewrites the page references that pointed at the repository root. */
-export function rebasePage(html) {
+/**
+ * Rewrites the page references that pointed at the repository root, and stamps
+ * the site's own assets with their content digest. GitHub Pages serves a
+ * stylesheet with a ten-minute lifetime, so without the stamp a reader can
+ * keep seeing the previous sheet long after a deployment replaced it, which
+ * looks exactly like a layout that was never fixed.
+ */
+export function rebasePage(html, assetVersions = new Map()) {
   let result = html;
   for (const [from, to] of ROOT_REFERENCES) result = result.split(from).join(to);
+  for (const [asset, version] of assetVersions) {
+    result = result.split(`assets/${asset}`).join(`assets/${asset}?v=${version}`);
+  }
   return result;
+}
+
+/** The script the site runs, compiled from Eliscript rather than written by hand. */
+export const SITE_SCRIPT = "dist/docs-site/site.js";
+
+/** The digests that stamp the site's own stylesheet and script. */
+export async function assetVersions({ root, siteDirectory }) {
+  const digest = (bytes) => createHash("sha256").update(bytes).digest("hex").slice(0, 12);
+  const versions = new Map();
+  versions.set("site.css", digest(await readFile(resolve(siteDirectory, "pages/assets/site.css"))));
+  versions.set("site.js", digest(await readFile(resolve(root, SITE_SCRIPT))));
+  return versions;
 }
 
 /**
@@ -82,7 +104,19 @@ export async function assemblePages({ root, outDir }) {
   }
   await rm(target, { recursive: true, force: true });
   await mkdir(target, { recursive: true });
-  await copySite(resolve(source, SITE_SOURCE), target);
+  // The site's script is a build artifact: the repository keeps its Eliscript
+  // source and publishes the compiled script, so the site cannot drift from
+  // the language it documents.
+  const script = resolve(source, SITE_SCRIPT);
+  if (!(await exists(script))) {
+    throw new Error(
+      `the site script is not built: run \`bun run build:docs-site\` (${SITE_SCRIPT})`,
+    );
+  }
+  const versions = await assetVersions({ root: source, siteDirectory: resolve(source, SITE_SOURCE) });
+  await copySite(resolve(source, SITE_SOURCE), target, versions);
+  await mkdir(resolve(target, "pages/assets"), { recursive: true });
+  await writeFile(resolve(target, "pages/assets/site.js"), await readFile(script));
   // The supporting trees are copied into the same directory, so a site entry
   // that shares a name with one of them would be silently replaced.
   for (const entry of PUBLISHED_TREES) {
@@ -103,16 +137,16 @@ export async function assemblePages({ root, outDir }) {
 }
 
 /** Copies one directory into another, rebasing the HTML it contains. */
-async function copySite(from, to) {
+async function copySite(from, to, versions) {
   const { readdir } = await import("node:fs/promises");
   await mkdir(to, { recursive: true });
   for (const entry of await readdir(from, { withFileTypes: true })) {
     const child = resolve(from, entry.name);
     const destination = resolve(to, entry.name);
     if (entry.isDirectory()) {
-      await copySite(child, destination);
+      await copySite(child, destination, versions);
     } else if (entry.name.endsWith(".html")) {
-      await writeFile(destination, rebasePage(await readFile(child, "utf8")));
+      await writeFile(destination, rebasePage(await readFile(child, "utf8"), versions));
     } else {
       await cp(child, destination, { recursive: true });
     }

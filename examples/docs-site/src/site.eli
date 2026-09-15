@@ -1,0 +1,174 @@
+;; The documentation site's own script.
+;;
+;; The site is published from `docs/`, and this file replaces the JavaScript
+;; that used to sit beside it. The behaviours are the ones the pages already
+;; declare through data attributes: the landing page's example switcher, the
+;; language page's tabs, the API index's filter, and the footer's year.
+;;
+;; It compiles to a classic script, because the site loads it with `defer` and
+;; the pages keep working when a reader opens them from disk without a build.
+;; Nothing here imports the portable collection runtime: the values involved
+;; are host objects on purpose, and pulling that runtime in would multiply the
+;; size of a script that only moves data between the DOM and a table.
+
+(module docs.site
+  (import "eliscript/platform/browser.mjs"
+          browserCapabilities browserDocument)
+
+  ;; The document capability is a grant, not an ambient permission: the script
+  ;; names what it reaches through the host before it reaches it.
+  (defconst capabilities
+    (browserCapabilities (js* "globalThis") (js-array "document")))
+  (defconst page (browserDocument capabilities))
+
+  ;; ------------------------------------------------------------- host helpers
+
+  ;; A method call describes a receiver, a property read describes a value.
+  ;; Mixing the two is how a property becomes `undefined` in the generated
+  ;; script, so the helpers below name which one they are.
+  (defun field (object name) (get object name))
+
+  (defun set-field (object name value)
+    (funcall (js* "((target, key, value) => { target[key] = value; })") object name value))
+
+  (defun text-of (element) (field element "textContent"))
+
+  (defun set-text (element value) (set-field element "textContent" (str value)))
+
+  (defun array-from (values)
+    (funcall (js* "((list) => Array.from(list))") values))
+
+  (defun nodes (selector) (array-from (js-call page :querySelectorAll selector)))
+
+  (defun node (selector) (js-call page :querySelector selector))
+
+  (defun present? (value) (not (nil? value)))
+
+  (defun same? (left right)
+    (funcall (js* "((a, b) => a === b)") left right))
+
+  (defun each (values handler)
+    (let ((index 0)
+          (total (js-length values)))
+      (while (< index total)
+        (funcall handler (js-nth index values))
+        (setq index (1+ index)))))
+
+  (defun watch (element event handler)
+    (js-call element :addEventListener event handler))
+
+  (defun set-selected (element selected)
+    (js-call element :setAttribute "aria-selected"
+             (if selected "true" "false")))
+
+  (defun set-hidden (element hidden)
+    (set-field element "hidden" (if hidden t false)))
+
+  ;; The three examples the landing page's buttons name.
+  (defun example-table ()
+    (js-object
+      "recur" (js-object
+                "source" "(defun sum-to (n total)\n  (if (= n 0)\n      total\n    (recur (1- n) (+ total n))))"
+                "output" "tail position verified\narguments evaluated once, left to right\nfunction frame reused as a loop\nconstant JavaScript stack")
+      "data" (js-object
+               "source" "(import \"./collection.eli\" assoc)\n\n(defconst before {:name \"Eliscript\"})\n(defconst after\n  (assoc before :status :stable))\n\n(print (equal before {:name \"Eliscript\"}))"
+               "output" "before remains unchanged\nafter shares the unchanged HAMT path\nkeys use Eliscript value equality\nhashes are cached on immutable roots")
+      "interop" (js-object
+                  "source" "(js-call (js-array 1 2 3)\n  :map\n  (lambda (value)\n    (* value 2)))"
+                  "output" "native container requested explicitly\nreceiver-preserving method call\nordinary JavaScript callback boundary\nstandard ESM host behavior")))
+
+  ;; ---------------------------------------------------------- example switcher
+
+  (defun bind-examples ()
+    (let ((buttons (nodes "[data-example]"))
+          (source (node "[data-source-code]"))
+          (output (node "[data-output-code]"))
+          (table (example-table)))
+      (when (and (present? source) (present? output))
+        (each buttons
+              (lambda (button)
+                (watch button "click"
+                       (lambda (event)
+                         (let ((example (field table (js-call button :getAttribute "data-example"))))
+                           (when (present? example)
+                             (each buttons
+                                   (lambda (candidate)
+                                     (set-selected candidate (same? candidate button))))
+                             (set-text source (field example "source"))
+                             (set-text output (field example "output")))))))))))
+
+  ;; ---------------------------------------------------------------- tabs
+
+  (defun bind-language-tabs ()
+    (let ((tabs (nodes "[data-language-tab]"))
+          (panels (nodes "[data-language-panel]")))
+      (each tabs
+            (lambda (button)
+              (watch button "click"
+                     (lambda (event)
+                       (let ((target (js-call button :getAttribute "data-language-tab")))
+                         (each tabs
+                               (lambda (candidate)
+                                 (set-selected candidate (same? candidate button))))
+                         (each panels
+                               (lambda (panel)
+                                 (set-hidden panel
+                                             (not (same? (js-call panel :getAttribute "data-language-panel")
+                                                         target))))))))))))
+
+  ;; ------------------------------------------------------------ api index
+
+  (defun lowered (value) (js-call (str value) :toLowerCase))
+
+  (defun apply-filter (modules query)
+    (let ((visible 0))
+      (each modules
+            (lambda (module)
+              (let ((matches (js-call
+                               (lowered (get (field module "dataset") "apiSearchable"))
+                               :includes query)))
+                (set-hidden module (not matches))
+                (when matches (setq visible (1+ visible))))))
+      visible))
+
+  (defun visible-module? (section)
+    (present? (js-call section :querySelector "[data-api-module]:not([hidden])")))
+
+  (defun bind-api-search ()
+    (let ((input (node "[data-api-search]")))
+      (when (present? input)
+        (let ((modules (nodes "[data-api-module]"))
+              (sections (nodes "[data-api-section]"))
+              (count (node "[data-api-count]"))
+              (empty (node "[data-api-empty]")))
+          (watch input "input"
+                 (lambda (event)
+                   (let ((visible (apply-filter modules (lowered (field input "value")))))
+                     (each sections
+                           (lambda (section)
+                             (set-hidden section (not (visible-module? section)))))
+                     (when (present? count)
+                       (set-text count (str visible " "
+                                            (if (= visible 1) "module" "modules"))))
+                     (when (present? empty)
+                       (set-hidden empty (not (= visible 0)))))))))))
+
+  ;; ---------------------------------------------------------------- footer
+
+  (defun bind-year ()
+    (let ((year (js-call (new (js* "Date")) :getFullYear)))
+      (each (nodes "[data-year]")
+            (lambda (element) (set-text element year)))))
+
+  ;; ------------------------------------------------------------- bootstrap
+
+  (defun start ()
+    (bind-examples)
+    (bind-language-tabs)
+    (bind-api-search)
+    (bind-year))
+
+  (if (= (get (js* "globalThis.document") "readyState") "loading")
+      (js-call (js* "globalThis.document") :addEventListener
+               "DOMContentLoaded" (lambda (event) (start)))
+    (start)))

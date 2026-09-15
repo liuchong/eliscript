@@ -248,18 +248,20 @@
           <a href="#resolution">Resolution</a>
         </nav>
 
-        <section class="doc-section" id="requirements">
-          <h2>Requirements</h2>
-          <p>The page loads the compiler from the repository it is served with, so the served directory must include the repository root. Build the compiled page application first:</p>
-          <pre>bun run build:browser-playground</pre>
-          <p>Until that build exists, the page reports the missing entry instead of compiling. Browsers refuse to load ES modules from <code>file://</code>, so this page needs a static server; the rest of the documentation opens directly from disk. See the <a href="../../examples/browser-playground/README.md">playground example</a> for the full walkthrough.</p>
-        </section>
+        <article class="doc-content">
+          <section class="doc-section" id="requirements">
+            <h2>Requirements</h2>
+            <p>The page loads the compiler from the repository it is served with, so the served directory must include the repository root. Build the compiled page application first:</p>
+            <pre>bun run build:browser-playground</pre>
+            <p>Until that build exists, the page reports the missing entry instead of compiling. Browsers refuse to load ES modules from <code>file://</code>, so this page needs a static server; the rest of the documentation opens directly from disk. See the <a href="../../examples/browser-playground/README.md">playground example</a> for the full walkthrough.</p>
+          </section>
 
-        <section class="doc-section" id="resolution">
-          <h2>Resolution</h2>
-          <p>Compiled output imports the runtime by package specifier. One import-map prefix above resolves it here, and the package export map resolves the same specifiers in Bun and Node, so the page, the tests, and the command line share one scheme.</p>
-          <p>The editor paints a highlighted copy behind a transparent textarea, and the compiled pane is highlighted by the same scanner, which is itself written in Eliscript.</p>
-        </section>
+          <section class="doc-section" id="resolution">
+            <h2>Resolution</h2>
+            <p>Compiled output imports the runtime by package specifier. One import-map prefix above resolves it here, and the package export map resolves the same specifiers in Bun and Node, so the page, the tests, and the command line share one scheme.</p>
+            <p>The editor paints a highlighted copy behind a transparent textarea, and the compiled pane is highlighted by the same scanner, which is itself written in Eliscript.</p>
+          </section>
+        </article>
       </div>
     </main>
 
