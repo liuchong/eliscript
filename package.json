@@ -1,8 +1,27 @@
 {
   "name": "eliscript",
   "private": true,
+  "version": "0.0.1",
+  "description": "An Emacs Lisp-flavored language that compiles to modern JavaScript.",
   "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liuchong/eliscript.git"
+  },
+  "keywords": [
+    "lisp",
+    "emacs-lisp",
+    "compiler",
+    "esm",
+    "persistent-data"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "exports": {
+    "./compiler": "./dist/bootstrap/compiler.mjs",
+    "./compiler.mjs": "./dist/bootstrap/compiler.mjs",
     "./runtime/literals": "./runtime/literals.mjs",
     "./runtime/literals.mjs": "./runtime/literals.mjs",
     "./runtime/source-mapping": "./runtime/source-mapping.mjs",
@@ -103,8 +122,27 @@
     "scale:project": "bun tools/project/scale-invalidation.mjs"
   },
   "engines": {
+    "node": ">=24.0.0",
     "bun": ">=1.4.0"
   },
+  "bin": {
+    "eliscript": "bin/eliscript-cli.mjs",
+    "eliscript-build": "bin/eliscript-cli.mjs",
+    "eliscript-check": "bin/eliscript-cli.mjs",
+    "eliscript-format": "bin/eliscript-cli.mjs",
+    "eliscript-eval": "bin/eliscript-cli.mjs",
+    "eliscript-watch": "bin/eliscript-cli.mjs"
+  },
+  "files": [
+    "bin/",
+    "bootstrap/",
+    "compiler/",
+    "dist/bootstrap/",
+    "editor/",
+    "platform/",
+    "runtime/",
+    "stdlib/"
+  ],
   "devDependencies": {
     "@vitejs/plugin-react": "6.1.0",
     "react": "19.2.8",

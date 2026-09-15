@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { createInterface } from "node:readline";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   EvaluationSession,
@@ -381,13 +383,19 @@ async function runOneShot(options) {
   }
 }
 
-try {
-  const options = parseArguments(process.argv.slice(2));
-  if (options.mode === "help") process.stdout.write(usage);
-  else if (options.mode === "stdio") await runStdio();
-  else if (options.mode === "repl") await runRepl(options);
-  else await runOneShot(options);
-} catch (error) {
-  process.stderr.write(`eliscript-eval: ${error.message}\n`);
-  process.exitCode = 1;
+export async function main(arguments_ = process.argv.slice(2)) {
+  try {
+    const options = parseArguments(arguments_);
+    if (options.mode === "help") process.stdout.write(usage);
+    else if (options.mode === "stdio") await runStdio();
+    else if (options.mode === "repl") await runRepl(options);
+    else await runOneShot(options);
+  } catch (error) {
+    process.stderr.write(`eliscript-eval: ${error.message}\n`);
+    process.exitCode = 1;
+  }
 }
+
+const isMain = process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) await main();

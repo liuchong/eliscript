@@ -14,8 +14,9 @@
 (module example.browser-playground
   (import "eliscript/platform/browser.mjs"
           browserCapabilities browserDocument)
-  (import "eliscript/dist/bootstrap/compiler.mjs"
-          compile_string_with_source_map)
+  ;; The package's public compiler entry, not an internal build path, so the
+  ;; browser and an npm consumer depend on the same contract.
+  (import "eliscript/compiler" compile_string_with_source_map)
   ;; Persistent values print through the canonical data text rather than
   ;; through JavaScript's default object spelling.
   (import "eliscript/runtime/core/data-text.mjs" printValue)

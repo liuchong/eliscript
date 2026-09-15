@@ -28,6 +28,7 @@ test-core: check-contracts
 		tests/local-onboarding.test.mjs \
 		tests/test-partition.test.mjs \
 		tests/repository-integrity.test.mjs \
+		tests/package-surface.test.mjs \
 		tests/platform-capabilities.test.mjs \
 		tests/reader-program-fuzz.test.mjs \
 		tests/persistent-semantics.test.mjs \
