@@ -18,12 +18,14 @@
   (import "node:path" :as Path)
   (import "../renderer/server.eli" render-site sort-posts)
   (import "./content.eli" check-identity read-posts)
+  (import "./issues.eli" collect-issues)
   (import "../support/config.eli" load-config)
   (import "../support/diagnostics.eli" fail)
   (import "../support/text.eli" slice)
 
   (defconst program-arguments (js* "process.argv"))
   (defconst environment (js* "process.env"))
+  (defconst fetch-implementation (js* "globalThis.fetch"))
   (defconst set-exit-code (js* "(code) => { process.exitCode = code; }"))
   (defconst to-native-array (js* "(value) => Array.from(value)"))
 
@@ -105,7 +107,7 @@
   (defun public-posts (posts)
     (funcall to-native-array (Sequence/map public-post posts)))
 
-  (defun write-manifests (staging documents posts config)
+  (defun write-manifests (staging documents posts config carriers unauthorized)
     (mkdirSync (Path/join staging "_dogfood") (js-object :recursive t))
     (writeFileSync
       (Path/join staging "_dogfood/build.json")
@@ -115,7 +117,9 @@
                         :configSchemaVersion (Collection/get config :schema-version 1)
                         :postCount (Collection/count posts)
                         :routeCount (Collection/count documents)
-                        :contentFingerprint (fingerprint documents)))
+                        :contentFingerprint (fingerprint documents)
+                        :commentCarriers (str carriers)
+                        :unauthorizedRecords (str unauthorized)))
            "\n"))
     (writeFileSync
       (Path/join staging "_dogfood/posts.json")
@@ -141,6 +145,68 @@
 
   (defun publishable? (post) (not (get post :draft)))
 
+  (defun append-all (target values)
+    (Collection/reduce values
+                       (lambda (accumulator value)
+                         (Collection/conj accumulator value))
+                       target))
+
+  ;; ------------------------------------------------------------------ sources
+
+  (defun enabled-sources (config)
+    (Sequence/filter (lambda (source) (Collection/get source :enabled false))
+                     (Collection/get config :sources [])))
+
+  ;; Carrier bindings name a canonical post, so every identity already known
+  ;; in this build is offered to the classifier before article filters run.
+  (defun identity-list (posts)
+    (let ((result [])
+          (index 0))
+      (while (< index (Collection/count posts))
+        (let* ((post (Collection/nth posts index))
+               (aliases (get post :aliases))
+               (alias-index 0))
+          (setq result (Collection/conj result (get post :id)))
+          (while (< alias-index (Collection/count aliases))
+            (setq result (Collection/conj result
+                                         (Collection/nth aliases alias-index)))
+            (setq alias-index (1+ alias-index))))
+        (setq index (1+ index)))
+      result))
+
+  (defun request-headers (token)
+    (if (nil? token)
+        (js-object :accept "application/vnd.github+json" :user-agent "dogfood")
+      (js-object :accept "application/vnd.github+json" :user-agent "dogfood"
+                 :authorization (str "Bearer " token))))
+
+  ;; The only network boundary in the builder. A token never reaches the
+  ;; renderer, the site output, or the build manifest.
+  (defasync github-transport (url)
+    (let* ((token (first-value (env-value "GITHUB_TOKEN")
+                               (action-input "github-token")))
+           (response (await (funcall fetch-implementation url
+                                     (js-object :headers (request-headers token))))))
+      {:status (get response "status")
+       :headers (js-object :link (js-call (get response "headers") :get "link"))
+       :body (await (js-call response :json))}))
+
+  (defasync source-posts (root config source transport identities)
+    (let ((kind (Collection/get source :kind :markdown)))
+      (cond
+        ((= kind :markdown)
+         {:posts (read-posts root (Collection/get source :directory "content/posts"))
+          :carriers 0
+          :unauthorized 0})
+        ((= kind :issues)
+         (await (collect-issues {:source source
+                                 :publishing (Collection/get config :publishing)
+                                 :adapters (Collection/get config :adapters [])
+                                 :identities identities
+                                 :transport transport})))
+        (t (fail "DOGFOOD-SOURCE-001"
+                 (str "unsupported source kind: " kind))))))
+
   ;; --------------------------------------------------------------- action glue
 
   (defun set-output (name value)
@@ -164,30 +230,40 @@
 
   ;; ------------------------------------------------------------------- build
 
-  (defun build-site (root config-path output-override reason)
+  (defasync build-site (root config-path output-override reason)
     (let* ((config (load-config config-path))
            (site (Collection/get config :site))
-           (source (Collection/nth (Collection/get config :sources) 0))
-           (directory (Collection/get source :directory "content/posts"))
+           (sources (enabled-sources config))
            (configured (Collection/get (Collection/get config :output) :directory "_site"))
            (output (Path/join root (if (nil? output-override) configured output-override)))
            (staging (str output ".staging"))
-           (all-posts (read-posts root directory))
-           (posts (sort-posts (Sequence/filter publishable? all-posts))))
-      (check-identity posts)
-      (let* ((documents (render-site site posts))
+           (collected [])
+           (carriers 0)
+           (unauthorized 0))
+      (let ((index 0))
+        (while (< index (Collection/count sources))
+          (let* ((source (Collection/nth sources index))
+                 (result (await (source-posts root config source github-transport
+                                              (identity-list collected)))))
+            (setq collected (append-all collected (Collection/get result :posts []))
+                  carriers (+ carriers (Collection/get result :carriers 0))
+                  unauthorized (+ unauthorized (Collection/get result :unauthorized 0))))
+          (setq index (1+ index))))
+      (let* ((posts (sort-posts (Sequence/filter publishable? collected)))
+             (documents (render-site site posts))
              (digest (fingerprint documents)))
+        (check-identity posts)
         (prepare-staging staging)
         (let ((index 0))
           (while (< index (Collection/count documents))
             (write-document staging (Collection/nth documents index))
             (setq index (1+ index))))
-        (write-manifests staging documents posts config)
+        (write-manifests staging documents posts config carriers unauthorized)
         (publish staging output)
         (report output documents posts reason digest)
         digest)))
 
-  (defun main ()
+  (defasync main ()
     (let* ((arguments program-arguments)
            (root (option-value arguments "--root"
                                (first-value (env-value "GITHUB_WORKSPACE") ".")))
@@ -200,7 +276,7 @@
            (forced (or (not (nil? (option-value arguments "--force" nil)))
                        (truthy-input? (action-input "force")))))
       (try
-        (build-site root config-path output-override (if forced "forced" "changed"))
+        (await (build-site root config-path output-override (if forced "forced" "changed")))
         (catch error
           (print (str "dogfood: " (get error :code "DOGFOOD") ": "
                       (get error :message)))

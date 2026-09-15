@@ -1,0 +1,56 @@
+;; Key/value field parsing shared by the content providers.
+;;
+;; Markdown front matter and a GitHub issue metadata header use the same
+;; `key: value` shape with comma or bracket separated lists, so both providers
+;; read them through this one implementation.
+
+(module dogfood.support.fields
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "./diagnostics.eli" fail)
+  (import "./text.eli"
+          blank empty-value? index-of join slice split-on startsWith endsWith
+          text-length trim)
+
+  (defun parse-field-line (line)
+    (let ((colon (index-of ":" line)))
+      (if (< colon 1)
+          nil
+        [(trim (slice 0 colon line))
+         (trim (slice (+ colon 1) (text-length line) line))])))
+
+  (defun parse-fields (lines start end)
+    (let ((fields {})
+          (index start))
+      (while (< index end)
+        (let ((pair (parse-field-line (Collection/nth lines index))))
+          (when pair
+            (setq fields (Collection/assoc fields (nth 0 pair) (nth 1 pair)))))
+        (setq index (1+ index)))
+      fields))
+
+  (defun parse-list (value)
+    (let* ((inner (if (and (startsWith "[" value) (endsWith "]" value))
+                      (slice 1 (- (text-length value) 1) value)
+                    value))
+           (parts (split-on "," inner))
+           (result [])
+           (index 0))
+      (while (< index (Collection/count parts))
+        (let ((item (trim (Collection/nth parts index))))
+          (unless (blank item)
+            (setq result (Collection/conj result item))))
+        (setq index (1+ index)))
+      result))
+
+  (defun field (fields key fallback)
+    (let ((value (Collection/get fields key nil)))
+      (if (empty-value? value) fallback value)))
+
+  (defun require-field (fields key path)
+    (let ((value (Collection/get fields key nil)))
+      (if (empty-value? value)
+          (fail "DOGFOOD-CONTENT-001"
+                (str path ": missing required metadata field \"" key "\""))
+        value)))
+
+  (export field parse-field-line parse-fields parse-list require-field))

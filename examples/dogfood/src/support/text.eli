@@ -9,7 +9,7 @@
 (module dogfood.support.text
   (import "eliscript/runtime/core/collection.mjs" :as Collection)
   (import "eliscript/runtime/core/text.mjs"
-          trim blank slice startsWith endsWith contains join)
+          trim blank slice startsWith endsWith contains join stripPrefix)
 
   (defun text-length (text) (Collection/count text))
 
@@ -163,5 +163,5 @@
   ;; The runtime text facade is re-exported so callers need one text module.
   (export basename blank char-code contains decode-entities digit-code?
           empty-value? endsWith index-of index-of-from join pad2 parse-integer
-          replace-all slice slugify split-lines split-on startsWith strip-tags
-          string-value? text-length to-lowercase trim without-suffix))
+          replace-all slice slugify split-lines split-on startsWith stripPrefix
+          strip-tags string-value? text-length to-lowercase trim without-suffix))
