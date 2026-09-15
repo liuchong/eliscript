@@ -129,7 +129,7 @@ test-applications:
 		tests/dogfood-resilience.test.mjs tests/dogfood-skip.test.mjs \
 		tests/dogfood-workflow.test.mjs tests/browser-matrix.test.mjs \
 		tests/browser-playground.test.mjs tests/browser-host.test.mjs \
-		tests/pages-assembly.test.mjs
+		tests/pages-assembly.test.mjs tests/pages-runtime.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/application-cli-test.sh
 
 # The browser matrix drives all three engines, so it is its own target: the

@@ -45,6 +45,11 @@ export const ROOT_REFERENCES = Object.freeze([
   ['"eliscript/": "../../"', '"eliscript/": "../"'],
   ['src="../../', 'src="../'],
   ['href="../../', 'href="../'],
+  // A page may also reach the root from a dynamic import, which is neither an
+  // attribute nor the import map. `language.html` shows `(import "../../…")`
+  // inside code samples, which is source text rather than a reference, so the
+  // pattern names the call.
+  ['import("../../', 'import("../'],
 ]);
 
 /** Rewrites the page references that pointed at the repository root. */

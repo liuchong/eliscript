@@ -196,7 +196,11 @@ export async function serveTree(directory, port) {
 function contentType(path) {
   if (path.endsWith(".html")) return "text/html; charset=utf-8";
   if (path.endsWith(".css")) return "text/css; charset=utf-8";
-  if (path.endsWith(".js")) return "text/javascript; charset=utf-8";
+  // `.mjs` is JavaScript too. Served as a binary stream, a browser refuses to
+  // execute it as a module, which looks like the module being absent.
+  if (path.endsWith(".js") || path.endsWith(".mjs")) return "text/javascript; charset=utf-8";
+  if (path.endsWith(".map")) return "application/json; charset=utf-8";
+  if (path.endsWith(".svg")) return "image/svg+xml";
   if (path.endsWith(".json")) return "application/json; charset=utf-8";
   if (path.endsWith(".xml")) return "application/xml; charset=utf-8";
   return "application/octet-stream";
