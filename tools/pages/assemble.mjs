@@ -69,8 +69,14 @@ export function rebasePage(html, assetVersions = new Map()) {
   return result;
 }
 
-/** The script the site runs, compiled from Eliscript rather than written by hand. */
+/**
+ * The site's loader, compiled ahead of time, and the Eliscript source it
+ * fetches and compiles in the browser. The repository keeps the source; the
+ * loader is the only JavaScript the site ships, and it exists to start the
+ * compiler the site already serves for its playground.
+ */
 export const SITE_SCRIPT = "dist/docs-site/site.js";
+export const SITE_SOURCE_FILE = "examples/docs-site/src/site.eli";
 
 /** The digests that stamp the site's own stylesheet and script. */
 export async function assetVersions({ root, siteDirectory }) {
@@ -117,6 +123,8 @@ export async function assemblePages({ root, outDir }) {
   await copySite(resolve(source, SITE_SOURCE), target, versions);
   await mkdir(resolve(target, "pages/assets"), { recursive: true });
   await writeFile(resolve(target, "pages/assets/site.js"), await readFile(script));
+  await writeFile(resolve(target, "pages/assets/site.eli"),
+                  await readFile(resolve(source, SITE_SOURCE_FILE)));
   await writePreviousAddresses(target, resolve(source, SITE_SOURCE));
   // The supporting trees are copied into the same directory, so a site entry
   // that shares a name with one of them would be silently replaced.

@@ -46,18 +46,22 @@ afterAll(async () => {
   if (staging) await rm(staging, { recursive: true, force: true });
 });
 
-test("the published script is a compiled classic script", async () => {
-  const source = await readFile(resolve(artifact, "pages/assets/site.js"), "utf8");
+test("the site publishes a loader and the source it compiles", async () => {
+  const loader = await readFile(resolve(artifact, "pages/assets/site.js"), "utf8");
   // The pages load it with `defer`, so it must be a classic script with
-  // nothing left to resolve.
-  expect(source).not.toMatch(/^\s*import\s/mu);
-  expect(source.startsWith("(")).toBe(true);
-  // It is built from Eliscript, and its own source is what the repository
-  // keeps: there is no handwritten script beside the site.
+  // nothing left to resolve. It is compiled from Eliscript like everything
+  // else: the repository has no handwritten JavaScript beside the site.
+  expect(loader).not.toMatch(/^\s*import\s/mu);
+  expect(loader.startsWith("(")).toBe(true);
   await expect(readFile(resolve(ROOT, "docs/pages/assets/site.js"), "utf8"))
     .rejects.toThrow();
-  expect(await readFile(resolve(ROOT, "examples/docs-site/src/site.eli"), "utf8"))
-    .toContain("(module docs.site");
+
+  // The behaviours themselves ship as source, and the loader is what compiles
+  // them in the browser.
+  const source = await readFile(resolve(artifact, "pages/assets/site.eli"), "utf8");
+  expect(source).toContain("(module docs.site");
+  expect(await readFile(resolve(ROOT, "examples/docs-site/src/loader.eli"), "utf8"))
+    .toContain("(module docs.loader");
 });
 
 test("the served pages stamp the script with its digest", async () => {
@@ -73,14 +77,27 @@ async function withPage(path, verify) {
   try {
     const page = await browser.newPage();
     const failed = [];
+    const requests = [];
     page.on("pageerror", (error) => failed.push(String(error).slice(0, 160)));
+    page.on("request", (request) => requests.push(request.url()));
     await page.goto(`${server.origin}${path}`, { waitUntil: "networkidle" });
-    await verify(page);
+    await verify(page, requests);
     expect(failed).toEqual([]);
   } finally {
     await browser.close();
   }
 }
+
+test("the page compiles the source in the browser", async () => {
+  await withPage("index.html", async (page, requests) => {
+    // The loader fetches the Eliscript source and the compiler the site
+    // already serves for its playground, rather than shipping the behaviours
+    // compiled.
+    expect(requests.some((url) => url.endsWith("pages/assets/site.eli"))).toBe(true);
+    expect(requests.some((url) => url.includes("browser/worker.mjs"))).toBe(true);
+    expect(requests.some((url) => url.includes("dist/browser/compiler.js"))).toBe(true);
+  });
+});
 
 test("the example switcher replaces the source and the output", async () => {
   await withPage("index.html", async (page) => {

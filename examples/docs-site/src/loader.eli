@@ -1,0 +1,71 @@
+;; The documentation site's loader.
+;;
+;; The site's behaviours are an Eliscript program, and this page compiles them
+;; in the browser at run time instead of shipping them compiled. The loader is
+;; itself compiled ahead of time and kept deliberately small: it fetches the
+;; source, hands it to the module worker the playground already uses, and runs
+;; the module that comes back.
+;;
+;; Running the compiled module from a blob URL is why the request names a
+;; runtime base: the worker rewrites `eliscript/...` specifiers to served URLs,
+;; so the output has no directory of its own to resolve them from. Nothing here
+;; touches the document; the compiled program does that, and it reaches the DOM
+;; through the platform package's document grant.
+
+(module docs.loader
+  (defconst load (js* "(url) => import(url)"))
+  ;; This script is classic, so it has no `import.meta`: it is loaded with
+  ;; `defer`, and the script element is available while it runs. Its own URL is
+  ;; the base for everything else it asks the server for.
+  (defconst script-url
+    (js* "String((document.currentScript && document.currentScript.src) || location.href)"))
+  (defconst relative-to (js* "((url, path) => new URL(path, url).href)"))
+  (defconst package-base (funcall relative-to script-url "../../"))
+  (defconst source-url (funcall relative-to script-url "site.eli"))
+  (defconst worker-url (funcall relative-to script-url "../../browser/worker.mjs"))
+  (defconst start-worker (js* "(url) => new Worker(url, { type: 'module' })"))
+  (defconst blob-url-of
+    (js* "(code) => URL.createObjectURL(new Blob([code], { type: 'text/javascript' }))"))
+  (defconst release-blob-url (js* "(url) => URL.revokeObjectURL(url)"))
+  (defconst fetch-text (js* "((url) => fetch(url).then((response) => { if (!response.ok) throw new Error(String(response.status)); return response.text(); }))"))
+  (defconst compile-once
+    (js* "((worker, request) => new Promise((resolve, reject) => { const id = 'docs-site-' + String(Math.floor(Math.random() * 1e9)); const onMessage = (event) => { const data = event.data; if (!data || data.id !== id) return; worker.removeEventListener('message', onMessage); if (data.ok) resolve(data); else reject(new Error(data.message || 'compilation failed')); }; worker.addEventListener('message', onMessage); worker.postMessage({ id, request }); }))"))
+
+  (defun field (object name) (get object name))
+
+  ;; The failure is reported where a developer looks for it, and nowhere a
+  ;; reader would mistake for page content.
+  (defun report (message)
+    (js-call (js* "globalThis.console") :error message))
+
+  ;; A page whose script cannot be compiled stays readable: the failure is
+  ;; reported where the playground reports its own, and nothing else changes.
+  (defasync start ()
+    (try
+      (let* ((source (await (funcall fetch-text source-url)))
+             (worker (funcall start-worker worker-url))
+             (reply (await (funcall compile-once
+                                    worker
+                                    (js-object
+                                      "mode" "single"
+                                      "source" source
+                                      "filename" "site.eli"
+                                      "runtimeBase" package-base))))
+             (module (field (field reply "modules") "site.mjs"))
+             (url (funcall blob-url-of (field module "javascript"))))
+        (try
+          (await (funcall load url))
+          (catch error
+            (report (str "site script failed at run time: "
+                         (field error "message"))))
+          (finally (funcall release-blob-url url))))
+      (catch error
+        (report (str "site script did not compile: " (field error "message"))))))
+
+  (defun boot ()
+    (if (= (field (js* "globalThis.document") "readyState") "loading")
+        (js-call (js* "globalThis.document") :addEventListener
+                 "DOMContentLoaded" (lambda (event) (start)))
+      (start)))
+
+  (boot))
