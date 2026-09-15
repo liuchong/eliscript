@@ -8,3 +8,13 @@ node_modules/
 
 # Packed release artifacts.
 *.tgz
+
+# The packaged dogfood Action is committed: a consumer resolves
+# `liuchong/eliscript/examples/dogfood@<ref>` from this repository, and the
+# generated entry has to exist in it for that reference to run.
+!examples/dogfood/dist/
+examples/dogfood/dist/*
+!examples/dogfood/dist/action/
+!examples/dogfood/dist/site/
+examples/dogfood/dist/site/*
+!examples/dogfood/dist/site/browser.js
