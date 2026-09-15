@@ -44,4 +44,9 @@ separates implementation, verification, stabilization, and application status.
 - [Generated library API](pages/api.html)
 - [Specification guide](pages/specifications.html)
 - [Roadmap and evidence status](pages/roadmap.html)
+- [Browser playground](pages/playground.html)
 - [Optional publishing example](pages/publishing.html)
+
+## Releasing And Deployment
+
+- [Release procedure](releasing.md)

@@ -1,0 +1,90 @@
+// Assembles the published documentation site.
+//
+// The site lives under `docs/`, and the browser playground in it loads the
+// compiler, the runtime, and the compile host from the repository root two
+// levels above the page. Publishing only `docs/` would therefore ship a page
+// whose imports cannot resolve, so the artifact keeps the repository shape for
+// exactly the trees the site needs.
+//
+// The layout is a test-verified contract rather than a deployment detail:
+// `tests/pages-assembly.test.mjs` assembles the artifact and resolves every
+// reference the playground page carries.
+
+import { cp, mkdir, rm } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+
+/**
+ * Trees the published site needs, relative to the repository root.
+ *
+ * - `docs` is the site itself.
+ * - `runtime` and `platform` are what the playground page and compiled output
+ *   import.
+ * - `browser` is the compile host and its worker.
+ * - `dist/browser` is the bundled compiler the worker loads.
+ * - `dist/browser-playground` is the compiled playground application.
+ */
+export const PUBLISHED_TREES = Object.freeze([
+  "docs",
+  "runtime",
+  "platform",
+  "browser",
+  "dist/browser",
+  "dist/browser-playground",
+]);
+
+/** Single files the published site carries. */
+export const PUBLISHED_FILES = Object.freeze(["LICENSE"]);
+
+/**
+ * Copies the published trees into `outDir`, replacing whatever was there.
+ *
+ * @returns {Promise<{ trees: string[], files: string[] }>}
+ */
+export async function assemblePages({ root, outDir }) {
+  const source = resolve(root);
+  const target = resolve(outDir);
+  if (target === source || source.startsWith(`${target}/`)) {
+    throw new Error(`refusing to assemble into the source tree: ${outDir}`);
+  }
+  await rm(target, { recursive: true, force: true });
+  await mkdir(target, { recursive: true });
+  for (const entry of PUBLISHED_TREES) {
+    const destination = resolve(target, entry);
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(resolve(source, entry), destination, { recursive: true });
+  }
+  for (const entry of PUBLISHED_FILES) {
+    await cp(resolve(source, entry), resolve(target, entry));
+  }
+  return { trees: [...PUBLISHED_TREES], files: [...PUBLISHED_FILES] };
+}
+
+function parseArguments(argv) {
+  const options = { root: ".", out: "dist/pages" };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--root" || argument === "--out") {
+      const value = argv[index + 1];
+      if (value === undefined) throw new Error(`${argument} requires a path`);
+      options[argument === "--root" ? "root" : "out"] = value;
+      index += 1;
+    } else {
+      throw new Error(`unknown argument ${argument}`);
+    }
+  }
+  return options;
+}
+
+if (import.meta.main) {
+  try {
+    const options = parseArguments(process.argv.slice(2));
+    const result = await assemblePages({ root: options.root, outDir: options.out });
+    process.stdout.write(
+      `Pages artifact: ${result.trees.length} trees, ${result.files.length} files ` +
+      `into ${resolve(options.out)}\n`,
+    );
+  } catch (error) {
+    process.stderr.write(`assemble: ${error.message}\n`);
+    process.exitCode = 1;
+  }
+}

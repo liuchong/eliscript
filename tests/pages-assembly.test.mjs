@@ -1,0 +1,93 @@
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { posix, resolve } from "node:path";
+
+import { PUBLISHED_TREES, assemblePages } from "../tools/pages/assemble.mjs";
+
+const ROOT = resolve(import.meta.dir, "..");
+const SITE_PAGE = "docs/pages/playground.html";
+
+let staging;
+let artifact;
+
+beforeAll(async () => {
+  staging = await mkdtemp(resolve(ROOT, ".eliscript-pages-"));
+  artifact = resolve(staging, "pages");
+  await assemblePages({ root: ROOT, outDir: artifact });
+});
+
+afterAll(async () => {
+  if (staging) await rm(staging, { recursive: true, force: true });
+});
+
+async function exists(path) {
+  try {
+    await stat(resolve(artifact, path));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("the artifact carries the site and every tree it loads", async () => {
+  for (const tree of [...PUBLISHED_TREES, "LICENSE"]) {
+    expect(await exists(tree)).toBe(true);
+  }
+  // The site's own entry cannot move: the published root keeps the repository
+  // shape so the playground's relative references stay valid.
+  expect(await exists("docs/index.html")).toBe(true);
+  expect(await exists("docs/pages/playground.html")).toBe(true);
+});
+
+test("every reference the playground page carries resolves in the artifact", async () => {
+  const page = await readFile(resolve(artifact, SITE_PAGE), "utf8");
+
+  // The import map maps `eliscript/` two levels above the page, so that
+  // directory must be the published root.
+  const importMap = JSON.parse(
+    page.match(/<script type="importmap">\s*(\{[\s\S]*?\})\s*<\/script>/u)[1],
+  );
+  const prefix = importMap.imports["eliscript/"];
+  expect(prefix).toBe("../../");
+  // The page sits two levels below the published root, so the prefix lands on
+  // that root, which is where the package trees are.
+  const base = posix.resolve("/", posix.dirname(SITE_PAGE), prefix);
+  expect(base).toBe("/");
+
+  // The bare specifiers this page's own module graph uses.
+  for (const specifier of ["platform/browser.mjs", "runtime/core/data-text.mjs"]) {
+    expect(await exists(specifier)).toBe(true);
+  }
+
+  // The worker, its host, and the bundle the host loads.
+  expect(await exists("browser/worker.mjs")).toBe(true);
+  expect(await exists("browser/host.mjs")).toBe(true);
+  expect(await exists("dist/browser/compiler.js")).toBe(true);
+  const host = await readFile(resolve(artifact, "browser/host.mjs"), "utf8");
+  const compilerImport = host.match(/from\s+"([^"]+)"/gu)
+    .map((match) => match.replace(/from\s+"|"/gu, ""))
+    .find((specifier) => specifier.includes("compiler"));
+  expect(await exists(posix.join("browser", compilerImport))).toBe(true);
+
+  // The compiled playground application the page imports at run time.
+  expect(page).toContain("../../dist/browser-playground/playground.mjs");
+  expect(await exists("dist/browser-playground/playground.mjs")).toBe(true);
+  expect(await exists("dist/browser-playground/highlight.mjs")).toBe(true);
+});
+
+test("the compiled playground loads its runtime from the published root", async () => {
+  const app = await readFile(resolve(artifact, "dist/browser-playground/playground.mjs"), "utf8");
+  // The application resolves the package root two levels above itself, which
+  // lands on the published root, and hands that base to the worker so compiled
+  // code can import the runtime without an import map.
+  expect(app).toContain("new URL('../../', import.meta.url)");
+  expect(app).toContain("browser/worker.mjs");
+  expect(await exists("runtime/core/data-text.mjs")).toBe(true);
+  expect(await exists("runtime/core/sequence.mjs")).toBe(true);
+  expect(await exists("runtime/literals.mjs")).toBe(true);
+});
+
+test("the assembler refuses to write into its own source tree", async () => {
+  await expect(assemblePages({ root: ROOT, outDir: ROOT }))
+    .rejects.toThrow(/refusing to assemble into the source tree/u);
+});

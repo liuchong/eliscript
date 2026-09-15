@@ -99,6 +99,30 @@ the emitter injects for literals and collection helpers, to served URLs. Only
 an application's own module graph needs a map, and that is the application's
 choice.
 
+## Documentation Site
+
+The documentation site is published from the assembled tree, not from `docs/`
+alone. The browser playground in it loads the compiler, the runtime, and the
+compile host from the repository root two levels above the page, so publishing
+only `docs/` would ship a page whose imports cannot resolve.
+
+`.github/workflows/pages.yml` builds the compiler, the browser bundle, and the
+playground, then calls `tools/pages/assemble.mjs`, which copies the site
+together with exactly the trees it needs. `tests/pages-assembly.test.mjs`
+assembles that tree and resolves every reference the playground page carries,
+so the layout is a verified contract rather than a deployment detail.
+
+Publishing is gated on the repository variable `ELISCRIPT_PAGES`. A repository
+without Pages enabled for Actions therefore reports a build rather than a failed
+deployment. To publish:
+
+1. Set Settings, Pages, Source to "GitHub Actions".
+2. Set the repository variable `ELISCRIPT_PAGES` to `true`.
+3. Push to `master`, or run the Pages workflow manually.
+
+The site is then served from the artifact root, so the entry page is at
+`/docs/index.html` and the playground at `/docs/pages/playground.html`.
+
 ## Source Obligations
 
 The package is GPL-3.0-or-later. `compiler/` and `stdlib/` ship as source
