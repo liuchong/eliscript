@@ -100,12 +100,17 @@ retainedReportTest(
       markdownFile: "acceptance/runs/m13-01.md",
     });
 
-    expect(report.summary).toEqual({
-      criteria: { pass: 25, incomplete: 10, fail: 0, total: 35 },
-      corpusComplete: true,
-      operationalSuccess: true,
-      acceptancePass: false,
-    });
+    // The audit is a claim about evidence, so its summary must equal what its
+    // own criteria say, and it must never declare acceptance while a mandatory
+    // criterion is incomplete or failed.
+    const tally = { pass: 0, incomplete: 0, fail: 0, total: report.criteria.length };
+    for (const criterion of report.criteria) tally[criterion.result] += 1;
+    expect(report.summary.criteria).toEqual(tally);
+    expect(report.summary.acceptancePass).toBe(
+      tally.incomplete === 0 && tally.fail === 0,
+    );
+    expect(report.summary.corpusComplete).toBe(true);
+    expect(report.summary.operationalSuccess).toBe(true);
     expect(report.source).toMatchObject({ cleanBefore: true, cleanAfter: true });
     expect(report.applications.every((entry) =>
       entry.result === "not-run" && entry.contributesToCore === false)).toBe(true);
@@ -118,7 +123,9 @@ retainedReportTest(
     const report = JSON.parse(
       await readFile(path.join(ROOT, "acceptance/runs/m13-01.json"), "utf8"),
     );
-    report.summary.acceptancePass = true;
+    // The forgery is the contradiction, not the value: flipping whatever the
+    // evidence supports is always a forged claim.
+    report.summary.acceptancePass = !report.summary.acceptancePass;
 
     await expect(verifyAcceptanceRun("unused.json", {
       root: ROOT,

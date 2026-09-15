@@ -119,7 +119,13 @@ test("a source that returns nothing produces a site without it", async () => {
   expect(archive).toContain("posts/");
 });
 
-test("a provider failure ends the build without touching the published tree", async () => {
+// These two cases cross the real network boundary on purpose: the point is
+// that a failing provider is reported rather than crashing, and a substituted
+// transport would not prove that. A slow or unavailable network is therefore
+// part of the fixture, so they get more room than the default timeout.
+const NETWORK_TIMEOUT = 30_000;
+
+test("a provider failure ends the build without touching the published tree", { timeout: NETWORK_TIMEOUT }, async () => {
   await writeFile(join(project, "dogfood.config.eli"), configText, "utf8");
   const first = await build();
   expect(first.exitCode).toBe(0);
@@ -147,7 +153,7 @@ test("a provider failure ends the build without touching the published tree", as
   expect(await exists(join(project, "site.backup"))).toBe(false);
 });
 
-test("a Discussion provider failure is reported with its own code", async () => {
+test("a Discussion provider failure is reported with its own code", { timeout: NETWORK_TIMEOUT }, async () => {
   await writeFile(
     join(project, "dogfood.config.eli"),
     withSources(

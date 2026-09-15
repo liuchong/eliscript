@@ -21,13 +21,16 @@ async function readJson(relativePath) {
 
 test("repository dependencies and generated artifacts satisfy declared boundaries", async () => {
   const report = await checkRepositoryIntegrity({ root: ROOT });
+  // The count comes from the contract, so declaring a dependency updates the
+  // contract rather than this expectation.
+  const contract = await readJson("contracts/repository-integrity.json");
 
   expect(report).toMatchObject({
     schemaVersion: 1,
     format: "eliscript-repository-integrity-report",
     version: 1,
     dependency: {
-      packages: 4,
+      packages: contract.packages.length,
       localPackages: 2,
       lockfile: "frozen",
       coreExternalImports: 0,

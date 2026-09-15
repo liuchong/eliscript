@@ -22,18 +22,27 @@ async function readJson(file) {
 
 retainedFinalTest("canonical final artifacts derive every gate from the retained local run", async () => {
   const manifest = await buildFinalAcceptance({ root: ROOT });
+  const run = await readJson("acceptance/runs/m13-01.json");
+
+  // The manifest is a projection of the retained run, so its counts are the
+  // run's counts. A hard-coded number here would become a claim about the
+  // project's state rather than a check of the projection.
+  const tally = { pass: 0, incomplete: 0, fail: 0, total: run.criteria.length };
+  for (const criterion of run.criteria) tally[criterion.result] += 1;
 
   expect(manifest).toMatchObject({
     schemaVersion: 1,
     format: "eliscript-1.0-acceptance-manifest",
     version: 1,
     summary: {
-      criteria: { pass: 25, incomplete: 10, fail: 0, total: 35 },
+      criteria: tally,
       corpusComplete: true,
       operationalSuccess: true,
       evidenceComplete: true,
       blockingDefects: 0,
-      acceptancePass: false,
+      // Acceptance is all-or-nothing: a manifest claims it only when no
+      // mandatory criterion is incomplete or failed.
+      acceptancePass: tally.incomplete === 0 && tally.fail === 0,
     },
   });
   expect(manifest.evidence.map((group) => group.id)).toEqual([
@@ -43,9 +52,20 @@ retainedFinalTest("canonical final artifacts derive every gate from the retained
   expect(manifest.applications.every((application) =>
     application.result === "not-run" &&
       application.contributesToCore === false)).toBe(true);
-  expect(humanFinalAcceptanceReport(manifest)).toContain(
-    "This is the canonical candidate report.",
+  // The report is prose about the same numbers, and it may only claim
+  // acceptance when the manifest does.
+  const report = humanFinalAcceptanceReport(manifest);
+  expect(report).toContain(
+    `Results: ${tally.pass} pass, ${tally.incomplete} incomplete, ` +
+    `${tally.fail} fail, ${tally.total} total.`,
   );
+  if (manifest.summary.acceptancePass) {
+    expect(report).toContain("Final acceptance: pass");
+    expect(report).not.toContain("This is the canonical candidate report.");
+  } else {
+    expect(report).toContain("This is the canonical candidate report.");
+    expect(report).not.toContain("Final acceptance: pass");
+  }
 });
 
 retainedFinalTest("blocking defects cannot be hidden by otherwise valid artifacts", async () => {
@@ -76,7 +96,7 @@ retainedFinalTest("final artifact contract rejects evidence absent from the sour
 retainedFinalTest("final acceptance rejects a forged pass result", async () => {
   const expected = await buildFinalAcceptance({ root: ROOT });
   const forged = structuredClone(expected);
-  forged.summary.acceptancePass = true;
+  forged.summary.acceptancePass = !expected.summary.acceptancePass;
 
   expect(() => validateFinalManifest(forged, expected)).toThrow(
     FinalAcceptanceError,
@@ -84,15 +104,22 @@ retainedFinalTest("final acceptance rejects a forged pass result", async () => {
 });
 
 retainedFinalTest("canonical final manifest and report remain byte exact", async () => {
+  const derived = await buildFinalAcceptance({ root: ROOT });
   const manifest = await verifyFinalAcceptance({ root: ROOT });
-  expect(manifest.summary.acceptancePass).toBe(false);
 
-  await expect(verifyFinalAcceptance({
-    root: ROOT,
-    requirePass: true,
-  })).rejects.toMatchObject({
-    errors: [
-      "the canonical artifacts are valid, but final acceptance has not been reached",
-    ],
-  });
+  // Byte exact means the retained artifacts are exactly what the derivation
+  // produces from the retained run.
+  expect(manifest).toEqual(derived);
+
+  // `--require-pass` is a gate on that derivation, not a second opinion.
+  const gate = verifyFinalAcceptance({ root: ROOT, requirePass: true });
+  if (derived.summary.acceptancePass) {
+    await expect(gate).resolves.toEqual(derived);
+  } else {
+    await expect(gate).rejects.toMatchObject({
+      errors: [
+        "the canonical artifacts are valid, but final acceptance has not been reached",
+      ],
+    });
+  }
 });
