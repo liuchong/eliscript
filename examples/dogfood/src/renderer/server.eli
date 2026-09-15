@@ -10,7 +10,7 @@
   (import "eliscript/runtime/core/sequence.mjs" :as Sequence)
   (import "eliscript/runtime/core/order.mjs" :as Order)
   (import "eliscript/runtime/core/text.mjs" blank)
-  (import "../support/text.eli" slugify strip-tags)
+  (import "../support/text.eli" slice slugify strip-tags text-length)
   (import "../support/sanitize.eli" escape-html)
   (import "./theme.eli" site-css document)
 
@@ -185,6 +185,7 @@
                       "<hr>"
                       "<p class=\"provenance\">Markdown · " (escape-html source-path)
                       " · <a href=\"" root "archive/\">archive</a></p>"
+                      (render-comment-channels post)
                       "</article>"))}))
 
   ;; Specification 0003: a changed slug keeps the previous route as an alias,
@@ -221,6 +222,106 @@
                   alias-index (1+ alias-index))))
         (setq index (1+ index)))
       documents))
+
+  ;; ------------------------------------------------------------- comments
+
+  ;; A keyword prints with its leading colon, which belongs in source and not
+  ;; in a page.
+  (defun display-name (value)
+    (let ((text (str value)))
+      (if (= (slice 0 1 text) ":") (slice 1 (text-length text) text) text)))
+
+  (defun channel-binding (channel)
+    (let ((binding (Collection/get channel :binding nil)))
+      (if (nil? binding)
+          ""
+        (let ((repository (Collection/get binding :repository ""))
+              (number (Collection/get binding :number nil)))
+          (if (nil? number) repository (str repository "#" number))))))
+
+  (defun render-comment-item (comment)
+    (let* ((author (Collection/get comment :author {}))
+           (login (str (Collection/get author :login "unknown")))
+           (url (Collection/get comment :url nil))
+           (created (str (Collection/get comment :created-at "")))
+           (updated (str (Collection/get comment :updated-at ""))))
+      (str "<li class=\"comment\">"
+           "<div class=\"meta\"><span class=\"comment-author\">"
+           (escape-html login) "</span>"
+           "<span>" (escape-html created) "</span>"
+           (if (= updated created)
+               ""
+             (str "<span>updated " (escape-html updated) "</span>"))
+           (if (nil? url)
+               ""
+             (str "<a href=\"" (escape-html url) "\">on GitHub</a>"))
+           "</div>"
+           "<div class=\"comment-body\">" (Collection/get comment :body "") "</div>"
+           "</li>")))
+
+  (defun render-comment-items (items)
+    (let ((markup "")
+          (index 0))
+      (while (< index (Collection/count items))
+        (setq markup (str markup (render-comment-item (Collection/nth items index)))
+              index (1+ index)))
+      (str "<ol class=\"comments-list\">" markup "</ol>")))
+
+  (defun render-channel-heading (channel)
+    (let ((count-value (Collection/get channel :count nil))
+          (freshness (Collection/get channel :updated-at nil)))
+      (str "<h2>Comments"
+           (if (and (not (nil? count-value)) (> count-value 0))
+               (str " (" count-value ")")
+             "")
+           "</h2>"
+           (if (blank freshness)
+               ""
+             (str "<p class=\"comment-note\">Snapshot from "
+                  (escape-html (str freshness)) ".</p>")))))
+
+  (defun render-channel (channel)
+    (let* ((mode (Collection/get channel :mode :snapshot))
+           (provider (display-name (Collection/get channel :kind :issue)))
+           (binding (channel-binding channel))
+           (items (Collection/get channel :items [])))
+      (str "<section class=\"comments\" data-comment-provider=\""
+           (escape-html provider) "\""
+           (if (blank binding)
+               ""
+             (str " data-comments-binding=\"" (escape-html binding) "\""))
+           ">"
+           (render-channel-heading channel)
+           (cond
+             ;; An external adapter owns its own content and its own script;
+             ;; this build declares where it mounts and nothing else.
+             ((or (= mode :embed) (= mode :external))
+              (str "<p class=\"comment-note\">Comments are provided by "
+                   (escape-html provider)
+                   ". The browser loads that provider; this build does not"
+                   " script it.</p>"))
+             ;; A live channel is deliberately not fetched during a build, so
+             ;; the reader is sent to the provider for freshness.
+             ((= mode :live)
+              (str "<p class=\"comment-note\">"
+                   (if (blank binding)
+                       "This channel is served live."
+                     (str "This thread is served live for " (escape-html binding) "."))
+                   " A comment never triggers a build; open the provider to"
+                   " read or reply.</p>"))
+             ((= (Collection/count items) 0)
+              "<p class=\"comment-note\">No comments in this snapshot.</p>")
+             (t (render-comment-items items)))
+           "</section>")))
+
+  (defun render-comment-channels (post)
+    (let ((channels (Collection/get post :comment-channels)))
+      (let ((markup "")
+            (index 0))
+        (while (< index (Collection/count channels))
+          (setq markup (str markup (render-channel (Collection/nth channels index)))
+                index (1+ index)))
+        markup)))
 
   (defun render-tag-index (site tags posts)
     (let ((items "")
@@ -367,4 +468,4 @@
       (append-all (append-all (append-all documents post-pages) tag-pages)
                   (alias-documents site sorted))))
 
-  (export render-site sort-posts))
+  (export render-comment-channels render-site sort-posts))

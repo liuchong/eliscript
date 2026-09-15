@@ -15,14 +15,15 @@
   (import "eliscript/runtime/core/sequence.mjs" :as Sequence)
   (import "../support/diagnostics.eli" fail)
   (import "../support/fields.eli" field parse-fields parse-list require-field)
+  (import "../support/github.eli" append-all fetch-paginated list-url)
+  (import "./comments.eli" native-channel)
   (import "../support/markdown.eli" render-markdown)
   (import "../support/text.eli"
-          index-of join parse-integer slice slugify split-lines split-on
-          startsWith text-length to-lowercase trim)
+          empty-value? index-of join parse-integer slice slugify split-lines
+          split-on startsWith text-length to-lowercase trim)
   (import "./content.eli" ->Post date-value)
 
   (defconst default-page-size 100)
-  (defconst maximum-pages 100)
 
   ;; ------------------------------------------------------- publisher set
 
@@ -144,61 +145,20 @@
 
   ;; ---------------------------------------------------------- pagination
 
-  (defun link-target (link)
-    (let ((start (index-of "<" link)))
-      (if (< start 0)
-          nil
-        (let ((end (index-of ">" link)))
-          (if (< end 0) nil (slice (1+ start) end link))))))
-
-  ;; Only the entry whose relation is `next` continues the traversal.
-  (defun next-link (headers)
-    (let* ((link (get headers "link" nil))
-           (parts (if (nil? link) [] (split-on "," link)))
-           (index 0)
-           (found nil))
-      (while (< index (Collection/count parts))
-        (let ((part (Collection/nth parts index)))
-          (when (and (nil? found) (>= (index-of "rel=\"next\"" part) 0))
-            (setq found (link-target part))))
-        (setq index (1+ index)))
-      found))
-
   (defun page-size (source)
     (Collection/get source :page-size default-page-size))
 
   (defun issue-list-url (source)
-    (let ((repository (Collection/get source :repository ""))
-          (label (Collection/get source :label nil)))
-      (str "https://api.github.com/repos/" repository "/issues?state=all&per_page="
-           (page-size source)
-           (if (nil? label) "" (str "&labels=" label)))))
+    (list-url (Collection/get source :repository "")
+              "issues"
+              (page-size source)
+              (Collection/get source :label nil)))
 
   ;; Complete pagination or a hard failure: a partial page set is never a
-  ;; successful provider result.
+  ;; successful provider result. The traversal itself is shared with the
+  ;; comment provider.
   (defasync fetch-issues (transport url)
-    (let ((records [])
-          (pages 0)
-          (next url))
-      (while (and (not (nil? next)) (< pages maximum-pages))
-        (let ((response (await (funcall transport next))))
-          (unless (= (get response "status" 0) 200)
-            (fail "DOGFOOD-ISSUES-002"
-                  (str "GitHub issue listing failed with status "
-                       (get response "status" "unknown"))))
-          (setq records (append-all records (get response "body" [])))
-          (setq next (next-link (get response "headers" (js-object))))
-          (setq pages (1+ pages))))
-      (when (not (nil? next))
-        (fail "DOGFOOD-ISSUES-003"
-              (str "issue listing exceeded " maximum-pages " pages")))
-      records))
-
-  (defun append-all (target values)
-    (Collection/reduce values
-                       (lambda (accumulator value)
-                         (Collection/conj accumulator value))
-                       target))
+    (await (fetch-paginated transport url "GitHub issue listing")))
 
   ;; --------------------------------------------------------- normalization
 
@@ -209,7 +169,7 @@
                "/issues/" (get record "number"))
         explicit)))
 
-  (defun normalize-issue (source record identity-urls)
+  (defun normalize-issue (source record identity-urls channel)
     (let* ((number (get record "number"))
            (repository (Collection/get source :repository ""))
            (path (str repository "#" number))
@@ -236,7 +196,7 @@
                :url (issue-url source record)
                :revision (get record "updated_at" "")}
               (parse-list (field fields "aliases" ""))
-              [])))
+              (if (empty-value? channel) [] [channel]))))
 
   ;; -------------------------------------------------------------- provider
 
@@ -247,6 +207,7 @@
     (let* ((source (Collection/get options :source))
            (publishing (Collection/get options :publishing))
            (adapters (Collection/get options :adapters []))
+           (comments (Collection/get options :comments {}))
            (identities (Collection/get options :identities []))
            (transport (Collection/get options :transport))
            (publishers (publisher-set publishing))
@@ -267,7 +228,14 @@
              (setq carriers (1+ carriers)))
             ;; Repository association and labels never grant authority.
             ((authorized-author? publishers author)
-             (setq posts (Collection/conj posts (normalize-issue source record identities))))
+             (let ((channel (await (native-channel
+                                     {:comments comments
+                                      :kind :issue
+                                      :repository (Collection/get source :repository "")
+                                      :number (get record "number")
+                                      :transport transport}))))
+               (setq posts (Collection/conj posts
+                                            (normalize-issue source record identities channel)))))
             (t (setq unauthorized (1+ unauthorized)))))
         (setq index (1+ index)))
       {:posts posts
@@ -276,5 +244,5 @@
        :records (Collection/count records)}))
 
   (export authorized-author? carrier-adapter collect-issues fetch-issues
-          identity-after issue-fields issue-markdown next-link normalize-issue
+          identity-after issue-fields issue-markdown normalize-issue
           normalize-login publisher-matches? publisher-set))

@@ -1,0 +1,70 @@
+;; GitHub transport and pagination.
+;;
+;; Both remote providers read GitHub the same way: one injected transport, one
+;; page bound, and completion by following only the `next` relation. A partial
+;; listing is never a successful result, so the bound is a failure rather than
+;; a truncation.
+
+(module dogfood.support.github
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "./diagnostics.eli" fail)
+  (import "./text.eli" index-of slice split-on)
+
+  (defconst maximum-pages 100)
+
+  (defun append-all (target values)
+    (Collection/reduce values
+                       (lambda (accumulator value)
+                         (Collection/conj accumulator value))
+                       target))
+
+  (defun link-target (link)
+    (let ((start (index-of "<" link)))
+      (if (< start 0)
+          nil
+        (let ((end (index-of ">" link)))
+          (if (< end 0) nil (slice (1+ start) end link))))))
+
+  ;; Only the entry whose relation is `next` continues the traversal.
+  (defun next-link (headers)
+    (let* ((link (get headers "link" nil))
+           (parts (if (nil? link) [] (split-on "," link)))
+           (index 0)
+           (found nil))
+      (while (< index (Collection/count parts))
+        (let ((part (Collection/nth parts index)))
+          (when (and (nil? found) (>= (index-of "rel=\"next\"" part) 0))
+            (setq found (link-target part))))
+        (setq index (1+ index)))
+      found))
+
+  ;; Complete pagination or a hard failure.
+  (defasync fetch-paginated (transport url label)
+    (let ((records [])
+          (pages 0)
+          (next url))
+      (while (and (not (nil? next)) (< pages maximum-pages))
+        (let ((response (await (funcall transport next))))
+          (unless (= (get response "status" 0) 200)
+            (fail "DOGFOOD-GITHUB-001"
+                  (str label " failed with status " (get response "status" "unknown"))))
+          (setq records (append-all records (get response "body" [])))
+          (setq next (next-link (get response "headers" (js-object))))
+          (setq pages (1+ pages))))
+      (when (not (nil? next))
+        (fail "DOGFOOD-GITHUB-002"
+              (str label " exceeded " maximum-pages " pages")))
+      records))
+
+  ;; A list endpoint with the maintained bounds applied.
+  (defun list-url (repository resource page-size label)
+    (str "https://api.github.com/repos/" repository "/" resource
+         "?state=all&per_page=" page-size
+         (if (nil? label) "" (str "&labels=" label))))
+
+  (defun plain-list-url (repository resource page-size)
+    (str "https://api.github.com/repos/" repository "/" resource
+         "?per_page=" page-size))
+
+  (export append-all fetch-paginated link-target list-url maximum-pages
+          next-link plain-list-url))

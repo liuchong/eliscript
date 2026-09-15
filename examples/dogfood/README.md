@@ -57,6 +57,25 @@ bun examples/dogfood/dist/src/builder/main.mjs --root examples/dogfood --output 
 Two clean builds from identical input are byte-equal; the fingerprint in
 `_site/_dogfood/build.json` is computed over the rendered documents.
 
+### Delivered Slices
+
+Each slice is verified by a maintained suite; the gates above stay open until
+their full wording is met.
+
+| Slice | What runs today | Test |
+| --- | --- | --- |
+| S0 | The design set is checked for internal consistency | `tests/dogfood-specs.test.mjs` |
+| S1 | Repository Markdown becomes a static site: routes, tags, archive, feed, sitemap, search, aliases, drafts, atomic output | `tests/dogfood-site.test.mjs` |
+| S2 | Issues are authorized, classified as carriers, paginated, and normalized | `tests/dogfood-issues.test.mjs` |
+| S3 | Comment channels: a native channel captured as a snapshot or declared live, and external adapters declared as mount regions | `tests/dogfood-comments.test.mjs` |
+| Packaging | The Action builds a consumer repository on Node 24 with no Emacs, Bun, or installed package | `tests/dogfood-action.test.mjs` |
+
+Comments are deliberately not fetched during a build unless the configuration
+asks for a snapshot, and a live channel is never fetched at all: a comment event
+must not become a build. An external adapter's mount region is declared, but
+this build does not script a third-party origin; loading it belongs to the
+browser bundle of gate I6.
+
 ### Executable Status
 
 The [specification checker](tools/README.md) is development tooling and does not

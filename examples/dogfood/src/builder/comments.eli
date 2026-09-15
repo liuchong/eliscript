@@ -1,0 +1,131 @@
+;; Native comment channels.
+;;
+;; Specification 0003 defines a comment channel and its topology, and
+;; specification 0005 decides when a build fetches one. A `snapshot` or
+;; `hybrid` channel is captured during the build; a `live` channel is not
+;; fetched at all, because its freshness belongs to the browser; an external
+;; adapter declares a mount region and owns its own content.
+;;
+;; Comment bodies are untrusted, so they pass through the same sanitizing
+;; Markdown pipeline as article bodies.
+
+(module dogfood.builder.comments
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "../support/github.eli" append-all fetch-paginated)
+  (import "../support/markdown.eli" render-markdown)
+  (import "../support/text.eli" index-of slice trim)
+
+  (defconst default-page-size 100)
+
+  (defun comment-list-url (repository number page-size)
+    (str "https://api.github.com/repos/" repository "/issues/" number
+         "/comments?per_page=" page-size))
+
+  ;; ----------------------------------------------------------- normalization
+
+  (defun normalize-comment (record)
+    (let ((user (get record "user" (js-object))))
+      {:id (get record "id")
+       ;; A persistent map, not a host object: the renderer reads these fields
+       ;; through the collection protocol.
+       :author {:login (get user "login" "unknown")
+                :url (get user "html_url" nil)}
+       :body (render-markdown (get record "body" ""))
+       :created-at (get record "created_at" "")
+       :updated-at (get record "updated_at" "")
+       :url (get record "html_url" nil)
+       ;; Issue comments are a flat stream; a reply tree belongs to another
+       ;; provider and is never fabricated here.
+       :replies []}))
+
+  (defun normalize-comments (records)
+    (append-all [] (map-comments records)))
+
+  (defun map-comments (records)
+    (let ((result [])
+          (index 0))
+      (while (< index (Collection/count records))
+        (setq result (Collection/conj result
+                                     (normalize-comment (Collection/nth records index))))
+        (setq index (1+ index)))
+      result))
+
+  ;; The freshest capture instant across the snapshot, or the empty string when
+  ;; there is nothing to report.
+  (defun freshness (items)
+    (let ((latest "")
+          (index 0))
+      (while (< index (Collection/count items))
+        (let ((updated (Collection/get (Collection/nth items index) :updated-at "")))
+          (when (> updated latest) (setq latest (str updated))))
+        (setq index (1+ index)))
+      latest))
+
+  ;; ---------------------------------------------------------------- channels
+
+  ;; The enabled declaration for a kind, or nil when the application does not
+  ;; configure that channel.
+  (defun channel-declaration (comments kind)
+    (let ((declarations (Collection/get comments :channels []))
+          (index 0)
+          (found nil))
+      (while (< index (Collection/count declarations))
+        (let ((declaration (Collection/nth declarations index)))
+          (when (and (Collection/get declaration :enabled false)
+                     (= (Collection/get declaration :kind :none) kind))
+            (setq found declaration)))
+        (setq index (1+ index)))
+      found))
+
+  ;; A live channel is declared but never fetched: the quota policy in
+  ;; specification 0005 forbids a build triggered by a comment, so freshness is
+  ;; the browser's or the provider's business.
+  (defun live-channel (declaration repository number)
+    {:id (Collection/get declaration :id :issue-native)
+     :kind (Collection/get declaration :kind :issue)
+     :mode :live
+     :binding {:repository repository :number number}
+     :count nil
+     :updated-at nil
+     :items []
+     :capabilities [:read :reply :reactions]})
+
+  (defasync snapshot-channel (options)
+    (let* ((declaration (Collection/get options :declaration))
+           (repository (Collection/get options :repository))
+           (number (Collection/get options :number))
+           (transport (Collection/get options :transport))
+           (mode (Collection/get declaration :mode :snapshot))
+           (page-size (Collection/get declaration :page-size default-page-size))
+           (records (await (fetch-paginated
+                             transport
+                             (comment-list-url repository number page-size)
+                             "GitHub issue comments")))
+           (items (normalize-comments records)))
+      {:id (Collection/get declaration :id :issue-native)
+       :kind (Collection/get declaration :kind :issue)
+       :mode mode
+       :binding {:repository repository :number number}
+       :count (Collection/count items)
+       :updated-at (freshness items)
+       :items items
+       :capabilities [:read :reply :reactions]}))
+
+  ;; The native channel for one remote article, or nil when the application
+  ;; does not enable one for this kind.
+  (defasync native-channel (options)
+    (let* ((declaration (channel-declaration (Collection/get options :comments)
+                                             (Collection/get options :kind :issue))))
+      (if (nil? declaration)
+          nil
+        (if (= (Collection/get declaration :mode :snapshot) :live)
+            (live-channel declaration
+                          (Collection/get options :repository)
+                          (Collection/get options :number))
+          ;; The snapshot path needs the resolved declaration, which the caller
+          ;; named by kind rather than by value.
+          (await (snapshot-channel
+                   (Collection/assoc options :declaration declaration)))))))
+
+  (export channel-declaration comment-list-url freshness live-channel
+          native-channel normalize-comment normalize-comments))

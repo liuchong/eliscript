@@ -175,7 +175,7 @@ test("pagination follows the next relation to exhaustion", async () => {
 test("a failed page fails the provider", async () => {
   const { transport } = transportOf([{ records: [issue(1)], next: "https://api.github.com/x?page=2" }]);
   const error = await rejectedBy(issues.fetch_issues(transport, "https://api.github.com/x?page=1"));
-  expect(error.code).toBe("DOGFOOD-ISSUES-002");
+  expect(error.code).toBe("DOGFOOD-GITHUB-001");
 });
 
 test("an article-shaped issue without metadata fails closed", async () => {
