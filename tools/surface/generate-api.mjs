@@ -230,6 +230,7 @@ export function renderApiHtml(index) {
           <a href="api.html" aria-current="page">API</a>
           <a class="nav-optional" href="specifications.html">Specs</a>
           <a class="nav-optional" href="roadmap.html">Roadmap</a>
+          <a class="nav-optional" href="playground.html">Playground</a>
           <a href="https://github.com/liuchong/eliscript">GitHub</a>
         </div>
       </nav>

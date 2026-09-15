@@ -8,10 +8,31 @@ mode for `.eli` source. Add this directory to `load-path` and require the mode:
 
 ## Installation
 
+The mode and its evaluation library are ordinary Emacs packages. Both carry
+`Version: 0.0.1`, `Package-Requires: ((emacs "29.1"))`, and the standard
+`Author`, `Keywords`, and `URL` fields, so `package-buffer-info` reads them and
+an archive or a source checkout can install them.
+
+From a checkout, without installing anything:
+
 ```elisp
 (add-to-list 'load-path "/path/to/eliscript/editor")
 (require 'eliscript-mode)
 ```
+
+From the repository itself, using Emacs 29 or newer, which fetches the sources
+and builds them into `package-user-dir`:
+
+```elisp
+(package-vc-install
+ '(eliscript-mode
+   :url "https://github.com/liuchong/eliscript"
+   :lisp-dir "editor"))
+```
+
+An archive install needs a recipe that lists both `editor/eliscript-mode.el`
+and `editor/eliscript-repl.el`; the mode requires the evaluation library, so
+they are installed together.
 
 ## Editing
 

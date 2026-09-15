@@ -1,5 +1,12 @@
 ;;; eliscript-repl.el --- Persistent evaluation for eliscript-mode -*- lexical-binding: t; -*-
 
+;; Author: 刘冲 <mail@liuchong.dev>
+;; Maintainer: 刘冲 <mail@liuchong.dev>
+;; Version: 0.0.1
+;; Package-Requires: ((emacs "29.1"))
+;; Keywords: languages, lisp
+;; URL: https://github.com/liuchong/eliscript
+
 ;;; Commentary:
 
 ;; Project-scoped NDJSON evaluation sessions for the maintained major mode.

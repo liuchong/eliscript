@@ -1,5 +1,12 @@
 ;;; eliscript-mode.el --- Major mode for Eliscript source -*- lexical-binding: t; -*-
 
+;; Author: 刘冲 <mail@liuchong.dev>
+;; Maintainer: 刘冲 <mail@liuchong.dev>
+;; Version: 0.0.1
+;; Package-Requires: ((emacs "29.1"))
+;; Keywords: languages, lisp
+;; URL: https://github.com/liuchong/eliscript
+
 ;;; Commentary:
 
 ;; Syntax-aware editing, navigation, project discovery, and formatter
