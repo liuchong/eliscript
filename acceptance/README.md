@@ -45,6 +45,15 @@ bun tools/compatibility/rehearse.mjs \
 bun tools/acceptance/finalize.mjs --verify
 ```
 
-Application validation status is recorded separately and contributes no core
-acceptance result. The migration rehearsal completes M13-03 but deliberately
+Application validation contributes no core acceptance result. The `AV-01` and
+`AV-02` rows in a generated report read `not-run` because the core audit does
+not execute them: the row records that this audit did not run the criterion,
+not that the criterion has no evidence.
+
+The maintained applications are executed by `make test-applications`, which runs
+the Org exporter tests, the Vite and Org Vite-plugin suites, the standalone
+application CLI check, and the dogfood, browser-host, browser-playground, and
+Pages-assembly suites. Their results are reported by that command and are
+deliberately absent from the core manifest, so no application result can raise
+or lower a core percentage. The migration rehearsal completes M13-03 but deliberately
 does not complete AC-02; the final stable compatibility corpus remains open.
