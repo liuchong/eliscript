@@ -140,4 +140,21 @@
             (setq index (1+ index)))
           result))))
 
-  (export attach-configured-channels browser-only-channel? carrier-kind-of))
+  ;; A snapshot is a channel the build captured, as opposed to one the reader
+  ;; loads from a provider. A hybrid channel ships one, so it counts.
+  (defun snapshot-count (posts)
+    (let ((total 0)
+          (index 0))
+      (while (< index (Collection/count posts))
+        (let* ((channels (Collection/get (Collection/nth posts index) :comment-channels []))
+               (channel-index 0))
+          (while (< channel-index (Collection/count channels))
+            (let ((mode (Collection/get (Collection/nth channels channel-index) :mode :snapshot)))
+              (when (or (= mode :snapshot) (= mode :hybrid))
+                (setq total (1+ total))))
+            (setq channel-index (1+ channel-index))))
+        (setq index (1+ index)))
+      total))
+
+  (export attach-configured-channels browser-only-channel? carrier-kind-of
+          snapshot-count))

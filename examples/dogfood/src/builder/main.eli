@@ -24,7 +24,7 @@
   (import "./issues.eli" collect-issues)
   (import "./discussions.eli" collect-discussions)
   (import "./events.eli" build-decision classify-event requested-event)
-  (import "./channels.eli" attach-configured-channels)
+  (import "./channels.eli" attach-configured-channels snapshot-count)
   (import "./identity.eli" resolve-identity)
   (import "./sources.eli" enabled-sources identity-list source-posts)
   (import "../support/config.eli" load-config)
@@ -143,6 +143,7 @@
                         :postCount (Collection/count posts)
                         :routeCount (Collection/count documents)
                         :contentFingerprint (fingerprint documents)
+                        :commentSnapshots (str (snapshot-count posts))
                         :commentCarriers (str carriers)
                         :unauthorizedRecords (str unauthorized)))
            "\n"))
@@ -318,7 +319,7 @@
       (set-output "cache-key" (str "dogfood-" fingerprint-value))
       (set-output "output-directory" output)
       (set-output "post-count" (str post-count))
-      (set-output "comment-snapshot-count" "0")
+      (set-output "comment-snapshot-count" (str (snapshot-count posts)))
       (set-output "manifest" (Path/join output "_dogfood/build.json"))))
 
   ;; ------------------------------------------------------------------- build

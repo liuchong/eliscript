@@ -14,6 +14,7 @@ let staging;
 let server;
 let origin;
 let renderer;
+let channels;
 let chromiumAvailable = true;
 
 const k = (name) => keyword(name);
@@ -103,6 +104,7 @@ beforeAll(async () => {
   ]);
   if (built.exitCode !== 0) throw new Error(built.stderr.trim() || built.stdout.trim());
   renderer = await import(join(staging, "build/src/renderer/server.mjs"));
+  channels = await import(join(staging, "build/src/builder/channels.mjs"));
 
   // The built site is the page the browser actually sees.
   try {
@@ -235,6 +237,30 @@ test("a native channel and an external channel render together, in order", () =>
   expect(markup).toContain("comments-list");
   expect(markup).toContain("embed-region");
   expect(markup).toContain("https://giscus.app/");
+});
+
+test("the reported snapshot count is the build's, not a constant", () => {
+  const post = (list) => mapOf([["id", "notes/x"], ["comment-channels", vector(...list)]]);
+  expect(channels.snapshot_count(vector())).toBe(0);
+  // A snapshot and a hybrid channel are captured; an embed is not.
+  expect(channels.snapshot_count(vector(
+    post([snapshotChannel()]),
+    post([hybridChannel(), externalChannel()]),
+  ))).toBe(2);
+  expect(channels.snapshot_count(vector(post([externalChannel()])))).toBe(0);
+});
+
+test("an old snapshot is still labelled with its date", () => {
+  // A stale snapshot is not hidden and not presented as live: the reader sees
+  // when it was taken, and a hybrid channel adds how much has changed since.
+  const stale = snapshotChannel();
+  const markup = markupFor(stale);
+  expect(markup).toContain("2026-09-10T00:00:00Z");
+  expect(markup).toContain("Snapshot from");
+
+  const hybrid = markupFor(hybridChannel([["updated-at", "2020-01-01T00:00:00Z"]]));
+  expect(hybrid).toContain("2020-01-01T00:00:00Z");
+  expect(hybrid).toContain('data-comment-refresh="1"');
 });
 
 test("the configured mode must be one the specification names", async () => {
