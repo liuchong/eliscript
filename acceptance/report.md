@@ -1,6 +1,6 @@
 # Eliscript 1.0 Acceptance Report
 
-- Source commit: `cef36eb5cb73d5abb39a74f42571e1da4e93adec`
+- Source commit: `c4bfa718c3702507f578ec5dbc1bd2d586d515d0`
 - Source tree: `b746c6848acc724f5bc584fd584b1c8337dd4c6c`
 - Contract: `contracts/final-acceptance.json` (`fc7760bdccc644b014b3513e4020f3647e3128e54676481d1515504967f2651d`)
 - Generated: 2026-09-12T19:38:55.765Z
