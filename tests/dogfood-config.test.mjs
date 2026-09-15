@@ -196,6 +196,42 @@ test("a configuration that is not data fails", async () => {
   expect(failure.code).toBe("DOGFOOD-CONFIG-005");
 });
 
+test("an adapter with an unknown carrier kind fails", async () => {
+  const { failure } = await load(BASE(
+    `[${MARKDOWN}]`, undefined,
+    ':adapters [{:id :x :carrier-kind :telepathy}]',
+  ));
+  expect(failure.code).toBe("DOGFOOD-CONFIG-012");
+});
+
+test("a native carrier adapter must say how it is identified", async () => {
+  const { failure } = await load(BASE(
+    `[${MARKDOWN}]`, undefined,
+    ':adapters [{:id :utterances :carrier-kind :issue}]',
+  ));
+  expect(failure.code).toBe("DOGFOOD-CONFIG-003");
+  expect(failure.message).toContain("native carrier");
+});
+
+test("an external adapter needs only an id and a carrier kind", async () => {
+  const { failure } = await load(BASE(
+    `[${MARKDOWN}]`, undefined,
+    ':adapters [{:id :giscus :carrier-kind :external}'
+    + ' {:id :plain :carrier-kind :none}]',
+  ));
+  expect(failure).toBeUndefined();
+});
+
+test("two adapters cannot share an id", async () => {
+  const { failure } = await load(BASE(
+    `[${MARKDOWN}]`, undefined,
+    ':adapters [{:id :giscus :carrier-kind :external}'
+    + ' {:id :giscus :carrier-kind :none}]',
+  ));
+  expect(failure.code).toBe("DOGFOOD-CONFIG-011");
+  expect(failure.message).toContain("adapter id");
+});
+
 test("an unsupported schema version fails", async () => {
   const { failure } = await load(
     BASE(`[${MARKDOWN}]`).replace(":schema-version 1", ":schema-version 2"),

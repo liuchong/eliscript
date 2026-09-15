@@ -79,14 +79,37 @@
      ".comment-author{font-weight:600;color:var(--ink)}\n"
      ".comment-body p{margin:0 0 10px}\n"
      ".comment-body p:last-child{margin-bottom:0}\n"
-     ".comment-note{color:var(--muted);font-size:14px}\n"     ".comment-replies{margin-top:12px;border-left:2px solid var(--line);padding-left:12px;gap:10px}\n"
-     "@media (max-width:600px){.article h1{font-size:28px}main{padding:28px 18px 56px}}\n"))
+     ".comment-note{color:var(--muted);font-size:14px}\n"
+     ".comment-replies{margin-top:12px;border-left:2px solid var(--line);padding-left:12px;gap:10px}\n"
+     ".embed-region{min-height:180px;height:auto;contain:layout style;border:1px dashed var(--line);border-radius:8px;padding:14px;color:var(--muted);font-size:14px;overflow-wrap:anywhere}\n"
+     ;; A long source name or a control label must never widen its container.
+     ".meta,.meta .tag,.provenance,.crumbs,.comment .meta{overflow-wrap:anywhere;min-width:0}\n"
+     ".masthead>*{min-width:0}\n"
+     "a:focus-visible,button:focus-visible,summary:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}\n"
+     "@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:0.01ms !important;animation-iteration-count:1 !important;transition-duration:0.01ms !important;scroll-behavior:auto !important}}\n"
+     ;; Wide screens keep the navigation inline; the disclosure is not rendered
+     ;; at all there, so the markup never adds a control it does not need.
+     ;; The disclosure ships open, so a browser that hides a closed one cannot
+     ;; hide the navigation from a wide layout. Below the breakpoint the browser
+     ;; bundle closes it before the first paint, and a reader without JavaScript
+     ;; gets the links expanded rather than missing.
+     "@media (min-width:601px){.menu{display:contents}.menu>summary{display:none}"
+     ".menu>nav{display:flex}}\n"
+     "@media (max-width:600px){.article h1{font-size:28px}main{padding:28px 18px 56px}"
+     ".masthead{padding:20px 18px 14px}.menu{width:100%}"
+     ".menu>summary{display:block;font-size:15px;color:var(--muted);cursor:pointer;padding:6px 0}"
+     ".menu>nav{flex-direction:column;gap:12px;padding:10px 0 2px}"
+     "html[data-menu=collapsed] .menu>nav{display:none}}\n"))
 
   (defun home-href (root)
     (if (= root "") "./" root))
 
+  ;; Below the breakpoint the secondary navigation becomes a disclosure, so the
+  ;; links stay reachable on a narrow screen without pushing the wordmark out of
+  ;; the header. Above it the same markup renders inline.
   (defun nav-links (root)
-    (str "<nav aria-label=\"site\">"
+    (str "<details class=\"menu\" open><summary>Menu</summary>"
+         "<nav aria-label=\"site\">"
          "<a href=\"" root "archive/\">Archive</a>"
          "<a href=\"" root "tags/\">Tags</a>"
          "<a href=\"" root "search/\">Search</a>"
@@ -94,9 +117,9 @@
          "<a href=\"https://github.com/\">GitHub</a>"
          ;; The browser bundle labels this control once it has run; the label
          ;; here keeps the page usable with JavaScript disabled.
-         "<button id=\"theme-toggle\" class=\"theme-toggle\" type=\"button\">"
-         "Theme</button>"
-         "</nav>"))
+         "<button id=\"theme-toggle\" class=\"theme-toggle\" type=\"button\""
+         " title=\"Switch the colour theme\">Theme</button>"
+         "</nav></details>"))
 
   (defun document (site root title description content)
     (let ((site-title (Collection/get site :title "dogfood"))

@@ -1,0 +1,143 @@
+;; Configured comment channels.
+;;
+;; Specification 0004 makes comment channels independent of article sources,
+;; and specification 0011 says an adapter whose carrier kind is `external` or
+;; `none` mounts only in the browser and holds no builder-side record. Such a
+;; channel therefore has no provider to attach it: the build declares the mount
+;; region on every published article and fetches nothing.
+;;
+;; A channel whose carrier kind is `issue` or `discussion` is the opposite case.
+;; Its binding comes from a native record, so it is attached by the provider
+;; that read that record, and a Markdown article never gains one implicitly.
+
+(module dogfood.builder.channels
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "eliscript/runtime/core/sequence.mjs" :as Sequence)
+  (import "./content.eli" ->Post)
+
+  (defconst browser-only-kinds [:external :none])
+
+  (defun member-keyword? (values needle)
+    (let ((index 0)
+          (found false))
+      (while (and (< index (Collection/count values)) (not found))
+        (when (= (Collection/nth values index) needle) (setq found t))
+        (setq index (1+ index)))
+      found))
+
+  (defun find-adapter (adapters id)
+    (let ((index 0)
+          (found nil))
+      (while (< index (Collection/count adapters))
+        (let ((adapter (Collection/nth adapters index)))
+          (when (= (Collection/get adapter :id nil) id) (setq found adapter)))
+        (setq index (1+ index)))
+      found))
+
+  ;; Without a declared adapter a channel is treated as browser-only, which is
+  ;; the safe reading: no fetched record, no builder-side binding.
+  (defun carrier-kind-of (adapters kind)
+    (let ((adapter (find-adapter adapters kind)))
+      (if (nil? adapter) :external (Collection/get adapter :carrier-kind :external))))
+
+  (defun enabled-channels (config)
+    (let ((comments (Collection/get config :comments {})))
+      (Sequence/filter
+        (lambda (channel) (Collection/get channel :enabled false))
+        (Collection/get comments :channels []))))
+
+  (defun browser-only-channel? (adapters channel)
+    (member-keyword? browser-only-kinds
+                     (carrier-kind-of adapters (Collection/get channel :kind nil))))
+
+  (defun channel-present? (post id)
+    (let ((channels (Collection/get post :comment-channels []))
+          (index 0)
+          (found false))
+      (while (and (< index (Collection/count channels)) (not found))
+        (when (= (Collection/get (Collection/nth channels index) :id nil) id)
+          (setq found t))
+        (setq index (1+ index)))
+      found))
+
+  ;; A browser-only provider declares the origins it may be loaded from, and the
+  ;; first of them is where a reader goes when the mount never arrives.
+  (defun provider-url (adapter)
+    (if (nil? adapter)
+        nil
+      (let ((origins (Collection/get adapter :origins [])))
+        (if (= (Collection/count origins) 0)
+            nil
+          (Collection/nth origins 0)))))
+
+  ;; The declared channel, without items: the browser owns the content, and a
+  ;; build that fetched it would be fetching from a provider it cannot read.
+  (defun declared-channel (channel adapter)
+    {:id (Collection/get channel :id nil)
+     :kind (Collection/get channel :kind nil)
+     :mode (Collection/get channel :mode :embed)
+     :items []
+     :count 0
+     :binding nil
+     :provider-url (provider-url adapter)})
+
+  (defun attach-to-post (post channels adapters)
+    (let ((added []))
+      (let ((index 0))
+        (while (< index (Collection/count channels))
+          (let ((channel (Collection/nth channels index)))
+            (unless (channel-present? post (Collection/get channel :id nil))
+              (setq added (Collection/conj
+                            added
+                            (declared-channel
+                              channel
+                              (find-adapter adapters (Collection/get channel :kind nil)))))))
+          (setq index (1+ index))))
+      (if (= (Collection/count added) 0)
+          post
+        (post-with-channels post
+                            (append-all (Collection/get post :comment-channels [])
+                                        added)))))
+
+  (defun append-all (left right)
+    (let ((result left)
+          (index 0))
+      (while (< index (Collection/count right))
+        (setq result (Collection/conj result (Collection/nth right index)))
+        (setq index (1+ index)))
+      result))
+
+  (defun post-with-channels (post channels)
+    (->Post (get post :id)
+            (get post :slug)
+            (get post :title)
+            (get post :summary)
+            (get post :body)
+            (get post :published-at)
+            (get post :updated-at)
+            (get post :authors)
+            (get post :tags)
+            (get post :cover)
+            (get post :draft)
+            (get post :pinned-weight)
+            (get post :provenance)
+            (get post :aliases)
+            channels))
+
+  (defun attach-configured-channels (config posts)
+    (let* ((adapters (Collection/get config :adapters []))
+           (channels (Sequence/filter
+                       (lambda (channel) (browser-only-channel? adapters channel))
+                       (enabled-channels config))))
+      (if (= (Collection/count channels) 0)
+          posts
+        (let ((result [])
+              (index 0))
+          (while (< index (Collection/count posts))
+            (setq result (Collection/conj result
+                                          (attach-to-post (Collection/nth posts index)
+                                                          channels adapters)))
+            (setq index (1+ index)))
+          result))))
+
+  (export attach-configured-channels browser-only-channel? carrier-kind-of))

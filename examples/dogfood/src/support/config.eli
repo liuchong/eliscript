@@ -33,9 +33,12 @@
   (defconst backslash 92)
   (defconst minus-sign 45)
 
+  ;; `adapters` was read by the providers but not listed here, so no valid
+  ;; configuration could declare one: the key was rejected before it reached
+  ;; the rule in specification 0011 that validates its carrier kind.
   (defconst known-keys
-    [:schema-version :site :publishing :sources :identity :comments :refresh
-     :output])
+    [:schema-version :site :publishing :sources :identity :comments :adapters
+     :refresh :output])
 
   ;; ------------------------------------------------------------- reader state
 
@@ -458,6 +461,44 @@
               (setq index (1+ index))))
           (check-unique-field channels :id "channel id")))))
 
+  ;; An adapter declares how a comment provider is reached and, for a native
+  ;; carrier, how that carrier is identified. Specification 0011 requires a
+  ;; native kind to say how it is identified and an unknown kind to fail.
+  (defun check-adapters (config)
+    (let ((adapters (Collection/get config :adapters [])))
+      (unless (isVector adapters)
+        (fail "DOGFOOD-CONFIG-003" "adapters must be a vector"))
+      (let ((index 0))
+        (while (< index (Collection/count adapters))
+          (let* ((label (str "adapters[" index "]"))
+                 (adapter (Collection/nth adapters index)))
+            (require-map adapter label)
+            (require-key adapter :id label)
+            (let ((kind (require-key adapter :carrier-kind label)))
+              (unless (carrier-kind? kind)
+                (fail "DOGFOOD-CONFIG-012"
+                      (str label ".carrier-kind must be issue, discussion, "
+                           "external, or none")))
+              ;; A native carrier is adopted or provisioned, so the adapter must
+              ;; say who may own it and how a record names a post.
+              (when (or (= kind :issue) (= kind :discussion))
+                (require-key adapter :principal (str label " native carrier"))
+                (require-key adapter :marker (str label " native carrier")))
+              ;; A browser-only provider has no builder-side record to capture,
+              ;; so a snapshot of one could only ever be empty.
+              (let ((mode (Collection/get adapter :mode nil)))
+                (when (and (not (nil? mode))
+                           (or (= kind :external) (= kind :none))
+                           (= mode :snapshot))
+                  (fail "DOGFOOD-CONFIG-013"
+                        (str label " is browser-only and cannot snapshot"))))))
+          (setq index (1+ index))))
+      (check-unique-field adapters :id "adapter id")))
+
+  (defun carrier-kind? (kind)
+    (or (= kind :issue) (= kind :discussion)
+        (= kind :external) (= kind :none)))
+
   ;; Logins compare case-insensitively everywhere else, so two spellings of one
   ;; login are one publisher and must be rejected here.
   (defun check-publishing (config)
@@ -513,6 +554,7 @@
         (fail "DOGFOOD-CONFIG-008"
               "site.base-url must be an absolute https URL for production"))
     (check-sources (require-key config :sources "config.sources"))
+    (check-adapters config)
     (check-comments config)
     (check-publishing config)
     (let* ((output (require-map (require-key config :output "config.output") "output"))

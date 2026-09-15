@@ -70,6 +70,9 @@ their full wording is met.
 | S3 | Comment channels: a native channel captured as a snapshot or declared live, and external adapters declared as mount regions | `tests/dogfood-comments.test.mjs` |
 | I7 | The packaged Action carries the generated site's browser asset, an external source map, and the map that names the `.eli` sources | `tests/dogfood-action.test.mjs` |
 | I8 | Events are classified before anything renders: a comment event defers without writing output, a pushed article event builds, `preview` renders drafts into a tree that asks not to be indexed, and `previous-manifest` verifies the tree being replaced | `tests/dogfood-events.test.mjs` |
+| S4 | The header's secondary navigation is a disclosure on narrow screens and an inline row on wide ones, verified in a real browser at 320px and 1280px | `tests/dogfood-accessibility.test.mjs` |
+| S4 | Focus is visible, motion can be reduced, long labels cannot overflow, and an external channel mounts in one isolated region with a fallback | `tests/dogfood-accessibility.test.mjs` |
+| S3 | A configured browser-side channel is declared on every published article without fetching anything | `tests/dogfood-accessibility.test.mjs` |
 | I1 | Closed-schema configuration: each source kind carries its own addressing, and provider ids, channel ids, and publisher logins are unique | `tests/dogfood-config.test.mjs` |
 | S6 | All seven non-empty article-source subsets are exercised directly, with a disabled provider provably never reaching the network | `tests/dogfood-matrix.test.mjs` |
 | I8 | The package ships the consumer workflow template, pinned to a full commit digest and pinned at package time | `tests/dogfood-workflow.test.mjs` |

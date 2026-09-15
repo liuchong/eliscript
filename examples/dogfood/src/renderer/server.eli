@@ -308,13 +308,26 @@
            ">"
            (render-channel-heading channel)
            (cond
-             ;; An external adapter owns its own content and its own script;
-             ;; this build declares where it mounts and nothing else.
+             ;; An external adapter owns its own content and its own script.
+             ;; The build reserves one isolated region for it and says what to
+             ;; do when that provider never arrives, so an embed that fails
+             ;; leaves a readable page rather than a shifting one.
              ((or (= mode :embed) (= mode :external))
-              (str "<p class=\"comment-note\">Comments are provided by "
+              (str "<div class=\"embed-region\" data-comment-mount=\""
+                   (escape-html provider) "\">"
+                   "<p class=\"comment-note\">Comments are provided by "
                    (escape-html provider)
                    ". The browser loads that provider; this build does not"
-                   " script it.</p>"))
+                   " script it.</p>"
+                   (let ((fallback (if (blank binding)
+                                       (or (Collection/get channel :provider-url nil) "")
+                                     binding)))
+                     (if (blank fallback)
+                         ""
+                       (str "<p class=\"comment-note\">If it does not load, read"
+                            " the thread at <a href=\"" (escape-html fallback) "\">"
+                            (escape-html fallback) "</a>.</p>")))
+                   "</div>"))
              ;; A live channel is deliberately not fetched during a build, so
              ;; the reader is sent to the provider for freshness.
              ((= mode :live)

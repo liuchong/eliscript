@@ -67,6 +67,10 @@ configuration values or executable forms.
        {:id :discussion-native :kind :discussion :enabled t :mode :snapshot}
        {:id :utterances :kind :utterances :enabled false :mode :embed}
        {:id :giscus :kind :giscus :enabled false :mode :embed}]}
+     :adapters
+     [{:id :utterances :carrier-kind :issue
+       :principal "utterances-bot" :marker "Canonical post: "}
+      {:id :giscus :carrier-kind :external}]
      :refresh
      {:articles :event
       :comments :runtime
@@ -149,6 +153,14 @@ trust boundary. Front-matter `authors` are display attribution only and do not
 grant GitHub publication authority.
 
 ## Comment Configuration
+
+`adapters` declares how an external provider is reached. Each adapter carries
+an `id` and a `carrier-kind` of `issue`, `discussion`, `external`, or `none`.
+A native carrier kind additionally declares the provider `principal` that may
+own the record and the `marker` that names a canonical post, because a native
+carrier is adopted or provisioned rather than trusted. Adapter ids are unique,
+an unknown carrier kind fails validation, and an adapter whose kind is `none`
+or `external` holds no builder-side record.
 
 Comment channels are independent of article sources. Each channel declares:
 

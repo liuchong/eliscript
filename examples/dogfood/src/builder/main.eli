@@ -22,6 +22,7 @@
   (import "./issues.eli" collect-issues)
   (import "./discussions.eli" collect-discussions)
   (import "./events.eli" build-decision classify-event requested-event)
+  (import "./channels.eli" attach-configured-channels)
   (import "./identity.eli" resolve-identity)
   (import "./sources.eli" enabled-sources identity-list source-posts)
   (import "../support/config.eli" load-config)
@@ -327,8 +328,10 @@
                   unauthorized (+ unauthorized (Collection/get result :unauthorized 0))))
           (setq index (1+ index))))
       (let* ((posts (sort-posts
-                      (Sequence/filter (lambda (post) (publishable? post preview))
-                                       (resolve-identity config collected))))
+                      (attach-configured-channels
+                        config
+                        (Sequence/filter (lambda (post) (publishable? post preview))
+                                         (resolve-identity config collected)))))
              (documents (Collection/conj (render-site site posts)
                                        {:path "assets/browser.js"
                                         :content (browser-bundle root browser-override)}))

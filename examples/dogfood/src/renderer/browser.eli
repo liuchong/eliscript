@@ -200,10 +200,52 @@
                                   (query-value)))
                               search-delay))))))))
 
+  ;; ------------------------------------------------------------ navigation
+
+  ;; The header's secondary navigation is a disclosure that ships open, so a
+  ;; wide layout always shows the links. Below the breakpoint it is closed
+  ;; before the first paint; without this script the links stay expanded, which
+  ;; is readable rather than missing.
+  (defconst menu-breakpoint 600)
+  ;; A function value is called with `funcall`: `js-call` with a receiver path
+  ;; is method invocation, and a two-argument call through it lowers to a
+  ;; property lookup on the function itself.
+  (defconst set-menu-marker
+    (js* "((value) => { document.documentElement.setAttribute('data-menu', value); })"))
+  (defconst clear-menu-marker
+    (js* "(() => { document.documentElement.removeAttribute('data-menu'); })"))
+
+  (defun narrow? () (not (> (js* "globalThis.innerWidth") menu-breakpoint)))
+
+  ;; The header is not parsed yet when this runs, so the decision is recorded on
+  ;; the document element, where the stylesheet applies it as the header
+  ;; arrives. That keeps a narrow screen from showing the links and then hiding
+  ;; them, and it leaves the wide layout alone.
+  (defun mark-menu-state ()
+    (if (narrow?) (funcall set-menu-marker "collapsed") (funcall clear-menu-marker)))
+
+  ;; Once the header exists, the element's own state has to agree with what is
+  ;; on screen: a narrow screen closes the disclosure so the first press opens
+  ;; it, and a wide one opens it so the links are present even after a resize
+  ;; from narrow. The disclosure's state is then the source of truth.
+  (defconst set-open (js* "((element, value) => { element.open = value; })"))
+
+  (defun bind-menu ()
+    (let ((menu (js* "document.querySelector('.menu')")))
+      (when (not (nil? menu))
+        (funcall set-open menu (not (narrow?)))
+        (js-call menu :addEventListener
+                 "toggle"
+                 (lambda (event)
+                   (if (and (narrow?) (not (get menu "open")))
+                       (funcall set-menu-marker "collapsed")
+                     (funcall clear-menu-marker)))))))
+
   ;; --------------------------------------------------------------- bootstrap
 
   ;; Applied before the first paint: this script is classic and in the head.
   (apply-theme (stored-theme))
+  (mark-menu-state)
 
   (defun on-ready ()
     (let ((button (node "theme-toggle")))
@@ -214,6 +256,11 @@
                  (lambda (event)
                    (js-call event :preventDefault)
                    (toggle-theme)))))
+    ;; A reader who rotates a tablet or resizes a window crosses the
+    ;; breakpoint without a reload.
+    (bind-menu)
+    (js-call (js* "globalThis") :addEventListener
+             "resize" (lambda (event) (bind-menu)))
     (search-once))
 
   (if (= (get (js* "globalThis.document") "readyState") "loading")
