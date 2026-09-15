@@ -173,6 +173,30 @@ test("action.yml declares the documented Action contract", async () => {
   ).resolves.toContain("require(");
 });
 
+test("the committed package reproduces from source", async () => {
+  // The packaging specification requires the generated `dist/` to be committed
+  // and reproducible, because a consumer resolves the Action from this
+  // repository: an entry that is not in the tree cannot run. The template's
+  // Action pin is a release-time substitution rather than a build output, so it
+  // is checked for the property that matters: it names a commit that carries
+  // the entry.
+  const { exitCode, stdout } = await run([
+    "git", "status", "--porcelain", "--", "examples/dogfood/dist",
+  ]);
+  expect(exitCode).toBe(0);
+  const changed = stdout.trim().split("\n")
+    .filter((line) => line.trim() !== "" && !line.endsWith("dist/action/workflow.yml"));
+  expect(changed).toEqual([]);
+
+  const template = await readFile(resolve(PROJECT, "dist/action/workflow.yml"), "utf8");
+  const pin = /uses: liuchong\/eliscript\/examples\/dogfood@([0-9a-f]{40})/u.exec(template)?.[1];
+  expect(pin).toBeTruthy();
+  const pinned = await run([
+    "git", "cat-file", "-e", `${pin}:examples/dogfood/dist/action/index.js`,
+  ]);
+  expect(pinned.exitCode).toBe(0);
+});
+
 test("the metadata satisfies the marketplace limits", async () => {
   const { stdout } = await run([process.execPath, "-e", `
     const fs = require("node:fs");
