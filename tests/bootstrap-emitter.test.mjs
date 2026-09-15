@@ -126,6 +126,34 @@ test("bootstrapped emitter matches seed ESM and Source Map output", async () => 
     expect(() => emitter.emit_module(
       ir.make_program("invalid-import.eli", [invalidImport]),
     )).toThrow("namespace and named imports cannot be combined");
+
+    // The raw form is exactly one string. Emitting only the first of several
+    // produced JavaScript whose braces did not close, so the module was not
+    // what the source said and nothing reported it.
+    const rawWithTwoArguments = ir.make_node(
+      "raw-javascript",
+      null,
+      "js*",
+      [
+        ir.make_node("literal", null, '"a"', [], "a"),
+        ir.make_node("literal", null, '"b"', [], "b"),
+      ],
+      null,
+    );
+    expect(() => emitter.emit_module(
+      ir.make_program("raw.js", [ir.make_node("expression-statement", null, "statement", [rawWithTwoArguments], null)]),
+    )).toThrow("js* expects 1 argument, got 2");
+
+    const rawWithSymbol = ir.make_node(
+      "raw-javascript",
+      null,
+      "js*",
+      [ir.make_node("reference", null, "fragment", [], null)],
+      null,
+    );
+    expect(() => emitter.emit_module(
+      ir.make_program("raw.js", [ir.make_node("expression-statement", null, "statement", [rawWithSymbol], null)]),
+    )).toThrow("js* expects a string literal");
     expect([
       sourceMap.encode_vlq(0),
       sourceMap.encode_vlq(1),

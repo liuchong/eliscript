@@ -1298,6 +1298,13 @@
              (js-array "new " (emit-expression (js-nth 0 nodes)) "("
               (emit-arguments (js-call nodes :slice 1)) ")")))
           ((= kind "raw-javascript")
+           ;; The raw form is exactly one string. Accepting several arguments
+           ;; emitted only the first, so the module's braces did not close and
+           ;; the JavaScript was not what the source said. The reference
+           ;; implementation reports this at emission, so this one does too.
+           (require-arity "js*" nodes 1 1)
+           (unless (= (ir-kind (js-nth 0 nodes)) "literal")
+             (fail "js* expects a string literal"))
            (text-fragment (ir-value (js-nth 0 nodes))))
           ((= kind "print") (combine (js-array "console.log(" (emit-arguments nodes) ")")))
           ((= kind "string-concat")
