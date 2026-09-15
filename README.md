@@ -81,6 +81,17 @@ Known gaps, stated rather than implied:
 - Publication is prepared and not performed: no tag, no registry release, and no
   Marketplace listing exists yet.
 
+## Contracts
+
+The published surface and the compatibility it must keep are recorded as
+machine-checked registries: [`contracts/public-surface.json`](contracts/public-surface.json)
+([0044](specs/0044-public-surface-registry.md)),
+[`contracts/compatibility-matrix.json`](contracts/compatibility-matrix.json)
+([0045](specs/0045-continuous-compatibility-matrix.md)), and the retained
+baseline in
+[`contracts/compatibility-baseline.json`](contracts/compatibility-baseline.json)
+([0046](specs/0046-m7-compatibility-baseline.md)).
+
 ## Repository Guide
 
 | Path | Purpose |

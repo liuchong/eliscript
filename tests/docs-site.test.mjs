@@ -99,6 +99,34 @@ test("the page compiles the source in the browser", async () => {
   });
 });
 
+test("every page opens with the same band as the home page", async () => {
+  // The band is what tells a reader a page finished loading. It is the same
+  // photograph, darkened once, with the heading in white.
+  for (const path of ["index.html", "pages/language.html", "pages/api.html",
+                      "pages/getting-started.html"]) {
+    await withPage(path, async (page) => {
+      const band = await page.evaluate(() => {
+        const hero = document.querySelector(".hero, .doc-hero");
+        if (!hero) return null;
+        const heading = hero.querySelector("h1");
+        return {
+          image: getComputedStyle(hero).backgroundImage.includes("eliscript-hero.jpg"),
+          overlay: getComputedStyle(hero, "::before").backgroundColor,
+          heading: getComputedStyle(heading).color,
+          height: Math.round(hero.getBoundingClientRect().height),
+        };
+      });
+      expect(band).not.toBeNull();
+      expect(band.image).toBe(true);
+      expect(band.height).toBeGreaterThan(200);
+      expect(band.heading).toBe("rgb(255, 255, 255)");
+      // A dark overlay, so the photograph never decides whether the heading is
+      // readable.
+      expect(band.overlay).toMatch(/rgba\(8, 9, 8, [0-9.]+\)/u);
+    });
+  }
+});
+
 test("the example switcher replaces the source and the output", async () => {
   await withPage("index.html", async (page) => {
     const before = await page.locator("[data-source-code]").innerText();

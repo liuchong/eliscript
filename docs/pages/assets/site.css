@@ -591,18 +591,45 @@ code {
 
 /* Documentation pages */
 
+/* An inner page opens with the same band as the home page: the same photograph,
+   darkened once, with the heading in white. The band is what tells a reader the
+   page finished loading, so it carries the same treatment everywhere. */
 .doc-hero {
   border-bottom: 1px solid var(--line);
-  background: var(--paper-bright);
+  color: white;
+  background-color: #1b1b19;
+  background-image: url("eliscript-hero.jpg");
+  background-position: center;
+  background-size: cover;
+  position: relative;
+  overflow: hidden;
+}
+
+.doc-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 9, 8, 0.32);
 }
 
 .doc-hero-inner {
+  position: relative;
   width: min(calc(100% - 40px), var(--max-width));
   margin: 0 auto;
   padding: 78px 0 66px;
 }
 
+.doc-hero .eyebrow {
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.doc-hero .doc-lede {
+  color: rgba(255, 255, 255, 0.88);
+}
+
 .doc-hero h1 {
+  color: white;
+  text-shadow: 0 3px 24px rgba(0, 0, 0, 0.34);
   max-width: 850px;
   margin: 0;
   font-size: 64px;
