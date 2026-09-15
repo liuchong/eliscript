@@ -89,3 +89,22 @@ precedence over parent rules when they address the same decision.
   Refresh generated contracts and run the broad local gate once at the batch
   boundary. Refresh the full compatibility matrix only at a milestone gate or
   when its evidence is the capability being delivered.
+
+## Commit Messages
+
+- **COMMIT-01** - Every commit subject starts with a Conventional Commits type
+  and a colon: `feat`, `fix`, `docs`, `test`, `perf`, `refactor`, `chore`,
+  `ci`, `build`, or `revert`. An optional scope may follow in parentheses.
+- **COMMIT-02** - The type describes the change, not the activity that produced
+  it. New or changed observable behavior is `feat`; a defect repair is `fix`;
+  tests, fixtures, and acceptance or evidence refreshes are `test`;
+  documentation, design, and specification-only changes are `docs`; build,
+  packaging, and repository maintenance are `chore`.
+- **COMMIT-03** - The subject after the prefix stays imperative, names the
+  observable intent, and carries no trailing period. The body records what
+  changed, why, and the verification performed.
+- **COMMIT-04** - Do not rewrite published history to correct message format.
+  Conventional format applies from the next commit forward. A history rewrite
+  changes every source identity that retained acceptance evidence is bound to,
+  so it is a milestone operation with evidence regeneration, never a cosmetic
+  edit.
