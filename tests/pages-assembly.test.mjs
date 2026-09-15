@@ -64,6 +64,18 @@ test("the artifact carries the site and every tree it loads", async () => {
   expect(await exists("examples/dogfood/_site/assets/browser.js")).toBe(true);
 });
 
+test("the published root answers instead of 404", async () => {
+  // The artifact keeps the repository shape, and the repository has no root
+  // index, so the assembler writes one.
+  const landing = await readFile(resolve(artifact, "index.html"), "utf8");
+  expect(landing).toContain("<!doctype html>");
+  // Every link it offers must resolve inside the artifact, or point outward.
+  for (const [, href] of landing.matchAll(/href="([^"]+)"/gu)) {
+    if (/^https?:/u.test(href)) continue;
+    expect(await exists(href.replace(/\/$/u, "/index.html"))).toBe(true);
+  }
+});
+
 test("every reference the playground page carries resolves in the artifact", async () => {
   const page = await readFile(resolve(artifact, SITE_PAGE), "utf8");
 
