@@ -70,6 +70,7 @@ their full wording is met.
 | S3 | Comment channels: a native channel captured as a snapshot or declared live, and external adapters declared as mount regions | `tests/dogfood-comments.test.mjs` |
 | I7 | The packaged Action carries the generated site's browser asset, an external source map, and the map that names the `.eli` sources | `tests/dogfood-action.test.mjs` |
 | I8 | Events are classified before anything renders: a comment event defers without writing output, a pushed article event builds, `preview` renders drafts into a tree that asks not to be indexed, and `previous-manifest` verifies the tree being replaced | `tests/dogfood-events.test.mjs` |
+| I8 | An article event whose record cannot be published ends the run before it renders, and an unchanged fingerprint ends it before it renders at all | `tests/dogfood-skip.test.mjs` |
 | I1 | A private source is accepted only with explicit acknowledgement, and only with static snapshots | `tests/dogfood-config.test.mjs` |
 | S3 | A hybrid channel serves its snapshot and the browser reports how much has changed, without a second renderer in the browser | `tests/dogfood-hybrid.test.mjs` |
 | S6 | A source that fails ends the build with a diagnostic and leaves the published tree untouched, and an empty source produces a site without it | `tests/dogfood-resilience.test.mjs` |

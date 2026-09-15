@@ -26,6 +26,7 @@
   (import "./events.eli" build-decision classify-event requested-event)
   (import "./channels.eli" attach-configured-channels snapshot-count)
   (import "./identity.eli" resolve-identity)
+  (import "./preflight.eli" skip-decision)
   (import "./sources.eli" enabled-sources identity-list source-posts)
   (import "../support/config.eli" load-config)
   (import "../support/diagnostics.eli" fail)
@@ -106,6 +107,150 @@
       (mkdirSync (Path/dirname target) (js-object :recursive t))
       (writeFileSync target (Collection/get document :content))))
 
+  ;; ------------------------------------------------------- publishable input
+
+  ;; Specification 0005 Layer 3: the publishable fingerprint is computed from
+  ;; publishable inputs, so an unchanged build is known before anything is
+  ;; rendered. It covers the canonical records, the publishable site
+  ;; configuration, the theme, and the two things that decide the markup: the
+  ;; renderer itself and the browser asset the generated pages load.
+  (defun canonical-channel (channel)
+    (js-object
+      :id (str (Collection/get channel :id nil))
+      :kind (str (Collection/get channel :kind nil))
+      :mode (str (Collection/get channel :mode nil))
+      :count (Collection/get channel :count nil)
+      :updatedAt (Collection/get channel :updated-at nil)
+      :binding (str (channel-binding-text channel))
+      :items (canonical-items (Collection/get channel :items []))))
+
+  (defun channel-binding-text (channel)
+    (let ((binding (Collection/get channel :binding nil)))
+      (if (nil? binding)
+          ""
+        (str (Collection/get binding :repository "")
+             "#" (Collection/get binding :number nil)))))
+
+  (defun canonical-items (items)
+    (let ((result (js-array))
+          (index 0))
+      (while (< index (Collection/count items))
+        (let ((item (Collection/nth items index)))
+          (js-call result :push
+                   (js-object
+                     :id (str (Collection/get item :id nil))
+                     :author (str (Collection/get (Collection/get item :author {}) :login ""))
+                     :body (Collection/get item :body "")
+                     :createdAt (Collection/get item :created-at nil)
+                     :updatedAt (Collection/get item :updated-at nil)
+                     :replies (canonical-items (Collection/get item :replies [])))))
+        (setq index (1+ index)))
+      result))
+
+  (defun canonical-post (post)
+    (js-object
+      :id (get post :id)
+      :slug (get post :slug)
+      :title (get post :title)
+      :summary (get post :summary)
+      :body (get post :body)
+      :publishedAt (get post :published-at)
+      :updatedAt (get post :updated-at)
+      :authors (values->array (get post :authors))
+      :tags (values->array (get post :tags))
+      :cover (get post :cover nil)
+      :draft (get post :draft)
+      :pinnedWeight (get post :pinned-weight)
+      :provenance (js-object :provider (Collection/get (get post :provenance) :provider "")
+                             :path (Collection/get (get post :provenance) :path ""))
+      :aliases (values->array (get post :aliases))
+      :channels (channels->array (get post :comment-channels))))
+
+  (defun channels->array (channels)
+    (let ((result (js-array))
+          (index 0))
+      (while (< index (Collection/count channels))
+        (js-call result :push (canonical-channel (Collection/nth channels index)))
+        (setq index (1+ index)))
+      result))
+
+  (defun values->array (values)
+    (let ((result (js-array))
+          (index 0))
+      (while (< index (Collection/count values))
+        (js-call result :push (Collection/nth values index))
+        (setq index (1+ index)))
+      result))
+
+  (defun publishable-inputs (config site posts browser-text renderer)
+    (js-object
+      :site (js-object
+              :title (Collection/get site :title "")
+              :baseUrl (Collection/get site :base-url "")
+              :language (Collection/get site :language "")
+              :theme (str (Collection/get site :theme :system))
+              :preview (Collection/get site :preview false))
+      :presentation (str (Collection/get (Collection/get config :comments {}) :presentation :tabs))
+      :posts (posts->array posts)
+      :browserAsset (digest-of-text browser-text)
+      :renderer (renderer-digest renderer)))
+
+  (defun posts->array (posts)
+    (let ((result (js-array))
+          (index 0))
+      (while (< index (Collection/count posts))
+        (js-call result :push (canonical-post (Collection/nth posts index)))
+        (setq index (1+ index)))
+      result))
+
+  (defun digest-of-text (text)
+    (js-call (js-call (createHash "sha256") :update text) :digest "hex"))
+
+  ;; The fingerprint has to change when the renderer would produce different
+  ;; output, so the renderer's own bytes are part of it. In development the
+  ;; renderer is the module beside the running entry; in the packaged Action it
+  ;; is inside the single bundle the entry *is*, which is why the fallback is
+  ;; the entry itself. Reading a compiled-in source path instead would ship the
+  ;; build machine's directory layout in the artifact.
+  (defun renderer-module-path ()
+    (let* ((entry (get program-arguments 1 ""))
+           (sibling (Path/join (Path/dirname entry) "../renderer/server.mjs")))
+      (if (existsSync sibling) sibling entry)))
+
+  (defun renderer-digest ()
+    (let ((path (renderer-module-path)))
+      (if (existsSync path)
+          (digest-of-text (readFileSync path "utf8"))
+        "unknown")))
+
+  (defun input-digest (inputs)
+    (digest-of-text (JSON/stringify inputs)))
+
+  (defun no-change-policy (config)
+    (Collection/get (Collection/get config :refresh {}) :no-change :skip))
+
+  ;; An unchanged build reports itself without writing anything.
+  (defun report-no-change (output posts inputs)
+    (let ((count (Collection/count posts)))
+      (print (str "dogfood: no change; " count
+                  " published posts produce the fingerprint already on disk"))
+      (print (str "dogfood: output " output))
+      (print (str "dogfood: fingerprint " inputs))
+      (set-output "built" "false")
+      (set-output "reason" "no-change")
+      (set-output "content-fingerprint" inputs)
+      (set-output "output-directory" output)
+      (set-output "post-count" (str count))
+      (set-output "comment-snapshot-count" (str (snapshot-count posts)))
+      (set-output "manifest" (Path/join output "_dogfood/build.json")))
+    inputs)
+
+  (defun previous-input-digest (output)
+    (let ((manifest (Path/join output "_dogfood/build.json")))
+      (if (existsSync manifest)
+          (Collection/get (JSON/parse (readFileSync manifest "utf8")) "inputDigest" nil)
+        nil)))
+
   (defun fingerprint (documents)
     (let ((hash (createHash "sha256"))
           (index 0))
@@ -132,7 +277,7 @@
   (defun public-posts (posts)
     (funcall to-native-array (Sequence/map public-post posts)))
 
-  (defun write-manifests (staging documents posts config carriers unauthorized)
+  (defun write-manifests (staging documents posts config carriers unauthorized inputs)
     (mkdirSync (Path/join staging "_dogfood") (js-object :recursive t))
     (writeFileSync
       (Path/join staging "_dogfood/build.json")
@@ -143,6 +288,7 @@
                         :postCount (Collection/count posts)
                         :routeCount (Collection/count documents)
                         :contentFingerprint (fingerprint documents)
+                        :inputDigest inputs
                         :commentSnapshots (str (snapshot-count posts))
                         :commentCarriers (str carriers)
                         :unauthorizedRecords (str unauthorized)))
@@ -307,15 +453,15 @@
       (when (not (nil? destination))
         (appendFileSync destination (str name "=" value "\n")))))
 
-  (defun report (output documents posts reason fingerprint-value)
+  (defun report (output documents posts reason fingerprint-value inputs)
     (let ((post-count (Collection/count posts)))
       (print (str "dogfood: wrote " (Collection/count documents)
                   " routes from " post-count " published posts"))
       (print (str "dogfood: output " output))
-      (print (str "dogfood: fingerprint " fingerprint-value))
+      (print (str "dogfood: fingerprint " inputs))
       (set-output "built" "true")
       (set-output "reason" reason)
-      (set-output "content-fingerprint" fingerprint-value)
+      (set-output "content-fingerprint" inputs)
       (set-output "cache-key" (str "dogfood-" fingerprint-value))
       (set-output "output-directory" output)
       (set-output "post-count" (str post-count))
@@ -337,37 +483,67 @@
            (sources (enabled-sources config))
            (output (output-directory-of root config output-override))
            (staging (str output ".staging"))
-           (collected [])
-           (carriers 0)
-           (unauthorized 0))
-      (let ((index 0))
-        (while (< index (Collection/count sources))
-          (let* ((source (Collection/nth sources index))
-                 (result (await (source-posts root config source github-transport
-                                              (identity-list collected)))))
-            (setq collected (append-all collected (Collection/get result :posts []))
-                  carriers (+ carriers (Collection/get result :carriers 0))
-                  unauthorized (+ unauthorized (Collection/get result :unauthorized 0))))
-          (setq index (1+ index))))
-      (let* ((posts (sort-posts
-                      (attach-configured-channels
-                        config
-                        (Sequence/filter (lambda (post) (publishable? post preview))
-                                         (resolve-identity config collected)))))
-             (documents (Collection/conj (render-site site posts)
-                                       {:path "assets/browser.js"
-                                        :content (browser-bundle root browser-override)}))
-             (digest (fingerprint documents)))
-        (check-identity posts)
-        (prepare-staging staging)
-        (let ((index 0))
-          (while (< index (Collection/count documents))
-            (write-document staging (Collection/nth documents index))
-            (setq index (1+ index))))
-        (write-manifests staging documents posts config carriers unauthorized)
-        (publish staging output)
-        (report output documents posts reason digest)
-        digest)))
+           (collected (await (collect-sources root config sources))))
+      (finish-build root config site output staging browser-override preview reason
+                    collected)))
+
+  ;; Every enabled source contributes records, carriers, and unauthorized
+  ;; records. The counts travel to the manifest so a build can be inspected
+  ;; without re-reading the providers.
+  (defasync collect-sources (root config sources)
+    (let ((collected [])
+          (carriers 0)
+          (unauthorized 0)
+          (index 0))
+      (while (< index (Collection/count sources))
+        (let* ((source (Collection/nth sources index))
+               (result (await (source-posts root config source github-transport
+                                            (identity-list collected)))))
+          (setq collected (append-all collected (Collection/get result :posts []))
+                carriers (+ carriers (Collection/get result :carriers 0))
+                unauthorized (+ unauthorized (Collection/get result :unauthorized 0))))
+        (setq index (1+ index)))
+      {:posts collected :carriers carriers :unauthorized unauthorized}))
+
+  ;; The publishable fingerprint decides this before a document is rendered.
+  (defun finish-build (root config site output staging browser-override preview reason
+                            collected)
+    (let* ((collected-posts (Collection/get collected :posts []))
+           (carriers (Collection/get collected :carriers 0))
+           (unauthorized (Collection/get collected :unauthorized 0))
+           (posts (sort-posts
+                    (attach-configured-channels
+                      config
+                      (Sequence/filter (lambda (post) (publishable? post preview))
+                                       (resolve-identity config collected-posts)))))
+           (bundle (browser-bundle root browser-override))
+           (inputs (input-digest (publishable-inputs config site posts bundle
+                                                     (renderer-digest)))))
+      (check-identity posts)
+      (if (unchanged-inputs? config output inputs reason)
+          (report-no-change output posts inputs)
+        (render-and-publish output staging config site posts bundle inputs carriers
+                            unauthorized reason))))
+
+  (defun unchanged-inputs? (config output inputs reason)
+    (and (= (no-change-policy config) :skip)
+         (not (= reason "forced"))
+         (= inputs (previous-input-digest output))))
+
+  (defun render-and-publish (output staging config site posts bundle inputs carriers
+                                    unauthorized reason)
+    (let* ((documents (Collection/conj (render-site site posts)
+                                       {:path "assets/browser.js" :content bundle}))
+           (digest (fingerprint documents))
+           (index 0))
+      (prepare-staging staging)
+      (while (< index (Collection/count documents))
+        (write-document staging (Collection/nth documents index))
+        (setq index (1+ index)))
+      (write-manifests staging documents posts config carriers unauthorized inputs)
+      (publish staging output)
+      (report output documents posts reason digest inputs)
+      digest))
 
   ;; Keywords print with their leading colon, which reads as noise in a log.
   (defun keyword-name (value)
@@ -376,6 +552,16 @@
       (if (and (> size 0) (= (string-code-unit-at text 0) 58))
           (slice 1 size text)
         text)))
+
+  ;; A record that cannot be published ends the run before it renders. The run
+  ;; has already consumed a runner, so the result says so rather than reporting
+  ;; an ordinary build that found nothing to change.
+  (defun skip (decision)
+    (let ((detail (Collection/get decision :detail "")))
+      (print (str "dogfood: skipped; " detail))
+      (set-output "built" "false")
+      (set-output "reason" "skipped")
+      (set-output "subject" "articles")))
 
   ;; An event that cannot change the site ends the run without writing output.
   (defun defer (decision)
@@ -422,14 +608,17 @@
                (decision (build-decision config classification forced)))
           (if (not (Collection/get decision :build nil))
               (defer decision)
-            (progn
-              ;; Verification is a precondition: it runs before any rendering,
-              ;; so a rejected run leaves no staging tree behind.
-              (verify-previous-manifest
-                previous-manifest
-                (output-directory-of root config output-override))
-              (await (build-site root config-path output-override browser-override
-                                 preview (Collection/get decision :reason "changed"))))))
+            (let ((preflight (skip-decision config classification)))
+              (if (Collection/get preflight :skip false)
+                  (skip preflight)
+                (progn
+                  ;; Verification is a precondition: it runs before any
+                  ;; rendering, so a rejected run leaves no staging tree behind.
+                  (verify-previous-manifest
+                    previous-manifest
+                    (output-directory-of root config output-override))
+                  (await (build-site root config-path output-override browser-override
+                                     preview (Collection/get decision :reason "changed"))))))))
         (catch error
           (print (str "dogfood: " (get error :code "DOGFOOD") ": "
                       (get error :message)))

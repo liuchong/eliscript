@@ -38,6 +38,10 @@
   ;; the rule in specification 0011 that validates its carrier kind.
   (defconst refresh-article-policies [:push :event :scheduled :manual :hybrid])
 
+  ;; `:skip` reports an unchanged fingerprint without rendering; `:build`
+  ;; always renders, for a repository that wants the artifact refreshed.
+  (defconst refresh-no-change-policies [:skip :build])
+
   (defconst refresh-comment-policies
     [:runtime :external :scheduled :manual :hybrid :event])
 
@@ -524,7 +528,8 @@
       (when (not (nil? refresh))
         (require-map refresh "config.refresh")
         (check-policy refresh :articles refresh-article-policies "articles")
-        (check-policy refresh :comments refresh-comment-policies "comments"))))
+        (check-policy refresh :comments refresh-comment-policies "comments")
+        (check-policy refresh :no-change refresh-no-change-policies "no-change"))))
 
   (defun check-policy (declaration key allowed label)
     (let ((value (Collection/get declaration key nil)))

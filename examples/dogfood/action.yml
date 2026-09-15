@@ -54,7 +54,11 @@ outputs:
   built:
     description: Whether a new site tree was produced.
   reason:
-    description: One of changed, no-change, forced, deferred, or failed.
+    description: >-
+      One of changed, no-change, forced, deferred, skipped, or failed. A
+      comment event defers; an article event whose record cannot be published
+      is skipped, and the run reports that rather than a build that found
+      nothing to change.
   content-fingerprint:
     description: Canonical digest of the rendered documents.
   output-directory:

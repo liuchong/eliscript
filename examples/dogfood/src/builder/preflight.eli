@@ -1,0 +1,160 @@
+;; Pre-flight classification.
+;;
+;; A workflow run has already consumed a runner by the time it starts, so an
+;; article event must not pay for a full build when the record it names cannot
+;; be published. Specification 0005 calls that a skip decision: no render, no
+;; upload, no deploy, and a result reported separately from the zero-run
+;; guarantee that comment events enjoy.
+;;
+;; The decision is made from the event payload, which is a GitHub record rather
+;; than something a user typed. No extra request is needed, so the check costs
+;; nothing beyond the classification. The rules are the publication rules the
+;; providers already apply, imported from them rather than restated; only the
+;; carrier rule is weaker here, because the identities it verifies against are
+;; discovered during the build this decision is deciding whether to run.
+
+(module dogfood.builder.preflight
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "eliscript/runtime/core/sequence.mjs" :as Sequence)
+  (import "./discussions.eli" allowed-category?)
+  (import "./issues.eli" authorized-author? publisher-set)
+  (import "../support/text.eli" blank contains to-lowercase))
+
+  ;; ------------------------------------------------------------- the payload
+
+  (defun repository-name (payload)
+    (let ((repository (get payload "repository" nil)))
+      (if (nil? repository) "" (str (get repository "full_name" "")))))
+
+  ;; -> {:kind ... :record ... :author ...} or nothing when the payload carries
+  ;; no article record, which is the case for push, schedule, and dispatch.
+  (defun event-record (event-name payload)
+    (cond
+      ((= event-name "issues")
+       (let ((issue (get payload "issue" nil)))
+         (if (nil? issue)
+             nil
+           {:kind :issues :record issue :author (get issue "user" nil)})))
+      ((= event-name "discussions")
+       (let ((discussion (get payload "discussion" nil)))
+         (if (nil? discussion)
+             nil
+           {:kind :discussions :record discussion :author (get discussion "user" nil)})))
+      (t nil)))
+
+  (defun record-field (record key)
+    (Collection/get record key nil))
+
+  ;; ------------------------------------------------------------- the sources
+
+  (defun enabled-sources-of-kind (config kind)
+    (Sequence/filter
+      (lambda (source)
+        (and (Collection/get source :enabled false)
+             (= (Collection/get source :kind :markdown) kind)))
+      (Collection/get config :sources [])))
+
+  (defun matching-source (config kind repository)
+    (let ((sources (enabled-sources-of-kind config kind))
+          (index 0)
+          (found nil))
+      (while (< index (Collection/count sources))
+        (let ((source (Collection/nth sources index)))
+          (when (= (Collection/get source :repository "") repository)
+            (setq found source)))
+        (setq index (1+ index)))
+      found))
+
+  ;; --------------------------------------------------------- the publication
+
+  (defun labelled-for-publication? (source issue)
+    (let ((required (Collection/get source :label ""))
+          (labels (get issue "labels" (js-array)))
+          (index 0)
+          (found false))
+      (while (< index (js-length labels))
+        (when (= (get (js-nth index labels) "name" "") required)
+          (setq found t))
+        (setq index (1+ index)))
+      found))
+
+  ;; The carrier rule without its identity check: the provider principal is a
+  ;; bot, so a record authored by that principal whose body carries the marker
+  ;; is a carrier whatever the marker names. A human author cannot match the
+  ;; principal, so no article is skipped by this weaker reading.
+  (defun carrier-shaped? (config author body)
+    (let ((adapters (Collection/get config :adapters []))
+          (index 0)
+          (found false))
+      (while (< index (Collection/count adapters))
+        (let* ((adapter (Collection/nth adapters index))
+               (principal (Collection/get adapter :principal nil))
+               (marker (Collection/get adapter :marker nil))
+               (login (login-of author)))
+          (when (and (= (Collection/get adapter :carrier-kind :none) :issue)
+                     (not (nil? principal))
+                     (not (nil? marker))
+                     (= (to-lowercase login) (to-lowercase (str principal)))
+                     (contains (str marker) (str body)))
+            (setq found t)))
+        (setq index (1+ index)))
+      found))
+
+  ;; ------------------------------------------------------------- the reasons
+
+  ;; Every rule returns the reason a record cannot be published, or an empty
+  ;; string when it can. Reasons compose; they are not a nest of branches.
+  (defun source-skip (config kind source body author)
+    (cond
+      ((and (= kind :issues) (not (labelled-for-publication? source body)))
+       (str "the issue is not labelled " (Collection/get source :label "")))
+      ((and (= kind :discussions) (not (allowed-category? source body)))
+       "the discussion is in a category that is not published")
+      ((carrier-shaped? config author (body-of body))
+       "the record is a comment carrier")
+      ((not (authorized-author? (publisher-set (Collection/get config :publishing {}))
+                                author))
+       (str "the author " (login-of author) " is not a publisher"))
+      (t "")))
+
+  (defun record-skip (config record repository)
+    (let* ((kind (record-field record :kind))
+           (body (record-field record :record))
+           (author (record-field record :author))
+           (source (matching-source config kind repository)))
+      (cond
+        ;; GitHub sends `issues` events for pull requests as well.
+        ((not (nil? (get body "pull_request" nil)))
+         "the record is a pull request, not an article")
+        ((nil? source)
+         (str "no enabled " (name-of kind) " source selects " repository))
+        (t (source-skip config kind source body author)))))
+
+  ;; -> {:skip bool :detail "..."}
+  ;;
+  ;; Called only for an event whose subject is an article and whose policy says
+  ;; it builds, so a decision to build is the ordinary case.
+  (defun skip-decision (config classification)
+    (let* ((event-name (Collection/get classification :event ""))
+           (payload (Collection/get classification :payload {}))
+           (record (event-record event-name payload))
+           (detail (if (nil? record)
+                       ""
+                     (record-skip config record (repository-name payload)))))
+      (if (blank detail)
+          {:skip false}
+        {:skip t :detail detail})))
+
+  ;; ---------------------------------------------------------------- helpers
+
+  (defun body-of (body)
+    (let ((text (get body "body" nil)))
+      (if (nil? text) "" (str text))))
+
+  (defun login-of (author)
+    (if (nil? author) "" (str (get author "login" ""))))
+
+  (defun name-of (kind)
+    (if (= kind :discussions) "discussions" "issues"))
+
+  (export event-record skip-decision)

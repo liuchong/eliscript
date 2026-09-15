@@ -83,11 +83,53 @@ test("permissions are the documented minimum", () => {
   expect(permissions).not.toContain("contents: write");
 });
 
-test("one concurrency group and one environment serialize the work", () => {
-  const groups = packaged.match(/^  group: /gmu) ?? [];
-  expect(groups.length).toBe(1);
-  const environments = packaged.match(/^      name: /gmu) ?? [];
-  expect(environments.length).toBe(1);
+test("a build may be cancelled but a deployment may not", () => {
+  // Specification 0005 Layer 5: concurrency protects the queue during a build,
+  // and a deployment that has started must not be interrupted.
+  const buildGroup = /^      group: dogfood-build-\$\{\{ github\.ref \}\}\n      cancel-in-progress: true$/mu;
+  const deployGroup = /^      group: dogfood-pages\n      cancel-in-progress: false$/mu;
+  expect(packaged).toMatch(buildGroup);
+  expect(packaged).toMatch(deployGroup);
+
+  // One build group and one deployment environment, per specification 0007.
+  expect((packaged.match(/^      group: /gmu) ?? []).length).toBe(2);
+  expect((packaged.match(/^    environment:/gmu) ?? []).length).toBe(1);
+  expect((packaged.match(/^      name: github-pages$/gmu) ?? []).length).toBe(1);
+});
+
+test("each job holds only the permissions it needs", () => {
+  const workflow = packaged.slice(packaged.indexOf("\njobs:"));
+  const build = workflow.slice(workflow.indexOf("\n  build:"), workflow.indexOf("\n  deploy:"));
+  const deploy = workflow.slice(workflow.indexOf("\n  deploy:"));
+  // The build reads records and can never write a deployment.
+  expect(build).toContain("contents: read");
+  expect(build).toContain("issues: read");
+  expect(build).toContain("discussions: read");
+  expect(build).not.toContain("pages: write");
+  expect(build).not.toContain("id-token: write");
+  // The deployment writes pages and holds the token, and reads nothing else.
+  expect(deploy).toContain("pages: write");
+  expect(deploy).toContain("id-token: write");
+  expect(deploy).not.toContain("discussions: read");
+});
+
+test("the jobs are bounded and the checkout is shallow", () => {
+  expect(packaged).toMatch(/timeout-minutes: \d+/u);
+  expect((packaged.match(/timeout-minutes: /gu) ?? []).length).toBe(2);
+  expect(packaged).toContain("fetch-depth: 1");
+  // Only the manifest is cached: a few hundred bytes decide the next run,
+  // while the artifact upload still ships the whole tree.
+  const cache = packaged.slice(packaged.indexOf("- id: restore"), packaged.indexOf("- id: build"));
+  expect(cache).toContain("path: _site/_dogfood");
+  expect(cache).not.toMatch(/path: _site$/mu);
+  const upload = packaged.slice(packaged.indexOf("upload-pages-artifact"));
+  expect(upload).toMatch(/path: _site$/mu);
+});
+
+test("a dispatch can ask for a rebuild", () => {
+  expect(packaged).toContain("force:");
+  expect(packaged).toContain("type: boolean");
+  expect(packaged).toContain("force: ${{ inputs.force || 'false' }}");
 });
 
 test("creation events are not in the default template", () => {

@@ -18,13 +18,21 @@ on:
     branches: [main]
     paths:
       - "content/**"
+      - "assets/**"
       - "dogfood.config.eli"
       - ".github/workflows/dogfood.yml"
   # The snapshot schedule. It must match `refresh.snapshot-schedule` in the
   # configuration, and a change there is a change to this file.
   schedule:
     - cron: "37 */6 * * *"
+  # A dispatch is a request, so it rebuilds whatever the policies would say.
+  # `force` asks for a render even when the publishable inputs are unchanged.
   workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild even when nothing publishable changed.
+        type: boolean
+        default: false
   # Article carriers. Creation events are deliberately absent: neither
   # `issues.opened` nor `discussion.created` can be author-filtered before a
   # runner starts, so subscribing to them lets anyone who can open a record
@@ -43,32 +51,41 @@ on:
   # A repository that wants that anyway can add the trigger, and the build will
   # classify the run as deferred rather than rendering it.
 
+# The workflow itself needs nothing but the repository it reads.
 permissions:
   contents: read
-  issues: read
-  discussions: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: dogfood-pages
-  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Least privilege per job: the build reads GitHub records and never holds a
+    # deployment token.
+    permissions:
+      contents: read
+      issues: read
+      discussions: read
+    # A newer content run may cancel an obsolete build; the deployment below is
+    # outside this group so it is never interrupted once it starts.
+    concurrency:
+      group: dogfood-build-${{ github.ref }}
+      cancel-in-progress: true
     outputs:
       built: ${{ steps.build.outputs.built }}
       cache-key: ${{ steps.build.outputs.cache-key }}
     steps:
+      # The build reads the working tree, not its history.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          fetch-depth: 1
 
-      # The cache key is the content fingerprint, so it changes exactly when
-      # the rendered documents change.
+      # Only the build manifest is restored. It is what tells the next run
+      # whether the publishable inputs changed, and it is a few hundred bytes
+      # rather than the whole site.
       - id: restore
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc38249
         with:
-          path: _site
+          path: _site/_dogfood
           key: ${{ github.workflow }}-${{ github.sha }}
           restore-keys: |
             ${{ github.workflow }}-
@@ -79,6 +96,7 @@ jobs:
           config-file: dogfood.config.eli
           output-directory: _site
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          force: ${{ inputs.force || 'false' }}
 
       # A deferred or unchanged run produces no artifact, and uploading an
       # absent path would fail the job for the wrong reason.
@@ -93,6 +111,15 @@ jobs:
     needs: build
     if: needs.build.outputs.built == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Deployment is serialized and never cancelled: an interrupted deployment
+    # leaves the published site in a state nobody chose.
+    concurrency:
+      group: dogfood-pages
+      cancel-in-progress: false
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}

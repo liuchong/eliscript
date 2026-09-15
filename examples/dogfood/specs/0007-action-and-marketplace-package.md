@@ -51,7 +51,7 @@ configuration.
 | Output | Meaning |
 | --- | --- |
 | `built` | Whether a new site tree was produced |
-| `reason` | `changed`, `no-change`, `forced`, or `deferred` |
+| `reason` | `changed`, `no-change`, `forced`, `deferred`, or `skipped` |
 | `content-fingerprint` | Canonical publishable input digest |
 | `output-directory` | Validated site artifact path |
 | `post-count` | Published canonical post count |

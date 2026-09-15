@@ -72,8 +72,8 @@ configuration values or executable forms.
        :principal "utterances-bot" :marker "Canonical post: "}
       {:id :giscus :carrier-kind :external}]
      :refresh
-     {:articles :event
-      :comments :runtime
+     {:articles :hybrid
+      :comments :scheduled
       :snapshot-schedule "37 */6 * * *"
       :no-change :skip}
      :output {:directory "_site"}})
@@ -193,7 +193,11 @@ rewrite.
 - `:manual` for workflow dispatch only;
 - `:hybrid` for push/events plus scheduled reconciliation.
 
-Article refresh and comment refresh are separate settings.
+Article refresh and comment refresh are separate settings. `:hybrid` is the
+recommended article policy: pushes and content events rebuild immediately, and
+the schedule reconciles anything a trigger could not carry. `:scheduled` is the
+recommended comment policy when a snapshot channel is configured, because the
+schedule is what captures snapshots.
 
 ## Comment Refresh Policy
 

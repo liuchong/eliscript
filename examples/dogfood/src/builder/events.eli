@@ -35,18 +35,20 @@
         (setq index (1+ index)))
       found))
 
-  (defun classification (subject event-name action)
-    {:subject subject :event event-name :action action})
+  ;; The payload travels with the classification: the pre-flight decision reads
+  ;; the record the event is about from it, which is why it costs no request.
+  (defun classification (subject event-name action payload)
+    {:subject subject :event event-name :action action :payload payload})
 
   ;; -> {:subject :articles|:comments|:unknown :event name :action name}
   (defun classify-event (event-name payload)
     (let ((action (Collection/get payload "action" "")))
       (cond
         ((member? article-events event-name)
-         (classification :articles event-name action))
+         (classification :articles event-name action payload))
         ((member? comment-events event-name)
-         (classification :comments event-name action))
-        (t (classification :unknown event-name action)))))
+         (classification :comments event-name action payload))
+        (t (classification :unknown event-name action payload)))))
 
   (defun refresh-value (config area fallback)
     (let ((refresh (Collection/get config :refresh {})))
@@ -95,7 +97,7 @@
   ;; A run without an event file, as when a maintainer builds locally, is a
   ;; requested build rather than a reaction to something.
   (defun requested-event ()
-    (classification :articles "workflow_dispatch" "requested"))
+    (classification :articles "workflow_dispatch" "requested" {}))
 
   (export article-builds? article-policies build-decision classify-event
           comment-policies requested-event))

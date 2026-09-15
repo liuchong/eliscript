@@ -270,8 +270,11 @@ test("a previous manifest that disagrees stops the run before it replaces output
     .toContain("Allow: /");
   expect(await exists(join(project, "site.staging"))).toBe(false);
 
+  // The matching manifest must not stop the run. It is asked to render, so
+  // the verification is exercised rather than short-circuited by the
+  // no-change path.
   const honest = await react("push", { ref: "refs/heads/master" }, [
-    "--previous-manifest", manifest,
+    "--previous-manifest", manifest, "--force",
   ]);
   expect(honest.exitCode).toBe(0);
   expect(honest.outputs).toContain("built=true");

@@ -45,6 +45,16 @@ are observable but not free.
 
 ### Skip Decisions Are Not Zero Runs
 
+Implemented in `src/builder/preflight.eli`, which classifies the payload record
+before anything is rendered. The payload is the trusted API record the event
+carries, so the decision costs no request: a pull request, a record no enabled
+source selects, an unlabelled issue, a record in an unpublished category, a
+comment carrier, and an unauthorized author are each skipped with their own
+reason and a `reason=skipped` result. The carrier rule here omits the identity
+check of the provider rule, because the identities it verifies against are
+discovered during the build this decision is deciding whether to run; the
+provider principal is a bot, so a human article is never skipped by it.
+
 Issue and Discussion events are classified from trusted API records before a
 full build. Events for unauthorized article authors or records classified as
 comment carriers produce a skipped decision with no render, upload, or deploy.
@@ -76,13 +86,17 @@ not promised as real-time delivery.
 
 ### Layer 3: Publishable Fingerprint
 
-The scan phase computes a canonical SHA-256 over:
+Implemented as the publishable input digest: an unchanged fingerprint ends the
+run before any document is rendered, and the manifest records the digest that
+decided it. The scan phase computes a canonical SHA-256 over:
 
 - normalized article records;
 - enabled static comment snapshots;
 - publishable site configuration;
-- theme and renderer identity;
-- public asset digests.
+- theme and renderer identity, realized as the renderer module's own bytes and
+  the theme stylesheet it renders;
+- public asset digests, realized as the browser asset the generated pages
+  load.
 
 API ordering, request ids, fetch timestamps, rate-limit counters, and transient
 headers do not affect the fingerprint.

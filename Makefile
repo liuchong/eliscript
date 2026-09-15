@@ -126,7 +126,7 @@ test-applications:
 		tests/dogfood-identity.test.mjs tests/dogfood-events.test.mjs \
 		tests/dogfood-accessibility.test.mjs tests/dogfood-config.test.mjs \
 		tests/dogfood-hybrid.test.mjs tests/dogfood-matrix.test.mjs \
-		tests/dogfood-resilience.test.mjs \
+		tests/dogfood-resilience.test.mjs tests/dogfood-skip.test.mjs \
 		tests/dogfood-workflow.test.mjs tests/browser-matrix.test.mjs \
 		tests/browser-playground.test.mjs tests/browser-host.test.mjs \
 		tests/pages-assembly.test.mjs
