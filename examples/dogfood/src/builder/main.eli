@@ -1,0 +1,141 @@
+;; Builder entry point.
+;;
+;; The builder owns host effects: it loads configuration, reads Markdown,
+;; normalizes the canonical post model, calls the renderer, writes a staging
+;; tree, and replaces the published output only after every document exists.
+;; The renderer is imported as a library and has no host authority of its own.
+
+(module dogfood.builder.main
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "eliscript/runtime/core/sequence.mjs" :as Sequence)
+  (import "node:crypto" createHash)
+  (import "node:fs"
+          existsSync mkdirSync renameSync rmSync writeFileSync)
+  (import "node:path" :as Path)
+  (import "../../dogfood.config.eli" config)
+  (import "../renderer/server.eli" render-site sort-posts)
+  (import "./content.eli" check-identity read-posts)
+
+  (defconst program-arguments (js* "process.argv"))
+  (defconst set-exit-code (js* "(code) => { process.exitCode = code; }"))
+  (defconst to-native-array (js* "(value) => Array.from(value)"))
+
+  (defun option-value (arguments name fallback)
+    (let ((index 2)
+          (found fallback)
+          (total (Collection/count arguments)))
+      (while (< index total)
+        (when (and (= (Collection/nth arguments index) name)
+                   (< (+ index 1) total))
+          (setq found (Collection/nth arguments (+ index 1))))
+        (setq index (1+ index)))
+      found))
+
+  (defun prepare-staging (staging)
+    (when (existsSync staging)
+      (rmSync staging (js-object :recursive t :force t)))
+    (mkdirSync staging (js-object :recursive t)))
+
+  (defun write-document (staging document)
+    (let* ((relative (Collection/get document :path))
+           (target (Path/join staging relative)))
+      (mkdirSync (Path/dirname target) (js-object :recursive t))
+      (writeFileSync target (Collection/get document :content))))
+
+  (defun fingerprint (documents)
+    (let ((hash (createHash "sha256"))
+          (index 0))
+      (while (< index (Collection/count documents))
+        (let ((document (Collection/nth documents index)))
+          (js-call hash :update (Collection/get document :path))
+          (js-call hash :update "\n")
+          (js-call hash :update (Collection/get document :content))
+          (js-call hash :update "\n"))
+        (setq index (1+ index)))
+      (js-call hash :digest "hex")))
+
+  (defun public-post (post)
+    (js-object
+      :id (get post :id)
+      :slug (get post :slug)
+      :title (get post :title)
+      :summary (get post :summary)
+      :publishedAt (get post :published-at)
+      :updatedAt (get post :updated-at)
+      :tags (funcall to-native-array (get post :tags))
+      :source (Collection/get (get post :provenance) :path "")))
+
+  (defun public-posts (posts)
+    (funcall to-native-array (Sequence/map public-post posts)))
+
+  (defun write-manifests (staging documents posts)
+    (mkdirSync (Path/join staging "_dogfood") (js-object :recursive t))
+    (writeFileSync
+      (Path/join staging "_dogfood/build.json")
+      (str (JSON/stringify
+             (js-object :format "dogfood-build"
+                        :version 1
+                        :configSchemaVersion (Collection/get config :schema-version 1)
+                        :postCount (Collection/count posts)
+                        :routeCount (Collection/count documents)
+                        :contentFingerprint (fingerprint documents)))
+           "\n"))
+    (writeFileSync
+      (Path/join staging "_dogfood/posts.json")
+      (str (JSON/stringify (js-object :format "dogfood-posts"
+                                      :version 1
+                                      :posts (public-posts posts)))
+           "\n")))
+
+  (defun publish (staging output)
+    (let ((backup (str output ".backup")))
+      (when (existsSync backup)
+        (rmSync backup (js-object :recursive t :force t)))
+      (when (existsSync output)
+        (renameSync output backup))
+      (try
+        (renameSync staging output)
+        (catch error
+          (when (existsSync backup)
+            (renameSync backup output))
+          (throw error)))
+      (when (existsSync backup)
+        (rmSync backup (js-object :recursive t :force t)))))
+
+  (defun publishable? (post) (not (get post :draft)))
+
+  (defun build-site (root output-override)
+    (let* ((site (Collection/get config :site))
+           (source (Collection/nth (Collection/get config :sources) 0))
+           (directory (Collection/get source :directory "content/posts"))
+           (configured (Collection/get (Collection/get config :output) :directory "_site"))
+           (output (Path/join root (if (nil? output-override) configured output-override)))
+           (staging (str output ".staging"))
+           (all-posts (read-posts root directory))
+           (posts (sort-posts (Sequence/filter publishable? all-posts))))
+      (check-identity posts)
+      (let ((documents (render-site site posts)))
+        (prepare-staging staging)
+        (let ((index 0))
+          (while (< index (Collection/count documents))
+            (write-document staging (Collection/nth documents index))
+            (setq index (1+ index))))
+        (write-manifests staging documents posts)
+        (publish staging output)
+        (print (str "dogfood: wrote " (Collection/count documents)
+                    " routes from " (Collection/count posts) " published posts"))
+        (print (str "dogfood: output " output))
+        (print (str "dogfood: fingerprint " (fingerprint documents))))))
+
+  (defun main ()
+    (let* ((arguments program-arguments)
+           (root (option-value arguments "--root" "."))
+           (output (option-value arguments "--output" nil)))
+      (try
+        (build-site root output)
+        (catch error
+          (print (str "dogfood: " (get error :code "DOGFOOD") ": "
+                      (get error :message)))
+          (funcall set-exit-code 1)))))
+
+  (main))

@@ -118,7 +118,8 @@ test-applications:
 	$(EMACS) --batch -Q -L tools/org -L tests \
 		-l tests/eliscript-org-tests.el \
 		-f ert-run-tests-batch-and-exit
-	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs
+	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
+		tests/dogfood-site.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/application-cli-test.sh
 
 check-contracts:

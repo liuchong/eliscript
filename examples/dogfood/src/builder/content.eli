@@ -1,0 +1,209 @@
+;; Markdown content provider.
+;;
+;; This module turns repository Markdown into the canonical post value from
+;; specification 0003. It owns front matter validation, identity, provenance,
+;; and the Markdown-to-HTML boundary; it never decides presentation.
+
+(module dogfood.builder.content
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "eliscript/runtime/core/order.mjs" :as Order)
+  (import "node:fs" readdirSync readFileSync)
+  (import "node:path" :as Path)
+  (import "../support/records.eli" define-record-type)
+  (import "../support/text.eli"
+          basename blank empty-value? index-of join parse-integer slice
+          slugify split-lines split-on startsWith endsWith text-length trim
+          without-suffix)
+  (import "../support/markdown.eli" render-markdown)
+
+  (defrecord Post
+    [id slug title summary body published-at updated-at authors tags cover draft
+     pinned-weight provenance aliases comment-channels])
+
+  (defun fail (code message)
+    (throw (js-object :code code :message message)))
+
+  (defun markdown-names (directory)
+    (let ((names (readdirSync directory))
+          (result [])
+          (index 0))
+      (while (< index (Collection/count names))
+        (let ((name (Collection/nth names index)))
+          (when (endsWith ".md" name)
+            (setq result (Collection/conj result name))))
+        (setq index (1+ index)))
+      (Order/sort result)))
+
+  (defun front-matter-close (lines)
+    (let ((index 1)
+          (close -1)
+          (total (Collection/count lines)))
+      (while (and (< index total) (< close 0))
+        (when (= (trim (Collection/nth lines index)) "---")
+          (setq close index))
+        (setq index (1+ index)))
+      close))
+
+  (defun parse-field-line (line)
+    (let ((colon (index-of ":" line)))
+      (if (< colon 1)
+          nil
+        [(trim (slice 0 colon line))
+         (trim (slice (+ colon 1) (text-length line) line))])))
+
+  (defun parse-fields (lines close)
+    (let ((fields {})
+          (index 1))
+      (while (< index close)
+        (let ((pair (parse-field-line (Collection/nth lines index))))
+          (when pair
+            (setq fields (Collection/assoc fields (nth 0 pair) (nth 1 pair)))))
+        (setq index (1+ index)))
+      fields))
+
+  (defun parse-list (value)
+    (let* ((inner (if (and (startsWith "[" value) (endsWith "]" value))
+                      (slice 1 (- (text-length value) 1) value)
+                    value))
+           (parts (split-on "," inner))
+           (result [])
+           (index 0))
+      (while (< index (Collection/count parts))
+        (let ((item (trim (Collection/nth parts index))))
+          (unless (blank item)
+            (setq result (Collection/conj result item))))
+        (setq index (1+ index)))
+      result))
+
+  (defun field (fields key fallback)
+    (let ((value (Collection/get fields key nil)))
+      (if (empty-value? value) fallback value)))
+
+  (defun require-field (fields key path)
+    (let ((value (Collection/get fields key nil)))
+      (if (empty-value? value)
+          (fail "DOGFOOD-CONTENT-001"
+                (str path ": missing required front matter field \"" key "\""))
+        value)))
+
+  (defun date-value (text)
+    (slice 0 10 (trim text)))
+
+  (defun body-text (lines start)
+    (let ((parts [])
+          (index start)
+          (total (Collection/count lines)))
+      (while (< index total)
+        (setq parts (Collection/conj parts (Collection/nth lines index))
+              index (1+ index)))
+      (join "\n" parts)))
+
+  (defun build-post (path relative lines close fields)
+    (let* ((identifier (require-field fields "id" path))
+           (title (require-field fields "title" path))
+           (published (date-value (require-field fields "date" path)))
+           (updated-field (field fields "updated" nil))
+           (slug-field (field fields "slug" nil))
+           (slug (if (nil? slug-field)
+                     (slugify (without-suffix ".md" (basename path)))
+                   slug-field))
+           (authors (parse-list (field fields "authors" "")))
+           (tags (parse-list (field fields "tags" "")))
+           (aliases (parse-list (field fields "aliases" "")))
+           (draft (= (field fields "draft" "false") "true"))
+           (body (render-markdown (body-text lines (+ close 1)))))
+      (->Post identifier
+              slug
+                 title
+                 (field fields "description" "")
+                 body
+                 published
+                 (if (nil? updated-field) published (date-value updated-field))
+                 (if (> (Collection/count authors) 0) authors ["dogfood"])
+                 tags
+                 (field fields "cover" nil)
+                 draft
+                 (parse-integer (field fields "pinned" "0") 0)
+                 {:provider "markdown" :path relative}
+                 aliases
+                 [])))
+
+  (defun read-posts (root directory)
+    (let* ((absolute (Path/join root directory))
+           (names (markdown-names absolute))
+           (posts [])
+           (index 0))
+      (while (< index (Collection/count names))
+        (let* ((name (Collection/nth names index))
+               (path (Path/join absolute name))
+               (relative (str directory "/" name))
+               (lines (split-lines (readFileSync path "utf8"))))
+          (when (< (Collection/count lines) 3)
+            (fail "DOGFOOD-CONTENT-002"
+                  (str relative ": file is too short to contain front matter")))
+          (unless (= (trim (Collection/nth lines 0)) "---")
+            (fail "DOGFOOD-CONTENT-002"
+                  (str relative ": file must open with a --- front matter block")))
+          (let ((close (front-matter-close lines)))
+            (when (< close 0)
+              (fail "DOGFOOD-CONTENT-002"
+                    (str relative ": front matter block is not terminated")))
+            (setq posts
+                  (Collection/conj posts
+                                   (build-post path relative lines close
+                                               (parse-fields lines close))))))
+        (setq index (1+ index)))
+      posts))
+
+  ;; A dynamic field key must go through the collection protocol: a bare `get`
+  ;; with a computed keyword lowers to JavaScript property access.
+  (defun duplicate-in? (posts field label)
+    (let ((index 0))
+      (while (< index (Collection/count posts))
+        (let ((earlier 0)
+              (value (Collection/get (Collection/nth posts index) field)))
+          (while (< earlier index)
+            (when (= (Collection/get (Collection/nth posts earlier) field) value)
+              (fail "DOGFOOD-IDENTITY-001"
+                    (str "duplicate " label " \"" value "\" in "
+                         (Collection/get
+                           (get (Collection/nth posts index) :provenance)
+                           :path ""))))
+            (setq earlier (1+ earlier))))
+        (setq index (1+ index)))))
+
+  ;; An alias replaces a previous canonical route, so it must not collide with
+  ;; any current slug or id, and two posts must not claim the same alias.
+  (defun check-aliases (posts)
+    (let ((canonical {})
+          (seen {})
+          (index 0))
+      (while (< index (Collection/count posts))
+        (setq canonical
+              (Collection/assoc
+                (Collection/assoc canonical
+                                  (get (Collection/nth posts index) :slug) t)
+                (get (Collection/nth posts index) :id) t))
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (< index (Collection/count posts))
+        (let ((aliases (get (Collection/nth posts index) :aliases))
+              (alias-index 0))
+          (while (< alias-index (Collection/count aliases))
+            (let ((alias (Collection/nth aliases alias-index)))
+              (when (Collection/get canonical alias false)
+                (fail "DOGFOOD-IDENTITY-002"
+                      (str "alias \"" alias "\" collides with a canonical slug or id")))
+              (when (Collection/get seen alias false)
+                (fail "DOGFOOD-IDENTITY-003"
+                      (str "duplicate alias \"" alias "\"")))
+              (setq seen (Collection/assoc seen alias t)))
+            (setq alias-index (1+ alias-index))))
+        (setq index (1+ index)))))
+
+  (defun check-identity (posts)
+    (duplicate-in? posts :id "canonical id")
+    (duplicate-in? posts :slug "slug")
+    (check-aliases posts))
+
+  (export read-posts check-identity Post? ->Post map->Post))

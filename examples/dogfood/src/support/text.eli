@@ -1,0 +1,167 @@
+;; Text helpers for dogfood.
+;;
+;; The runtime text facade already covers trimming, prefix and suffix tests,
+;; slicing, joining, and blankness. This module adds the operations the static
+;; site needs on top of it: line splitting, substring search, case folding,
+;; integer parsing, and slug normalization. Everything here is ordinary
+;; Eliscript over the public runtime boundary.
+
+(module dogfood.support.text
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "eliscript/runtime/core/text.mjs"
+          trim blank slice startsWith endsWith contains join)
+
+  (defun text-length (text) (Collection/count text))
+
+  (defun empty-value? (value)
+    (or (nil? value)
+        (undefined? value)
+        (and (= (value-type value) "string") (blank value))))
+
+  (defun string-value? (value) (= (value-type value) "string"))
+
+  (defun char-code (text index) (string-code-unit-at text index))
+
+  (defun upper-code? (code) (and (>= code 65) (<= code 90)))
+
+  (defun lower-code? (code) (and (>= code 97) (<= code 122)))
+
+  (defun digit-code? (code) (and (>= code 48) (<= code 57)))
+
+  (defun lower-code (code)
+    (if (upper-code? code) (+ code 32) code))
+
+  (defun to-lowercase (text)
+    (let ((result "")
+          (index 0))
+      (while (< index (text-length text))
+        (setq result
+              (str result
+                   (string-from-code-unit (lower-code (char-code text index))))
+              index (1+ index)))
+      result))
+
+  (defun split-lines (text)
+    (let ((lines [])
+          (start 0)
+          (index 0)
+          (size (text-length text)))
+      (while (< index size)
+        (when (= (char-code text index) 10)
+          (setq lines (Collection/conj lines (slice start index text))
+                start (1+ index)))
+        (setq index (1+ index)))
+      (Collection/conj lines (slice start size text))))
+
+  (defun split-on (separator text)
+    (let ((parts [])
+          (start 0)
+          (index 0)
+          (size (text-length text))
+          (width (text-length separator)))
+      (while (< index size)
+        (if (and (> width 0)
+                 (<= (+ index width) size)
+                 (= (slice index (+ index width) text) separator))
+            (setq parts (Collection/conj parts (slice start index text))
+                  index (+ index width)
+                  start index)
+          (setq index (1+ index))))
+      (Collection/conj parts (slice start size text))))
+
+  (defun index-of-from (needle text start)
+    (let ((found -1)
+          (index start)
+          (width (text-length needle))
+          (limit (- (text-length text) (text-length needle))))
+      (while (and (< found 0) (<= index limit))
+        (when (= (slice index (+ index width) text) needle)
+          (setq found index))
+        (setq index (1+ index)))
+      found))
+
+  (defun index-of (needle text) (index-of-from needle text 0))
+
+  (defun basename (path)
+    (let ((last -1)
+          (index 0))
+      (while (< index (text-length path))
+        (when (= (char-code path index) 47)
+          (setq last index))
+        (setq index (1+ index)))
+      (if (< last 0) path (slice (1+ last) (text-length path) path))))
+
+  (defun without-suffix (suffix text)
+    (if (endsWith suffix text)
+        (slice 0 (- (text-length text) (text-length suffix)) text)
+      text))
+
+  (defun pad2 (value)
+    (if (< value 10) (str "0" value) (str value)))
+
+  (defun parse-integer (text fallback)
+    (let ((value (string-to-number (trim text))))
+      (if (= value value) value fallback)))
+
+  (defun replace-all (needle replacement text)
+    (let ((result "")
+          (index 0)
+          (size (text-length text))
+          (width (text-length needle)))
+      (while (< index size)
+        (if (and (> width 0)
+                 (<= (+ index width) size)
+                 (= (slice index (+ index width) text) needle))
+            (setq result (str result replacement)
+                  index (+ index width))
+          (setq result (str result (string-from-code-unit (char-code text index)))
+                index (1+ index))))
+      result))
+
+  ;; Strip markup and decode the entities this site can emit, producing the
+  ;; plain text projection the search index publishes.
+  (defun strip-tags (html)
+    (let ((result "")
+          (index 0)
+          (in-tag false)
+          (size (text-length html)))
+      (while (< index size)
+        (let ((code (char-code html index)))
+          (cond
+            ((= code 60) (setq in-tag t))
+            ((= code 62) (setq in-tag false))
+            ((not in-tag)
+             (setq result (str result (string-from-code-unit code))))))
+        (setq index (1+ index)))
+      (decode-entities result)))
+
+  ;; `->>` appends the threaded value, matching replace-all's last parameter.
+  (defun decode-entities (text)
+    (->> text
+         (replace-all "&lt;" "<")
+         (replace-all "&gt;" ">")
+         (replace-all "&quot;" "\"")
+         (replace-all "&#39;" "'")
+         (replace-all "&amp;" "&")))
+
+  (defun slugify (text)
+    (let ((lowered (to-lowercase text))
+          (result "")
+          (pending-dash false)
+          (index 0))
+      (while (< index (text-length lowered))
+        (let ((code (char-code lowered index)))
+          (if (or (lower-code? code) (digit-code? code))
+              (setq result
+                    (str result (if pending-dash "-" "")
+                         (string-from-code-unit code))
+                    pending-dash false)
+            (setq pending-dash (> (text-length result) 0))))
+        (setq index (1+ index)))
+      result))
+
+  ;; The runtime text facade is re-exported so callers need one text module.
+  (export basename blank char-code contains decode-entities digit-code?
+          empty-value? endsWith index-of index-of-from join pad2 parse-integer
+          replace-all slice slugify split-lines split-on startsWith strip-tags
+          string-value? text-length to-lowercase trim without-suffix))

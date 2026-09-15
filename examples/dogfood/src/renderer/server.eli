@@ -1,0 +1,370 @@
+;; Static document renderer.
+;;
+;; The renderer accepts only the canonical model from specification 0003 and
+;; owns every public presentation decision. It cannot read the filesystem,
+;; environment, or network, and it never emits an ad hoc fragment: the builder
+;; writes the documents this module returns.
+
+(module dogfood.renderer.server
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "eliscript/runtime/core/sequence.mjs" :as Sequence)
+  (import "eliscript/runtime/core/order.mjs" :as Order)
+  (import "eliscript/runtime/core/text.mjs" blank)
+  (import "../support/text.eli" slugify strip-tags)
+  (import "../support/sanitize.eli" escape-html)
+  (import "./theme.eli" site-css document)
+
+  (defconst recent-limit 12)
+  (defconst to-native-array (js* "(value) => Array.from(value)"))
+
+  ;; ------------------------------------------------------------- model reads
+
+  (defun compare-posts (left right)
+    (let ((left-pinned (get left :pinned-weight))
+          (right-pinned (get right :pinned-weight)))
+      (cond
+        ((not (= left-pinned right-pinned))
+         (if (> left-pinned right-pinned) -1 1))
+        ((not (= (get left :published-at) (get right :published-at)))
+         (if (> (get left :published-at) (get right :published-at)) -1 1))
+        ((= (get left :id) (get right :id)) 0)
+        ((< (get left :id) (get right :id)) -1)
+        (t 1))))
+
+  (defun sort-posts (posts) (Order/sort compare-posts posts))
+
+  (defun site-value (site key fallback)
+    (Collection/get site key fallback))
+
+  (defun absolute-url (site path)
+    (str (site-value site :base-url "/") path))
+
+  (defun append-all (target values)
+    (Collection/reduce values
+                       (lambda (accumulator value)
+                         (Collection/conj accumulator value))
+                       target))
+
+  ;; ------------------------------------------------------------------ pieces
+
+  (defun render-tag-links (root post)
+    (let ((tags (get post :tags))
+          (result "")
+          (index 0))
+      (while (< index (Collection/count tags))
+        (let ((tag (Collection/nth tags index)))
+          (setq result
+                (str result "<a class=\"tag\" href=\"" root "tags/"
+                     (slugify tag) "/\">" (escape-html tag) "</a>")))
+        (setq index (1+ index)))
+      result))
+
+  (defun render-card (root post)
+    (let ((summary (get post :summary)))
+      (str "<li><a class=\"title\" href=\"" root "posts/" (get post :slug) "/\">"
+           (escape-html (get post :title)) "</a>"
+           (if (blank summary)
+               ""
+             (str "<p class=\"summary\">" (escape-html summary) "</p>"))
+           "<div class=\"meta\"><span>" (escape-html (get post :published-at)) "</span>"
+           (render-tag-links root post)
+           "</div></li>")))
+
+  (defun render-post-list (root posts)
+    (let ((items "")
+          (index 0))
+      (while (< index (Collection/count posts))
+        (setq items (str items (render-card root (Collection/nth posts index)))
+              index (1+ index)))
+      (str "<ul class=\"list\">" items "</ul>")))
+
+  (defun section (heading content)
+    (if (blank content)
+        ""
+      (str "<h2>" (escape-html heading) "</h2>" content)))
+
+  (defun tagged? (post tag)
+    (let ((tags (get post :tags))
+          (index 0)
+          (found false))
+      (while (and (< index (Collection/count tags)) (not found))
+        (when (= (Collection/nth tags index) tag)
+          (setq found t))
+        (setq index (1+ index)))
+      found))
+
+  (defun posts-with-tag (tag posts)
+    (Sequence/filter (lambda (post) (tagged? post tag)) posts))
+
+  (defun collect-tags (posts)
+    (let ((seen {})
+          (tags [])
+          (index 0))
+      (while (< index (Collection/count posts))
+        (let* ((post-tags (get (Collection/nth posts index) :tags))
+               (tag-index 0))
+          (while (< tag-index (Collection/count post-tags))
+            (let ((tag (Collection/nth post-tags tag-index)))
+              (unless (Collection/get seen tag false)
+                (setq seen (Collection/assoc seen tag t)
+                      tags (Collection/conj tags tag))))
+            (setq tag-index (1+ tag-index))))
+        (setq index (1+ index)))
+      (Order/sort tags)))
+
+  ;; ------------------------------------------------------------------- pages
+
+  (defun render-home (site posts)
+    (let* ((recent (Sequence/take recent-limit posts))
+           (description (site-value site :description "")))
+      {:path "index.html"
+       :content
+       (document site ""
+                 (site-value site :title "dogfood")
+                 description
+                 (str "<div class=\"article\">"
+                      "<h1>" (escape-html (site-value site :title "dogfood")) "</h1>"
+                      (if (blank description)
+                          ""
+                        (str "<p class=\"lede\">" (escape-html description) "</p>"))
+                      "</div>"
+                      (section "Recent writing" (render-post-list "" recent))))}))
+
+  (defun render-archive (site posts)
+    {:path "archive/index.html"
+     :content
+     (document site "../" "Archive"
+               "Every published article in date order."
+               (str "<div class=\"article\"><h1>Archive</h1>"
+                    "<p class=\"crumbs\"><a href=\"../\">Home</a></p></div>"
+                    (render-post-list "../" posts)))})
+
+  (defun neighbour-link (root label post)
+    (if (nil? post)
+        ""
+      (str "<a href=\"" root "posts/" (get post :slug) "/\">" (escape-html label)
+           ": " (escape-html (get post :title)) "</a>")))
+
+  (defun render-neighbours (root posts position)
+    (let ((newer (if (> position 0) (Collection/nth posts (- position 1)) nil))
+          (older (if (< position (- (Collection/count posts) 1))
+                     (Collection/nth posts (+ position 1))
+                   nil)))
+      (if (and (nil? newer) (nil? older))
+          ""
+        (str "<nav class=\"crumbs\" aria-label=\"article\">"
+             (neighbour-link root "Newer" newer)
+             (if (and (not (nil? newer)) (not (nil? older))) " · " "")
+             (neighbour-link root "Older" older)
+             "</nav>"))))
+
+  (defun render-post-page (site post posts position)
+    (let* ((root "../../")
+           (slug (get post :slug))
+           (updated (get post :updated-at))
+           (summary (get post :summary))
+           (source-path (Collection/get (get post :provenance) :path "")))
+      {:path (str "posts/" slug "/index.html")
+       :content
+       (document site root
+                 (get post :title)
+                 summary
+                 (str "<article class=\"article\">"
+                      (render-neighbours root posts position)
+                      "<h1>" (escape-html (get post :title)) "</h1>"
+                      (if (blank summary)
+                          ""
+                        (str "<p class=\"lede\">" (escape-html summary) "</p>"))
+                      "<div class=\"meta\"><span>" (escape-html (get post :published-at))
+                      "</span>"
+                      (if (= updated (get post :published-at))
+                          ""
+                        (str "<span>updated " (escape-html updated) "</span>"))
+                      (render-tag-links root post) "</div>"
+                      (get post :body)
+                      "<hr>"
+                      "<p class=\"provenance\">Markdown · " (escape-html source-path)
+                      " · <a href=\"" root "archive/\">archive</a></p>"
+                      "</article>"))}))
+
+  ;; Specification 0003: a changed slug keeps the previous route as an alias,
+  ;; and the generator emits a redirect document that needs no JavaScript.
+  (defun render-alias-page (site post alias)
+    (let ((slug (get post :slug))
+          (title (get post :title)))
+      {:path (str "posts/" alias "/index.html")
+       :content
+       (str "<!doctype html>\n"
+            "<html lang=\"" (escape-html (site-value site :language "en")) "\">\n"
+            "<head>\n<meta charset=\"utf-8\">\n"
+            "<meta http-equiv=\"refresh\" content=\"0; url=../" (escape-html slug) "/\">\n"
+            "<meta name=\"robots\" content=\"noindex\">\n"
+            "<link rel=\"canonical\" href=\""
+            (escape-html (absolute-url site (str "posts/" slug "/"))) "\">\n"
+            "<title>" (escape-html title) "</title>\n"
+            "</head>\n<body>\n<p>This page moved to "
+            "<a href=\"../" (escape-html slug) "/\">" (escape-html title) "</a>.</p>\n"
+            "</body>\n</html>\n")}))
+
+  (defun alias-documents (site posts)
+    (let ((documents [])
+          (index 0))
+      (while (< index (Collection/count posts))
+        (let* ((post (Collection/nth posts index))
+               (aliases (get post :aliases))
+               (alias-index 0))
+          (while (< alias-index (Collection/count aliases))
+            (setq documents
+                  (Collection/conj documents
+                                   (render-alias-page
+                                     site post (Collection/nth aliases alias-index)))
+                  alias-index (1+ alias-index))))
+        (setq index (1+ index)))
+      documents))
+
+  (defun render-tag-index (site tags posts)
+    (let ((items "")
+          (index 0))
+      (while (< index (Collection/count tags))
+        (let ((tag (Collection/nth tags index)))
+          (setq items
+                (str items "<li><a class=\"title\" href=\"" (slugify tag) "/\">"
+                     (escape-html tag) "</a>"
+                     "<div class=\"meta\"><span>"
+                     (Collection/count (posts-with-tag tag posts))
+                     " articles</span></div></li>")))
+        (setq index (1+ index)))
+      {:path "tags/index.html"
+       :content
+       (document site "../" "Tags" "Articles grouped by tag."
+                 (str "<div class=\"article\"><h1>Tags</h1>"
+                      "<p class=\"crumbs\"><a href=\"../\">Home</a></p></div>"
+                      "<ul class=\"list\">" items "</ul>"))}))
+
+  (defun render-tag-page (site tag posts)
+    (let ((matching (Sequence/filter (lambda (post) (tagged? post tag)) posts)))
+      {:path (str "tags/" (slugify tag) "/index.html")
+       :content
+       (document site "../../" (str "Tag: " tag)
+                 (str "Articles tagged " tag ".")
+                 (str "<div class=\"article\"><h1>" (escape-html tag) "</h1>"
+                      "<p class=\"crumbs\"><a href=\"../../\">Home</a> · "
+                      "<a href=\"../\">Tags</a></p></div>"
+                      (render-post-list "../../" matching)))}))
+
+  (defun render-not-found (site)
+    {:path "404.html"
+     :content
+     (document site "" "Not found" "The requested page does not exist."
+               (str "<div class=\"article\"><h1>Not found</h1>"
+                    "<p class=\"empty\">That page does not exist. "
+                    "<a href=\"./\">Return home</a>.</p></div>"))})
+
+  ;; ---------------------------------------------------------------- metadata
+
+  (defun render-feed (site posts)
+    (let ((base (site-value site :base-url "/"))
+          (title (site-value site :title "dogfood"))
+          (entries "")
+          (index 0))
+      (while (< index (Collection/count posts))
+        (let* ((post (Collection/nth posts index))
+               (url (str base "posts/" (get post :slug) "/")))
+          (setq entries
+                (str entries
+                     "<entry><title>" (escape-html (get post :title)) "</title>"
+                     "<link href=\"" (escape-html url) "\"/>"
+                     "<id>" (escape-html url) "</id>"
+                     "<updated>" (escape-html (get post :updated-at))
+                     "T00:00:00Z</updated>"
+                     "<summary>" (escape-html (get post :summary)) "</summary>"
+                     "</entry>"))
+          (setq index (1+ index))))
+      {:path "feed.xml"
+       :content
+       (str "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+            "<feed xmlns=\"http://www.w3.org/2005/Atom\">"
+            "<title>" (escape-html title) "</title>"
+            "<link href=\"" (escape-html base) "\"/>"
+            "<id>" (escape-html base) "</id>"
+            entries "</feed>\n")}))
+
+  (defun render-sitemap (site posts)
+    (let ((urls (str "<url><loc>" (escape-html (absolute-url site "")) "</loc></url>"
+                     "<url><loc>" (escape-html (absolute-url site "archive/")) "</loc></url>"
+                     "<url><loc>" (escape-html (absolute-url site "tags/")) "</loc></url>"))
+          (index 0))
+      (while (< index (Collection/count posts))
+        (setq urls
+              (str urls "<url><loc>"
+                   (escape-html
+                     (absolute-url site
+                                   (str "posts/"
+                                        (get (Collection/nth posts index) :slug) "/")))
+                   "</loc></url>"))
+        (setq index (1+ index)))
+      {:path "sitemap.xml"
+       :content (str "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+                     "<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"
+                     urls "</urlset>\n")}))
+
+  ;; Specification 0006: a compact local index of canonical public fields only.
+  (defun search-entry (post)
+    (js-object :id (get post :id)
+               :slug (get post :slug)
+               :title (get post :title)
+               :summary (get post :summary)
+               :tags (funcall to-native-array (get post :tags))
+               :authors (funcall to-native-array (get post :authors))
+               :url (str "posts/" (get post :slug) "/")
+               :text (strip-tags (get post :body))))
+
+  (defun render-search-index (site posts)
+    {:path "search.json"
+     :content (str (JSON/stringify
+                     (js-object :format "dogfood-search"
+                                :version 1
+                                :entries (funcall to-native-array
+                                                  (Sequence/map search-entry posts))))
+                   "\n")})
+
+  (defun render-robots (site)
+    {:path "robots.txt"
+     :content (str "User-agent: *\nAllow: /\nSitemap: "
+                   (absolute-url site "sitemap.xml") "\n")})
+
+  ;; ------------------------------------------------------------------- entry
+
+  (defun render-site (site posts)
+    (let* ((sorted (sort-posts posts))
+           (tags (collect-tags sorted))
+           (post-pages [])
+           (tag-pages [])
+           (documents []))
+      (let ((index 0))
+        (while (< index (Collection/count sorted))
+          (setq post-pages
+                (Collection/conj post-pages
+                                 (render-post-page site (Collection/nth sorted index)
+                                                   sorted index))
+                index (1+ index))))
+      (let ((index 0))
+        (while (< index (Collection/count tags))
+          (setq tag-pages
+                (Collection/conj tag-pages
+                                 (render-tag-page site (Collection/nth tags index) sorted))
+                index (1+ index))))
+      (setq documents (Collection/conj documents (render-home site sorted)))
+      (setq documents (Collection/conj documents (render-archive site sorted)))
+      (setq documents (Collection/conj documents (render-tag-index site tags sorted)))
+      (setq documents (Collection/conj documents (render-not-found site)))
+      (setq documents (Collection/conj documents (render-feed site sorted)))
+      (setq documents (Collection/conj documents (render-sitemap site sorted)))
+      (setq documents (Collection/conj documents (render-search-index site sorted)))
+      (setq documents (Collection/conj documents (render-robots site)))
+      (setq documents (Collection/conj documents
+                                       {:path "assets/site.css" :content site-css}))
+      (append-all (append-all (append-all documents post-pages) tag-pages)
+                  (alias-documents site sorted))))
+
+  (export render-site sort-posts))

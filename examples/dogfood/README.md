@@ -25,14 +25,47 @@ Packaged JavaScript under `dist/` is compiler output, not handwritten source.
 | Executable implementation gates | 0/8 (0%) | 8/8 (100%) | [Delivery plan](specs/0009-delivery-and-acceptance.md) |
 | Final application acceptance | 0/13 (0%) | 13/13 (100%) | [Acceptance standard](specs/0009-delivery-and-acceptance.md#final-acceptance-standard) |
 
-This is a design-complete scaffold, not yet a working Action or site. No
-`action.yml`, generated Action bundle, release tag, Pages deployment, or
-Marketplace listing is claimed in this state.
+The design set is complete and the Markdown static slice builds a working local
+site. No `action.yml`, generated Action bundle, release tag, Pages deployment,
+or Marketplace listing is claimed in this state.
 
-The first executable artifact is the [specification checker](tools/README.md),
-an Eliscript program that validates this design set for internal consistency.
-It is development tooling. It does not implement the product and does not
-advance an implementation gate.
+## Local Development
+
+The first executable slice renders repository Markdown into a static site. From
+the repository root:
+
+```sh
+bun run dogfood                 # compile, then build _site
+bun run check:dogfood          # validate this design set
+```
+
+The compiled builder writes `examples/dogfood/_site` and reports the route
+count, the published post count, and a content fingerprint. Because every route
+is relative, the site opens directly from disk:
+
+```text
+examples/dogfood/_site/index.html
+```
+
+To inspect the pieces separately:
+
+```sh
+bun run build:dogfood                                                  # compile only
+bun examples/dogfood/dist/src/builder/main.mjs --root examples/dogfood --output _preview
+```
+
+Two clean builds from identical input are byte-equal; the fingerprint in
+`_site/_dogfood/build.json` is computed over the rendered documents.
+
+### Executable Status
+
+The [specification checker](tools/README.md) is development tooling and does not
+advance an implementation gate. The Markdown static slice is the first product
+code: it delivers the observable behavior of gates I1 and I2 but is not yet a
+completed gate, because gate completion also requires the focused local test
+suite and the clean standalone-package check defined by
+[specification 0009](specs/0009-delivery-and-acceptance.md). No gate is claimed
+complete in this state.
 
 ## Required Capabilities
 

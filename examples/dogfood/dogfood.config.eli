@@ -1,0 +1,43 @@
+;; dogfood configuration.
+;;
+;; Specification 0004 requires this to be a closed data module: it declares
+;; constants, exports exactly one `config` value, and imports nothing.
+
+(module dogfood.config
+  (defconst config
+    {:schema-version 1
+
+     :site
+     {:title "dogfood"
+      :description "A GitHub-native static blog built with Eliscript."
+      :base-url "https://example.github.io/dogfood/"
+      :language "zh-CN"
+      :theme :system}
+
+     :publishing
+     {:owner {:login "owner"}
+      :coauthors []}
+
+     :sources
+     [{:id :local
+       :kind :markdown
+       :enabled t
+       :directory "content/posts"}]
+
+     :identity
+     {:conflict :fail
+      :projections []}
+
+     :comments
+     {:presentation :tabs
+      :channels []}
+
+     :refresh
+     {:articles :push
+      :comments :runtime
+      :no-change :skip}
+
+     :output
+     {:directory "_site"}})
+
+  (export config))

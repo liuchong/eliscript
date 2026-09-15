@@ -1,0 +1,52 @@
+;; The single sanitization policy module.
+;;
+;; Specification 0008 requires one module to own the raw-HTML switch, the
+;; escape rules, and the URL scheme policy, and requires article bodies and
+;; comment snapshots to pass through the same declaration. Raw HTML is
+;; disabled, so every untrusted character is escaped rather than filtered, and
+;; only an allowlist of URL schemes can reach an `href`.
+
+(module dogfood.support.sanitize
+  (import "eliscript/runtime/core/text.mjs" trim startsWith contains)
+  (import "./text.eli" text-length char-code)
+
+  (defconst raw-html-allowed false)
+
+  (defconst ampersand 38)
+  (defconst less-than 60)
+  (defconst greater-than 62)
+  (defconst double-quote 34)
+  (defconst single-quote 39)
+
+  (defun escape-html (text)
+    (let ((result "")
+          (index 0))
+      (while (< index (text-length text))
+        (let ((code (char-code text index)))
+          (setq result
+                (str result
+                     (cond
+                       ((= code ampersand) "&amp;")
+                       ((= code less-than) "&lt;")
+                       ((= code greater-than) "&gt;")
+                       ((= code double-quote) "&quot;")
+                       ((= code single-quote) "&#39;")
+                       (t (string-from-code-unit code))))
+                index (1+ index))))
+      result))
+
+  ;; Default deny: a target is safe only when it is an explicit http, https, or
+  ;; mailto URL, a same-page fragment, an absolute site path, or a relative
+  ;; path with no scheme at all. This rejects javascript:, data:, and
+  ;; protocol-relative targets.
+  (defun safe-url? (url)
+    (let ((target (trim url)))
+      (or (startsWith "https://" target)
+          (startsWith "http://" target)
+          (startsWith "mailto:" target)
+          (startsWith "#" target)
+          (and (startsWith "/" target) (not (startsWith "//" target)))
+          (and (not (contains ":" target))
+               (not (startsWith "//" target))))))
+
+  (export raw-html-allowed escape-html safe-url?))

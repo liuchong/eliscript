@@ -1,0 +1,15 @@
+;; Temporary record bridge.
+;;
+;; `defrecord` expands to a call to `define-record-type`, which the standard
+;; library normally provides. A standalone project cannot import a `.eli`
+;; standard-library module yet, so this module re-exports the public runtime
+;; record constructor under the name the declaration expands to. The
+;; packaging gate replaces it with the exported toolchain.
+
+(module dogfood.support.records
+  (import "eliscript/runtime/core/record.mjs" :as Runtime)
+
+  (defun define-record-type (name fields)
+    (Runtime/defineRecordType name fields))
+
+  (export define-record-type))

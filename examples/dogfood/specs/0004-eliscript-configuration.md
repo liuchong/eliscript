@@ -52,17 +52,17 @@ configuration values or executable forms.
      {:owner {:login "owner"}
       :coauthors []}
      :sources
-     [{:id :local :kind :markdown :enabled true :directory "content/posts"}
-      {:id :notes :kind :issues :enabled true
+     [{:id :local :kind :markdown :enabled t :directory "content/posts"}
+      {:id :notes :kind :issues :enabled t
        :repository "owner/repository" :label "blog"}
-      {:id :topics :kind :discussions :enabled true
+      {:id :topics :kind :discussions :enabled t
        :repository "owner/repository" :category "Blog"}]
      :identity {:conflict :fail :projections []}
      :comments
      {:presentation :tabs
       :channels
-      [{:id :issue-native :kind :issue :enabled true :mode :live}
-       {:id :discussion-native :kind :discussion :enabled true :mode :snapshot}
+      [{:id :issue-native :kind :issue :enabled t :mode :live}
+       {:id :discussion-native :kind :discussion :enabled t :mode :snapshot}
        {:id :utterances :kind :utterances :enabled false :mode :embed}
        {:id :giscus :kind :giscus :enabled false :mode :embed}]}
      :refresh

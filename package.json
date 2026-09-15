@@ -26,6 +26,8 @@
     "check:compatibility-matrix": "bun tools/compatibility/matrix.mjs --verify-all",
     "check:source-debugging": "bun tools/debugging/check.mjs",
     "check:dogfood": "./bin/eliscript --output dist/dogfood-spec-check.mjs examples/dogfood/tools/spec-check.eli && bun dist/dogfood-spec-check.mjs --root examples/dogfood",
+    "build:dogfood": "./bin/eliscript-build --config examples/dogfood/eliscript.json",
+    "dogfood": "./bin/eliscript-build --config examples/dogfood/eliscript.json && bun examples/dogfood/dist/src/builder/main.mjs --root examples/dogfood",
     "check:docs": "bun tools/documentation/check.mjs",
     "check:onboarding": "bun tools/onboarding/check.mjs --verify-run acceptance/runs/m13-02.json --verify-markdown acceptance/runs/m13-02.md",
     "check:compatibility-rehearsal": "bun tools/compatibility/rehearse.mjs --verify-run acceptance/runs/m13-03.json --verify-markdown acceptance/runs/m13-03.md",

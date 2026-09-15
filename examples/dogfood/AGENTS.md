@@ -14,9 +14,12 @@ These rules apply to the `examples/dogfood/` application project.
 
 ## Eliscript-Only Logic
 
-- dogfood contains exactly two top-level executable programs: the renderer and
+- dogfood contains exactly two top-level product programs: the renderer and
   the builder. Both programs are authored in Eliscript and compiled to
   JavaScript.
+- Development tools under `tools/` are not product programs. They are also
+  authored in Eliscript and must not gain product authority or count as
+  implementation evidence for a gate.
 - The renderer accepts a normalized blog model and owns HTML and browser UI. It
   cannot fetch GitHub data or depend on the Actions environment.
 - The builder runs in GitHub Actions, converts Markdown, Issues, Discussions,

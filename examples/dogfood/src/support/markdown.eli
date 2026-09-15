@@ -1,0 +1,261 @@
+;; Markdown subset renderer.
+;;
+;; Specification 0002 keeps Markdown rendering and sanitization in the builder,
+;; before the normalized model crosses to the renderer. This module implements
+;; the maintained subset: ATX headings, paragraphs, fenced code, block quotes,
+;; unordered and ordered lists, horizontal rules, and inline code, strong, em,
+;; and links. Raw HTML is never interpreted; every character of untrusted text
+;; passes through the sanitizer, so the output is escaped rather than filtered.
+
+(module dogfood.support.markdown
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "eliscript/runtime/core/text.mjs"
+          trim blank slice startsWith stripPrefix join)
+  (import "./text.eli"
+          char-code digit-code? index-of-from split-lines text-length)
+  (import "./sanitize.eli" escape-html safe-url?)
+
+  (defconst space 32)
+  (defconst hash-mark 35)
+
+  ;; ---------------------------------------------------------------- blocks
+
+  (defun block-start? (line)
+    (let ((trimmed (trim line)))
+      (or (blank trimmed)
+          (startsWith "#" trimmed)
+          (startsWith "```" trimmed)
+          (startsWith "> " trimmed)
+          (startsWith "- " trimmed)
+          (ordered-item? trimmed)
+          (= trimmed "---"))))
+
+  (defun heading-level (text)
+    (let ((index 0))
+      (while (and (< index (text-length text)) (= (char-code text index) hash-mark))
+        (setq index (1+ index)))
+      (if (and (> index 0)
+               (<= index 6)
+               (< index (text-length text))
+               (= (char-code text index) space))
+          index
+        0)))
+
+  (defun ordered-prefix-length (text)
+    (let ((index 0))
+      (while (and (< index (text-length text)) (digit-code? (char-code text index)))
+        (setq index (1+ index)))
+      (if (and (> index 0)
+               (< (+ index 1) (text-length text))
+               (= (slice index (+ index 2) text) ". "))
+          (+ index 2)
+        -1)))
+
+  (defun ordered-item? (text) (> (ordered-prefix-length text) 0))
+
+  (defun unordered-item? (text) (startsWith "- " text))
+
+  (defun fence-close (lines start total)
+    (let ((index (1+ start))
+          (close total))
+      (while (< index total)
+        (when (startsWith "```" (trim (Collection/nth lines index)))
+          (setq close index
+                index total))
+        (setq index (1+ index)))
+      close))
+
+  (defun item-of-kind? (text ordered)
+    (if ordered (ordered-item? text) (unordered-item? text)))
+
+  ;; A list runs while lines are items of this kind or lazy continuation lines.
+  (defun list-end (lines start total ordered)
+    (let ((index start))
+      (while (and (< index total)
+                  (let ((trimmed (trim (Collection/nth lines index))))
+                    (or (item-of-kind? trimmed ordered)
+                        (not (block-start? trimmed)))))
+        (setq index (1+ index)))
+      index))
+
+  (defun quote-end (lines start total)
+    (let ((index start))
+      (while (and (< index total)
+                  (startsWith "> " (trim (Collection/nth lines index))))
+        (setq index (1+ index)))
+      index))
+
+  (defun paragraph-end (lines start total)
+    (let ((index start))
+      (while (and (< index total)
+                  (not (block-start? (Collection/nth lines index))))
+        (setq index (1+ index)))
+      index))
+
+  (defun paragraph-text (lines start end)
+    (let ((parts [])
+          (index start))
+      (while (< index end)
+        (setq parts (Collection/conj parts (trim (Collection/nth lines index)))
+              index (1+ index)))
+      (join " " parts)))
+
+  (defun render-fence (lines start close)
+    (let* ((opening (trim (Collection/nth lines start)))
+           (language (trim (stripPrefix "```" opening)))
+           (content "")
+           (index (1+ start)))
+      (while (< index close)
+        (setq content (str content (Collection/nth lines index) "\n")
+              index (1+ index)))
+      (str "<pre><code"
+           (if (blank language)
+               ""
+             (str " class=\"language-" (escape-html language) "\""))
+           ">" (escape-html content) "</code></pre>")))
+
+  (defun list-marker-width (text)
+    (cond
+      ((unordered-item? text) 2)
+      ((ordered-item? text) (ordered-prefix-length text))
+      (t 0)))
+
+  (defun render-list (lines start end)
+    (let ((items "")
+          (current nil)
+          (index start))
+      (while (< index end)
+        (let* ((trimmed (trim (Collection/nth lines index)))
+               (width (list-marker-width trimmed)))
+          (if (> width 0)
+              (progn
+                (when current
+                  (setq items (str items "<li>" (render-inline current) "</li>")))
+                (setq current (trim (slice width (text-length trimmed) trimmed))))
+            (setq current (str current " " trimmed))))
+        (setq index (1+ index)))
+      (when current
+        (setq items (str items "<li>" (render-inline current) "</li>")))
+      (str (if (unordered-item? (trim (Collection/nth lines start))) "<ul>" "<ol>")
+           items
+           (if (unordered-item? (trim (Collection/nth lines start))) "</ul>" "</ol>"))))
+
+  (defun render-quote (lines start end)
+    (let ((parts [])
+          (index start))
+      (while (< index end)
+        (setq parts (Collection/conj parts
+                                     (stripPrefix "> " (trim (Collection/nth lines index))))
+              index (1+ index)))
+      (str "<blockquote><p>" (render-inline (join " " parts)) "</p></blockquote>")))
+
+  (defun render-heading (trimmed)
+    (let* ((level (heading-level trimmed))
+           (content (trim (slice level (text-length trimmed) trimmed))))
+      (str "<h" level ">" (render-inline content) "</h" level ">")))
+
+  (defun render-markdown (text)
+    (let* ((lines (split-lines text))
+           (total (Collection/count lines))
+           (blocks []))
+      (let ((index 0))
+        (while (< index total)
+          (let* ((trimmed (trim (Collection/nth lines index)))
+                 (level (heading-level trimmed)))
+            (cond
+              ((blank trimmed) (setq index (1+ index)))
+              ((startsWith "```" trimmed)
+               (let* ((close (fence-close lines index total))
+                      (next (if (< close total) (1+ close) total)))
+                 (setq blocks (Collection/conj blocks (render-fence lines index close))
+                       index next)))
+              ((> level 0)
+               (setq blocks (Collection/conj blocks (render-heading trimmed))
+                     index (1+ index)))
+              ((= trimmed "---")
+               (setq blocks (Collection/conj blocks "<hr>")
+                     index (1+ index)))
+              ((startsWith "> " trimmed)
+               (let ((end (quote-end lines index total)))
+                 (setq blocks (Collection/conj blocks (render-quote lines index end))
+                       index end)))
+              ((unordered-item? trimmed)
+               (let ((end (list-end lines index total false)))
+                 (setq blocks (Collection/conj blocks (render-list lines index end))
+                       index end)))
+              ((ordered-item? trimmed)
+               (let ((end (list-end lines index total t)))
+                 (setq blocks (Collection/conj blocks (render-list lines index end))
+                       index end)))
+              (t
+               (let ((end (paragraph-end lines index total)))
+                 (setq blocks
+                       (Collection/conj
+                         blocks
+                         (str "<p>" (render-inline (paragraph-text lines index end)) "</p>"))
+                       index end)))))))
+      (join "\n" blocks)))
+
+  ;; ---------------------------------------------------------------- inlines
+
+  (defun render-inline (text)
+    (let ((result "")
+          (plain "")
+          (index 0)
+          (size (text-length text)))
+      (while (< index size)
+        (let ((character (slice index (+ index 1) text)))
+          (cond
+            ((= character "`")
+             (let ((close (index-of-from "`" text (1+ index))))
+               (if (< close 0)
+                   (setq plain (str plain character)
+                         index (1+ index))
+                 (setq result (str result (escape-html plain) "<code>"
+                                   (escape-html (slice (1+ index) close text)) "</code>")
+                       plain ""
+                       index (1+ close)))))
+            ((and (= character "*")
+                  (< (+ index 1) size)
+                  (= (slice (+ index 1) (+ index 2) text) "*"))
+             (let ((close (index-of-from "**" text (+ index 2))))
+               (if (< close 0)
+                   (setq plain (str plain character)
+                         index (1+ index))
+                 (setq result (str result (escape-html plain) "<strong>"
+                                   (render-inline (slice (+ index 2) close text)) "</strong>")
+                       plain ""
+                       index (+ close 2)))))
+            ((= character "*")
+             (let ((close (index-of-from "*" text (1+ index))))
+               (if (< close 0)
+                   (setq plain (str plain character)
+                         index (1+ index))
+                 (setq result (str result (escape-html plain) "<em>"
+                                   (render-inline (slice (1+ index) close text)) "</em>")
+                       plain ""
+                       index (1+ close)))))
+            ((= character "[")
+             (let* ((label-end (index-of-from "](" text (1+ index)))
+                    (url-end (if (< label-end 0)
+                                 -1
+                               (index-of-from ")" text (+ label-end 2)))))
+               (if (or (< label-end 0) (< url-end 0))
+                   (setq plain (str plain character)
+                         index (1+ index))
+                 (let ((label (slice (1+ index) label-end text))
+                       (target (slice (+ label-end 2) url-end text)))
+                   (setq result
+                         (str result
+                              (escape-html plain)
+                              (if (safe-url? target)
+                                  (str "<a href=\"" (escape-html target) "\">"
+                                       (render-inline label) "</a>")
+                                (render-inline label)))
+                         plain ""
+                         index (1+ url-end))))))
+            (t (setq plain (str plain character)
+                     index (1+ index))))))
+      (str result (escape-html plain))))
+
+  (export render-markdown render-inline))

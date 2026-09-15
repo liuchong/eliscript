@@ -1,0 +1,104 @@
+;; Theme and document shell.
+;;
+;; Specification 0006 asks for an editorial surface rather than a landing page:
+;; near-black and paper-white structure, restrained green for source and
+;; success states, amber for freshness, red only for errors, a modern sans
+;; interface face, a serif article face, monospace metadata, zero letter
+;; spacing, and an 8px maximum corner radius. The shell is written here so the
+;; renderer owns presentation and the builder never emits a page fragment.
+
+(module dogfood.renderer.theme
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "../support/sanitize.eli" escape-html)
+
+  (defconst site-css
+    (str
+     ":root{--ink:#16181d;--paper:#fbfaf7;--muted:#5f646e;"
+     "--line:#e2ded6;--accent:#2f6f4f;--fresh:#9a6b12;--error:#a32c22;"
+     "--sans:-apple-system,BlinkMacSystemFont,\"Segoe UI\",\"Noto Sans\",sans-serif;"
+     "--serif:Georgia,\"Songti SC\",\"Noto Serif\",serif;"
+     "--mono:ui-monospace,SFMono-Regular,Menlo,monospace}\n"
+     "@media (prefers-color-scheme:dark){:root{--ink:#eceae5;--paper:#14161a;"
+     "--muted:#9aa0ab;--line:#2c3037;--accent:#7fb495;--fresh:#d3a44c;--error:#e0796c}}\n"
+     "*{box-sizing:border-box}\n"
+     "html{-webkit-text-size-adjust:100%}\n"
+     "body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);"
+     "font-size:17px;line-height:1.6;letter-spacing:0}\n"
+     "a{color:var(--accent);text-decoration:none}\n"
+     "a:hover{text-decoration:underline}\n"
+     ".skip{position:absolute;left:-9999px}\n"
+     ".skip:focus{left:12px;top:12px;background:var(--paper);padding:8px 12px;"
+     "border:1px solid var(--line);border-radius:8px;z-index:5}\n"
+     ".masthead{display:flex;flex-wrap:wrap;gap:16px;align-items:baseline;"
+     "justify-content:space-between;max-width:1040px;margin:0 auto;"
+     "padding:28px 24px 18px;border-bottom:1px solid var(--line)}\n"
+     ".wordmark{font-weight:650;font-size:19px;color:var(--ink)}\n"
+     ".masthead nav{display:flex;flex-wrap:wrap;gap:18px;font-size:15px;color:var(--muted)}\n"
+     "main{max-width:1040px;margin:0 auto;padding:36px 24px 72px}\n"
+     ".article{max-width:44rem}\n"
+     ".article h1{font-family:var(--serif);font-size:34px;line-height:1.25;margin:0 0 12px}\n"
+     ".article h2{font-family:var(--serif);font-size:24px;margin:36px 0 10px}\n"
+     ".article h3{font-family:var(--serif);font-size:20px;margin:28px 0 8px}\n"
+     ".lede{font-size:18px;color:var(--muted);margin:0 0 18px}\n"
+     ".meta{font-family:var(--mono);font-size:13px;color:var(--muted);"
+     "display:flex;flex-wrap:wrap;gap:6px 14px;margin:0 0 26px}\n"
+     ".meta .tag{border:1px solid var(--line);border-radius:8px;padding:1px 7px}\n"
+     ".provenance{font-family:var(--mono);font-size:12.5px;color:var(--fresh)}\n"
+     ".article p{margin:0 0 18px}\n"
+     ".article ul,.article ol{margin:0 0 18px;padding-left:22px}\n"
+     ".article li{margin:4px 0}\n"
+     ".article blockquote{margin:0 0 18px;padding:2px 0 2px 16px;"
+     "border-left:3px solid var(--line);color:var(--muted)}\n"
+     ".article pre{background:#1c1f24;color:#e8e6e1;padding:14px 16px;"
+     "border-radius:8px;overflow-x:auto;font-family:var(--mono);font-size:14px}\n"
+     ".article code{font-family:var(--mono);font-size:0.92em}\n"
+     ".article :not(pre) > code{background:var(--line);padding:1px 5px;border-radius:5px}\n"
+     ".article hr{border:0;border-top:1px solid var(--line);margin:32px 0}\n"
+     ".list{list-style:none;padding:0;margin:0;display:grid;gap:14px}\n"
+     ".list li{border:1px solid var(--line);border-radius:8px;padding:16px 18px;"
+     "max-width:44rem}\n"
+     ".list a.title{font-family:var(--serif);font-size:20px}\n"
+     ".list .summary{margin:6px 0 0;color:var(--muted)}\n"
+     ".crumbs{font-size:14px;color:var(--muted);margin:0 0 20px}\n"
+     ".empty{color:var(--muted)}\n"
+     "footer{max-width:1040px;margin:0 auto;padding:24px;border-top:1px solid var(--line);"
+     "color:var(--muted);font-family:var(--mono);font-size:13px}\n"
+     "@media (max-width:600px){.article h1{font-size:28px}main{padding:28px 18px 56px}}\n"))
+
+  (defun home-href (root)
+    (if (= root "") "./" root))
+
+  (defun nav-links (root)
+    (str "<nav aria-label=\"site\">"
+         "<a href=\"" root "archive/\">Archive</a>"
+         "<a href=\"" root "tags/\">Tags</a>"
+         "<a href=\"" root "feed.xml\">Feed</a>"
+         "<a href=\"https://github.com/\">GitHub</a>"
+         "</nav>"))
+
+  (defun document (site root title description content)
+    (let ((site-title (Collection/get site :title "dogfood"))
+          (language (Collection/get site :language "en")))
+      (str
+       "<!doctype html>\n"
+       "<html lang=\"" (escape-html language) "\">\n"
+       "<head>\n"
+       "<meta charset=\"utf-8\">\n"
+       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+       "<title>" (escape-html title) "</title>\n"
+       "<meta name=\"description\" content=\"" (escape-html description) "\">\n"
+       "<link rel=\"stylesheet\" href=\"" root "assets/site.css\">\n"
+       "<link rel=\"alternate\" type=\"application/atom+xml\" href=\"" root
+       "feed.xml\" title=\"" (escape-html site-title) "\">\n"
+       "</head>\n<body>\n"
+       "<a class=\"skip\" href=\"#main\">Skip to content</a>\n"
+       "<header class=\"masthead\">\n"
+       "<a class=\"wordmark\" href=\"" (home-href root) "\">"
+       (escape-html site-title) "</a>\n"
+       (nav-links root) "\n"
+       "</header>\n"
+       "<main id=\"main\">\n" content "\n</main>\n"
+       "<footer>Built with Eliscript from the repository and its published Markdown.</footer>\n"
+       "</body>\n</html>\n")))
+
+  (export site-css document nav-links home-href))
