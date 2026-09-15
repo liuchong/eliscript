@@ -143,9 +143,9 @@ test("action.yml declares the documented Action contract", async () => {
   const metadata = Bun.YAML.parse(
     await readFile(resolve(PROJECT, "action.yml"), "utf8"),
   );
-  // The display name has to be unique on the marketplace, where `dogfood` is
-  // already taken.
-  expect(metadata.name).toBe("Eliscript Dogfood");
+  // The listing is named for what it does, in the shape comparable Actions
+  // use (`Hugo setup`, `Astro Deploy`, `Build Jekyll for GitHub Pages`).
+  expect(metadata.name).toBe("Dogfood Site Generator");
   expect(metadata.runs).toEqual({ using: "node24", main: "dist/action/index.js" });
   expect(Object.keys(metadata.inputs)).toEqual([
     "config-file",
