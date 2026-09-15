@@ -1,0 +1,104 @@
+# Publishing is manual, and a run stages a release rather than publishing it.
+#
+# Nothing here runs on a push: a person dispatches this workflow and names the
+# version. The default path is `npm stage publish`, which puts the package in
+# the registry's staging area; a maintainer then reviews and approves it with
+# two-factor authentication before anyone can install it. Direct publishing is
+# the explicit alternative, for the case where the staged package was already
+# reviewed.
+#
+# What is staged is the tarball attached to the release, not a fresh build.
+# Publishing the reviewed bytes is the point: the artifact a consumer downloads
+# is the artifact that was verified, and its digest can be compared against the
+# release asset.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release, matching the tag without its `v` (for example 0.0.1).
+        required: true
+        type: string
+      publish:
+        description: Publish directly, instead of staging for review. npm must also permit direct publishes, and a staged package should have been reviewed first.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check the version names a signed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::the version must look like 0.0.1"
+            exit 1
+          fi
+          gh release view "v$VERSION" --json isDraft,assets --jq '.isDraft' \
+            | grep -qx false || {
+              echo "::error::v$VERSION is a draft or does not exist"
+              exit 1
+            }
+          gh api "repos/${{ github.repository }}/git/ref/tags/v$VERSION" \
+            --jq '.object.sha' > tag.json
+          sha=$(cat tag.json)
+          gh api "repos/${{ github.repository }}/git/tags/$sha" --jq '.verification.verified' \
+            | grep -qx true || {
+              echo "::error::the tag v$VERSION is not a verified signature"
+              exit 1
+            }
+          echo "v$VERSION is a signed release"
+
+      - name: Download the released package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          gh release download "v$VERSION" --pattern "eliscript-$VERSION.tgz"
+          # A release whose tag was re-cut without repacking would attach the
+          # wrong bytes, so the version inside the package has to match the
+          # version being released.
+          packed=$(tar -xOf "eliscript-$VERSION.tgz" package/package.json \
+            | grep -o '"version": *"[^"]*"' | head -1 | cut -d'"' -f4)
+          if [ "$packed" != "$VERSION" ]; then
+            echo "::error::the release carries version $packed, not $VERSION"
+            exit 1
+          fi
+          sha256sum "eliscript-$VERSION.tgz"
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+
+      # The default path. The package waits in the registry's staging area and
+      # a maintainer approves it, so an accidental dispatch publishes nothing.
+      - name: Stage the release for review
+        if: ${{ !inputs.publish }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          npm stage publish "eliscript-$VERSION.tgz" --access public --provenance
+          echo "::notice::staged $VERSION; review it with 'npm stage list' and approve it with 'npm stage approve <stage-id>' and two-factor authentication"
+
+      - name: Publish the release
+        if: ${{ inputs.publish }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          npm publish "eliscript-$VERSION.tgz" --access public --provenance
