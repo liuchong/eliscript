@@ -11,6 +11,8 @@
 
 (module dogfood.builder.main
   (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "eliscript/runtime/core/collection.mjs" isMap)
+  (import "eliscript/runtime/literals.mjs" keyword)
   (import "eliscript/runtime/core/sequence.mjs" :as Sequence)
   (import "node:crypto" createHash)
   (import "node:fs"
@@ -27,7 +29,7 @@
   (import "./sources.eli" enabled-sources identity-list source-posts)
   (import "../support/config.eli" load-config)
   (import "../support/diagnostics.eli" fail)
-  (import "../support/text.eli" join slice string-value? text-length)
+  (import "../support/text.eli" blank join slice string-value? text-length)
 
   (defconst program-arguments (js* "process.argv"))
   (defconst environment (js* "process.env"))
@@ -261,20 +263,39 @@
   ;; The transport accepts either a URL string, which the shared pagination
   ;; layer uses for REST, or a request map with a method and body, which the
   ;; Discussion provider uses for GraphQL.
+  ;; A request reaches this boundary either as a persistent map built by the
+  ;; provider or as a plain object built by an embedder or a test. Reading only
+  ;; one of them made the Discussion query fetch a blank URL: the collection
+  ;; protocol returns nothing for a plain object, so every field read came back
+  ;; as its default.
+  (defun request-field (request name fallback)
+    (if (isMap request)
+        (Collection/get request (keyword name) fallback)
+      (let ((value (get request name)))
+        (if (undefined? value) fallback value))))
+
   (defasync github-transport (request)
     (let* ((token (first-value (env-value "GITHUB_TOKEN")
                                (action-input "github-token")))
            (plain (string-value? request))
-           (url (if plain request (Collection/get request :url "")))
-           (method (if plain "GET" (Collection/get request :method "GET")))
-           (body (if plain nil (Collection/get request :body nil)))
+           (url (if plain request (request-field request "url" "")))
+           (method (if plain "GET" (request-field request "method" "GET")))
+           (body (if plain nil (request-field request "body" nil)))
            (init (js-object :method method :headers (request-headers token))))
+      (when (blank url)
+        (fail "DOGFOOD-GITHUB-002" "a provider request carried no URL"))
       (when (not (nil? body))
         (put init "body" body))
-      (let ((response (await (funcall fetch-implementation url init))))
-        {:status (get response "status")
-         :headers (js-object :link (js-call (get response "headers") :get "link"))
-         :body (await (js-call response :json))})))
+      ;; A transport failure is a provider failure, not a crash: the caller
+      ;; decides whether a degraded page is acceptable.
+      (try
+        (let ((response (await (funcall fetch-implementation url init))))
+          {:status (get response "status")
+           :headers (js-object :link (js-call (get response "headers") :get "link"))
+           :body (await (js-call response :json))})
+        (catch error
+          (fail "DOGFOOD-GITHUB-001"
+                (str "GitHub request failed: " (get error :message (str error))))))))
 
 
 
