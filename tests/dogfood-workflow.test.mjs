@@ -40,9 +40,9 @@ afterAll(async () => {
 
 test("the template checks out the consumer repository and invokes the action", () => {
   expect(packaged).toMatch(/uses: actions\/checkout@[0-9a-f]{40}\n/u);
-  // The package is published from its own repository, so that is the
-  // reference a consumer resolves.
-  expect(packaged).toMatch(/uses: liuchong\/dogfood@[0-9a-f]{40}\n/u);
+  // A consumer resolves the Action from this repository, at the path that holds
+  // the packaged entry.
+  expect(packaged).toMatch(/uses: liuchong\/eliscript\/examples\/dogfood@[0-9a-f]{40}\n/u);
 });
 
 test("the shipped copy pins the action to a real commit digest", () => {
