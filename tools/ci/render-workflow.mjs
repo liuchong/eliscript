@@ -243,6 +243,10 @@ export function renderWorkflow(matrix) {
 `        uses: ${checkout.repository}@${checkout.revision} # ${checkout.label}\n` +
 `        with:\n` +
 `          persist-credentials: false\n` +
+// Retained platform reports name the commit each was produced from, and the
+// verification resolves those trees. A shallow clone cannot, so the job that
+// verifies evidence needs the history the evidence refers to.
+`          fetch-depth: 0\n` +
 `      - name: Install Emacs\n` +
 `        uses: ${setupEmacs.repository}@${setupEmacs.revision} # ${setupEmacs.label}\n` +
 `        with:\n` +
