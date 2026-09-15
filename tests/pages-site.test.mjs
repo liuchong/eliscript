@@ -9,6 +9,7 @@ const SITE_FILES = [
   "docs/pages/api.html",
   "docs/pages/getting-started.html",
   "docs/pages/language.html",
+  "docs/pages/playground.html",
   "docs/pages/publishing.html",
   "docs/pages/roadmap.html",
   "docs/pages/specifications.html",

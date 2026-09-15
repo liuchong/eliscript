@@ -1,0 +1,19 @@
+# Generated compiler and site output belongs to no language statistic and is
+# hidden from diffs.
+dist/** linguist-generated
+examples/*/dist/** linguist-generated
+
+# Eliscript is not yet listed in github-linguist's languages.yml, and Linguist
+# ignores `linguist-language` for a language it does not know. Until an
+# Eliscript entry merges, classify `.eli` sources as Lisp so the language bar
+# and syntax highlighting show the Lisp-shaped source instead of unclassified
+# text.
+#
+# To make GitHub report "Eliscript" with its own color, an entry must be added
+# to `lib/linguist/languages.yml` with `type`, `color`, `extensions`,
+# `tm_scope`, and `aliases`, together with a syntax-highlighting grammar added
+# through `script/add-grammar`, representative samples under `samples/`, and a
+# language id from `script/update-ids`. Linguist adds an extension only once it
+# has sufficient in-the-wild usage. Once merged, delete the line below and let
+# the real entry take effect.
+*.eli linguist-language=Lisp
