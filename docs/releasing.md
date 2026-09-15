@@ -63,8 +63,8 @@ entry per command with a Node shebang, every exported entry resolving inside
 the package, the compiler and runtime present in the `files` allowlist,
 development trees absent, and the release latch still set.
 
-The dry run reports the exact artifact. The maintained state is 192 files,
-about 570 KB packed and 3.1 MB unpacked, including
+The dry run reports the exact artifact. The maintained state is 195 files,
+about 630 KB packed and 3.5 MB unpacked, including
 `dist/bootstrap/compiler.mjs`.
 
 Then install that artifact and use it the way a consumer would:
@@ -101,10 +101,13 @@ choice.
 
 ## Documentation Site
 
-The documentation site is published from the assembled tree, not from `docs/`
-alone. The browser playground in it loads the compiler, the runtime, and the
-compile host from the repository root two levels above the page, so publishing
-only `docs/` would ship a page whose imports cannot resolve.
+The documentation site is published from the assembled tree, and it is the
+deployment root: `https://liuchong.org/eliscript/` serves `docs/index.html`.
+The browser playground in it loads the compiler, the runtime, and the compile
+host from the published root, so publishing only `docs/` would ship a page
+whose imports cannot resolve. `tools/pages/assemble.mjs` copies the site's
+contents to the artifact root and the trees it loads beside it, rebasing the
+references each page used to reach the repository root.
 
 `.github/workflows/pages.yml` builds the compiler, the browser bundle, and the
 playground, then calls `tools/pages/assemble.mjs`, which copies the site
@@ -120,8 +123,9 @@ deployment. To publish:
 2. Set the repository variable `ELISCRIPT_PAGES` to `true`.
 3. Push to `master`, or run the Pages workflow manually.
 
-The site is then served from the artifact root, so the entry page is at
-`/docs/index.html` and the playground at `/docs/pages/playground.html`.
+The site is then served from the artifact root, so the entry page is at `/`
+and the playground at `/pages/playground.html`. HTTPS is enforced on the custom
+domain, so the `http` form redirects.
 
 ## Source Obligations
 

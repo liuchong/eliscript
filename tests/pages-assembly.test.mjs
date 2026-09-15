@@ -5,7 +5,7 @@ import { posix, resolve } from "node:path";
 import { PUBLISHED_TREES, assemblePages } from "../tools/pages/assemble.mjs";
 
 const ROOT = resolve(import.meta.dir, "..");
-const SITE_PAGE = "docs/pages/playground.html";
+const SITE_PAGE = "pages/playground.html";
 
 let staging;
 let artifact;
@@ -56,36 +56,74 @@ test("the artifact carries the site and every tree it loads", async () => {
   }
   // The site's own entry cannot move: the published root keeps the repository
   // shape so the playground's relative references stay valid.
-  expect(await exists("docs/index.html")).toBe(true);
-  expect(await exists("docs/pages/playground.html")).toBe(true);
+  expect(await exists("index.html")).toBe(true);
+  expect(await exists("pages/playground.html")).toBe(true);
   // The proving-ground site is part of the published tree, with the assets its
   // pages load.
   expect(await exists("examples/dogfood/_site/index.html")).toBe(true);
   expect(await exists("examples/dogfood/_site/assets/browser.js")).toBe(true);
 });
 
-test("the published root answers instead of 404", async () => {
-  // The artifact keeps the repository shape, and the repository has no root
-  // index, so the assembler writes one.
-  const landing = await readFile(resolve(artifact, "index.html"), "utf8");
-  expect(landing).toContain("<!doctype html>");
-  // Every link it offers must resolve inside the artifact, or point outward.
-  for (const [, href] of landing.matchAll(/href="([^"]+)"/gu)) {
-    if (/^https?:/u.test(href)) continue;
-    expect(await exists(href.replace(/\/$/u, "/index.html"))).toBe(true);
+test("the published root is the documentation site", async () => {
+  const index = await readFile(resolve(artifact, "index.html"), "utf8");
+  expect(index).toContain("<!doctype html>");
+  // The site's own pages moved with it, so its relative links still resolve.
+  expect(index).toContain("pages/");
+  expect(await exists("pages/api.html")).toBe(true);
+  expect(await exists("pages/language.html")).toBe(true);
+  // A page that reached the repository root has been rebased, and no reference
+  // is left pointing one level above the site.
+  for (const page of ["pages/playground.html", "pages/language.html"]) {
+    const source = await readFile(resolve(artifact, page), "utf8");
+    expect(source).not.toContain('src="../../');
+    expect(source).not.toContain('href="../../');
   }
+});
+
+test("every local reference in every published page resolves", async () => {
+  const { readdir } = await import("node:fs/promises");
+  const pages = [];
+  async function walk(directory) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const path = resolve(directory, entry.name);
+      if (entry.isDirectory()) await walk(path);
+      else if (entry.name.endsWith(".html")) pages.push(path);
+    }
+  }
+  await walk(artifact);
+  expect(pages.length).toBeGreaterThan(5);
+  // Collect rather than fail on the first: the useful output is the list.
+  const unresolved = [];
+  for (const path of pages) {
+    const source = await readFile(path, "utf8");
+    const directory = posix.dirname(path.replace(`${artifact}/`, ""));
+    for (const [, reference] of source.matchAll(/(?:href|src)="([^"]+)"/gu)) {
+      if (/^[a-z]+:/iu.test(reference) || reference.startsWith("#")) continue;
+      // A fragment names a place inside the target document.
+      const [path_] = reference.split("#");
+      if (path_ === "") continue;
+      const target = path_.startsWith("/")
+        ? path_.slice(1)
+        : posix.normalize(posix.join(directory, path_));
+      const candidate = target.endsWith("/") ? `${target}index.html` : target;
+      if (!(await exists(candidate))) {
+        unresolved.push(`${posix.dirname(path.replace(`${artifact}/`, ""))} -> ${reference}`);
+      }
+    }
+  }
+  expect(unresolved).toEqual([]);
 });
 
 test("every reference the playground page carries resolves in the artifact", async () => {
   const page = await readFile(resolve(artifact, SITE_PAGE), "utf8");
 
-  // The import map maps `eliscript/` two levels above the page, so that
-  // directory must be the published root.
+  // The import map maps `eliscript/` one level above the page, which is the
+  // published root: the documentation site *is* the artifact root.
   const importMap = JSON.parse(
     page.match(/<script type="importmap">\s*(\{[\s\S]*?\})\s*<\/script>/u)[1],
   );
   const prefix = importMap.imports["eliscript/"];
-  expect(prefix).toBe("../../");
+  expect(prefix).toBe("../");
   // The page sits two levels below the published root, so the prefix lands on
   // that root, which is where the package trees are.
   const base = posix.resolve("/", posix.dirname(SITE_PAGE), prefix);
@@ -107,7 +145,7 @@ test("every reference the playground page carries resolves in the artifact", asy
   expect(await exists(posix.join("browser", compilerImport))).toBe(true);
 
   // The compiled playground application the page imports at run time.
-  expect(page).toContain("../../dist/browser-playground/playground.mjs");
+  expect(page).toContain("../dist/browser-playground/playground.mjs");
   expect(await exists("dist/browser-playground/playground.mjs")).toBe(true);
   expect(await exists("dist/browser-playground/highlight.mjs")).toBe(true);
 });
