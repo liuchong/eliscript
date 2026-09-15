@@ -19,9 +19,10 @@
   (import "../renderer/server.eli" render-site sort-posts)
   (import "./content.eli" check-identity read-posts)
   (import "./issues.eli" collect-issues)
+  (import "./discussions.eli" collect-discussions)
   (import "../support/config.eli" load-config)
   (import "../support/diagnostics.eli" fail)
-  (import "../support/text.eli" slice)
+  (import "../support/text.eli" slice string-value?)
 
   (defconst program-arguments (js* "process.argv"))
   (defconst environment (js* "process.env"))
@@ -182,14 +183,24 @@
 
   ;; The only network boundary in the builder. A token never reaches the
   ;; renderer, the site output, or the build manifest.
-  (defasync github-transport (url)
+  ;;
+  ;; The transport accepts either a URL string, which the shared pagination
+  ;; layer uses for REST, or a request map with a method and body, which the
+  ;; Discussion provider uses for GraphQL.
+  (defasync github-transport (request)
     (let* ((token (first-value (env-value "GITHUB_TOKEN")
                                (action-input "github-token")))
-           (response (await (funcall fetch-implementation url
-                                     (js-object :headers (request-headers token))))))
-      {:status (get response "status")
-       :headers (js-object :link (js-call (get response "headers") :get "link"))
-       :body (await (js-call response :json))}))
+           (plain (string-value? request))
+           (url (if plain request (Collection/get request :url "")))
+           (method (if plain "GET" (Collection/get request :method "GET")))
+           (body (if plain nil (Collection/get request :body nil)))
+           (init (js-object :method method :headers (request-headers token))))
+      (when (not (nil? body))
+        (put init "body" body))
+      (let ((response (await (funcall fetch-implementation url init))))
+        {:status (get response "status")
+         :headers (js-object :link (js-call (get response "headers") :get "link"))
+         :body (await (js-call response :json))})))
 
   (defasync source-posts (root config source transport identities)
     (let ((kind (Collection/get source :kind :markdown)))
@@ -203,7 +214,15 @@
                                  :publishing (Collection/get config :publishing)
                                  :adapters (Collection/get config :adapters [])
                                  :identities identities
+                                 :comments (Collection/get config :comments {})
                                  :transport transport})))
+        ((= kind :discussions)
+         (await (collect-discussions {:source source
+                                      :publishing (Collection/get config :publishing)
+                                      :adapters (Collection/get config :adapters [])
+                                      :identities identities
+                                      :comments (Collection/get config :comments {})
+                                      :transport transport})))
         (t (fail "DOGFOOD-SOURCE-001"
                  (str "unsupported source kind: " kind))))))
 

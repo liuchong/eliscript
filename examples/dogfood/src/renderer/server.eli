@@ -257,7 +257,22 @@
              (str "<a href=\"" (escape-html url) "\">on GitHub</a>"))
            "</div>"
            "<div class=\"comment-body\">" (Collection/get comment :body "") "</div>"
+           ;; A reply tree stays a tree: a reply is nested under its parent
+           ;; rather than appended to the parent's stream.
+           (let ((replies (Collection/get comment :replies [])))
+             (if (= (Collection/count replies) 0)
+                 ""
+               (str "<ol class=\"comments-list comment-replies\">"
+                    (render-reply-items replies) "</ol>")))
            "</li>")))
+
+  (defun render-reply-items (items)
+    (let ((markup "")
+          (index 0))
+      (while (< index (Collection/count items))
+        (setq markup (str markup (render-comment-item (Collection/nth items index)))
+              index (1+ index)))
+      markup))
 
   (defun render-comment-items (items)
     (let ((markup "")

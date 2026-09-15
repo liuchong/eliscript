@@ -1,0 +1,276 @@
+;; GitHub Discussions article provider.
+;;
+;; Specification 0003 makes a Discussion eligible by repository, allowed
+;; category, carrier exclusion, and original author. Specification 0010 orders
+;; authorization ahead of article metadata exactly as for Issues, so the
+;; publisher set and the carrier classifier are shared rather than reimplemented
+;; and cannot drift between the two providers.
+;;
+;; Discussions are read through GraphQL, which paginates by cursor rather than
+;; by a link header, and their comments are a reply tree rather than a flat
+;; stream. The tree is preserved: a reply is never flattened into its parent's
+;; stream.
+;;
+;; A channel captured as a snapshot is fetched with the discussion, because one
+;; query already carries both. A live channel is not fetched at all: the query
+;; omits its comments entirely, so a build never asks for content it will not
+;; publish.
+
+(module dogfood.builder.discussions
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "../support/diagnostics.eli" fail)
+  (import "../support/fields.eli" field parse-fields parse-list require-field)
+  (import "../support/github.eli" append-all)
+  (import "../support/markdown.eli" render-markdown)
+  (import "../support/text.eli"
+          empty-value? index-of parse-integer slice slugify trim)
+  (import "./comments.eli" channel-declaration freshness)
+  (import "./content.eli" ->Post date-value)
+  (import "./issues.eli"
+          authorized-author? carrier-adapter issue-fields issue-markdown
+          publisher-set)
+
+  (defconst default-page-size 50)
+  (defconst comment-bound 100)
+  (defconst maximum-pages 100)
+
+  (defun repository-parts (repository)
+    (let ((slash (index-of "/" repository)))
+      (if (< slash 1)
+          (fail "DOGFOOD-DISCUSSIONS-001"
+                (str "discussion source repository must be \"owner/name\": "
+                     repository))
+        [(slice 0 slash repository)
+         (slice (1+ slash) (length repository) repository)])))
+
+  ;; --------------------------------------------------------------- queries
+
+  (defconst author-selection
+    "author { login __typename ... on User { databaseId } }")
+
+  ;; Two reply levels cover an answer and its replies; a deeper thread trips the
+  ;; reply bound below rather than losing structure silently.
+  (defun reply-selection (depth)
+    (if (= depth 0)
+        ""
+      (str " replies(first: 50) { nodes { id " author-selection
+           " body createdAt updatedAt url" (reply-selection (1- depth)) " } }")))
+
+  (defun comment-selection ()
+    (str " comments(first: " comment-bound ") { pageInfo { hasNextPage endCursor }"
+         " nodes { id " author-selection " body createdAt updatedAt url"
+         (reply-selection 2) " } }"))
+
+  (defun discussions-query (with-comments)
+    (str "query DogfoodDiscussions($owner: String!, $name: String!, $cursor: String,"
+         " $pageSize: Int!) { repository(owner: $owner, name: $name) {"
+         " discussions(first: $pageSize, after: $cursor,"
+         " orderBy: {field: UPDATED_AT, direction: DESC}) {"
+         " pageInfo { hasNextPage endCursor }"
+         " nodes { number title body createdAt updatedAt url"
+         " category { name } " author-selection " answerChosenAt"
+         (if with-comments (comment-selection) "")
+         " } } } }"))
+
+  ;; ------------------------------------------------------------------ fetch
+
+  (defasync graphql (transport query variables)
+    (let* ((response (await (funcall transport
+                                    (js-object
+                                      :url "https://api.github.com/graphql"
+                                      :method "POST"
+                                      :body (JSON/stringify
+                                              (js-object :query query
+                                                         :variables variables))))))
+           (status (get response "status" 0))
+           (body (get response "body" nil)))
+      (unless (= status 200)
+        (fail "DOGFOOD-DISCUSSIONS-002"
+              (str "GitHub discussion query failed with status " status)))
+      (when (and (not (nil? body)) (not (nil? (get body "errors" nil))))
+        (fail "DOGFOOD-DISCUSSIONS-003"
+              (str "GitHub discussion query returned errors: "
+                   (JSON/stringify (get body "errors")))))
+      (get (get body "data") "repository" nil)))
+
+  (defasync fetch-discussions (transport source with-comments)
+    (let* ((parts (repository-parts (Collection/get source :repository "")))
+           (page-size (Collection/get source :page-size default-page-size))
+           (query (discussions-query with-comments))
+           (nodes [])
+           (pages 0)
+           (cursor nil)
+           (more t))
+      (while (and more (< pages maximum-pages))
+        (let* ((data (await (graphql
+                              transport query
+                              (js-object :owner (nth 0 parts)
+                                         :name (nth 1 parts)
+                                         :pageSize page-size
+                                         :cursor (if (nil? cursor) nil cursor)))))
+               (connection (get data "discussions" nil)))
+          (when (nil? connection)
+            (fail "DOGFOOD-DISCUSSIONS-004"
+                  "discussion query returned no connection"))
+          (setq nodes (append-all nodes (get connection "nodes" [])))
+          (let ((page-info (get connection "pageInfo" (js-object))))
+            (setq more (get page-info "hasNextPage" false)
+                  cursor (get page-info "endCursor" nil)))
+          (setq pages (1+ pages))))
+      (when (and more (>= pages maximum-pages))
+        (fail "DOGFOOD-DISCUSSIONS-005"
+              (str "discussion listing exceeded " maximum-pages " pages")))
+      nodes))
+
+  ;; ---------------------------------------------------------------- comments
+
+  (defun comment-record (node)
+    (let ((user (get node "author" nil)))
+      {:id (get node "id")
+       :author {:login (get user "login" "ghost")
+                :url (get node "url" nil)}
+       :body (render-markdown (get node "body" ""))
+       :created-at (get node "createdAt" "")
+       :updated-at (get node "updatedAt" "")
+       :url (get node "url" nil)
+       :replies []}))
+
+  (defun reply-tree (nodes)
+    (let ((replies [])
+          (index 0))
+      (while (< index (Collection/count nodes))
+        (let* ((node (Collection/nth nodes index))
+               (children (get (get node "replies" (js-object)) "nodes" []))
+               (page-info (get (get node "replies" (js-object)) "pageInfo" nil)))
+          (when (and (not (nil? page-info)) (get page-info "hasNextPage" false))
+            (fail "DOGFOOD-DISCUSSIONS-006"
+                  (str "discussion reply tree exceeded " comment-bound
+                       " replies at " (get node "id" "unknown"))))
+          (setq replies
+                (Collection/conj replies
+                                 (Collection/assoc
+                                   (comment-record node)
+                                   :replies (reply-tree children)))))
+        (setq index (1+ index)))
+      replies))
+
+  ;; The snapshot must be complete: a truncated comment page fails rather than
+  ;; publishing a partial conversation.
+  (defun comment-tree (record)
+    (let* ((connection (get record "comments" (js-object)))
+           (page-info (get connection "pageInfo" (js-object)))
+           (nodes (get connection "nodes" [])))
+      (when (get page-info "hasNextPage" false)
+        (fail "DOGFOOD-DISCUSSIONS-007"
+              (str "discussion " (get record "number" "unknown")
+                   " has more than " comment-bound " comments")))
+      (reply-tree nodes)))
+
+  ;; -------------------------------------------------------------- normalize
+
+  (defun category-name (record)
+    (get (get record "category" (js-object)) "name" ""))
+
+  (defun allowed-category? (source record)
+    (let ((allowed (Collection/get source :category nil))
+          (category (category-name record)))
+      (or (nil? allowed) (= allowed category))))
+
+  ;; GraphQL reports an actor by interface, so the exact type is read from the
+  ;; concrete name and the immutable id from the User fragment.
+  (defun discussion-author (record)
+    (let* ((author (get record "author" nil))
+           (kind (if (nil? author) "User" (get author "__typename" "User"))))
+      (js-object :login (get author "login" "ghost")
+                 :id (get author "databaseId" nil)
+                 :type (if (= kind "User") "User" kind))))
+
+  (defun discussion-channel (declaration repository record items)
+    {:id (Collection/get declaration :id :discussion-native)
+     :kind :discussion
+     :mode (Collection/get declaration :mode :snapshot)
+     :binding {:repository repository :number (get record "number")}
+     :count (Collection/count items)
+     :updated-at (freshness items)
+     :items items
+     :capabilities [:read :reply :nested-replies :reactions :moderation]})
+
+  (defun normalize-discussion (source record items channel)
+    (let* ((number (get record "number"))
+           (repository (Collection/get source :repository ""))
+           (path (str repository "#" number))
+           (fields (issue-fields (get record "body" "") path))
+           (title (require-field fields "title" path))
+           (slug-field (field fields "slug" nil))
+           (published (date-value (field fields "date" (get record "createdAt" ""))))
+           (updated-raw (field fields "updated" nil)))
+      (->Post (require-field fields "id" path)
+              (if (nil? slug-field) (slugify title) slug-field)
+              title
+              (field fields "description" "")
+              (render-markdown (issue-markdown (get record "body" "")))
+              published
+              (if (nil? updated-raw) published (date-value updated-raw))
+              [(get (get record "author" (js-object)) "login" "unknown")]
+              (parse-list (field fields "tags" ""))
+              nil
+              (= (field fields "draft" "false") "true")
+              (parse-integer (field fields "pinned" "0") 0)
+              {:provider "discussions"
+               :path path
+               :url (get record "url" nil)
+               :revision (get record "updatedAt" "")}
+              (parse-list (field fields "aliases" ""))
+              (if (empty-value? channel) [] [channel]))))
+
+  ;; --------------------------------------------------------------- provider
+
+  (defasync collect-discussions (options)
+    (let* ((source (Collection/get options :source))
+           (publishing (Collection/get options :publishing))
+           (adapters (Collection/get options :adapters []))
+           (identities (Collection/get options :identities []))
+           (comments (Collection/get options :comments {}))
+           (declaration (channel-declaration comments :discussion))
+           ;; A snapshot is captured only when a channel asks for one.
+           (with-comments (and (not (nil? declaration))
+                               (not (= (Collection/get declaration :mode :snapshot)
+                                       :live))))
+           (transport (Collection/get options :transport))
+           (publishers (publisher-set publishing))
+           (records (await (fetch-discussions transport source with-comments)))
+           (posts [])
+           (carriers 0)
+           (unauthorized 0)
+           (index 0))
+      (while (< index (Collection/count records))
+        (let* ((record (Collection/nth records index))
+               (body (get record "body" ""))
+               (author (discussion-author record)))
+          (cond
+            ;; Carrier classification precedes every article filter and every
+            ;; category rule.
+            ((not (nil? (carrier-adapter adapters author body identities)))
+             (setq carriers (1+ carriers)))
+            ;; The category is an article selector, never publication authority.
+            ((not (allowed-category? source record)) nil)
+            ((authorized-author? publishers author)
+             (let* ((items (if with-comments (comment-tree record) []))
+                    (channel (if (nil? declaration)
+                                 nil
+                               (discussion-channel declaration
+                                                    (Collection/get source :repository "")
+                                                    record items))))
+               (setq posts (Collection/conj posts
+                                            (normalize-discussion source record items channel)))))
+            (t (setq unauthorized (1+ unauthorized)))))
+        (setq index (1+ index)))
+      {:posts posts
+       :carriers carriers
+       :unauthorized unauthorized
+       :records (Collection/count records)}))
+
+  (export allowed-category? category-name collect-discussions comment-record
+          comment-tree discussion-author discussion-channel discussions-query
+          fetch-discussions graphql normalize-discussion reply-tree
+          repository-parts))
