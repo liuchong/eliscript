@@ -458,6 +458,8 @@
                            (str "comments.channels[" index "]"))
               (require-key (Collection/nth channels index) :kind
                            (str "comments.channels[" index "]"))
+              (check-mode (Collection/nth channels index)
+                          (str "comments.channels[" index "]"))
               (setq index (1+ index))))
           (check-unique-field channels :id "channel id")))))
 
@@ -494,6 +496,18 @@
                         (str label " is browser-only and cannot snapshot"))))))
           (setq index (1+ index))))
       (check-unique-field adapters :id "adapter id")))
+
+  ;; Specification 0011 fixes the four modes. A mode that is not one of them
+  ;; would silently render as a snapshot, so it fails instead.
+  (defun check-mode (declaration label)
+    (let ((mode (Collection/get declaration :mode nil)))
+      (when (and (not (nil? mode)) (not (comment-mode? mode)))
+        (fail "DOGFOOD-CONFIG-014"
+              (str label ".mode must be snapshot, live, hybrid, or embed")))))
+
+  (defun comment-mode? (mode)
+    (or (= mode :snapshot) (= mode :live)
+        (= mode :hybrid) (= mode :embed)))
 
   (defun carrier-kind? (kind)
     (or (= kind :issue) (= kind :discussion)

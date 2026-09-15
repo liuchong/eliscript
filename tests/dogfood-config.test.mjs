@@ -232,6 +232,16 @@ test("two adapters cannot share an id", async () => {
   expect(failure.message).toContain("adapter id");
 });
 
+test("a comment mode outside the specification fails", async () => {
+  const { failure } = await load(BASE(`[${MARKDOWN}]`).replace(":mode :live", ":mode :sometimes"));
+  expect(failure.code).toBe("DOGFOOD-CONFIG-014");
+});
+
+test("a hybrid channel is accepted", async () => {
+  const { failure } = await load(BASE(`[${MARKDOWN}]`).replace(":mode :live", ":mode :hybrid"));
+  expect(failure).toBeUndefined();
+});
+
 test("an unsupported schema version fails", async () => {
   const { failure } = await load(
     BASE(`[${MARKDOWN}]`).replace(":schema-version 1", ":schema-version 2"),

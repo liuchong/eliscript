@@ -242,7 +242,8 @@ test("a snapshot renders its comments", () => {
       )],
     ]),
   ]));
-  expect(markup).toContain('data-comment-provider="issue"');
+  // The page names the provider the reader knows, not the declaration's kind.
+  expect(markup).toContain('data-comment-provider="GitHub Issues"');
   expect(markup).toContain("Comments (2)");
   expect(markup).toContain("Snapshot from 2026-09-14T08:30:00Z");
   expect(markup).toContain("<p>First</p>");

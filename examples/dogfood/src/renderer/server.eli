@@ -10,7 +10,7 @@
   (import "eliscript/runtime/core/sequence.mjs" :as Sequence)
   (import "eliscript/runtime/core/order.mjs" :as Order)
   (import "eliscript/runtime/core/text.mjs" blank)
-  (import "../support/text.eli" slice slugify strip-tags text-length)
+  (import "../support/text.eli" index-of slice slugify strip-tags text-length)
   (import "../support/sanitize.eli" escape-html)
   (import "./theme.eli" site-css document)
 
@@ -231,6 +231,14 @@
     (let ((text (str value)))
       (if (= (slice 0 1 text) ":") (slice 1 (text-length text) text) text)))
 
+  ;; A native channel is served by GitHub, and the page says so rather than
+  ;; printing the declaration's kind.
+  (defun provider-label (kind)
+    (cond
+      ((= kind :issue) "GitHub Issues")
+      ((= kind :discussion) "GitHub Discussions")
+      (t (display-name kind))))
+
   (defun channel-binding (channel)
     (let ((binding (Collection/get channel :binding nil)))
       (if (nil? binding)
@@ -238,6 +246,47 @@
         (let ((repository (Collection/get binding :repository ""))
               (number (Collection/get binding :number nil)))
           (if (nil? number) repository (str repository "#" number))))))
+
+  ;; The reader is told how old the snapshot is and is given the provider link;
+  ;; the browser bundle replaces the second half of this sentence once it has
+  ;; asked the provider how much has changed.
+  (defun render-refresh-note (channel binding)
+    (let* ((kind-name (display-name (Collection/get channel :kind :issue)))
+           (snapshot (Collection/get channel :updated-at nil))
+           (count-value (Collection/get channel :count 0))
+           (posting (provider-thread-url binding)))
+      (str "<p class=\"comment-note refresh-note\""
+           " data-comment-refresh=\"1\""
+           " data-comment-kind=\"" (escape-html kind-name) "\""
+           " data-comment-count=\"" (str count-value) "\""
+           " data-comment-binding=\"" (escape-html binding) "\""
+           (if (blank snapshot)
+               ""
+             (str " data-comment-snapshot=\"" (escape-html (str snapshot)) "\""))
+           ">Snapshot"
+           (if (blank snapshot) "" (str " from " (escape-html (str snapshot))))
+           (if (> count-value 0) (str " with " count-value " comments") "")
+           "."
+           (if (blank posting)
+               ""
+             (str " <a href=\"" (escape-html posting) "\">Read or reply at "
+                  (escape-html posting) "</a>."))
+           ;; The browser fills this once it has asked the provider how much has
+           ;; changed; an empty span claims nothing on its own.
+           "<span class=\"refresh-verdict\"></span>"
+           "</p>")))
+
+  ;; A binding is `owner/repository#number`; the provider thread is the issue or
+  ;; the discussion that number names.
+  (defun provider-thread-url (binding)
+    (if (blank binding)
+        ""
+      (let* ((hash (index-of "#" binding))
+             (path (if (< hash 0) binding (slice 0 hash binding)))
+             (number (if (< hash 0) "" (slice (+ hash 1) (text-length binding) binding))))
+        (if (blank number)
+            (str "https://github.com/" path)
+          (str "https://github.com/" path "/issues/" number)))))
 
   (defun render-comment-item (comment)
     (let* ((author (Collection/get comment :author {}))
@@ -297,7 +346,8 @@
 
   (defun render-channel (channel)
     (let* ((mode (Collection/get channel :mode :snapshot))
-           (provider (display-name (Collection/get channel :kind :issue)))
+           (kind (Collection/get channel :kind :issue))
+           (provider (provider-label kind))
            (binding (channel-binding channel))
            (items (Collection/get channel :items [])))
       (str "<section class=\"comments\" data-comment-provider=\""
@@ -337,6 +387,16 @@
                      (str "This thread is served live for " (escape-html binding) "."))
                    " A comment never triggers a build; open the provider to"
                    " read or reply.</p>"))
+             ;; A hybrid channel serves its snapshot and asks the browser to
+             ;; find out how much has changed since it was captured. The
+             ;; snapshot body is not re-rendered there: one renderer owns the
+             ;; markup contract, so the browser reports freshness and links to
+             ;; the provider rather than producing a second dialect of markup.
+             ((= mode :hybrid)
+              (str (if (= (Collection/count items) 0)
+                       "<p class=\"comment-note\">No comments in this snapshot yet.</p>"
+                     (render-comment-items items))
+                   (render-refresh-note channel binding)))
              ((= (Collection/count items) 0)
               "<p class=\"comment-note\">No comments in this snapshot.</p>")
              (t (render-comment-items items)))

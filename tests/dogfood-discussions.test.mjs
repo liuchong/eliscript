@@ -277,7 +277,7 @@ test("the renderer nests discussion replies instead of flattening them", () => {
   const markup = renderer.render_comment_channels(
     mapOf([["comment-channels", vector(channel)]]),
   );
-  expect(markup).toContain('data-comment-provider="discussion"');
+  expect(markup).toContain('data-comment-provider="GitHub Discussions"');
   expect(markup).toContain("comment-replies");
   expect(markup).toContain("<p>Second</p>");
   // The reply is nested inside its parent list item, not beside it.

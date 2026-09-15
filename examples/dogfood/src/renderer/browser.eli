@@ -241,6 +241,68 @@
                        (funcall set-menu-marker "collapsed")
                      (funcall clear-menu-marker)))))))
 
+  ;; ------------------------------------------------------- comment freshness
+
+  ;; A hybrid channel ships a snapshot and asks the reader's browser how much
+  ;; has changed since it was captured. Only the count and the newest date are
+  ;; read: the snapshot body stays the server's markup, and the provider link
+  ;; is one click away.
+
+  (defconst comment-endpoint
+    (js* "((kind, binding) => { const [repository, number] = binding.split('#'); const path = kind === 'discussion' ? 'discussions' : 'issues'; return `https://api.github.com/repos/${repository}/${path}/${number}/comments?per_page=100`; })"))
+
+  (defconst set-text
+    (js* "((element, value) => { element.textContent = value; })"))
+
+  (defun refresh-notes ()
+    (js* "Array.from(document.querySelectorAll('[data-comment-refresh]'))"))
+
+  (defun verdict-element (note) (js-call note :querySelector ".refresh-verdict"))
+
+  (defasync report-freshness (note url)
+    (let ((verdict (verdict-element note)))
+      (when (not (nil? verdict))
+        (try
+          (let* ((response (await (js-call (js* "globalThis")
+                                          :fetch
+                                          url
+                                          (js-object
+                                            :headers (js-object
+                                                       :accept "application/vnd.github+json")))))
+                 ;; `ok` is a property of the response, not a method on it.
+                 (payload (if (get response "ok")
+                              (await (js-call response :json))
+                            (js-array))))
+            (if (js-call (js* "Array") :isArray payload)
+                (let ((before (js-call note :getAttribute "data-comment-count"))
+                      (now (js-length payload)))
+                  (funcall set-text
+                           verdict
+                           (if (> now (parse-count before))
+                               (str " " now " comments now; " before
+                                    " when this snapshot was taken.")
+                             (str " " now " comments; this snapshot is current."))))
+              (funcall set-text verdict " Newer comments could not be checked.")))
+          (catch error
+            (funcall set-text verdict " Newer comments could not be checked."))))))
+
+  (defun parse-count (value)
+    (let ((parsed (js* "Number.parseInt")))
+      (if (nil? value) 0 (funcall parsed value 10))))
+
+  (defasync refresh-comment-freshness ()
+    (let* ((notes (refresh-notes))
+           (index 0))
+      (while (< index (js-length notes))
+        (let* ((note (js-nth index notes))
+               (binding (js-call note :getAttribute "data-comment-binding"))
+               (kind (js-call note :getAttribute "data-comment-kind")))
+          (when (not (blank? binding))
+            (await (report-freshness
+                     note
+                     (funcall comment-endpoint kind binding)))))
+        (setq index (1+ index)))))
+
   ;; --------------------------------------------------------------- bootstrap
 
   ;; Applied before the first paint: this script is classic and in the head.
@@ -259,6 +321,9 @@
     ;; A reader who rotates a tablet or resizes a window crosses the
     ;; breakpoint without a reload.
     (bind-menu)
+    ;; Freshness is checked after the article is on screen and never blocks it.
+    (js-call (js* "globalThis") :addEventListener
+             "load" (lambda (event) (refresh-comment-freshness)))
     (js-call (js* "globalThis") :addEventListener
              "resize" (lambda (event) (bind-menu)))
     (search-once))
