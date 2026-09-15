@@ -67,6 +67,57 @@ suite and the clean standalone-package check defined by
 [specification 0009](specs/0009-delivery-and-acceptance.md). No gate is claimed
 complete in this state.
 
+## GitHub Action
+
+The packaged Action is a single generated CommonJS file that runs on the Node 24
+runtime supplied by GitHub Actions. No Emacs, Bun, or installed package is
+required at consumer run time.
+
+Build the package locally:
+
+```sh
+bun run package:dogfood
+```
+
+That command compiles the Eliscript sources, bundles
+`dist/action/index.js`, and writes `dist/action/artifact.json`, which binds the
+entry digest and every source digest. Rebuilding from unchanged sources is
+byte-identical.
+
+### Inputs And Outputs
+
+| Input | Active | Meaning |
+| --- | --- | --- |
+| `config-file` | yes | Repository-relative configuration, default `dogfood.config.eli` |
+| `output-directory` | yes | Output destination, default `_site` |
+| `force` | yes | Report `reason=forced` |
+| `github-token` | reserved | Issues and Discussions providers |
+| `event-file` | reserved | Event classification |
+| `preview` | reserved | Preview routes |
+| `previous-manifest` | reserved | Previous-manifest verification |
+
+Outputs are `built`, `reason`, `content-fingerprint`, `output-directory`,
+`post-count`, `comment-snapshot-count`, and `manifest`. They are written to
+`GITHUB_OUTPUT` when the runner sets it. A reserved input is accepted but not
+read, and its description says so.
+
+The bundled entry runs anywhere Node runs:
+
+```sh
+cd examples/dogfood/_demo
+node ../dist/action/index.js
+```
+
+The `_demo` directory is a consumer project with its own configuration,
+Chinese content, and a draft. It builds `_demo/_site` and proves the Action
+reads the consumer's configuration rather than an embedded one.
+
+### Not Published
+
+`dist/action/index.js` is generated and not committed. There is no release tag,
+no Pages deployment, and no Marketplace listing; publication is a separate,
+explicitly authorized operation.
+
 ## Required Capabilities
 
 - Enable Markdown, Issues, and Discussions independently or together.

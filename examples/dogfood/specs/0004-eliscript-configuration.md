@@ -18,19 +18,21 @@ can already change the workflow and the build source. The configuration
 boundary is therefore a schema and reproducibility boundary, not a security
 sandbox.
 
-The builder evaluates the configuration by compiling and importing the module
-with the packaged compiler capability. It does not claim a capability sandbox
-around that evaluation, because the platform host-capability packages are
-explicitly object-capability APIs rather than a JavaScript sandbox, and
-Eliscript source can always use explicit interop. Two enforceable rules replace
-an unenforceable capability claim:
+The builder reads the configuration with the packaged closed-data reader. It
+never compiles, evaluates, or imports the module, so no capability sandbox and
+no code execution are involved at all. The reader accepts only the literal
+subset — maps, vectors, strings, numbers, keywords, `t`, `false`, `nil`, and the
+module, defconst, and export wrapper — and rejects every other form with a
+located failure.
+
+Two rules define the boundary:
 
 1. The configuration module is a closed data module. Its dependency graph is
    empty: it declares constants and exports `config`, and it imports no module,
    local or external.
 2. The value bound to `config` is validated against the closed schema below
-   before any source is fetched. Static interop forms (`js*`, `js-call`, `new`)
-   in the configuration module are a validation error.
+   before any source is fetched. Any symbol, list, set, queue, function, or
+   interop form inside the value is a validation error.
 
 A module that violates either rule fails the build before any network request.
 Untrusted input never enters configuration: event payloads, repository

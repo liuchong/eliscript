@@ -95,6 +95,16 @@ The packaging command performs:
 No handwritten `.js`, `.mjs`, `.cjs`, or `.ts` file may enter the
 standalone package.
 
+### Implementation Status
+
+The maintained packaging tool is [`tools/package.eli`](../tools/package.eli),
+an Eliscript program. It compiles the Eliscript sources, bundles one CommonJS
+Node 24 entry, rejects credential shapes and absolute host paths, and writes a
+source-bound artifact manifest. Two packaging units remain open: the browser
+renderer bundle, which needs the interactive islands of gate I6, and the
+exported `toolchain/` capability that makes the standalone repository
+rebuildable without the monorepo.
+
 ## Toolchain Export
 
 The monorepo build uses public Eliscript commands from the repository root. The

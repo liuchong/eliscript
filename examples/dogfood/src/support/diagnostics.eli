@@ -1,0 +1,11 @@
+;; Structured build failures.
+;;
+;; Every failure carries a stable code and a message. The builder prints both
+;; and exits nonzero; tests assert the code, so a failure can never be reported
+;; as success.
+
+(module dogfood.support.diagnostics
+  (defun fail (code message)
+    (throw (js-object :code code :message message)))
+
+  (export fail))

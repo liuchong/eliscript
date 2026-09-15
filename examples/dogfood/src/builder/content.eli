@@ -9,6 +9,7 @@
   (import "eliscript/runtime/core/order.mjs" :as Order)
   (import "node:fs" readdirSync readFileSync)
   (import "node:path" :as Path)
+  (import "../support/diagnostics.eli" fail)
   (import "../support/records.eli" define-record-type)
   (import "../support/text.eli"
           basename blank empty-value? index-of join parse-integer slice
@@ -19,9 +20,6 @@
   (defrecord Post
     [id slug title summary body published-at updated-at authors tags cover draft
      pinned-weight provenance aliases comment-channels])
-
-  (defun fail (code message)
-    (throw (js-object :code code :message message)))
 
   (defun markdown-names (directory)
     (let ((names (readdirSync directory))

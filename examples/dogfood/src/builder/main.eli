@@ -4,21 +4,53 @@
 ;; normalizes the canonical post model, calls the renderer, writes a staging
 ;; tree, and replaces the published output only after every document exists.
 ;; The renderer is imported as a library and has no host authority of its own.
+;;
+;; The same entry serves two callers. Locally it takes `--root`, `--config`,
+;; and `--output`. Under GitHub Actions it reads the declared action inputs and
+;; writes the declared action outputs.
 
 (module dogfood.builder.main
   (import "eliscript/runtime/core/collection.mjs" :as Collection)
   (import "eliscript/runtime/core/sequence.mjs" :as Sequence)
   (import "node:crypto" createHash)
   (import "node:fs"
-          existsSync mkdirSync renameSync rmSync writeFileSync)
+          appendFileSync existsSync mkdirSync renameSync rmSync writeFileSync)
   (import "node:path" :as Path)
-  (import "../../dogfood.config.eli" config)
   (import "../renderer/server.eli" render-site sort-posts)
   (import "./content.eli" check-identity read-posts)
+  (import "../support/config.eli" load-config)
+  (import "../support/diagnostics.eli" fail)
+  (import "../support/text.eli" slice)
 
   (defconst program-arguments (js* "process.argv"))
+  (defconst environment (js* "process.env"))
   (defconst set-exit-code (js* "(code) => { process.exitCode = code; }"))
   (defconst to-native-array (js* "(value) => Array.from(value)"))
+
+  (defun env-value (name)
+    (let ((value (get environment name nil)))
+      (if (or (nil? value) (= value "")) nil value)))
+
+  (defun truthy-input? (value)
+    (or (= value "true") (= value "1") (= value "yes")))
+
+  ;; GitHub upper-cases action inputs and preserves dashes, while many runners
+  ;; export the underscored spelling, so both are accepted.
+  (defun action-input (name)
+    (cond
+      ((= name "config-file")
+       (first-value (env-value "INPUT_CONFIG-FILE") (env-value "INPUT_CONFIG_FILE")))
+      ((= name "output-directory")
+       (first-value (env-value "INPUT_OUTPUT-DIRECTORY")
+                    (env-value "INPUT_OUTPUT_DIRECTORY")))
+      ((= name "force") (env-value "INPUT_FORCE"))
+      ((= name "preview") (env-value "INPUT_PREVIEW"))
+      ((= name "github-token")
+       (first-value (env-value "INPUT_GITHUB-TOKEN") (env-value "INPUT_GITHUB_TOKEN")))
+      (t nil)))
+
+  (defun first-value (first second)
+    (if (nil? first) second first))
 
   (defun option-value (arguments name fallback)
     (let ((index 2)
@@ -30,6 +62,11 @@
           (setq found (Collection/nth arguments (+ index 1))))
         (setq index (1+ index)))
       found))
+
+  (defun absolute-path (root value)
+    (if (= (slice 0 1 value) "/") value (Path/join root value)))
+
+  ;; ------------------------------------------------------------ output writing
 
   (defun prepare-staging (staging)
     (when (existsSync staging)
@@ -68,7 +105,7 @@
   (defun public-posts (posts)
     (funcall to-native-array (Sequence/map public-post posts)))
 
-  (defun write-manifests (staging documents posts)
+  (defun write-manifests (staging documents posts config)
     (mkdirSync (Path/join staging "_dogfood") (js-object :recursive t))
     (writeFileSync
       (Path/join staging "_dogfood/build.json")
@@ -104,8 +141,32 @@
 
   (defun publishable? (post) (not (get post :draft)))
 
-  (defun build-site (root output-override)
-    (let* ((site (Collection/get config :site))
+  ;; --------------------------------------------------------------- action glue
+
+  (defun set-output (name value)
+    (let ((destination (env-value "GITHUB_OUTPUT")))
+      (when (not (nil? destination))
+        (appendFileSync destination (str name "=" value "\n")))))
+
+  (defun report (output documents posts reason fingerprint-value)
+    (let ((post-count (Collection/count posts)))
+      (print (str "dogfood: wrote " (Collection/count documents)
+                  " routes from " post-count " published posts"))
+      (print (str "dogfood: output " output))
+      (print (str "dogfood: fingerprint " fingerprint-value))
+      (set-output "built" "true")
+      (set-output "reason" reason)
+      (set-output "content-fingerprint" fingerprint-value)
+      (set-output "output-directory" output)
+      (set-output "post-count" (str post-count))
+      (set-output "comment-snapshot-count" "0")
+      (set-output "manifest" (Path/join output "_dogfood/build.json"))))
+
+  ;; ------------------------------------------------------------------- build
+
+  (defun build-site (root config-path output-override reason)
+    (let* ((config (load-config config-path))
+           (site (Collection/get config :site))
            (source (Collection/nth (Collection/get config :sources) 0))
            (directory (Collection/get source :directory "content/posts"))
            (configured (Collection/get (Collection/get config :output) :directory "_site"))
@@ -114,28 +175,37 @@
            (all-posts (read-posts root directory))
            (posts (sort-posts (Sequence/filter publishable? all-posts))))
       (check-identity posts)
-      (let ((documents (render-site site posts)))
+      (let* ((documents (render-site site posts))
+             (digest (fingerprint documents)))
         (prepare-staging staging)
         (let ((index 0))
           (while (< index (Collection/count documents))
             (write-document staging (Collection/nth documents index))
             (setq index (1+ index))))
-        (write-manifests staging documents posts)
+        (write-manifests staging documents posts config)
         (publish staging output)
-        (print (str "dogfood: wrote " (Collection/count documents)
-                    " routes from " (Collection/count posts) " published posts"))
-        (print (str "dogfood: output " output))
-        (print (str "dogfood: fingerprint " (fingerprint documents))))))
+        (report output documents posts reason digest)
+        digest)))
 
   (defun main ()
     (let* ((arguments program-arguments)
-           (root (option-value arguments "--root" "."))
-           (output (option-value arguments "--output" nil)))
+           (root (option-value arguments "--root"
+                               (first-value (env-value "GITHUB_WORKSPACE") ".")))
+           (config-input (first-value (option-value arguments "--config" nil)
+                                      (action-input "config-file")))
+           (config-file (if (nil? config-input) "dogfood.config.eli" config-input))
+           (config-path (absolute-path root config-file))
+           (output-override (first-value (option-value arguments "--output" nil)
+                                         (action-input "output-directory")))
+           (forced (or (not (nil? (option-value arguments "--force" nil)))
+                       (truthy-input? (action-input "force")))))
       (try
-        (build-site root output)
+        (build-site root config-path output-override (if forced "forced" "changed"))
         (catch error
           (print (str "dogfood: " (get error :code "DOGFOOD") ": "
                       (get error :message)))
+          (set-output "built" "false")
+          (set-output "reason" "failed")
           (funcall set-exit-code 1)))))
 
   (main))

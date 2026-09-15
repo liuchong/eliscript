@@ -1,0 +1,43 @@
+;; Consumer configuration for the packaged Action demo.
+;;
+;; The Action reads this file at run time. It is a closed data module: it
+;; declares constants, exports one `config` value, and imports nothing.
+
+(module demo.config
+  (defconst config
+    {:schema-version 1
+
+     :site
+     {:title "阿冲的笔记本"
+      :description "用 Eliscript 构建的静态博客，内容来自仓库里的 Markdown。"
+      :base-url "https://example.github.io/notes/"
+      :language "zh-CN"
+      :theme :system}
+
+     :publishing
+     {:owner {:login "liuchong"}
+      :coauthors []}
+
+     :sources
+     [{:id :local
+       :kind :markdown
+       :enabled t
+       :directory "content/posts"}]
+
+     :identity
+     {:conflict :fail
+      :projections []}
+
+     :comments
+     {:presentation :tabs
+      :channels []}
+
+     :refresh
+     {:articles :push
+      :comments :runtime
+      :no-change :skip}
+
+     :output
+     {:directory "_site"}})
+
+  (export config))

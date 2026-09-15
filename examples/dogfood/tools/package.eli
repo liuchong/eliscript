@@ -1,0 +1,181 @@
+;; Action packaging pipeline.
+;;
+;; Specification 0007 requires one generated Node 24 entry that runs without
+;; Emacs, Bun, or installed packages. This tool compiles the Eliscript sources,
+;; bundles them into a single CommonJS file, rejects credentials and absolute
+;; paths in the artifact, and writes a source-bound artifact manifest.
+;;
+;; It is a development tool, not a product program. It runs from the Eliscript
+;; repository and uses Node host interop for processes, digests, and files.
+
+(module dogfood.tools.package
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "eliscript/runtime/core/order.mjs" :as Order)
+  (import "eliscript/runtime/core/text.mjs" contains startsWith)
+  (import "node:child_process" spawnSync)
+  (import "node:crypto" createHash)
+  (import "node:fs"
+          existsSync mkdirSync readdirSync readFileSync rmSync statSync
+          writeFileSync)
+  (import "node:path" :as Path)
+
+  (defconst program-arguments (js* "process.argv"))
+  (defconst set-exit-code (js* "(code) => { process.exitCode = code; }"))
+  (defconst byte-length (js* "(text) => Buffer.byteLength(text, 'utf8')"))
+
+  ;; Credential shapes and absolute host paths, never the plain input names:
+  ;; the builder legitimately reads an input called INPUT_GITHUB_TOKEN.
+  (defconst forbidden-patterns
+    ["/Users/" "/home/" "ghp_" "github_pat_" "-----BEGIN"])
+
+  ;; ----------------------------------------------------------------- helpers
+
+  (defun option-value (arguments name fallback)
+    (let ((index 2)
+          (found fallback)
+          (total (Collection/count arguments)))
+      (while (< index total)
+        (when (and (= (Collection/nth arguments index) name)
+                   (< (+ index 1) total))
+          (setq found (Collection/nth arguments (+ index 1))))
+        (setq index (1+ index)))
+      found))
+
+  (defun sha256-of-text (text)
+    (let ((hash (createHash "sha256")))
+      (js-call hash :update text "utf8")
+      (js-call hash :digest "hex")))
+
+  (defun run-command (command arguments root)
+    (let ((result (spawnSync command arguments
+                             (js-object :encoding "utf8" :cwd root))))
+      (when (not (= (get result :status 1) 0))
+        (print (str "package: command failed: " command " "
+                    (js-call arguments :join " ")))
+        (print (get result :stdout ""))
+        (print (get result :stderr ""))
+        (funcall set-exit-code 1)
+        (throw (js-object :code "DOGFOOD-PACKAGE-001"
+                          :message (str command " exited with "
+                                        (get result :status 1)))))
+      (get result :stdout "")))
+
+  (defun collect-eliscript (root prefix)
+    (let ((files [])
+          (pending (js-array prefix)))
+      (while (> (Collection/count pending) 0)
+        (let* ((relative (js-call pending :pop))
+               (absolute (Path/join root relative))
+               (names (readdirSync absolute))
+               (index 0))
+          (while (< index (Collection/count names))
+            (let* ((name (Collection/nth names index))
+                   (child (str relative "/" name)))
+              (unless (startsWith "." name)
+                (if (js-call (statSync (Path/join root child)) :isDirectory)
+                    (js-call pending :push child)
+                  (when (= (substring-after-last child ".") "eli")
+                    (setq files (Collection/conj files child))))))
+            (setq index (1+ index)))))
+      (Order/sort files)))
+
+  (defun substring-after-last (text delimiter)
+    (let ((index (- (Collection/count text) 1))
+          (found -1))
+      (while (>= index 0)
+        (when (and (< found 0)
+                   (= (js-call text :slice index (+ index 1)) delimiter))
+          (setq found index))
+        (setq index (1- index)))
+      (if (< found 0) text (js-call text :slice (+ found 1)))))
+
+  (defun assert-clean (text label)
+    (let ((index 0))
+      (while (< index (Collection/count forbidden-patterns))
+        (when (contains (Collection/nth forbidden-patterns index) text)
+          (throw (js-object
+                   :code "DOGFOOD-PACKAGE-002"
+                   :message (str label " contains the forbidden pattern \""
+                                 (Collection/nth forbidden-patterns index) "\""))))
+        (setq index (1+ index))))
+    (let ((token (get (js* "process.env") "GITHUB_TOKEN" nil)))
+      (when (and (not (nil? token)) (> (Collection/count token) 0))
+        (when (contains token text)
+          (throw (js-object :code "DOGFOOD-PACKAGE-005"
+                            :message (str label " embeds the live GITHUB_TOKEN")))))))
+
+  (defun source-digests (root project)
+    (let* ((absolute-root (Path/resolve root))
+           (relative-prefix (str project "/src"))
+           (files (collect-eliscript root relative-prefix))
+           (entries (js-array))
+           (index 0))
+      (while (< index (Collection/count files))
+        (let* ((relative (Collection/nth files index))
+               (absolute (Path/join root relative))
+               (text (readFileSync absolute "utf8")))
+          (js-call entries :push
+                   (js-object :path (js-call relative :slice
+                                             (+ (Collection/count project) 1))
+                              :sha256 (sha256-of-text text)))
+          (when (contains absolute-root text)
+            (throw (js-object :code "DOGFOOD-PACKAGE-003"
+                              :message (str relative " embeds an absolute path")))))
+        (setq index (1+ index)))
+      entries))
+
+  ;; ------------------------------------------------------------------- build
+
+  (defun package-action (root project)
+    (let* ((project-root (Path/join root project))
+           (entry-source (Path/join project-root "dist/src/builder/main.mjs"))
+           (action-directory (Path/join project-root "dist/action"))
+           (entry (Path/join action-directory "index.js"))
+           (manifest (Path/join action-directory "artifact.json")))
+      (print (str "package: compiling " project))
+      (run-command (Path/join root "bin/eliscript-build")
+                   (js-array "--config" (Path/join project "eliscript.json"))
+                   root)
+      (when (not (existsSync entry-source))
+        (throw (js-object :code "DOGFOOD-PACKAGE-004"
+                          :message (str "compiled entry is missing: " entry-source))))
+      (when (existsSync action-directory)
+        (rmSync action-directory (js-object :recursive t :force t)))
+      (mkdirSync action-directory (js-object :recursive t))
+      (print "package: bundling the Action entry for Node 24")
+      (run-command "bun"
+                   (js-array "build" entry-source
+                             "--target=node" "--format=cjs"
+                             "--outfile" entry)
+                   root)
+      (let* ((bundle (readFileSync entry "utf8"))
+             (sources (source-digests root project)))
+        (assert-clean bundle "the Action bundle")
+        (writeFileSync
+          manifest
+          (str (JSON/stringify
+                 (js-object :format "dogfood-action-artifact"
+                            :version 1
+                            :runtime "node24"
+                            :entry (str project "/dist/action/index.js")
+                            :entrySha256 (sha256-of-text bundle)
+                            :entryBytes (funcall byte-length bundle)
+                            :sources sources))
+               "\n"))
+        (print (str "package: entry " entry))
+        (print (str "package: sources " (Collection/count sources)))
+        (print (str "package: entrySha256 " (sha256-of-text bundle)))
+        (print (str "package: manifest " manifest)))))
+
+  (defun main ()
+    (let* ((arguments program-arguments)
+           (root (option-value arguments "--root" "."))
+           (project (option-value arguments "--project" "examples/dogfood")))
+      (try
+        (package-action root project)
+        (catch error
+          (print (str "package: " (get error :code "DOGFOOD") ": "
+                      (get error :message)))
+          (funcall set-exit-code 1)))))
+
+  (main))

@@ -1,0 +1,407 @@
+;; Closed data configuration loader.
+;;
+;; Specification 0004 requires `dogfood.config.eli` to be a closed data module:
+;; it declares constants, exports exactly one `config` value, and imports
+;; nothing. Because the file is data and never code, the Action reads it with
+;; this reader instead of executing it. Nothing here can call a function, reach
+;; the network, or observe a secret, so no sandbox is needed.
+;;
+;; The reader accepts the literal subset only: maps, vectors, strings, numbers,
+;; keywords, `t`, `false`, `nil`, and the module, defconst, and export wrapper.
+;; Any other form is a build failure rather than silently ignored input.
+
+(module dogfood.support.config
+  (import "eliscript/runtime/core/collection.mjs"
+          :as Collection)
+  (import "eliscript/runtime/core/collection.mjs" isMap isVector)
+  (import "eliscript/runtime/literals.mjs" keyword)
+  (import "node:fs" readFileSync)
+  (import "./diagnostics.eli" fail)
+  (import "./text.eli"
+          blank char-code digit-code? empty-value? slice startsWith text-length
+          trim)
+
+  (defconst open-paren 40)
+  (defconst close-paren 41)
+  (defconst open-brace 123)
+  (defconst close-brace 125)
+  (defconst open-bracket 91)
+  (defconst close-bracket 93)
+  (defconst double-quote 34)
+  (defconst colon 58)
+  (defconst semicolon 59)
+  (defconst backslash 92)
+  (defconst minus-sign 45)
+
+  (defconst known-keys
+    [:schema-version :site :publishing :sources :identity :comments :refresh
+     :output])
+
+  ;; ------------------------------------------------------------- reader state
+
+  (defun make-reader (source)
+    (js-object :source source :index 0 :length (text-length source)))
+
+  (defun reader-code (reader)
+    (let ((index (get reader :index)))
+      (if (< index (get reader :length))
+          (char-code (get reader :source) index)
+          nil)))
+
+  (defun advance-reader (reader)
+    (put reader :index (1+ (get reader :index))))
+
+  (defun whitespace-code? (code)
+    (or (= code 32) (= code 9) (= code 10) (= code 13)))
+
+  (defun delimiter-code? (code)
+    (or (nil? code)
+        (whitespace-code? code)
+        (= code open-paren) (= code close-paren)
+        (= code open-brace) (= code close-brace)
+        (= code open-bracket) (= code close-bracket)
+        (= code double-quote) (= code semicolon)))
+
+  (defun skip-space (reader)
+    (let ((done false))
+      (while (not done)
+        (let ((code (reader-code reader)))
+          (cond
+            ((nil? code) (setq done t))
+            ((whitespace-code? code) (advance-reader reader))
+            ((= code semicolon)
+             (while (and (not (nil? (reader-code reader)))
+                         (not (= (reader-code reader) 10)))
+               (advance-reader reader)))
+            (t (setq done t)))))))
+
+  (defun read-failure (reader message)
+    (fail "DOGFOOD-CONFIG-001"
+          (str "configuration at offset " (get reader :index) ": " message)))
+
+  ;; ------------------------------------------------------------------ reader
+
+  (defun read-delimited (reader open close kind)
+    (advance-reader reader)
+    (let ((items [])
+          (done false))
+      (while (not done)
+        (skip-space reader)
+        (let ((code (reader-code reader)))
+          (cond
+            ((nil? code)
+             (read-failure reader (str "unterminated " kind)))
+            ((= code close)
+             (advance-reader reader)
+             (setq done t))
+            (t (setq items (Collection/conj items (read-value reader)))))))
+      items))
+
+  (defun read-map-value (reader)
+    (let* ((items (read-delimited reader open-brace close-brace "map"))
+           (total (Collection/count items)))
+      (when (= (% total 2) 1)
+        (read-failure reader "map literal needs an even number of forms"))
+      (let ((result {})
+            (index 0))
+        (while (< index total)
+          (setq result (Collection/assoc result
+                                         (Collection/nth items index)
+                                         (Collection/nth items (+ index 1)))
+                index (+ index 2)))
+        result)))
+
+  (defun read-vector-value (reader)
+    (read-delimited reader open-bracket close-bracket "vector"))
+
+  (defun read-list-value (reader)
+    (read-delimited reader open-paren close-paren "list"))
+
+  (defun read-escaped (reader)
+    (advance-reader reader)
+    (let ((code (reader-code reader)))
+      (when (nil? code)
+        (read-failure reader "unterminated string literal"))
+      (advance-reader reader)
+      (cond
+        ((= code 110) "\n")
+        ((= code 116) "\t")
+        ((= code 114) "\r")
+        ((= code double-quote) "\"")
+        ((= code backslash) "\\")
+        (t (read-failure reader "unsupported string escape")))))
+
+  (defun read-string-value (reader)
+    (advance-reader reader)
+    (let ((result "")
+          (done false))
+      (while (not done)
+        (let ((code (reader-code reader)))
+          (cond
+            ((nil? code) (read-failure reader "unterminated string literal"))
+            ((= code double-quote)
+             (advance-reader reader)
+             (setq done t))
+            ((= code backslash) (setq result (str result (read-escaped reader))))
+            (t (setq result (str result (string-from-code-unit code)))
+               (advance-reader reader)))))
+      result))
+
+  (defun read-keyword-value (reader)
+    (advance-reader reader)
+    (let ((name (read-token reader)))
+      (when (blank name)
+        (read-failure reader "empty keyword"))
+      (keyword name)))
+
+  (defun token-end? (code) (delimiter-code? code))
+
+  (defun read-token (reader)
+    (let ((result "")
+          (done false))
+      (while (not done)
+        (let ((code (reader-code reader)))
+          (if (token-end? code)
+              (setq done t)
+            (progn
+              (setq result (str result (string-from-code-unit code)))
+              (advance-reader reader)))))
+      result))
+
+  (defun numeric-token? (text)
+    (let ((start 0)
+          (index 0)
+          (ok (> (text-length text) 0)))
+      (when (and ok (= (char-code text 0) minus-sign))
+        (setq start 1
+              index 1))
+      (while (< index (text-length text))
+        (unless (digit-code? (char-code text index))
+          (setq ok false))
+        (setq index (1+ index)))
+      (and ok (> (text-length text) start))))
+
+  (defun read-atom (reader)
+    (let ((token (read-token reader)))
+      (cond
+        ((= token "t") t)
+        ((= token "false") false)
+        ((= token "nil") nil)
+        ((numeric-token? token) (string-to-number token))
+        ((blank token) (read-failure reader "unexpected character"))
+        (t (js-object :config-symbol token)))))
+
+  (defun read-value (reader)
+    (skip-space reader)
+    (let ((code (reader-code reader)))
+      (cond
+        ((nil? code) (read-failure reader "unexpected end of configuration"))
+        ((= code open-paren) (read-list-value reader))
+        ((= code open-brace) (read-map-value reader))
+        ((= code open-bracket) (read-vector-value reader))
+        ((= code double-quote) (read-string-value reader))
+        ((= code colon) (read-keyword-value reader))
+        (t (read-atom reader)))))
+
+  (defun read-forms (reader)
+    (let ((forms []))
+      (skip-space reader)
+      (while (not (nil? (reader-code reader)))
+        (setq forms (Collection/conj forms (read-value reader)))
+        (skip-space reader))
+      forms))
+
+  ;; --------------------------------------------------------------- structure
+
+  ;; A symbol is the reader's own marker object; `value-type` reports "object"
+  ;; for persistent collections too, so the marker is identified by its field.
+  (defun symbol-named? (value name)
+    (and (not (nil? value))
+         (not (isMap value))
+         (not (isVector value))
+         (= (get value :config-symbol nil) name)))
+
+  (defun list-starting-with? (value name)
+    (and (not (nil? value))
+         (isVector value)
+         (> (Collection/count value) 1)
+         (symbol-named? (Collection/nth value 0) name)))
+
+  (defun find-child-declaration (children name)
+    (let ((index 0)
+          (found nil))
+      (while (< index (Collection/count children))
+        (let ((child (Collection/nth children index)))
+          (when (and (nil? found) (list-starting-with? child name))
+            (setq found child)))
+        (setq index (1+ index)))
+      found))
+
+  (defun find-declaration (forms name)
+    (let ((index 0)
+          (found nil))
+      (while (< index (Collection/count forms))
+        (let ((form (Collection/nth forms index)))
+          (when (nil? found)
+            (cond
+              ((list-starting-with? form name) (setq found form))
+              ((list-starting-with? form "module")
+               (setq found (find-child-declaration form name))))))
+        (setq index (1+ index)))
+      found))
+
+  (defun load-config-value (path)
+    (let* ((source (readFileSync path "utf8"))
+           (reader (make-reader source))
+           (forms (read-forms reader))
+           (declaration (find-declaration forms "defconst")))
+      (when (nil? declaration)
+        (fail "DOGFOOD-CONFIG-002"
+              (str path ": no (defconst config ...) declaration found")))
+      (when (< (Collection/count declaration) 3)
+        (fail "DOGFOOD-CONFIG-002"
+              (str path ": defconst must bind a value")))
+      (Collection/nth declaration 2)))
+
+  ;; ---------------------------------------------------------------- validation
+
+  (defun scalar-value? (value)
+    (or (= (value-type value) "string")
+        (= (value-type value) "number")
+        (= (value-type value) "boolean")
+        (= (value-type value) "keyword")))
+
+  ;; Configuration is data. Persistent maps and vectors are accepted; a plain
+  ;; JavaScript object is the reader's symbol marker and is rejected here, and
+  ;; a list, set, queue, or function can never appear.
+  (defun data-only? (value)
+    (cond
+      ((nil? value) t)
+      ((or (undefined? value) (scalar-value? value)) (not (undefined? value)))
+      ((isVector value)
+       (let ((index 0)
+             (ok t))
+         (while (< index (Collection/count value))
+           (unless (data-only? (Collection/nth value index))
+             (setq ok false))
+           (setq index (1+ index)))
+         ok))
+      ((isMap value)
+       (let ((keys (collect-keys value))
+             (index 0)
+             (ok t))
+         (while (< index (Collection/count keys))
+           (unless (and (= (value-type (Collection/nth keys index)) "keyword")
+                        (data-only? (Collection/get value (Collection/nth keys index))))
+             (setq ok false))
+           (setq index (1+ index)))
+         ok))
+      (t nil)))
+
+  (defun map-value? (value) (isMap value))
+
+  (defun require-map (value label)
+    (unless (map-value? value)
+      (fail "DOGFOOD-CONFIG-003" (str label " must be a map")))
+    value)
+
+  (defun require-string (value label)
+    (unless (and (not (nil? value)) (= (value-type value) "string"))
+      (fail "DOGFOOD-CONFIG-003" (str label " must be a string")))
+    value)
+
+  (defun require-key (map key label)
+    (let ((value (Collection/get map key nil)))
+      (when (empty-value? value)
+        (fail "DOGFOOD-CONFIG-003" (str label " is required")))
+      value))
+
+  (defun relative-path? (text)
+    (and (not (blank text))
+         (not (startsWith "/" text))
+         (not (startsWith "~" text))
+         (not (startsWith ".." text))))
+
+  (defun collect-keys (map)
+    (Collection/reduceKV map
+                         (lambda (accumulator key value)
+                           (Collection/conj accumulator key))
+                         []))
+
+  (defun known-key? (key)
+    (let ((index 0)
+          (found false))
+      (while (and (< index (Collection/count known-keys)) (not found))
+        (when (= (Collection/nth known-keys index) key)
+          (setq found t))
+        (setq index (1+ index)))
+      found))
+
+  (defun check-source (source index)
+    (let ((label (str "sources[" index "]")))
+      (require-map source label)
+      (require-key source :id label)
+      (require-key source :kind label)
+      (require-string (require-key source :directory (str label " markdown"))
+                      (str label ".directory"))))
+
+  (defun check-sources (sources)
+    (unless (isVector sources)
+      (fail "DOGFOOD-CONFIG-003" "sources must be a vector"))
+    (when (= (Collection/count sources) 0)
+      (fail "DOGFOOD-CONFIG-003" "at least one article source is required"))
+    (let ((index 0)
+          (enabled 0))
+      (while (< index (Collection/count sources))
+        (let ((source (Collection/nth sources index)))
+          (check-source source index)
+          ;; The parsed configuration is a persistent map, so reads go through
+          ;; the collection protocol rather than JavaScript property access.
+          (when (Collection/get source :enabled false)
+            (setq enabled (1+ enabled)))
+          (let ((directory (Collection/get source :directory "")))
+            (unless (relative-path? directory)
+              (fail "DOGFOOD-CONFIG-004"
+                    (str "sources[" index "].directory must be a contained "
+                         "repository-relative path")))))
+        (setq index (1+ index)))
+      (when (= enabled 0)
+        (fail "DOGFOOD-CONFIG-003" "at least one article source must be enabled"))))
+
+  (defun validate-config (config path)
+    (require-map config "config")
+    (unless (data-only? config)
+      (fail "DOGFOOD-CONFIG-005"
+            (str path ": configuration must contain data only, never code")))
+    (let ((keys (collect-keys config))
+          (index 0))
+      (while (< index (Collection/count keys))
+        (unless (known-key? (Collection/nth keys index))
+          (fail "DOGFOOD-CONFIG-006"
+                (str path ": unknown configuration key " (Collection/nth keys index))))
+        (setq index (1+ index))))
+    (let ((version (require-key config :schema-version "config.schema-version")))
+      (unless (= version 1)
+        (fail "DOGFOOD-CONFIG-007"
+              (str path ": unsupported schema version " version))))
+    (let* ((site (require-map (require-key config :site "config.site") "site"))
+           (base-url (require-string (require-key site :base-url "config.site.base-url")
+                                     "site.base-url")))
+      (require-string (require-key site :title "config.site.title") "site.title")
+      (unless (startsWith "https://" base-url)
+        (fail "DOGFOOD-CONFIG-008"
+              "site.base-url must be an absolute https URL for production"))
+    (check-sources (require-key config :sources "config.sources"))
+    (let* ((output (require-map (require-key config :output "config.output") "output"))
+           (directory (require-string
+                        (require-key output :directory "config.output.directory")
+                        "output.directory")))
+      (unless (relative-path? directory)
+        (fail "DOGFOOD-CONFIG-004"
+              "output.directory must be a contained repository-relative path")))
+    config))
+
+  (defun load-config (path)
+    (validate-config (load-config-value path) path))
+
+  (export load-config))

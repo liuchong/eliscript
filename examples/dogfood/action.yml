@@ -1,0 +1,65 @@
+name: dogfood
+description: >-
+  Build a static blog from repository Markdown, GitHub Issues, and GitHub
+  Discussions, with native and external comment channels.
+author: liuchong
+
+branding:
+  icon: book-open
+  color: green
+
+inputs:
+  config-file:
+    description: Repository-relative Eliscript configuration file.
+    required: false
+    default: dogfood.config.eli
+  output-directory:
+    description: >-
+      Static output destination, relative to the repository root. Overrides
+      output.directory in the configuration.
+    required: false
+    default: _site
+  force:
+    description: Bypass the no-change build skip and report reason=forced.
+    required: false
+    default: "false"
+  github-token:
+    description: >-
+      Reserved for the Issues and Discussions providers. The Markdown slice
+      does not read it, so no token is required yet.
+    required: false
+  event-file:
+    description: >-
+      Reserved for event classification. The Markdown slice does not read it.
+    required: false
+  preview:
+    description: >-
+      Reserved for preview routes. The Markdown slice always builds production
+      output and does not publish drafts.
+    required: false
+    default: "false"
+  previous-manifest:
+    description: >-
+      Reserved for previous-manifest verification. The Markdown slice does not
+      read it.
+    required: false
+
+outputs:
+  built:
+    description: Whether a new site tree was produced.
+  reason:
+    description: One of changed, no-change, forced, deferred, or failed.
+  content-fingerprint:
+    description: Canonical digest of the rendered documents.
+  output-directory:
+    description: Path of the validated site artifact.
+  post-count:
+    description: Published canonical post count.
+  comment-snapshot-count:
+    description: Included comment snapshot count. Zero until comment channels land.
+  manifest:
+    description: Path to the redacted build manifest.
+
+runs:
+  using: node24
+  main: dist/action/index.js
