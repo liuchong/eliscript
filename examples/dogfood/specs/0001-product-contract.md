@@ -7,16 +7,20 @@
 ## Product
 
 dogfood is a content-first static blog that uses GitHub as an optional authoring
-and discussion system. It must support three article sources and multiple
-comment channels without requiring any one of them:
+and discussion system. Any non-empty subset of three article sources must work
+without requiring the others:
 
 1. Repository Markdown files.
 2. GitHub Issues selected by repository and label.
 3. GitHub Discussions selected by repository and category.
-4. Issue comments attached to Issue posts or explicitly bound Markdown posts.
-5. Discussion comments and replies attached to Discussion posts or explicitly
+
+Comment channels are independent of article sources, and none of them is
+required:
+
+1. Issue comments attached to Issue posts or explicitly bound Markdown posts.
+2. Discussion comments and replies attached to Discussion posts or explicitly
    bound Markdown posts.
-6. External comment providers attached globally or per post.
+3. External comment providers attached globally or per post.
 
 Any non-empty subset of the three article sources is valid. Native comments,
 external comments, both, or no comments are valid when their required bindings

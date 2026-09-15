@@ -1,6 +1,6 @@
 # dogfood Design Specifications
 
-[dogfood README](../README.md) | [Eliscript examples](../../README.md)
+[dogfood README](../README.md) | [Specification check](../tools/README.md)
 
 These specifications are the design authority for the dogfood application.
 They govern application behavior only and do not define Eliscript language,
@@ -18,6 +18,7 @@ compiler, runtime, or standard-library semantics.
 | [0008](0008-security-and-privacy.md) | Security And Privacy | Accepted design |
 | [0009](0009-delivery-and-acceptance.md) | Delivery And Acceptance | Accepted design |
 | [0010](0010-publishing-authorization.md) | Publishing Authorization | Accepted design |
+| [0011](0011-comment-adapters.md) | Comment Adapters | Accepted design |
 
 An accepted design is not implementation evidence. Executable status is tracked
 only by the gates and artifacts defined in specification 0009.

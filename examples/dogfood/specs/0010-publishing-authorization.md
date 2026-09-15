@@ -94,7 +94,9 @@ until a configured binding validates it.
 
 Utterances is the initial Issue-backed adapter: the Issue it provisions for a
 canonical post is a comment carrier. Giscus is the initial Discussion-backed
-adapter and follows the same classification rule. Provider-created carrier
+adapter and follows the same classification rule. The binding evidence each
+adapter must verify, and how a lazily provisioned carrier is rediscovered, are
+defined in [0011](0011-comment-adapters.md). Provider-created carrier
 labels are routing metadata, not publication grants.
 
 Carrier classification is terminal for article selection. The same record

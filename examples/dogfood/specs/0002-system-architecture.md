@@ -122,6 +122,22 @@ API for Discussions, comments, and replies. It authenticates at build time,
 paginates serially, uses conditional requests where supported, and stops on
 rate-limit instructions instead of retrying in a tight loop.
 
+Because carrier classification and publication authorization precede article
+metadata parsing, a provider cannot fetch bodies first. Every provider runs in
+two phases:
+
+1. **Metadata scan.** Paginate list endpoints for every enabled source, reading
+   only record identity, author, labels or category, state, timestamps, and
+   counts.
+2. **Expansion.** Fetch bodies, comment snapshots, and reply topology only for
+   records that survived authorization and carrier classification.
+
+Both phases enforce the page, record, byte, and duration bounds of
+specification 0008. A required source that exceeds a bound fails closed; an
+optional source follows its configured failure policy. Carrier discovery is
+part of the metadata scan, so a carrier provisioned by an external adapter
+between two builds is classified before any article filter runs.
+
 Unauthenticated browser REST access is limited to public data and a small lazy
 request budget. Direct browser GraphQL access is not used because Discussion
 queries require authentication. Live Discussion interaction is supplied by an

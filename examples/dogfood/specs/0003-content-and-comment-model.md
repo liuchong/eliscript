@@ -15,7 +15,7 @@ Every provider produces the same immutable application value:
 | `title` | Display title |
 | `summary` | Plain-text or sanitized summary |
 | `body` | Sanitized rendered body |
-| `source-body` | Optional source Markdown retained only during build |
+| `source-body` | Optional source Markdown used only during build and dropped before the model crosses to the renderer |
 | `published-at` | Original publication instant |
 | `updated-at` | Last content update instant |
 | `authors` | Stable author records |
@@ -92,7 +92,8 @@ Source order controls display tie-breaking only. It is not a deduplication rule.
 
 Slugs are normalized once and validated for path safety. Duplicate slugs fail
 even when canonical ids differ. A changed slug requires the prior slug in
-`aliases`; the generator emits redirect pages without client-side dependence.
+`aliases`; the generator emits redirect documents that work without
+JavaScript.
 
 Canonical routes use `posts/<slug>/`. Provider URLs remain visible source links
 and never replace the canonical route.
@@ -145,6 +146,7 @@ The initial Issue-backed carrier is the Utterances adapter. Its generated Issue
 is represented as an `utterances` comment channel with Issue provenance, not as
 an `issue` article source. Giscus follows the same rule for its Discussion-backed
 carrier. Generic adapters must declare their carrier resource kind explicitly.
+The adapter binding rules are defined in [0011](0011-comment-adapters.md).
 
 ## Ordering
 

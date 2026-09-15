@@ -10,9 +10,32 @@ The canonical configuration file is `dogfood.config.eli`. It is an Eliscript
 module exporting one immutable `config` value. There is no handwritten
 `site.config.js`.
 
-The Action evaluates configuration through the packaged self-hosted compiler in
-a restricted configuration capability set. Configuration cannot read arbitrary
-files, start processes, access the network, or inspect secrets.
+### Trust Model
+
+`dogfood.config.eli` is checked repository source. It is trusted exactly as far
+as the consumer workflow that runs it: anyone who can change the configuration
+can already change the workflow and the build source. The configuration
+boundary is therefore a schema and reproducibility boundary, not a security
+sandbox.
+
+The builder evaluates the configuration by compiling and importing the module
+with the packaged compiler capability. It does not claim a capability sandbox
+around that evaluation, because the platform host-capability packages are
+explicitly object-capability APIs rather than a JavaScript sandbox, and
+Eliscript source can always use explicit interop. Two enforceable rules replace
+an unenforceable capability claim:
+
+1. The configuration module is a closed data module. Its dependency graph is
+   empty: it declares constants and exports `config`, and it imports no module,
+   local or external.
+2. The value bound to `config` is validated against the closed schema below
+   before any source is fetched. Static interop forms (`js*`, `js-call`, `new`)
+   in the configuration module are a validation error.
+
+A module that violates either rule fails the build before any network request.
+Untrusted input never enters configuration: event payloads, repository
+content, provider responses, secrets, and Action inputs cannot contribute
+configuration values or executable forms.
 
 ## Top-Level Shape
 
@@ -47,7 +70,8 @@ files, start processes, access the network, or inspect secrets.
       :comments :runtime
       :snapshot-schedule "37 */6 * * *"
       :no-change :skip}
-     :output {:directory "_site"}}))
+     :output {:directory "_site"}})
+  (export config))
 ```
 
 This snippet defines the target data shape. The implementation gate must compile
@@ -110,10 +134,11 @@ Native comments may derive a binding from the article provenance only when the
 article itself came from that provider. Markdown and cross-provider bindings
 must be explicit.
 
-External providers implement a declared adapter protocol. Initial delivery
-targets Utterances for Issue-backed comments, Giscus for Discussion-backed
-comments, and a generic script/embed adapter. Additional systems do not require
-a core or renderer rewrite.
+External providers implement the declared adapter protocol in
+[0011](0011-comment-adapters.md). Initial delivery targets Utterances for
+Issue-backed comments, Giscus for Discussion-backed comments, and a generic
+script/embed adapter. Additional systems do not require a core or renderer
+rewrite.
 
 ## Article Refresh Policy
 

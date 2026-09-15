@@ -2,7 +2,8 @@
 
 - Status: Accepted design
 - Implementation: Not started
-- Depends on: 0001 through 0008, 0010 Publishing Authorization
+- Depends on: 0001 through 0008, 0010 Publishing Authorization,
+  0011 Comment Adapters
 
 ## Progress Model
 
@@ -10,8 +11,31 @@ Design, implementation, verification, publication, and real site acceptance are
 separate tracks. File count, line count, commit count, elapsed time, and an
 Action process exit are not completion measures.
 
-Current design status is 10/10 accepted specifications. Executable
+Current design status is 11/11 accepted specifications. Executable
 implementation is 0/8 gates. Final application acceptance is 0/13 criteria.
+
+## Implementation Order
+
+Gates are delivered as vertical slices, not as a design phase followed by a
+build phase. Each slice must leave the previous slice working, and the design
+record is corrected by implementation evidence rather than frozen ahead of it.
+
+| Slice | Contents | Gates advanced |
+| --- | --- | --- |
+| S0 | Specification checker under `tools/`; design consistency enforced mechanically | none (tooling) |
+| S1 | Markdown-only static site: one project, one builder entry, one renderer entry, no GitHub API, no comments | I1, I2 |
+| S2 | One remote source, Issues first: authorization, carrier classification, pagination | I3 |
+| S3 | One native comment channel, then one external adapter | I5 |
+| S4 | Production site experience on the working site | I6 |
+| S5 | Standalone Action and Pages workflow | I7, I8 |
+| S6 | Discussion provider and the full source and comment matrix | I4, matrix evidence |
+
+S0 is complete and is tooling evidence only. It does not advance a gate. S1 is
+the next executable increment and is deliberately narrower than I1 and I2 as
+written: it omits the compiler capability bundle, the standalone export, and
+every remote provider so that configuration loading, canonical identity,
+deterministic rendering, the renderer boundary, and atomic output replacement
+are proven on the smallest possible surface.
 
 ## Implementation Gates
 
@@ -96,8 +120,8 @@ Invalid combinations must have deterministic diagnostics and no output mutation.
 
 ## Final Acceptance Standard
 
-Final application acceptance is all-or-nothing. All twelve criteria must pass
-on one source identity:
+Final application acceptance is all-or-nothing. All 13 criteria must pass on
+one source identity:
 
 | ID | Criterion | Required evidence |
 | --- | --- | --- |

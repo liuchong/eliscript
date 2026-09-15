@@ -40,6 +40,24 @@ same sanitizer policy applies to article bodies and static comment snapshots.
 
 Code highlighting must escape source text before markup insertion.
 
+### Markdown And Sanitization Boundary
+
+Markdown rendering and sanitization run in the builder, before the normalized
+model crosses to the renderer. The renderer receives sanitized bodies and never
+parses untrusted Markdown itself, so one boundary owns the policy and the
+renderer keeps no sanitizer dependency.
+
+Rendering and sanitization are reached through explicit Eliscript imports of
+pinned application packages, and they are bundled into the Action. They are
+never a hand-written JavaScript glue file, and no unpublished fork is patched
+into the project. Because the builder runs on Node without a DOM, a sanitizer
+that requires one is paired with a pinned DOM implementation in the same
+declared dependency set; a DOM-free sanitizer is preferred.
+
+One module declares the allowlist, URL scheme policy, and raw-HTML switch. Both
+article bodies and comment snapshots pass through that one declaration. A
+second sanitizer path would be a configuration error rather than a fallback.
+
 ## External Comment Providers
 
 Each external adapter declares:
@@ -50,7 +68,9 @@ Each external adapter declares:
 - content-security-policy additions;
 - lazy-load behavior;
 - failure fallback;
-- integrity or version pinning policy.
+- an integrity, version pinning, or origin allowlist policy. A provider that
+  publishes no subresource integrity metadata must be pinned by version and
+  origin instead.
 
 Unknown script URLs fail configuration validation. An adapter cannot receive
 the article body or build token unless its protocol explicitly requires and

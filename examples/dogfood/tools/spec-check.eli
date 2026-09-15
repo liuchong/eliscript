@@ -1,0 +1,609 @@
+;; dogfood specification checker.
+;;
+;; This program validates the dogfood design documents for internal
+;; consistency, so design drift is caught mechanically instead of by review.
+;; It is dogfood's first executable artifact and it consumes only the public
+;; Eliscript runtime boundary plus explicit Node host interop for files,
+;; arguments, and the exit status.
+;;
+;; Rules are documented in README.md beside this file. Each issue carries a
+;; stable code so tests can assert the exact failure the checker must report.
+
+(module dogfood.tools.spec-check
+  (import "node:fs" readdirSync readFileSync statSync)
+  (import "node:path" join)
+
+  (defconst program-arguments (js* "process.argv"))
+  (defconst set-exit-code (js* "(code) => { process.exitCode = code; }"))
+
+  ;; ------------------------------------------------------------------
+  ;; Text primitives
+  ;;
+  ;; A host-bound tool calls native string operations directly instead of
+  ;; importing the portable text library, so the compiled checker stays one
+  ;; self-contained module with no relative imports.
+  ;; ------------------------------------------------------------------
+
+  (defun text-trim (text) (js-call text :trim))
+
+  (defun text-blank? (text) (= (length (text-trim text)) 0))
+
+  (defun text-starts-with? (prefix text) (js-call text :startsWith prefix))
+
+  (defun text-ends-with? (suffix text) (js-call text :endsWith suffix))
+
+  (defun text-contains? (needle text) (js-call text :includes needle))
+
+  (defun text-slice (start end text) (js-call text :slice start end))
+
+  (defun text-index-of (needle text) (js-call text :indexOf needle))
+
+  (defun digit-code? (code) (and (>= code 48) (<= code 57)))
+
+  ;; Collect every decimal integer in one line, in source order.
+  (defun integers-in (text)
+    (let ((result (js-array))
+          (index 0)
+          (current 0)
+          (in-number false))
+      (while (< index (length text))
+        (let ((code (string-code-unit-at text index)))
+          (if (digit-code? code)
+              (setq current (+ (* current 10) (- code 48))
+                    in-number t)
+            (when in-number
+              (js-call result :push current)
+              (setq current 0 in-number false))))
+        (setq index (1+ index)))
+      (when in-number (js-call result :push current))
+      result))
+
+  ;; ------------------------------------------------------------------
+  ;; Sequence helpers
+  ;; ------------------------------------------------------------------
+
+  (defun join-strings (separator values)
+    (let ((result "")
+          (index 0))
+      (while (< index (length values))
+        (when (> index 0)
+          (setq result (str result separator)))
+        (setq result (str result (nth index values))
+              index (1+ index)))
+      result))
+
+  (defun member-of? (value values)
+    (let ((index 0)
+          (found false))
+      (while (and (< index (length values)) (not found))
+        (when (= value (nth index values))
+          (setq found t))
+        (setq index (1+ index)))
+      found))
+
+  (defun add-issue (issues code file line message)
+    (js-call issues :push
+             (js-object :code code :file file :line line :message message)))
+
+  (defun compare-issues (left right)
+    (let ((left-file (str (get left :file "")))
+          (right-file (str (get right :file ""))))
+      (cond
+        ((not (= left-file right-file))
+         (if (< left-file right-file) -1 1))
+        ((not (= (get left :line 0) (get right :line 0)))
+         (if (< (get left :line 0) (get right :line 0)) -1 1))
+        ((= (get left :code "") (get right :code "")) 0)
+        ((< (get left :code "") (get right :code "")) -1)
+        (t 1))))
+
+  ;; ------------------------------------------------------------------
+  ;; Paths
+  ;; ------------------------------------------------------------------
+
+  (defun basename (path)
+    (let ((slash (last-index-of-string "/" path)))
+      (if (< slash 0) path (text-slice (1+ slash) (length path) path))))
+
+  (defun dirname (path)
+    (let ((slash (last-index-of-string "/" path)))
+      (if (< slash 0) "" (text-slice 0 slash path))))
+
+  (defun last-index-of-string (needle text)
+    (js-call text :lastIndexOf needle))
+
+  (defun skip-entry? (name)
+    (or (text-starts-with? "." name)
+        (= name "node_modules")
+        (= name "dist")))
+
+  ;; Normalize "base/target" and return nil when it escapes the project root.
+  (defun normalize-relative (base target)
+    (let ((combined (if (= base "") target (str base "/" target)))
+          (parts (js-call (if (= base "") target (str base "/" target)) :split "/"))
+          (stack (js-array))
+          (index 0)
+          (escaped false))
+      (while (< index (length parts))
+        (let ((part (nth index parts)))
+          (cond
+            ((or (= part "") (= part ".")) nil)
+            ((= part "..")
+             (if (> (length stack) 0)
+                 (js-call stack :pop)
+               (setq escaped t)))
+            (t (js-call stack :push part))))
+        (setq index (1+ index)))
+      (if escaped nil (join-strings "/" stack))))
+
+  ;; ------------------------------------------------------------------
+  ;; File discovery
+  ;; ------------------------------------------------------------------
+
+  (defun collect-files (root)
+    (let ((files (js-array))
+          (pending (js-array "")))
+      (while (> (length pending) 0)
+        (let* ((relative-directory (js-call pending :pop))
+               (directory (if (= relative-directory "")
+                              root
+                            (join root relative-directory)))
+               (names (readdirSync directory))
+               (index 0))
+          (while (< index (length names))
+            (let* ((name (nth index names))
+                   (relative (if (= relative-directory "")
+                                 name
+                               (str relative-directory "/" name)))
+                   (absolute (join root relative)))
+              (unless (skip-entry? name)
+                (if (js-call (statSync absolute) :isDirectory)
+                    (js-call pending :push relative)
+                  (js-call files :push relative))))
+            (setq index (1+ index)))))
+      (js-call files :sort)
+      files))
+
+  (defun file-text (files path)
+    (let ((index 0)
+          (found nil))
+      (while (and (< index (length files)) (not found))
+        (let ((entry (nth index files)))
+          (when (= (get entry :path) path)
+            (setq found (get entry :text))))
+        (setq index (1+ index)))
+      found))
+
+  ;; ------------------------------------------------------------------
+  ;; Markdown parsing
+  ;; ------------------------------------------------------------------
+
+  (defun split-lines (text) (js-call text :split "\n"))
+
+  (defun first-non-blank-index (lines)
+    (let ((index 0)
+          (found -1))
+      (while (and (< index (length lines)) (< found 0))
+        (unless (text-blank? (nth index lines))
+          (setq found index))
+        (setq index (1+ index)))
+      found))
+
+  (defun metadata-value (lines prefix)
+    (let ((index 0)
+          (found nil))
+      (while (and (< index (length lines)) (not found))
+        (let ((line (text-trim (nth index lines))))
+          (when (text-starts-with? prefix line)
+            (setq found (text-trim (text-slice (length prefix) (length line) line)))))
+        (setq index (1+ index)))
+      found))
+
+  (defun collect-prefixed-cells (lines prefix)
+    (let ((cells (js-array))
+          (index 0))
+      (while (< index (length lines))
+        (let ((line (text-trim (nth index lines))))
+          (when (text-starts-with? prefix line)
+            (let ((cell (table-first-cell line)))
+              (when cell (js-call cells :push cell)))))
+        (setq index (1+ index)))
+      cells))
+
+  (defun table-first-cell (line)
+    (let ((trimmed (text-trim line)))
+      (if (text-starts-with? "|" trimmed)
+          (let* ((body (text-slice 1 (length trimmed) trimmed))
+                 (bar (text-index-of "|" body)))
+            (if (< bar 0) nil (text-trim (text-slice 0 bar body))))
+        nil)))
+
+  (defun heading-id (line)
+    (let* ((trimmed (text-trim line))
+           (body (text-slice 4 (length trimmed) trimmed))
+           (colon (text-index-of ":" body)))
+      (if (< colon 0) (text-trim body) (text-trim (text-slice 0 colon body)))))
+
+  (defun find-line-containing (lines needle)
+    (let ((index 0)
+          (found nil))
+      (while (and (< index (length lines)) (not found))
+        (when (text-contains? needle (nth index lines))
+          (setq found (nth index lines)))
+        (setq index (1+ index)))
+      found))
+
+  ;; Extract every "](" ... ")" markdown link target in one document.
+  (defun markdown-links (text)
+    (let ((links (js-array))
+          (offset 0)
+          (length (length text)))
+      (while (< offset length)
+        (let ((open (text-index-of "](" (text-slice offset length text))))
+          (if (< open 0)
+              (setq offset length)
+            (let* ((start (+ offset open 2))
+                   (close (text-index-of ")" (text-slice start length text))))
+              (if (< close 0)
+                  (setq offset length)
+                (progn
+                  (js-call links :push (text-slice start (+ start close) text))
+                  (setq offset (+ start close 1))))))))
+      links))
+
+  (defun spec-basename? (name)
+    (and (>= (length name) 5)
+         (digit-code? (string-code-unit-at name 0))
+         (digit-code? (string-code-unit-at name 1))
+         (digit-code? (string-code-unit-at name 2))
+         (digit-code? (string-code-unit-at name 3))
+         (text-ends-with? ".md" name)))
+
+  (defun spec-file? (path)
+    (and (text-starts-with? "specs/" path)
+         (text-ends-with? ".md" path)
+         (not (= path "specs/README.md"))))
+
+  (defun spec-file-id (path)
+    (text-slice 0 4 (basename path)))
+
+  ;; ------------------------------------------------------------------
+  ;; Rules
+  ;; ------------------------------------------------------------------
+
+  (defun check-heading (issues file lines)
+    (let ((heading-index (first-non-blank-index lines)))
+      (if (< heading-index 0)
+          (add-issue issues "DF-HEADING" file 1
+                     "specification must not be empty")
+        (let ((heading (text-trim (nth heading-index lines)))
+              (line-number (+ heading-index 1)))
+          (if (not (text-starts-with? "# " heading))
+              (add-issue issues "DF-HEADING" file line-number
+                         "specification must begin with a level-one heading")
+            (let* ((body (text-slice 2 (length heading) heading))
+                   (colon (text-index-of ":" body)))
+              (if (< colon 1)
+                  (add-issue issues "DF-HEADING" file line-number
+                             "heading must use the form \"# NNNN: Title\"")
+                (let ((identifier (text-trim (text-slice 0 colon body)))
+                      (title (text-trim (text-slice (+ colon 1) (length body) body))))
+                  (when (text-blank? title)
+                    (add-issue issues "DF-HEADING" file line-number
+                               "heading title must not be empty"))
+                  (unless (= identifier (spec-file-id file))
+                    (add-issue issues "DF-ID" file line-number
+                               (str "heading id \"" identifier
+                                    "\" must match the file id \""
+                                    (spec-file-id file) "\"")))))))))))
+
+  (defun check-metadata (issues file lines)
+    (let ((status (metadata-value lines "- Status:"))
+          (implementation (metadata-value lines "- Implementation:")))
+      (if (not status)
+          (add-issue issues "DF-METADATA" file 0
+                     "missing \"- Status:\" metadata")
+        (unless (member-of? status (js-array "Accepted design" "Draft design"
+                                             "Superseded design"))
+          (add-issue issues "DF-METADATA" file 0
+                     (str "unsupported status \"" status "\""))))
+      (if (not implementation)
+          (add-issue issues "DF-METADATA" file 0
+                     "missing \"- Implementation:\" metadata")
+        (unless (member-of? implementation (js-array "Not started" "In progress"
+                                                     "Implemented" "Superseded"))
+          (add-issue issues "DF-METADATA" file 0
+                     (str "unsupported implementation \"" implementation "\""))))))
+
+  (defun check-index-coverage (issues spec-files spec-index)
+    (let ((index 0))
+      (while (< index (length spec-files))
+        (let ((path (get (nth index spec-files) :path)))
+          (unless (text-contains? (str "](" (basename path) ")") spec-index)
+            (add-issue issues "DF-INDEX-MISSING" "specs/README.md" 0
+                       (str "specification " (basename path)
+                            " is not linked from the index"))))
+        (setq index (1+ index)))))
+
+  (defun check-index-staleness (issues spec-files spec-index)
+    (let ((links (markdown-links spec-index))
+          (index 0))
+      (while (< index (length links))
+        (let ((target (nth index links)))
+          (when (spec-basename? target)
+            (let ((resolved (normalize-relative "specs" target)))
+              (unless (and resolved (file-exists? spec-files resolved))
+                (add-issue issues "DF-INDEX-STALE" "specs/README.md" 0
+                           (str "index links missing specification " target))))))
+        (setq index (1+ index)))))
+
+  (defun check-spec-index (issues spec-files spec-index)
+    (if (not spec-index)
+        (add-issue issues "DF-INDEX" "specs/README.md" 0
+                   "missing specification index")
+      (progn
+        (check-index-coverage issues spec-files spec-index)
+        (check-index-staleness issues spec-files spec-index))))
+
+  (defun file-exists? (files path)
+    (let ((index 0)
+          (found false))
+      (while (and (< index (length files)) (not found))
+        (when (= (get (nth index files) :path) path)
+          (setq found t))
+        (setq index (1+ index)))
+      found))
+
+  ;; Compare one README progress row against a computed count.
+  (defun check-readme-row (issues readme path label position expected)
+    (if (not readme)
+        (add-issue issues "DF-README" path 0 "missing project README")
+      (let* ((lines (split-lines readme))
+             (line (find-line-containing lines label)))
+        (if (not line)
+            (add-issue issues "DF-README" path 0
+                       (str "README is missing the \"" label "\" progress row"))
+          (let* ((numbers (integers-in line))
+                 (actual (if (< (length numbers) 2)
+                             -1
+                           (nth (if (= position 0) 0 1) numbers))))
+            (unless (= actual expected)
+              (add-issue issues "DF-README" path 0
+                         (str "\"" label "\" declares " actual
+                              " but the design documents contain " expected))))))))
+
+  (defun check-criteria (issues specification lines)
+    (let ((criteria-cells (collect-prefixed-cells lines "| DF-"))
+          (gate-ids (js-array))
+          (row-ids (js-array)))
+      (let ((index 0))
+        (while (< index (length criteria-cells))
+          (js-call row-ids :push (nth index criteria-cells))
+          (setq index (1+ index))))
+      ;; Unique acceptance criteria identifiers.
+      (let ((index 0))
+        (while (< index (length row-ids))
+          (let ((earlier 0)
+                (duplicate false))
+            (while (< earlier index)
+              (when (= (nth earlier row-ids) (nth index row-ids))
+                (setq duplicate t))
+              (setq earlier (1+ earlier)))
+            (when duplicate
+              (add-issue issues "DF-CRITERIA" specification 0
+                         (str "duplicate acceptance criterion " (nth index row-ids)))))
+          (setq index (1+ index))))
+      ;; Gate headings are the implementation-gate denominator.
+      (let ((index 0))
+        (while (< index (length lines))
+          (let ((line (nth index lines)))
+            (when (text-starts-with? "### I" (text-trim line))
+              (js-call gate-ids :push (heading-id line))))
+          (setq index (1+ index))))
+      ;; Prose count must use an arabic numeral equal to the table length.
+      (let ((prose (find-line-containing lines "criteria must pass")))
+        (if (not prose)
+            (add-issue issues "DF-CRITERIA-PROSE" specification 0
+                       "acceptance standard must state the criterion count")
+          (let* ((numbers (integers-in prose))
+                 (stated (if (> (length numbers) 0)
+                             (nth (1- (length numbers)) numbers)
+                           -1)))
+            (unless (= stated (length row-ids))
+              (add-issue issues "DF-CRITERIA-PROSE" specification 0
+                         (str "acceptance standard states " stated
+                              " criteria but the table lists " (length row-ids)))))))
+      (js-object :criteria (length row-ids) :gates (length gate-ids)))))
+
+  (defun skip-link? (raw target)
+    (or (= target "")
+        (text-starts-with? "#" raw)
+        (text-contains? "://" target)
+        (text-starts-with? "mailto:" target)))
+
+  (defun check-link (issues files path base raw)
+    (let* ((hash (text-index-of "#" raw))
+           (target (if (< hash 0) raw (text-slice 0 hash raw))))
+      (unless (skip-link? raw target)
+        (let ((resolved (normalize-relative base target)))
+          (cond
+            ((not resolved)
+             (add-issue issues "DF-LINK-ESCAPE" path 0
+                        (str "relative link \"" target
+                             "\" escapes the project root")))
+            ((not (file-exists? files resolved))
+             (add-issue issues "DF-LINK-MISSING" path 0
+                        (str "relative link \"" target
+                             "\" does not resolve to a file"))))))))
+
+  (defun markdown-file? (path) (text-ends-with? ".md" path))
+
+  (defun check-file-links (issues files entry)
+    (let* ((path (get entry :path))
+           (base (dirname path))
+           (links (markdown-links (get entry :text)))
+           (link-index 0))
+      (when (markdown-file? path)
+        (while (< link-index (length links))
+          (check-link issues files path base (nth link-index links))
+          (setq link-index (1+ link-index))))))
+
+  (defun check-links (issues files)
+    (let ((index 0))
+      (while (< index (length files))
+        (check-file-links issues files (nth index files))
+        (setq index (1+ index)))))
+
+  ;; ------------------------------------------------------------------
+  ;; Program
+  ;; ------------------------------------------------------------------
+
+  (defun parse-arguments (arguments)
+    (let ((root ".")
+          (json false)
+          (help false)
+          (index 2))
+      (while (< index (length arguments))
+        (let ((argument (nth index arguments)))
+          (cond
+            ((= argument "--help") (setq help t))
+            ((= argument "--json") (setq json t))
+            ((= argument "--root")
+             (setq index (1+ index))
+             (when (< index (length arguments))
+               (setq root (nth index arguments))))
+            (t nil)))
+        (setq index (1+ index)))
+      (js-object :root root :json json :help help)))
+
+  (defun print-help ()
+    (print "Usage: spec-check [--root DIR] [--json] [--help]")
+    (print "")
+    (print "Validate the dogfood design documents for internal consistency.")
+    (print "Exits nonzero when any rule fails. See README.md for the rule set."))
+
+  (defun report-issues (issues)
+    (let ((index 0))
+      (while (< index (length issues))
+        (let ((issue (nth index issues)))
+          (print (str "  " (get issue :file "")
+                      ":" (get issue :line 0)
+                      "  " (get issue :code "")
+                      "  " (get issue :message))))
+        (setq index (1+ index)))))
+
+  (defun load-files (root)
+    (let* ((names (collect-files root))
+           (files (js-array))
+           (index 0))
+      (while (< index (length names))
+        (let* ((relative (nth index names))
+               (path (join root relative)))
+          (js-call files :push
+                   (js-object :path relative :text (readFileSync path "utf8"))))
+        (setq index (1+ index)))
+      files))
+
+  (defun spec-entries (files)
+    (let ((entries (js-array))
+          (index 0))
+      (while (< index (length files))
+        (let ((entry (nth index files)))
+          (when (spec-file? (get entry :path))
+            (js-call entries :push entry)))
+        (setq index (1+ index)))
+      entries))
+
+  (defun check-duplicates (issues spec-files)
+    (let ((index 0))
+      (while (< index (length spec-files))
+        (let ((earlier 0)
+              (duplicate false))
+          (while (< earlier index)
+            (when (= (spec-file-id (get (nth earlier spec-files) :path))
+                     (spec-file-id (get (nth index spec-files) :path)))
+              (setq duplicate t))
+            (setq earlier (1+ earlier)))
+          (when duplicate
+            (add-issue issues "DF-DUPLICATE"
+                       (get (nth index spec-files) :path) 0
+                       "duplicate specification identifier")))
+        (setq index (1+ index)))))
+
+  (defun check-spec-structure (issues spec-files)
+    (let ((index 0))
+      (while (< index (length spec-files))
+        (let* ((entry (nth index spec-files))
+               (lines (split-lines (get entry :text))))
+          (check-heading issues (get entry :path) lines)
+          (check-metadata issues (get entry :path) lines))
+        (setq index (1+ index)))))
+
+  (defun check-acceptance (issues files spec-files)
+    (let* ((specification "specs/0009-delivery-and-acceptance.md")
+           (text (file-text files specification))
+           (readme (file-text files "README.md")))
+      (if (not text)
+          (add-issue issues "DF-CRITERIA" specification 0
+                     "missing delivery and acceptance specification")
+        (let ((counts (check-criteria issues specification
+                                      (split-lines text))))
+          (check-readme-row issues readme "README.md"
+                            "Executable implementation gates" 1
+                            (get counts :gates 0))
+          (check-readme-row issues readme "README.md"
+                            "Final application acceptance" 1
+                            (get counts :criteria 0))))
+      (check-readme-row issues readme "README.md"
+                        "Product and architecture design" 0
+                        (length spec-files))))
+
+  (defun emit-report (root spec-files issues json)
+    (if json
+        (print (JSON/stringify
+                (js-object :ok (= (length issues) 0)
+                           :root root
+                           :specCount (length spec-files)
+                           :issueCount (length issues)
+                           :issues issues)))
+      (progn
+        (print (str "dogfood specification check: " root))
+        (print (str "  specifications: " (length spec-files)))
+        (print (str "  issues: " (length issues)))
+        (report-issues issues))))
+
+  (defun run-check (root json)
+    (let* ((files (load-files root))
+           (spec-files (spec-entries files))
+           (issues (js-array)))
+      (check-duplicates issues spec-files)
+      (check-spec-structure issues spec-files)
+      (check-spec-index issues spec-files (file-text files "specs/README.md"))
+      (check-acceptance issues files spec-files)
+      (check-links issues files)
+      (js-call issues :sort compare-issues)
+      (emit-report root spec-files issues json)
+      (length issues)))
+
+  (defun directory-exists? (path)
+    (try
+      (js-call (statSync path) :isDirectory)
+      (catch _error false)))
+
+  (defun main ()
+    (let* ((options (parse-arguments program-arguments))
+           (root (get options :root "."))
+           (json (get options :json false)))
+      (cond
+        ((get options :help false) (print-help))
+        ((not (directory-exists? root))
+         (if json
+             (print (JSON/stringify
+                     (js-object :ok false :root root
+                                :error "root is not a directory")))
+           (print (str "spec-check: " root " is not a directory")))
+         (funcall set-exit-code 1))
+        (t (funcall set-exit-code
+                    (if (> (run-check root json) 0) 1 0))))))
+
+  (main)

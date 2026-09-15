@@ -17,20 +17,40 @@ prevents comment events from entering the default build workflow.
 
 The default Pages workflow responds to:
 
-- `push` paths for Markdown, assets, configuration, and dogfood source;
-- eligible `issues` events that change article content or publication state;
-- eligible `discussion` events that change article content or publication
-  state;
+- `push` for Markdown, assets, configuration, and dogfood source;
+- `issues` types `labeled`, `unlabeled`, `edited`, `closed`, `reopened`, and
+  `transferred`;
+- `discussion` types `edited`, `labeled`, `unlabeled`, `closed`, `reopened`,
+  `answered`, and `unanswered`;
 - a bounded `schedule` for reconciliation and optional comment snapshots;
 - `workflow_dispatch` for an explicit forced rebuild.
 
 It does not subscribe to `issue_comment` or `discussion_comment`.
 
+### Creation Events Are Opt-In
+
+`issues.opened` and `discussion.created` are excluded from the default
+template. Neither can be author-filtered before a runner starts, so subscribing
+to them lets any user who can open a record consume runner capacity at will.
+Authoring still reaches the site without them:
+
+- a new remote article becomes eligible when a trusted actor applies the
+  publication label or category, which emits `labeled` or `edited`;
+- a new record that already matches is picked up by the bounded schedule;
+- `workflow_dispatch` forces immediate pickup.
+
+A consumer may opt in to creation events. The generated template then states
+that every created record starts a runner, and that the skip decisions below
+are observable but not free.
+
+### Skip Decisions Are Not Zero Runs
+
 Issue and Discussion events are classified from trusted API records before a
 full build. Events for unauthorized article authors or records classified as
 comment carriers produce a skipped decision with no render, upload, or deploy.
-Because event delivery itself has already started a workflow, these skips are
-reported separately from the zero-build guarantee for comment events.
+Every subscribed event has already started a workflow, so these skips are
+reported separately from the zero-build guarantee for comment events and they
+are counted as runner starts in the quota evidence.
 
 Issue comments may use credential-free browser REST loading for public
 repositories. Native Discussion comments use scheduled static snapshots unless
@@ -132,11 +152,17 @@ The comment policy must pass deterministic simulations:
 5. A manual force run builds even when the content fingerprint is unchanged and
    records `reason=forced`.
 6. One hundred Issue or Discussion article-shaped records from unauthorized
-   authors produce zero renders, uploads, or deployments.
+   authors produce zero renders, uploads, or deployments, and the evidence
+   reports the runner starts they did consume.
 7. A comment-provider-created Issue with an article label remains a comment
    carrier and produces zero article routes.
+8. One hundred `issue_comment` or `discussion_comment` events produce zero
+   workflow runs in the default template.
+9. One hundred creation events of the excluded types produce zero workflow runs
+   in the default template.
 
-Tests count requested builds, renders, uploads, and deploy decisions separately.
+Tests count event receipt, runner start, scan, render, upload, and deploy
+separately.
 
 ## Freshness Contract
 

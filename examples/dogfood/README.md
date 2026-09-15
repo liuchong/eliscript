@@ -1,6 +1,6 @@
 # dogfood
 
-[Examples](../README.md) | [Design specifications](specs/README.md)
+[Design specifications](specs/README.md) | [Specification check](tools/README.md)
 
 dogfood is a GitHub-native static blog and the production application proving
 ground for Eliscript. It is designed to combine repository Markdown, GitHub
@@ -21,13 +21,18 @@ Packaged JavaScript under `dist/` is compiler output, not handwritten source.
 
 | Track | Complete | Remaining | Evidence |
 | --- | ---: | ---: | --- |
-| Product and architecture design | 10/10 (100%) | 0/10 (0%) | [Specification index](specs/README.md) |
+| Product and architecture design | 11/11 (100%) | 0/11 (0%) | [Specification index](specs/README.md) |
 | Executable implementation gates | 0/8 (0%) | 8/8 (100%) | [Delivery plan](specs/0009-delivery-and-acceptance.md) |
 | Final application acceptance | 0/13 (0%) | 13/13 (100%) | [Acceptance standard](specs/0009-delivery-and-acceptance.md#final-acceptance-standard) |
 
 This is a design-complete scaffold, not yet a working Action or site. No
 `action.yml`, generated Action bundle, release tag, Pages deployment, or
 Marketplace listing is claimed in this state.
+
+The first executable artifact is the [specification checker](tools/README.md),
+an Eliscript program that validates this design set for internal consistency.
+It is development tooling. It does not implement the product and does not
+advance an implementation gate.
 
 ## Required Capabilities
 
@@ -94,6 +99,7 @@ dogfood/
   src/renderer/components/
   src/renderer/theme/
   templates/workflows/
+  tools/
   tests/
   specs/
   toolchain/
@@ -120,3 +126,4 @@ browser renderer. A consumer runner does not need Emacs or Bun.
 | [0008](specs/0008-security-and-privacy.md) | Trust, permissions, sanitization, and private data |
 | [0009](specs/0009-delivery-and-acceptance.md) | Implementation gates and final acceptance standard |
 | [0010](specs/0010-publishing-authorization.md) | Owner, coauthor, comment-only, and carrier authorization |
+| [0011](specs/0011-comment-adapters.md) | Comment adapter protocol, carrier binding, and discovery |
