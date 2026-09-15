@@ -4,6 +4,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+// The site's script is a build artifact rather than a source file.
+const GENERATED_ASSETS = Object.freeze(["assets/eliscript-loader.js", "pages/assets/eliscript-loader.js"]);
 const SITE_FILES = [
   "docs/index.html",
   "docs/pages/api.html",
@@ -48,6 +51,18 @@ test("Pages site has complete local navigation and assets", async () => {
       }
       if (!localReference(reference)) continue;
       const target = reference.split(/[?#]/u, 1)[0];
+      if (GENERATED_ASSETS.includes(target)) {
+        // The loader is compiled from Eliscript by `bun run build:docs-site`
+        // and published by the assembler, so it is not a file in the source
+        // tree. The page names the source it compiles, and that file is
+        // checked below.
+        const declared = attributes(source, "data-eliscript");
+        expect(declared.length).toBeGreaterThan(0);
+        for (const candidate of declared) {
+          await access(path.resolve(ROOT, path.dirname(file), candidate));
+        }
+        continue;
+      }
       await access(path.resolve(ROOT, path.dirname(file), target));
     }
   }
