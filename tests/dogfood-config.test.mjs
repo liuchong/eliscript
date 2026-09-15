@@ -242,6 +242,56 @@ test("a hybrid channel is accepted", async () => {
   expect(failure).toBeUndefined();
 });
 
+const PRIVATE_ISSUES = '{:id :notes :kind :issues :enabled t'
+  + ' :repository "owner/repository" :label "published" :visibility :private}';
+
+test("a private source needs explicit acknowledgement", async () => {
+  const { failure } = await load(BASE(`[${PRIVATE_ISSUES}]`));
+  expect(failure.code).toBe("DOGFOOD-CONFIG-017");
+  expect(failure.message).toContain("private-input");
+});
+
+test("an acknowledged private source is accepted with static snapshots", async () => {
+  const { failure } = await load(BASE(
+    `[${PRIVATE_ISSUES}]`,
+    '{:owner {:login "owner" :id "U_owner"} :coauthors [] :private-input :acknowledged}',
+  ).replace(":mode :live", ":mode :snapshot"));
+  expect(failure).toBeUndefined();
+});
+
+test("a private source cannot serve live comments", async () => {
+  // The reader's browser holds no credential for a repository it cannot see.
+  const base = BASE(
+    `[${PRIVATE_ISSUES}]`,
+    '{:owner {:login "owner" :id "U_owner"} :coauthors [] :private-input :acknowledged}',
+  );
+  const live = await load(base);
+  expect(live.failure.code).toBe("DOGFOOD-CONFIG-018");
+
+  const hybrid = await load(base.replace(":mode :live", ":mode :hybrid"));
+  expect(hybrid.failure.code).toBe("DOGFOOD-CONFIG-018");
+
+  // A snapshot is captured by the build, which holds the credential.
+  const snapshot = await load(base.replace(":mode :live", ":mode :snapshot"));
+  expect(snapshot.failure).toBeUndefined();
+});
+
+test("a visibility that is neither public nor private fails", async () => {
+  const { failure } = await load(BASE(
+    '[{:id :notes :kind :issues :enabled t :repository "owner/repository"'
+    + ' :label "published" :visibility :sometimes}]',
+  ));
+  expect(failure.code).toBe("DOGFOOD-CONFIG-016");
+});
+
+test("a public source needs no acknowledgement", async () => {
+  const { failure } = await load(BASE(
+    '[{:id :notes :kind :issues :enabled t :repository "owner/repository"'
+    + ' :label "published" :visibility :public}]',
+  ));
+  expect(failure).toBeUndefined();
+});
+
 test("an article refresh policy outside the specification fails", async () => {
   const { failure } = await load(
     BASE(`[${MARKDOWN}]`).replace(":articles :push", ":articles :sometimes"),

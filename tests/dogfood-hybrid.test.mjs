@@ -59,6 +59,17 @@ function snapshotChannel() {
   ]);
 }
 
+function externalChannel() {
+  return mapOf([
+    ["id", k("giscus")],
+    ["kind", k("giscus")],
+    ["mode", k("embed")],
+    ["items", vector()],
+    ["count", 0],
+    ["provider-url", "https://giscus.app/"],
+  ]);
+}
+
 /** The channel markup comes from the real renderer, not from the test. */
 function markupFor(channel) {
   return renderer.render_comment_channels(
@@ -208,6 +219,22 @@ test("a provider that cannot be reached leaves the snapshot standing", async () 
   } finally {
     await browser.close();
   }
+});
+
+test("a native channel and an external channel render together, in order", () => {
+  // The required matrix names native and external channels together: one is
+  // fetched into the build, the other only mounts in the browser.
+  const markup = renderer.render_comment_channels(mapOf([
+    ["id", "notes/x"],
+    ["comment-channels", vector(snapshotChannel(), externalChannel())],
+  ]));
+  const native = markup.indexOf('data-comment-provider="GitHub Issues"');
+  const external = markup.indexOf('data-comment-mount="giscus"');
+  expect(native).toBeGreaterThan(-1);
+  expect(external).toBeGreaterThan(native);
+  expect(markup).toContain("comments-list");
+  expect(markup).toContain("embed-region");
+  expect(markup).toContain("https://giscus.app/");
 });
 
 test("the configured mode must be one the specification names", async () => {

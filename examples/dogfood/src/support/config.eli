@@ -362,9 +362,11 @@
            (str label ".directory")))
         ((= kind :issues)
          (check-repository source label)
+         (check-visibility source label)
          (check-optional-string source :label label))
         ((= kind :discussions)
          (check-repository source label)
+         (check-visibility source label)
          (require-string (require-key source :category (str label " discussions"))
                          (str label ".category")))
         (t (fail "DOGFOOD-CONFIG-009"
@@ -387,6 +389,16 @@
         (fail "DOGFOOD-CONFIG-010"
               (str label ".repository must be owner/name")))
       repository))
+
+  ;; Specification 0008 requires the configuration to declare whether a GitHub
+  ;; source repository is public, because a private one may not reach public
+  ;; output without acknowledgement.
+  (defun check-visibility (source label)
+    (let ((value (Collection/get source :visibility nil)))
+      (unless (or (nil? value) (= value :public) (= value :private))
+        (fail "DOGFOOD-CONFIG-016"
+              (str label ".visibility must be public or private")))
+      value))
 
   (defun check-optional-string (source key label)
     (let ((value (Collection/get source key nil)))
@@ -471,6 +483,40 @@
   ;; An adapter declares how a comment provider is reached and, for a native
   ;; carrier, how that carrier is identified. Specification 0011 requires a
   ;; native kind to say how it is identified and an unknown kind to fail.
+  ;; Private input may not cross into public output without acknowledgement,
+  ;; and a private source can only use static snapshots: a live or hybrid
+  ;; channel is read by the reader's browser, which holds no credential for a
+  ;; repository it cannot see. Specification 0008 states both rules.
+  (defun check-private-input (config)
+    (let ((private-sources [])
+          (sources (Collection/get config :sources []))
+          (index 0))
+      (while (< index (Collection/count sources))
+        (let ((source (Collection/nth sources index)))
+          (when (and (Collection/get source :enabled false)
+                     (= (Collection/get source :visibility :public) :private))
+            (setq private-sources (Collection/conj private-sources source)))
+          (setq index (1+ index))))
+      (when (> (Collection/count private-sources) 0)
+        (let ((publishing (Collection/get config :publishing {})))
+          (unless (= (Collection/get publishing :private-input :open) :acknowledged)
+            (fail "DOGFOOD-CONFIG-017"
+                  (str "a private source publishes into public output; declare "
+                       "publishing.private-input :acknowledged to accept it"))))
+        (let ((channels (Collection/get (Collection/get config :comments {}) :channels []))
+              (channel-index 0))
+          (while (< channel-index (Collection/count channels))
+            (let* ((channel (Collection/nth channels channel-index))
+                   (kind (Collection/get channel :kind nil))
+                   (mode (Collection/get channel :mode :snapshot)))
+              (when (and (Collection/get channel :enabled false)
+                         (or (= kind :issue) (= kind :discussion))
+                         (or (= mode :live) (= mode :hybrid)))
+                (fail "DOGFOOD-CONFIG-018"
+                      (str "a private source cannot serve " (str mode)
+                           " comments: the reader holds no credential"))))
+            (setq channel-index (1+ channel-index)))))))
+
   ;; Specification 0004 names the accepted policies for both settings. An
   ;; unknown one would silently behave like the default.
   (defun check-refresh (config)
@@ -603,6 +649,7 @@
         (fail "DOGFOOD-CONFIG-008"
               "site.base-url must be an absolute https URL for production"))
     (check-sources (require-key config :sources "config.sources"))
+    (check-private-input config)
     (check-refresh config)
     (check-adapters config)
     (check-comments config)
