@@ -75,11 +75,10 @@ async function buildPlayground() {
 test("the playground builds both sources into ESM", async () => {
   const outDir = await buildPlayground();
   const javascript = await readFile(resolve(outDir, "playground.mjs"), "utf8");
-  // The page and the compiler must agree on one resolution scheme, so the
-  // playground imports the compiler and the platform by package specifier.
-  // The public compiler entry, so the page depends on a published contract
-  // rather than on an internal build path.
-  expect(javascript).toContain('from "eliscript/compiler"');
+  // Compilation happens in the worker host, so the page never loads the
+  // compiler itself and a large edit cannot block the editor.
+  expect(javascript).not.toContain("eliscript/compiler");
+  expect(javascript).toContain("browser/worker.mjs");
   expect(javascript).toContain('from "eliscript/platform/browser.mjs"');
   expect(javascript).toContain('from "eliscript/runtime/core/data-text.mjs"');
   // A local import must point at the emitted module, never at the source file.
@@ -168,10 +167,10 @@ test("both pages declare the relative import map and the editor surface", async 
     expect(page).toContain('type="importmap"');
     // A relative prefix works under any server root, and both pages are two
     // levels deep.
+    // Only this page's own module graph needs the prefix: the worker resolves
+    // the runtime for compiled code, so no compiled output depends on a map.
     expect(page).toContain('"eliscript/": "../../"');
-    // An exact key wins over the prefix, so the compiler entry resolves even
-    // though it has no `.mjs` suffix.
-    expect(page).toContain('"eliscript/compiler": "../../dist/bootstrap/compiler.mjs"');
+    expect(page).not.toContain("eliscript/compiler\":");
     for (const id of ["highlight", "source", "stdout", "diagnostics", "js", "run"]) {
       expect(page).toContain(`id="${id}"`);
     }

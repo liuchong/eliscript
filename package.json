@@ -22,6 +22,10 @@
   "exports": {
     "./compiler": "./dist/bootstrap/compiler.mjs",
     "./compiler.mjs": "./dist/bootstrap/compiler.mjs",
+    "./browser": "./browser/host.mjs",
+    "./browser/host.mjs": "./browser/host.mjs",
+    "./browser/worker.mjs": "./browser/worker.mjs",
+    "./browser/compiler": "./dist/browser/compiler.js",
     "./runtime/literals": "./runtime/literals.mjs",
     "./runtime/literals.mjs": "./runtime/literals.mjs",
     "./runtime/source-mapping": "./runtime/source-mapping.mjs",
@@ -35,7 +39,8 @@
     "./*": "./*"
   },
   "scripts": {
-    "prepack": "./bin/eliscript-bootstrap",
+    "prepack": "./bin/eliscript-bootstrap && bun run build:browser",
+    "build:browser": "bun build dist/bootstrap/compiler.mjs --target=browser --format=esm --outfile dist/browser/compiler.js",
     "test": "make test",
     "test:core": "make test-core",
     "test:applications": "make test-applications",
@@ -137,8 +142,10 @@
   "files": [
     "bin/",
     "bootstrap/",
+    "browser/",
     "compiler/",
     "dist/bootstrap/",
+    "dist/browser/",
     "editor/",
     "platform/",
     "runtime/",

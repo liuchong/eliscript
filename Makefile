@@ -121,7 +121,8 @@ test-applications:
 		-f ert-run-tests-batch-and-exit
 	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
 		tests/dogfood-site.test.mjs tests/dogfood-action.test.mjs \
-		tests/dogfood-issues.test.mjs tests/browser-playground.test.mjs
+		tests/dogfood-issues.test.mjs tests/browser-playground.test.mjs \
+		tests/browser-host.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/application-cli-test.sh
 
 check-contracts:

@@ -1,24 +1,18 @@
 ;; Browser playground.
 ;;
 ;; This page compiles and runs Eliscript in the browser. It is itself an
-;; Eliscript program, compiled ahead of time by the maintained compiler, and
-;; it imports the compiler again at run time to compile whatever the editor
-;; holds. No host process participates: the compiler core, the runtime core,
-;; and the emitted module all execute in the document realm.
+;; Eliscript program, compiled ahead of time by the maintained compiler, and it
+;; drives the browser compile host at run time.
 ;;
-;; Module resolution is the only environment concern. The page declares an
-;; import map for the `eliscript/` prefix, so both the compiler the page
-;; imports and the runtime imports inside freshly compiled output resolve to
-;; served files.
+;; Compilation happens in a module worker, so a large edit never blocks the
+;; editor, and the worker rewrites the runtime specifiers of the output to
+;; served URLs. That is why compiled code needs no import map: only this page's
+;; own module graph uses one.
 
 (module example.browser-playground
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
   (import "eliscript/platform/browser.mjs"
           browserCapabilities browserDocument)
-  ;; The package's public compiler entry, not an internal build path, so the
-  ;; browser and an npm consumer depend on the same contract.
-  (import "eliscript/compiler" compile_string_with_source_map)
-  ;; Persistent values print through the canonical data text rather than
-  ;; through JavaScript's default object spelling.
   (import "eliscript/runtime/core/data-text.mjs" printValue)
   (import "./highlight.eli" highlight-eliscript highlight-javascript)
 
@@ -29,6 +23,17 @@
   (defconst install-console-capture
     (js* "(node, format) => { if (console.eliscriptPlayground) return; const original = console.log; console.eliscriptPlayground = original; console.log = (...args) => { const pane = document.getElementById(node); if (pane) pane.textContent += args.map((value) => (value !== null && typeof value === 'object' ? format(value) : String(value))).join(' ') + '\\n'; original(...args); }; }"))
 
+  ;; The page and the worker both live two levels below the repository root,
+  ;; which is the base the runtime is served from.
+  (defconst package-base (js* "new URL('../../', import.meta.url).href"))
+  (defconst worker-url (js* "new URL('../../browser/worker.mjs', import.meta.url).href"))
+  (defconst start-worker (js* "(url) => new Worker(url, { type: 'module' })"))
+  (defconst compile-once
+    (js* "(worker, message) => new Promise((resolve, reject) => { const onMessage = (event) => { const data = event.data; if (!data || data.id !== message.id) return; worker.removeEventListener('message', onMessage); if (data.ok) { resolve(data); return; } const error = new Error(data.message); error.diagnostics = data.diagnostics ?? []; reject(error); }; worker.addEventListener('message', onMessage); worker.postMessage(message); })"))
+
+  (defvar compile-worker nil)
+  (defvar compile-sequence 0)
+
   (defconst capabilities
     (browserCapabilities (js* "globalThis") (js-array "document")))
   (defconst page (browserDocument capabilities))
@@ -38,29 +43,39 @@
   (defun set-text (id text)
     (put (node id) "textContent" text))
 
+  (defun display-html (selector html)
+    (put (node selector) "innerHTML" html))
+
   (defun editor-source ()
     (get (node "source") "value" ""))
 
-  (defun diagnostic-text (error)
-    (let ((diagnostic (get error "eliscriptDiagnostic" nil)))
-      (if (nil? diagnostic)
-          (str "error: " (get error "message" "unknown failure"))
-        (let* ((location (get diagnostic "location" nil))
-               (start (if (nil? location) nil (get location "start" nil)))
-               (place (if (nil? start)
-                          ""
-                        (str "  [" (get location "file" "") ":" (get start "line") ":"
-                             (get start "column") "]"))))
-          (str (get diagnostic "code" "ELI-UNKNOWN") " · "
-               (get diagnostic "phase" "unknown") " · "
-               (get diagnostic "message" "")
-               place)))))
+  ;; --------------------------------------------------------------- reporting
 
-  (defun display (selector text)
+  (defun format-diagnostic (diagnostic)
+    (let* ((location (get diagnostic "location" nil))
+           (start (if (nil? location) nil (get location "start" nil)))
+           (place (if (nil? start)
+                      ""
+                    (str "  [" (get location "file" "") ":" (get start "line") ":"
+                         (get start "column") "]"))))
+      (str (get diagnostic "code" "ELI-UNKNOWN") " · "
+           (get diagnostic "phase" "unknown") " · "
+           (get diagnostic "message" "")
+           place)))
+
+  (defun error-text (error)
+    (let ((diagnostics (get error "diagnostics" nil)))
+      (cond
+        ((and (not (nil? diagnostics)) (> (Collection/count diagnostics) 0))
+         (format-diagnostic (Collection/nth diagnostics 0)))
+        ((not (nil? (get error "eliscriptDiagnostic" nil)))
+         (format-diagnostic (get error "eliscriptDiagnostic")))
+        (t (str "internal · " (get error "message" "unknown failure"))))))
+
+  (defun display-text (selector text)
     (put (node selector) "textContent" text))
 
-  (defun display-html (selector html)
-    (put (node selector) "innerHTML" html))
+  ;; ------------------------------------------------------------------ editor
 
   ;; The editor paints a highlighted copy behind the textarea, so the two must
   ;; scroll together.
@@ -74,33 +89,50 @@
       (put layer "scrollTop" (get textarea "scrollTop" 0))
       (put layer "scrollLeft" (get textarea "scrollLeft" 0))))
 
+  ;; ----------------------------------------------------------------- compile
+
+  (defun worker-for-compile ()
+    (when (nil? compile-worker)
+      (setq compile-worker (funcall start-worker worker-url)))
+    compile-worker)
+
+  (defasync compile-in-worker (source)
+    (setq compile-sequence (1+ compile-sequence))
+    (await (funcall compile-once
+                    (worker-for-compile)
+                    (js-object :id (str "compile-" compile-sequence)
+                               :request (js-object :mode "single"
+                                                   :source source
+                                                   :filename "playground.eli"
+                                                   :runtimeBase package-base)))))
+
   (defasync evaluate ()
     (install-console-capture "stdout" printValue)
-    (display "stdout" "")
-    (display "js" "")
-    (display "diagnostics" "")
-    (let ((source (editor-source)))
-      (try
-        (let* ((compiled (compile_string_with_source_map source "playground.eli"))
-               (javascript (get compiled :javascript))
-               (url (blob-url-of javascript)))
-          (display-html "js" (highlight-javascript javascript))
-          (try
-            (await (funcall dynamic-import url))
-            (catch error
-              (display "diagnostics"
-                       (str "runtime · " (get error "message" "unknown failure"))))
-            (finally (release-blob-url url))))
-        (catch error
-          (display "diagnostics" (diagnostic-text error))))))
+    (display-text "stdout" "")
+    (display-text "js" "")
+    (display-text "diagnostics" "")
+    (try
+      (let* ((reply (await (compile-in-worker (editor-source))))
+             (module (get (get reply "modules") "playground.mjs" nil)))
+        (if (nil? module)
+            (display-text "diagnostics" "internal · the compiler returned no module")
+          (let* ((javascript (get module "javascript"))
+                 (url (blob-url-of javascript)))
+            (display-html "js" (highlight-javascript javascript))
+            (try
+              (await (funcall dynamic-import url))
+              (catch error
+                (display-text "diagnostics"
+                              (str "runtime · " (get error "message" "unknown failure"))))
+              (finally (release-blob-url url))))))
+      (catch error
+        (display-text "diagnostics" (error-text error)))))
 
-  ;; A rejected promise would otherwise disappear, so every entry point
-  ;; reports its own failure into the diagnostics pane.
-  (defun report-failure (error)
-    (display "diagnostics" (str "internal · " (get error "message" "unknown failure"))))
-
+  ;; A rejected promise would otherwise disappear, so every entry point reports
+  ;; its own failure into the diagnostics pane.
   (defun start ()
-    (js-call (evaluate) :catch report-failure))
+    (js-call (evaluate) :catch (lambda (error)
+                                 (display-text "diagnostics" (error-text error)))))
 
   (defun wire ()
     (js-call (node "run") :addEventListener "click" (lambda (event) (start)))

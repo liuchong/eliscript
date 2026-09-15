@@ -36,15 +36,36 @@ JavaScript runs.
 The runtime core is host-free in the same way. Only `runtime/worker.mjs` and the
 `bootstrap/host/` entry points touch Node, and the playground uses neither.
 
-## Module resolution
+## Compilation runs in a worker
 
-Compiled output imports the runtime by package specifier:
+The page never loads the compiler itself. It starts
+`browser/worker.mjs`, which imports the compile host, and sends it the editor
+contents. A large edit therefore cannot block the editor, and the compiler is
+bundled to one file (`dist/browser/compiler.js`) rather than fetched as thirteen
+modules.
+
+The worker is imported by a relative path, because a worker realm has no
+document and therefore no import map.
+
+## Compiled code needs no import map
+
+Compiled output normally carries a runtime specifier:
 
 ```javascript
 import { map } from "eliscript/runtime/core/sequence.mjs";
 ```
 
-The page resolves that with one import-map prefix:
+A blob module has no directory, so that specifier cannot resolve on its own.
+The host therefore rewrites every runtime specifier — including the imports the
+emitter injects for literals, collection helpers, list operations, and value
+equality — to the URL the package is served from:
+
+```javascript
+import { map } from "http://host/runtime/core/sequence.mjs";
+```
+
+Only this page's own module graph still needs an import map, and only because
+the page itself is written in Eliscript and imports the platform package:
 
 ```html
 <script type="importmap">
@@ -52,25 +73,45 @@ The page resolves that with one import-map prefix:
 </script>
 ```
 
-The same specifiers resolve in Bun and Node through the package `exports` map,
-so one scheme serves the page, the tests, and the command line. The playground
-therefore imports the compiler and the platform the same way, and the maintained
-test asserts that every emitted specifier names a file below the served root.
+An application that compiles Eliscript in the browser needs no map at all.
 
 ## Execution
 
-The page compiles the editor contents, wraps the result in a `Blob`, and
-imports it:
+The compiled entry is wrapped in a `Blob` and imported:
 
 ```elisp
 (let ((url (blob-url-of javascript)))
   (await (funcall dynamic-import url)))
 ```
 
-Because the import happens in the document realm, the import map applies to the
-blob module exactly as it applies to any other module. A compile failure is
-reported from the structured `eliscript-diagnostic` value, and a runtime failure
-from the rejected import, so neither disappears silently.
+A compile failure arrives as a structured `eliscript-diagnostic` from the
+worker, and a runtime failure as a rejected import, so neither disappears
+silently.
+
+## Projects, not just files
+
+The host also compiles a whole project from a map of sources:
+
+```js
+import { compileProject, moduleGraphUrls } from "eliscript/browser";
+
+const { modules } = compileProject({
+  files: { "main.eli": mainSource, "lib/text.eli": textSource },
+  entry: "main.eli",
+  resolveExternal: (specifier) =>
+    specifier.startsWith("eliscript/")
+      ? new URL(specifier.slice("eliscript/".length), runtimeBase).href
+      : undefined,
+});
+const graph = moduleGraphUrls(modules, "main.eli");
+await import(graph.entryUrl);
+graph.release();
+```
+
+The planner resolves the graph from the sources rather than from the
+filesystem, local imports are rewritten to the emitted modules, the modules are
+ordered dependency first, and each becomes a blob URL. Macro file dependencies
+are unavailable here, because they need a filesystem.
 
 ## Value formatting
 
@@ -82,11 +123,9 @@ canonical data text (`runtime/core/data-text.mjs`), so the sample prints
 
 ## Limits
 
-- The page compiles one module at a time. A multi-file project build needs an
-  in-memory module host, because the maintained project planner reads the
-  filesystem through `bootstrap/host/`.
-- Compilation runs on the main thread. Moving it into a worker needs the
-  compiler imported by URL inside the worker, because import maps do not apply
-  to worker realms.
+- This page edits one module. The host compiles projects, but the interface
+  shows a single editor.
 - A strict Content-Security-Policy must allow `blob:` module scripts for the
   execution step to run.
+- The host reads sources from memory, so a project that declares file-based
+  macro dependencies cannot compile in the browser.

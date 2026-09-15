@@ -38,9 +38,42 @@ test("every exported entry resolves inside the package", async () => {
     expect(target.startsWith("./")).toBe(true);
     await access(resolve(ROOT, target));
   }
-  // The compiler is the entry a browser and an npm consumer both use, so it
-  // must be addressable without naming a build path.
+  // The compiler is the entry an npm consumer uses, so it must be addressable
+  // without naming a build path, and the browser host is a second public entry.
   expect(manifest.exports["./compiler"]).toBe("./dist/bootstrap/compiler.mjs");
+  expect(manifest.exports["./browser"]).toBe("./browser/host.mjs");
+  expect(manifest.exports["./browser/worker.mjs"]).toBe("./browser/worker.mjs");
+  expect(manifest.exports["./browser/compiler"]).toBe("./dist/browser/compiler.js");
+});
+
+test("the published file list carries the browser host", async () => {
+  for (const entry of ["browser/", "dist/browser/"]) {
+    expect(manifest.files).toContain(entry);
+  }
+  await access(resolve(ROOT, "browser/host.mjs"));
+  await access(resolve(ROOT, "browser/worker.mjs"));
+});
+
+test("the browser bundle is one file and needs no Node built-in", async () => {
+  const child = Bun.spawn([
+    "bun", "build", "dist/bootstrap/compiler.mjs",
+    "--target=browser", "--format=esm", "--outfile", "dist/browser/compiler.js",
+  ], { cwd: ROOT, stdout: "pipe", stderr: "pipe" });
+  const [exitCode, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stderr).text(),
+  ]);
+  expect(exitCode.toString(), stderr).toBe("0");
+
+  const bundle = await readFile(resolve(ROOT, "dist/browser/compiler.js"), "utf8");
+  // One self-contained file: no Node built-in import and nothing left to
+  // resolve. The compiler's own diagnostics mention "node:" as prose, so the
+  // check is about imports, not about the substring.
+  expect(bundle).not.toMatch(/from\s+"node:/u);
+  expect(bundle).not.toMatch(/import\s+"node:/u);
+  expect(bundle).not.toContain("require(");
+  for (const match of bundle.matchAll(/^\s*import\s/gmu)) expect(match).toBeNull();
+  expect(bundle.length).toBeGreaterThan(100_000);
 });
 
 test("the published file list carries the compiler and the runtime", async () => {

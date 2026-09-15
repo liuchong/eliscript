@@ -24,6 +24,8 @@ The version is `0.0.1` and is not bumped by ordinary work.
 | `bootstrap/` | The host layer, including the Node entry that npm links under every command name. |
 | `runtime/` | Host-free runtime semantics linked by generated code. |
 | `platform/` | The browser and worker capability packages. |
+| `browser/` | The in-memory compile host and its module worker. |
+| `dist/browser/` | The compiler bundled into one browser file. |
 | `stdlib/` | Standard-library sources that project builds import. |
 | `compiler/` | The Emacs Lisp seed compiler, so the package remains rebuildable from source. |
 | `editor/` | The Emacs major mode and its evaluation library. |
@@ -85,10 +87,17 @@ node --input-type=module -e \
 
 ## Public Entries
 
-`exports` defines what a consumer may name. `./compiler` is the compiler, and
-the runtime and platform packages are exported with and without their `.mjs`
-suffix. The browser playground imports `eliscript/compiler`, so the page and an
-npm consumer depend on the same contract rather than on an internal build path.
+`exports` defines what a consumer may name. `./compiler` is the compiler,
+`./browser` is the in-memory compile host, `./browser/worker.mjs` is the module
+worker, and `./browser/compiler` is the compiler bundled for a browser. The
+runtime and platform packages are exported with and without their `.mjs`
+suffix.
+
+A browser consumer needs no import map for the code it compiles: the host
+rewrites the runtime specifiers of the emitted modules, including the imports
+the emitter injects for literals and collection helpers, to served URLs. Only
+an application's own module graph needs a map, and that is the application's
+choice.
 
 ## Source Obligations
 
