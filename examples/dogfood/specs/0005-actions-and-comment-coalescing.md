@@ -1,7 +1,7 @@
 # 0005: Actions And Comment Coalescing
 
 - Status: Accepted design
-- Implementation: Not started
+- Implementation: In progress
 - Depends on: 0002 System Architecture, 0004 Eliscript Configuration
 
 ## Problem

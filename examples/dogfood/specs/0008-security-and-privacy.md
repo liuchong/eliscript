@@ -1,7 +1,7 @@
 # 0008: Security And Privacy
 
 - Status: Accepted design
-- Implementation: Not started
+- Implementation: In progress
 - Depends on: 0002 System Architecture, 0003 Content And Comment Model
 
 ## Trust Zones

@@ -1,7 +1,7 @@
 # 0002: System Architecture
 
 - Status: Accepted design
-- Implementation: Not started
+- Implementation: In progress
 - Depends on: 0001 Product Contract
 
 ## Boundary

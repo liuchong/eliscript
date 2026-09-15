@@ -1,7 +1,7 @@
 # 0004: Eliscript Configuration
 
 - Status: Accepted design
-- Implementation: Not started
+- Implementation: In progress
 - Depends on: 0001 Product Contract, 0003 Content And Comment Model
 
 ## Configuration Source

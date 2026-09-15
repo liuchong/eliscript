@@ -1,7 +1,7 @@
 # 0003: Content And Comment Model
 
 - Status: Accepted design
-- Implementation: Not started
+- Implementation: In progress
 - Depends on: 0001 Product Contract, 0002 System Architecture
 
 ## Canonical Post

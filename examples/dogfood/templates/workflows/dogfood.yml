@@ -25,12 +25,17 @@ on:
   schedule:
     - cron: "37 */6 * * *"
   workflow_dispatch:
-  # Article carriers: an issue-backed article changes when its issue changes.
+  # Article carriers. Creation events are deliberately absent: neither
+  # `issues.opened` nor `discussion.created` can be author-filtered before a
+  # runner starts, so subscribing to them lets anyone who can open a record
+  # spend runner capacity. A new record still reaches the site when a trusted
+  # actor labels or edits it, when the schedule above picks it up, or when
+  # someone dispatches a run. A repository that wants creation events anyway
+  # can add them, and every created record will then start a runner.
   issues:
-    types: [opened, edited, reopened, closed, labeled, unlabeled]
-  # Discussion carriers and their replies.
+    types: [labeled, unlabeled, edited, closed, reopened, transferred]
   discussion:
-    types: [created, edited, deleted]
+    types: [edited, labeled, unlabeled, closed, reopened, answered, unanswered]
   # There is deliberately no issue_comment or discussion_comment trigger here.
   # A new comment cannot change the site: live channels are read in the
   # reader's browser, and snapshot channels are captured by the schedule above.

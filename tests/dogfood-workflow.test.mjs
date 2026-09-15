@@ -90,6 +90,34 @@ test("one concurrency group and one environment serialize the work", () => {
   expect(environments.length).toBe(1);
 });
 
+test("creation events are not in the default template", () => {
+  // Neither can be author-filtered before a runner starts, so the default
+  // policy leaves them out and says how a new record still reaches the site.
+  const triggers = packaged.slice(0, packaged.indexOf("\npermissions:"));
+  const issueTypes = /^  issues:\n    types: \[([^\]]+)\]$/mu.exec(triggers);
+  const discussionTypes = /^  discussion:\n    types: \[([^\]]+)\]$/mu.exec(triggers);
+  expect(issueTypes).not.toBeNull();
+  expect(discussionTypes).not.toBeNull();
+  // Types are compared as whole words: "reopened" contains "opened".
+  const issueList = issueTypes[1].split(",").map((type) => type.trim());
+  const discussionList = discussionTypes[1].split(",").map((type) => type.trim());
+  expect(issueList).not.toContain("opened");
+  expect(discussionList).not.toContain("created");
+
+  // The policy the template implements is spelled out where a consumer reads
+  // it, including how a new record still reaches the site.
+  expect(triggers).toContain("issues.opened");
+  expect(triggers).toContain("the schedule above picks it up");
+
+  // The article types the policy names are present.
+  for (const type of ["labeled", "unlabeled", "edited", "closed", "reopened", "transferred"]) {
+    expect(issueList).toContain(type);
+  }
+  for (const type of ["edited", "labeled", "unlabeled", "closed", "reopened", "answered", "unanswered"]) {
+    expect(discussionList).toContain(type);
+  }
+});
+
 test("the default template never triggers per comment", () => {
   // A new comment cannot change the site, so triggering on one would spend a
   // runner to decide it has nothing to do.

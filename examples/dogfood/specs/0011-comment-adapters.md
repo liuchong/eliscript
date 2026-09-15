@@ -1,7 +1,7 @@
 # 0011: Comment Adapters
 
 - Status: Accepted design
-- Implementation: Not started
+- Implementation: In progress
 - Depends on: 0001 Product Contract, 0003 Content And Comment Model,
   0004 Eliscript Configuration, 0008 Security And Privacy,
   0010 Publishing Authorization

@@ -1,7 +1,7 @@
 # 0007: Action And Marketplace Package
 
 - Status: Accepted design
-- Implementation: Not started
+- Implementation: In progress
 - Depends on: 0002 System Architecture, 0005 Actions And Comment Coalescing
 
 ## Package Objective

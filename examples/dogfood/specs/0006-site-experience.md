@@ -1,7 +1,7 @@
 # 0006: Site Experience
 
 - Status: Accepted design
-- Implementation: Not started
+- Implementation: In progress
 - Depends on: 0001 Product Contract, 0003 Content And Comment Model
 
 ## Experience Direction

@@ -1,7 +1,7 @@
 # 0001: Product Contract
 
 - Status: Accepted design
-- Implementation: Not started
+- Implementation: In progress
 - Scope: `examples/dogfood/`
 
 ## Product

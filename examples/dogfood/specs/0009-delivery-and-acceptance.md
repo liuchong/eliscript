@@ -1,7 +1,7 @@
 # 0009: Delivery And Acceptance
 
 - Status: Accepted design
-- Implementation: Not started
+- Implementation: In progress
 - Depends on: 0001 through 0008, 0010 Publishing Authorization,
   0011 Comment Adapters
 
