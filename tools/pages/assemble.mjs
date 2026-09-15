@@ -22,6 +22,7 @@ import { dirname, resolve } from "node:path";
  * - `browser` is the compile host and its worker.
  * - `dist/browser` is the bundled compiler the worker loads.
  * - `dist/browser-playground` is the compiled playground application.
+ * - `examples/dogfood/_site` is the generated proving-ground site.
  */
 export const PUBLISHED_TREES = Object.freeze([
   "docs",
@@ -30,6 +31,7 @@ export const PUBLISHED_TREES = Object.freeze([
   "browser",
   "dist/browser",
   "dist/browser-playground",
+  "examples/dogfood/_site",
 ]);
 
 /** Single files the published site carries. */

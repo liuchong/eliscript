@@ -461,6 +461,18 @@
                                                   (Sequence/map search-entry posts))))
                    "\n")})
 
+  (defun preview? (site)
+    (truthy? (Collection/get site :preview false)))
+
+  ;; The site model carries the flag as `t`, `false`, or nothing at all.
+  (defun truthy? (value) (if value t nil))
+
+  ;; A preview tree is reachable from a pull request, so it asks not to be
+  ;; crawled at all rather than publishing a sitemap.
+  (defun render-preview-robots ()
+    {:path "robots.txt"
+     :content "User-agent: *\nDisallow: /\n"})
+
   (defun render-robots (site)
     {:path "robots.txt"
      :content (str "User-agent: *\nAllow: /\nSitemap: "
@@ -492,10 +504,16 @@
       (setq documents (Collection/conj documents (render-tag-index site tags sorted)))
       (setq documents (Collection/conj documents (render-search-page site)))
       (setq documents (Collection/conj documents (render-not-found site)))
-      (setq documents (Collection/conj documents (render-feed site sorted)))
-      (setq documents (Collection/conj documents (render-sitemap site sorted)))
+      ;; A preview tree carries no feed and no sitemap: it is a review
+      ;; surface, not a publication.
+      (unless (preview? site)
+        (setq documents (Collection/conj documents (render-feed site sorted)))
+        (setq documents (Collection/conj documents (render-sitemap site sorted))))
       (setq documents (Collection/conj documents (render-search-index site sorted)))
-      (setq documents (Collection/conj documents (render-robots site)))
+      (setq documents (Collection/conj documents
+                                       (if (preview? site)
+                                           (render-preview-robots)
+                                         (render-robots site))))
       (setq documents (Collection/conj documents
                                        {:path "assets/site.css" :content site-css}))
       (append-all (append-all (append-all documents post-pages) tag-pages)

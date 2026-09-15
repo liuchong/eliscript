@@ -62,6 +62,8 @@ jobs:
           ./bin/eliscript-bootstrap
           bun run build:browser
           bun run build:browser-playground
+      - name: Build the proving-ground site
+        run: bun run dogfood
       - name: Assemble the published tree
         run: bun tools/pages/assemble.mjs --root . --out dist/pages
       - name: Upload the site artifact

@@ -24,6 +24,7 @@
      ".theme-toggle{font:inherit;font-size:14px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:8px;padding:3px 10px;cursor:pointer}\n"
      ".theme-toggle:hover{color:var(--ink);border-color:var(--ink)}\n"
      ".search-form{display:flex;gap:8px;align-items:center}\n"
+     ".preview-banner{margin:0;padding:8px 24px;background:var(--fresh);color:#1b1d22;font-size:14px;text-align:center}\n"
      ".search-form input{font:inherit;font-size:15px;padding:6px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);min-width:220px}\n"
      "*{box-sizing:border-box}\n"
      "html{-webkit-text-size-adjust:100%}\n"
@@ -99,7 +100,8 @@
 
   (defun document (site root title description content)
     (let ((site-title (Collection/get site :title "dogfood"))
-          (language (Collection/get site :language "en")))
+          (language (Collection/get site :language "en"))
+          (preview (Collection/get site :preview false)))
       (str
        "<!doctype html>\n"
        "<html lang=\"" (escape-html language) "\">\n"
@@ -110,6 +112,7 @@
        "<meta name=\"description\" content=\"" (escape-html description) "\">\n"
        ;; The browser bundle reads its own configuration from these, and the
        ;; search index it fetches is a site-relative URL.
+       (if preview "<meta name=\"robots\" content=\"noindex\">\n" "")
        "<meta name=\"dogfood-search-index\" content=\"" root "search.json\">\n"
        "<meta name=\"dogfood-root\" content=\"" root "\">\n"
        ;; A classic head script applies the stored theme before the first
@@ -125,6 +128,10 @@
        (escape-html site-title) "</a>\n"
        (nav-links root) "\n"
        "</header>\n"
+       (if preview
+           (str "<p class=\"preview-banner\">Preview build: drafts are included and"
+                " this page must not be indexed.</p>\n")
+         "")
        "<main id=\"main\">\n" content "\n</main>\n"
        "<footer>Built with Eliscript from the repository and its published Markdown.</footer>\n"
        "</body>\n</html>\n")))

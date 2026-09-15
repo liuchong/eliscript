@@ -123,7 +123,8 @@ test-applications:
 		tests/dogfood-site.test.mjs tests/dogfood-action.test.mjs \
 		tests/dogfood-issues.test.mjs tests/dogfood-comments.test.mjs \
 		tests/dogfood-discussions.test.mjs tests/dogfood-browser.test.mjs \
-		tests/dogfood-identity.test.mjs \
+		tests/dogfood-identity.test.mjs tests/dogfood-events.test.mjs \
+		tests/dogfood-workflow.test.mjs \
 		tests/browser-playground.test.mjs tests/browser-host.test.mjs \
 		tests/pages-assembly.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/application-cli-test.sh

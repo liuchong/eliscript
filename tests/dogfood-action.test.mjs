@@ -16,7 +16,8 @@ const BUILD = resolve(ROOT, "bin/eliscript-build");
 const PROJECT = resolve(ROOT, "examples/dogfood");
 const PACKAGE_TOOL = resolve(PROJECT, "tools/package.eli");
 const ENTRY = resolve(PROJECT, "dist/action/index.js");
-const ARTIFACT = resolve(PROJECT, "dist/action/artifact.json");
+const ACTION = resolve(PROJECT, "dist/action");
+const ARTIFACT = resolve(ACTION, "artifact.json");
 
 let staging;
 let tool;
@@ -161,6 +162,8 @@ test("action.yml declares the documented Action contract", async () => {
     "post-count",
     "comment-snapshot-count",
     "manifest",
+    "subject",
+    "cache-key",
   ]);
   // The declared entry must exist relative to the project root.
   await expect(
@@ -183,6 +186,16 @@ test("the artifact manifest binds every source and the bundle", async () => {
   expect(artifact.browserEntry).toContain("dist/site/browser.js");
   expect(artifact.browserSha256).toMatch(/^[0-9a-f]{64}$/u);
   expect(artifact.browserBytes).toBeGreaterThan(5_000);
+  // The package carries the map that names the .eli sources and the workflow
+  // template a consumer copies.
+  expect(artifact.workflow).toBe("workflow.yml");
+  expect(artifact.sourceMap).toBe("index.js.map");
+  expect(artifact.eliscriptSourceMap).toBe("index.eli.map");
+  const eliMap = JSON.parse(
+    await readFile(join(ACTION, "index.eli.map"), "utf8"),
+  );
+  expect(eliMap.sources.some((source) => source.endsWith(".eli"))).toBe(true);
+  expect(eliMap.sources.every((source) => !source.startsWith("/"))).toBe(true);
 });
 
 test("the bundle carries no credential shape or host path", async () => {

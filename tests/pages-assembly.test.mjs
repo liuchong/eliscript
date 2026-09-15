@@ -10,7 +10,28 @@ const SITE_PAGE = "docs/pages/playground.html";
 let staging;
 let artifact;
 
+// The proving-ground site is generated rather than checked in, so the test
+// produces it when it is absent instead of depending on a previous run.
+async function ensureDemoSite() {
+  try {
+    await stat(resolve(ROOT, "examples/dogfood/_site/index.html"));
+    return;
+  } catch {
+    // Build it below.
+  }
+  const child = Bun.spawn(["bun", "run", "dogfood"], {
+    cwd: ROOT, stdout: "pipe", stderr: "pipe",
+  });
+  const [exitCode, , stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  if (exitCode !== 0) throw new Error(stderr.trim() || "the demo site build failed");
+}
+
 beforeAll(async () => {
+  await ensureDemoSite();
   staging = await mkdtemp(resolve(ROOT, ".eliscript-pages-"));
   artifact = resolve(staging, "pages");
   await assemblePages({ root: ROOT, outDir: artifact });
@@ -37,6 +58,10 @@ test("the artifact carries the site and every tree it loads", async () => {
   // shape so the playground's relative references stay valid.
   expect(await exists("docs/index.html")).toBe(true);
   expect(await exists("docs/pages/playground.html")).toBe(true);
+  // The proving-ground site is part of the published tree, with the assets its
+  // pages load.
+  expect(await exists("examples/dogfood/_site/index.html")).toBe(true);
+  expect(await exists("examples/dogfood/_site/assets/browser.js")).toBe(true);
 });
 
 test("every reference the playground page carries resolves in the artifact", async () => {

@@ -1,0 +1,68 @@
+;; Event classification.
+;;
+;; A workflow runs for many reasons, and not all of them change the site. A new
+;; comment does not: live channels are read in the reader's browser and
+;; snapshots come from the snapshot schedule, so a comment event must not become
+;; a build. Classification turns the event name and payload into that decision
+;; before anything is rendered or written.
+
+(module dogfood.builder.events
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+
+  ;; Events whose subject is an article.
+  (defconst article-events
+    ["push" "schedule" "workflow_dispatch" "issues" "release"])
+
+  ;; Events whose subject is a comment, a discussion, or a comment carrier.
+  (defconst comment-events
+    ["issue_comment" "discussion_comment" "discussions"])
+
+  (defun contains-string? (values needle)
+    (let ((index 0)
+          (found false))
+      (while (and (< index (Collection/count values)) (not found))
+        (when (= (Collection/nth values index) needle) (setq found t))
+        (setq index (1+ index)))
+      found))
+
+  (defun classification (subject event-name action)
+    {:subject subject :event event-name :action action})
+
+  ;; -> {:subject :articles|:comments|:unknown :event name :action name}
+  (defun classify-event (event-name payload)
+    (let ((action (Collection/get payload "action" "")))
+      (cond
+        ((contains-string? article-events event-name)
+         (classification :articles event-name action))
+        ((contains-string? comment-events event-name)
+         (classification :comments event-name action))
+        (t (classification :unknown event-name action)))))
+
+  (defun refresh-value (config area fallback)
+    (let ((refresh (Collection/get config :refresh {})))
+      (Collection/get refresh area fallback)))
+
+  ;; -> {:build bool :reason "..." :subject ...}
+  ;;
+  ;; `changed` means the site is rendered. `deferred` means this event cannot
+  ;; change the site, so the run ends without writing output.
+  (defun build-decision (config classification forced)
+    (cond
+      (forced
+       {:build t :reason "forced" :subject (Collection/get classification :subject :unknown)})
+      ((= (Collection/get classification :subject :unknown) :articles)
+       {:build t :reason "changed" :subject :articles})
+      ((= (Collection/get classification :subject :unknown) :comments)
+       (let ((comments (refresh-value config :comments :runtime)))
+         ;; A live channel changes nothing in the tree. A snapshot channel
+         ;; changes it on the snapshot schedule, and that schedule arrives as
+         ;; its own event, so a comment event still defers.
+         {:build false :reason "deferred" :subject :comments :refresh comments}))
+      (t {:build false :reason "deferred" :subject :unknown})))
+
+  ;; A run without an event file, as when a maintainer builds locally, is a
+  ;; requested build rather than a reaction to something.
+  (defun requested-event ()
+    (classification :articles "workflow_dispatch" "requested"))
+
+  (export build-decision classify-event requested-event))

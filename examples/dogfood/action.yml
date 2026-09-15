@@ -30,18 +30,23 @@ inputs:
     required: false
   event-file:
     description: >-
-      Reserved for event classification. The Markdown slice does not read it.
+      Path to the GitHub event payload, relative to the repository root.
+      Defaults to the path in GITHUB_EVENT_PATH when the runner exports it.
+      An event whose subject is a comment is deferred instead of built,
+      because live channels are read in the reader's browser and snapshots
+      come from the snapshot schedule.
     required: false
   preview:
     description: >-
-      Reserved for preview routes. The Markdown slice always builds production
-      output and does not publish drafts.
+      Render draft posts into a tree marked noindex, for a pull-request
+      preview. Production output never includes drafts.
     required: false
     default: "false"
   previous-manifest:
     description: >-
-      Reserved for previous-manifest verification. The Markdown slice does not
-      read it.
+      Path to the manifest recorded by the previous run. When given, the
+      output tree is verified against it before it is replaced, so a run
+      cannot delete output it did not produce.
     required: false
 
 outputs:
@@ -59,6 +64,14 @@ outputs:
     description: Included comment snapshot count. Zero until comment channels land.
   manifest:
     description: Path to the redacted build manifest.
+  subject:
+    description: >-
+      What the triggering event was about: articles, comments, or unknown.
+      Reported on a deferred run.
+  cache-key:
+    description: >-
+      Cache key for the content fingerprint, suitable for actions/cache. The
+      key changes exactly when the rendered documents change.
 
 runs:
   using: node24

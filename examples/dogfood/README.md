@@ -68,6 +68,9 @@ their full wording is met.
 | S1 | Repository Markdown becomes a static site: routes, tags, archive, feed, sitemap, search, aliases, drafts, atomic output | `tests/dogfood-site.test.mjs` |
 | S2 | Issues are authorized, classified as carriers, paginated, and normalized | `tests/dogfood-issues.test.mjs` |
 | S3 | Comment channels: a native channel captured as a snapshot or declared live, and external adapters declared as mount regions | `tests/dogfood-comments.test.mjs` |
+| I7 | The packaged Action carries the generated site's browser asset, an external source map, and the map that names the `.eli` sources | `tests/dogfood-action.test.mjs` |
+| I8 | Events are classified before anything renders: a comment event defers without writing output, a pushed article event builds, `preview` renders drafts into a tree that asks not to be indexed, and `previous-manifest` verifies the tree being replaced | `tests/dogfood-events.test.mjs` |
+| I8 | The package ships the consumer workflow template, pinned to a full commit digest and pinned at package time | `tests/dogfood-workflow.test.mjs` |
 | S4 | Local search, light/dark/system themes with no flash of the wrong theme, and a browser bundle the build requires | `tests/dogfood-browser.test.mjs` |
 | S6 | Discussions are read through GraphQL, filtered by category, authorized the same way as Issues, and captured with their reply tree | `tests/dogfood-discussions.test.mjs` |
 | Packaging | The Action builds a consumer repository on Node 24 with no Emacs, Bun, or installed package | `tests/dogfood-action.test.mjs` |

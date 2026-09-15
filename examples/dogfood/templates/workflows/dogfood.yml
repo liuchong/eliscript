@@ -1,0 +1,96 @@
+# Consumer workflow template.
+#
+# Copy this file to `.github/workflows/dogfood.yml` in the repository that
+# holds the content. The Action builds and validates only; this workflow
+# decides when it runs and when the result is deployed.
+#
+# The action reference is pinned to a full commit digest. The placeholder is
+# resolved when the package is produced, so a copy always names a real commit.
+#
+# Event filters live here rather than in the configuration, because a
+# configuration file cannot add workflow triggers. The `:event` comment policy
+# is deliberately absent: per-comment triggering is opt-in and never generated
+# by this template, since it lets an external commenter schedule work.
+name: dogfood
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "content/**"
+      - "dogfood.config.eli"
+      - ".github/workflows/dogfood.yml"
+  # The snapshot schedule. It must match `refresh.snapshot-schedule` in the
+  # configuration, and a change there is a change to this file.
+  schedule:
+    - cron: "37 */6 * * *"
+  workflow_dispatch:
+  # Article carriers: an issue-backed article changes when its issue changes.
+  issues:
+    types: [opened, edited, reopened, closed, labeled, unlabeled]
+  # Discussion carriers and their replies.
+  discussion:
+    types: [created, edited, deleted]
+  # There is deliberately no issue_comment or discussion_comment trigger here.
+  # A new comment cannot change the site: live channels are read in the
+  # reader's browser, and snapshot channels are captured by the schedule above.
+  # Triggering per comment would spend a runner to decide it has nothing to do.
+  # A repository that wants that anyway can add the trigger, and the build will
+  # classify the run as deferred rather than rendering it.
+
+permissions:
+  contents: read
+  issues: read
+  discussions: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: dogfood-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      built: ${{ steps.build.outputs.built }}
+      cache-key: ${{ steps.build.outputs.cache-key }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+
+      # The cache key is the content fingerprint, so it changes exactly when
+      # the rendered documents change.
+      - id: restore
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc38249
+        with:
+          path: _site
+          key: ${{ github.workflow }}-${{ github.sha }}
+          restore-keys: |
+            ${{ github.workflow }}-
+
+      - id: build
+        uses: liuchong/eliscript/examples/dogfood@PLACEHOLDER_ACTION_DIGEST
+        with:
+          config-file: dogfood.config.eli
+          output-directory: _site
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # A deferred or unchanged run produces no artifact, and uploading an
+      # absent path would fail the job for the wrong reason.
+      - if: steps.build.outputs.built == 'true'
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b
+        with:
+          path: _site
+
+  # Deployment is a separate job in the protected environment, so a build that
+  # runs for an untrusted event never holds a deployment token.
+  deploy:
+    needs: build
+    if: needs.build.outputs.built == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e

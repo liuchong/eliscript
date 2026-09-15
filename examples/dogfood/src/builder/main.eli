@@ -21,10 +21,11 @@
   (import "./content.eli" check-identity read-posts)
   (import "./issues.eli" collect-issues)
   (import "./discussions.eli" collect-discussions)
+  (import "./events.eli" build-decision classify-event requested-event)
   (import "./identity.eli" resolve-identity)
   (import "../support/config.eli" load-config)
   (import "../support/diagnostics.eli" fail)
-  (import "../support/text.eli" join slice string-value?)
+  (import "../support/text.eli" join slice string-value? text-length)
 
   (defconst program-arguments (js* "process.argv"))
   (defconst environment (js* "process.env"))
@@ -50,12 +51,29 @@
                     (env-value "INPUT_OUTPUT_DIRECTORY")))
       ((= name "force") (env-value "INPUT_FORCE"))
       ((= name "preview") (env-value "INPUT_PREVIEW"))
+      ((= name "event-file")
+       (first-value (env-value "INPUT_EVENT-FILE") (env-value "INPUT_EVENT_FILE")))
+      ((= name "previous-manifest")
+       (first-value (env-value "INPUT_PREVIOUS-MANIFEST")
+                    (env-value "INPUT_PREVIOUS_MANIFEST")))
       ((= name "github-token")
        (first-value (env-value "INPUT_GITHUB-TOKEN") (env-value "INPUT_GITHUB_TOKEN")))
       (t nil)))
 
   (defun first-value (first second)
     (if (nil? first) second first))
+
+  ;; `--force` and `--preview` are flags. Reading them as options made a
+  ;; trailing `--force` read the next argument as its value, so the flag did
+  ;; nothing exactly when it was written last.
+  (defun flag-present? (arguments name)
+    (let ((index 0)
+          (found nil)
+          (total (Collection/count arguments)))
+      (while (< index total)
+        (when (= (Collection/nth arguments index) name) (setq found t))
+        (setq index (1+ index)))
+      found))
 
   (defun option-value (arguments name fallback)
     (let ((index 2)
@@ -131,6 +149,31 @@
                                       :posts (public-posts posts)))
            "\n")))
 
+  (defun manifest-fingerprint (path)
+    (Collection/get (JSON/parse (readFileSync path "utf8")) "contentFingerprint" nil))
+
+  ;; The tree this run replaces must be the one the recorded build produced.
+  ;; Without this check a stale, hand-edited, or foreign output directory is
+  ;; deleted without anyone noticing.
+  (defun verify-previous-manifest (previous-manifest output)
+    (when (not (nil? previous-manifest))
+      (let* ((expected-path (absolute-path "." previous-manifest))
+             (current-path (Path/join output "_dogfood/build.json"))
+             (current (if (existsSync current-path)
+                          (manifest-fingerprint current-path) nil))
+             (expected (if (existsSync expected-path)
+                           (manifest-fingerprint expected-path) nil)))
+        (cond
+          ((nil? current) nil)
+          ((nil? expected)
+           (fail "DOGFOOD-BUILD-005"
+                 (str "previous manifest is missing or unreadable: " expected-path)))
+          ((not (= current expected))
+           (fail "DOGFOOD-BUILD-004"
+                 (str "output " output " was not produced by the recorded build: "
+                      (str current) " does not match " (str expected))))
+          (t nil)))))
+
   (defun publish (staging output)
     (let ((backup (str output ".backup")))
       (when (existsSync backup)
@@ -146,7 +189,13 @@
       (when (existsSync backup)
         (rmSync backup (js-object :recursive t :force t)))))
 
-  (defun publishable? (post) (not (get post :draft)))
+  (defun publishable? (post preview)
+    (or preview (not (get post :draft))))
+
+  ;; A preview tree is reachable from a pull request, so it must not be indexed
+  ;; and must say what it is.
+  (defun preview-site (site)
+    (Collection/assoc site :preview t))
 
   ;; ------------------------------------------------------------ browser asset
 
@@ -282,6 +331,7 @@
       (set-output "built" "true")
       (set-output "reason" reason)
       (set-output "content-fingerprint" fingerprint-value)
+      (set-output "cache-key" (str "dogfood-" fingerprint-value))
       (set-output "output-directory" output)
       (set-output "post-count" (str post-count))
       (set-output "comment-snapshot-count" "0")
@@ -289,12 +339,18 @@
 
   ;; ------------------------------------------------------------------- build
 
-  (defasync build-site (root config-path output-override browser-override reason)
+  (defun output-directory-of (root config override)
+    (Path/join root (if (nil? override)
+                        (Collection/get (Collection/get config :output) :directory "_site")
+                      override)))
+
+  (defasync build-site (root config-path output-override browser-override preview reason)
     (let* ((config (load-config config-path))
-           (site (Collection/get config :site))
+           (site (if preview
+                     (preview-site (Collection/get config :site))
+                   (Collection/get config :site)))
            (sources (enabled-sources config))
-           (configured (Collection/get (Collection/get config :output) :directory "_site"))
-           (output (Path/join root (if (nil? output-override) configured output-override)))
+           (output (output-directory-of root config output-override))
            (staging (str output ".staging"))
            (collected [])
            (carriers 0)
@@ -308,8 +364,9 @@
                   carriers (+ carriers (Collection/get result :carriers 0))
                   unauthorized (+ unauthorized (Collection/get result :unauthorized 0))))
           (setq index (1+ index))))
-      (let* ((posts (sort-posts (Sequence/filter publishable?
-                                                  (resolve-identity config collected))))
+      (let* ((posts (sort-posts
+                      (Sequence/filter (lambda (post) (publishable? post preview))
+                                       (resolve-identity config collected))))
              (documents (Collection/conj (render-site site posts)
                                        {:path "assets/browser.js"
                                         :content (browser-bundle root browser-override)}))
@@ -325,6 +382,25 @@
         (report output documents posts reason digest)
         digest)))
 
+  ;; Keywords print with their leading colon, which reads as noise in a log.
+  (defun keyword-name (value)
+    (let* ((text (str value))
+           (size (text-length text)))
+      (if (and (> size 0) (= (string-code-unit-at text 0) 58))
+          (slice 1 size text)
+        text)))
+
+  ;; An event that cannot change the site ends the run without writing output.
+  (defun defer (decision)
+    (let ((subject (keyword-name (Collection/get decision :subject :unknown)))
+          (event (str (Collection/get decision :event ""))))
+      (print (str "dogfood: deferred; " subject " event "
+                  (if (= event "") "(none)" event)
+                  " cannot change the site"))
+      (set-output "built" "false")
+      (set-output "reason" "deferred")
+      (set-output "subject" subject)))
+
   (defasync main ()
     (let* ((arguments program-arguments)
            (root (option-value arguments "--root"
@@ -335,12 +411,38 @@
            (config-path (absolute-path root config-file))
            (output-override (first-value (option-value arguments "--output" nil)
                                          (action-input "output-directory")))
-           (forced (or (not (nil? (option-value arguments "--force" nil)))
+           (forced (or (flag-present? arguments "--force")
                        (truthy-input? (action-input "force"))))
-           (browser-override (option-value arguments "--browser-bundle" nil)))
+           (browser-override (option-value arguments "--browser-bundle" nil))
+           (preview (or (flag-present? arguments "--preview")
+                        (truthy-input? (action-input "preview"))))
+           (event-file (first-value (option-value arguments "--event-file" nil)
+                                    (first-value (action-input "event-file")
+                                                 (env-value "GITHUB_EVENT_PATH"))))
+           (previous-manifest
+            (first-value (option-value arguments "--previous-manifest" nil)
+                         (action-input "previous-manifest"))))
       (try
-        (await (build-site root config-path output-override browser-override
-                           (if forced "forced" "changed")))
+        (let* ((classification (if (nil? event-file)
+                                   (requested-event)
+                                 (classify-event
+                                   (first-value (env-value "GITHUB_EVENT_NAME")
+                                                "workflow_dispatch")
+                                   (JSON/parse (readFileSync
+                                                 (absolute-path root event-file)
+                                                 "utf8")))))
+               (config (load-config config-path))
+               (decision (build-decision config classification forced)))
+          (if (not (Collection/get decision :build nil))
+              (defer decision)
+            (progn
+              ;; Verification is a precondition: it runs before any rendering,
+              ;; so a rejected run leaves no staging tree behind.
+              (verify-previous-manifest
+                previous-manifest
+                (output-directory-of root config output-override))
+              (await (build-site root config-path output-override browser-override
+                                 preview (Collection/get decision :reason "changed"))))))
         (catch error
           (print (str "dogfood: " (get error :code "DOGFOOD") ": "
                       (get error :message)))

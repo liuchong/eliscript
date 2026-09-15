@@ -11,17 +11,36 @@
 (module dogfood.tools.package
   (import "eliscript/runtime/core/collection.mjs" :as Collection)
   (import "eliscript/runtime/core/order.mjs" :as Order)
-  (import "eliscript/runtime/core/text.mjs" contains startsWith)
+  (import "eliscript/runtime/core/text.mjs" contains endsWith startsWith)
   (import "node:child_process" spawnSync)
   (import "node:crypto" createHash)
   (import "node:fs"
-          existsSync mkdirSync readdirSync readFileSync rmSync statSync
-          writeFileSync)
+          copyFileSync existsSync mkdirSync readdirSync readFileSync renameSync
+          rmSync statSync writeFileSync)
   (import "node:path" :as Path)
 
   (defconst program-arguments (js* "process.argv"))
   (defconst set-exit-code (js* "(code) => { process.exitCode = code; }"))
   (defconst byte-length (js* "(text) => Buffer.byteLength(text, 'utf8')"))
+
+  ;; This tool is compiled as a single file, so it keeps its own text helpers
+  ;; rather than importing project modules by a path that would not survive.
+  (defun replace-text (text needle replacement)
+    (js-call (js-call text :split needle) :join replacement))
+
+  ;; Specification 0007 requires the template to pin the Action to a full
+  ;; commit digest. The digest cannot be written by hand and stay correct, so
+  ;; the placeholder is resolved from the repository being packaged.
+  (defun commit-digest (root)
+    (let ((result (spawnSync "git"
+                             (js-array "rev-parse" "HEAD")
+                             (js-object :cwd root :encoding "utf8"))))
+      (if (= (get result "status") 0)
+          (trim-text (get result "stdout"))
+        (throw (js-object :code "DOGFOOD-PACKAGE-012"
+                          :message "cannot read the commit digest to pin the template")))))
+
+  (defun trim-text (text) (js-call text :trim))
 
   ;; Credential shapes and absolute host paths, never the plain input names:
   ;; the builder legitimately reads an input called INPUT_GITHUB_TOKEN.
@@ -132,6 +151,11 @@
            (action-directory (Path/join project-root "dist/action"))
            (entry (Path/join action-directory "index.js"))
            (browser (Path/join project-root "dist/site/browser.js"))
+           (source-map (Path/join action-directory "index.js.map"))
+           (eliscript-map (Path/join action-directory "index.eli.map"))
+           (compiler-map (Path/join project-root "dist/src/builder/main.mjs.map"))
+           (workflow-source (Path/join project-root "templates/workflows/dogfood.yml"))
+           (workflow (Path/join action-directory "workflow.yml"))
            (manifest (Path/join action-directory "artifact.json")))
       (print (str "package: compiling " project))
       (run-command (Path/join root "bin/eliscript-build")
@@ -151,16 +175,69 @@
         (rmSync action-directory (js-object :recursive t :force t)))
       (mkdirSync action-directory (js-object :recursive t))
       (print "package: bundling the Action entry for Node 24")
-      (run-command "bun"
-                   (js-array "build" entry-source
-                             "--target=node" "--format=cjs"
-                             "--outfile" entry)
-                   root)
+      ;; The map is external and chained through the compiler's own map, so
+      ;; its sources are the project-relative .eli files a reader can open.
+      ;; Bun only writes an external map beside an output directory, so the
+      ;; bundle is produced there and renamed into place.
+      (let ((bundle-directory (Path/join project-root "dist/action-bundle")))
+        (when (existsSync bundle-directory)
+          (rmSync bundle-directory (js-object :recursive t :force t)))
+        (run-command "bun"
+                     (js-array "build" entry-source
+                               "--target=node" "--format=cjs"
+                               "--sourcemap=external"
+                               "--outdir" bundle-directory)
+                     root)
+        (when (not (existsSync (Path/join bundle-directory "main.js")))
+          (throw (js-object :code "DOGFOOD-PACKAGE-010"
+                            :message "the bundler wrote no entry into its output directory")))
+        (renameSync (Path/join bundle-directory "main.js") entry)
+        (renameSync (Path/join bundle-directory "main.js.map") source-map)
+        ;; The bundler does not chain the compiler's map, so the map that names
+        ;; the .eli sources travels beside the bundle instead of pretending the
+        ;; bundle map contains it.
+        (when (not (existsSync compiler-map))
+          (throw (js-object :code "DOGFOOD-PACKAGE-011"
+                            :message (str "compiler source map is missing: "
+                                          compiler-map))))
+        (copyFileSync compiler-map eliscript-map)
+        (rmSync bundle-directory (js-object :recursive t :force t))
+        ;; The rename must not leave the bundle pointing at a file that is gone.
+        (writeFileSync
+          entry
+          (replace-text (readFileSync entry "utf8")
+                        "sourceMappingURL=main.js.map"
+                        "sourceMappingURL=index.js.map")))
+      (when (not (existsSync workflow-source))
+        (throw (js-object :code "DOGFOOD-PACKAGE-008"
+                          :message (str "workflow template is missing: "
+                                        workflow-source))))
+      (writeFileSync
+        workflow
+        (replace-text (readFileSync workflow-source "utf8")
+                      "PLACEHOLDER_ACTION_DIGEST"
+                      (commit-digest root)))
       (let* ((bundle (readFileSync entry "utf8"))
              (browser-bundle (readFileSync browser "utf8"))
+             (map-text (readFileSync source-map "utf8"))
+             (eliscript-map-text (readFileSync eliscript-map "utf8"))
+             (map (JSON/parse eliscript-map-text))
              (sources (source-digests root project)))
         (assert-clean bundle "the Action bundle")
         (assert-clean browser-bundle "the browser bundle")
+        (assert-clean map-text "the bundle source map")
+        (assert-clean eliscript-map-text "the Eliscript source map")
+        ;; A readable map is only useful if it still names the source files.
+        (let ((map-sources (Collection/get map "sources" []))
+              (index 0)
+              (eliscript 0))
+          (while (< index (Collection/count map-sources))
+            (when (endsWith ".eli" (Collection/nth map-sources index))
+              (setq eliscript (1+ eliscript)))
+            (setq index (1+ index)))
+          (when (= eliscript 0)
+            (throw (js-object :code "DOGFOOD-PACKAGE-009"
+                              :message "the source map names no .eli source"))))
         ;; The shell loads this from the document head as a classic script, so
         ;; a top-level import statement would leave it unable to run.
         (when (or (startsWith "import " browser-bundle)
@@ -176,6 +253,9 @@
                             :entry (str project "/dist/action/index.js")
                             :entrySha256 (sha256-of-text bundle)
                             :entryBytes (funcall byte-length bundle)
+                            :workflow "workflow.yml"
+                            :sourceMap "index.js.map"
+                            :eliscriptSourceMap "index.eli.map"
                             :browserEntry (str project "/dist/site/browser.js")
                             :browserSha256 (sha256-of-text browser-bundle)
                             :browserBytes (funcall byte-length browser-bundle)
