@@ -143,7 +143,9 @@ test("action.yml declares the documented Action contract", async () => {
   const metadata = Bun.YAML.parse(
     await readFile(resolve(PROJECT, "action.yml"), "utf8"),
   );
-  expect(metadata.name).toBe("dogfood");
+  // The display name has to be unique on the marketplace, where `dogfood` is
+  // already taken.
+  expect(metadata.name).toBe("Eliscript Dogfood");
   expect(metadata.runs).toEqual({ using: "node24", main: "dist/action/index.js" });
   expect(Object.keys(metadata.inputs)).toEqual([
     "config-file",
@@ -169,6 +171,29 @@ test("action.yml declares the documented Action contract", async () => {
   await expect(
     readFile(resolve(PROJECT, metadata.runs.main), "utf8"),
   ).resolves.toContain("require(");
+});
+
+test("the metadata satisfies the marketplace limits", async () => {
+  const { stdout } = await run([process.execPath, "-e", `
+    const fs = require("node:fs");
+    const text = fs.readFileSync(${JSON.stringify(resolve(PROJECT, "action.yml"))}, "utf8");
+    const block = (key) => {
+      const match = new RegExp("^" + key + ": >-\\\\n((?:  .*\\\\n)+)", "m").exec(text);
+      if (match) return match[1].split("\\n").map((line) => line.trim()).join(" ").trim();
+      return new RegExp("^" + key + ": (.+)$", "m").exec(text)?.[1]?.trim() ?? "";
+    };
+    process.stdout.write(JSON.stringify({
+      name: block("name"), description: block("description"),
+      icon: /icon: (\\S+)/.exec(text)?.[1], color: /color: (\\S+)/.exec(text)?.[1],
+    }));
+  `]);
+  const metadata = JSON.parse(stdout);
+  // The marketplace refuses a description of 125 characters or more, and this
+  // is how a listing was refused once already.
+  expect(metadata.description.length).toBeLessThan(125);
+  expect(metadata.name.length).toBeLessThanOrEqual(50);
+  expect(metadata.icon).toBeTruthy();
+  expect(metadata.color).toBeTruthy();
 });
 
 test("the artifact manifest binds every source and the bundle", async () => {
