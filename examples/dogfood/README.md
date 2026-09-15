@@ -68,8 +68,17 @@ their full wording is met.
 | S1 | Repository Markdown becomes a static site: routes, tags, archive, feed, sitemap, search, aliases, drafts, atomic output | `tests/dogfood-site.test.mjs` |
 | S2 | Issues are authorized, classified as carriers, paginated, and normalized | `tests/dogfood-issues.test.mjs` |
 | S3 | Comment channels: a native channel captured as a snapshot or declared live, and external adapters declared as mount regions | `tests/dogfood-comments.test.mjs` |
+| S4 | Local search, light/dark/system themes with no flash of the wrong theme, and a browser bundle the build requires | `tests/dogfood-browser.test.mjs` |
 | S6 | Discussions are read through GraphQL, filtered by category, authorized the same way as Issues, and captured with their reply tree | `tests/dogfood-discussions.test.mjs` |
 | Packaging | The Action builds a consumer repository on Node 24 with no Emacs, Bun, or installed package | `tests/dogfood-action.test.mjs` |
+
+The browser layer is one classic script emitted into the document head. It is
+classic rather than a module because it applies the stored theme before the first
+paint, and a module script would run after parse and flash the wrong theme. It
+needs no import map, carries no portable collection runtime, and reaches storage
+through an annotated interop boundary because specification 0126 does not grant
+one. Every page keeps working with JavaScript disabled: the search page says so
+and links the archive.
 
 Comments are deliberately not fetched during a build unless the configuration
 asks for a snapshot, and a live channel is never fetched at all: a comment event

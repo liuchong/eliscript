@@ -18,8 +18,13 @@
      "--sans:-apple-system,BlinkMacSystemFont,\"Segoe UI\",\"Noto Sans\",sans-serif;"
      "--serif:Georgia,\"Songti SC\",\"Noto Serif\",serif;"
      "--mono:ui-monospace,SFMono-Regular,Menlo,monospace}\n"
-     "@media (prefers-color-scheme:dark){:root{--ink:#eceae5;--paper:#14161a;"
+     "@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--ink:#eceae5;--paper:#14161a;"
      "--muted:#9aa0ab;--line:#2c3037;--accent:#7fb495;--fresh:#d3a44c;--error:#e0796c}}\n"
+     ":root[data-theme=dark]{--ink:#eceae5;--paper:#14161a;--muted:#9aa0ab;--line:#2c3037;--accent:#7fb495;--fresh:#d3a44c;--error:#e0796c}\n"
+     ".theme-toggle{font:inherit;font-size:14px;color:var(--muted);background:none;border:1px solid var(--line);border-radius:8px;padding:3px 10px;cursor:pointer}\n"
+     ".theme-toggle:hover{color:var(--ink);border-color:var(--ink)}\n"
+     ".search-form{display:flex;gap:8px;align-items:center}\n"
+     ".search-form input{font:inherit;font-size:15px;padding:6px 12px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);min-width:220px}\n"
      "*{box-sizing:border-box}\n"
      "html{-webkit-text-size-adjust:100%}\n"
      "body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);"
@@ -83,8 +88,13 @@
     (str "<nav aria-label=\"site\">"
          "<a href=\"" root "archive/\">Archive</a>"
          "<a href=\"" root "tags/\">Tags</a>"
+         "<a href=\"" root "search/\">Search</a>"
          "<a href=\"" root "feed.xml\">Feed</a>"
          "<a href=\"https://github.com/\">GitHub</a>"
+         ;; The browser bundle labels this control once it has run; the label
+         ;; here keeps the page usable with JavaScript disabled.
+         "<button id=\"theme-toggle\" class=\"theme-toggle\" type=\"button\">"
+         "Theme</button>"
          "</nav>"))
 
   (defun document (site root title description content)
@@ -98,6 +108,13 @@
        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
        "<title>" (escape-html title) "</title>\n"
        "<meta name=\"description\" content=\"" (escape-html description) "\">\n"
+       ;; The browser bundle reads its own configuration from these, and the
+       ;; search index it fetches is a site-relative URL.
+       "<meta name=\"dogfood-search-index\" content=\"" root "search.json\">\n"
+       "<meta name=\"dogfood-root\" content=\"" root "\">\n"
+       ;; A classic head script applies the stored theme before the first
+       ;; paint; a module script would flash the wrong theme.
+       "<script src=\"" root "assets/browser.js\"></script>\n"
        "<link rel=\"stylesheet\" href=\"" root "assets/site.css\">\n"
        "<link rel=\"alternate\" type=\"application/atom+xml\" href=\"" root
        "feed.xml\" title=\"" (escape-html site-title) "\">\n"

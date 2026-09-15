@@ -368,6 +368,23 @@
                       "<a href=\"../\">Tags</a></p></div>"
                       (render-post-list "../../" matching)))}))
 
+  (defun render-search-page (site)
+    {:path "search/index.html"
+     :content
+     (document site "../" "Search" "Search every published article locally."
+               (str "<div class=\"article\"><h1>Search</h1>"
+                    "<p class=\"crumbs\"><a href=\"../\">Home</a></p>"
+                    "<div class=\"search-form\">"
+                    "<label class=\"skip\" for=\"search-input\">Search articles</label>"
+                    "<input id=\"search-input\" type=\"search\" autocomplete=\"off\""
+                    " placeholder=\"Search title, summary, tags, or text\">"
+                    "</div>"
+                    "<div id=\"search-results\" aria-live=\"polite\"></div>"
+                    "<noscript><p class=\"comment-note\">Search needs JavaScript."
+                    " Every article is still reachable from the"
+                    " <a href=\"../archive/\">archive</a>.</p></noscript>"
+                    "</div>"))})
+
   (defun render-not-found (site)
     {:path "404.html"
      :content
@@ -473,6 +490,7 @@
       (setq documents (Collection/conj documents (render-home site sorted)))
       (setq documents (Collection/conj documents (render-archive site sorted)))
       (setq documents (Collection/conj documents (render-tag-index site tags sorted)))
+      (setq documents (Collection/conj documents (render-search-page site)))
       (setq documents (Collection/conj documents (render-not-found site)))
       (setq documents (Collection/conj documents (render-feed site sorted)))
       (setq documents (Collection/conj documents (render-sitemap site sorted)))

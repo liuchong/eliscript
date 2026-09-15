@@ -25,12 +25,18 @@ The builder and the renderer are two separate Eliscript programs:
 Output replacement is atomic: the build writes `_site.staging`, and only after
 every route exists does it rename that tree into place.
 
-## Deliberate omissions
+## What has landed since
 
-This slice has no Issues provider, no Discussions provider, no comment
-channels, and no packaging. Those gates arrive in the order recorded by
-specification 0009. The static article authority rule already holds: every
-article is complete HTML and stays readable with JavaScript disabled.
+Issues and Discussions are article sources now, each with owner-only
+publication and carrier classification. Comment channels exist in three
+shapes: a native snapshot captured during a build, a live channel that no
+build ever fetches, and a mount region for an external provider.
+
+What has not landed is packaging. Those gates arrive in the order recorded by
+specification 0009. The static article authority rule holds throughout: every
+article is complete HTML and stays readable with JavaScript disabled. Search
+and the theme control are enhancements, not requirements, and the
+<code>&lt;noscript&gt;</code> note on the search page says so.
 
 > A design is only as good as the smallest slice that proves it.
 

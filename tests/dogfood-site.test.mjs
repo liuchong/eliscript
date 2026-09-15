@@ -17,6 +17,7 @@ const PROJECT = resolve(ROOT, "examples/dogfood");
 let staging;
 let program;
 let workspace;
+let browserBundle;
 
 async function run(command, options = {}) {
   const child = Bun.spawn(command, {
@@ -43,6 +44,8 @@ async function buildSite(directory, output) {
     directory,
     "--output",
     output,
+    "--browser-bundle",
+    browserBundle,
   ]);
   if (exitCode !== 0) throw new Error(stderr.trim() || stdout.trim());
   return stdout;
@@ -100,6 +103,26 @@ beforeAll(async () => {
   if (build.exitCode !== 0) {
     throw new Error(build.stderr.trim() || build.stdout.trim());
   }
+
+  // The browser bundle is generated beside the package rather than inside the
+  // consumer's repository, so the test builds it once and passes it in, exactly
+  // as a packaged Action would carry it.
+  const browserSource = resolve(staging, "browser-source");
+  const compile = await run([
+    COMPILER, "--no-cache", "--root", "examples/dogfood", "--out-dir", browserSource,
+    "examples/dogfood/src/renderer/browser.eli",
+  ]);
+  if (compile.exitCode !== 0) {
+    throw new Error(compile.stderr.trim() || compile.stdout.trim());
+  }
+  browserBundle = resolve(staging, "browser.js");
+  const bundle = await run([
+    "bun", "build", resolve(browserSource, "src/renderer/browser.mjs"),
+    "--target=browser", "--format=iife", "--outfile", browserBundle,
+  ]);
+  if (bundle.exitCode !== 0) {
+    throw new Error(bundle.stderr.trim() || bundle.stdout.trim());
+  }
   program = resolve(staging, "src/builder/main.mjs");
 
   // A copy of the project proves it works as a standalone project root.
@@ -131,7 +154,9 @@ test("the Markdown slice publishes the documented route set", async () => {
     "sitemap.xml",
     "robots.txt",
     "search.json",
+    "search/index.html",
     "assets/site.css",
+    "assets/browser.js",
     "_dogfood/build.json",
     "_dogfood/posts.json",
     "posts/hello-dogfood/index.html",
@@ -166,8 +191,10 @@ test("article bodies are sanitized and self-contained", async () => {
   expect(body).toContain("<strong>executable slice</strong>");
   expect(body).toContain("<pre><code class=\"language-elisp\">");
   expect(body).toContain("<code>content/posts/</code>");
-  // Raw HTML in content is escaped rather than interpreted.
-  expect(body).not.toContain("<script");
+  // Raw HTML in content is escaped rather than interpreted: the bundle the
+  // shell loads is the page's only script, and nothing inline appears.
+  expect(body).toContain('<script src="../../assets/browser.js"></script>');
+  expect(body).not.toMatch(/<script(?![^>]*\ssrc=)/u);
 });
 
 test("every relative link resolves", async () => {
@@ -180,7 +207,7 @@ test("the published manifests follow the documented shape", async () => {
   expect(manifest.format).toBe("dogfood-build");
   expect(manifest.version).toBe(1);
   expect(manifest.postCount).toBe(3);
-  expect(manifest.routeCount).toBe(17);
+  expect(manifest.routeCount).toBe(19);
   expect(manifest.contentFingerprint).toMatch(/^[0-9a-f]{64}$/u);
 
   const posts = JSON.parse(await readText(root, "_dogfood/posts.json"));

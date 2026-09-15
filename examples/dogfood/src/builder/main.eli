@@ -14,7 +14,8 @@
   (import "eliscript/runtime/core/sequence.mjs" :as Sequence)
   (import "node:crypto" createHash)
   (import "node:fs"
-          appendFileSync existsSync mkdirSync renameSync rmSync writeFileSync)
+          appendFileSync existsSync mkdirSync readFileSync renameSync rmSync
+          writeFileSync)
   (import "node:path" :as Path)
   (import "../renderer/server.eli" render-site sort-posts)
   (import "./content.eli" check-identity read-posts)
@@ -22,7 +23,7 @@
   (import "./discussions.eli" collect-discussions)
   (import "../support/config.eli" load-config)
   (import "../support/diagnostics.eli" fail)
-  (import "../support/text.eli" slice string-value?)
+  (import "../support/text.eli" join slice string-value?)
 
   (defconst program-arguments (js* "process.argv"))
   (defconst environment (js* "process.env"))
@@ -146,6 +147,44 @@
 
   (defun publishable? (post) (not (get post :draft)))
 
+  ;; ------------------------------------------------------------ browser asset
+
+  ;; The browser bundle is generated beside the package rather than in the
+  ;; consumer's repository, so it is looked for in the development layout and
+  ;; then beside the running entry, which is the packaged layout.
+  (defun defined-values (values)
+    (let ((result [])
+          (index 0))
+      (while (< index (Collection/count values))
+        (let ((value (Collection/nth values index)))
+          (when (not (nil? value))
+            (setq result (Collection/conj result value))))
+        (setq index (1+ index)))
+      result))
+
+  (defun browser-bundle-candidates (root override)
+    (let ((from-entry (str (Path/dirname (get program-arguments 1 "."))
+                           "/../site/browser.js")))
+      (defined-values [override
+                       (env-value "DOGFOOD_BROWSER_BUNDLE")
+                       (str root "/dist/site/browser.js")
+                       from-entry])))
+
+  (defun browser-bundle (root override)
+    (let ((candidates (browser-bundle-candidates root override))
+          (index 0)
+          (found nil))
+      (while (and (< index (Collection/count candidates)) (nil? found))
+        (let ((candidate (Collection/nth candidates index)))
+          (when (and (not (nil? candidate)) (existsSync candidate))
+            (setq found candidate)))
+        (setq index (1+ index)))
+      (if (nil? found)
+          (fail "DOGFOOD-BUILD-003"
+                (str "browser bundle not found; looked in "
+                     (join ", " candidates)))
+        (readFileSync found "utf8"))))
+
   (defun append-all (target values)
     (Collection/reduce values
                        (lambda (accumulator value)
@@ -249,7 +288,7 @@
 
   ;; ------------------------------------------------------------------- build
 
-  (defasync build-site (root config-path output-override reason)
+  (defasync build-site (root config-path output-override browser-override reason)
     (let* ((config (load-config config-path))
            (site (Collection/get config :site))
            (sources (enabled-sources config))
@@ -269,7 +308,9 @@
                   unauthorized (+ unauthorized (Collection/get result :unauthorized 0))))
           (setq index (1+ index))))
       (let* ((posts (sort-posts (Sequence/filter publishable? collected)))
-             (documents (render-site site posts))
+             (documents (Collection/conj (render-site site posts)
+                                       {:path "assets/browser.js"
+                                        :content (browser-bundle root browser-override)}))
              (digest (fingerprint documents)))
         (check-identity posts)
         (prepare-staging staging)
@@ -293,9 +334,11 @@
            (output-override (first-value (option-value arguments "--output" nil)
                                          (action-input "output-directory")))
            (forced (or (not (nil? (option-value arguments "--force" nil)))
-                       (truthy-input? (action-input "force")))))
+                       (truthy-input? (action-input "force"))))
+           (browser-override (option-value arguments "--browser-bundle" nil)))
       (try
-        (await (build-site root config-path output-override (if forced "forced" "changed")))
+        (await (build-site root config-path output-override browser-override
+                           (if forced "forced" "changed")))
         (catch error
           (print (str "dogfood: " (get error :code "DOGFOOD") ": "
                       (get error :message)))

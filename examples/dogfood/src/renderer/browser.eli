@@ -1,0 +1,222 @@
+;; Site browser entry.
+;;
+;; Specification 0006 asks for a local search index, light/dark/system themes
+;; with no flash of the wrong theme, and islands that never block first content
+;; paint. This module owns all three.
+;;
+;; It is compiled and bundled into one classic script that the shell loads from
+;; the document head, before the first paint, so the stored theme is applied
+;; before anything renders. A module script would run after parse and flash the
+;; wrong theme, so the bundle is deliberately not a module.
+;;
+;; The bundle reads its configuration from meta elements the renderer emits,
+;; because a bundled script has no module URL to resolve against. It needs no
+;; import map: the package specifiers below are bundled away.
+
+(module dogfood.renderer.browser
+  (import "eliscript/platform/browser.mjs"
+          browserCapabilities browserDocument browserSetTimeout)
+
+  ;; Text operations on native strings. The portable text library reaches the
+  ;; collection runtime through its facade, which would pull the whole protocol
+  ;; stack into a bundle that only searches a JSON index.
+  (defun to-lowercase (text) (js-call text :toLowerCase))
+
+  (defun trim-text (text) (js-call text :trim))
+
+  (defun contains? (needle text) (js-call text :includes needle))
+
+  (defun blank? (text) (= (js-length (trim-text text)) 0))
+
+  (defun split-on (separator text) (js-call text :split separator))
+
+  (defconst theme-key "dogfood-theme")
+  (defconst result-limit 25)
+  (defconst search-delay 80)
+
+  ;; Storage is not one of the grants in specification 0126, so it is reached
+  ;; through explicit interop rather than through a capability token.
+  (defconst storage
+    (js* "(typeof localStorage === 'undefined' ? null : localStorage)"))
+
+  (defconst capabilities
+    (browserCapabilities (js* "globalThis") (js-array "document" "network" "timers")))
+  (defconst page (browserDocument capabilities))
+
+  (defvar index-value nil)
+
+  (defun node (id) (js-call page :getElementById id))
+
+  (defun root () (get page "documentElement"))
+
+  (defun meta-content (name)
+    (let ((element (js-call page :querySelector (str "meta[name=\"" name "\"]"))))
+      (if (nil? element) "" (get element "content" ""))))
+
+  ;; ------------------------------------------------------------------ theme
+
+  (defun stored-theme ()
+    (if (nil? storage)
+        "system"
+      (let ((value (js-call storage :getItem theme-key)))
+        (if (or (nil? value) (= value "")) "system" value))))
+
+  (defun apply-theme (name)
+    (if (= name "system")
+        (js-call (root) :removeAttribute "data-theme")
+      (js-call (root) :setAttribute "data-theme" name)))
+
+  (defun next-theme (name)
+    (cond
+      ((= name "system") "light")
+      ((= name "light") "dark")
+      (t "system")))
+
+  (defun remember-theme (name)
+    (when (not (nil? storage)) (js-call storage :setItem theme-key name)))
+
+  (defun label-theme (name)
+    (let ((button (node "theme-toggle")))
+      (when (not (nil? button))
+        (put button "textContent" (str "Theme: " name))
+        (js-call button :setAttribute "aria-label"
+                 (str "Theme " name ", switch to " (next-theme name))))))
+
+  (defun toggle-theme ()
+    (let ((next (next-theme (stored-theme))))
+      (remember-theme next)
+      (apply-theme next)
+      (label-theme next)))
+
+  ;; ----------------------------------------------------------------- search
+
+  (defasync load-index ()
+    (when (nil? index-value)
+      (let* ((url (meta-content "dogfood-search-index"))
+             (response (await (js-call (js* "globalThis") :fetch url))))
+        (unless (get response "ok" false)
+          (throw (new (js* "globalThis.Error")
+                      (str "search index unavailable: " url))))
+        (setq index-value (await (js-call response :json)))))
+    index-value)
+
+  (defun entry-haystack (entry)
+    (to-lowercase
+      (str (get entry "title" "") " " (get entry "summary" "") " "
+           (get entry "text" "") " "
+           (js-call (js-array) :concat (get entry "tags" (js-array))))))
+
+  (defun matches? (entry query)
+    (let ((haystack (entry-haystack entry))
+          (terms (split-on " " query))
+          (index 0)
+          (found t))
+      (while (< index (js-length terms))
+        (let ((term (trim-text (js-nth index terms))))
+          (when (and (not (blank? term)) (not (contains? term haystack)))
+            (setq found false)))
+        (setq index (1+ index)))
+      found))
+
+  (defun matching-entries (entries query)
+    (let ((results (js-array))
+          (index 0))
+      (while (and (< index (js-length entries))
+                  (< (js-length results) result-limit))
+        (let ((entry (js-nth index entries)))
+          (when (matches? entry query)
+            (js-call results :push entry)))
+        (setq index (1+ index)))
+      results))
+
+  ;; Text from the index and from the query reaches the document, so it is
+  ;; escaped by construction rather than by filtering.
+  (defun escape-text (text)
+    (let ((element (js-call page :createElement "span")))
+      (put element "textContent" text)
+      (get element "innerHTML" "")))
+
+  (defun render-entry (entry)
+    (str "<li><a class=\"title\" href=\"" (escape-text (get entry "url" "")) "\">"
+         (escape-text (get entry "title" "")) "</a>"
+         "<p class=\"summary\">" (escape-text (get entry "summary" "")) "</p></li>"))
+
+  (defun render-results (entries query)
+    (let ((container (node "search-results")))
+      (when (not (nil? container))
+        (if (blank? query)
+            (put container "innerHTML" "")
+          (let ((count-value (js-length entries)))
+            (put container "innerHTML"
+                 (str "<p class=\"comment-note\">" count-value
+                      (if (= count-value 1) " result" " results")
+                      " for \"" (escape-text query) "\"</p>"
+                      (if (= count-value 0)
+                          "<p class=\"empty\">No article matches.</p>"
+                        (let ((markup "<ul class=\"list\">")
+                              (index 0))
+                          (while (< index count-value)
+                            (setq markup (str markup
+                                              (render-entry (js-nth index entries))))
+                            (setq index (1+ index)))
+                          (str markup "</ul>"))))))))))
+
+  (defun read-query ()
+    (let ((parameters (new (js* "globalThis.URLSearchParams")
+                           (get (js* "globalThis.location") "search"))))
+      (js-call parameters :get "q")))
+
+  (defun query-value ()
+    (let ((element (node "search-input")))
+      (if (nil? element)
+          ""
+        (let ((value (get element "value" nil)))
+          (if (nil? value) (or (read-query) "") value)))))
+
+  (defun search-once ()
+    (js-call (run-search) :catch
+             (lambda (error)
+               (let ((container (node "search-results")))
+                 (when (not (nil? container))
+                   (put container "innerHTML"
+                        (str "<p class=\"empty\">" (escape-text (get error "message" ""))
+                             "</p>")))))))
+
+  (defasync run-search ()
+    (let ((input (node "search-input")))
+      (when (not (nil? input))
+        (put input "value" (query-value))
+        (let* ((index (await (load-index)))
+               (entries (get index "entries" (js-array))))
+          (render-results (matching-entries entries (query-value)) (query-value))
+          (js-call input :addEventListener
+                   "input"
+                   (lambda (event)
+                     (funcall browserSetTimeout
+                              capabilities
+                              (lambda ()
+                                (render-results
+                                  (matching-entries entries (query-value))
+                                  (query-value)))
+                              search-delay))))))))
+
+  ;; --------------------------------------------------------------- bootstrap
+
+  ;; Applied before the first paint: this script is classic and in the head.
+  (apply-theme (stored-theme))
+
+  (defun on-ready ()
+    (let ((button (node "theme-toggle")))
+      (when (not (nil? button))
+        (label-theme (stored-theme))
+        (js-call button :addEventListener
+                 "click"
+                 (lambda (event)
+                   (js-call event :preventDefault)
+                   (toggle-theme)))))
+    (search-once))
+
+  (if (= (get (js* "globalThis.document") "readyState") "loading")
+      (js-call (js* "globalThis.document") :addEventListener
+               "DOMContentLoaded" (lambda (event) (on-ready)))
+    (on-ready))

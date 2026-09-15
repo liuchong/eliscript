@@ -131,6 +131,7 @@
            (entry-source (Path/join project-root "dist/src/builder/main.mjs"))
            (action-directory (Path/join project-root "dist/action"))
            (entry (Path/join action-directory "index.js"))
+           (browser (Path/join project-root "dist/site/browser.js"))
            (manifest (Path/join action-directory "artifact.json")))
       (print (str "package: compiling " project))
       (run-command (Path/join root "bin/eliscript-build")
@@ -139,6 +140,13 @@
       (when (not (existsSync entry-source))
         (throw (js-object :code "DOGFOOD-PACKAGE-004"
                           :message (str "compiled entry is missing: " entry-source))))
+      ;; The generated site loads this asset, so a package without it produces
+      ;; a site whose search and theme do not work.
+      (when (not (existsSync browser))
+        (throw (js-object
+                 :code "DOGFOOD-PACKAGE-006"
+                 :message (str "browser bundle is missing: " browser
+                               " (run `bun run build:dogfood-browser`)"))))
       (when (existsSync action-directory)
         (rmSync action-directory (js-object :recursive t :force t)))
       (mkdirSync action-directory (js-object :recursive t))
@@ -149,8 +157,16 @@
                              "--outfile" entry)
                    root)
       (let* ((bundle (readFileSync entry "utf8"))
+             (browser-bundle (readFileSync browser "utf8"))
              (sources (source-digests root project)))
         (assert-clean bundle "the Action bundle")
+        (assert-clean browser-bundle "the browser bundle")
+        ;; The shell loads this from the document head as a classic script, so
+        ;; a top-level import statement would leave it unable to run.
+        (when (or (startsWith "import " browser-bundle)
+                  (contains (str (string-from-code-unit 10) "import ") browser-bundle))
+          (throw (js-object :code "DOGFOOD-PACKAGE-007"
+                            :message "the browser bundle must be a classic script")))
         (writeFileSync
           manifest
           (str (JSON/stringify
@@ -160,11 +176,16 @@
                             :entry (str project "/dist/action/index.js")
                             :entrySha256 (sha256-of-text bundle)
                             :entryBytes (funcall byte-length bundle)
+                            :browserEntry (str project "/dist/site/browser.js")
+                            :browserSha256 (sha256-of-text browser-bundle)
+                            :browserBytes (funcall byte-length browser-bundle)
                             :sources sources))
                "\n"))
         (print (str "package: entry " entry))
         (print (str "package: sources " (Collection/count sources)))
         (print (str "package: entrySha256 " (sha256-of-text bundle)))
+        (print (str "package: browser " browser))
+        (print (str "package: browserSha256 " (sha256-of-text browser-bundle)))
         (print (str "package: manifest " manifest)))))
 
   (defun main ()

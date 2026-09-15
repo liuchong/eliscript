@@ -107,6 +107,14 @@ beforeAll(async () => {
   if (compiled.exitCode !== 0) {
     throw new Error(compiled.stderr.trim() || compiled.stdout.trim());
   }
+  // The package carries the generated site's browser asset, so it must exist
+  // before packaging.
+  const browser = await run([
+    "bun", "run", "build:dogfood-browser",
+  ]);
+  if (browser.exitCode !== 0) {
+    throw new Error(browser.stderr.trim() || browser.stdout.trim());
+  }
   const packaged = await run(["node", tool, "--root", ROOT]);
   if (packaged.exitCode !== 0) {
     throw new Error(packaged.stderr.trim() || packaged.stdout.trim());
@@ -171,6 +179,10 @@ test("the artifact manifest binds every source and the bundle", async () => {
   }
   expect(artifact.entrySha256).toMatch(/^[0-9a-f]{64}$/u);
   expect(artifact.entryBytes).toBeGreaterThan(50_000);
+  // The generated site loads this asset, so the package binds its digest too.
+  expect(artifact.browserEntry).toContain("dist/site/browser.js");
+  expect(artifact.browserSha256).toMatch(/^[0-9a-f]{64}$/u);
+  expect(artifact.browserBytes).toBeGreaterThan(5_000);
 });
 
 test("the bundle carries no credential shape or host path", async () => {
@@ -209,7 +221,9 @@ test("the packaged Action builds a consumer project on Node", async () => {
     "feed.xml",
     "sitemap.xml",
     "robots.txt",
+    "search/index.html",
     "assets/site.css",
+    "assets/browser.js",
     "_dogfood/build.json",
   ]) {
     expect(files).toContain(expected);
