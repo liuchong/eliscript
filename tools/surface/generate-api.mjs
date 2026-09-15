@@ -217,7 +217,10 @@ export function renderApiHtml(index) {
     <link rel="icon" type="image/png" href="assets/favicon.png">
     <link rel="apple-touch-icon" href="assets/eliscript-logo.png">
     <link rel="stylesheet" href="assets/site.css">
-    <script defer src="assets/site.js"></script>
+    <!-- The page's behaviours are Eliscript: this loader compiles the source
+         it names and runs the result. Nothing here is handwritten JavaScript. -->
+    <script defer src="assets/eliscript-loader.js"
+            data-eliscript="assets/site.eli"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>

@@ -66,6 +66,9 @@ export function rebasePage(html, assetVersions = new Map()) {
   for (const [asset, version] of assetVersions) {
     result = result.split(`assets/${asset}`).join(`assets/${asset}?v=${version}`);
   }
+  // The script the pages defer is a loader, and saying so in its name keeps the
+  // page honest about what it is loading.
+  result = result.split("assets/site.js").join("assets/eliscript-loader.js");
   return result;
 }
 
@@ -83,7 +86,7 @@ export async function assetVersions({ root, siteDirectory }) {
   const digest = (bytes) => createHash("sha256").update(bytes).digest("hex").slice(0, 12);
   const versions = new Map();
   versions.set("site.css", digest(await readFile(resolve(siteDirectory, "pages/assets/site.css"))));
-  versions.set("site.js", digest(await readFile(resolve(root, SITE_SCRIPT))));
+  versions.set("eliscript-loader.js", digest(await readFile(resolve(root, SITE_SCRIPT))));
   return versions;
 }
 
@@ -122,7 +125,7 @@ export async function assemblePages({ root, outDir }) {
   const versions = await assetVersions({ root: source, siteDirectory: resolve(source, SITE_SOURCE) });
   await copySite(resolve(source, SITE_SOURCE), target, versions);
   await mkdir(resolve(target, "pages/assets"), { recursive: true });
-  await writeFile(resolve(target, "pages/assets/site.js"), await readFile(script));
+  await writeFile(resolve(target, "pages/assets/eliscript-loader.js"), await readFile(script));
   await writeFile(resolve(target, "pages/assets/site.eli"),
                   await readFile(resolve(source, SITE_SOURCE_FILE)));
   await writePreviousAddresses(target, resolve(source, SITE_SOURCE));

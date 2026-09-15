@@ -47,7 +47,7 @@ afterAll(async () => {
 });
 
 test("the site publishes a loader and the source it compiles", async () => {
-  const loader = await readFile(resolve(artifact, "pages/assets/site.js"), "utf8");
+  const loader = await readFile(resolve(artifact, "pages/assets/eliscript-loader.js"), "utf8");
   // The pages load it with `defer`, so it must be a classic script with
   // nothing left to resolve. It is compiled from Eliscript like everything
   // else: the repository has no handwritten JavaScript beside the site.
@@ -60,13 +60,22 @@ test("the site publishes a loader and the source it compiles", async () => {
   // them in the browser.
   const source = await readFile(resolve(artifact, "pages/assets/site.eli"), "utf8");
   expect(source).toContain("(module docs.site");
+
+  // A reader looking at the page's source sees the Eliscript it runs, not only
+  // a script file: every page names the source it asks the loader to compile.
+  for (const path of ["index.html", "pages/language.html", "pages/api.html"]) {
+    const html = await readFile(resolve(artifact, path), "utf8");
+    expect(html).toMatch(/data-eliscript="[^"]*site\.eli"/u);
+    expect(html).toContain("eliscript-loader.js");
+    expect(html).not.toContain("assets/site.js");
+  }
   expect(await readFile(resolve(ROOT, "examples/docs-site/src/loader.eli"), "utf8"))
     .toContain("(module docs.loader");
 });
 
 test("the served pages stamp the script with its digest", async () => {
   const page = await readFile(resolve(artifact, "index.html"), "utf8");
-  expect(page).toMatch(/assets\/site\.js\?v=[0-9a-f]{12}/u);
+  expect(page).toMatch(/assets\/eliscript-loader\.js\?v=[0-9a-f]{12}/u);
   expect(page).toMatch(/assets\/site\.css\?v=[0-9a-f]{12}/u);
 });
 

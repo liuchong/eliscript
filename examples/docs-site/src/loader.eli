@@ -21,8 +21,15 @@
     (js* "String((document.currentScript && document.currentScript.src) || location.href)"))
   (defconst relative-to (js* "((url, path) => new URL(path, url).href)"))
   (defconst package-base (funcall relative-to script-url "../../"))
-  (defconst source-url (funcall relative-to script-url "site.eli"))
   (defconst worker-url (funcall relative-to script-url "../../browser/worker.mjs"))
+  ;; The page names the source it wants compiled, relative to itself; the file
+  ;; beside the loader is the fallback for a page that does not.
+  (defconst declared-source
+    (js* "((script) => (script && script.dataset && script.dataset.eliscript) || '')"))
+  (defconst source-url
+    (let ((declared (funcall declared-source (js* "document.currentScript"))))
+      (if (= declared "") (funcall relative-to script-url "site.eli")
+        (funcall relative-to (js* "document.baseURI") declared))))
   (defconst start-worker (js* "(url) => new Worker(url, { type: 'module' })"))
   (defconst blob-url-of
     (js* "(code) => URL.createObjectURL(new Blob([code], { type: 'text/javascript' }))"))
