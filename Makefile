@@ -119,7 +119,8 @@ test-applications:
 		-l tests/eliscript-org-tests.el \
 		-f ert-run-tests-batch-and-exit
 	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
-		tests/dogfood-site.test.mjs tests/dogfood-action.test.mjs
+		tests/dogfood-site.test.mjs tests/dogfood-action.test.mjs \
+		tests/browser-playground.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/application-cli-test.sh
 
 check-contracts:

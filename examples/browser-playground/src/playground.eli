@@ -1,0 +1,100 @@
+;; Browser playground.
+;;
+;; This page compiles and runs Eliscript in the browser. It is itself an
+;; Eliscript program, compiled ahead of time by the maintained compiler, and
+;; it imports the compiler again at run time to compile whatever the editor
+;; holds. No host process participates: the compiler core, the runtime core,
+;; and the emitted module all execute in the document realm.
+;;
+;; Module resolution is the only environment concern. The page declares an
+;; import map for the `eliscript/` prefix, so both the compiler the page
+;; imports and the runtime imports inside freshly compiled output resolve to
+;; served files.
+
+(module example.browser-playground
+  (import "eliscript/platform/browser.mjs"
+          browserCapabilities browserDocument)
+  (import "eliscript/dist/bootstrap/compiler.mjs"
+          compile_string_with_source_map)
+  ;; Persistent values print through the canonical data text rather than
+  ;; through JavaScript's default object spelling.
+  (import "eliscript/runtime/core/data-text.mjs" printValue)
+
+  (defconst dynamic-import (js* "(url) => import(url)"))
+  (defconst blob-url-of
+    (js* "(code) => URL.createObjectURL(new Blob([code], { type: 'text/javascript' }))"))
+  (defconst release-blob-url (js* "(url) => URL.revokeObjectURL(url)"))
+  (defconst install-console-capture
+    (js* "(node, format) => { if (console.eliscriptPlayground) return; const original = console.log; console.eliscriptPlayground = original; console.log = (...args) => { const pane = document.getElementById(node); if (pane) pane.textContent += args.map((value) => (value !== null && typeof value === 'object' ? format(value) : String(value))).join(' ') + '\\n'; original(...args); }; }"))
+
+  (defconst capabilities
+    (browserCapabilities (js* "globalThis") (js-array "document")))
+  (defconst page (browserDocument capabilities))
+
+  (defun node (id) (js-call page :getElementById id))
+
+  (defun set-text (id text)
+    (put (node id) "textContent" text))
+
+  (defun editor-source ()
+    (get (node "source") "value" ""))
+
+  (defun diagnostic-text (error)
+    (let ((diagnostic (get error "eliscriptDiagnostic" nil)))
+      (if (nil? diagnostic)
+          (str "error: " (get error "message" "unknown failure"))
+        (let* ((location (get diagnostic "location" nil))
+               (start (if (nil? location) nil (get location "start" nil)))
+               (place (if (nil? start)
+                          ""
+                        (str "  [" (get location "file" "") ":" (get start "line") ":"
+                             (get start "column") "]"))))
+          (str (get diagnostic "code" "ELI-UNKNOWN") " · "
+               (get diagnostic "phase" "unknown") " · "
+               (get diagnostic "message" "")
+               place)))))
+
+  (defun display (selector text)
+    (put (node selector) "textContent" text))
+
+  (defasync evaluate ()
+    (install-console-capture "stdout" printValue)
+    (display "stdout" "")
+    (display "js" "")
+    (display "diagnostics" "")
+    (let ((source (editor-source)))
+      (try
+        (let* ((compiled (compile_string_with_source_map source "playground.eli"))
+               (javascript (get compiled :javascript))
+               (url (blob-url-of javascript)))
+          (display "js" javascript)
+          (try
+            (await (funcall dynamic-import url))
+            (catch error
+              (display "diagnostics"
+                       (str "runtime · " (get error "message" "unknown failure"))))
+            (finally (release-blob-url url))))
+        (catch error
+          (display "diagnostics" (diagnostic-text error))))))
+
+  ;; A rejected promise would otherwise disappear, so every entry point
+  ;; reports its own failure into the diagnostics pane.
+  (defun report-failure (error)
+    (display "diagnostics" (str "internal · " (get error "message" "unknown failure"))))
+
+  (defun start ()
+    (js-call (evaluate) :catch report-failure))
+
+  (defun wire ()
+    (js-call (node "run") :addEventListener "click" (lambda (event) (start)))
+    (js-call (node "source") :addEventListener
+             "keydown"
+             (lambda (event)
+               (when (and (get event "metaKey") (= (get event "key") "Enter"))
+                 (js-call event :preventDefault)
+                 (start))))
+    (start))
+
+  (wire)
+
+  (export evaluate))

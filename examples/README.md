@@ -8,6 +8,7 @@ expected generated JavaScript, and the smallest environment needed to run it.
 | Example | What it proves | Entry command |
 | --- | --- | --- |
 | [`basic/`](basic/) | Core language forms and direct ESM execution | `bun run compile:example` |
+| [`browser-playground/`](browser-playground/README.md) | The compiler running in the browser, compiling and executing Eliscript in the page | `bun run build:browser-playground` |
 | [`getting-started/`](getting-started/README.md) | Documented format, check, build, Bun, Node, REPL, and editor workflow | `eliscript-build --config examples/getting-started/eliscript.json` |
 | [`stdlib-cli/`](stdlib-cli/README.md) | Recursive multi-file project builds | `bun run build:stdlib-cli` |
 | [`react-counter/`](react-counter/README.md) | React, hooks, browser mounting, Vite, and Fast Refresh | `bun run dev:react-counter` |

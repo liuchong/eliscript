@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Eliscript in the browser</title>
+<link rel="stylesheet" href="site.css">
+<script type="importmap">
+{
+  "imports": {
+    "eliscript/": "/"
+  }
+}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="masthead">
+  <span class="wordmark">Eliscript</span>
+  <span class="tagline">compiled in the page, not on a server</span>
+</header>
+<main id="main">
+  <section class="editor">
+    <label for="source">Source</label>
+    <textarea id="source" spellcheck="false" autocomplete="off" autocapitalize="off">(module playground
+  (import "eliscript/runtime/core/sequence.mjs" map filter)
+  (import "eliscript/runtime/core/order.mjs" sort)
+
+  (defconst values [4 1 3 2])
+
+  (defun square (value) (* value value))
+
+  (print "values " values)
+  (print "sorted" (sort values))
+  (print "squares" (map square values))
+  (print "even" (filter (lambda (value) (= (% value 2) 0)) values)))
+
+; Edit and press Run. The page compiles this with the same compiler that
+; built the page, then imports the result as a blob module. Collection
+; values print through the canonical data text, not String().
+</textarea>
+    <div class="actions">
+      <button id="run" type="button">Run</button>
+      <span class="hint">or press ⌘/Ctrl + Enter</span>
+    </div>
+  </section>
+  <section class="panes">
+    <div class="pane">
+      <h2>Output</h2>
+      <pre id="stdout" aria-live="polite"></pre>
+    </div>
+    <div class="pane">
+      <h2>Diagnostics</h2>
+      <pre id="diagnostics" aria-live="polite"></pre>
+    </div>
+    <div class="pane">
+      <h2>Compiled ESM</h2>
+      <pre id="js"></pre>
+    </div>
+  </section>
+</main>
+<script type="module" src="./playground.mjs"></script>
+</body>
+</html>
