@@ -9,7 +9,6 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join, posix, resolve } from "node:path";
-import { parse as parseYaml } from "yaml";
 
 const ROOT = resolve(import.meta.dir, "..");
 const COMPILER = resolve(ROOT, "bin/eliscript");
@@ -130,7 +129,11 @@ test("the packaging tool emits one CommonJS Node entry", async () => {
 });
 
 test("action.yml declares the documented Action contract", async () => {
-  const metadata = parseYaml(await readFile(resolve(PROJECT, "action.yml"), "utf8"));
+  // Bun parses YAML natively, so validating the Action metadata adds no
+  // package dependency to the repository.
+  const metadata = Bun.YAML.parse(
+    await readFile(resolve(PROJECT, "action.yml"), "utf8"),
+  );
   expect(metadata.name).toBe("dogfood");
   expect(metadata.runs).toEqual({ using: "node24", main: "dist/action/index.js" });
   expect(Object.keys(metadata.inputs)).toEqual([
