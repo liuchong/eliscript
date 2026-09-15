@@ -5,24 +5,41 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Eliscript in the browser</title>
 <link rel="stylesheet" href="site.css">
+<!--
+  Relative on purpose: the source page and the built page are both two
+  levels deep, so this one prefix resolves to the repository root from
+  either location and under any server root.
+-->
 <script type="importmap">
 {
   "imports": {
-    "eliscript/": "/"
+    "eliscript/": "../../"
   }
 }
 </script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
+
 <header class="masthead">
   <span class="wordmark">Eliscript</span>
   <span class="tagline">compiled in the page, not on a server</span>
 </header>
+
 <main id="main">
-  <section class="editor">
-    <label for="source">Source</label>
-    <textarea id="source" spellcheck="false" autocomplete="off" autocapitalize="off">(module playground
+  <div class="workbench">
+    <div class="workbench-bar">
+      <span class="workbench-title">Playground</span>
+      <span class="workbench-hint">⌘/Ctrl + Enter</span>
+      <button id="run" type="button" class="run">Run</button>
+    </div>
+
+    <div class="workbench-body">
+      <section class="panel panel-editor">
+        <h2 class="panel-title">Source</h2>
+        <div class="editor-surface">
+          <pre id="highlight" class="highlight" aria-hidden="true"></pre>
+          <textarea id="source" spellcheck="false" autocomplete="off" autocapitalize="off">(module playground
   (import "eliscript/runtime/core/sequence.mjs" map filter)
   (import "eliscript/runtime/core/order.mjs" sort)
 
@@ -34,31 +51,25 @@
   (print "sorted" (sort values))
   (print "squares" (map square values))
   (print "even" (filter (lambda (value) (= (% value 2) 0)) values)))
-
-; Edit and press Run. The page compiles this with the same compiler that
-; built the page, then imports the result as a blob module. Collection
-; values print through the canonical data text, not String().
 </textarea>
-    <div class="actions">
-      <button id="run" type="button">Run</button>
-      <span class="hint">or press ⌘/Ctrl + Enter</span>
+        </div>
+      </section>
+
+      <section class="panel panel-output">
+        <h2 class="panel-title">Output</h2>
+        <pre id="stdout" class="console" aria-live="polite"></pre>
+        <pre id="diagnostics" class="console console-error" aria-live="assertive"></pre>
+        <details class="compiled">
+          <summary>Compiled ESM</summary>
+          <pre id="js" class="console"></pre>
+        </details>
+      </section>
     </div>
-  </section>
-  <section class="panes">
-    <div class="pane">
-      <h2>Output</h2>
-      <pre id="stdout" aria-live="polite"></pre>
-    </div>
-    <div class="pane">
-      <h2>Diagnostics</h2>
-      <pre id="diagnostics" aria-live="polite"></pre>
-    </div>
-    <div class="pane">
-      <h2>Compiled ESM</h2>
-      <pre id="js"></pre>
-    </div>
-  </section>
+  </div>
 </main>
+
+<footer class="footer">Built with the maintained compiler, running in this page.</footer>
+
 <script type="module" src="./playground.mjs"></script>
 </body>
 </html>

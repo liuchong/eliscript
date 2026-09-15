@@ -19,6 +19,7 @@
   ;; Persistent values print through the canonical data text rather than
   ;; through JavaScript's default object spelling.
   (import "eliscript/runtime/core/data-text.mjs" printValue)
+  (import "./highlight.eli" highlight-eliscript highlight-javascript)
 
   (defconst dynamic-import (js* "(url) => import(url)"))
   (defconst blob-url-of
@@ -57,6 +58,21 @@
   (defun display (selector text)
     (put (node selector) "textContent" text))
 
+  (defun display-html (selector html)
+    (put (node selector) "innerHTML" html))
+
+  ;; The editor paints a highlighted copy behind the textarea, so the two must
+  ;; scroll together.
+  (defun paint-source ()
+    (display-html "highlight" (highlight-eliscript (editor-source)))
+    (sync-editor-scroll))
+
+  (defun sync-editor-scroll ()
+    (let ((textarea (node "source"))
+          (layer (node "highlight")))
+      (put layer "scrollTop" (get textarea "scrollTop" 0))
+      (put layer "scrollLeft" (get textarea "scrollLeft" 0))))
+
   (defasync evaluate ()
     (install-console-capture "stdout" printValue)
     (display "stdout" "")
@@ -67,7 +83,7 @@
         (let* ((compiled (compile_string_with_source_map source "playground.eli"))
                (javascript (get compiled :javascript))
                (url (blob-url-of javascript)))
-          (display "js" javascript)
+          (display-html "js" (highlight-javascript javascript))
           (try
             (await (funcall dynamic-import url))
             (catch error
@@ -87,12 +103,15 @@
 
   (defun wire ()
     (js-call (node "run") :addEventListener "click" (lambda (event) (start)))
+    (js-call (node "source") :addEventListener "input" (lambda (event) (paint-source)))
+    (js-call (node "source") :addEventListener "scroll" (lambda (event) (sync-editor-scroll)))
     (js-call (node "source") :addEventListener
              "keydown"
              (lambda (event)
                (when (and (get event "metaKey") (= (get event "key") "Enter"))
                  (js-call event :preventDefault)
                  (start))))
+    (paint-source)
     (start))
 
   (wire)

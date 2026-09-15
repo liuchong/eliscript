@@ -10,59 +10,10 @@
     <link rel="apple-touch-icon" href="assets/eliscript-logo.png">
     <link rel="stylesheet" href="assets/site.css">
     <script defer src="assets/site.js"></script>
-    <style>
-      .playground-shell {
-        display: grid;
-        grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
-        gap: 20px;
-      }
-      @media (max-width: 900px) {
-        .playground-shell { grid-template-columns: 1fr; }
-      }
-      .playground-shell textarea {
-        width: 100%;
-        min-height: 320px;
-        resize: vertical;
-        padding: 12px 14px;
-        border: 1px solid var(--line, #e2ded6);
-        border-radius: 8px;
-        background: var(--paper, #fbfaf7);
-        color: inherit;
-        font-family: var(--mono, ui-monospace, monospace);
-        font-size: 13px;
-        line-height: 1.55;
-        tab-size: 2;
-      }
-      .playground-shell pre {
-        margin: 0 0 4px;
-        padding: 12px 14px;
-        border: 1px solid var(--line, #e2ded6);
-        border-radius: 8px;
-        background: #1c1f24;
-        color: #e8e6e1;
-        font-family: var(--mono, ui-monospace, monospace);
-        font-size: 12.5px;
-        line-height: 1.55;
-        white-space: pre-wrap;
-        overflow-x: auto;
-        min-height: 40px;
-      }
-      .playground-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
-      .playground-actions button {
-        font: inherit;
-        padding: 7px 18px;
-        border: 1px solid currentColor;
-        border-radius: 8px;
-        background: transparent;
-        color: inherit;
-        cursor: pointer;
-      }
-      #diagnostics:not(:empty) { color: #e0796c; }
-    </style>
     <!--
-      The compiler is imported by the page itself, so the runtime specifiers
-      inside freshly compiled output resolve through this one prefix. Serving
-      must include the repository root, because `eliscript/` maps to it.
+      Relative on purpose: this page and the example page are both two levels
+      deep, so one prefix resolves to the repository root from either, under
+      any server root.
     -->
     <script type="importmap">
     {
@@ -71,6 +22,158 @@
       }
     }
     </script>
+    <style>
+      .pg-section {
+        width: min(calc(100% - 40px), var(--max-width));
+        margin: 0 auto;
+        padding: 0 0 72px;
+      }
+      .pg-workbench {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--paper-bright);
+        overflow: hidden;
+      }
+      .pg-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--line);
+        background: var(--paper);
+      }
+      .pg-bar .pg-title { font-weight: 600; font-size: 14px; }
+      .pg-bar .pg-hint {
+        margin-left: auto;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+      .pg-bar button {
+        font: inherit;
+        font-size: 14px;
+        padding: 6px 18px;
+        border: 1px solid var(--ink);
+        border-radius: 7px;
+        background: var(--ink);
+        color: var(--paper-bright);
+        cursor: pointer;
+      }
+      .pg-bar button:hover { opacity: .88; }
+      .pg-bar button:focus-visible,
+      .pg-workbench summary:focus-visible,
+      .pg-workbench textarea:focus-visible {
+        outline: 2px solid var(--cyan);
+        outline-offset: 2px;
+      }
+      .pg-body {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        height: min(68vh, 600px);
+        min-height: 360px;
+      }
+      .pg-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+      .pg-panel-editor { border-right: 1px solid var(--line); }
+      .pg-panel-title {
+        margin: 0;
+        padding: 9px 14px;
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        border-bottom: 1px solid var(--line);
+      }
+      /* The textarea is transparent and sits on top of a highlighted copy, so
+         both layers must share every metric. */
+      .pg-editor { position: relative; flex: 1 1 auto; min-height: 0; }
+      .pg-editor .pg-highlight,
+      .pg-editor textarea {
+        position: absolute;
+        inset: 0;
+        margin: 0;
+        border: 0;
+        padding: 14px 16px;
+        font-family: var(--mono);
+        font-size: 13px;
+        line-height: 1.65;
+        tab-size: 2;
+        white-space: pre-wrap;
+        overflow-wrap: normal;
+        word-break: normal;
+        overflow: auto;
+      }
+      .pg-editor .pg-highlight {
+        pointer-events: none;
+        overflow: hidden;
+        background: var(--paper-bright);
+        color: var(--ink);
+      }
+      .pg-editor textarea {
+        resize: none;
+        background: transparent;
+        color: transparent;
+        caret-color: var(--ink);
+      }
+      .pg-editor textarea::selection { background: rgba(19, 151, 176, .28); }
+      .pg-panel-output { background: var(--code); }
+      .pg-panel-output .pg-panel-title {
+        color: var(--code-muted);
+        border-bottom-color: rgba(255, 255, 255, .09);
+      }
+      .pg-console {
+        margin: 0;
+        padding: 14px 16px;
+        background: transparent;
+        color: var(--code-text, #e8e6e1);
+        font-family: var(--mono);
+        font-size: 12.5px;
+        line-height: 1.65;
+        white-space: pre-wrap;
+        overflow: auto;
+      }
+      #stdout { flex: 1 1 auto; min-height: 0; }
+      #diagnostics {
+        flex: 0 0 auto;
+        max-height: 30%;
+        color: var(--coral);
+        border-top: 1px solid rgba(255, 255, 255, .09);
+      }
+      #diagnostics:empty { display: none; }
+      .pg-compiled { flex: 0 0 auto; border-top: 1px solid rgba(255, 255, 255, .09); }
+      .pg-compiled summary {
+        padding: 9px 16px;
+        cursor: pointer;
+        color: var(--code-muted);
+        font-family: var(--mono);
+        font-size: 11.5px;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+      }
+      .pg-compiled[open] summary { border-bottom: 1px solid rgba(255, 255, 255, .09); }
+      #js { flex: none; max-height: 40vh; }
+      /* Tokens on the light editor surface. */
+      .pg-highlight .tok-comment { color: var(--muted); font-style: italic; }
+      .pg-highlight .tok-string { color: #1f7a4d; }
+      .pg-highlight .tok-number { color: #9a5b12; }
+      .pg-highlight .tok-keyword { color: #b7362a; font-weight: 600; }
+      .pg-highlight .tok-literal { color: #10707f; }
+      .pg-highlight .tok-paren { color: var(--muted); }
+      /* Tokens on the dark console. */
+      .pg-console .tok-comment { color: var(--code-muted); font-style: italic; }
+      .pg-console .tok-string { color: #9ecb8a; }
+      .pg-console .tok-number { color: #d8a657; }
+      .pg-console .tok-keyword { color: #ef8a76; font-weight: 600; }
+      .pg-console .tok-literal { color: #6fc7d8; }
+      .pg-console .tok-paren { color: var(--code-muted); }
+      @media (max-width: 860px) {
+        .pg-body { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; }
+        .pg-panel-editor { border-right: 0; border-bottom: 1px solid var(--line); }
+        .pg-editor { min-height: 240px; }
+        #stdout { min-height: 200px; }
+      }
+    </style>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -98,21 +201,19 @@
         </div>
       </header>
 
-      <div class="doc-shell">
-        <nav class="doc-nav" aria-label="On this page">
-          <p class="doc-nav-title">On this page</p>
-          <a href="#editor">Editor</a>
-          <a href="#output">Output</a>
-          <a href="#compiled">Compiled ESM</a>
-          <a href="#requirements">Requirements</a>
-        </nav>
-
-        <section class="doc-section" id="editor">
-          <h2>Editor</h2>
-          <div class="playground-shell">
-            <div>
-              <label for="source">Source</label>
-              <textarea id="source" spellcheck="false" autocomplete="off" autocapitalize="off">(module playground
+      <section class="pg-section" id="editor">
+        <div class="pg-workbench">
+          <div class="pg-bar">
+            <span class="pg-title">Playground</span>
+            <span class="pg-hint">⌘/Ctrl + Enter</span>
+            <button id="run" type="button">Run</button>
+          </div>
+          <div class="pg-body">
+            <section class="pg-panel pg-panel-editor">
+              <h2 class="pg-panel-title">Source</h2>
+              <div class="pg-editor">
+                <pre id="highlight" class="pg-highlight" aria-hidden="true"></pre>
+                <textarea id="source" spellcheck="false" autocomplete="off" autocapitalize="off">(module playground
   (import "eliscript/runtime/core/sequence.mjs" map filter)
   (import "eliscript/runtime/core/order.mjs" sort)
 
@@ -125,33 +226,39 @@
   (print "squares" (map square values))
   (print "even" (filter (lambda (value) (= (% value 2) 0)) values)))
 </textarea>
-              <div class="playground-actions">
-                <button id="run" type="button">Run</button>
-                <span>or press ⌘/Ctrl + Enter</span>
               </div>
-            </div>
-            <div>
-              <section id="output">
-                <h3>Output</h3>
-                <pre id="stdout" aria-live="polite"></pre>
-              </section>
-              <section>
-                <h3>Diagnostics</h3>
-                <pre id="diagnostics" aria-live="polite"></pre>
-              </section>
-              <section id="compiled">
-                <h3>Compiled ESM</h3>
-                <pre id="js"></pre>
-              </section>
-            </div>
+            </section>
+            <section class="pg-panel pg-panel-output">
+              <h2 class="pg-panel-title">Output</h2>
+              <pre id="stdout" class="pg-console" aria-live="polite"></pre>
+              <pre id="diagnostics" class="pg-console" aria-live="assertive"></pre>
+              <details class="pg-compiled">
+                <summary>Compiled ESM</summary>
+                <pre id="js" class="pg-console"></pre>
+              </details>
+            </section>
           </div>
-        </section>
+        </div>
+      </section>
+
+      <div class="doc-shell">
+        <nav class="doc-nav" aria-label="On this page">
+          <p class="doc-nav-title">On this page</p>
+          <a href="#requirements">Requirements</a>
+          <a href="#resolution">Resolution</a>
+        </nav>
 
         <section class="doc-section" id="requirements">
           <h2>Requirements</h2>
           <p>The page loads the compiler from the repository it is served with, so the served directory must include the repository root. Build the compiled page application first:</p>
           <pre>bun run build:browser-playground</pre>
-          <p>Until that build exists, the editor below reports the missing entry instead of compiling. See the <a href="../README.md">documentation index</a> and the <a href="../../examples/browser-playground/README.md">playground example</a> for the full walkthrough.</p>
+          <p>Until that build exists, the page reports the missing entry instead of compiling. Browsers refuse to load ES modules from <code>file://</code>, so this page needs a static server; the rest of the documentation opens directly from disk. See the <a href="../../examples/browser-playground/README.md">playground example</a> for the full walkthrough.</p>
+        </section>
+
+        <section class="doc-section" id="resolution">
+          <h2>Resolution</h2>
+          <p>Compiled output imports the runtime by package specifier. One import-map prefix above resolves it here, and the package export map resolves the same specifiers in Bun and Node, so the page, the tests, and the command line share one scheme.</p>
+          <p>The editor paints a highlighted copy behind a transparent textarea, and the compiled pane is highlighted by the same scanner, which is itself written in Eliscript.</p>
         </section>
       </div>
     </main>

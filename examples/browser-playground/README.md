@@ -13,12 +13,17 @@ emitted module all execute in the document realm.
 
 ```sh
 bun run build:browser-playground
-python3 -m http.server 8787 --bind 127.0.0.1
+bun run preview          # serves the repository root on 127.0.0.1:8787
 ```
 
-Then open `http://127.0.0.1:8787/dist/browser-playground/`. The repository root
-must be the served directory, because the page resolves the `eliscript/` prefix
-against it.
+Then open `http://127.0.0.1:8787/dist/browser-playground/`, or the copy on the
+documentation site at `/docs/pages/playground.html`.
+
+A static server is required. The `eliscript/` prefix is relative, so any server
+root works as long as the repository is below it, but the page must be served
+rather than opened from disk: browsers refuse to fetch ES modules from
+`file://`, so no arrangement of paths can make that work. The rest of the
+documentation loads no modules and does open directly from disk.
 
 ## Why this works without a bundler
 

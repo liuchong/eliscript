@@ -1,0 +1,213 @@
+;; Source highlighting.
+;;
+;; The playground paints the editor by layering a highlighted copy behind a
+;; transparent textarea, and the compiled pane through the same scanner. One
+;; scanner serves both languages; a language describes its comments, string
+;; quotes, word characters, and reserved words.
+
+(module example.browser-playground.highlight
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "eliscript/runtime/core/text.mjs" startsWith)
+
+  (defconst eliscript-keywords
+    ["module" "import" "import-portable" "export" "export-default"
+     "defconst" "defvar" "defun" "defn" "defmacro" "defasync" "defportable"
+     "defrecord" "defprotocol" "defmulti" "defmethod" "deftype" "reify"
+     "extend-type" "extend-category" "extend-default"
+     "let" "let*" "letfn" "lambda" "fn" "async" "await"
+     "if" "when" "unless" "cond" "case" "condp" "and" "or"
+     "progn" "do" "while" "loop" "recur" "try" "catch" "finally" "throw"
+     "setq" "set!" "quote" "gensym"
+     "str" "print" "get" "put" "cons" "car" "cdr" "list" "vector" "hash-map"
+     "js*" "js-call" "js-array" "js-object" "js-cons" "js-nth" "js-length"
+     "new" "apply" "funcall" "not" "eq" "equal" "length" "nth" "reduce"
+     "t" "false" "nil" "undefined"])
+
+  (defconst javascript-keywords
+    ["import" "export" "from" "default" "const" "let" "var" "function"
+     "return" "if" "else" "for" "of" "in" "while" "do" "break" "continue"
+     "class" "extends" "new" "this" "typeof" "instanceof" "delete" "void"
+     "async" "await" "yield" "try" "catch" "finally" "throw" "switch" "case"
+     "true" "false" "null" "undefined" "static" "get" "set"])
+
+  ;; ------------------------------------------------------------- characters
+
+  (defun digit-code? (code) (and (>= code 48) (<= code 57)))
+
+  (defun letter-code? (code)
+    (or (and (>= code 65) (<= code 90)) (and (>= code 97) (<= code 122))))
+
+  (defun word-code? (code dot-joins)
+    (or (letter-code? code)
+        (digit-code? code)
+        (= code 45) (= code 95) (= code 63) (= code 33) (= code 42)
+        (= code 43) (= code 47) (= code 60) (= code 62) (= code 61)
+        (and dot-joins (= code 46))))
+
+  (defun quote-code? (code) (or (= code 34) (= code 39) (= code 96)))
+
+  (defun delimiter-code? (code)
+    (or (= code 40) (= code 41) (= code 91) (= code 93) (= code 123) (= code 125)))
+
+  ;; ----------------------------------------------------------------- markup
+
+  (defun escape-character (code)
+    (cond
+      ((= code 38) "&amp;")
+      ((= code 60) "&lt;")
+      ((= code 62) "&gt;")
+      ((= code 34) "&quot;")
+      (t (string-from-code-unit code))))
+
+  (defun escape-range (text start end)
+    (let ((result "")
+          (index start))
+      (while (< index end)
+        (setq result (str result (escape-character (string-code-unit-at text index)))
+              index (1+ index)))
+      result))
+
+  (defun span (class-name text start end)
+    (if (or (= start end) (> start (- (Collection/count text) 0)))
+        ""
+      (str "<span class=\"" class-name "\">"
+           (escape-range text start (if (> end (Collection/count text))
+                                        (Collection/count text)
+                                      end))
+           "</span>")))
+
+  ;; ---------------------------------------------------------------- scanner
+
+  (defun member-of? (values text)
+    (let ((index 0)
+          (found false))
+      (while (and (< index (Collection/count values)) (not found))
+        (when (= (Collection/nth values index) text)
+          (setq found t))
+        (setq index (1+ index)))
+      found))
+
+  (defun at? (text index needle)
+    (and (<= (+ index (Collection/count needle)) (Collection/count text))
+         (= (js-call text :slice index (+ index (Collection/count needle))) needle)))
+
+  (defun scan-line-comment (text start marker)
+    (let ((index start)
+          (size (Collection/count text)))
+      (while (and (< index size)
+                  (not (= (string-code-unit-at text index) 10)))
+        (setq index (1+ index)))
+      index))
+
+  (defun scan-block-comment (text start close)
+    (let ((index (+ start 2))
+          (size (Collection/count text)))
+      (while (and (< index size) (not (at? text index close)))
+        (setq index (1+ index)))
+      (if (>= index size) size (+ index 2))))
+
+  (defun scan-string (text start quote)
+    (let ((index (1+ start))
+          (size (Collection/count text))
+          (done false))
+      (while (and (< index size) (not done))
+        (let ((code (string-code-unit-at text index)))
+          (cond
+            ((= code 92) (setq index (+ index 2)))
+            ((= code quote) (setq index (1+ index) done t))
+            (t (setq index (1+ index))))))
+      (if (> index size) size index)))
+
+  (defun scan-word (text start dot-joins)
+    (let ((index start)
+          (size (Collection/count text)))
+      (while (and (< index size)
+                  (word-code? (string-code-unit-at text index) dot-joins))
+        (setq index (1+ index)))
+      index))
+
+  (defun highlight (text language)
+    (let* ((dot-joins (Collection/get language :dot-joins t))
+           (keywords (Collection/get language :keywords []))
+           (quotes (Collection/get language :quotes [34]))
+           (line-comment (Collection/get language :line-comment ";"))
+           (block-open (Collection/get language :block-open nil))
+           (block-close (Collection/get language :block-close nil))
+           (colon-literal (Collection/get language :colon-literal t))
+           (size (Collection/count text))
+           (result ""))
+      (let ((index 0)
+            (plain 0))
+        (while (< index size)
+          (let ((code (string-code-unit-at text index)))
+            (cond
+              ;; Line comment to the end of the line.
+              ((at? text index line-comment)
+               (let ((end (scan-line-comment text index line-comment)))
+                 (setq result (str result (escape-range text plain index)
+                                   (span "tok-comment" text index end))
+                       index end
+                       plain end)))
+              ;; Block comment.
+              ((and (not (nil? block-open)) (at? text index block-open))
+               (let ((end (scan-block-comment text index block-close)))
+                 (setq result (str result (escape-range text plain index)
+                                   (span "tok-comment" text index end))
+                       index end
+                       plain end)))
+              ;; String literal.
+              ((and (quote-code? code) (member-of? quotes code))
+               (let ((end (scan-string text index code)))
+                 (setq result (str result (escape-range text plain index)
+                                   (span "tok-string" text index end))
+                       index end
+                       plain end)))
+              ;; Keyword literal such as :name.
+              ((and colon-literal (= code 58)
+                    (< (+ index 1) size)
+                    (letter-code? (string-code-unit-at text (+ index 1))))
+               (let ((end (scan-word text (+ index 1) dot-joins)))
+                 (setq result (str result (escape-range text plain index)
+                                   (span "tok-literal" text index end))
+                       index end
+                       plain end)))
+              ;; Number.
+              ((digit-code? code)
+               (let ((end (scan-word text index dot-joins)))
+                 (setq result (str result (escape-range text plain index)
+                                   (span "tok-number" text index end))
+                       index end
+                       plain end)))
+              ;; Word, distinguished by the reserved list.
+              ((or (letter-code? code) (= code 95))
+               (let* ((end (scan-word text index dot-joins))
+                      (word (js-call text :slice index end))
+                      (class-name (if (member-of? keywords word)
+                                      "tok-keyword"
+                                    "tok-symbol")))
+                 (setq result (str result (escape-range text plain index)
+                                   (span class-name text index end))
+                       index end
+                       plain end)))
+              ;; Delimiters.
+              ((delimiter-code? code)
+               (setq result (str result (escape-range text plain index)
+                                 (span "tok-paren" text index (1+ index)))
+                     index (1+ index)
+                     plain index))
+              (t (setq index (1+ index))))))
+        (str result (escape-range text plain size)))))
+
+  (defconst eliscript-language
+    {:line-comment ";" :block-open "#|" :block-close "|#" :quotes [34]
+     :dot-joins t :colon-literal t :keywords eliscript-keywords})
+
+  (defconst javascript-language
+    {:line-comment "//" :block-open "/*" :block-close "*/" :quotes [34 39 96]
+     :dot-joins false :colon-literal false :keywords javascript-keywords})
+
+  (defun highlight-eliscript (text) (highlight text eliscript-language))
+
+  (defun highlight-javascript (text) (highlight text javascript-language))
+
+  (export highlight highlight-eliscript highlight-javascript))

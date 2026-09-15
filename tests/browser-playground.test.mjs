@@ -6,8 +6,11 @@ import { printValue } from "../runtime/core/data-text.mjs";
 
 const ROOT = resolve(import.meta.dir, "..");
 const COMPILER = resolve(ROOT, "bin/eliscript");
+const BUILDER = resolve(ROOT, "bin/eliscript-build");
 const PLAYGROUND = resolve(ROOT, "examples/browser-playground/src/playground.eli");
+const HIGHLIGHTER = resolve(ROOT, "examples/browser-playground/src/highlight.eli");
 const PAGE = resolve(ROOT, "examples/browser-playground/index.html");
+const SITE_PAGE = resolve(ROOT, "docs/pages/playground.html");
 
 let staging;
 
@@ -57,19 +60,57 @@ afterAll(async () => {
   if (staging) await rm(staging, { recursive: true, force: true });
 });
 
-test("the playground application compiles to ESM", async () => {
-  const output = resolve(staging, "playground.mjs");
+// The playground is a project, not a single file: its highlighter is a second
+// source module, so the build must emit both and rewrite the local import.
+async function buildPlayground() {
+  const outDir = resolve(staging, "playground-build");
   const result = await run([
-    COMPILER, "--source-map", "--output", output, PLAYGROUND,
+    BUILDER, "--no-cache", "--root", "examples/browser-playground/src",
+    "--out-dir", outDir, PLAYGROUND,
   ]);
-  expect(result.stderr.trim()).toBe("");
-  expect(result.exitCode).toBe(0);
-  const javascript = await readFile(output, "utf8");
+  if (result.exitCode !== 0) throw new Error(result.stderr.trim() || result.stdout.trim());
+  return outDir;
+}
+
+test("the playground builds both sources into ESM", async () => {
+  const outDir = await buildPlayground();
+  const javascript = await readFile(resolve(outDir, "playground.mjs"), "utf8");
   // The page and the compiler must agree on one resolution scheme, so the
   // playground imports the compiler and the platform by package specifier.
   expect(javascript).toContain('from "eliscript/dist/bootstrap/compiler.mjs"');
   expect(javascript).toContain('from "eliscript/platform/browser.mjs"');
   expect(javascript).toContain('from "eliscript/runtime/core/data-text.mjs"');
+  // A local import must point at the emitted module, never at the source file.
+  expect(javascript).toContain('from "./highlight.mjs"');
+  // No emitted import may name a source file; every specifier is a module.
+  for (const match of javascript.matchAll(/from "([^"]+)"/gu)) {
+    expect(match[1].endsWith(".eli")).toBe(false);
+  }
+  expect((await readFile(resolve(outDir, "highlight.mjs"), "utf8")).length)
+    .toBeGreaterThan(1_000);
+});
+
+test("the highlighter marks the syntax the editor shows", async () => {
+  const output = resolve(staging, "highlight.mjs");
+  const result = await run([COMPILER, "--output", output, HIGHLIGHTER]);
+  expect(result.exitCode).toBe(0);
+  const { highlight_eliscript: eliscript, highlight_javascript: javascript } =
+    await import(output);
+
+  const lisp = eliscript('; note\n(defconst n 42)\n(print "hi <b>" :tag)');
+  expect(lisp).toContain('<span class="tok-comment">; note</span>');
+  expect(lisp).toContain('<span class="tok-keyword">defconst</span>');
+  expect(lisp).toContain('<span class="tok-number">42</span>');
+  expect(lisp).toContain('<span class="tok-literal">:tag</span>');
+  // Markup in a string is escaped, never emitted as markup.
+  expect(lisp).toContain('&lt;b&gt;');
+  expect(lisp).not.toContain('<b>');
+
+  const js = javascript('const x = 1; // note\n/* block */\nfoo("a");');
+  expect(js).toContain('<span class="tok-comment">// note</span>');
+  expect(js).toContain('<span class="tok-comment">/* block */</span>');
+  expect(js).toContain('<span class="tok-keyword">const</span>');
+  expect(js).toContain('<span class="tok-string">&quot;a&quot;</span>');
 });
 
 test("the compiler emits only package-relative runtime imports", async () => {
@@ -119,14 +160,31 @@ test("every emitted specifier resolves to a served file", async () => {
   expect(seen.size).toBeGreaterThanOrEqual(2);
 });
 
-test("the page declares the import map and loads the compiled entry", async () => {
-  const page = await readFile(PAGE, "utf8");
-  expect(page).toContain('type="importmap"');
-  expect(page).toContain('"eliscript/": "/"');
-  expect(page).toContain('src="./playground.mjs"');
-  expect(page).toContain('id="source"');
-  expect(page).toContain('id="stdout"');
-  expect(page).toContain('id="diagnostics"');
+test("both pages declare the relative import map and the editor surface", async () => {
+  for (const file of [PAGE, SITE_PAGE]) {
+    const page = await readFile(file, "utf8");
+    expect(page).toContain('type="importmap"');
+    // A relative prefix works under any server root, and both pages are two
+    // levels deep.
+    expect(page).toContain('"eliscript/": "../../"');
+    for (const id of ["highlight", "source", "stdout", "diagnostics", "js", "run"]) {
+      expect(page).toContain(`id="${id}"`);
+    }
+  }
+  expect(await readFile(PAGE, "utf8")).toContain('src="./playground.mjs"');
+  expect(await readFile(SITE_PAGE, "utf8"))
+    .toContain('import("../../dist/browser-playground/playground.mjs")');
+});
+
+// The example keeps its token styles in a stylesheet and the site page inlines
+// them, so each page is checked against the styles it actually loads.
+test("both pages style the highlight tokens", async () => {
+  expect(await readFile(resolve(ROOT, "examples/browser-playground/site.css"), "utf8"))
+    .toContain(".highlight .tok-keyword");
+  expect(await readFile(SITE_PAGE, "utf8")).toContain(".pg-highlight .tok-keyword");
+  for (const file of [PAGE, SITE_PAGE]) {
+    expect(await readFile(file, "utf8")).toContain('id="highlight"');
+  }
 });
 
 test("a compile failure carries a structured diagnostic", async () => {
