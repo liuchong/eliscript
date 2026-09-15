@@ -126,10 +126,19 @@ test-applications:
 		tests/dogfood-identity.test.mjs tests/dogfood-events.test.mjs \
 		tests/dogfood-accessibility.test.mjs tests/dogfood-config.test.mjs \
 		tests/dogfood-matrix.test.mjs \
-		tests/dogfood-workflow.test.mjs \
+		tests/dogfood-workflow.test.mjs tests/browser-matrix.test.mjs \
 		tests/browser-playground.test.mjs tests/browser-host.test.mjs \
 		tests/pages-assembly.test.mjs
 	PATH="$(dir $(shell command -v $(BUN))):$$PATH" ./tests/application-cli-test.sh
+
+# The browser matrix drives all three engines, so it is its own target: the
+# suite above runs one engine and reports rather than requiring a browser to
+# be installed. The report is retained as acceptance evidence.
+check-browsers: dogfood
+	$(BUN) run check:dogfood:browsers
+
+dogfood:
+	$(BUN) run dogfood
 
 check-contracts:
 	$(BUN) tools/conformance/check.mjs

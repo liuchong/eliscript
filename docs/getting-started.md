@@ -288,6 +288,19 @@ framework-neutral ERT, Bun, host-equivalence, scale, security, and CLI suite.
 `make test-applications` separately verifies maintained Vite, React, and Org
 consumers. The aggregate `bun run test` command runs both partitions.
 
+The application browser matrix is a separate target, because it needs browser
+engines rather than only the repository toolchain:
+
+```sh
+bunx playwright install chromium firefox webkit
+make check-browsers
+```
+
+It drives all three engines at three viewports against a served build and
+retains its report as acceptance evidence. A machine without those engines
+records the gap: the engine suite inside `make test-applications` runs one
+engine and skips cleanly when none is installed.
+
 The documented project path has its own bounded executable check:
 
 ```sh

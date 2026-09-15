@@ -50,6 +50,7 @@
     "check:compatibility-corpus": "bun tools/compatibility/corpus.mjs",
     "check:compatibility-matrix": "bun tools/compatibility/matrix.mjs --verify-all",
     "check:source-debugging": "bun tools/debugging/check.mjs",
+    "check:dogfood:browsers": "bun tools/browser/matrix.mjs --site examples/dogfood/_site --out examples/dogfood/evidence/browser-matrix.json",
     "check:dogfood": "./bin/eliscript --output dist/dogfood-spec-check.mjs examples/dogfood/tools/spec-check.eli && bun dist/dogfood-spec-check.mjs --root examples/dogfood",
     "build:dogfood-browser": "./bin/eliscript-build --root examples/dogfood --out-dir examples/dogfood/dist/dogfood-browser examples/dogfood/src/renderer/browser.eli && bun build examples/dogfood/dist/dogfood-browser/src/renderer/browser.mjs --target=browser --format=iife --outfile examples/dogfood/dist/site/browser.js",
     "build:browser-playground": "./bin/eliscript-build --root examples/browser-playground/src --out-dir dist/browser-playground examples/browser-playground/src/playground.eli && cp examples/browser-playground/index.html examples/browser-playground/site.css dist/browser-playground/",
@@ -154,6 +155,7 @@
   ],
   "devDependencies": {
     "@vitejs/plugin-react": "6.1.0",
+    "playwright-core": "1.63.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "vite": "8.2.2"
