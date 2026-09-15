@@ -18,8 +18,8 @@
   (import "node:fs" readFileSync)
   (import "./diagnostics.eli" fail)
   (import "./text.eli"
-          blank char-code digit-code? empty-value? slice startsWith text-length
-          trim)
+          blank char-code digit-code? empty-value? slice split-on startsWith
+          text-length to-lowercase trim)
 
   (defconst open-paren 40)
   (defconst close-paren 41)
@@ -337,13 +337,53 @@
         (setq index (1+ index)))
       found))
 
+  ;; Each kind carries its own addressing. A Markdown source is a directory in
+  ;; the repository; a remote source is a repository, and sometimes a selector
+  ;; within it. Requiring a directory of every source rejected every
+  ;; configuration whose articles all come from Issues or Discussions.
   (defun check-source (source index)
-    (let ((label (str "sources[" index "]")))
-      (require-map source label)
+    (require-map source (str "sources[" index "]"))
+    (let* ((label (str "sources[" index "]"))
+           (kind (require-key source :kind label)))
       (require-key source :id label)
-      (require-key source :kind label)
-      (require-string (require-key source :directory (str label " markdown"))
-                      (str label ".directory"))))
+      (cond
+        ((= kind :markdown)
+         (check-contained
+           (require-string (require-key source :directory (str label " markdown"))
+                           (str label ".directory"))
+           (str label ".directory")))
+        ((= kind :issues)
+         (check-repository source label)
+         (check-optional-string source :label label))
+        ((= kind :discussions)
+         (check-repository source label)
+         (require-string (require-key source :category (str label " discussions"))
+                         (str label ".category")))
+        (t (fail "DOGFOOD-CONFIG-009"
+                 (str label ".kind must be markdown, issues, or discussions"))))))
+
+  (defun check-contained (value label)
+    (unless (relative-path? value)
+      (fail "DOGFOOD-CONFIG-004"
+            (str label " must be a contained repository-relative path")))
+    value)
+
+  ;; A remote source names its repository as owner/name. The provider splits it
+  ;; later, so the shape is checked once here rather than at the first request.
+  (defun check-repository (source label)
+    (let ((repository (require-string (require-key source :repository label)
+                                      (str label ".repository"))))
+      (unless (and (= (Collection/count (split-on "/" repository)) 2)
+                   (not (blank (Collection/nth (split-on "/" repository) 0)))
+                   (not (blank (Collection/nth (split-on "/" repository) 1))))
+        (fail "DOGFOOD-CONFIG-010"
+              (str label ".repository must be owner/name")))
+      repository))
+
+  (defun check-optional-string (source key label)
+    (let ((value (Collection/get source key nil)))
+      (when (and (not (nil? value)) (not (= (value-type value) "string")))
+        (fail "DOGFOOD-CONFIG-003" (str label "." (str key) " must be a string")))))
 
   (defun check-sources (sources)
     (unless (isVector sources)
@@ -358,15 +398,96 @@
           ;; The parsed configuration is a persistent map, so reads go through
           ;; the collection protocol rather than JavaScript property access.
           (when (Collection/get source :enabled false)
-            (setq enabled (1+ enabled)))
-          (let ((directory (Collection/get source :directory "")))
-            (unless (relative-path? directory)
-              (fail "DOGFOOD-CONFIG-004"
-                    (str "sources[" index "].directory must be a contained "
-                         "repository-relative path")))))
+            (setq enabled (1+ enabled))))
         (setq index (1+ index)))
       (when (= enabled 0)
-        (fail "DOGFOOD-CONFIG-003" "at least one article source must be enabled"))))
+        (fail "DOGFOOD-CONFIG-003" "at least one article source must be enabled"))
+      (check-unique-field sources :id "provider id")))
+
+  ;; A repeated identity makes provenance ambiguous: two records would report
+  ;; the same provider, and a projection could not name one of them.
+  (defun check-unique-field (values key label)
+    (let ((collected [])
+          (index 0))
+      (while (< index (Collection/count values))
+        (let ((value (Collection/get (Collection/nth values index) key nil)))
+          (when (not (nil? value))
+            (setq collected (Collection/conj collected value))))
+        (setq index (1+ index)))
+      (check-unique-values collected label)))
+
+  ;; Values rather than maps: a JavaScript object is not a collection here, so
+  ;; wrapping a plain value in one would make every entry read as absent.
+  (defun check-unique-values (values label)
+    (let ((seen [])
+          (index 0))
+      (while (< index (Collection/count values))
+        (let ((value (Collection/nth values index)))
+          (when (member-of? seen value)
+            (fail "DOGFOOD-CONFIG-011"
+                  (str label " " (str value) " is declared more than once")))
+          (setq seen (Collection/conj seen value)))
+        (setq index (1+ index)))
+      seen))
+
+  (defun member-of? (values needle)
+    (let ((index 0)
+          (found false))
+      (while (and (< index (Collection/count values)) (not found))
+        (when (= (Collection/nth values index) needle) (setq found t))
+        (setq index (1+ index)))
+      found))
+
+  ;; Comment channel ids address a channel from the configuration and from the
+  ;; rendered page, so a repeat would make one of them unreachable.
+  (defun check-comments (config)
+    (let ((comments (Collection/get config :comments nil)))
+      (when (not (nil? comments))
+        (require-map comments "config.comments")
+        (let ((channels (Collection/get comments :channels [])))
+          (unless (isVector channels)
+            (fail "DOGFOOD-CONFIG-003" "comments.channels must be a vector"))
+          (let ((index 0))
+            (while (< index (Collection/count channels))
+              (require-map (Collection/nth channels index)
+                           (str "comments.channels[" index "]"))
+              (require-key (Collection/nth channels index) :id
+                           (str "comments.channels[" index "]"))
+              (require-key (Collection/nth channels index) :kind
+                           (str "comments.channels[" index "]"))
+              (setq index (1+ index))))
+          (check-unique-field channels :id "channel id")))))
+
+  ;; Logins compare case-insensitively everywhere else, so two spellings of one
+  ;; login are one publisher and must be rejected here.
+  (defun check-publishing (config)
+    (let ((publishing (Collection/get config :publishing nil)))
+      (when (not (nil? publishing))
+        (require-map publishing "config.publishing")
+        (let* ((owner (require-map (require-key publishing :owner "config.publishing.owner")
+                                   "config.publishing.owner"))
+               (logins (vector (login-of owner "config.publishing.owner"))))
+          (let* ((coauthors (Collection/get publishing :coauthors []))
+                 (index 0))
+            (unless (isVector coauthors)
+              (fail "DOGFOOD-CONFIG-003" "publishing.coauthors must be a vector"))
+            (while (< index (Collection/count coauthors))
+              (let ((coauthor (require-map (Collection/nth coauthors index)
+                                           (str "publishing.coauthors[" index "]"))))
+                (setq logins (Collection/conj
+                               logins
+                               (login-of coauthor
+                                         (str "publishing.coauthors[" index "]")))))
+              (setq index (1+ index))))
+          (check-unique-values logins "publisher login"))
+        ;; The owner is the authorization anchor, so it must be an object.
+        (require-map (Collection/get publishing :owner nil) "config.publishing.owner"))))
+
+  (defun login-of (publisher label)
+    (to-lowercase
+      (require-string (require-key publisher :login (str label ".login"))
+                      (str label ".login"))))
+
 
   (defun validate-config (config path)
     (require-map config "config")
@@ -392,6 +513,8 @@
         (fail "DOGFOOD-CONFIG-008"
               "site.base-url must be an absolute https URL for production"))
     (check-sources (require-key config :sources "config.sources"))
+    (check-comments config)
+    (check-publishing config)
     (let* ((output (require-map (require-key config :output "config.output") "output"))
            (directory (require-string
                         (require-key output :directory "config.output.directory")
@@ -404,4 +527,4 @@
   (defun load-config (path)
     (validate-config (load-config-value path) path))
 
-  (export load-config))
+  (export load-config validate-config))

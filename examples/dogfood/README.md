@@ -70,6 +70,7 @@ their full wording is met.
 | S3 | Comment channels: a native channel captured as a snapshot or declared live, and external adapters declared as mount regions | `tests/dogfood-comments.test.mjs` |
 | I7 | The packaged Action carries the generated site's browser asset, an external source map, and the map that names the `.eli` sources | `tests/dogfood-action.test.mjs` |
 | I8 | Events are classified before anything renders: a comment event defers without writing output, a pushed article event builds, `preview` renders drafts into a tree that asks not to be indexed, and `previous-manifest` verifies the tree being replaced | `tests/dogfood-events.test.mjs` |
+| I1 | Closed-schema configuration: each source kind carries its own addressing, and provider ids, channel ids, and publisher logins are unique | `tests/dogfood-config.test.mjs` |
 | S6 | All seven non-empty article-source subsets are exercised directly, with a disabled provider provably never reaching the network | `tests/dogfood-matrix.test.mjs` |
 | I8 | The package ships the consumer workflow template, pinned to a full commit digest and pinned at package time | `tests/dogfood-workflow.test.mjs` |
 | S4 | Local search, light/dark/system themes with no flash of the wrong theme, and a browser bundle the build requires | `tests/dogfood-browser.test.mjs` |
