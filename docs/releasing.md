@@ -20,8 +20,8 @@ The version is `0.0.1` and is not bumped by ordinary work.
 | Entry | Why it is in the tarball |
 | --- | --- |
 | `dist/bootstrap/` | The generated compiler. A consumer has no Emacs, so it cannot build this itself. |
-| `bin/` | The shell wrappers and the Node entry they and npm both dispatch through. |
-| `bootstrap/` | The host layer the entries import. |
+| `bin/` | The shell wrappers used from a checkout. |
+| `bootstrap/` | The host layer, including the Node entry that npm links under every command name. |
 | `runtime/` | Host-free runtime semantics linked by generated code. |
 | `platform/` | The browser and worker capability packages. |
 | `stdlib/` | Standard-library sources that project builds import. |
@@ -34,23 +34,26 @@ allowlist.
 
 ## Prerequisites
 
-Building the compiler needs Emacs, because the seed compiler is Emacs Lisp:
+Building the compiler needs Emacs, because the seed compiler is Emacs Lisp.
+`prepack` runs that build, so packing or publishing always ships a compiler
+derived from the current sources:
 
 ```sh
-./bin/eliscript-bootstrap        # writes dist/bootstrap/*.mjs
+./bin/eliscript-bootstrap        # writes dist/bootstrap/*.mjs; prepack runs this
 ```
 
-This runs before packing, never on the consumer side. Everything the consumer
-executes is plain JavaScript on Node 24 or Bun.
+It runs before packing and never on the consumer side. Everything the consumer
+executes is plain JavaScript on Node 24 or Bun, so an install from a git
+dependency is not supported: the registry tarball is the artifact, because only
+it carries the generated compiler.
 
 ## Verification
 
 Run the whole sequence from a clean checkout:
 
 ```sh
-./bin/eliscript-bootstrap
 bun test tests/package-surface.test.mjs
-npm pack --dry-run --json
+npm pack --dry-run --json       # prepack rebuilds the compiler first
 ```
 
 `tests/package-surface.test.mjs` checks the manifest itself: one executable

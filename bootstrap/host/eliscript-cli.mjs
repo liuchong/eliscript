@@ -13,24 +13,24 @@ import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const root = resolve(here, "..");
+const root = resolve(here, "../..");
 
 // The generated compiler sits beside the package. The shell wrappers read the
 // same variable, so both entry points agree on one location.
 process.env.ELISCRIPT_BOOTSTRAP_MODULE_DIR ??= resolve(root, "dist/bootstrap");
 
 const commands = {
-  "eliscript": ["bootstrap/host/bun.mjs", "eliscript"],
-  "eliscript-build": ["bootstrap/host/project-cli.mjs", "eliscript-build"],
-  "eliscript-check": ["bootstrap/host/check-cli.mjs", "eliscript-check"],
-  "eliscript-format": ["bootstrap/host/format-cli.mjs", "eliscript-format"],
-  "eliscript-eval": ["bootstrap/host/evaluation-cli.mjs", "eliscript-eval"],
-  "eliscript-watch": ["bootstrap/host/watch-cli.mjs", "eliscript-watch"],
+  "eliscript": ["bun.mjs", "eliscript"],
+  "eliscript-build": ["project-cli.mjs", "eliscript-build"],
+  "eliscript-check": ["check-cli.mjs", "eliscript-check"],
+  "eliscript-format": ["format-cli.mjs", "eliscript-format"],
+  "eliscript-eval": ["evaluation-cli.mjs", "eliscript-eval"],
+  "eliscript-watch": ["watch-cli.mjs", "eliscript-watch"],
 };
 
 const invoked = basename(process.argv[1] ?? "");
 const [entry, commandName] = commands[invoked] ?? commands.eliscript;
 process.env.ELISCRIPT_COMMAND_NAME ??= commandName;
 
-const { main } = await import(new URL(`../${entry}`, import.meta.url));
+const { main } = await import(new URL(`./${entry}`, import.meta.url));
 await main(process.argv.slice(2));

@@ -22,11 +22,12 @@ test("the package declares one executable entry for every command", async () => 
   const target = resolve(ROOT, manifest.bin.eliscript);
   const source = await readFile(target, "utf8");
   // npm links the same file under every command name and the entry dispatches
-  // on the invoked name, so each name must appear in the table.
+  // on the invoked name, so each name must appear in the table. The entry is a
+  // host, not a bin wrapper, because it reads the process environment.
   expect(source.startsWith("#!/usr/bin/env node")).toBe(true);
   expect((await stat(target)).mode & 0o111).toBeGreaterThan(0);
   for (const command of COMMANDS) {
-    expect(manifest.bin[command]).toBe("bin/eliscript-cli.mjs");
+    expect(manifest.bin[command]).toBe("bootstrap/host/eliscript-cli.mjs");
     expect(source).toContain(`"${command}":`);
   }
 });
