@@ -1,0 +1,272 @@
+;; Cross-source identity resolution.
+;;
+;; Specification 0003 makes identity explicit. Two records with the same
+;; canonical id stop the build, unless the configuration declares one source as
+;; the authority and the others as projections of it: "The authority supplies
+;; article fields. Projections may supply comment channels, aliases, or declared
+;; metadata fields. Undeclared field disagreement fails."
+;;
+;; A projection matches a record by provider and by the provenance path the
+;; provider already records, so a projection cannot bind a record it did not
+;; name. Nothing here reads a title, a slug, or a body to guess identity.
+
+(module dogfood.builder.identity
+  (import "eliscript/runtime/core/collection.mjs" :as Collection)
+  (import "../support/diagnostics.eli" fail)
+  (import "../support/github.eli" append-all)
+  (import "eliscript/runtime/core/value.mjs" :as Value)
+  (import "../support/text.eli" join)
+  (import "./content.eli" ->Post)
+
+  ;; Fields the authority owns outright. A projected value that differs is a
+  ;; route or body disagreement and needs an explicit alias or declaration.
+  (defconst authority-only [:slug :body])
+
+  ;; Fields that must agree, or be declared by the projection.
+  (defconst comparable-fields
+    [:title :summary :published-at :updated-at :authors :tags :cover :draft
+     :pinned-weight])
+
+  ;; A computed key must travel through the collection protocol: a bare `get`
+  ;; with a keyword variable lowers to JavaScript property access, where the
+  ;; keyword's spelling is the string ":slug" and nothing is found.
+  (defun merged-field (post overrides key)
+    (Collection/get overrides key (Collection/get post key nil)))
+
+  (defun post-with (post overrides)
+    (->Post (merged-field post overrides :id)
+            (merged-field post overrides :slug)
+            (merged-field post overrides :title)
+            (merged-field post overrides :summary)
+            (merged-field post overrides :body)
+            (merged-field post overrides :published-at)
+            (merged-field post overrides :updated-at)
+            (merged-field post overrides :authors)
+            (merged-field post overrides :tags)
+            (merged-field post overrides :cover)
+            (merged-field post overrides :draft)
+            (merged-field post overrides :pinned-weight)
+            (merged-field post overrides :provenance)
+            (merged-field post overrides :aliases)
+            (merged-field post overrides :comment-channels)))
+
+  (defconst provider-of {:markdown "markdown" :issue "issues" :discussion "discussions"})
+
+  (defun projection-matches? (projection post)
+    (let* ((source (Collection/get projection :source nil))
+           (provider (Collection/get provider-of source ""))
+           (provenance (get post :provenance))
+           (repository (Collection/get projection :repository ""))
+           (number (Collection/get projection :number nil))
+           (path (if (nil? number) repository (str repository "#" number))))
+      (and (not (= provider ""))
+           (= (Collection/get provenance :provider "") provider)
+           (= (Collection/get provenance :path "") path))))
+
+  (defun group-by-id (posts)
+    (let ((groups {})
+          (index 0))
+      (while (< index (Collection/count posts))
+        (let* ((post (Collection/nth posts index))
+               (id (get post :id))
+               (existing (Collection/get groups id nil)))
+          (setq groups
+                (Collection/assoc groups id
+                                  (if (nil? existing)
+                                      [post]
+                                    (Collection/conj existing post)))))
+        (setq index (1+ index)))
+      groups))
+
+  (defun provenance-text (post)
+    (let ((provenance (get post :provenance)))
+      (str (Collection/get provenance :provider "unknown") " "
+           (Collection/get provenance :path "unknown"))))
+
+  ;; Value equality, not host identity: two independently built persistent
+  ;; vectors that hold the same values are equal, and two that differ are not.
+  (defun values-equal? (left right)
+    (Value/equalValues left right))
+
+  ;; A field may be declared once for the whole declaration or on one
+  ;; projection, so both are read and the sets are combined.
+  (defun declared-fields (declaration projection)
+    (dedupe (append-all (Collection/get declaration :fields [])
+                        (Collection/get projection :fields []))))
+
+  (defun declared? (fields key)
+    (let ((index 0)
+          (found false))
+      (while (< index (Collection/count fields))
+        (when (= (Collection/nth fields index) key) (setq found t))
+        (setq index (1+ index)))
+      found))
+
+  (defun check-agreement (authority projected projection fields)
+    (let ((index 0))
+      (while (< index (Collection/count comparable-fields))
+        (let ((key (Collection/nth comparable-fields index)))
+          (when (and (not (values-equal?
+                            (Collection/get authority key nil)
+                            (Collection/get projected key nil)))
+                     (not (declared? fields key)))
+            (fail "DOGFOOD-IDENTITY-004"
+                  (str "projection " (provenance-text projected)
+                       " disagrees with authority " (provenance-text authority)
+                       " on " (str key)))))
+        (setq index (1+ index)))))
+
+  (defun check-authority-only (authority projected projection fields)
+    (let ((index 0))
+      (while (< index (Collection/count authority-only))
+        (let* ((key (Collection/nth authority-only index))
+               (alias? (and (= (str key) ":slug")
+                            (contains-value? (get projected :aliases)
+                                             (get projected :slug)))))
+          (when (and (not (values-equal?
+                            (Collection/get authority key nil)
+                            (Collection/get projected key nil)))
+                     (not (declared? fields key))
+                     (not alias?))
+            (fail "DOGFOOD-IDENTITY-005"
+                  (str "projection " (provenance-text projected)
+                       " differs from authority " (provenance-text authority)
+                       " on " (str key)
+                       " without an alias or a declared field"))))
+        (setq index (1+ index)))))
+
+  (defun contains-value? (values needle)
+    (let ((index 0)
+          (found false))
+      (while (and (< index (Collection/count values)) (not found))
+        (when (= (Collection/nth values index) needle) (setq found t))
+        (setq index (1+ index)))
+      found))
+
+  ;; A projection contributes comment channels and aliases, and the fields it
+  ;; explicitly declares.
+  (defun merged-overrides (authority projected fields)
+    (let ((overrides {}))
+      (let ((index 0))
+        (while (< index (Collection/count fields))
+          (let ((key (Collection/nth fields index)))
+            (setq overrides (Collection/assoc overrides key (Collection/get projected key nil))))
+          (setq index (1+ index))))
+      (setq overrides
+            (Collection/assoc overrides :comment-channels
+                              (append-all (get authority :comment-channels)
+                                          (get projected :comment-channels))))
+      (setq overrides
+            (Collection/assoc overrides :aliases
+                              (dedupe (append-all (get authority :aliases)
+                                                  (get projected :aliases)))))
+      overrides))
+
+  (defun dedupe (values)
+    (let ((result [])
+          (index 0))
+      (while (< index (Collection/count values))
+        (let ((value (Collection/nth values index)))
+          (unless (contains-value? result value)
+            (setq result (Collection/conj result value))))
+        (setq index (1+ index)))
+      result))
+
+  (defun resolve-projection (declaration group)
+    (let* ((id (Collection/get declaration :id ""))
+           (authority-source (Collection/get declaration :authority nil))
+           (projections (Collection/get declaration :projections []))
+           (authority nil)
+           (projection-index 0)
+           (overrides {}))
+      ;; The authority record is found by the same provider-and-path rule, so a
+      ;; declaration cannot silently promote an unnamed record.
+      (let ((index 0))
+        (while (< index (Collection/count group))
+          (let* ((post (Collection/nth group index))
+                 (provider (Collection/get (get post :provenance) :provider ""))
+                 (expected (Collection/get provider-of authority-source "")))
+            (when (and (nil? authority) (= provider expected))
+              (setq authority post)))
+          (setq index (1+ index))))
+      (when (nil? authority)
+        (fail "DOGFOOD-IDENTITY-006"
+              (str "projection for \"" id "\" names authority " (str authority-source)
+                   " but no record from that source carries the id")))
+      (while (< projection-index (Collection/count projections))
+        (let* ((projection (Collection/nth projections projection-index))
+               (matched nil)
+               (index 0))
+          (while (< index (Collection/count group))
+            (let ((post (Collection/nth group index)))
+              (when (projection-matches? projection post) (setq matched post)))
+            (setq index (1+ index)))
+          (when (nil? matched)
+            (fail "DOGFOOD-IDENTITY-007"
+                  (str "projection for \"" id "\" names a record that was not collected: "
+                       (str (Collection/get projection :source "")) " "
+                       (str (Collection/get projection :repository "")) "#"
+                       (str (Collection/get projection :number nil)))))
+          (let ((fields (declared-fields declaration projection)))
+            (check-agreement authority matched projection fields)
+            (check-authority-only authority matched projection fields)
+            (setq overrides (merged-overrides authority matched fields))))
+        (setq projection-index (1+ projection-index)))
+      (post-with authority overrides)))
+
+  ;; Every id must resolve to exactly one post. A repeated id without a
+  ;; declaration is the conflict policy's `fail`.
+  (defun resolve-identity (config posts)
+    (let* ((identity (Collection/get config :identity {}))
+           (declarations (Collection/get identity :projections []))
+           (groups (group-by-id posts))
+           (ids (distinct-ids posts))
+           (resolved [])
+           (index 0))
+      (while (< index (Collection/count ids))
+        (let* ((id (Collection/nth ids index))
+               (group (Collection/get groups id))
+               (declaration (find-declaration declarations id)))
+          (cond
+            ((= (Collection/count group) 1)
+             (setq resolved (Collection/conj resolved (Collection/nth group 0))))
+            ((nil? declaration)
+             (fail "DOGFOOD-IDENTITY-001"
+                   (str "duplicate canonical id \"" id "\" from "
+                        (join ", " (map-provenance group))
+                        "; declare a projection to resolve it")))
+            (t (setq resolved (Collection/conj resolved
+                                               (resolve-projection declaration group))))))
+        (setq index (1+ index)))
+      resolved))
+
+  ;; Grouping uses a hash map, whose iteration order is not the input order, so
+  ;; the identity order is collected separately and predictably.
+  (defun distinct-ids (posts)
+    (let ((ids [])
+          (index 0))
+      (while (< index (Collection/count posts))
+        (let ((id (get (Collection/nth posts index) :id)))
+          (unless (contains-value? ids id)
+            (setq ids (Collection/conj ids id))))
+        (setq index (1+ index)))
+      ids))
+
+  (defun find-declaration (declarations id)
+    (let ((index 0)
+          (found nil))
+      (while (< index (Collection/count declarations))
+        (when (= (Collection/get (Collection/nth declarations index) :id "") id)
+          (setq found (Collection/nth declarations index)))
+        (setq index (1+ index)))
+      found))
+
+  (defun map-provenance (posts)
+    (let ((result [])
+          (index 0))
+      (while (< index (Collection/count posts))
+        (setq result (Collection/conj result (provenance-text (Collection/nth posts index))))
+        (setq index (1+ index)))
+      result))
+
+  (export group-by-id post-with projection-matches? resolve-identity))

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Persistent values from the first line</title>
+<meta name="description" content="Why the canonical post model is a record, and why collections are persistent rather than mutable.">
+<meta name="dogfood-search-index" content="../../search.json">
+<meta name="dogfood-root" content="../../">
+<script src="../../assets/browser.js"></script>
+<link rel="stylesheet" href="../../assets/site.css">
+<link rel="alternate" type="application/atom+xml" href="../../feed.xml" title="dogfood">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="masthead">
+<a class="wordmark" href="../../">dogfood</a>
+<nav aria-label="site"><a href="../../archive/">Archive</a><a href="../../tags/">Tags</a><a href="../../search/">Search</a><a href="../../feed.xml">Feed</a><a href="https://github.com/">GitHub</a><button id="theme-toggle" class="theme-toggle" type="button">Theme</button></nav>
+</header>
+<main id="main">
+<article class="article"><nav class="crumbs" aria-label="article"><a href="../../posts/comment-channels/">Newer: Comments are channels, not one lossy list</a></nav><h1>Persistent values from the first line</h1><p class="lede">Why the canonical post model is a record, and why collections are persistent rather than mutable.</p><div class="meta"><span>2026-09-09</span><a class="tag" href="../../tags/eliscript/">eliscript</a><a class="tag" href="../../tags/data/">data</a></div><p>The canonical model is an immutable value. Posts are records, collections are persistent Vectors and Maps, and no build step mutates a value in place.</p>
+<h2>Records for domain values</h2>
+<p>A canonical post has a fixed field set, so the model declares it once:</p>
+<pre><code class="language-elisp">(defrecord Post
+  [id slug title summary body published-at updated-at authors tags cover draft
+   pinned-weight provenance aliases comment-channels])
+</code></pre>
+<p>Reading a field is direct keyword lookup, and the type has an exact predicate. Cross-source identity is the <code>id</code> field, never a title or a derived path.</p>
+<h2>Persistent collections</h2>
+<p>Lists, vectors, maps, and sets share structure instead of copying. The builder folds over a vector to accumulate documents, which is ordinary Lisp-style code:</p>
+<ul><li><code>Collection/get</code> reads a key with a fallback,</li><li><code>Collection/assoc</code> returns a new map,</li><li><code>Collection/conj</code> returns a new vector,</li><li><code>Order/sort</code> returns a new vector without mutating its input.</li></ul>
+<p>That last property is what makes the build deterministic. Sorting cannot observe or disturb the module-level constants it consumes.</p>
+<h2>Why this matters for a blog</h2>
+<p>A build is a pure function from normalized input to output. When the input and the renderer identity are equal, the output bytes are equal too. Determinism is a property of the value model, not a promise layered on top of it.</p><hr><p class="provenance">Markdown · content/posts/0002-persistent-values.md · <a href="../../archive/">archive</a></p></article>
+</main>
+<footer>Built with Eliscript from the repository and its published Markdown.</footer>
+</body>
+</html>

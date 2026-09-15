@@ -96,6 +96,35 @@ descriptive metadata or a non-authorizing filter.
 
 Multiple providers of the same kind are allowed. Provider ids must be unique.
 
+## Identity Configuration
+
+`identity.conflict` is `fail`. `identity.projections` lists declarations that
+resolve one canonical id collected from several sources:
+
+```elisp
+{:identity
+ {:conflict :fail
+  :projections
+  [{:id "notes/compiler-host"
+    :authority :markdown
+    :projections
+    [{:source :issue :repository "owner/repository" :number 42}]}]}}
+```
+
+A declaration names the authority by source kind and names each projected
+record by the provider and by the provenance path that provider already
+records. A declaration that names an authority no collected record carries, or
+a record that was not collected, fails instead of resolving quietly.
+
+The authority supplies the article. A projection contributes its comment
+channels and its aliases, and the fields it declares. `fields` may be given
+once for the declaration or on one projected record, and a declared field may
+differ from the authority.
+
+`slug` and `body` belong to the authority alone. A differing projected slug is
+a route disagreement, so it must appear in that record's `aliases` or be
+declared; anything else fails and reports both provenances.
+
 ## Publishing Authorization
 
 `publishing.owner` is required whenever an Issue or Discussion article source

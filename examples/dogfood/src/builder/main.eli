@@ -21,6 +21,7 @@
   (import "./content.eli" check-identity read-posts)
   (import "./issues.eli" collect-issues)
   (import "./discussions.eli" collect-discussions)
+  (import "./identity.eli" resolve-identity)
   (import "../support/config.eli" load-config)
   (import "../support/diagnostics.eli" fail)
   (import "../support/text.eli" join slice string-value?)
@@ -307,7 +308,8 @@
                   carriers (+ carriers (Collection/get result :carriers 0))
                   unauthorized (+ unauthorized (Collection/get result :unauthorized 0))))
           (setq index (1+ index))))
-      (let* ((posts (sort-posts (Sequence/filter publishable? collected)))
+      (let* ((posts (sort-posts (Sequence/filter publishable?
+                                                  (resolve-identity config collected))))
              (documents (Collection/conj (render-site site posts)
                                        {:path "assets/browser.js"
                                         :content (browser-bundle root browser-override)}))

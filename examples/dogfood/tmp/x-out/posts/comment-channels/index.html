@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comments are channels, not one lossy list</title>
+<meta name="description" content="The comment model this site will adopt once the Issues and Discussions providers land.">
+<meta name="dogfood-search-index" content="../../search.json">
+<meta name="dogfood-root" content="../../">
+<script src="../../assets/browser.js"></script>
+<link rel="stylesheet" href="../../assets/site.css">
+<link rel="alternate" type="application/atom+xml" href="../../feed.xml" title="dogfood">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="masthead">
+<a class="wordmark" href="../../">dogfood</a>
+<nav aria-label="site"><a href="../../archive/">Archive</a><a href="../../tags/">Tags</a><a href="../../search/">Search</a><a href="../../feed.xml">Feed</a><a href="https://github.com/">GitHub</a><button id="theme-toggle" class="theme-toggle" type="button">Theme</button></nav>
+</header>
+<main id="main">
+<article class="article"><nav class="crumbs" aria-label="article"><a href="../../posts/hello-dogfood/">Newer: Hello, dogfood</a> · <a href="../../posts/persistent-values/">Older: Persistent values from the first line</a></nav><h1>Comments are channels, not one lossy list</h1><p class="lede">The comment model this site will adopt once the Issues and Discussions providers land.</p><div class="meta"><span>2026-09-12</span><a class="tag" href="../../tags/design/">design</a><a class="tag" href="../../tags/comments/">comments</a></div><p>A post owns zero or more ordered comment channels. Each channel keeps its own provider, topology, and freshness, because flattening them loses information that readers and moderators both rely on.</p>
+<h2>Topology is preserved</h2>
+<ul><li>Issue comments form a flat ordered stream.</li><li>Discussion comments preserve replies as a tree.</li><li>External providers own their own native structure.</li></ul>
+<p>The interface may present channels as tabs or as adjacent sections. The model never fabricates a reply graph by merging two providers.</p>
+<h2>Freshness is explicit</h2>
+<p>A channel declares <code>snapshot</code>, <code>live</code>, <code>hybrid</code>, or <code>embed</code> mode. The page shows when a snapshot was captured, and a failed live request keeps the snapshot and reports a non-blocking provider status.</p>
+<h2>Carriers are classified first</h2>
+<p>An Issue or Discussion provisioned by a widget is a comment carrier. Carrier classification runs before article selection, so a provider-created record cannot become an article through a publication label, and its body can never override canonical fields.</p><hr><p class="provenance">Markdown · content/posts/0003-comment-channels.md · <a href="../../archive/">archive</a></p></article>
+</main>
+<footer>Built with Eliscript from the repository and its published Markdown.</footer>
+</body>
+</html>

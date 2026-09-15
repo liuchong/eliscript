@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hello, dogfood</title>
+<meta name="description" content="The first published article of the dogfood proving ground, and what this slice actually runs.">
+<meta name="dogfood-search-index" content="../../search.json">
+<meta name="dogfood-root" content="../../">
+<script src="../../assets/browser.js"></script>
+<link rel="stylesheet" href="../../assets/site.css">
+<link rel="alternate" type="application/atom+xml" href="../../feed.xml" title="dogfood">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="masthead">
+<a class="wordmark" href="../../">dogfood</a>
+<nav aria-label="site"><a href="../../archive/">Archive</a><a href="../../tags/">Tags</a><a href="../../search/">Search</a><a href="../../feed.xml">Feed</a><a href="https://github.com/">GitHub</a><button id="theme-toggle" class="theme-toggle" type="button">Theme</button></nav>
+</header>
+<main id="main">
+<article class="article"><nav class="crumbs" aria-label="article"><a href="../../posts/comment-channels/">Older: Comments are channels, not one lossy list</a></nav><h1>Hello, dogfood</h1><p class="lede">The first published article of the dogfood proving ground, and what this slice actually runs.</p><div class="meta"><span>2026-09-06</span><span>updated 2026-09-14</span><a class="tag" href="../../tags/design/">design</a><a class="tag" href="../../tags/eliscript/">eliscript</a></div><p>This site is the first <strong>executable slice</strong> of the dogfood project. It reads repository Markdown, builds the canonical post model, and renders static documents without touching the GitHub API.</p>
+<h2>What runs today</h2>
+<p>The builder and the renderer are two separate Eliscript programs:</p>
+<ol><li>The builder owns the filesystem, reads <code>content/posts/</code>, validates front matter, and writes a staging tree.</li><li>The renderer takes only the canonical model and returns documents. It has no filesystem, environment, or network authority.</li></ol>
+<p>Output replacement is atomic: the build writes <code>_site.staging</code>, and only after every route exists does it rename that tree into place.</p>
+<h2>What has landed since</h2>
+<p>Issues and Discussions are article sources now, each with owner-only publication and carrier classification. Comment channels exist in three shapes: a native snapshot captured during a build, a live channel that no build ever fetches, and a mount region for an external provider.</p>
+<p>What has not landed is packaging. Those gates arrive in the order recorded by specification 0009. The static article authority rule holds throughout: every article is complete HTML and stays readable with JavaScript disabled. Search and the theme control are enhancements, not requirements, and the &lt;code&gt;&amp;lt;noscript&amp;gt;&lt;/code&gt; note on the search page says so.</p>
+<blockquote><p>A design is only as good as the smallest slice that proves it.</p></blockquote>
+<p>Here is the renderer boundary in Eliscript:</p>
+<pre><code class="language-elisp">(defun render-site (site posts)
+  (let* ((sorted (sort-posts posts))
+         (tags (collect-tags sorted)))
+    ...))
+</code></pre>
+<p>Front matter is the only content metadata. Identity is the explicit <code>id</code> field; a file name never defines identity.</p><hr><p class="provenance">Markdown · content/posts/0001-hello-dogfood.md · <a href="../../archive/">archive</a></p></article>
+</main>
+<footer>Built with Eliscript from the repository and its published Markdown.</footer>
+</body>
+</html>
