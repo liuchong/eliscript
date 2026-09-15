@@ -145,7 +145,7 @@
 
   ;; ------------------------------------------------------------------- build
 
-  (defun package-action (root project)
+  (defun package-action (root project action-digest)
     (let* ((project-root (Path/join root project))
            (entry-source (Path/join project-root "dist/src/builder/main.mjs"))
            (action-directory (Path/join project-root "dist/action"))
@@ -216,7 +216,7 @@
         workflow
         (replace-text (readFileSync workflow-source "utf8")
                       "PLACEHOLDER_ACTION_DIGEST"
-                      (commit-digest root)))
+                      action-digest))
       (let* ((bundle (readFileSync entry "utf8"))
              (browser-bundle (readFileSync browser "utf8"))
              (map-text (readFileSync source-map "utf8"))
@@ -271,9 +271,15 @@
   (defun main ()
     (let* ((arguments program-arguments)
            (root (option-value arguments "--root" "."))
-           (project (option-value arguments "--project" "examples/dogfood")))
+           (project (option-value arguments "--project" "examples/dogfood"))
+           ;; The template pins the Action for a consumer, and the repository a
+           ;; consumer resolves is the one that publishes the package. Naming
+           ;; its commit here is what keeps the pin resolvable: defaulting to
+           ;; this repository's commit produced a digest that does not exist in
+           ;; the published one.
+           (digest (option-value arguments "--action-digest" (commit-digest root))))
       (try
-        (package-action root project)
+        (package-action root project digest)
         (catch error
           (print (str "package: " (get error :code "DOGFOOD") ": "
                       (get error :message)))
