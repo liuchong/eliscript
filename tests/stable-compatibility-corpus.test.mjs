@@ -33,14 +33,14 @@ test("stable compatibility corpus covers every frozen core behavior", async () =
     schemaVersion: 1,
     stableSpecifications: 173,
     stableFeatures: 173,
-    provisionalFeatures: 0,
+    provisionalFeatures: 1,
     excludedApplicationFeatures: 2,
     migrations: 3,
-    fixtures: 101,
+    fixtures: 103,
     evidenceLocators: 679,
     evidenceFiles: 134,
-    sourceFiles: 410,
-    readyForAc02: true,
+    sourceFiles: 412,
+    readyForAc02: false,
     identity: expect.stringMatching(/^[0-9a-f]{64}$/u),
   });
 });
@@ -61,7 +61,7 @@ test("stable compatibility corpus rejects omitted behavior and migrations", asyn
 
 test("stable compatibility corpus rejects false AC-02 readiness and fixture drift", async () => {
   const value = await contract();
-  value.readyForAc02 = false;
+  value.readyForAc02 = true;
   value.fixtureFiles.pop();
   value.identity = "0".repeat(64);
 

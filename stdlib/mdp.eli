@@ -1,0 +1,7 @@
+(module eliscript.mdp
+  (import "../runtime/wire/markdown.mjs" :as Wire)
+  (defun mdp-parse (source &rest options)
+    (apply Wire/parse (js-cons source options)))
+  (defun mdp-encode (value &rest options)
+    (apply Wire/encode (js-cons value options)))
+  (export mdp-encode mdp-parse))

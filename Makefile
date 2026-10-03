@@ -73,6 +73,7 @@ test-core: check-contracts
 		tests/emacs-analysis-evidence.test.mjs \
 		tests/stdlib-sequence.test.mjs \
 		tests/stdlib-text.test.mjs tests/stdlib-object.test.mjs \
+		tests/markdown-wire.test.mjs tests/http-rpc.test.mjs tests/wire-compiler.test.mjs \
 		tests/stdlib-bit.test.mjs tests/stdlib-function.test.mjs \
 		tests/stdlib-deferred.test.mjs \
 		tests/portable-persistent-list.test.mjs \

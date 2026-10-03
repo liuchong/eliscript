@@ -1,0 +1,12 @@
+(module eliscript.gepo
+  (import "../runtime/wire/http-rpc.mjs" :as HTTP)
+  (defun gepo-operation (options) (HTTP/defineOperation options))
+  (defun gepo-usage (operation) (HTTP/usageMarkdown operation))
+  (defun gepo-index (title operations &rest path)
+    (apply HTTP/pathIndexMarkdown (js-cons title (js-cons operations path))))
+  (defun gepo-discovery-candidates (url) (HTTP/discoveryCandidates url))
+  (defun gepo-classify-discovery (response) (HTTP/classifyDiscovery response))
+  (defun gepo-service (&rest options) (apply HTTP/createService options))
+  (defun gepo-client (&rest options) (apply HTTP/createClient options))
+  (export gepo-classify-discovery gepo-client gepo-discovery-candidates
+          gepo-index gepo-operation gepo-service gepo-usage))

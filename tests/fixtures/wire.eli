@@ -1,0 +1,21 @@
+(module eliscript.fixture.wire
+  (import "../../stdlib/mdp.eli" mdp-parse mdp-encode)
+  (import "../../stdlib/mds.eli" mds-validate)
+  (import "../../stdlib/gepo.eli" gepo-client gepo-service gepo-index)
+  (defun codec-report ()
+    (let* ((data (js-object :User (js-object :name "Ada" :age 42)))
+           (schema (js-object :mds "0.1"
+                     :User (js-array (js-object :name "age" :type "int" :required t)))))
+      (js-object :data (mdp-parse (mdp-encode data))
+                 :validation (mds-validate data schema)
+                 :index (gepo-index "Example" (js-array)))))
+  (defun make-service (operations) (gepo-service (js-object :operations operations)))
+  (defun make-client (options) (gepo-client options))
+  (defun roundtrip (data) (mdp-parse (mdp-encode data)))
+  (defasync echo-data (url data)
+    (let* ((client (gepo-client))
+           (reply (await (js-call client :invoke url (mdp-encode data)
+                           (js-object :allowPost t
+                                      :contentType "text/markdown; variant=mdp")))))
+      (mdp-parse (get reply "body"))))
+  (export codec-report echo-data make-client make-service roundtrip))

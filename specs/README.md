@@ -29,21 +29,21 @@ rather than silently choosing one.
 
 ## Current Snapshot
 
-The registry currently contains 180 specifications.
+The registry currently contains 181 specifications.
 
 | Classification | Count |
 | --- | ---: |
 | Draft design | 2 |
-| Accepted design | 2 |
+| Accepted design | 3 |
 | Stable design | 175 |
 | Superseded design | 1 |
 | Implementation in progress | 3 |
-| Implemented | 175 |
+| Implemented | 176 |
 | Pending implementation | 1 |
 | Superseded implementation | 1 |
 
 Compatibility Baseline 2 separately classifies 175 specifications as stable,
-none as provisional, 4 as planning, and 1 as superseded. That baseline is
+1 as provisional, 4 as planning, and 1 as superseded. That baseline is
 derived from registry and feature statuses, so it cannot drift independently.
 
 M7 and M8 are complete. M8 includes persistent List, Vector, Map, and Set
@@ -548,6 +548,7 @@ defined by [0125](0125-generated-library-api-index.md).
 | 0178 | [Immutable Regex Text Processing](0178-immutable-regex-text-processing.md) | Stable | Implemented |
 | 0179 | [Local Acceptance Compatibility Profile](0179-local-acceptance-compatibility-profile.md) | Stable | Implemented |
 | 0180 | [General Tail-Call Optimization](0180-general-tail-call-optimization.md) | Draft | Pending |
+| 0181 | [Markdown Wire Data and Self-describing HTTP RPC](0181-markdown-wire-and-http-rpc.md) | Accepted | Implemented |
 
 ## Adding a Specification
 

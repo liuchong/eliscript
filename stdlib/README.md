@@ -772,3 +772,57 @@ The Emacs indexing workload imports `count-by` from this module. Its portable
 project build follows the dependency into `object.eli`, emits only `count-by`,
 `assoc`, and `has?`, and executes the resulting graph in the worker. See
 [specs/0029-portable-indexing-composition.md](../specs/0029-portable-indexing-composition.md).
+
+## Markdown wire data and HTTP RPC
+
+Import the wire libraries directly from Eliscript:
+
+```elisp
+(import "./stdlib/mdp.eli" mdp-parse mdp-encode)
+(import "./stdlib/mds.eli" mds-validate)
+(import "./stdlib/gepo.eli" gepo-client gepo-service gepo-operation)
+
+(defconst data (mdp-parse "# User\n- name: Ada\n- age: 42\n"))
+(defconst wire (mdp-encode data))
+(defconst report
+  (mds-validate data
+    "- mds: \"0.1\"\n# User\n| name | type | required |\n| --- | --- | --- |\n| age | int | true |\n"))
+```
+
+The MDP boundary uses native JSON objects and arrays. Parsing throws structural
+errors with `code` and one-based `line`; encoding preserves nested and mixed
+arrays and rejects unsupported values. Optional `maxLength` and `maxDepth`
+bound document size and nesting. Numbers use finite IEEE 754 doubles.
+MDS validation accepts objects or Markdown text and returns `{valid, errors}`;
+error records include path, rule, expected and actual. Schema patterns use
+ECMAScript Unicode regular expressions and should come from trusted schemas.
+
+`gepo-service` accepts an options object with `operations` and returns a Fetch
+request handler for GEPO 0.2. Each operation supplies `path` and an `execute`
+callback that returns a Fetch Response. Its optional title, summary, request,
+success, failures, effect, retry and contentType describe current usage.
+`visible` filters discoverable operations, and `authorize` checks requests
+independently. Both default to public access. The host provides the listener.
+
+`gepo-client` returns async `discover(url)`, `index(url)`, `usage(url)`, and
+`invoke(url, body, options)` methods. Invocation requires an explicit body and
+`allowPost: true`, reads successful same-path usage first, then sends one POST.
+For example, call the client from an async Eliscript function:
+
+```elisp
+(defasync invoke-echo (url data)
+  (let* ((client (gepo-client))
+         (reply (await (js-call client :invoke url (mdp-encode data)
+                        (js-object :allowPost t
+                                   :contentType "text/markdown; variant=mdp")))))
+    (mdp-parse (get reply "body"))))
+```
+
+Options include custom fetch and classifier, headers, timeoutMs and maxBytes;
+request options include signal, headers and contentType. Discovery distinguishes
+found, empty and not-found. The default textual classifier handles Markdown and
+plain-text indexes; other representations use the classifier callback. Clients
+reject URL credentials and redirects and do not automatically retry POST.
+
+See [the wire contract](../specs/0181-markdown-wire-and-http-rpc.md) for the
+complete API and local verification scenarios.
