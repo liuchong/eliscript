@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { chromium } from "playwright-core";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { assemblePages } from "../tools/pages/assemble.mjs";
+import { buildPagesInputs } from "./helpers/pages-build.mjs";
 import { serveTree } from "../tools/browser/matrix.mjs";
 
 // Resolving a page's references proves where a link points; it does not prove
@@ -31,18 +32,7 @@ async function browserAvailable() {
 }
 
 beforeAll(async () => {
-  // The playground entry is generated, so it is built when it is absent.
-  try {
-    await stat(resolve(ROOT, "dist/browser-playground/playground.mjs"));
-  } catch {
-    const child = Bun.spawn(["bun", "run", "build:browser-playground"], {
-      cwd: ROOT, stdout: "pipe", stderr: "pipe",
-    });
-    const [exitCode, , stderr] = await Promise.all([
-      child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
-    ]);
-    if (exitCode !== 0) throw new Error(stderr.trim() || "the playground build failed");
-  }
+  await buildPagesInputs();
 
   staging = await mkdtemp(resolve(ROOT, ".eliscript-pages-runtime-"));
   artifact = resolve(staging, "site");

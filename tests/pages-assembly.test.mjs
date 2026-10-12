@@ -4,34 +4,16 @@ import { posix, resolve } from "node:path";
 
 import { PUBLISHED_TREES, assemblePages } from "../tools/pages/assemble.mjs";
 
+import { buildPagesInputs } from "./helpers/pages-build.mjs";
+
 const ROOT = resolve(import.meta.dir, "..");
 const SITE_PAGE = "pages/playground.html";
 
 let staging;
 let artifact;
 
-// The proving-ground site is generated rather than checked in, so the test
-// produces it when it is absent instead of depending on a previous run.
-async function ensureDemoSite() {
-  try {
-    await stat(resolve(ROOT, "examples/dogfood/_site/index.html"));
-    return;
-  } catch {
-    // Build it below.
-  }
-  const child = Bun.spawn(["bun", "run", "dogfood"], {
-    cwd: ROOT, stdout: "pipe", stderr: "pipe",
-  });
-  const [exitCode, , stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
-  if (exitCode !== 0) throw new Error(stderr.trim() || "the demo site build failed");
-}
-
 beforeAll(async () => {
-  await ensureDemoSite();
+  await buildPagesInputs();
   staging = await mkdtemp(resolve(ROOT, ".eliscript-pages-"));
   artifact = resolve(staging, "pages");
   await assemblePages({ root: ROOT, outDir: artifact });

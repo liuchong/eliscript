@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { assemblePages } from "../tools/pages/assemble.mjs";
+import { buildPagesInputs } from "./helpers/pages-build.mjs";
 import { serveTree } from "../tools/browser/matrix.mjs";
 
 // The documentation site's script is compiled from Eliscript. Its source is a
@@ -12,7 +13,6 @@ import { serveTree } from "../tools/browser/matrix.mjs";
 // stamping the year. A script that loads but does nothing passes none of them.
 
 const ROOT = resolve(import.meta.dir, "..");
-const SCRIPT = "dist/docs-site/site.js";
 const PORT = 8903;
 
 let staging;
@@ -21,13 +21,7 @@ let server;
 let available = true;
 
 beforeAll(async () => {
-  const built = Bun.spawn(["bun", "run", "build:docs-site"], {
-    cwd: ROOT, stdout: "pipe", stderr: "pipe",
-  });
-  const [exitCode, , stderr] = await Promise.all([
-    built.exited, new Response(built.stdout).text(), new Response(built.stderr).text(),
-  ]);
-  if (exitCode !== 0) throw new Error(stderr.trim() || "the site script build failed");
+  await buildPagesInputs();
 
   staging = await mkdtemp(resolve(ROOT, ".eliscript-docs-site-"));
   artifact = resolve(staging, "site");

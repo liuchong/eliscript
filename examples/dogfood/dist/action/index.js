@@ -100,12 +100,16 @@ function protocol_fail(message) {
   })(new globalThis.TypeError(message));
 }
 function protocol_state(protocol) {
-  return ((state) => {
-    return __eliscript_truthy(state === undefined) ? protocol_fail("expected an Eliscript protocol") : state;
-  })(protocol_states["get"](protocol));
+  {
+    const __eliscript_value_2 = protocol_states["get"](protocol);
+    {
+      let state = __eliscript_value_2;
+      return state === undefined ? protocol_fail("expected an Eliscript protocol") : state;
+    }
+  }
 }
 function normalize_name(value, label) {
-  return __eliscript_truthy(((__eliscript_value_2) => __eliscript_truthy(__eliscript_value_2) ? __eliscript_value_2 : (value ?? []).length === 0)(!__eliscript_truthy(((__eliscript_value) => {
+  return !(((__eliscript_value) => {
     if (__eliscript_value === null)
       return "null";
     const __eliscript_host_type = typeof __eliscript_value;
@@ -126,61 +130,91 @@ function normalize_name(value, label) {
     } catch {
       return __eliscript_host_type;
     }
-  })(value) === "string"))) ? protocol_fail(String(label) + String(" must be a non-empty string")) : value;
+  })(value) === "string") || (value ?? []).length === 0 ? protocol_fail(String(label) + String(" must be a non-empty string")) : value;
 }
 function normalize_protocol_operations(operations) {
-  __eliscript_truthy(!__eliscript_truthy(protocol_array_QMARK_(operations))) && protocol_fail("protocol operations must be a non-empty dense array");
-  return ((length) => {
-    __eliscript_truthy(length === 0) && protocol_fail("protocol operations must be a non-empty dense array");
-    __eliscript_truthy(length > protocol_max_operations) && protocol_fail(String("protocol operations exceed ") + String(protocol_max_operations));
-    return ((descriptors) => {
-      return ((keys) => {
-        return ((normalized) => {
-          return ((index) => {
-            return (() => {
-              __eliscript_truthy(((__eliscript_value_3, __eliscript_value_4) => __eliscript_value_3 !== __eliscript_value_4)((keys ?? []).length, length + 1)) && protocol_fail("protocol operations must be a dense array with no extra properties");
-              (() => {
-                while (__eliscript_truthy(index < length)) {
-                  ((descriptor) => {
-                    __eliscript_truthy(((__eliscript_value_5) => __eliscript_truthy(__eliscript_value_5) ? __eliscript_value_5 : ((__eliscript_value_6) => __eliscript_truthy(__eliscript_value_6) ? __eliscript_value_6 : !__eliscript_truthy(descriptor["enumerable"] ?? false))(!__eliscript_truthy(protocol_has_own(descriptor, "value"))))(descriptor === undefined)) && protocol_fail("protocol operations must contain enumerable data values");
-                    return normalized["push"](normalize_name(descriptor["value"], "protocol operation"));
-                  })(descriptors[String(index)] ?? undefined);
-                  index = index + 1;
+  !__eliscript_truthy(protocol_array_QMARK_(operations)) && protocol_fail("protocol operations must be a non-empty dense array");
+  {
+    const __eliscript_value_3 = (operations ?? []).length;
+    {
+      let length = __eliscript_value_3;
+      length === 0 && protocol_fail("protocol operations must be a non-empty dense array");
+      length > protocol_max_operations && protocol_fail(String("protocol operations exceed ") + String(protocol_max_operations));
+      {
+        const __eliscript_value_4 = protocol_own_descriptors(operations);
+        {
+          let descriptors = __eliscript_value_4;
+          {
+            const __eliscript_value_5 = protocol_own_keys(descriptors);
+            {
+              let keys = __eliscript_value_5;
+              {
+                const __eliscript_value_6 = [];
+                {
+                  let normalized = __eliscript_value_6;
+                  {
+                    const __eliscript_value_7 = 0;
+                    {
+                      let index = __eliscript_value_7;
+                      ((__eliscript_value_8, __eliscript_value_9) => __eliscript_value_8 !== __eliscript_value_9)((keys ?? []).length, length + 1) && protocol_fail("protocol operations must be a dense array with no extra properties");
+                      while (index < length) {
+                        {
+                          const __eliscript_value_10 = descriptors[String(index)] ?? undefined;
+                          {
+                            let descriptor = __eliscript_value_10;
+                            (descriptor === undefined || !__eliscript_truthy(protocol_has_own(descriptor, "value")) || !__eliscript_truthy(descriptor["enumerable"] ?? false)) && protocol_fail("protocol operations must contain enumerable data values");
+                            normalized["push"](normalize_name(descriptor["value"], "protocol operation"));
+                          }
+                        }
+                        index = index + 1;
+                      }
+                      return normalized;
+                    }
+                  }
                 }
-                return null;
-              })();
-              return normalized;
-            })();
-          })(0);
-        })([]);
-      })(protocol_own_keys(descriptors));
-    })(protocol_own_descriptors(operations));
-  })((operations ?? []).length);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function operation_record(protocol, operation) {
-  return ((state) => {
-    return ((record) => {
-      return __eliscript_truthy(record === undefined) ? protocol_fail(String("protocol ") + String(protocol["name"]) + String(" has no operation ") + String(operation)) : record;
-    })(state["operations"]["get"](operation));
-  })(protocol_state(protocol));
+  {
+    const __eliscript_value_29 = protocol_state(protocol);
+    {
+      let state = __eliscript_value_29;
+      {
+        const __eliscript_value_30 = state["operations"]["get"](operation);
+        {
+          let record = __eliscript_value_30;
+          return record === undefined ? protocol_fail(String("protocol ") + String(protocol["name"]) + String(" has no operation ") + String(operation)) : record;
+        }
+      }
+    }
+  }
 }
 function protocol_host_category(value) {
-  return __eliscript_truthy(value === null) ? "null" : protocol_host_type(value);
+  return value === null ? "null" : protocol_host_type(value);
 }
 function known_host_category_QMARK_(category) {
-  return ((index, found) => {
-    (() => {
-      while (__eliscript_truthy(((__eliscript_value_20) => __eliscript_truthy(__eliscript_value_20) ? !__eliscript_truthy(found) : __eliscript_value_20)(index < (protocol_host_categories ?? []).length))) {
-        __eliscript_truthy(category === ((protocol_host_categories ?? [])[index] ?? null)) && (found = true);
+  {
+    const __eliscript_value_31 = 0;
+    const __eliscript_value_32 = false;
+    {
+      let index = __eliscript_value_31;
+      let found = __eliscript_value_32;
+      while (index < (protocol_host_categories ?? []).length && !__eliscript_truthy(found)) {
+        category === ((protocol_host_categories ?? [])[index] ?? null) && (found = true);
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(0, false);
+      return found;
+    }
+  }
 }
 function normalize_implementations(protocol, implementations) {
-  __eliscript_truthy(((__eliscript_value_21) => __eliscript_truthy(__eliscript_value_21) ? __eliscript_value_21 : !__eliscript_truthy(((__eliscript_value) => {
+  (implementations === null || !(((__eliscript_value) => {
     if (__eliscript_value === null)
       return "null";
     const __eliscript_host_type = typeof __eliscript_value;
@@ -201,102 +235,127 @@ function normalize_implementations(protocol, implementations) {
     } catch {
       return __eliscript_host_type;
     }
-  })(implementations) === "object"))(implementations === null)) && protocol_fail(String("protocol ") + String(protocol["name"]) + String(" implementations must be an object"));
-  return ((descriptors) => {
-    return ((keys) => {
-      return ((normalized) => {
-        return ((index) => {
-          return (() => {
-            __eliscript_truthy((keys ?? []).length === 0) && protocol_fail(String("protocol ") + String(protocol["name"]) + String(" extension must implement at least one operation"));
-            (() => {
-              while (__eliscript_truthy(index < (keys ?? []).length)) {
-                ((key) => {
-                  return ((descriptor) => {
-                    return (() => {
-                      __eliscript_truthy(!__eliscript_truthy(((__eliscript_value) => {
-                        if (__eliscript_value === null)
-                          return "null";
-                        const __eliscript_host_type = typeof __eliscript_value;
-                        if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function")
-                          return __eliscript_host_type;
-                        try {
-                          const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type"));
-                          if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol"))
-                            return __eliscript_type.value;
-                          const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind");
-                          if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) {
-                            if (__eliscript_kind.value === "eliscript/keyword")
-                              return "keyword";
-                            if (__eliscript_kind.value === "eliscript/symbol")
-                              return "symbol";
+  })(implementations) === "object")) && protocol_fail(String("protocol ") + String(protocol["name"]) + String(" implementations must be an object"));
+  {
+    const __eliscript_value_33 = protocol_own_descriptors(implementations);
+    {
+      let descriptors = __eliscript_value_33;
+      {
+        const __eliscript_value_34 = protocol_own_keys(descriptors);
+        {
+          let keys = __eliscript_value_34;
+          {
+            const __eliscript_value_35 = protocol_null_object();
+            {
+              let normalized = __eliscript_value_35;
+              {
+                const __eliscript_value_36 = 0;
+                {
+                  let index = __eliscript_value_36;
+                  (keys ?? []).length === 0 && protocol_fail(String("protocol ") + String(protocol["name"]) + String(" extension must implement at least one operation"));
+                  while (index < (keys ?? []).length) {
+                    {
+                      const __eliscript_value_37 = (keys ?? [])[index] ?? null;
+                      {
+                        let key = __eliscript_value_37;
+                        {
+                          const __eliscript_value_38 = descriptors[key];
+                          {
+                            let descriptor = __eliscript_value_38;
+                            !(((__eliscript_value) => {
+                              if (__eliscript_value === null)
+                                return "null";
+                              const __eliscript_host_type = typeof __eliscript_value;
+                              if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function")
+                                return __eliscript_host_type;
+                              try {
+                                const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type"));
+                                if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol"))
+                                  return __eliscript_type.value;
+                                const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind");
+                                if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) {
+                                  if (__eliscript_kind.value === "eliscript/keyword")
+                                    return "keyword";
+                                  if (__eliscript_kind.value === "eliscript/symbol")
+                                    return "symbol";
+                                }
+                                return __eliscript_host_type;
+                              } catch {
+                                return __eliscript_host_type;
+                              }
+                            })(key) === "string") && protocol_fail(String("protocol ") + String(protocol["name"]) + String(" implementation names must be strings"));
+                            operation_record(protocol, key);
+                            (!__eliscript_truthy(protocol_has_own(descriptor, "value")) || !(((__eliscript_value) => {
+                              if (__eliscript_value === null)
+                                return "null";
+                              const __eliscript_host_type = typeof __eliscript_value;
+                              if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function")
+                                return __eliscript_host_type;
+                              try {
+                                const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type"));
+                                if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol"))
+                                  return __eliscript_type.value;
+                                const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind");
+                                if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) {
+                                  if (__eliscript_kind.value === "eliscript/keyword")
+                                    return "keyword";
+                                  if (__eliscript_kind.value === "eliscript/symbol")
+                                    return "symbol";
+                                }
+                                return __eliscript_host_type;
+                              } catch {
+                                return __eliscript_host_type;
+                              }
+                            })(descriptor["value"]) === "function")) && protocol_fail(String("protocol ") + String(protocol["name"]) + String("/") + String(key) + String(" implementation must be a function"));
+                            protocol_define_enumerable(normalized, key, descriptor["value"]);
                           }
-                          return __eliscript_host_type;
-                        } catch {
-                          return __eliscript_host_type;
                         }
-                      })(key) === "string")) && protocol_fail(String("protocol ") + String(protocol["name"]) + String(" implementation names must be strings"));
-                      operation_record(protocol, key);
-                      __eliscript_truthy(((__eliscript_value_22) => __eliscript_truthy(__eliscript_value_22) ? __eliscript_value_22 : !__eliscript_truthy(((__eliscript_value) => {
-                        if (__eliscript_value === null)
-                          return "null";
-                        const __eliscript_host_type = typeof __eliscript_value;
-                        if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function")
-                          return __eliscript_host_type;
-                        try {
-                          const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type"));
-                          if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol"))
-                            return __eliscript_type.value;
-                          const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind");
-                          if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) {
-                            if (__eliscript_kind.value === "eliscript/keyword")
-                              return "keyword";
-                            if (__eliscript_kind.value === "eliscript/symbol")
-                              return "symbol";
-                          }
-                          return __eliscript_host_type;
-                        } catch {
-                          return __eliscript_host_type;
-                        }
-                      })(descriptor["value"]) === "function"))(!__eliscript_truthy(protocol_has_own(descriptor, "value")))) && protocol_fail(String("protocol ") + String(protocol["name"]) + String("/") + String(key) + String(" implementation must be a function"));
-                      return protocol_define_enumerable(normalized, key, descriptor["value"]);
-                    })();
-                  })(descriptors[key]);
-                })((keys ?? [])[index] ?? null);
-                index = index + 1;
+                      }
+                    }
+                    index = index + 1;
+                  }
+                  return protocol_freeze(normalized);
+                }
               }
-              return null;
-            })();
-            return protocol_freeze(normalized);
-          })();
-        })(0);
-      })(protocol_null_object());
-    })(protocol_own_keys(descriptors));
-  })(protocol_own_descriptors(implementations));
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function merge_implementations(current, incoming) {
-  return ((merged, copy) => {
-    copy = (source) => {
-      return __eliscript_truthy(!__eliscript_truthy(source == null)) ? ((keys, index) => {
-        return (() => {
-          while (__eliscript_truthy(index < (keys ?? []).length)) {
-            ((key) => {
-              return protocol_define_enumerable(merged, key, source[key]);
-            })((keys ?? [])[index] ?? null);
+  {
+    const __eliscript_value_39 = protocol_null_object();
+    const __eliscript_value_40 = null;
+    {
+      let merged = __eliscript_value_39;
+      let copy = __eliscript_value_40;
+      copy = (source) => {
+        return !(source == null) ? ((keys, index) => {
+          while (index < (keys ?? []).length) {
+            {
+              const __eliscript_value_41 = (keys ?? [])[index] ?? null;
+              {
+                let key = __eliscript_value_41;
+                protocol_define_enumerable(merged, key, source[key]);
+              }
+            }
             index = index + 1;
           }
           return null;
-        })();
-      })(Object.keys(source ?? {}), 0) : null;
-    };
-    copy(current);
-    copy(incoming);
-    return protocol_freeze(merged);
-  })(protocol_null_object(), null);
+        })(Object.keys(source ?? {}), 0) : null;
+      };
+      copy(current);
+      copy(incoming);
+      return protocol_freeze(merged);
+    }
+  }
 }
 function direct_method(record, receiver) {
-  return __eliscript_truthy(((__eliscript_value_23) => __eliscript_truthy(__eliscript_value_23) ? __eliscript_value_23 : receiver === undefined)(receiver === null)) ? protocol_missing : ((slot) => {
-    return __eliscript_truthy(!__eliscript_truthy(protocol_property_present(receiver, slot))) ? protocol_missing : ((method) => {
-      return __eliscript_truthy(((__eliscript_value) => {
+  return receiver === null || receiver === undefined ? protocol_missing : ((slot) => {
+    return !__eliscript_truthy(protocol_property_present(receiver, slot)) ? protocol_missing : ((method) => {
+      return ((__eliscript_value) => {
         if (__eliscript_value === null)
           return "null";
         const __eliscript_host_type = typeof __eliscript_value;
@@ -317,83 +376,133 @@ function direct_method(record, receiver) {
         } catch {
           return __eliscript_host_type;
         }
-      })(method) === "function") ? method : null;
+      })(method) === "function" ? method : null;
     })(protocol_property_value(receiver, slot));
   })(record["slot"]);
 }
 function external_method(state, record, receiver) {
-  return ((prototype) => {
-    return ((exact_implementations) => {
-      return ((exact) => {
-        return __eliscript_truthy(!__eliscript_truthy(exact === undefined)) ? exact : ((category_implementations) => {
-          return ((category) => {
-            return __eliscript_truthy(!__eliscript_truthy(category === undefined)) ? category : state["defaults"][record["name"]] ?? protocol_missing;
-          })(__eliscript_truthy(category_implementations === undefined) ? undefined : category_implementations[record["name"]] ?? undefined);
-        })(state["categories"]["get"](protocol_host_category(receiver)));
-      })(__eliscript_truthy(exact_implementations === undefined) ? undefined : exact_implementations[record["name"]] ?? undefined);
-    })(__eliscript_truthy(prototype === protocol_missing) ? undefined : state["types"]["get"](prototype));
-  })(protocol_exact_prototype(receiver, protocol_missing));
+  {
+    const __eliscript_value_42 = protocol_exact_prototype(receiver, protocol_missing);
+    {
+      let prototype = __eliscript_value_42;
+      {
+        const __eliscript_value_43 = prototype === protocol_missing ? undefined : state["types"]["get"](prototype);
+        {
+          let exact_implementations = __eliscript_value_43;
+          {
+            const __eliscript_value_44 = exact_implementations === undefined ? undefined : exact_implementations[record["name"]] ?? undefined;
+            {
+              let exact = __eliscript_value_44;
+              return !(exact === undefined) ? exact : ((category_implementations) => {
+                return ((category) => {
+                  return !(category === undefined) ? category : state["defaults"][record["name"]] ?? protocol_missing;
+                })(category_implementations === undefined ? undefined : category_implementations[record["name"]] ?? undefined);
+              })(state["categories"]["get"](protocol_host_category(receiver)));
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function dispatch(protocol, record, receiver, arguments$) {
-  return ((direct) => {
-    __eliscript_truthy(direct === null) && ((__eliscript_value_24) => {
-      throw __eliscript_value_24;
-    })(new ProtocolDispatchError(protocol, record["name"], receiver, "invalid-direct-slot"));
-    return __eliscript_truthy(((__eliscript_value_25, __eliscript_value_26) => __eliscript_value_25 !== __eliscript_value_26)(direct, protocol_missing)) ? direct["apply"](receiver, arguments$) : ((external) => {
-      return __eliscript_truthy(external === protocol_missing) ? ((__eliscript_value_27) => {
-        throw __eliscript_value_27;
-      })(new ProtocolDispatchError(protocol, record["name"], receiver)) : external(...[receiver, ...arguments$ ?? []]);
-    })(external_method(protocol_state(protocol), record, receiver));
-  })(direct_method(record, receiver));
+  {
+    const __eliscript_value_45 = direct_method(record, receiver);
+    {
+      let direct = __eliscript_value_45;
+      direct === null && ((__eliscript_value_46) => {
+        throw __eliscript_value_46;
+      })(new ProtocolDispatchError(protocol, record["name"], receiver, "invalid-direct-slot"));
+      return ((__eliscript_value_47, __eliscript_value_48) => __eliscript_value_47 !== __eliscript_value_48)(direct, protocol_missing) ? direct["apply"](receiver, arguments$) : ((external) => {
+        return external === protocol_missing ? ((__eliscript_value_49) => {
+          throw __eliscript_value_49;
+        })(new ProtocolDispatchError(protocol, record["name"], receiver)) : external(...[receiver, ...arguments$ ?? []]);
+      })(external_method(protocol_state(protocol), record, receiver));
+    }
+  }
 }
 function define_protocol(name, operations) {
-  return ((protocol_name, protocol_operations) => {
-    return ((records, operation_table, protocol, index) => {
-      (() => {
-        while (__eliscript_truthy(index < (protocol_operations ?? []).length)) {
-          ((operation) => {
-            __eliscript_truthy(records["has"](operation)) && protocol_fail(String("protocol ") + String(protocol_name) + String(" declares duplicate operation ") + String(operation));
-            return ((slot) => {
-              return ((method) => {
-                return ((record) => {
-                  return (() => {
-                    records["set"](operation, record);
-                    return protocol_define_enumerable(operation_table, operation, method);
-                  })();
-                })({ name: operation, slot, method });
-              })((...invocation) => {
-                __eliscript_truthy((invocation ?? []).length === 0) && protocol_fail(String("protocol ") + String(protocol_name) + String("/") + String(operation) + String(" requires a dispatch value"));
-                return dispatch(protocol, records["get"](operation), invocation[0], invocation["slice"](1));
-              });
-            })(protocol_symbol(String("eliscript.protocol.") + String(protocol_name) + String("/") + String(operation)));
-          })((protocol_operations ?? [])[index] ?? null);
-          index = index + 1;
+  {
+    const __eliscript_value_50 = normalize_name(name, "protocol name");
+    const __eliscript_value_51 = normalize_protocol_operations(operations);
+    {
+      let protocol_name = __eliscript_value_50;
+      let protocol_operations = __eliscript_value_51;
+      {
+        const __eliscript_value_52 = protocol_map();
+        const __eliscript_value_53 = protocol_null_object();
+        const __eliscript_value_54 = null;
+        const __eliscript_value_55 = 0;
+        {
+          let records = __eliscript_value_52;
+          let operation_table = __eliscript_value_53;
+          let protocol = __eliscript_value_54;
+          let index = __eliscript_value_55;
+          while (index < (protocol_operations ?? []).length) {
+            {
+              const __eliscript_value_56 = (protocol_operations ?? [])[index] ?? null;
+              {
+                let operation = __eliscript_value_56;
+                __eliscript_truthy(records["has"](operation)) && protocol_fail(String("protocol ") + String(protocol_name) + String(" declares duplicate operation ") + String(operation));
+                {
+                  const __eliscript_value_57 = protocol_symbol(String("eliscript.protocol.") + String(protocol_name) + String("/") + String(operation));
+                  {
+                    let slot = __eliscript_value_57;
+                    {
+                      const __eliscript_value_58 = (...invocation) => {
+                        (invocation ?? []).length === 0 && protocol_fail(String("protocol ") + String(protocol_name) + String("/") + String(operation) + String(" requires a dispatch value"));
+                        return dispatch(protocol, records["get"](operation), invocation[0], invocation["slice"](1));
+                      };
+                      {
+                        let method = __eliscript_value_58;
+                        {
+                          const __eliscript_value_59 = { name: operation, slot, method };
+                          {
+                            let record = __eliscript_value_59;
+                            records["set"](operation, record);
+                            protocol_define_enumerable(operation_table, operation, method);
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            index = index + 1;
+          }
+          protocol = protocol_freeze({ name: protocol_name, operations: protocol_freeze(operation_table) });
+          index = 0;
+          while (index < (protocol_operations ?? []).length) {
+            {
+              const __eliscript_value_60 = (protocol_operations ?? [])[index] ?? null;
+              {
+                let operation = __eliscript_value_60;
+                {
+                  const __eliscript_value_61 = records["get"](operation);
+                  {
+                    let record = __eliscript_value_61;
+                    {
+                      const __eliscript_value_62 = record["method"];
+                      {
+                        let method = __eliscript_value_62;
+                        protocol_define_metadata(method, protocol, operation, record["slot"]);
+                        protocol_freeze(method);
+                        protocol_freeze(record);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            index = index + 1;
+          }
+          protocol_states["set"](protocol, { operations: records, types: protocol_map(), categories: protocol_map(), defaults: protocol_freeze(protocol_null_object()) });
+          return protocol;
         }
-        return null;
-      })();
-      protocol = protocol_freeze({ name: protocol_name, operations: protocol_freeze(operation_table) });
-      index = 0;
-      (() => {
-        while (__eliscript_truthy(index < (protocol_operations ?? []).length)) {
-          ((operation) => {
-            return ((record) => {
-              return ((method) => {
-                return (() => {
-                  protocol_define_metadata(method, protocol, operation, record["slot"]);
-                  protocol_freeze(method);
-                  return protocol_freeze(record);
-                })();
-              })(record["method"]);
-            })(records["get"](operation));
-          })((protocol_operations ?? [])[index] ?? null);
-          index = index + 1;
-        }
-        return null;
-      })();
-      protocol_states["set"](protocol, { operations: records, types: protocol_map(), categories: protocol_map(), defaults: protocol_freeze(protocol_null_object()) });
-      return protocol;
-    })(protocol_map(), protocol_null_object(), null, 0);
-  })(normalize_name(name, "protocol name"), normalize_protocol_operations(operations));
+      }
+    }
+  }
 }
 function protocol_method(protocol, operation) {
   return operation_record(protocol, operation)["method"];
@@ -402,31 +511,11 @@ function protocol_slot(protocol, operation) {
   return operation_record(protocol, operation)["slot"];
 }
 function extend_protocol_type(protocol, constructor, implementations) {
-  return ((state) => {
-    __eliscript_truthy(!__eliscript_truthy(((__eliscript_value) => {
-      if (__eliscript_value === null)
-        return "null";
-      const __eliscript_host_type = typeof __eliscript_value;
-      if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function")
-        return __eliscript_host_type;
-      try {
-        const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type"));
-        if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol"))
-          return __eliscript_type.value;
-        const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind");
-        if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) {
-          if (__eliscript_kind.value === "eliscript/keyword")
-            return "keyword";
-          if (__eliscript_kind.value === "eliscript/symbol")
-            return "symbol";
-        }
-        return __eliscript_host_type;
-      } catch {
-        return __eliscript_host_type;
-      }
-    })(constructor) === "function")) && protocol_fail(String("protocol ") + String(protocol["name"]) + String(" exact type must be a constructor with a prototype"));
-    return ((prototype) => {
-      __eliscript_truthy(((__eliscript_value_28) => __eliscript_truthy(__eliscript_value_28) ? __eliscript_value_28 : !__eliscript_truthy(((__eliscript_value) => {
+  {
+    const __eliscript_value_65 = protocol_state(protocol);
+    {
+      let state = __eliscript_value_65;
+      !(((__eliscript_value) => {
         if (__eliscript_value === null)
           return "null";
         const __eliscript_host_type = typeof __eliscript_value;
@@ -447,33 +536,89 @@ function extend_protocol_type(protocol, constructor, implementations) {
         } catch {
           return __eliscript_host_type;
         }
-      })(prototype) === "object"))(prototype === null)) && protocol_fail(String("protocol ") + String(protocol["name"]) + String(" exact type must be a constructor with a prototype"));
-      ((normalized) => {
-        return ((current) => {
-          return state["types"]["set"](prototype, merge_implementations(current, normalized));
-        })(state["types"]["get"](prototype));
-      })(normalize_implementations(protocol, implementations));
-      return protocol;
-    })(constructor["prototype"] ?? null);
-  })(protocol_state(protocol));
+      })(constructor) === "function") && protocol_fail(String("protocol ") + String(protocol["name"]) + String(" exact type must be a constructor with a prototype"));
+      {
+        const __eliscript_value_66 = constructor["prototype"] ?? null;
+        {
+          let prototype = __eliscript_value_66;
+          (prototype === null || !(((__eliscript_value) => {
+            if (__eliscript_value === null)
+              return "null";
+            const __eliscript_host_type = typeof __eliscript_value;
+            if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function")
+              return __eliscript_host_type;
+            try {
+              const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type"));
+              if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol"))
+                return __eliscript_type.value;
+              const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind");
+              if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) {
+                if (__eliscript_kind.value === "eliscript/keyword")
+                  return "keyword";
+                if (__eliscript_kind.value === "eliscript/symbol")
+                  return "symbol";
+              }
+              return __eliscript_host_type;
+            } catch {
+              return __eliscript_host_type;
+            }
+          })(prototype) === "object")) && protocol_fail(String("protocol ") + String(protocol["name"]) + String(" exact type must be a constructor with a prototype"));
+          {
+            const __eliscript_value_67 = normalize_implementations(protocol, implementations);
+            {
+              let normalized = __eliscript_value_67;
+              {
+                const __eliscript_value_68 = state["types"]["get"](prototype);
+                {
+                  let current = __eliscript_value_68;
+                  state["types"]["set"](prototype, merge_implementations(current, normalized));
+                }
+              }
+            }
+          }
+          return protocol;
+        }
+      }
+    }
+  }
 }
 function extend_protocol_category(protocol, category, implementations) {
-  return ((state) => {
-    __eliscript_truthy(!__eliscript_truthy(known_host_category_QMARK_(category))) && protocol_fail(String("unknown protocol host category ") + String(category));
-    ((normalized) => {
-      return ((current) => {
-        return state["categories"]["set"](category, merge_implementations(current, normalized));
-      })(state["categories"]["get"](category));
-    })(normalize_implementations(protocol, implementations));
-    return protocol;
-  })(protocol_state(protocol));
+  {
+    const __eliscript_value_69 = protocol_state(protocol);
+    {
+      let state = __eliscript_value_69;
+      !__eliscript_truthy(known_host_category_QMARK_(category)) && protocol_fail(String("unknown protocol host category ") + String(category));
+      {
+        const __eliscript_value_70 = normalize_implementations(protocol, implementations);
+        {
+          let normalized = __eliscript_value_70;
+          {
+            const __eliscript_value_71 = state["categories"]["get"](category);
+            {
+              let current = __eliscript_value_71;
+              state["categories"]["set"](category, merge_implementations(current, normalized));
+            }
+          }
+        }
+      }
+      return protocol;
+    }
+  }
 }
 function implements_protocol_operation_QMARK_(protocol, operation, value) {
-  return ((record) => {
-    return ((direct) => {
-      return ((__eliscript_value_29) => __eliscript_truthy(__eliscript_value_29) ? ((__eliscript_value_30) => __eliscript_truthy(__eliscript_value_30) ? __eliscript_value_30 : ((__eliscript_value_33, __eliscript_value_34) => __eliscript_value_33 !== __eliscript_value_34)(external_method(protocol_state(protocol), record, value), protocol_missing))(((__eliscript_value_31, __eliscript_value_32) => __eliscript_value_31 !== __eliscript_value_32)(direct, protocol_missing)) : __eliscript_value_29)(!__eliscript_truthy(direct === null));
-    })(direct_method(record, value));
-  })(operation_record(protocol, operation));
+  {
+    const __eliscript_value_74 = operation_record(protocol, operation);
+    {
+      let record = __eliscript_value_74;
+      {
+        const __eliscript_value_75 = direct_method(record, value);
+        {
+          let direct = __eliscript_value_75;
+          return !(direct === null) && (((__eliscript_value_76, __eliscript_value_77) => __eliscript_value_76 !== __eliscript_value_77)(direct, protocol_missing) || ((__eliscript_value_78, __eliscript_value_79) => __eliscript_value_78 !== __eliscript_value_79)(external_method(protocol_state(protocol), record, value), protocol_missing));
+        }
+      }
+    }
+  }
 }
 // runtime/core/collection-internals.mjs
 var I_COUNTED = define_protocol("ICounted", ["count"]);
@@ -4286,27 +4431,35 @@ function empty_QMARK_(text) {
   return count(text) === 0;
 }
 function slice(start, end, text) {
-  return ((result, index, limit) => {
-    (() => {
-      while (__eliscript_truthy2(index < limit)) {
+  {
+    const __eliscript_value_1 = "";
+    const __eliscript_value_2 = start < 0 ? 0 : start;
+    const __eliscript_value_3 = end > count(text) ? count(text) : end;
+    {
+      let result = __eliscript_value_1;
+      let index = __eliscript_value_2;
+      let limit = __eliscript_value_3;
+      while (index < limit) {
         result = String(result) + String(nth(text, index)), index = index + 1;
       }
-      return null;
-    })();
-    return result;
-  })("", __eliscript_truthy2(start < 0) ? 0 : start, __eliscript_truthy2(end > count(text)) ? count(text) : end);
+      return result;
+    }
+  }
 }
 function starts_at_QMARK_(prefix, offset, text) {
-  return ((matched, index) => {
-    (() => {
-      while (__eliscript_truthy2(((__eliscript_value_2) => __eliscript_truthy2(__eliscript_value_2) ? index < count(prefix) : __eliscript_value_2)(matched))) {
-        __eliscript_truthy2(!__eliscript_truthy2(nth(prefix, index) === nth(text, offset + index))) && (matched = false);
+  {
+    const __eliscript_value_4 = offset >= 0 && offset + count(prefix) <= count(text);
+    const __eliscript_value_5 = 0;
+    {
+      let matched = __eliscript_value_4;
+      let index = __eliscript_value_5;
+      while (__eliscript_truthy2(((__eliscript_value_6) => __eliscript_truthy2(__eliscript_value_6) ? index < count(prefix) : __eliscript_value_6)(matched))) {
+        !(nth(prefix, index) === nth(text, offset + index)) && (matched = false);
         index = index + 1;
       }
-      return null;
-    })();
-    return matched;
-  })(((__eliscript_value_1) => __eliscript_truthy2(__eliscript_value_1) ? offset + count(prefix) <= count(text) : __eliscript_value_1)(offset >= 0), 0);
+      return matched;
+    }
+  }
 }
 function starts_with_QMARK_(prefix, text) {
   return starts_at_QMARK_(prefix, 0, text);
@@ -4315,40 +4468,45 @@ function ends_with_QMARK_(suffix, text) {
   return starts_at_QMARK_(suffix, count(text) - count(suffix), text);
 }
 function contains_QMARK_(needle, text) {
-  return ((found, offset, last_offset) => {
-    (() => {
-      while (__eliscript_truthy2(((__eliscript_value_3) => __eliscript_truthy2(__eliscript_value_3) ? offset <= last_offset : __eliscript_value_3)(!__eliscript_truthy2(found)))) {
+  {
+    const __eliscript_value_7 = false;
+    const __eliscript_value_8 = 0;
+    const __eliscript_value_9 = count(text) - count(needle);
+    {
+      let found = __eliscript_value_7;
+      let offset = __eliscript_value_8;
+      let last_offset = __eliscript_value_9;
+      while (!__eliscript_truthy2(found) && offset <= last_offset) {
         __eliscript_truthy2(starts_at_QMARK_(needle, offset, text)) && (found = true);
         offset = offset + 1;
       }
-      return null;
-    })();
-    return found;
-  })(false, 0, count(text) - count(needle));
+      return found;
+    }
+  }
 }
 function strip_prefix(prefix, text) {
   return __eliscript_truthy2(starts_with_QMARK_(prefix, text)) ? slice(count(prefix), count(text), text) : text;
 }
 function whitespace_QMARK_(character) {
-  return ((__eliscript_value_4) => __eliscript_truthy2(__eliscript_value_4) ? __eliscript_value_4 : ((__eliscript_value_5) => __eliscript_truthy2(__eliscript_value_5) ? __eliscript_value_5 : ((__eliscript_value_6) => __eliscript_truthy2(__eliscript_value_6) ? __eliscript_value_6 : character === "\r")(character === `
-`))(character === "\t"))(character === " ");
+  return character === " " || character === "\t" || character === `
+` || character === "\r";
 }
 function trim(text) {
-  return ((start, end) => {
-    (() => {
-      while (__eliscript_truthy2(((__eliscript_value_7) => __eliscript_truthy2(__eliscript_value_7) ? whitespace_QMARK_(nth(text, start)) : __eliscript_value_7)(start <= end))) {
+  {
+    const __eliscript_value_10 = 0;
+    const __eliscript_value_11 = count(text) - 1;
+    {
+      let start = __eliscript_value_10;
+      let end = __eliscript_value_11;
+      while (__eliscript_truthy2(((__eliscript_value_12) => __eliscript_truthy2(__eliscript_value_12) ? whitespace_QMARK_(nth(text, start)) : __eliscript_value_12)(start <= end))) {
         start = start + 1;
       }
-      return null;
-    })();
-    (() => {
-      while (__eliscript_truthy2(((__eliscript_value_8) => __eliscript_truthy2(__eliscript_value_8) ? whitespace_QMARK_(nth(text, end)) : __eliscript_value_8)(end >= start))) {
+      while (__eliscript_truthy2(((__eliscript_value_13) => __eliscript_truthy2(__eliscript_value_13) ? whitespace_QMARK_(nth(text, end)) : __eliscript_value_13)(end >= start))) {
         end = end - 1;
       }
-      return null;
-    })();
-    return slice(start, end + 1, text);
-  })(0, count(text) - 1);
+      return slice(start, end + 1, text);
+    }
+  }
 }
 function blank_QMARK_(text) {
   return empty_QMARK_(trim(text));
@@ -4415,127 +4573,189 @@ function char_code(text, index) {
   return text.charCodeAt(index);
 }
 function upper_code_QMARK_(code) {
-  return ((__eliscript_value_4) => __eliscript_truthy3(__eliscript_value_4) ? code <= 90 : __eliscript_value_4)(code >= 65);
+  return code >= 65 && code <= 90;
 }
 function lower_code_QMARK_(code) {
-  return ((__eliscript_value_5) => __eliscript_truthy3(__eliscript_value_5) ? code <= 122 : __eliscript_value_5)(code >= 97);
+  return code >= 97 && code <= 122;
 }
 function digit_code_QMARK_(code) {
-  return ((__eliscript_value_6) => __eliscript_truthy3(__eliscript_value_6) ? code <= 57 : __eliscript_value_6)(code >= 48);
+  return code >= 48 && code <= 57;
 }
 function lower_code(code) {
   return __eliscript_truthy3(upper_code_QMARK_(code)) ? code + 32 : code;
 }
 function to_lowercase(text) {
-  return ((result, index) => {
-    (() => {
-      while (__eliscript_truthy3(index < text_length(text))) {
+  {
+    const __eliscript_value_4 = "";
+    const __eliscript_value_5 = 0;
+    {
+      let result = __eliscript_value_4;
+      let index = __eliscript_value_5;
+      while (index < text_length(text)) {
         result = String(result) + String(String.fromCharCode(lower_code(char_code(text, index)))), index = index + 1;
       }
-      return null;
-    })();
-    return result;
-  })("", 0);
+      return result;
+    }
+  }
 }
 function split_lines(text) {
-  return ((lines, start, index, size) => {
-    (() => {
-      while (__eliscript_truthy3(index < size)) {
-        __eliscript_truthy3(char_code(text, index) === 10) && (lines = conj(lines, slice(start, index, text)), start = index + 1);
+  {
+    const __eliscript_value_6 = vector();
+    const __eliscript_value_7 = 0;
+    const __eliscript_value_8 = 0;
+    const __eliscript_value_9 = text_length(text);
+    {
+      let lines = __eliscript_value_6;
+      let start = __eliscript_value_7;
+      let index = __eliscript_value_8;
+      let size = __eliscript_value_9;
+      while (index < size) {
+        char_code(text, index) === 10 && (lines = conj(lines, slice(start, index, text)), start = index + 1);
         index = index + 1;
       }
-      return null;
-    })();
-    return conj(lines, slice(start, size, text));
-  })(vector(), 0, 0, text_length(text));
+      return conj(lines, slice(start, size, text));
+    }
+  }
 }
 function split_on(separator, text) {
-  return ((parts, start, index, size, width) => {
-    (() => {
-      while (__eliscript_truthy3(index < size)) {
-        __eliscript_truthy3(((__eliscript_value_7) => __eliscript_truthy3(__eliscript_value_7) ? ((__eliscript_value_8) => __eliscript_truthy3(__eliscript_value_8) ? slice(index, index + width, text) === separator : __eliscript_value_8)(index + width <= size) : __eliscript_value_7)(width > 0)) ? (parts = conj(parts, slice(start, index, text)), index = index + width, start = index) : index = index + 1;
+  {
+    const __eliscript_value_10 = vector();
+    const __eliscript_value_11 = 0;
+    const __eliscript_value_12 = 0;
+    const __eliscript_value_13 = text_length(text);
+    const __eliscript_value_14 = text_length(separator);
+    {
+      let parts = __eliscript_value_10;
+      let start = __eliscript_value_11;
+      let index = __eliscript_value_12;
+      let size = __eliscript_value_13;
+      let width = __eliscript_value_14;
+      while (index < size) {
+        width > 0 && index + width <= size && slice(index, index + width, text) === separator ? (parts = conj(parts, slice(start, index, text)), index = index + width, start = index) : index = index + 1;
       }
-      return null;
-    })();
-    return conj(parts, slice(start, size, text));
-  })(vector(), 0, 0, text_length(text), text_length(separator));
+      return conj(parts, slice(start, size, text));
+    }
+  }
 }
 function index_of_from(needle, text, start) {
-  return ((found, index, width, limit) => {
-    (() => {
-      while (__eliscript_truthy3(((__eliscript_value_9) => __eliscript_truthy3(__eliscript_value_9) ? index <= limit : __eliscript_value_9)(found < 0))) {
-        __eliscript_truthy3(slice(index, index + width, text) === needle) && (found = index);
+  {
+    const __eliscript_value_15 = -1;
+    const __eliscript_value_16 = start;
+    const __eliscript_value_17 = text_length(needle);
+    const __eliscript_value_18 = text_length(text) - text_length(needle);
+    {
+      let found = __eliscript_value_15;
+      let index = __eliscript_value_16;
+      let width = __eliscript_value_17;
+      let limit = __eliscript_value_18;
+      while (found < 0 && index <= limit) {
+        slice(index, index + width, text) === needle && (found = index);
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(-1, start, text_length(needle), text_length(text) - text_length(needle));
+      return found;
+    }
+  }
 }
 function index_of(needle, text) {
   return index_of_from(needle, text, 0);
 }
 function basename(path) {
-  return ((last, index) => {
-    (() => {
-      while (__eliscript_truthy3(index < text_length(path))) {
-        __eliscript_truthy3(char_code(path, index) === 47) && (last = index);
+  {
+    const __eliscript_value_19 = -1;
+    const __eliscript_value_20 = 0;
+    {
+      let last = __eliscript_value_19;
+      let index = __eliscript_value_20;
+      while (index < text_length(path)) {
+        char_code(path, index) === 47 && (last = index);
         index = index + 1;
       }
-      return null;
-    })();
-    return __eliscript_truthy3(last < 0) ? path : slice(last + 1, text_length(path), path);
-  })(-1, 0);
+      return last < 0 ? path : slice(last + 1, text_length(path), path);
+    }
+  }
 }
 function without_suffix(suffix, text) {
   return __eliscript_truthy3(ends_with_QMARK_(suffix, text)) ? slice(0, text_length(text) - text_length(suffix), text) : text;
 }
 function parse_integer(text, fallback) {
-  return ((value) => {
-    return __eliscript_truthy3(value === value) ? value : fallback;
-  })(Number(trim(text)));
+  {
+    const __eliscript_value_21 = Number(trim(text));
+    {
+      let value = __eliscript_value_21;
+      return value === value ? value : fallback;
+    }
+  }
 }
 function replace_all(needle, replacement, text) {
-  return ((result, index, size, width) => {
-    (() => {
-      while (__eliscript_truthy3(index < size)) {
-        __eliscript_truthy3(((__eliscript_value_10) => __eliscript_truthy3(__eliscript_value_10) ? ((__eliscript_value_11) => __eliscript_truthy3(__eliscript_value_11) ? slice(index, index + width, text) === needle : __eliscript_value_11)(index + width <= size) : __eliscript_value_10)(width > 0)) ? (result = String(result) + String(replacement), index = index + width) : (result = String(result) + String(String.fromCharCode(char_code(text, index))), index = index + 1);
+  {
+    const __eliscript_value_22 = "";
+    const __eliscript_value_23 = 0;
+    const __eliscript_value_24 = text_length(text);
+    const __eliscript_value_25 = text_length(needle);
+    {
+      let result = __eliscript_value_22;
+      let index = __eliscript_value_23;
+      let size = __eliscript_value_24;
+      let width = __eliscript_value_25;
+      while (index < size) {
+        width > 0 && index + width <= size && slice(index, index + width, text) === needle ? (result = String(result) + String(replacement), index = index + width) : (result = String(result) + String(String.fromCharCode(char_code(text, index))), index = index + 1);
       }
-      return null;
-    })();
-    return result;
-  })("", 0, text_length(text), text_length(needle));
+      return result;
+    }
+  }
 }
 function strip_tags(html) {
-  return ((result, index, in_tag, size) => {
-    (() => {
-      while (__eliscript_truthy3(index < size)) {
-        ((code) => {
-          return __eliscript_truthy3(code === 60) ? in_tag = true : __eliscript_truthy3(code === 62) ? in_tag = false : __eliscript_truthy3(!__eliscript_truthy3(in_tag)) ? result = String(result) + String(String.fromCharCode(code)) : null;
-        })(char_code(html, index));
+  {
+    const __eliscript_value_26 = "";
+    const __eliscript_value_27 = 0;
+    const __eliscript_value_28 = false;
+    const __eliscript_value_29 = text_length(html);
+    {
+      let result = __eliscript_value_26;
+      let index = __eliscript_value_27;
+      let in_tag = __eliscript_value_28;
+      let size = __eliscript_value_29;
+      while (index < size) {
+        {
+          const __eliscript_value_30 = char_code(html, index);
+          {
+            let code = __eliscript_value_30;
+            code === 60 ? in_tag = true : code === 62 ? in_tag = false : !__eliscript_truthy3(in_tag) && (result = String(result) + String(String.fromCharCode(code)));
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return decode_entities(result);
-  })("", 0, false, text_length(html));
+      return decode_entities(result);
+    }
+  }
 }
 function decode_entities(text) {
   return replace_all("&amp;", "&", replace_all("&#39;", "'", replace_all("&quot;", '"', replace_all("&gt;", ">", replace_all("&lt;", "<", text)))));
 }
 function slugify(text) {
-  return ((lowered, result, pending_dash, index) => {
-    (() => {
-      while (__eliscript_truthy3(index < text_length(lowered))) {
-        ((code) => {
-          return __eliscript_truthy3(((__eliscript_value_12) => __eliscript_truthy3(__eliscript_value_12) ? __eliscript_value_12 : digit_code_QMARK_(code))(lower_code_QMARK_(code))) ? (result = String(result) + String(__eliscript_truthy3(pending_dash) ? "-" : "") + String(String.fromCharCode(code)), pending_dash = false) : pending_dash = text_length(result) > 0;
-        })(char_code(lowered, index));
+  {
+    const __eliscript_value_31 = to_lowercase(text);
+    const __eliscript_value_32 = "";
+    const __eliscript_value_33 = false;
+    const __eliscript_value_34 = 0;
+    {
+      let lowered = __eliscript_value_31;
+      let result = __eliscript_value_32;
+      let pending_dash = __eliscript_value_33;
+      let index = __eliscript_value_34;
+      while (index < text_length(lowered)) {
+        {
+          const __eliscript_value_35 = char_code(lowered, index);
+          {
+            let code = __eliscript_value_35;
+            __eliscript_truthy3(((__eliscript_value_36) => __eliscript_truthy3(__eliscript_value_36) ? __eliscript_value_36 : digit_code_QMARK_(code))(lower_code_QMARK_(code))) ? (result = String(result) + String(__eliscript_truthy3(pending_dash) ? "-" : "") + String(String.fromCharCode(code)), pending_dash = false) : pending_dash = text_length(result) > 0;
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return result;
-  })(to_lowercase(text), "", false, 0);
+      return result;
+    }
+  }
 }
 
 // examples/dogfood/dist/src/support/sanitize.mjs
@@ -4546,22 +4766,33 @@ var greater_than = 62;
 var double_quote = 34;
 var single_quote = 39;
 function escape_html(text) {
-  return ((result, index) => {
-    (() => {
-      while (__eliscript_truthy4(index < text_length(text))) {
-        ((code) => {
-          return result = String(result) + String(__eliscript_truthy4(code === ampersand) ? "&amp;" : __eliscript_truthy4(code === less_than) ? "&lt;" : __eliscript_truthy4(code === greater_than) ? "&gt;" : __eliscript_truthy4(code === double_quote) ? "&quot;" : __eliscript_truthy4(code === single_quote) ? "&#39;" : String.fromCharCode(code)), index = index + 1;
-        })(char_code(text, index));
+  {
+    const __eliscript_value_1 = "";
+    const __eliscript_value_2 = 0;
+    {
+      let result = __eliscript_value_1;
+      let index = __eliscript_value_2;
+      while (index < text_length(text)) {
+        {
+          const __eliscript_value_3 = char_code(text, index);
+          {
+            let code = __eliscript_value_3;
+            result = String(result) + String(code === ampersand ? "&amp;" : code === less_than ? "&lt;" : code === greater_than ? "&gt;" : code === double_quote ? "&quot;" : code === single_quote ? "&#39;" : String.fromCharCode(code)), index = index + 1;
+          }
+        }
       }
-      return null;
-    })();
-    return result;
-  })("", 0);
+      return result;
+    }
+  }
 }
 function safe_url_QMARK_(url) {
-  return ((target) => {
-    return ((__eliscript_value_1) => __eliscript_truthy4(__eliscript_value_1) ? __eliscript_value_1 : ((__eliscript_value_2) => __eliscript_truthy4(__eliscript_value_2) ? __eliscript_value_2 : ((__eliscript_value_3) => __eliscript_truthy4(__eliscript_value_3) ? __eliscript_value_3 : ((__eliscript_value_4) => __eliscript_truthy4(__eliscript_value_4) ? __eliscript_value_4 : ((__eliscript_value_5) => __eliscript_truthy4(__eliscript_value_5) ? __eliscript_value_5 : ((__eliscript_value_7) => __eliscript_truthy4(__eliscript_value_7) ? !__eliscript_truthy4(starts_with_QMARK_("//", target)) : __eliscript_value_7)(!__eliscript_truthy4(contains_QMARK_(":", target))))(((__eliscript_value_6) => __eliscript_truthy4(__eliscript_value_6) ? !__eliscript_truthy4(starts_with_QMARK_("//", target)) : __eliscript_value_6)(starts_with_QMARK_("/", target))))(starts_with_QMARK_("#", target)))(starts_with_QMARK_("mailto:", target)))(starts_with_QMARK_("http://", target)))(starts_with_QMARK_("https://", target));
-  })(trim(url));
+  {
+    const __eliscript_value_4 = trim(url);
+    {
+      let target = __eliscript_value_4;
+      return ((__eliscript_value_5) => __eliscript_truthy4(__eliscript_value_5) ? __eliscript_value_5 : ((__eliscript_value_6) => __eliscript_truthy4(__eliscript_value_6) ? __eliscript_value_6 : ((__eliscript_value_7) => __eliscript_truthy4(__eliscript_value_7) ? __eliscript_value_7 : ((__eliscript_value_8) => __eliscript_truthy4(__eliscript_value_8) ? __eliscript_value_8 : ((__eliscript_value_9) => __eliscript_truthy4(__eliscript_value_9) ? __eliscript_value_9 : !__eliscript_truthy4(contains_QMARK_(":", target)) && !__eliscript_truthy4(starts_with_QMARK_("//", target)))(((__eliscript_value_10) => __eliscript_truthy4(__eliscript_value_10) ? !__eliscript_truthy4(starts_with_QMARK_("//", target)) : __eliscript_value_10)(starts_with_QMARK_("/", target))))(starts_with_QMARK_("#", target)))(starts_with_QMARK_("mailto:", target)))(starts_with_QMARK_("http://", target)))(starts_with_QMARK_("https://", target));
+    }
+  }
 }
 
 // examples/dogfood/dist/src/renderer/theme.mjs
@@ -4627,14 +4858,21 @@ var site_css = String(":root{--ink:#16181d;--paper:#fbfaf7;--muted:#5f646e;") + 
 `) + String("@media (max-width:600px){.article h1{font-size:28px}main{padding:28px 18px 56px}") + String(".masthead{padding:20px 18px 14px}.menu{width:100%}") + String(".menu>summary{display:block;font-size:15px;color:var(--muted);cursor:pointer;padding:6px 0}") + String(".menu>nav{flex-direction:column;gap:12px;padding:10px 0 2px}") + String(`html[data-menu=collapsed] .menu>nav{display:none}}
 `);
 function home_href(root) {
-  return __eliscript_truthy5(root === "") ? "./" : root;
+  return root === "" ? "./" : root;
 }
 function nav_links(root) {
   return String('<details class="menu" open><summary>Menu</summary>') + String('<nav aria-label="site">') + String('<a href="') + String(root) + String('archive/">Archive</a>') + String('<a href="') + String(root) + String('tags/">Tags</a>') + String('<a href="') + String(root) + String('search/">Search</a>') + String('<a href="') + String(root) + String('feed.xml">Feed</a>') + String('<a href="https://github.com/">GitHub</a>') + String('<button id="theme-toggle" class="theme-toggle" type="button"') + String(' title="Switch the colour theme">Theme</button>') + String("</nav></details>");
 }
 function document(site, root, title, description, content) {
-  return ((site_title, language, preview) => {
-    return String(`<!doctype html>
+  {
+    const __eliscript_value_1 = get(site, keyword("title"), "dogfood");
+    const __eliscript_value_2 = get(site, keyword("language"), "en");
+    const __eliscript_value_3 = get(site, keyword("preview"), false);
+    {
+      let site_title = __eliscript_value_1;
+      let language = __eliscript_value_2;
+      let preview = __eliscript_value_3;
+      return String(`<!doctype html>
 `) + String('<html lang="') + String(escape_html(language)) + String(`">
 `) + String(`<head>
 `) + String(`<meta charset="utf-8">
@@ -4662,7 +4900,8 @@ function document(site, root, title, description, content) {
 `) + String(`</body>
 </html>
 `);
-  })(get(site, keyword("title"), "dogfood"), get(site, keyword("language"), "en"), get(site, keyword("preview"), false));
+    }
+  }
 }
 
 // examples/dogfood/dist/src/renderer/server.mjs
@@ -4670,9 +4909,15 @@ var __eliscript_truthy6 = (value) => value !== false && value != null;
 var recent_limit = 12;
 var to_native_array = (value) => Array.from(value);
 function compare_posts(left, right) {
-  return ((left_pinned, right_pinned) => {
-    return __eliscript_truthy6(!__eliscript_truthy6(left_pinned === right_pinned)) ? __eliscript_truthy6(left_pinned > right_pinned) ? -1 : 1 : __eliscript_truthy6(!__eliscript_truthy6(left["published-at"] === right["published-at"])) ? __eliscript_truthy6(left["published-at"] > right["published-at"]) ? -1 : 1 : __eliscript_truthy6(left["id"] === right["id"]) ? 0 : __eliscript_truthy6(left["id"] < right["id"]) ? -1 : 1;
-  })(left["pinned-weight"], right["pinned-weight"]);
+  {
+    const __eliscript_value_1 = left["pinned-weight"];
+    const __eliscript_value_2 = right["pinned-weight"];
+    {
+      let left_pinned = __eliscript_value_1;
+      let right_pinned = __eliscript_value_2;
+      return !(left_pinned === right_pinned) ? left_pinned > right_pinned ? -1 : 1 : !(left["published-at"] === right["published-at"]) ? left["published-at"] > right["published-at"] ? -1 : 1 : left["id"] === right["id"] ? 0 : left["id"] < right["id"] ? -1 : 1;
+    }
+  }
 }
 function sort_posts(posts) {
   return sort(compare_posts, posts);
@@ -4689,49 +4934,70 @@ function append_all(target, values) {
   }, target);
 }
 function render_tag_links(root, post) {
-  return ((tags, result, index) => {
-    (() => {
-      while (__eliscript_truthy6(index < count(tags))) {
-        ((tag) => {
-          return result = String(result) + String('<a class="tag" href="') + String(root) + String("tags/") + String(slugify(tag)) + String('/">') + String(escape_html(tag)) + String("</a>");
-        })(nth(tags, index));
+  {
+    const __eliscript_value_3 = post["tags"];
+    const __eliscript_value_4 = "";
+    const __eliscript_value_5 = 0;
+    {
+      let tags = __eliscript_value_3;
+      let result = __eliscript_value_4;
+      let index = __eliscript_value_5;
+      while (index < count(tags)) {
+        {
+          const __eliscript_value_6 = nth(tags, index);
+          {
+            let tag = __eliscript_value_6;
+            result = String(result) + String('<a class="tag" href="') + String(root) + String("tags/") + String(slugify(tag)) + String('/">') + String(escape_html(tag)) + String("</a>");
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return result;
-  })(post["tags"], "", 0);
+      return result;
+    }
+  }
 }
 function render_card(root, post) {
-  return ((summary) => {
-    return String('<li><a class="title" href="') + String(root) + String("posts/") + String(post["slug"]) + String('/">') + String(escape_html(post["title"])) + String("</a>") + String(__eliscript_truthy6(blank_QMARK_(summary)) ? "" : String('<p class="summary">') + String(escape_html(summary)) + String("</p>")) + String('<div class="meta"><span>') + String(escape_html(post["published-at"])) + String("</span>") + String(render_tag_links(root, post)) + String("</div></li>");
-  })(post["summary"]);
+  {
+    const __eliscript_value_7 = post["summary"];
+    {
+      let summary = __eliscript_value_7;
+      return String('<li><a class="title" href="') + String(root) + String("posts/") + String(post["slug"]) + String('/">') + String(escape_html(post["title"])) + String("</a>") + String(__eliscript_truthy6(blank_QMARK_(summary)) ? "" : String('<p class="summary">') + String(escape_html(summary)) + String("</p>")) + String('<div class="meta"><span>') + String(escape_html(post["published-at"])) + String("</span>") + String(render_tag_links(root, post)) + String("</div></li>");
+    }
+  }
 }
 function render_post_list(root, posts) {
-  return ((items, index) => {
-    (() => {
-      while (__eliscript_truthy6(index < count(posts))) {
+  {
+    const __eliscript_value_8 = "";
+    const __eliscript_value_9 = 0;
+    {
+      let items = __eliscript_value_8;
+      let index = __eliscript_value_9;
+      while (index < count(posts)) {
         items = String(items) + String(render_card(root, nth(posts, index))), index = index + 1;
       }
-      return null;
-    })();
-    return String('<ul class="list">') + String(items) + String("</ul>");
-  })("", 0);
+      return String('<ul class="list">') + String(items) + String("</ul>");
+    }
+  }
 }
 function section(heading, content) {
   return __eliscript_truthy6(blank_QMARK_(content)) ? "" : String("<h2>") + String(escape_html(heading)) + String("</h2>") + String(content);
 }
 function tagged_QMARK_(post, tag) {
-  return ((tags, index, found) => {
-    (() => {
-      while (__eliscript_truthy6(((__eliscript_value_1) => __eliscript_truthy6(__eliscript_value_1) ? !__eliscript_truthy6(found) : __eliscript_value_1)(index < count(tags)))) {
-        __eliscript_truthy6(nth(tags, index) === tag) && (found = true);
+  {
+    const __eliscript_value_10 = post["tags"];
+    const __eliscript_value_11 = 0;
+    const __eliscript_value_12 = false;
+    {
+      let tags = __eliscript_value_10;
+      let index = __eliscript_value_11;
+      let found = __eliscript_value_12;
+      while (index < count(tags) && !__eliscript_truthy6(found)) {
+        nth(tags, index) === tag && (found = true);
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(post["tags"], 0, false);
+      return found;
+    }
+  }
 }
 function posts_with_tag(tag, posts) {
   return filter((post) => {
@@ -4739,63 +5005,116 @@ function posts_with_tag(tag, posts) {
   }, posts);
 }
 function collect_tags(posts) {
-  return ((seen, tags, index) => {
-    (() => {
-      while (__eliscript_truthy6(index < count(posts))) {
-        ((post_tags) => {
-          return ((tag_index) => {
-            return (() => {
-              while (__eliscript_truthy6(tag_index < count(post_tags))) {
-                ((tag) => {
-                  return __eliscript_truthy6(!__eliscript_truthy6(get(seen, tag, false))) ? (seen = assoc(seen, tag, true), tags = conj(tags, tag)) : null;
-                })(nth(post_tags, tag_index));
-                tag_index = tag_index + 1;
+  {
+    const __eliscript_value_13 = hashMap();
+    const __eliscript_value_14 = vector();
+    const __eliscript_value_15 = 0;
+    {
+      let seen = __eliscript_value_13;
+      let tags = __eliscript_value_14;
+      let index = __eliscript_value_15;
+      while (index < count(posts)) {
+        {
+          const __eliscript_value_16 = nth(posts, index)["tags"];
+          {
+            let post_tags = __eliscript_value_16;
+            {
+              const __eliscript_value_17 = 0;
+              {
+                let tag_index = __eliscript_value_17;
+                while (tag_index < count(post_tags)) {
+                  {
+                    const __eliscript_value_18 = nth(post_tags, tag_index);
+                    {
+                      let tag = __eliscript_value_18;
+                      !__eliscript_truthy6(get(seen, tag, false)) && (seen = assoc(seen, tag, true), tags = conj(tags, tag));
+                    }
+                  }
+                  tag_index = tag_index + 1;
+                }
               }
-              return null;
-            })();
-          })(0);
-        })(nth(posts, index)["tags"]);
+            }
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return sort(tags);
-  })(hashMap(), vector(), 0);
+      return sort(tags);
+    }
+  }
 }
 function render_home(site, posts) {
-  return ((recent) => {
-    return ((description) => {
-      return hashMap(keyword("path"), "index.html", keyword("content"), document(site, "", site_value(site, keyword("title"), "dogfood"), description, String('<div class="article">') + String("<h1>") + String(escape_html(site_value(site, keyword("title"), "dogfood"))) + String("</h1>") + String(__eliscript_truthy6(blank_QMARK_(description)) ? "" : String('<p class="lede">') + String(escape_html(description)) + String("</p>")) + String("</div>") + String(section("Recent writing", render_post_list("", recent)))));
-    })(site_value(site, keyword("description"), ""));
-  })(take(recent_limit, posts));
+  {
+    const __eliscript_value_19 = take(recent_limit, posts);
+    {
+      let recent = __eliscript_value_19;
+      {
+        const __eliscript_value_20 = site_value(site, keyword("description"), "");
+        {
+          let description = __eliscript_value_20;
+          return hashMap(keyword("path"), "index.html", keyword("content"), document(site, "", site_value(site, keyword("title"), "dogfood"), description, String('<div class="article">') + String("<h1>") + String(escape_html(site_value(site, keyword("title"), "dogfood"))) + String("</h1>") + String(__eliscript_truthy6(blank_QMARK_(description)) ? "" : String('<p class="lede">') + String(escape_html(description)) + String("</p>")) + String("</div>") + String(section("Recent writing", render_post_list("", recent)))));
+        }
+      }
+    }
+  }
 }
 function render_archive(site, posts) {
   return hashMap(keyword("path"), "archive/index.html", keyword("content"), document(site, "../", "Archive", "Every published article in date order.", String('<div class="article"><h1>Archive</h1>') + String('<p class="crumbs"><a href="../">Home</a></p></div>') + String(render_post_list("../", posts))));
 }
 function neighbour_link(root, label, post) {
-  return __eliscript_truthy6(post === null) ? "" : String('<a href="') + String(root) + String("posts/") + String(post["slug"]) + String('/">') + String(escape_html(label)) + String(": ") + String(escape_html(post["title"])) + String("</a>");
+  return post === null ? "" : String('<a href="') + String(root) + String("posts/") + String(post["slug"]) + String('/">') + String(escape_html(label)) + String(": ") + String(escape_html(post["title"])) + String("</a>");
 }
 function render_neighbours(root, posts, position) {
-  return ((newer, older) => {
-    return __eliscript_truthy6(((__eliscript_value_2) => __eliscript_truthy6(__eliscript_value_2) ? older === null : __eliscript_value_2)(newer === null)) ? "" : String('<nav class="crumbs" aria-label="article">') + String(neighbour_link(root, "Newer", newer)) + String(__eliscript_truthy6(((__eliscript_value_3) => __eliscript_truthy6(__eliscript_value_3) ? !__eliscript_truthy6(older === null) : __eliscript_value_3)(!__eliscript_truthy6(newer === null))) ? " · " : "") + String(neighbour_link(root, "Older", older)) + String("</nav>");
-  })(__eliscript_truthy6(position > 0) ? nth(posts, position - 1) : null, __eliscript_truthy6(position < count(posts) - 1) ? nth(posts, position + 1) : null);
+  {
+    const __eliscript_value_21 = position > 0 ? nth(posts, position - 1) : null;
+    const __eliscript_value_22 = position < count(posts) - 1 ? nth(posts, position + 1) : null;
+    {
+      let newer = __eliscript_value_21;
+      let older = __eliscript_value_22;
+      return newer === null && older === null ? "" : String('<nav class="crumbs" aria-label="article">') + String(neighbour_link(root, "Newer", newer)) + String(!(newer === null) && !(older === null) ? " · " : "") + String(neighbour_link(root, "Older", older)) + String("</nav>");
+    }
+  }
 }
 function render_post_page(site, post, posts, position) {
-  return ((root) => {
-    return ((slug) => {
-      return ((updated) => {
-        return ((summary) => {
-          return ((source_path) => {
-            return hashMap(keyword("path"), String("posts/") + String(slug) + String("/index.html"), keyword("content"), document(site, root, post["title"], summary, String('<article class="article">') + String(render_neighbours(root, posts, position)) + String("<h1>") + String(escape_html(post["title"])) + String("</h1>") + String(__eliscript_truthy6(blank_QMARK_(summary)) ? "" : String('<p class="lede">') + String(escape_html(summary)) + String("</p>")) + String('<div class="meta"><span>') + String(escape_html(post["published-at"])) + String("</span>") + String(__eliscript_truthy6(updated === post["published-at"]) ? "" : String("<span>updated ") + String(escape_html(updated)) + String("</span>")) + String(render_tag_links(root, post)) + String("</div>") + String(post["body"]) + String("<hr>") + String('<p class="provenance">Markdown · ') + String(escape_html(source_path)) + String(' · <a href="') + String(root) + String('archive/">archive</a></p>') + String(render_comment_channels(post)) + String("</article>")));
-          })(get(post["provenance"], keyword("path"), ""));
-        })(post["summary"]);
-      })(post["updated-at"]);
-    })(post["slug"]);
-  })("../../");
+  {
+    const __eliscript_value_23 = "../../";
+    {
+      let root = __eliscript_value_23;
+      {
+        const __eliscript_value_24 = post["slug"];
+        {
+          let slug = __eliscript_value_24;
+          {
+            const __eliscript_value_25 = post["updated-at"];
+            {
+              let updated = __eliscript_value_25;
+              {
+                const __eliscript_value_26 = post["summary"];
+                {
+                  let summary = __eliscript_value_26;
+                  {
+                    const __eliscript_value_27 = get(post["provenance"], keyword("path"), "");
+                    {
+                      let source_path = __eliscript_value_27;
+                      return hashMap(keyword("path"), String("posts/") + String(slug) + String("/index.html"), keyword("content"), document(site, root, post["title"], summary, String('<article class="article">') + String(render_neighbours(root, posts, position)) + String("<h1>") + String(escape_html(post["title"])) + String("</h1>") + String(__eliscript_truthy6(blank_QMARK_(summary)) ? "" : String('<p class="lede">') + String(escape_html(summary)) + String("</p>")) + String('<div class="meta"><span>') + String(escape_html(post["published-at"])) + String("</span>") + String(updated === post["published-at"] ? "" : String("<span>updated ") + String(escape_html(updated)) + String("</span>")) + String(render_tag_links(root, post)) + String("</div>") + String(post["body"]) + String("<hr>") + String('<p class="provenance">Markdown · ') + String(escape_html(source_path)) + String(' · <a href="') + String(root) + String('archive/">archive</a></p>') + String(render_comment_channels(post)) + String("</article>")));
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function render_alias_page(site, post, alias) {
-  return ((slug, title) => {
-    return hashMap(keyword("path"), String("posts/") + String(alias) + String("/index.html"), keyword("content"), String(`<!doctype html>
+  {
+    const __eliscript_value_28 = post["slug"];
+    const __eliscript_value_29 = post["title"];
+    {
+      let slug = __eliscript_value_28;
+      let title = __eliscript_value_29;
+      return hashMap(keyword("path"), String("posts/") + String(alias) + String("/index.html"), keyword("content"), String(`<!doctype html>
 `) + String('<html lang="') + String(escape_html(site_value(site, keyword("language"), "en"))) + String(`">
 `) + String(`<head>
 <meta charset="utf-8">
@@ -4809,156 +5128,263 @@ function render_alias_page(site, post, alias) {
 `) + String(`</body>
 </html>
 `));
-  })(post["slug"], post["title"]);
+    }
+  }
 }
 function alias_documents(site, posts) {
-  return ((documents, index) => {
-    (() => {
-      while (__eliscript_truthy6(index < count(posts))) {
-        ((post) => {
-          return ((aliases) => {
-            return ((alias_index) => {
-              return (() => {
-                while (__eliscript_truthy6(alias_index < count(aliases))) {
-                  documents = conj(documents, render_alias_page(site, post, nth(aliases, alias_index))), alias_index = alias_index + 1;
+  {
+    const __eliscript_value_30 = vector();
+    const __eliscript_value_31 = 0;
+    {
+      let documents = __eliscript_value_30;
+      let index = __eliscript_value_31;
+      while (index < count(posts)) {
+        {
+          const __eliscript_value_32 = nth(posts, index);
+          {
+            let post = __eliscript_value_32;
+            {
+              const __eliscript_value_33 = post["aliases"];
+              {
+                let aliases = __eliscript_value_33;
+                {
+                  const __eliscript_value_34 = 0;
+                  {
+                    let alias_index = __eliscript_value_34;
+                    while (alias_index < count(aliases)) {
+                      documents = conj(documents, render_alias_page(site, post, nth(aliases, alias_index))), alias_index = alias_index + 1;
+                    }
+                  }
                 }
-                return null;
-              })();
-            })(0);
-          })(post["aliases"]);
-        })(nth(posts, index));
+              }
+            }
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return documents;
-  })(vector(), 0);
+      return documents;
+    }
+  }
 }
 function display_name(value) {
-  return ((text) => {
-    return __eliscript_truthy6(slice(0, 1, text) === ":") ? slice(1, text_length(text), text) : text;
-  })(String(value));
+  {
+    const __eliscript_value_35 = String(value);
+    {
+      let text = __eliscript_value_35;
+      return slice(0, 1, text) === ":" ? slice(1, text_length(text), text) : text;
+    }
+  }
 }
 function provider_label(kind) {
-  return __eliscript_truthy6(kind === keyword("issue")) ? "GitHub Issues" : __eliscript_truthy6(kind === keyword("discussion")) ? "GitHub Discussions" : display_name(kind);
+  return kind === keyword("issue") ? "GitHub Issues" : kind === keyword("discussion") ? "GitHub Discussions" : display_name(kind);
 }
 function channel_binding(channel) {
-  return ((binding) => {
-    return __eliscript_truthy6(binding === null) ? "" : ((repository, number) => {
-      return __eliscript_truthy6(number === null) ? repository : String(repository) + String("#") + String(number);
-    })(get(binding, keyword("repository"), ""), get(binding, keyword("number"), null));
-  })(get(channel, keyword("binding"), null));
+  {
+    const __eliscript_value_36 = get(channel, keyword("binding"), null);
+    {
+      let binding = __eliscript_value_36;
+      return binding === null ? "" : ((repository, number) => {
+        return number === null ? repository : String(repository) + String("#") + String(number);
+      })(get(binding, keyword("repository"), ""), get(binding, keyword("number"), null));
+    }
+  }
 }
 function render_refresh_note(channel, binding) {
-  return ((kind_name) => {
-    return ((snapshot) => {
-      return ((count_value) => {
-        return ((posting) => {
-          return String('<p class="comment-note refresh-note"') + String(' data-comment-refresh="1"') + String(' data-comment-kind="') + String(escape_html(kind_name)) + String('"') + String(' data-comment-count="') + String(String(count_value)) + String('"') + String(' data-comment-binding="') + String(escape_html(binding)) + String('"') + String(__eliscript_truthy6(blank_QMARK_(snapshot)) ? "" : String(' data-comment-snapshot="') + String(escape_html(String(snapshot))) + String('"')) + String(">Snapshot") + String(__eliscript_truthy6(blank_QMARK_(snapshot)) ? "" : String(" from ") + String(escape_html(String(snapshot)))) + String(__eliscript_truthy6(count_value > 0) ? String(" with ") + String(count_value) + String(" comments") : "") + String(".") + String(__eliscript_truthy6(blank_QMARK_(posting)) ? "" : String(' <a href="') + String(escape_html(posting)) + String('">Read or reply at ') + String(escape_html(posting)) + String("</a>.")) + String('<span class="refresh-verdict"></span>') + String("</p>");
-        })(provider_thread_url(binding));
-      })(get(channel, keyword("count"), 0));
-    })(get(channel, keyword("updated-at"), null));
-  })(display_name(get(channel, keyword("kind"), keyword("issue"))));
+  {
+    const __eliscript_value_37 = display_name(get(channel, keyword("kind"), keyword("issue")));
+    {
+      let kind_name = __eliscript_value_37;
+      {
+        const __eliscript_value_38 = get(channel, keyword("updated-at"), null);
+        {
+          let snapshot = __eliscript_value_38;
+          {
+            const __eliscript_value_39 = get(channel, keyword("count"), 0);
+            {
+              let count_value = __eliscript_value_39;
+              {
+                const __eliscript_value_40 = provider_thread_url(binding);
+                {
+                  let posting = __eliscript_value_40;
+                  return String('<p class="comment-note refresh-note"') + String(' data-comment-refresh="1"') + String(' data-comment-kind="') + String(escape_html(kind_name)) + String('"') + String(' data-comment-count="') + String(String(count_value)) + String('"') + String(' data-comment-binding="') + String(escape_html(binding)) + String('"') + String(__eliscript_truthy6(blank_QMARK_(snapshot)) ? "" : String(' data-comment-snapshot="') + String(escape_html(String(snapshot))) + String('"')) + String(">Snapshot") + String(__eliscript_truthy6(blank_QMARK_(snapshot)) ? "" : String(" from ") + String(escape_html(String(snapshot)))) + String(count_value > 0 ? String(" with ") + String(count_value) + String(" comments") : "") + String(".") + String(__eliscript_truthy6(blank_QMARK_(posting)) ? "" : String(' <a href="') + String(escape_html(posting)) + String('">Read or reply at ') + String(escape_html(posting)) + String("</a>.")) + String('<span class="refresh-verdict"></span>') + String("</p>");
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function provider_thread_url(binding) {
   return __eliscript_truthy6(blank_QMARK_(binding)) ? "" : ((hash) => {
     return ((path) => {
       return ((number) => {
         return __eliscript_truthy6(blank_QMARK_(number)) ? String("https://github.com/") + String(path) : String("https://github.com/") + String(path) + String("/issues/") + String(number);
-      })(__eliscript_truthy6(hash < 0) ? "" : slice(hash + 1, text_length(binding), binding));
-    })(__eliscript_truthy6(hash < 0) ? binding : slice(0, hash, binding));
+      })(hash < 0 ? "" : slice(hash + 1, text_length(binding), binding));
+    })(hash < 0 ? binding : slice(0, hash, binding));
   })(index_of("#", binding));
 }
 function render_comment_item(comment) {
-  return ((author) => {
-    return ((login) => {
-      return ((url) => {
-        return ((created) => {
-          return ((updated) => {
-            return String('<li class="comment">') + String('<div class="meta"><span class="comment-author">') + String(escape_html(login)) + String("</span>") + String("<span>") + String(escape_html(created)) + String("</span>") + String(__eliscript_truthy6(updated === created) ? "" : String("<span>updated ") + String(escape_html(updated)) + String("</span>")) + String(__eliscript_truthy6(url === null) ? "" : String('<a href="') + String(escape_html(url)) + String('">on GitHub</a>')) + String("</div>") + String('<div class="comment-body">') + String(get(comment, keyword("body"), "")) + String("</div>") + String(((replies) => {
-              return __eliscript_truthy6(count(replies) === 0) ? "" : String('<ol class="comments-list comment-replies">') + String(render_reply_items(replies)) + String("</ol>");
-            })(get(comment, keyword("replies"), vector()))) + String("</li>");
-          })(String(get(comment, keyword("updated-at"), "")));
-        })(String(get(comment, keyword("created-at"), "")));
-      })(get(comment, keyword("url"), null));
-    })(String(get(author, keyword("login"), "unknown")));
-  })(get(comment, keyword("author"), hashMap()));
+  {
+    const __eliscript_value_41 = get(comment, keyword("author"), hashMap());
+    {
+      let author = __eliscript_value_41;
+      {
+        const __eliscript_value_42 = String(get(author, keyword("login"), "unknown"));
+        {
+          let login = __eliscript_value_42;
+          {
+            const __eliscript_value_43 = get(comment, keyword("url"), null);
+            {
+              let url = __eliscript_value_43;
+              {
+                const __eliscript_value_44 = String(get(comment, keyword("created-at"), ""));
+                {
+                  let created = __eliscript_value_44;
+                  {
+                    const __eliscript_value_45 = String(get(comment, keyword("updated-at"), ""));
+                    {
+                      let updated = __eliscript_value_45;
+                      return String('<li class="comment">') + String('<div class="meta"><span class="comment-author">') + String(escape_html(login)) + String("</span>") + String("<span>") + String(escape_html(created)) + String("</span>") + String(updated === created ? "" : String("<span>updated ") + String(escape_html(updated)) + String("</span>")) + String(url === null ? "" : String('<a href="') + String(escape_html(url)) + String('">on GitHub</a>')) + String("</div>") + String('<div class="comment-body">') + String(get(comment, keyword("body"), "")) + String("</div>") + String(((replies) => {
+                        return count(replies) === 0 ? "" : String('<ol class="comments-list comment-replies">') + String(render_reply_items(replies)) + String("</ol>");
+                      })(get(comment, keyword("replies"), vector()))) + String("</li>");
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function render_reply_items(items) {
-  return ((markup, index) => {
-    (() => {
-      while (__eliscript_truthy6(index < count(items))) {
+  {
+    const __eliscript_value_46 = "";
+    const __eliscript_value_47 = 0;
+    {
+      let markup = __eliscript_value_46;
+      let index = __eliscript_value_47;
+      while (index < count(items)) {
         markup = String(markup) + String(render_comment_item(nth(items, index))), index = index + 1;
       }
-      return null;
-    })();
-    return markup;
-  })("", 0);
+      return markup;
+    }
+  }
 }
 function render_comment_items(items) {
-  return ((markup, index) => {
-    (() => {
-      while (__eliscript_truthy6(index < count(items))) {
+  {
+    const __eliscript_value_48 = "";
+    const __eliscript_value_49 = 0;
+    {
+      let markup = __eliscript_value_48;
+      let index = __eliscript_value_49;
+      while (index < count(items)) {
         markup = String(markup) + String(render_comment_item(nth(items, index))), index = index + 1;
       }
-      return null;
-    })();
-    return String('<ol class="comments-list">') + String(markup) + String("</ol>");
-  })("", 0);
+      return String('<ol class="comments-list">') + String(markup) + String("</ol>");
+    }
+  }
 }
 function render_channel_heading(channel) {
-  return ((count_value, freshness) => {
-    return String("<h2>Comments") + String(__eliscript_truthy6(((__eliscript_value_4) => __eliscript_truthy6(__eliscript_value_4) ? count_value > 0 : __eliscript_value_4)(!__eliscript_truthy6(count_value === null))) ? String(" (") + String(count_value) + String(")") : "") + String("</h2>") + String(__eliscript_truthy6(blank_QMARK_(freshness)) ? "" : String('<p class="comment-note">Snapshot from ') + String(escape_html(String(freshness))) + String(".</p>"));
-  })(get(channel, keyword("count"), null), get(channel, keyword("updated-at"), null));
+  {
+    const __eliscript_value_50 = get(channel, keyword("count"), null);
+    const __eliscript_value_51 = get(channel, keyword("updated-at"), null);
+    {
+      let count_value = __eliscript_value_50;
+      let freshness = __eliscript_value_51;
+      return String("<h2>Comments") + String(!(count_value === null) && count_value > 0 ? String(" (") + String(count_value) + String(")") : "") + String("</h2>") + String(__eliscript_truthy6(blank_QMARK_(freshness)) ? "" : String('<p class="comment-note">Snapshot from ') + String(escape_html(String(freshness))) + String(".</p>"));
+    }
+  }
 }
 function render_channel(channel) {
-  return ((mode) => {
-    return ((kind) => {
-      return ((provider) => {
-        return ((binding) => {
-          return ((items) => {
-            return String('<section class="comments" data-comment-provider="') + String(escape_html(provider)) + String('"') + String(__eliscript_truthy6(blank_QMARK_(binding)) ? "" : String(' data-comments-binding="') + String(escape_html(binding)) + String('"')) + String(">") + String(render_channel_heading(channel)) + String(__eliscript_truthy6(((__eliscript_value_5) => __eliscript_truthy6(__eliscript_value_5) ? __eliscript_value_5 : mode === keyword("external"))(mode === keyword("embed"))) ? String('<div class="embed-region" data-comment-mount="') + String(escape_html(provider)) + String('">') + String('<p class="comment-note">Comments are provided by ') + String(escape_html(provider)) + String(". The browser loads that provider; this build does not") + String(" script it.</p>") + String(((fallback) => {
-              return __eliscript_truthy6(blank_QMARK_(fallback)) ? "" : String('<p class="comment-note">If it does not load, read') + String(' the thread at <a href="') + String(escape_html(fallback)) + String('">') + String(escape_html(fallback)) + String("</a>.</p>");
-            })(__eliscript_truthy6(blank_QMARK_(binding)) ? ((__eliscript_value_6) => __eliscript_truthy6(__eliscript_value_6) ? __eliscript_value_6 : "")(get(channel, keyword("provider-url"), null)) : binding)) + String("</div>") : __eliscript_truthy6(mode === keyword("live")) ? String('<p class="comment-note">') + String(__eliscript_truthy6(blank_QMARK_(binding)) ? "This channel is served live." : String("This thread is served live for ") + String(escape_html(binding)) + String(".")) + String(" A comment never triggers a build; open the provider to") + String(" read or reply.</p>") : __eliscript_truthy6(mode === keyword("hybrid")) ? String(__eliscript_truthy6(count(items) === 0) ? '<p class="comment-note">No comments in this snapshot yet.</p>' : render_comment_items(items)) + String(render_refresh_note(channel, binding)) : __eliscript_truthy6(count(items) === 0) ? '<p class="comment-note">No comments in this snapshot.</p>' : render_comment_items(items)) + String("</section>");
-          })(get(channel, keyword("items"), vector()));
-        })(channel_binding(channel));
-      })(provider_label(kind));
-    })(get(channel, keyword("kind"), keyword("issue")));
-  })(get(channel, keyword("mode"), keyword("snapshot")));
+  {
+    const __eliscript_value_52 = get(channel, keyword("mode"), keyword("snapshot"));
+    {
+      let mode = __eliscript_value_52;
+      {
+        const __eliscript_value_53 = get(channel, keyword("kind"), keyword("issue"));
+        {
+          let kind = __eliscript_value_53;
+          {
+            const __eliscript_value_54 = provider_label(kind);
+            {
+              let provider = __eliscript_value_54;
+              {
+                const __eliscript_value_55 = channel_binding(channel);
+                {
+                  let binding = __eliscript_value_55;
+                  {
+                    const __eliscript_value_56 = get(channel, keyword("items"), vector());
+                    {
+                      let items = __eliscript_value_56;
+                      return String('<section class="comments" data-comment-provider="') + String(escape_html(provider)) + String('"') + String(__eliscript_truthy6(blank_QMARK_(binding)) ? "" : String(' data-comments-binding="') + String(escape_html(binding)) + String('"')) + String(">") + String(render_channel_heading(channel)) + String(mode === keyword("embed") || mode === keyword("external") ? String('<div class="embed-region" data-comment-mount="') + String(escape_html(provider)) + String('">') + String('<p class="comment-note">Comments are provided by ') + String(escape_html(provider)) + String(". The browser loads that provider; this build does not") + String(" script it.</p>") + String(((fallback) => {
+                        return __eliscript_truthy6(blank_QMARK_(fallback)) ? "" : String('<p class="comment-note">If it does not load, read') + String(' the thread at <a href="') + String(escape_html(fallback)) + String('">') + String(escape_html(fallback)) + String("</a>.</p>");
+                      })(__eliscript_truthy6(blank_QMARK_(binding)) ? ((__eliscript_value_57) => __eliscript_truthy6(__eliscript_value_57) ? __eliscript_value_57 : "")(get(channel, keyword("provider-url"), null)) : binding)) + String("</div>") : mode === keyword("live") ? String('<p class="comment-note">') + String(__eliscript_truthy6(blank_QMARK_(binding)) ? "This channel is served live." : String("This thread is served live for ") + String(escape_html(binding)) + String(".")) + String(" A comment never triggers a build; open the provider to") + String(" read or reply.</p>") : mode === keyword("hybrid") ? String(count(items) === 0 ? '<p class="comment-note">No comments in this snapshot yet.</p>' : render_comment_items(items)) + String(render_refresh_note(channel, binding)) : count(items) === 0 ? '<p class="comment-note">No comments in this snapshot.</p>' : render_comment_items(items)) + String("</section>");
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function render_comment_channels(post) {
-  return ((channels) => {
-    return ((markup, index) => {
-      (() => {
-        while (__eliscript_truthy6(index < count(channels))) {
-          markup = String(markup) + String(render_channel(nth(channels, index))), index = index + 1;
+  {
+    const __eliscript_value_58 = get(post, keyword("comment-channels"));
+    {
+      let channels = __eliscript_value_58;
+      {
+        const __eliscript_value_59 = "";
+        const __eliscript_value_60 = 0;
+        {
+          let markup = __eliscript_value_59;
+          let index = __eliscript_value_60;
+          while (index < count(channels)) {
+            markup = String(markup) + String(render_channel(nth(channels, index))), index = index + 1;
+          }
+          return markup;
         }
-        return null;
-      })();
-      return markup;
-    })("", 0);
-  })(get(post, keyword("comment-channels")));
+      }
+    }
+  }
 }
 function render_tag_index(site, tags, posts) {
-  return ((items, index) => {
-    (() => {
-      while (__eliscript_truthy6(index < count(tags))) {
-        ((tag) => {
-          return items = String(items) + String('<li><a class="title" href="') + String(slugify(tag)) + String('/">') + String(escape_html(tag)) + String("</a>") + String('<div class="meta"><span>') + String(count(posts_with_tag(tag, posts))) + String(" articles</span></div></li>");
-        })(nth(tags, index));
+  {
+    const __eliscript_value_61 = "";
+    const __eliscript_value_62 = 0;
+    {
+      let items = __eliscript_value_61;
+      let index = __eliscript_value_62;
+      while (index < count(tags)) {
+        {
+          const __eliscript_value_63 = nth(tags, index);
+          {
+            let tag = __eliscript_value_63;
+            items = String(items) + String('<li><a class="title" href="') + String(slugify(tag)) + String('/">') + String(escape_html(tag)) + String("</a>") + String('<div class="meta"><span>') + String(count(posts_with_tag(tag, posts))) + String(" articles</span></div></li>");
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return hashMap(keyword("path"), "tags/index.html", keyword("content"), document(site, "../", "Tags", "Articles grouped by tag.", String('<div class="article"><h1>Tags</h1>') + String('<p class="crumbs"><a href="../">Home</a></p></div>') + String('<ul class="list">') + String(items) + String("</ul>")));
-  })("", 0);
+      return hashMap(keyword("path"), "tags/index.html", keyword("content"), document(site, "../", "Tags", "Articles grouped by tag.", String('<div class="article"><h1>Tags</h1>') + String('<p class="crumbs"><a href="../">Home</a></p></div>') + String('<ul class="list">') + String(items) + String("</ul>")));
+    }
+  }
 }
 function render_tag_page(site, tag, posts) {
-  return ((matching) => {
-    return hashMap(keyword("path"), String("tags/") + String(slugify(tag)) + String("/index.html"), keyword("content"), document(site, "../../", String("Tag: ") + String(tag), String("Articles tagged ") + String(tag) + String("."), String('<div class="article"><h1>') + String(escape_html(tag)) + String("</h1>") + String('<p class="crumbs"><a href="../../">Home</a> · ') + String('<a href="../">Tags</a></p></div>') + String(render_post_list("../../", matching))));
-  })(filter((post) => {
-    return tagged_QMARK_(post, tag);
-  }, posts));
+  {
+    const __eliscript_value_64 = filter((post) => {
+      return tagged_QMARK_(post, tag);
+    }, posts);
+    {
+      let matching = __eliscript_value_64;
+      return hashMap(keyword("path"), String("tags/") + String(slugify(tag)) + String("/index.html"), keyword("content"), document(site, "../../", String("Tag: ") + String(tag), String("Articles tagged ") + String(tag) + String("."), String('<div class="article"><h1>') + String(escape_html(tag)) + String("</h1>") + String('<p class="crumbs"><a href="../../">Home</a> · ') + String('<a href="../">Tags</a></p></div>') + String(render_post_list("../../", matching))));
+    }
+  }
 }
 function render_search_page(site) {
   return hashMap(keyword("path"), "search/index.html", keyword("content"), document(site, "../", "Search", "Search every published article locally.", String('<div class="article"><h1>Search</h1>') + String('<p class="crumbs"><a href="../">Home</a></p>') + String('<div class="search-form">') + String('<label class="skip" for="search-input">Search articles</label>') + String('<input id="search-input" type="search" autocomplete="off"') + String(' placeholder="Search title, summary, tags, or text">') + String("</div>") + String('<div id="search-results" aria-live="polite"></div>') + String('<noscript><p class="comment-note">Search needs JavaScript.') + String(" Every article is still reachable from the") + String(' <a href="../archive/">archive</a>.</p></noscript>') + String("</div>")));
@@ -4967,38 +5393,54 @@ function render_not_found(site) {
   return hashMap(keyword("path"), "404.html", keyword("content"), document(site, "", "Not found", "The requested page does not exist.", String('<div class="article"><h1>Not found</h1>') + String('<p class="empty">That page does not exist. ') + String('<a href="./">Return home</a>.</p></div>')));
 }
 function render_feed(site, posts) {
-  return ((base, title, entries, index) => {
-    (() => {
-      while (__eliscript_truthy6(index < count(posts))) {
-        ((post) => {
-          return ((url) => {
-            return (() => {
-              entries = String(entries) + String("<entry><title>") + String(escape_html(post["title"])) + String("</title>") + String('<link href="') + String(escape_html(url)) + String('"/>') + String("<id>") + String(escape_html(url)) + String("</id>") + String("<updated>") + String(escape_html(post["updated-at"])) + String("T00:00:00Z</updated>") + String("<summary>") + String(escape_html(post["summary"])) + String("</summary>") + String("</entry>");
-              return index = index + 1;
-            })();
-          })(String(base) + String("posts/") + String(post["slug"]) + String("/"));
-        })(nth(posts, index));
+  {
+    const __eliscript_value_65 = site_value(site, keyword("base-url"), "/");
+    const __eliscript_value_66 = site_value(site, keyword("title"), "dogfood");
+    const __eliscript_value_67 = "";
+    const __eliscript_value_68 = 0;
+    {
+      let base = __eliscript_value_65;
+      let title = __eliscript_value_66;
+      let entries = __eliscript_value_67;
+      let index = __eliscript_value_68;
+      while (index < count(posts)) {
+        {
+          const __eliscript_value_69 = nth(posts, index);
+          {
+            let post = __eliscript_value_69;
+            {
+              const __eliscript_value_70 = String(base) + String("posts/") + String(post["slug"]) + String("/");
+              {
+                let url = __eliscript_value_70;
+                entries = String(entries) + String("<entry><title>") + String(escape_html(post["title"])) + String("</title>") + String('<link href="') + String(escape_html(url)) + String('"/>') + String("<id>") + String(escape_html(url)) + String("</id>") + String("<updated>") + String(escape_html(post["updated-at"])) + String("T00:00:00Z</updated>") + String("<summary>") + String(escape_html(post["summary"])) + String("</summary>") + String("</entry>");
+                index = index + 1;
+              }
+            }
+          }
+        }
       }
-      return null;
-    })();
-    return hashMap(keyword("path"), "feed.xml", keyword("content"), String(`<?xml version="1.0" encoding="utf-8"?>
+      return hashMap(keyword("path"), "feed.xml", keyword("content"), String(`<?xml version="1.0" encoding="utf-8"?>
 `) + String('<feed xmlns="http://www.w3.org/2005/Atom">') + String("<title>") + String(escape_html(title)) + String("</title>") + String('<link href="') + String(escape_html(base)) + String('"/>') + String("<id>") + String(escape_html(base)) + String("</id>") + String(entries) + String(`</feed>
 `));
-  })(site_value(site, keyword("base-url"), "/"), site_value(site, keyword("title"), "dogfood"), "", 0);
+    }
+  }
 }
 function render_sitemap(site, posts) {
-  return ((urls, index) => {
-    (() => {
-      while (__eliscript_truthy6(index < count(posts))) {
+  {
+    const __eliscript_value_71 = String("<url><loc>") + String(escape_html(absolute_url(site, ""))) + String("</loc></url>") + String("<url><loc>") + String(escape_html(absolute_url(site, "archive/"))) + String("</loc></url>") + String("<url><loc>") + String(escape_html(absolute_url(site, "tags/"))) + String("</loc></url>");
+    const __eliscript_value_72 = 0;
+    {
+      let urls = __eliscript_value_71;
+      let index = __eliscript_value_72;
+      while (index < count(posts)) {
         urls = String(urls) + String("<url><loc>") + String(escape_html(absolute_url(site, String("posts/") + String(nth(posts, index)["slug"]) + String("/")))) + String("</loc></url>");
         index = index + 1;
       }
-      return null;
-    })();
-    return hashMap(keyword("path"), "sitemap.xml", keyword("content"), String(`<?xml version="1.0" encoding="utf-8"?>
+      return hashMap(keyword("path"), "sitemap.xml", keyword("content"), String(`<?xml version="1.0" encoding="utf-8"?>
 `) + String('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">') + String(urls) + String(`</urlset>
 `));
-  })(String("<url><loc>") + String(escape_html(absolute_url(site, ""))) + String("</loc></url>") + String("<url><loc>") + String(escape_html(absolute_url(site, "archive/"))) + String("</loc></url>") + String("<url><loc>") + String(escape_html(absolute_url(site, "tags/"))) + String("</loc></url>"), 0);
+    }
+  }
 }
 function search_entry(post) {
   return { id: post["id"], slug: post["slug"], title: post["title"], summary: post["summary"], tags: to_native_array(post["tags"]), authors: to_native_array(post["authors"]), url: String("posts/") + String(post["slug"]) + String("/"), text: strip_tags(post["body"]) };
@@ -5025,47 +5467,67 @@ Sitemap: `) + String(absolute_url(site, "sitemap.xml")) + String(`
 `));
 }
 function render_site(site, posts) {
-  return ((sorted) => {
-    return ((tags) => {
-      return ((post_pages) => {
-        return ((tag_pages) => {
-          return ((documents) => {
-            return (() => {
-              ((index) => {
-                return (() => {
-                  while (__eliscript_truthy6(index < count(sorted))) {
-                    post_pages = conj(post_pages, render_post_page(site, nth(sorted, index), sorted, index)), index = index + 1;
+  {
+    const __eliscript_value_73 = sort_posts(posts);
+    {
+      let sorted = __eliscript_value_73;
+      {
+        const __eliscript_value_74 = collect_tags(sorted);
+        {
+          let tags = __eliscript_value_74;
+          {
+            const __eliscript_value_75 = vector();
+            {
+              let post_pages = __eliscript_value_75;
+              {
+                const __eliscript_value_76 = vector();
+                {
+                  let tag_pages = __eliscript_value_76;
+                  {
+                    const __eliscript_value_77 = vector();
+                    {
+                      let documents = __eliscript_value_77;
+                      {
+                        const __eliscript_value_78 = 0;
+                        {
+                          let index = __eliscript_value_78;
+                          while (index < count(sorted)) {
+                            post_pages = conj(post_pages, render_post_page(site, nth(sorted, index), sorted, index)), index = index + 1;
+                          }
+                        }
+                      }
+                      {
+                        const __eliscript_value_79 = 0;
+                        {
+                          let index = __eliscript_value_79;
+                          while (index < count(tags)) {
+                            tag_pages = conj(tag_pages, render_tag_page(site, nth(tags, index), sorted)), index = index + 1;
+                          }
+                        }
+                      }
+                      documents = conj(documents, render_home(site, sorted));
+                      documents = conj(documents, render_archive(site, sorted));
+                      documents = conj(documents, render_tag_index(site, tags, sorted));
+                      documents = conj(documents, render_search_page(site));
+                      documents = conj(documents, render_not_found(site));
+                      !__eliscript_truthy6(preview_QMARK_(site)) && (() => {
+                        documents = conj(documents, render_feed(site, sorted));
+                        return documents = conj(documents, render_sitemap(site, sorted));
+                      })();
+                      documents = conj(documents, render_search_index(site, sorted));
+                      documents = conj(documents, __eliscript_truthy6(preview_QMARK_(site)) ? render_preview_robots() : render_robots(site));
+                      documents = conj(documents, hashMap(keyword("path"), "assets/site.css", keyword("content"), site_css));
+                      return append_all(append_all(append_all(documents, post_pages), tag_pages), alias_documents(site, sorted));
+                    }
                   }
-                  return null;
-                })();
-              })(0);
-              ((index) => {
-                return (() => {
-                  while (__eliscript_truthy6(index < count(tags))) {
-                    tag_pages = conj(tag_pages, render_tag_page(site, nth(tags, index), sorted)), index = index + 1;
-                  }
-                  return null;
-                })();
-              })(0);
-              documents = conj(documents, render_home(site, sorted));
-              documents = conj(documents, render_archive(site, sorted));
-              documents = conj(documents, render_tag_index(site, tags, sorted));
-              documents = conj(documents, render_search_page(site));
-              documents = conj(documents, render_not_found(site));
-              __eliscript_truthy6(!__eliscript_truthy6(preview_QMARK_(site))) && (() => {
-                documents = conj(documents, render_feed(site, sorted));
-                return documents = conj(documents, render_sitemap(site, sorted));
-              })();
-              documents = conj(documents, render_search_index(site, sorted));
-              documents = conj(documents, __eliscript_truthy6(preview_QMARK_(site)) ? render_preview_robots() : render_robots(site));
-              documents = conj(documents, hashMap(keyword("path"), "assets/site.css", keyword("content"), site_css));
-              return append_all(append_all(append_all(documents, post_pages), tag_pages), alias_documents(site, sorted));
-            })();
-          })(vector());
-        })(vector());
-      })(vector());
-    })(collect_tags(sorted));
-  })(sort_posts(posts));
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 // examples/dogfood/dist/src/builder/content.mjs
@@ -5082,55 +5544,89 @@ function fail2(code, message) {
 // examples/dogfood/dist/src/support/fields.mjs
 var __eliscript_truthy7 = (value) => value !== false && value != null;
 function parse_field_line(line) {
-  return ((colon) => {
-    return __eliscript_truthy7(colon < 1) ? null : vector(trim(slice(0, colon, line)), trim(slice(colon + 1, text_length(line), line)));
-  })(index_of(":", line));
+  {
+    const __eliscript_value_1 = index_of(":", line);
+    {
+      let colon = __eliscript_value_1;
+      return colon < 1 ? null : vector(trim(slice(0, colon, line)), trim(slice(colon + 1, text_length(line), line)));
+    }
+  }
 }
 function parse_fields(lines, start, end) {
-  return ((fields, index) => {
-    (() => {
-      while (__eliscript_truthy7(index < end)) {
-        ((pair) => {
-          return __eliscript_truthy7(pair) ? fields = assoc(fields, nth(pair, 0, null), nth(pair, 1, null)) : null;
-        })(parse_field_line(nth(lines, index)));
+  {
+    const __eliscript_value_2 = hashMap();
+    const __eliscript_value_3 = start;
+    {
+      let fields = __eliscript_value_2;
+      let index = __eliscript_value_3;
+      while (index < end) {
+        {
+          const __eliscript_value_4 = parse_field_line(nth(lines, index));
+          {
+            let pair = __eliscript_value_4;
+            __eliscript_truthy7(pair) && (fields = assoc(fields, nth(pair, 0, null), nth(pair, 1, null)));
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return fields;
-  })(hashMap(), start);
+      return fields;
+    }
+  }
 }
 function parse_list(value) {
-  return ((inner) => {
-    return ((parts) => {
-      return ((result) => {
-        return ((index) => {
-          return (() => {
-            (() => {
-              while (__eliscript_truthy7(index < count(parts))) {
-                ((item) => {
-                  return __eliscript_truthy7(!__eliscript_truthy7(blank_QMARK_(item))) ? result = conj(result, item) : null;
-                })(trim(nth(parts, index)));
-                index = index + 1;
+  {
+    const __eliscript_value_5 = __eliscript_truthy7(((__eliscript_value_6) => __eliscript_truthy7(__eliscript_value_6) ? ends_with_QMARK_("]", value) : __eliscript_value_6)(starts_with_QMARK_("[", value))) ? slice(1, text_length(value) - 1, value) : value;
+    {
+      let inner = __eliscript_value_5;
+      {
+        const __eliscript_value_7 = split_on(",", inner);
+        {
+          let parts = __eliscript_value_7;
+          {
+            const __eliscript_value_8 = vector();
+            {
+              let result = __eliscript_value_8;
+              {
+                const __eliscript_value_9 = 0;
+                {
+                  let index = __eliscript_value_9;
+                  while (index < count(parts)) {
+                    {
+                      const __eliscript_value_10 = trim(nth(parts, index));
+                      {
+                        let item = __eliscript_value_10;
+                        !__eliscript_truthy7(blank_QMARK_(item)) && (result = conj(result, item));
+                      }
+                    }
+                    index = index + 1;
+                  }
+                  return result;
+                }
               }
-              return null;
-            })();
-            return result;
-          })();
-        })(0);
-      })(vector());
-    })(split_on(",", inner));
-  })(__eliscript_truthy7(((__eliscript_value_1) => __eliscript_truthy7(__eliscript_value_1) ? ends_with_QMARK_("]", value) : __eliscript_value_1)(starts_with_QMARK_("[", value))) ? slice(1, text_length(value) - 1, value) : value);
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function field(fields, key, fallback) {
-  return ((value) => {
-    return __eliscript_truthy7(empty_value_QMARK_(value)) ? fallback : value;
-  })(get(fields, key, null));
+  {
+    const __eliscript_value_11 = get(fields, key, null);
+    {
+      let value = __eliscript_value_11;
+      return __eliscript_truthy7(empty_value_QMARK_(value)) ? fallback : value;
+    }
+  }
 }
 function require_field(fields, key, path) {
-  return ((value) => {
-    return __eliscript_truthy7(empty_value_QMARK_(value)) ? fail2("DOGFOOD-CONTENT-001", String(path) + String(': missing required metadata field "') + String(key) + String('"')) : value;
-  })(get(fields, key, null));
+  {
+    const __eliscript_value_12 = get(fields, key, null);
+    {
+      let value = __eliscript_value_12;
+      return __eliscript_truthy7(empty_value_QMARK_(value)) ? fail2("DOGFOOD-CONTENT-001", String(path) + String(': missing required metadata field "') + String(key) + String('"')) : value;
+    }
+  }
 }
 
 // examples/dogfood/dist/src/support/records.mjs
@@ -5143,31 +5639,37 @@ var __eliscript_truthy8 = (value) => value !== false && value != null;
 var space = 32;
 var hash_mark = 35;
 function block_start_QMARK_(line) {
-  return ((trimmed) => {
-    return ((__eliscript_value_1) => __eliscript_truthy8(__eliscript_value_1) ? __eliscript_value_1 : ((__eliscript_value_2) => __eliscript_truthy8(__eliscript_value_2) ? __eliscript_value_2 : ((__eliscript_value_3) => __eliscript_truthy8(__eliscript_value_3) ? __eliscript_value_3 : ((__eliscript_value_4) => __eliscript_truthy8(__eliscript_value_4) ? __eliscript_value_4 : ((__eliscript_value_5) => __eliscript_truthy8(__eliscript_value_5) ? __eliscript_value_5 : ((__eliscript_value_6) => __eliscript_truthy8(__eliscript_value_6) ? __eliscript_value_6 : trimmed === "---")(ordered_item_QMARK_(trimmed)))(starts_with_QMARK_("- ", trimmed)))(starts_with_QMARK_("> ", trimmed)))(starts_with_QMARK_("```", trimmed)))(starts_with_QMARK_("#", trimmed)))(blank_QMARK_(trimmed));
-  })(trim(line));
+  {
+    const __eliscript_value_1 = trim(line);
+    {
+      let trimmed = __eliscript_value_1;
+      return ((__eliscript_value_2) => __eliscript_truthy8(__eliscript_value_2) ? __eliscript_value_2 : ((__eliscript_value_3) => __eliscript_truthy8(__eliscript_value_3) ? __eliscript_value_3 : ((__eliscript_value_4) => __eliscript_truthy8(__eliscript_value_4) ? __eliscript_value_4 : ((__eliscript_value_5) => __eliscript_truthy8(__eliscript_value_5) ? __eliscript_value_5 : ((__eliscript_value_6) => __eliscript_truthy8(__eliscript_value_6) ? __eliscript_value_6 : ((__eliscript_value_7) => __eliscript_truthy8(__eliscript_value_7) ? __eliscript_value_7 : trimmed === "---")(ordered_item_QMARK_(trimmed)))(starts_with_QMARK_("- ", trimmed)))(starts_with_QMARK_("> ", trimmed)))(starts_with_QMARK_("```", trimmed)))(starts_with_QMARK_("#", trimmed)))(blank_QMARK_(trimmed));
+    }
+  }
 }
 function heading_level(text) {
-  return ((index) => {
-    (() => {
-      while (__eliscript_truthy8(((__eliscript_value_7) => __eliscript_truthy8(__eliscript_value_7) ? char_code(text, index) === hash_mark : __eliscript_value_7)(index < text_length(text)))) {
+  {
+    const __eliscript_value_8 = 0;
+    {
+      let index = __eliscript_value_8;
+      while (index < text_length(text) && char_code(text, index) === hash_mark) {
         index = index + 1;
       }
-      return null;
-    })();
-    return __eliscript_truthy8(((__eliscript_value_8) => __eliscript_truthy8(__eliscript_value_8) ? ((__eliscript_value_9) => __eliscript_truthy8(__eliscript_value_9) ? ((__eliscript_value_10) => __eliscript_truthy8(__eliscript_value_10) ? char_code(text, index) === space : __eliscript_value_10)(index < text_length(text)) : __eliscript_value_9)(index <= 6) : __eliscript_value_8)(index > 0)) ? index : 0;
-  })(0);
+      return index > 0 && index <= 6 && index < text_length(text) && char_code(text, index) === space ? index : 0;
+    }
+  }
 }
 function ordered_prefix_length(text) {
-  return ((index) => {
-    (() => {
-      while (__eliscript_truthy8(((__eliscript_value_11) => __eliscript_truthy8(__eliscript_value_11) ? digit_code_QMARK_(char_code(text, index)) : __eliscript_value_11)(index < text_length(text)))) {
+  {
+    const __eliscript_value_9 = 0;
+    {
+      let index = __eliscript_value_9;
+      while (__eliscript_truthy8(((__eliscript_value_10) => __eliscript_truthy8(__eliscript_value_10) ? digit_code_QMARK_(char_code(text, index)) : __eliscript_value_10)(index < text_length(text)))) {
         index = index + 1;
       }
-      return null;
-    })();
-    return __eliscript_truthy8(((__eliscript_value_12) => __eliscript_truthy8(__eliscript_value_12) ? ((__eliscript_value_13) => __eliscript_truthy8(__eliscript_value_13) ? slice(index, index + 2, text) === ". " : __eliscript_value_13)(index + 1 < text_length(text)) : __eliscript_value_12)(index > 0)) ? index + 2 : -1;
-  })(0);
+      return index > 0 && index + 1 < text_length(text) && slice(index, index + 2, text) === ". " ? index + 2 : -1;
+    }
+  }
 }
 function ordered_item_QMARK_(text) {
   return ordered_prefix_length(text) > 0;
@@ -5176,187 +5678,261 @@ function unordered_item_QMARK_(text) {
   return starts_with_QMARK_("- ", text);
 }
 function fence_close(lines, start, total) {
-  return ((index, close) => {
-    (() => {
-      while (__eliscript_truthy8(index < total)) {
+  {
+    const __eliscript_value_11 = start + 1;
+    const __eliscript_value_12 = total;
+    {
+      let index = __eliscript_value_11;
+      let close = __eliscript_value_12;
+      while (index < total) {
         __eliscript_truthy8(starts_with_QMARK_("```", trim(nth(lines, index)))) && (close = index, index = total);
         index = index + 1;
       }
-      return null;
-    })();
-    return close;
-  })(start + 1, total);
+      return close;
+    }
+  }
 }
 function item_of_kind_QMARK_(text, ordered) {
   return __eliscript_truthy8(ordered) ? ordered_item_QMARK_(text) : unordered_item_QMARK_(text);
 }
 function list_end(lines, start, total, ordered) {
-  return ((index) => {
-    (() => {
+  {
+    const __eliscript_value_13 = start;
+    {
+      let index = __eliscript_value_13;
       while (__eliscript_truthy8(((__eliscript_value_14) => __eliscript_truthy8(__eliscript_value_14) ? ((trimmed) => {
         return ((__eliscript_value_15) => __eliscript_truthy8(__eliscript_value_15) ? __eliscript_value_15 : !__eliscript_truthy8(block_start_QMARK_(trimmed)))(item_of_kind_QMARK_(trimmed, ordered));
       })(trim(nth(lines, index))) : __eliscript_value_14)(index < total))) {
         index = index + 1;
       }
-      return null;
-    })();
-    return index;
-  })(start);
+      return index;
+    }
+  }
 }
 function quote_end(lines, start, total) {
-  return ((index) => {
-    (() => {
-      while (__eliscript_truthy8(((__eliscript_value_16) => __eliscript_truthy8(__eliscript_value_16) ? starts_with_QMARK_("> ", trim(nth(lines, index))) : __eliscript_value_16)(index < total))) {
+  {
+    const __eliscript_value_16 = start;
+    {
+      let index = __eliscript_value_16;
+      while (__eliscript_truthy8(((__eliscript_value_17) => __eliscript_truthy8(__eliscript_value_17) ? starts_with_QMARK_("> ", trim(nth(lines, index))) : __eliscript_value_17)(index < total))) {
         index = index + 1;
       }
-      return null;
-    })();
-    return index;
-  })(start);
+      return index;
+    }
+  }
 }
 function paragraph_end(lines, start, total) {
-  return ((index) => {
-    (() => {
-      while (__eliscript_truthy8(((__eliscript_value_17) => __eliscript_truthy8(__eliscript_value_17) ? !__eliscript_truthy8(block_start_QMARK_(nth(lines, index))) : __eliscript_value_17)(index < total))) {
+  {
+    const __eliscript_value_18 = start;
+    {
+      let index = __eliscript_value_18;
+      while (index < total && !__eliscript_truthy8(block_start_QMARK_(nth(lines, index)))) {
         index = index + 1;
       }
-      return null;
-    })();
-    return index;
-  })(start);
+      return index;
+    }
+  }
 }
 function paragraph_text(lines, start, end) {
-  return ((parts, index) => {
-    (() => {
-      while (__eliscript_truthy8(index < end)) {
+  {
+    const __eliscript_value_19 = vector();
+    const __eliscript_value_20 = start;
+    {
+      let parts = __eliscript_value_19;
+      let index = __eliscript_value_20;
+      while (index < end) {
         parts = conj(parts, trim(nth(lines, index))), index = index + 1;
       }
-      return null;
-    })();
-    return join(" ", parts);
-  })(vector(), start);
+      return join(" ", parts);
+    }
+  }
 }
 function render_fence(lines, start, close) {
-  return ((opening) => {
-    return ((language) => {
-      return ((content) => {
-        return ((index) => {
-          return (() => {
-            (() => {
-              while (__eliscript_truthy8(index < close)) {
-                content = String(content) + String(nth(lines, index)) + String(`
+  {
+    const __eliscript_value_21 = trim(nth(lines, start));
+    {
+      let opening = __eliscript_value_21;
+      {
+        const __eliscript_value_22 = trim(strip_prefix("```", opening));
+        {
+          let language = __eliscript_value_22;
+          {
+            const __eliscript_value_23 = "";
+            {
+              let content = __eliscript_value_23;
+              {
+                const __eliscript_value_24 = start + 1;
+                {
+                  let index = __eliscript_value_24;
+                  while (index < close) {
+                    content = String(content) + String(nth(lines, index)) + String(`
 `), index = index + 1;
+                  }
+                  return String("<pre><code") + String(__eliscript_truthy8(blank_QMARK_(language)) ? "" : String(' class="language-') + String(escape_html(language)) + String('"')) + String(">") + String(escape_html(content)) + String("</code></pre>");
+                }
               }
-              return null;
-            })();
-            return String("<pre><code") + String(__eliscript_truthy8(blank_QMARK_(language)) ? "" : String(' class="language-') + String(escape_html(language)) + String('"')) + String(">") + String(escape_html(content)) + String("</code></pre>");
-          })();
-        })(start + 1);
-      })("");
-    })(trim(strip_prefix("```", opening)));
-  })(trim(nth(lines, start)));
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function list_marker_width(text) {
   return __eliscript_truthy8(unordered_item_QMARK_(text)) ? 2 : __eliscript_truthy8(ordered_item_QMARK_(text)) ? ordered_prefix_length(text) : 0;
 }
 function render_list(lines, start, end) {
-  return ((items, current, index) => {
-    (() => {
-      while (__eliscript_truthy8(index < end)) {
-        ((trimmed) => {
-          return ((width) => {
-            return __eliscript_truthy8(width > 0) ? (() => {
-              __eliscript_truthy8(current) && (items = String(items) + String("<li>") + String(render_inline(current)) + String("</li>"));
-              return current = trim(slice(width, text_length(trimmed), trimmed));
-            })() : current = String(current) + String(" ") + String(trimmed);
-          })(list_marker_width(trimmed));
-        })(trim(nth(lines, index)));
+  {
+    const __eliscript_value_25 = "";
+    const __eliscript_value_26 = null;
+    const __eliscript_value_27 = start;
+    {
+      let items = __eliscript_value_25;
+      let current = __eliscript_value_26;
+      let index = __eliscript_value_27;
+      while (index < end) {
+        {
+          const __eliscript_value_28 = trim(nth(lines, index));
+          {
+            let trimmed = __eliscript_value_28;
+            {
+              const __eliscript_value_29 = list_marker_width(trimmed);
+              {
+                let width = __eliscript_value_29;
+                width > 0 ? (() => {
+                  __eliscript_truthy8(current) && (items = String(items) + String("<li>") + String(render_inline(current)) + String("</li>"));
+                  return current = trim(slice(width, text_length(trimmed), trimmed));
+                })() : current = String(current) + String(" ") + String(trimmed);
+              }
+            }
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    __eliscript_truthy8(current) && (items = String(items) + String("<li>") + String(render_inline(current)) + String("</li>"));
-    return String(__eliscript_truthy8(unordered_item_QMARK_(trim(nth(lines, start)))) ? "<ul>" : "<ol>") + String(items) + String(__eliscript_truthy8(unordered_item_QMARK_(trim(nth(lines, start)))) ? "</ul>" : "</ol>");
-  })("", null, start);
+      __eliscript_truthy8(current) && (items = String(items) + String("<li>") + String(render_inline(current)) + String("</li>"));
+      return String(__eliscript_truthy8(unordered_item_QMARK_(trim(nth(lines, start)))) ? "<ul>" : "<ol>") + String(items) + String(__eliscript_truthy8(unordered_item_QMARK_(trim(nth(lines, start)))) ? "</ul>" : "</ol>");
+    }
+  }
 }
 function render_quote(lines, start, end) {
-  return ((parts, index) => {
-    (() => {
-      while (__eliscript_truthy8(index < end)) {
+  {
+    const __eliscript_value_30 = vector();
+    const __eliscript_value_31 = start;
+    {
+      let parts = __eliscript_value_30;
+      let index = __eliscript_value_31;
+      while (index < end) {
         parts = conj(parts, strip_prefix("> ", trim(nth(lines, index)))), index = index + 1;
       }
-      return null;
-    })();
-    return String("<blockquote><p>") + String(render_inline(join(" ", parts))) + String("</p></blockquote>");
-  })(vector(), start);
+      return String("<blockquote><p>") + String(render_inline(join(" ", parts))) + String("</p></blockquote>");
+    }
+  }
 }
 function render_heading(trimmed) {
-  return ((level) => {
-    return ((content) => {
-      return String("<h") + String(level) + String(">") + String(render_inline(content)) + String("</h") + String(level) + String(">");
-    })(trim(slice(level, text_length(trimmed), trimmed)));
-  })(heading_level(trimmed));
+  {
+    const __eliscript_value_32 = heading_level(trimmed);
+    {
+      let level = __eliscript_value_32;
+      {
+        const __eliscript_value_33 = trim(slice(level, text_length(trimmed), trimmed));
+        {
+          let content = __eliscript_value_33;
+          return String("<h") + String(level) + String(">") + String(render_inline(content)) + String("</h") + String(level) + String(">");
+        }
+      }
+    }
+  }
 }
 function render_markdown(text) {
-  return ((lines) => {
-    return ((total) => {
-      return ((blocks) => {
-        return (() => {
-          ((index) => {
-            return (() => {
-              while (__eliscript_truthy8(index < total)) {
-                ((trimmed) => {
-                  return ((level) => {
-                    return __eliscript_truthy8(blank_QMARK_(trimmed)) ? index = index + 1 : __eliscript_truthy8(starts_with_QMARK_("```", trimmed)) ? ((close) => {
-                      return ((next) => {
-                        return blocks = conj(blocks, render_fence(lines, index, close)), index = next;
-                      })(__eliscript_truthy8(close < total) ? close + 1 : total);
-                    })(fence_close(lines, index, total)) : __eliscript_truthy8(level > 0) ? (blocks = conj(blocks, render_heading(trimmed)), index = index + 1) : __eliscript_truthy8(trimmed === "---") ? (blocks = conj(blocks, "<hr>"), index = index + 1) : __eliscript_truthy8(starts_with_QMARK_("> ", trimmed)) ? ((end) => {
-                      return blocks = conj(blocks, render_quote(lines, index, end)), index = end;
-                    })(quote_end(lines, index, total)) : __eliscript_truthy8(unordered_item_QMARK_(trimmed)) ? ((end) => {
-                      return blocks = conj(blocks, render_list(lines, index, end)), index = end;
-                    })(list_end(lines, index, total, false)) : __eliscript_truthy8(ordered_item_QMARK_(trimmed)) ? ((end) => {
-                      return blocks = conj(blocks, render_list(lines, index, end)), index = end;
-                    })(list_end(lines, index, total, true)) : ((end) => {
-                      return blocks = conj(blocks, String("<p>") + String(render_inline(paragraph_text(lines, index, end))) + String("</p>")), index = end;
-                    })(paragraph_end(lines, index, total));
-                  })(heading_level(trimmed));
-                })(trim(nth(lines, index)));
+  {
+    const __eliscript_value_34 = split_lines(text);
+    {
+      let lines = __eliscript_value_34;
+      {
+        const __eliscript_value_35 = count(lines);
+        {
+          let total = __eliscript_value_35;
+          {
+            const __eliscript_value_36 = vector();
+            {
+              let blocks = __eliscript_value_36;
+              {
+                const __eliscript_value_37 = 0;
+                {
+                  let index = __eliscript_value_37;
+                  while (index < total) {
+                    {
+                      const __eliscript_value_38 = trim(nth(lines, index));
+                      {
+                        let trimmed = __eliscript_value_38;
+                        {
+                          const __eliscript_value_39 = heading_level(trimmed);
+                          {
+                            let level = __eliscript_value_39;
+                            __eliscript_truthy8(blank_QMARK_(trimmed)) ? index = index + 1 : __eliscript_truthy8(starts_with_QMARK_("```", trimmed)) ? ((close) => {
+                              return ((next) => {
+                                return blocks = conj(blocks, render_fence(lines, index, close)), index = next;
+                              })(close < total ? close + 1 : total);
+                            })(fence_close(lines, index, total)) : level > 0 ? (blocks = conj(blocks, render_heading(trimmed)), index = index + 1) : trimmed === "---" ? (blocks = conj(blocks, "<hr>"), index = index + 1) : __eliscript_truthy8(starts_with_QMARK_("> ", trimmed)) ? ((end) => {
+                              return blocks = conj(blocks, render_quote(lines, index, end)), index = end;
+                            })(quote_end(lines, index, total)) : __eliscript_truthy8(unordered_item_QMARK_(trimmed)) ? ((end) => {
+                              return blocks = conj(blocks, render_list(lines, index, end)), index = end;
+                            })(list_end(lines, index, total, false)) : __eliscript_truthy8(ordered_item_QMARK_(trimmed)) ? ((end) => {
+                              return blocks = conj(blocks, render_list(lines, index, end)), index = end;
+                            })(list_end(lines, index, total, true)) : ((end) => {
+                              return blocks = conj(blocks, String("<p>") + String(render_inline(paragraph_text(lines, index, end))) + String("</p>")), index = end;
+                            })(paragraph_end(lines, index, total));
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
               }
-              return null;
-            })();
-          })(0);
-          return join(`
+              return join(`
 `, blocks);
-        })();
-      })(vector());
-    })(count(lines));
-  })(split_lines(text));
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function render_inline(text) {
-  return ((result, plain, index, size) => {
-    (() => {
-      while (__eliscript_truthy8(index < size)) {
-        ((character) => {
-          return __eliscript_truthy8(character === "`") ? ((close) => {
-            return __eliscript_truthy8(close < 0) ? (plain = String(plain) + String(character), index = index + 1) : (result = String(result) + String(escape_html(plain)) + String("<code>") + String(escape_html(slice(index + 1, close, text))) + String("</code>"), plain = "", index = close + 1);
-          })(index_of_from("`", text, index + 1)) : __eliscript_truthy8(((__eliscript_value_18) => __eliscript_truthy8(__eliscript_value_18) ? ((__eliscript_value_19) => __eliscript_truthy8(__eliscript_value_19) ? slice(index + 1, index + 2, text) === "*" : __eliscript_value_19)(index + 1 < size) : __eliscript_value_18)(character === "*")) ? ((close) => {
-            return __eliscript_truthy8(close < 0) ? (plain = String(plain) + String(character), index = index + 1) : (result = String(result) + String(escape_html(plain)) + String("<strong>") + String(render_inline(slice(index + 2, close, text))) + String("</strong>"), plain = "", index = close + 2);
-          })(index_of_from("**", text, index + 2)) : __eliscript_truthy8(character === "*") ? ((close) => {
-            return __eliscript_truthy8(close < 0) ? (plain = String(plain) + String(character), index = index + 1) : (result = String(result) + String(escape_html(plain)) + String("<em>") + String(render_inline(slice(index + 1, close, text))) + String("</em>"), plain = "", index = close + 1);
-          })(index_of_from("*", text, index + 1)) : __eliscript_truthy8(character === "[") ? ((label_end) => {
-            return ((url_end) => {
-              return __eliscript_truthy8(((__eliscript_value_20) => __eliscript_truthy8(__eliscript_value_20) ? __eliscript_value_20 : url_end < 0)(label_end < 0)) ? (plain = String(plain) + String(character), index = index + 1) : ((label, target) => {
-                return result = String(result) + String(escape_html(plain)) + String(__eliscript_truthy8(safe_url_QMARK_(target)) ? String('<a href="') + String(escape_html(target)) + String('">') + String(render_inline(label)) + String("</a>") : render_inline(label)), plain = "", index = url_end + 1;
-              })(slice(index + 1, label_end, text), slice(label_end + 2, url_end, text));
-            })(__eliscript_truthy8(label_end < 0) ? -1 : index_of_from(")", text, label_end + 2));
-          })(index_of_from("](", text, index + 1)) : (plain = String(plain) + String(character), index = index + 1);
-        })(slice(index, index + 1, text));
+  {
+    const __eliscript_value_40 = "";
+    const __eliscript_value_41 = "";
+    const __eliscript_value_42 = 0;
+    const __eliscript_value_43 = text_length(text);
+    {
+      let result = __eliscript_value_40;
+      let plain = __eliscript_value_41;
+      let index = __eliscript_value_42;
+      let size = __eliscript_value_43;
+      while (index < size) {
+        {
+          const __eliscript_value_44 = slice(index, index + 1, text);
+          {
+            let character = __eliscript_value_44;
+            character === "`" ? ((close) => {
+              return close < 0 ? (plain = String(plain) + String(character), index = index + 1) : (result = String(result) + String(escape_html(plain)) + String("<code>") + String(escape_html(slice(index + 1, close, text))) + String("</code>"), plain = "", index = close + 1);
+            })(index_of_from("`", text, index + 1)) : character === "*" && index + 1 < size && slice(index + 1, index + 2, text) === "*" ? ((close) => {
+              return close < 0 ? (plain = String(plain) + String(character), index = index + 1) : (result = String(result) + String(escape_html(plain)) + String("<strong>") + String(render_inline(slice(index + 2, close, text))) + String("</strong>"), plain = "", index = close + 2);
+            })(index_of_from("**", text, index + 2)) : character === "*" ? ((close) => {
+              return close < 0 ? (plain = String(plain) + String(character), index = index + 1) : (result = String(result) + String(escape_html(plain)) + String("<em>") + String(render_inline(slice(index + 1, close, text))) + String("</em>"), plain = "", index = close + 1);
+            })(index_of_from("*", text, index + 1)) : character === "[" ? ((label_end) => {
+              return ((url_end) => {
+                return label_end < 0 || url_end < 0 ? (plain = String(plain) + String(character), index = index + 1) : ((label, target) => {
+                  return result = String(result) + String(escape_html(plain)) + String(__eliscript_truthy8(safe_url_QMARK_(target)) ? String('<a href="') + String(escape_html(target)) + String('">') + String(render_inline(label)) + String("</a>") : render_inline(label)), plain = "", index = url_end + 1;
+                })(slice(index + 1, label_end, text), slice(label_end + 2, url_end, text));
+              })(label_end < 0 ? -1 : index_of_from(")", text, label_end + 2));
+            })(index_of_from("](", text, index + 1)) : (plain = String(plain) + String(character), index = index + 1);
+          }
+        }
       }
-      return null;
-    })();
-    return String(result) + String(escape_html(plain));
-  })("", "", 0, text_length(text));
+      return String(result) + String(escape_html(plain));
+    }
+  }
 }
 
 // examples/dogfood/dist/src/builder/content.mjs
@@ -5366,155 +5942,262 @@ var __GT_Post = (id, slug, title, summary, body, published_at, updated_at, autho
   return Post["create"](id, slug, title, summary, body, published_at, updated_at, authors, tags, cover, draft, pinned_weight, provenance, aliases, comment_channels);
 };
 function markdown_names(directory) {
-  return ((names, result, index) => {
-    (() => {
-      while (__eliscript_truthy9(index < count(names))) {
-        ((name) => {
-          return __eliscript_truthy9(ends_with_QMARK_(".md", name)) ? result = conj(result, name) : null;
-        })(nth(names, index));
+  {
+    const __eliscript_value_1 = import_node_fs.readdirSync(directory);
+    const __eliscript_value_2 = vector();
+    const __eliscript_value_3 = 0;
+    {
+      let names = __eliscript_value_1;
+      let result = __eliscript_value_2;
+      let index = __eliscript_value_3;
+      while (index < count(names)) {
+        {
+          const __eliscript_value_4 = nth(names, index);
+          {
+            let name = __eliscript_value_4;
+            __eliscript_truthy9(ends_with_QMARK_(".md", name)) && (result = conj(result, name));
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return sort(result);
-  })(import_node_fs.readdirSync(directory), vector(), 0);
+      return sort(result);
+    }
+  }
 }
 function front_matter_close(lines) {
-  return ((index, close, total) => {
-    (() => {
-      while (__eliscript_truthy9(((__eliscript_value_1) => __eliscript_truthy9(__eliscript_value_1) ? close < 0 : __eliscript_value_1)(index < total))) {
-        __eliscript_truthy9(trim(nth(lines, index)) === "---") && (close = index);
+  {
+    const __eliscript_value_5 = 1;
+    const __eliscript_value_6 = -1;
+    const __eliscript_value_7 = count(lines);
+    {
+      let index = __eliscript_value_5;
+      let close = __eliscript_value_6;
+      let total = __eliscript_value_7;
+      while (index < total && close < 0) {
+        trim(nth(lines, index)) === "---" && (close = index);
         index = index + 1;
       }
-      return null;
-    })();
-    return close;
-  })(1, -1, count(lines));
+      return close;
+    }
+  }
 }
 function date_value(text) {
   return slice(0, 10, trim(text));
 }
 function body_text(lines, start) {
-  return ((parts, index, total) => {
-    (() => {
-      while (__eliscript_truthy9(index < total)) {
+  {
+    const __eliscript_value_8 = vector();
+    const __eliscript_value_9 = start;
+    const __eliscript_value_10 = count(lines);
+    {
+      let parts = __eliscript_value_8;
+      let index = __eliscript_value_9;
+      let total = __eliscript_value_10;
+      while (index < total) {
         parts = conj(parts, nth(lines, index)), index = index + 1;
       }
-      return null;
-    })();
-    return join(`
+      return join(`
 `, parts);
-  })(vector(), start, count(lines));
+    }
+  }
 }
 function build_post(path, relative, lines, close, fields) {
-  return ((identifier) => {
-    return ((title) => {
-      return ((published) => {
-        return ((updated_field) => {
-          return ((slug_field) => {
-            return ((slug) => {
-              return ((authors) => {
-                return ((tags) => {
-                  return ((aliases) => {
-                    return ((draft) => {
-                      return ((body) => {
-                        return __GT_Post(identifier, slug, title, field(fields, "description", ""), body, published, __eliscript_truthy9(updated_field === null) ? published : date_value(updated_field), __eliscript_truthy9(count(authors) > 0) ? authors : vector("dogfood"), tags, field(fields, "cover", null), draft, parse_integer(field(fields, "pinned", "0"), 0), hashMap(keyword("provider"), "markdown", keyword("path"), relative), aliases, vector());
-                      })(render_markdown(body_text(lines, close + 1)));
-                    })(field(fields, "draft", "false") === "true");
-                  })(parse_list(field(fields, "aliases", "")));
-                })(parse_list(field(fields, "tags", "")));
-              })(parse_list(field(fields, "authors", "")));
-            })(__eliscript_truthy9(slug_field === null) ? slugify(without_suffix(".md", basename(path))) : slug_field);
-          })(field(fields, "slug", null));
-        })(field(fields, "updated", null));
-      })(date_value(require_field(fields, "date", path)));
-    })(require_field(fields, "title", path));
-  })(require_field(fields, "id", path));
+  {
+    const __eliscript_value_11 = require_field(fields, "id", path);
+    {
+      let identifier = __eliscript_value_11;
+      {
+        const __eliscript_value_12 = require_field(fields, "title", path);
+        {
+          let title = __eliscript_value_12;
+          {
+            const __eliscript_value_13 = date_value(require_field(fields, "date", path));
+            {
+              let published = __eliscript_value_13;
+              {
+                const __eliscript_value_14 = field(fields, "updated", null);
+                {
+                  let updated_field = __eliscript_value_14;
+                  {
+                    const __eliscript_value_15 = field(fields, "slug", null);
+                    {
+                      let slug_field = __eliscript_value_15;
+                      {
+                        const __eliscript_value_16 = slug_field === null ? slugify(without_suffix(".md", basename(path))) : slug_field;
+                        {
+                          let slug = __eliscript_value_16;
+                          {
+                            const __eliscript_value_17 = parse_list(field(fields, "authors", ""));
+                            {
+                              let authors = __eliscript_value_17;
+                              {
+                                const __eliscript_value_18 = parse_list(field(fields, "tags", ""));
+                                {
+                                  let tags = __eliscript_value_18;
+                                  {
+                                    const __eliscript_value_19 = parse_list(field(fields, "aliases", ""));
+                                    {
+                                      let aliases = __eliscript_value_19;
+                                      {
+                                        const __eliscript_value_20 = field(fields, "draft", "false") === "true";
+                                        {
+                                          let draft = __eliscript_value_20;
+                                          {
+                                            const __eliscript_value_21 = render_markdown(body_text(lines, close + 1));
+                                            {
+                                              let body = __eliscript_value_21;
+                                              return __GT_Post(identifier, slug, title, field(fields, "description", ""), body, published, updated_field === null ? published : date_value(updated_field), count(authors) > 0 ? authors : vector("dogfood"), tags, field(fields, "cover", null), draft, parse_integer(field(fields, "pinned", "0"), 0), hashMap(keyword("provider"), "markdown", keyword("path"), relative), aliases, vector());
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function read_posts(root, directory) {
-  return ((absolute) => {
-    return ((names) => {
-      return ((posts) => {
-        return ((index) => {
-          return (() => {
-            (() => {
-              while (__eliscript_truthy9(index < count(names))) {
-                ((name) => {
-                  return ((path) => {
-                    return ((relative) => {
-                      return ((lines) => {
-                        return (() => {
-                          __eliscript_truthy9(count(lines) < 3) && fail2("DOGFOOD-CONTENT-002", String(relative) + String(": file is too short to contain front matter"));
-                          __eliscript_truthy9(!__eliscript_truthy9(trim(nth(lines, 0)) === "---")) && fail2("DOGFOOD-CONTENT-002", String(relative) + String(": file must open with a --- front matter block"));
-                          return ((close) => {
-                            __eliscript_truthy9(close < 0) && fail2("DOGFOOD-CONTENT-002", String(relative) + String(": front matter block is not terminated"));
-                            return posts = conj(posts, build_post(path, relative, lines, close, parse_fields(lines, 1, close)));
-                          })(front_matter_close(lines));
-                        })();
-                      })(split_lines(import_node_fs.readFileSync(path, "utf8")));
-                    })(String(directory) + String("/") + String(name));
-                  })(Path.join(absolute, name));
-                })(nth(names, index));
-                index = index + 1;
+  {
+    const __eliscript_value_22 = Path.join(root, directory);
+    {
+      let absolute = __eliscript_value_22;
+      {
+        const __eliscript_value_23 = markdown_names(absolute);
+        {
+          let names = __eliscript_value_23;
+          {
+            const __eliscript_value_24 = vector();
+            {
+              let posts = __eliscript_value_24;
+              {
+                const __eliscript_value_25 = 0;
+                {
+                  let index = __eliscript_value_25;
+                  while (index < count(names)) {
+                    {
+                      const __eliscript_value_26 = nth(names, index);
+                      {
+                        let name = __eliscript_value_26;
+                        {
+                          const __eliscript_value_27 = Path.join(absolute, name);
+                          {
+                            let path = __eliscript_value_27;
+                            {
+                              const __eliscript_value_28 = String(directory) + String("/") + String(name);
+                              {
+                                let relative = __eliscript_value_28;
+                                {
+                                  const __eliscript_value_29 = split_lines(import_node_fs.readFileSync(path, "utf8"));
+                                  {
+                                    let lines = __eliscript_value_29;
+                                    count(lines) < 3 && fail2("DOGFOOD-CONTENT-002", String(relative) + String(": file is too short to contain front matter"));
+                                    !(trim(nth(lines, 0)) === "---") && fail2("DOGFOOD-CONTENT-002", String(relative) + String(": file must open with a --- front matter block"));
+                                    {
+                                      const __eliscript_value_30 = front_matter_close(lines);
+                                      {
+                                        let close = __eliscript_value_30;
+                                        close < 0 && fail2("DOGFOOD-CONTENT-002", String(relative) + String(": front matter block is not terminated"));
+                                        posts = conj(posts, build_post(path, relative, lines, close, parse_fields(lines, 1, close)));
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                    index = index + 1;
+                  }
+                  return posts;
+                }
               }
-              return null;
-            })();
-            return posts;
-          })();
-        })(0);
-      })(vector());
-    })(markdown_names(absolute));
-  })(Path.join(root, directory));
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function duplicate_in_QMARK_(posts, field2, label) {
-  return ((index) => {
-    return (() => {
-      while (__eliscript_truthy9(index < count(posts))) {
-        ((earlier, value) => {
-          return (() => {
-            while (__eliscript_truthy9(earlier < index)) {
-              __eliscript_truthy9(get(nth(posts, earlier), field2) === value) && fail2("DOGFOOD-IDENTITY-001", String("duplicate ") + String(label) + String(' "') + String(value) + String('" in ') + String(get(nth(posts, index)["provenance"], keyword("path"), "")));
+  {
+    const __eliscript_value_31 = 0;
+    {
+      let index = __eliscript_value_31;
+      while (index < count(posts)) {
+        {
+          const __eliscript_value_32 = 0;
+          const __eliscript_value_33 = get(nth(posts, index), field2);
+          {
+            let earlier = __eliscript_value_32;
+            let value = __eliscript_value_33;
+            while (earlier < index) {
+              get(nth(posts, earlier), field2) === value && fail2("DOGFOOD-IDENTITY-001", String("duplicate ") + String(label) + String(' "') + String(value) + String('" in ') + String(get(nth(posts, index)["provenance"], keyword("path"), "")));
               earlier = earlier + 1;
             }
-            return null;
-          })();
-        })(0, get(nth(posts, index), field2));
+          }
+        }
         index = index + 1;
       }
       return null;
-    })();
-  })(0);
+    }
+  }
 }
 function check_aliases(posts) {
-  return ((canonical, seen, index) => {
-    (() => {
-      while (__eliscript_truthy9(index < count(posts))) {
+  {
+    const __eliscript_value_34 = hashMap();
+    const __eliscript_value_35 = hashMap();
+    const __eliscript_value_36 = 0;
+    {
+      let canonical = __eliscript_value_34;
+      let seen = __eliscript_value_35;
+      let index = __eliscript_value_36;
+      while (index < count(posts)) {
         canonical = assoc(assoc(canonical, nth(posts, index)["slug"], true), nth(posts, index)["id"], true);
         index = index + 1;
       }
-      return null;
-    })();
-    index = 0;
-    return (() => {
-      while (__eliscript_truthy9(index < count(posts))) {
-        ((aliases, alias_index) => {
-          return (() => {
-            while (__eliscript_truthy9(alias_index < count(aliases))) {
-              ((alias) => {
-                __eliscript_truthy9(get(canonical, alias, false)) && fail2("DOGFOOD-IDENTITY-002", String('alias "') + String(alias) + String('" collides with a canonical slug or id'));
-                __eliscript_truthy9(get(seen, alias, false)) && fail2("DOGFOOD-IDENTITY-003", String('duplicate alias "') + String(alias) + String('"'));
-                return seen = assoc(seen, alias, true);
-              })(nth(aliases, alias_index));
+      index = 0;
+      while (index < count(posts)) {
+        {
+          const __eliscript_value_37 = nth(posts, index)["aliases"];
+          const __eliscript_value_38 = 0;
+          {
+            let aliases = __eliscript_value_37;
+            let alias_index = __eliscript_value_38;
+            while (alias_index < count(aliases)) {
+              {
+                const __eliscript_value_39 = nth(aliases, alias_index);
+                {
+                  let alias = __eliscript_value_39;
+                  __eliscript_truthy9(get(canonical, alias, false)) && fail2("DOGFOOD-IDENTITY-002", String('alias "') + String(alias) + String('" collides with a canonical slug or id'));
+                  __eliscript_truthy9(get(seen, alias, false)) && fail2("DOGFOOD-IDENTITY-003", String('duplicate alias "') + String(alias) + String('"'));
+                  seen = assoc(seen, alias, true);
+                }
+              }
               alias_index = alias_index + 1;
             }
-            return null;
-          })();
-        })(nth(posts, index)["aliases"], 0);
+          }
+        }
         index = index + 1;
       }
       return null;
-    })();
-  })(hashMap(), hashMap(), 0);
+    }
+  }
 }
 function check_identity(posts) {
   duplicate_in_QMARK_(posts, keyword("id"), "canonical id");
@@ -5523,7 +6206,6 @@ function check_identity(posts) {
 }
 
 // examples/dogfood/dist/src/support/github.mjs
-var __eliscript_truthy10 = (value) => value !== false && value != null;
 var maximum_pages = 100;
 function append_all2(target, values) {
   return reduce(values, (accumulator, value) => {
@@ -5531,40 +6213,59 @@ function append_all2(target, values) {
   }, target);
 }
 function link_target(link) {
-  return ((start) => {
-    return __eliscript_truthy10(start < 0) ? null : ((end) => {
-      return __eliscript_truthy10(end < 0) ? null : slice(start + 1, end, link);
-    })(index_of(">", link));
-  })(index_of("<", link));
+  {
+    const __eliscript_value_1 = index_of("<", link);
+    {
+      let start = __eliscript_value_1;
+      return start < 0 ? null : ((end) => {
+        return end < 0 ? null : slice(start + 1, end, link);
+      })(index_of(">", link));
+    }
+  }
 }
 function next_link(headers) {
-  return ((link) => {
-    return ((parts) => {
-      return ((index) => {
-        return ((found) => {
-          return (() => {
-            (() => {
-              while (__eliscript_truthy10(index < count(parts))) {
-                ((part) => {
-                  return __eliscript_truthy10(((__eliscript_value_1) => __eliscript_truthy10(__eliscript_value_1) ? index_of('rel="next"', part) >= 0 : __eliscript_value_1)(found === null)) ? found = link_target(part) : null;
-                })(nth(parts, index));
-                index = index + 1;
+  {
+    const __eliscript_value_2 = headers["link"] ?? null;
+    {
+      let link = __eliscript_value_2;
+      {
+        const __eliscript_value_3 = link === null ? vector() : split_on(",", link);
+        {
+          let parts = __eliscript_value_3;
+          {
+            const __eliscript_value_4 = 0;
+            {
+              let index = __eliscript_value_4;
+              {
+                const __eliscript_value_5 = null;
+                {
+                  let found = __eliscript_value_5;
+                  while (index < count(parts)) {
+                    {
+                      const __eliscript_value_6 = nth(parts, index);
+                      {
+                        let part = __eliscript_value_6;
+                        found === null && index_of('rel="next"', part) >= 0 && (found = link_target(part));
+                      }
+                    }
+                    index = index + 1;
+                  }
+                  return found;
+                }
               }
-              return null;
-            })();
-            return found;
-          })();
-        })(null);
-      })(0);
-    })(__eliscript_truthy10(link === null) ? vector() : split_on(",", link));
-  })(headers["link"] ?? null);
+            }
+          }
+        }
+      }
+    }
+  }
 }
 async function fetch_paginated(transport, url, label) {
   return await (async (records, pages, next) => {
     await (async () => {
-      while (__eliscript_truthy10(((__eliscript_value_2) => __eliscript_truthy10(__eliscript_value_2) ? pages < maximum_pages : __eliscript_value_2)(!__eliscript_truthy10(next === null)))) {
+      while (!(next === null) && pages < maximum_pages) {
         ((response) => {
-          __eliscript_truthy10(!__eliscript_truthy10((response["status"] ?? 0) === 200)) && fail2("DOGFOOD-GITHUB-001", String(label) + String(" failed with status ") + String(response["status"] ?? "unknown"));
+          !((response["status"] ?? 0) === 200) && fail2("DOGFOOD-GITHUB-001", String(label) + String(" failed with status ") + String(response["status"] ?? "unknown"));
           records = append_all2(records, response["body"] ?? vector());
           next = next_link(response["headers"] ?? {});
           return pages = pages + 1;
@@ -5572,67 +6273,90 @@ async function fetch_paginated(transport, url, label) {
       }
       return null;
     })();
-    __eliscript_truthy10(!__eliscript_truthy10(next === null)) && fail2("DOGFOOD-GITHUB-002", String(label) + String(" exceeded ") + String(maximum_pages) + String(" pages"));
+    !(next === null) && fail2("DOGFOOD-GITHUB-002", String(label) + String(" exceeded ") + String(maximum_pages) + String(" pages"));
     return records;
   })(vector(), 0, url);
 }
 function list_url(repository, resource, page_size, label) {
-  return String("https://api.github.com/repos/") + String(repository) + String("/") + String(resource) + String("?state=all&per_page=") + String(page_size) + String(__eliscript_truthy10(label === null) ? "" : String("&labels=") + String(label));
+  return String("https://api.github.com/repos/") + String(repository) + String("/") + String(resource) + String("?state=all&per_page=") + String(page_size) + String(label === null ? "" : String("&labels=") + String(label));
 }
 
 // examples/dogfood/dist/src/builder/comments.mjs
-var __eliscript_truthy11 = (value) => value !== false && value != null;
+var __eliscript_truthy10 = (value) => value !== false && value != null;
 var default_page_size = 100;
 function comment_list_url(repository, number, page_size) {
   return String("https://api.github.com/repos/") + String(repository) + String("/issues/") + String(number) + String("/comments?per_page=") + String(page_size);
 }
 function normalize_comment(record) {
-  return ((user) => {
-    return hashMap(keyword("id"), record["id"], keyword("author"), hashMap(keyword("login"), user["login"] ?? "unknown", keyword("url"), user["html_url"] ?? null), keyword("body"), render_markdown(record["body"] ?? ""), keyword("created-at"), record["created_at"] ?? "", keyword("updated-at"), record["updated_at"] ?? "", keyword("url"), record["html_url"] ?? null, keyword("replies"), vector());
-  })(record["user"] ?? {});
+  {
+    const __eliscript_value_1 = record["user"] ?? {};
+    {
+      let user = __eliscript_value_1;
+      return hashMap(keyword("id"), record["id"], keyword("author"), hashMap(keyword("login"), user["login"] ?? "unknown", keyword("url"), user["html_url"] ?? null), keyword("body"), render_markdown(record["body"] ?? ""), keyword("created-at"), record["created_at"] ?? "", keyword("updated-at"), record["updated_at"] ?? "", keyword("url"), record["html_url"] ?? null, keyword("replies"), vector());
+    }
+  }
 }
 function normalize_comments(records) {
   return append_all2(vector(), map_comments(records));
 }
 function map_comments(records) {
-  return ((result, index) => {
-    (() => {
-      while (__eliscript_truthy11(index < count(records))) {
+  {
+    const __eliscript_value_2 = vector();
+    const __eliscript_value_3 = 0;
+    {
+      let result = __eliscript_value_2;
+      let index = __eliscript_value_3;
+      while (index < count(records)) {
         result = conj(result, normalize_comment(nth(records, index)));
         index = index + 1;
       }
-      return null;
-    })();
-    return result;
-  })(vector(), 0);
+      return result;
+    }
+  }
 }
 function freshness(items) {
-  return ((latest, index) => {
-    (() => {
-      while (__eliscript_truthy11(index < count(items))) {
-        ((updated) => {
-          return __eliscript_truthy11(updated > latest) ? latest = String(updated) : null;
-        })(get(nth(items, index), keyword("updated-at"), ""));
+  {
+    const __eliscript_value_4 = "";
+    const __eliscript_value_5 = 0;
+    {
+      let latest = __eliscript_value_4;
+      let index = __eliscript_value_5;
+      while (index < count(items)) {
+        {
+          const __eliscript_value_6 = get(nth(items, index), keyword("updated-at"), "");
+          {
+            let updated = __eliscript_value_6;
+            updated > latest && (latest = String(updated));
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return latest;
-  })("", 0);
+      return latest;
+    }
+  }
 }
 function channel_declaration(comments, kind) {
-  return ((declarations, index, found) => {
-    (() => {
-      while (__eliscript_truthy11(index < count(declarations))) {
-        ((declaration) => {
-          return __eliscript_truthy11(((__eliscript_value_1) => __eliscript_truthy11(__eliscript_value_1) ? get(declaration, keyword("kind"), keyword("none")) === kind : __eliscript_value_1)(get(declaration, keyword("enabled"), false))) ? found = declaration : null;
-        })(nth(declarations, index));
+  {
+    const __eliscript_value_7 = get(comments, keyword("channels"), vector());
+    const __eliscript_value_8 = 0;
+    const __eliscript_value_9 = null;
+    {
+      let declarations = __eliscript_value_7;
+      let index = __eliscript_value_8;
+      let found = __eliscript_value_9;
+      while (index < count(declarations)) {
+        {
+          const __eliscript_value_10 = nth(declarations, index);
+          {
+            let declaration = __eliscript_value_10;
+            __eliscript_truthy10(((__eliscript_value_11) => __eliscript_truthy10(__eliscript_value_11) ? get(declaration, keyword("kind"), keyword("none")) === kind : __eliscript_value_11)(get(declaration, keyword("enabled"), false))) && (found = declaration);
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(get(comments, keyword("channels"), vector()), 0, null);
+      return found;
+    }
+  }
 }
 function live_channel(declaration, repository, number) {
   return hashMap(keyword("id"), get(declaration, keyword("id"), keyword("issue-native")), keyword("kind"), get(declaration, keyword("kind"), keyword("issue")), keyword("mode"), keyword("live"), keyword("binding"), hashMap(keyword("repository"), repository, keyword("number"), number), keyword("count"), null, keyword("updated-at"), null, keyword("items"), vector(), keyword("capabilities"), vector(keyword("read"), keyword("reply"), keyword("reactions")));
@@ -5658,148 +6382,225 @@ async function snapshot_channel(options) {
 }
 async function native_channel(options) {
   return await (async (declaration) => {
-    return __eliscript_truthy11(declaration === null) ? null : __eliscript_truthy11(get(declaration, keyword("mode"), keyword("snapshot")) === keyword("live")) ? live_channel(declaration, get(options, keyword("repository")), get(options, keyword("number"))) : await snapshot_channel(assoc(options, keyword("declaration"), declaration));
+    return declaration === null ? null : get(declaration, keyword("mode"), keyword("snapshot")) === keyword("live") ? live_channel(declaration, get(options, keyword("repository")), get(options, keyword("number"))) : await snapshot_channel(assoc(options, keyword("declaration"), declaration));
   })(channel_declaration(get(options, keyword("comments")), get(options, keyword("kind"), keyword("issue"))));
 }
 
 // examples/dogfood/dist/src/builder/issues.mjs
-var __eliscript_truthy12 = (value) => value !== false && value != null;
+var __eliscript_truthy11 = (value) => value !== false && value != null;
 var default_page_size2 = 100;
 function normalize_login(login) {
   return to_lowercase(trim(String(login)));
 }
 function denied_identity_QMARK_(author) {
-  return ((__eliscript_value_1) => __eliscript_truthy12(__eliscript_value_1) ? __eliscript_value_1 : normalize_login(author["login"] ?? "") === "ghost")(!__eliscript_truthy12((author["type"] ?? "User") === "User"));
+  return !((author["type"] ?? "User") === "User") || normalize_login(author["login"] ?? "") === "ghost";
 }
 function publisher_matches_QMARK_(publisher, author) {
-  return ((pinned) => {
-    return ((__eliscript_value_2) => __eliscript_truthy12(__eliscript_value_2) ? ((__eliscript_value_3) => __eliscript_truthy12(__eliscript_value_3) ? __eliscript_value_3 : pinned === (author["id"] ?? null))(pinned === null) : __eliscript_value_2)(normalize_login(get(publisher, keyword("login"), "")) === normalize_login(author["login"] ?? ""));
-  })(get(publisher, keyword("id"), null));
+  {
+    const __eliscript_value_1 = get(publisher, keyword("id"), null);
+    {
+      let pinned = __eliscript_value_1;
+      return normalize_login(get(publisher, keyword("login"), "")) === normalize_login(author["login"] ?? "") && (pinned === null || pinned === (author["id"] ?? null));
+    }
+  }
 }
 function publisher_set(publishing) {
-  return ((owner, coauthors, result) => {
-    __eliscript_truthy12(!__eliscript_truthy12(owner === null)) && (result = conj(result, owner));
-    ((index) => {
-      return (() => {
-        while (__eliscript_truthy12(index < count(coauthors))) {
-          result = conj(result, nth(coauthors, index));
-          index = index + 1;
+  {
+    const __eliscript_value_2 = get(publishing, keyword("owner"), null);
+    const __eliscript_value_3 = get(publishing, keyword("coauthors"), vector());
+    const __eliscript_value_4 = vector();
+    {
+      let owner = __eliscript_value_2;
+      let coauthors = __eliscript_value_3;
+      let result = __eliscript_value_4;
+      !(owner === null) && (result = conj(result, owner));
+      {
+        const __eliscript_value_5 = 0;
+        {
+          let index = __eliscript_value_5;
+          while (index < count(coauthors)) {
+            result = conj(result, nth(coauthors, index));
+            index = index + 1;
+          }
         }
-        return null;
-      })();
-    })(0);
-    return result;
-  })(get(publishing, keyword("owner"), null), get(publishing, keyword("coauthors"), vector()), vector());
+      }
+      return result;
+    }
+  }
 }
 function authorized_author_QMARK_(publishers, author) {
-  return ((__eliscript_value_4) => __eliscript_truthy12(__eliscript_value_4) ? ((index, found) => {
-    (() => {
-      while (__eliscript_truthy12(index < count(publishers))) {
-        __eliscript_truthy12(publisher_matches_QMARK_(nth(publishers, index), author)) && (found = true);
-        index = index + 1;
-      }
-      return null;
-    })();
+  return ((__eliscript_value_6) => __eliscript_truthy11(__eliscript_value_6) ? ((index, found) => {
+    while (index < count(publishers)) {
+      __eliscript_truthy11(publisher_matches_QMARK_(nth(publishers, index), author)) && (found = true);
+      index = index + 1;
+    }
     return found;
-  })(0, false) : __eliscript_value_4)(!__eliscript_truthy12(denied_identity_QMARK_(author)));
+  })(0, false) : __eliscript_value_6)(!__eliscript_truthy11(denied_identity_QMARK_(author)));
 }
 function identity_after(marker, body) {
-  return ((lines) => {
-    return ((index) => {
-      return ((found) => {
-        return (() => {
-          (() => {
-            while (__eliscript_truthy12(((__eliscript_value_5) => __eliscript_truthy12(__eliscript_value_5) ? found === null : __eliscript_value_5)(index < count(lines)))) {
-              ((line) => {
-                return __eliscript_truthy12(starts_with_QMARK_(marker, line)) ? found = trim(slice(text_length(marker), text_length(line), line)) : null;
-              })(trim(nth(lines, index)));
-              index = index + 1;
+  {
+    const __eliscript_value_7 = split_lines(body);
+    {
+      let lines = __eliscript_value_7;
+      {
+        const __eliscript_value_8 = 0;
+        {
+          let index = __eliscript_value_8;
+          {
+            const __eliscript_value_9 = null;
+            {
+              let found = __eliscript_value_9;
+              while (index < count(lines) && found === null) {
+                {
+                  const __eliscript_value_10 = trim(nth(lines, index));
+                  {
+                    let line = __eliscript_value_10;
+                    __eliscript_truthy11(starts_with_QMARK_(marker, line)) && (found = trim(slice(text_length(marker), text_length(line), line)));
+                  }
+                }
+                index = index + 1;
+              }
+              return found;
             }
-            return null;
-          })();
-          return found;
-        })();
-      })(null);
-    })(0);
-  })(split_lines(body));
+          }
+        }
+      }
+    }
+  }
 }
 function known_identity_QMARK_(identities, value) {
-  return ((index, found) => {
-    (() => {
-      while (__eliscript_truthy12(((__eliscript_value_6) => __eliscript_truthy12(__eliscript_value_6) ? !__eliscript_truthy12(found) : __eliscript_value_6)(index < count(identities)))) {
-        __eliscript_truthy12(nth(identities, index) === value) && (found = true);
+  {
+    const __eliscript_value_11 = 0;
+    const __eliscript_value_12 = false;
+    {
+      let index = __eliscript_value_11;
+      let found = __eliscript_value_12;
+      while (index < count(identities) && !__eliscript_truthy11(found)) {
+        nth(identities, index) === value && (found = true);
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(0, false);
+      return found;
+    }
+  }
 }
 function carrier_adapter(adapters, author, body, identities) {
-  return ((index, found) => {
-    (() => {
-      while (__eliscript_truthy12(((__eliscript_value_7) => __eliscript_truthy12(__eliscript_value_7) ? found === null : __eliscript_value_7)(index < count(adapters)))) {
-        ((adapter) => {
-          return ((principal) => {
-            return ((marker) => {
-              return __eliscript_truthy12(((__eliscript_value_8) => __eliscript_truthy12(__eliscript_value_8) ? ((__eliscript_value_9) => __eliscript_truthy12(__eliscript_value_9) ? ((__eliscript_value_10) => __eliscript_truthy12(__eliscript_value_10) ? normalize_login(principal) === normalize_login(author["login"] ?? "") : __eliscript_value_10)(!__eliscript_truthy12(marker === null)) : __eliscript_value_9)(!__eliscript_truthy12(principal === null)) : __eliscript_value_8)(get(adapter, keyword("carrier-kind"), keyword("none")) === keyword("issue"))) ? ((identity2) => {
-                return __eliscript_truthy12(((__eliscript_value_11) => __eliscript_truthy12(__eliscript_value_11) ? known_identity_QMARK_(identities, identity2) : __eliscript_value_11)(!__eliscript_truthy12(identity2 === null))) ? found = get(adapter, keyword("id"), null) : null;
-              })(identity_after(marker, body)) : null;
-            })(get(adapter, keyword("marker"), null));
-          })(get(adapter, keyword("principal"), null));
-        })(nth(adapters, index));
+  {
+    const __eliscript_value_13 = 0;
+    const __eliscript_value_14 = null;
+    {
+      let index = __eliscript_value_13;
+      let found = __eliscript_value_14;
+      while (index < count(adapters) && found === null) {
+        {
+          const __eliscript_value_15 = nth(adapters, index);
+          {
+            let adapter = __eliscript_value_15;
+            {
+              const __eliscript_value_16 = get(adapter, keyword("principal"), null);
+              {
+                let principal = __eliscript_value_16;
+                {
+                  const __eliscript_value_17 = get(adapter, keyword("marker"), null);
+                  {
+                    let marker = __eliscript_value_17;
+                    get(adapter, keyword("carrier-kind"), keyword("none")) === keyword("issue") && !(principal === null) && !(marker === null) && normalize_login(principal) === normalize_login(author["login"] ?? "") && ((identity2) => {
+                      return __eliscript_truthy11(((__eliscript_value_18) => __eliscript_truthy11(__eliscript_value_18) ? known_identity_QMARK_(identities, identity2) : __eliscript_value_18)(!(identity2 === null))) ? found = get(adapter, keyword("id"), null) : null;
+                    })(identity_after(marker, body));
+                  }
+                }
+              }
+            }
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(0, null);
+      return found;
+    }
+  }
 }
 function metadata_block(lines) {
-  return ((index, start, end, total) => {
-    (() => {
-      while (__eliscript_truthy12(((__eliscript_value_12) => __eliscript_truthy12(__eliscript_value_12) ? end < 0 : __eliscript_value_12)(index < total))) {
-        ((trimmed) => {
-          return __eliscript_truthy12(((__eliscript_value_13) => __eliscript_truthy12(__eliscript_value_13) ? trimmed === "```dogfood" : __eliscript_value_13)(start < 0)) ? start = index : __eliscript_truthy12(((__eliscript_value_14) => __eliscript_truthy12(__eliscript_value_14) ? trimmed === "```" : __eliscript_value_14)(start >= 0)) ? end = index : null;
-        })(trim(nth(lines, index)));
+  {
+    const __eliscript_value_19 = 0;
+    const __eliscript_value_20 = -1;
+    const __eliscript_value_21 = -1;
+    const __eliscript_value_22 = count(lines);
+    {
+      let index = __eliscript_value_19;
+      let start = __eliscript_value_20;
+      let end = __eliscript_value_21;
+      let total = __eliscript_value_22;
+      while (index < total && end < 0) {
+        {
+          const __eliscript_value_23 = trim(nth(lines, index));
+          {
+            let trimmed = __eliscript_value_23;
+            start < 0 && trimmed === "```dogfood" ? start = index : start >= 0 && trimmed === "```" && (end = index);
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return __eliscript_truthy12(((__eliscript_value_15) => __eliscript_truthy12(__eliscript_value_15) ? __eliscript_value_15 : end < 0)(start < 0)) ? null : vector(start, end);
-  })(0, -1, -1, count(lines));
+      return start < 0 || end < 0 ? null : vector(start, end);
+    }
+  }
 }
 function issue_fields(body, path) {
-  return ((lines) => {
-    return ((block) => {
-      return __eliscript_truthy12(block === null) ? fail2("DOGFOOD-ISSUES-001", String(path) + String(": issue body has no ```dogfood metadata block")) : parse_fields(lines, nth(block, 0, null) + 1, nth(block, 1, null));
-    })(metadata_block(lines));
-  })(split_lines(body));
+  {
+    const __eliscript_value_24 = split_lines(body);
+    {
+      let lines = __eliscript_value_24;
+      {
+        const __eliscript_value_25 = metadata_block(lines);
+        {
+          let block = __eliscript_value_25;
+          return block === null ? fail2("DOGFOOD-ISSUES-001", String(path) + String(": issue body has no ```dogfood metadata block")) : parse_fields(lines, nth(block, 0, null) + 1, nth(block, 1, null));
+        }
+      }
+    }
+  }
 }
 function issue_markdown(body) {
-  return ((lines) => {
-    return ((block) => {
-      return ((start) => {
-        return ((parts) => {
-          return ((index) => {
-            return ((total) => {
-              return (() => {
-                (() => {
-                  while (__eliscript_truthy12(index < total)) {
-                    parts = conj(parts, nth(lines, index));
-                    index = index + 1;
-                  }
-                  return null;
-                })();
-                return join(`
+  {
+    const __eliscript_value_26 = split_lines(body);
+    {
+      let lines = __eliscript_value_26;
+      {
+        const __eliscript_value_27 = metadata_block(lines);
+        {
+          let block = __eliscript_value_27;
+          {
+            const __eliscript_value_28 = block === null ? 0 : nth(block, 1, null) + 1;
+            {
+              let start = __eliscript_value_28;
+              {
+                const __eliscript_value_29 = vector();
+                {
+                  let parts = __eliscript_value_29;
+                  {
+                    const __eliscript_value_30 = start;
+                    {
+                      let index = __eliscript_value_30;
+                      {
+                        const __eliscript_value_31 = count(lines);
+                        {
+                          let total = __eliscript_value_31;
+                          while (index < total) {
+                            parts = conj(parts, nth(lines, index));
+                            index = index + 1;
+                          }
+                          return join(`
 `, parts);
-              })();
-            })(count(lines));
-          })(start);
-        })(vector());
-      })(__eliscript_truthy12(block === null) ? 0 : nth(block, 1, null) + 1);
-    })(metadata_block(lines));
-  })(split_lines(body));
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function page_size(source) {
   return get(source, keyword("page-size"), default_page_size2);
@@ -5811,30 +6612,70 @@ async function fetch_issues(transport, url) {
   return await fetch_paginated(transport, url, "GitHub issue listing");
 }
 function issue_url(source, record) {
-  return ((explicit) => {
-    return __eliscript_truthy12(explicit === null) ? String("https://github.com/") + String(get(source, keyword("repository"), "")) + String("/issues/") + String(record["number"]) : explicit;
-  })(record["html_url"] ?? null);
+  {
+    const __eliscript_value_32 = record["html_url"] ?? null;
+    {
+      let explicit = __eliscript_value_32;
+      return explicit === null ? String("https://github.com/") + String(get(source, keyword("repository"), "")) + String("/issues/") + String(record["number"]) : explicit;
+    }
+  }
 }
 function normalize_issue(source, record, identity_urls, channel) {
-  return ((number) => {
-    return ((repository) => {
-      return ((path) => {
-        return ((body) => {
-          return ((fields) => {
-            return ((title) => {
-              return ((slug_field) => {
-                return ((published) => {
-                  return ((updated_raw) => {
-                    return __GT_Post(require_field(fields, "id", path), __eliscript_truthy12(slug_field === null) ? slugify(title) : slug_field, title, field(fields, "description", ""), render_markdown(issue_markdown(body)), published, __eliscript_truthy12(updated_raw === null) ? published : date_value(updated_raw), vector(record["user"]["login"] ?? "unknown"), parse_list(field(fields, "tags", "")), null, field(fields, "draft", "false") === "true", parse_integer(field(fields, "pinned", "0"), 0), hashMap(keyword("provider"), "issues", keyword("path"), path, keyword("url"), issue_url(source, record), keyword("revision"), record["updated_at"] ?? ""), parse_list(field(fields, "aliases", "")), __eliscript_truthy12(empty_value_QMARK_(channel)) ? vector() : vector(channel));
-                  })(field(fields, "updated", null));
-                })(date_value(field(fields, "date", record["created_at"] ?? "")));
-              })(field(fields, "slug", null));
-            })(require_field(fields, "title", path));
-          })(issue_fields(body, path));
-        })(record["body"] ?? "");
-      })(String(repository) + String("#") + String(number));
-    })(get(source, keyword("repository"), ""));
-  })(record["number"]);
+  {
+    const __eliscript_value_33 = record["number"];
+    {
+      let number = __eliscript_value_33;
+      {
+        const __eliscript_value_34 = get(source, keyword("repository"), "");
+        {
+          let repository = __eliscript_value_34;
+          {
+            const __eliscript_value_35 = String(repository) + String("#") + String(number);
+            {
+              let path = __eliscript_value_35;
+              {
+                const __eliscript_value_36 = record["body"] ?? "";
+                {
+                  let body = __eliscript_value_36;
+                  {
+                    const __eliscript_value_37 = issue_fields(body, path);
+                    {
+                      let fields = __eliscript_value_37;
+                      {
+                        const __eliscript_value_38 = require_field(fields, "title", path);
+                        {
+                          let title = __eliscript_value_38;
+                          {
+                            const __eliscript_value_39 = field(fields, "slug", null);
+                            {
+                              let slug_field = __eliscript_value_39;
+                              {
+                                const __eliscript_value_40 = date_value(field(fields, "date", record["created_at"] ?? ""));
+                                {
+                                  let published = __eliscript_value_40;
+                                  {
+                                    const __eliscript_value_41 = field(fields, "updated", null);
+                                    {
+                                      let updated_raw = __eliscript_value_41;
+                                      return __GT_Post(require_field(fields, "id", path), slug_field === null ? slugify(title) : slug_field, title, field(fields, "description", ""), render_markdown(issue_markdown(body)), published, updated_raw === null ? published : date_value(updated_raw), vector(record["user"]["login"] ?? "unknown"), parse_list(field(fields, "tags", "")), null, field(fields, "draft", "false") === "true", parse_integer(field(fields, "pinned", "0"), 0), hashMap(keyword("provider"), "issues", keyword("path"), path, keyword("url"), issue_url(source, record), keyword("revision"), record["updated_at"] ?? ""), parse_list(field(fields, "aliases", "")), __eliscript_truthy11(empty_value_QMARK_(channel)) ? vector() : vector(channel));
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 async function collect_issues(options) {
   return await (async (source) => {
@@ -5851,11 +6692,11 @@ async function collect_issues(options) {
                         return await (async (index) => {
                           return await (async () => {
                             await (async () => {
-                              while (__eliscript_truthy12(index < count(records))) {
+                              while (index < count(records)) {
                                 await (async (record) => {
                                   return await (async (body) => {
                                     return await (async (author) => {
-                                      return __eliscript_truthy12(record["pull_request"] ?? null) ? null : __eliscript_truthy12(!__eliscript_truthy12(carrier_adapter(adapters, author, body, identities) === null)) ? carriers = carriers + 1 : __eliscript_truthy12(authorized_author_QMARK_(publishers, author)) ? ((channel) => {
+                                      return __eliscript_truthy11(record["pull_request"] ?? null) ? null : !(carrier_adapter(adapters, author, body, identities) === null) ? carriers = carriers + 1 : __eliscript_truthy11(authorized_author_QMARK_(publishers, author)) ? ((channel) => {
                                         return posts = conj(posts, normalize_issue(source, record, identities, channel));
                                       })(await native_channel(hashMap(keyword("comments"), comments, keyword("kind"), keyword("issue"), keyword("repository"), get(source, keyword("repository"), ""), keyword("number"), record["number"], keyword("transport"), transport))) : unauthorized = unauthorized + 1;
                                     })(record["user"] ?? {});
@@ -5882,32 +6723,36 @@ async function collect_issues(options) {
 }
 
 // examples/dogfood/dist/src/builder/discussions.mjs
-var __eliscript_truthy13 = (value) => value !== false && value != null;
+var __eliscript_truthy12 = (value) => value !== false && value != null;
 var default_page_size3 = 50;
 var comment_bound = 100;
 var maximum_pages2 = 100;
 function repository_parts(repository) {
-  return ((slash) => {
-    return __eliscript_truthy13(slash < 1) ? fail2("DOGFOOD-DISCUSSIONS-001", String('discussion source repository must be "owner/name": ') + String(repository)) : vector(slice(0, slash, repository), slice(slash + 1, count(repository), repository));
-  })(index_of("/", repository));
+  {
+    const __eliscript_value_1 = index_of("/", repository);
+    {
+      let slash = __eliscript_value_1;
+      return slash < 1 ? fail2("DOGFOOD-DISCUSSIONS-001", String('discussion source repository must be "owner/name": ') + String(repository)) : vector(slice(0, slash, repository), slice(slash + 1, count(repository), repository));
+    }
+  }
 }
 var author_selection = "author { login __typename ... on User { databaseId } }";
 function reply_selection(depth) {
-  return __eliscript_truthy13(depth === 0) ? "" : String(" replies(first: 50) { nodes { id ") + String(author_selection) + String(" body createdAt updatedAt url") + String(reply_selection(depth - 1)) + String(" } }");
+  return depth === 0 ? "" : String(" replies(first: 50) { nodes { id ") + String(author_selection) + String(" body createdAt updatedAt url") + String(reply_selection(depth - 1)) + String(" } }");
 }
 function comment_selection() {
   return String(" comments(first: ") + String(comment_bound) + String(") { pageInfo { hasNextPage endCursor }") + String(" nodes { id ") + String(author_selection) + String(" body createdAt updatedAt url") + String(reply_selection(2)) + String(" } }");
 }
 function discussions_query(with_comments) {
-  return String("query DogfoodDiscussions($owner: String!, $name: String!, $cursor: String,") + String(" $pageSize: Int!) { repository(owner: $owner, name: $name) {") + String(" discussions(first: $pageSize, after: $cursor,") + String(" orderBy: {field: UPDATED_AT, direction: DESC}) {") + String(" pageInfo { hasNextPage endCursor }") + String(" nodes { number title body createdAt updatedAt url") + String(" category { name } ") + String(author_selection) + String(" answerChosenAt") + String(__eliscript_truthy13(with_comments) ? comment_selection() : "") + String(" } } } }");
+  return String("query DogfoodDiscussions($owner: String!, $name: String!, $cursor: String,") + String(" $pageSize: Int!) { repository(owner: $owner, name: $name) {") + String(" discussions(first: $pageSize, after: $cursor,") + String(" orderBy: {field: UPDATED_AT, direction: DESC}) {") + String(" pageInfo { hasNextPage endCursor }") + String(" nodes { number title body createdAt updatedAt url") + String(" category { name } ") + String(author_selection) + String(" answerChosenAt") + String(__eliscript_truthy12(with_comments) ? comment_selection() : "") + String(" } } } }");
 }
 async function graphql(transport, query, variables) {
   return ((response) => {
     return ((status) => {
       return ((body) => {
         return (() => {
-          __eliscript_truthy13(!__eliscript_truthy13(status === 200)) && fail2("DOGFOOD-DISCUSSIONS-002", String("GitHub discussion query failed with status ") + String(status));
-          __eliscript_truthy13(((__eliscript_value_1) => __eliscript_truthy13(__eliscript_value_1) ? !__eliscript_truthy13((body["errors"] ?? null) === null) : __eliscript_value_1)(!__eliscript_truthy13(body === null))) && fail2("DOGFOOD-DISCUSSIONS-003", String("GitHub discussion query returned errors: ") + String(JSON.stringify(body["errors"])));
+          !(status === 200) && fail2("DOGFOOD-DISCUSSIONS-002", String("GitHub discussion query failed with status ") + String(status));
+          !(body === null) && !((body["errors"] ?? null) === null) && fail2("DOGFOOD-DISCUSSIONS-003", String("GitHub discussion query returned errors: ") + String(JSON.stringify(body["errors"])));
           return body["data"]["repository"] ?? null;
         })();
       })(response["body"] ?? null);
@@ -5924,23 +6769,27 @@ async function fetch_discussions(transport, source, with_comments) {
               return await (async (more) => {
                 return await (async () => {
                   await (async () => {
-                    while (__eliscript_truthy13(((__eliscript_value_2) => __eliscript_truthy13(__eliscript_value_2) ? pages < maximum_pages2 : __eliscript_value_2)(more))) {
+                    while (__eliscript_truthy12(((__eliscript_value_2) => __eliscript_truthy12(__eliscript_value_2) ? pages < maximum_pages2 : __eliscript_value_2)(more))) {
                       ((data) => {
                         return ((connection) => {
                           return (() => {
-                            __eliscript_truthy13(connection === null) && fail2("DOGFOOD-DISCUSSIONS-004", "discussion query returned no connection");
+                            connection === null && fail2("DOGFOOD-DISCUSSIONS-004", "discussion query returned no connection");
                             nodes = append_all2(nodes, connection["nodes"] ?? vector());
-                            ((page_info) => {
-                              return more = page_info["hasNextPage"] ?? false, cursor = page_info["endCursor"] ?? null;
-                            })(connection["pageInfo"] ?? {});
+                            {
+                              const __eliscript_value_3 = connection["pageInfo"] ?? {};
+                              {
+                                let page_info = __eliscript_value_3;
+                                more = page_info["hasNextPage"] ?? false, cursor = page_info["endCursor"] ?? null;
+                              }
+                            }
                             return pages = pages + 1;
                           })();
                         })(data["discussions"] ?? null);
-                      })(await graphql(transport, query, { owner: nth(parts, 0, null), name: nth(parts, 1, null), pageSize: page_size2, cursor: __eliscript_truthy13(cursor === null) ? null : cursor }));
+                      })(await graphql(transport, query, { owner: nth(parts, 0, null), name: nth(parts, 1, null), pageSize: page_size2, cursor: cursor === null ? null : cursor }));
                     }
                     return null;
                   })();
-                  __eliscript_truthy13(((__eliscript_value_3) => __eliscript_truthy13(__eliscript_value_3) ? pages >= maximum_pages2 : __eliscript_value_3)(more)) && fail2("DOGFOOD-DISCUSSIONS-005", String("discussion listing exceeded ") + String(maximum_pages2) + String(" pages"));
+                  __eliscript_truthy12(((__eliscript_value_4) => __eliscript_truthy12(__eliscript_value_4) ? pages >= maximum_pages2 : __eliscript_value_4)(more)) && fail2("DOGFOOD-DISCUSSIONS-005", String("discussion listing exceeded ") + String(maximum_pages2) + String(" pages"));
                   return nodes;
                 })();
               })(true);
@@ -5952,79 +6801,152 @@ async function fetch_discussions(transport, source, with_comments) {
   })(repository_parts(get(source, keyword("repository"), "")));
 }
 function comment_record(node) {
-  return ((user) => {
-    return hashMap(keyword("id"), node["id"], keyword("author"), hashMap(keyword("login"), user["login"] ?? "ghost", keyword("url"), node["url"] ?? null), keyword("body"), render_markdown(node["body"] ?? ""), keyword("created-at"), node["createdAt"] ?? "", keyword("updated-at"), node["updatedAt"] ?? "", keyword("url"), node["url"] ?? null, keyword("replies"), vector());
-  })(node["author"] ?? null);
+  {
+    const __eliscript_value_5 = node["author"] ?? null;
+    {
+      let user = __eliscript_value_5;
+      return hashMap(keyword("id"), node["id"], keyword("author"), hashMap(keyword("login"), user["login"] ?? "ghost", keyword("url"), node["url"] ?? null), keyword("body"), render_markdown(node["body"] ?? ""), keyword("created-at"), node["createdAt"] ?? "", keyword("updated-at"), node["updatedAt"] ?? "", keyword("url"), node["url"] ?? null, keyword("replies"), vector());
+    }
+  }
 }
 function reply_tree(nodes) {
-  return ((replies, index) => {
-    (() => {
-      while (__eliscript_truthy13(index < count(nodes))) {
-        ((node) => {
-          return ((children) => {
-            return ((page_info) => {
-              return (() => {
-                __eliscript_truthy13(((__eliscript_value_4) => __eliscript_truthy13(__eliscript_value_4) ? page_info["hasNextPage"] ?? false : __eliscript_value_4)(!__eliscript_truthy13(page_info === null))) && fail2("DOGFOOD-DISCUSSIONS-006", String("discussion reply tree exceeded ") + String(comment_bound) + String(" replies at ") + String(node["id"] ?? "unknown"));
-                return replies = conj(replies, assoc(comment_record(node), keyword("replies"), reply_tree(children)));
-              })();
-            })((node["replies"] ?? {})["pageInfo"] ?? null);
-          })((node["replies"] ?? {})["nodes"] ?? vector());
-        })(nth(nodes, index));
+  {
+    const __eliscript_value_6 = vector();
+    const __eliscript_value_7 = 0;
+    {
+      let replies = __eliscript_value_6;
+      let index = __eliscript_value_7;
+      while (index < count(nodes)) {
+        {
+          const __eliscript_value_8 = nth(nodes, index);
+          {
+            let node = __eliscript_value_8;
+            {
+              const __eliscript_value_9 = (node["replies"] ?? {})["nodes"] ?? vector();
+              {
+                let children = __eliscript_value_9;
+                {
+                  const __eliscript_value_10 = (node["replies"] ?? {})["pageInfo"] ?? null;
+                  {
+                    let page_info = __eliscript_value_10;
+                    __eliscript_truthy12(((__eliscript_value_11) => __eliscript_truthy12(__eliscript_value_11) ? page_info["hasNextPage"] ?? false : __eliscript_value_11)(!(page_info === null))) && fail2("DOGFOOD-DISCUSSIONS-006", String("discussion reply tree exceeded ") + String(comment_bound) + String(" replies at ") + String(node["id"] ?? "unknown"));
+                    replies = conj(replies, assoc(comment_record(node), keyword("replies"), reply_tree(children)));
+                  }
+                }
+              }
+            }
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return replies;
-  })(vector(), 0);
+      return replies;
+    }
+  }
 }
 function comment_tree(record) {
-  return ((connection) => {
-    return ((page_info) => {
-      return ((nodes) => {
-        return (() => {
-          __eliscript_truthy13(page_info["hasNextPage"] ?? false) && fail2("DOGFOOD-DISCUSSIONS-007", String("discussion ") + String(record["number"] ?? "unknown") + String(" has more than ") + String(comment_bound) + String(" comments"));
-          return reply_tree(nodes);
-        })();
-      })(connection["nodes"] ?? vector());
-    })(connection["pageInfo"] ?? {});
-  })(record["comments"] ?? {});
+  {
+    const __eliscript_value_12 = record["comments"] ?? {};
+    {
+      let connection = __eliscript_value_12;
+      {
+        const __eliscript_value_13 = connection["pageInfo"] ?? {};
+        {
+          let page_info = __eliscript_value_13;
+          {
+            const __eliscript_value_14 = connection["nodes"] ?? vector();
+            {
+              let nodes = __eliscript_value_14;
+              __eliscript_truthy12(page_info["hasNextPage"] ?? false) && fail2("DOGFOOD-DISCUSSIONS-007", String("discussion ") + String(record["number"] ?? "unknown") + String(" has more than ") + String(comment_bound) + String(" comments"));
+              return reply_tree(nodes);
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function category_name(record) {
   return (record["category"] ?? {})["name"] ?? "";
 }
 function allowed_category_QMARK_(source, record) {
-  return ((allowed, category) => {
-    return ((__eliscript_value_5) => __eliscript_truthy13(__eliscript_value_5) ? __eliscript_value_5 : allowed === category)(allowed === null);
-  })(get(source, keyword("category"), null), category_name(record));
+  {
+    const __eliscript_value_15 = get(source, keyword("category"), null);
+    const __eliscript_value_16 = category_name(record);
+    {
+      let allowed = __eliscript_value_15;
+      let category = __eliscript_value_16;
+      return allowed === null || allowed === category;
+    }
+  }
 }
 function discussion_author(record) {
-  return ((author) => {
-    return ((kind) => {
-      return { login: author["login"] ?? "ghost", id: author["databaseId"] ?? null, type: __eliscript_truthy13(kind === "User") ? "User" : kind };
-    })(__eliscript_truthy13(author === null) ? "User" : author["__typename"] ?? "User");
-  })(record["author"] ?? null);
+  {
+    const __eliscript_value_17 = record["author"] ?? null;
+    {
+      let author = __eliscript_value_17;
+      {
+        const __eliscript_value_18 = author === null ? "User" : author["__typename"] ?? "User";
+        {
+          let kind = __eliscript_value_18;
+          return { login: author["login"] ?? "ghost", id: author["databaseId"] ?? null, type: kind === "User" ? "User" : kind };
+        }
+      }
+    }
+  }
 }
 function discussion_channel(declaration, repository, record, items) {
   return hashMap(keyword("id"), get(declaration, keyword("id"), keyword("discussion-native")), keyword("kind"), keyword("discussion"), keyword("mode"), get(declaration, keyword("mode"), keyword("snapshot")), keyword("binding"), hashMap(keyword("repository"), repository, keyword("number"), record["number"]), keyword("count"), count(items), keyword("updated-at"), freshness(items), keyword("items"), items, keyword("capabilities"), vector(keyword("read"), keyword("reply"), keyword("nested-replies"), keyword("reactions"), keyword("moderation")));
 }
 function normalize_discussion(source, record, items, channel) {
-  return ((number) => {
-    return ((repository) => {
-      return ((path) => {
-        return ((fields) => {
-          return ((title) => {
-            return ((slug_field) => {
-              return ((published) => {
-                return ((updated_raw) => {
-                  return __GT_Post(require_field(fields, "id", path), __eliscript_truthy13(slug_field === null) ? slugify(title) : slug_field, title, field(fields, "description", ""), render_markdown(issue_markdown(record["body"] ?? "")), published, __eliscript_truthy13(updated_raw === null) ? published : date_value(updated_raw), vector((record["author"] ?? {})["login"] ?? "unknown"), parse_list(field(fields, "tags", "")), null, field(fields, "draft", "false") === "true", parse_integer(field(fields, "pinned", "0"), 0), hashMap(keyword("provider"), "discussions", keyword("path"), path, keyword("url"), record["url"] ?? null, keyword("revision"), record["updatedAt"] ?? ""), parse_list(field(fields, "aliases", "")), __eliscript_truthy13(empty_value_QMARK_(channel)) ? vector() : vector(channel));
-                })(field(fields, "updated", null));
-              })(date_value(field(fields, "date", record["createdAt"] ?? "")));
-            })(field(fields, "slug", null));
-          })(require_field(fields, "title", path));
-        })(issue_fields(record["body"] ?? "", path));
-      })(String(repository) + String("#") + String(number));
-    })(get(source, keyword("repository"), ""));
-  })(record["number"]);
+  {
+    const __eliscript_value_19 = record["number"];
+    {
+      let number = __eliscript_value_19;
+      {
+        const __eliscript_value_20 = get(source, keyword("repository"), "");
+        {
+          let repository = __eliscript_value_20;
+          {
+            const __eliscript_value_21 = String(repository) + String("#") + String(number);
+            {
+              let path = __eliscript_value_21;
+              {
+                const __eliscript_value_22 = issue_fields(record["body"] ?? "", path);
+                {
+                  let fields = __eliscript_value_22;
+                  {
+                    const __eliscript_value_23 = require_field(fields, "title", path);
+                    {
+                      let title = __eliscript_value_23;
+                      {
+                        const __eliscript_value_24 = field(fields, "slug", null);
+                        {
+                          let slug_field = __eliscript_value_24;
+                          {
+                            const __eliscript_value_25 = date_value(field(fields, "date", record["createdAt"] ?? ""));
+                            {
+                              let published = __eliscript_value_25;
+                              {
+                                const __eliscript_value_26 = field(fields, "updated", null);
+                                {
+                                  let updated_raw = __eliscript_value_26;
+                                  return __GT_Post(require_field(fields, "id", path), slug_field === null ? slugify(title) : slug_field, title, field(fields, "description", ""), render_markdown(issue_markdown(record["body"] ?? "")), published, updated_raw === null ? published : date_value(updated_raw), vector((record["author"] ?? {})["login"] ?? "unknown"), parse_list(field(fields, "tags", "")), null, field(fields, "draft", "false") === "true", parse_integer(field(fields, "pinned", "0"), 0), hashMap(keyword("provider"), "discussions", keyword("path"), path, keyword("url"), record["url"] ?? null, keyword("revision"), record["updatedAt"] ?? ""), parse_list(field(fields, "aliases", "")), __eliscript_truthy12(empty_value_QMARK_(channel)) ? vector() : vector(channel));
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 async function collect_discussions(options) {
   return await (async (source) => {
@@ -6042,23 +6964,32 @@ async function collect_discussions(options) {
                           return ((unauthorized) => {
                             return ((index) => {
                               return (() => {
-                                (() => {
-                                  while (__eliscript_truthy13(index < count(records))) {
-                                    ((record) => {
-                                      return ((body) => {
-                                        return ((author) => {
-                                          return __eliscript_truthy13(!__eliscript_truthy13(carrier_adapter(adapters, author, body, identities) === null)) ? carriers = carriers + 1 : __eliscript_truthy13(!__eliscript_truthy13(allowed_category_QMARK_(source, record))) ? null : __eliscript_truthy13(authorized_author_QMARK_(publishers, author)) ? ((items) => {
-                                            return ((channel) => {
-                                              return posts = conj(posts, normalize_discussion(source, record, items, channel));
-                                            })(__eliscript_truthy13(declaration === null) ? null : discussion_channel(declaration, get(source, keyword("repository"), ""), record, items));
-                                          })(__eliscript_truthy13(with_comments) ? comment_tree(record) : vector()) : unauthorized = unauthorized + 1;
-                                        })(discussion_author(record));
-                                      })(record["body"] ?? "");
-                                    })(nth(records, index));
-                                    index = index + 1;
+                                while (index < count(records)) {
+                                  {
+                                    const __eliscript_value_27 = nth(records, index);
+                                    {
+                                      let record = __eliscript_value_27;
+                                      {
+                                        const __eliscript_value_28 = record["body"] ?? "";
+                                        {
+                                          let body = __eliscript_value_28;
+                                          {
+                                            const __eliscript_value_29 = discussion_author(record);
+                                            {
+                                              let author = __eliscript_value_29;
+                                              !(carrier_adapter(adapters, author, body, identities) === null) ? carriers = carriers + 1 : !__eliscript_truthy12(allowed_category_QMARK_(source, record)) || (__eliscript_truthy12(authorized_author_QMARK_(publishers, author)) ? ((items) => {
+                                                return ((channel) => {
+                                                  return posts = conj(posts, normalize_discussion(source, record, items, channel));
+                                                })(declaration === null ? null : discussion_channel(declaration, get(source, keyword("repository"), ""), record, items));
+                                              })(__eliscript_truthy12(with_comments) ? comment_tree(record) : vector()) : unauthorized = unauthorized + 1);
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
                                   }
-                                  return null;
-                                })();
+                                  index = index + 1;
+                                }
                                 return hashMap(keyword("posts"), posts, keyword("carriers"), carriers, keyword("unauthorized"), unauthorized, keyword("records"), count(records));
                               })();
                             })(0);
@@ -6068,7 +6999,7 @@ async function collect_discussions(options) {
                     })(await fetch_discussions(transport, source, with_comments));
                   })(publisher_set(publishing));
                 })(get(options, keyword("transport")));
-              })(((__eliscript_value_6) => __eliscript_truthy13(__eliscript_value_6) ? !__eliscript_truthy13(get(declaration, keyword("mode"), keyword("snapshot")) === keyword("live")) : __eliscript_value_6)(!__eliscript_truthy13(declaration === null)));
+              })(!(declaration === null) && !(get(declaration, keyword("mode"), keyword("snapshot")) === keyword("live")));
             })(channel_declaration(comments, keyword("discussion")));
           })(get(options, keyword("comments"), hashMap()));
         })(get(options, keyword("identities"), vector()));
@@ -6078,193 +7009,262 @@ async function collect_discussions(options) {
 }
 
 // examples/dogfood/dist/src/builder/events.mjs
-var __eliscript_truthy14 = (value) => value !== false && value != null;
+var __eliscript_truthy13 = (value) => value !== false && value != null;
 var article_events = vector("push", "schedule", "workflow_dispatch", "issues", "release");
 var comment_events = vector("issue_comment", "discussion_comment", "discussions");
 var content_events = vector("issues", "release");
 var article_policies = vector(keyword("push"), keyword("event"), keyword("scheduled"), keyword("manual"), keyword("hybrid"));
 var comment_policies = vector(keyword("runtime"), keyword("external"), keyword("scheduled"), keyword("manual"), keyword("hybrid"), keyword("event"));
 function member_QMARK_(values, needle) {
-  return ((index, found) => {
-    (() => {
-      while (__eliscript_truthy14(((__eliscript_value_1) => __eliscript_truthy14(__eliscript_value_1) ? !__eliscript_truthy14(found) : __eliscript_value_1)(index < count(values)))) {
-        __eliscript_truthy14(nth(values, index) === needle) && (found = true);
+  {
+    const __eliscript_value_1 = 0;
+    const __eliscript_value_2 = false;
+    {
+      let index = __eliscript_value_1;
+      let found = __eliscript_value_2;
+      while (index < count(values) && !__eliscript_truthy13(found)) {
+        nth(values, index) === needle && (found = true);
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(0, false);
+      return found;
+    }
+  }
 }
 function classification(subject, event_name, action, payload) {
   return hashMap(keyword("subject"), subject, keyword("event"), event_name, keyword("action"), action, keyword("payload"), payload);
 }
 function classify_event(event_name, payload) {
-  return ((action) => {
-    return __eliscript_truthy14(member_QMARK_(article_events, event_name)) ? classification(keyword("articles"), event_name, action, payload) : __eliscript_truthy14(member_QMARK_(comment_events, event_name)) ? classification(keyword("comments"), event_name, action, payload) : classification(keyword("unknown"), event_name, action, payload);
-  })(get(payload, "action", ""));
+  {
+    const __eliscript_value_3 = get(payload, "action", "");
+    {
+      let action = __eliscript_value_3;
+      return __eliscript_truthy13(member_QMARK_(article_events, event_name)) ? classification(keyword("articles"), event_name, action, payload) : __eliscript_truthy13(member_QMARK_(comment_events, event_name)) ? classification(keyword("comments"), event_name, action, payload) : classification(keyword("unknown"), event_name, action, payload);
+    }
+  }
 }
 function refresh_value(config, area, fallback) {
-  return ((refresh) => {
-    return get(refresh, area, fallback);
-  })(get(config, keyword("refresh"), hashMap()));
+  {
+    const __eliscript_value_4 = get(config, keyword("refresh"), hashMap());
+    {
+      let refresh = __eliscript_value_4;
+      return get(refresh, area, fallback);
+    }
+  }
 }
 function article_builds_QMARK_(policy, event_name) {
-  return __eliscript_truthy14(event_name === "workflow_dispatch") ? true : __eliscript_truthy14(policy === keyword("push")) ? event_name === "push" : __eliscript_truthy14(policy === keyword("event")) ? member_QMARK_(content_events, event_name) : __eliscript_truthy14(policy === keyword("scheduled")) ? event_name === "schedule" : __eliscript_truthy14(policy === keyword("manual")) ? false : __eliscript_truthy14(policy === keyword("hybrid")) ? ((__eliscript_value_2) => __eliscript_truthy14(__eliscript_value_2) ? __eliscript_value_2 : ((__eliscript_value_3) => __eliscript_truthy14(__eliscript_value_3) ? __eliscript_value_3 : member_QMARK_(content_events, event_name))(event_name === "schedule"))(event_name === "push") : false;
+  return event_name === "workflow_dispatch" ? true : policy === keyword("push") ? event_name === "push" : policy === keyword("event") ? member_QMARK_(content_events, event_name) : policy === keyword("scheduled") ? event_name === "schedule" : policy === keyword("manual") ? false : policy === keyword("hybrid") ? ((__eliscript_value_5) => __eliscript_truthy13(__eliscript_value_5) ? __eliscript_value_5 : ((__eliscript_value_6) => __eliscript_truthy13(__eliscript_value_6) ? __eliscript_value_6 : member_QMARK_(content_events, event_name))(event_name === "schedule"))(event_name === "push") : false;
 }
 function build_decision(config, classification2, forced) {
-  return ((subject, event_name) => {
-    return __eliscript_truthy14(forced) ? hashMap(keyword("build"), true, keyword("reason"), "forced", keyword("subject"), subject) : __eliscript_truthy14(subject === keyword("articles")) ? ((policy) => {
-      return __eliscript_truthy14(article_builds_QMARK_(policy, event_name)) ? hashMap(keyword("build"), true, keyword("reason"), "changed", keyword("subject"), keyword("articles")) : hashMap(keyword("build"), false, keyword("reason"), "deferred", keyword("subject"), keyword("articles"), keyword("refresh"), policy);
-    })(refresh_value(config, keyword("articles"), keyword("push"))) : __eliscript_truthy14(subject === keyword("comments")) ? ((policy) => {
-      return __eliscript_truthy14(policy === keyword("event")) ? hashMap(keyword("build"), true, keyword("reason"), "changed", keyword("subject"), keyword("comments")) : hashMap(keyword("build"), false, keyword("reason"), "deferred", keyword("subject"), keyword("comments"), keyword("refresh"), policy);
-    })(refresh_value(config, keyword("comments"), keyword("runtime"))) : hashMap(keyword("build"), false, keyword("reason"), "deferred", keyword("subject"), keyword("unknown"));
-  })(get(classification2, keyword("subject"), keyword("unknown")), get(classification2, keyword("event"), ""));
+  {
+    const __eliscript_value_7 = get(classification2, keyword("subject"), keyword("unknown"));
+    const __eliscript_value_8 = get(classification2, keyword("event"), "");
+    {
+      let subject = __eliscript_value_7;
+      let event_name = __eliscript_value_8;
+      return __eliscript_truthy13(forced) ? hashMap(keyword("build"), true, keyword("reason"), "forced", keyword("subject"), subject) : subject === keyword("articles") ? ((policy) => {
+        return __eliscript_truthy13(article_builds_QMARK_(policy, event_name)) ? hashMap(keyword("build"), true, keyword("reason"), "changed", keyword("subject"), keyword("articles")) : hashMap(keyword("build"), false, keyword("reason"), "deferred", keyword("subject"), keyword("articles"), keyword("refresh"), policy);
+      })(refresh_value(config, keyword("articles"), keyword("push"))) : subject === keyword("comments") ? ((policy) => {
+        return policy === keyword("event") ? hashMap(keyword("build"), true, keyword("reason"), "changed", keyword("subject"), keyword("comments")) : hashMap(keyword("build"), false, keyword("reason"), "deferred", keyword("subject"), keyword("comments"), keyword("refresh"), policy);
+      })(refresh_value(config, keyword("comments"), keyword("runtime"))) : hashMap(keyword("build"), false, keyword("reason"), "deferred", keyword("subject"), keyword("unknown"));
+    }
+  }
 }
 function requested_event() {
   return classification(keyword("articles"), "workflow_dispatch", "requested", hashMap());
 }
 
 // examples/dogfood/dist/src/builder/channels.mjs
-var __eliscript_truthy15 = (value) => value !== false && value != null;
+var __eliscript_truthy14 = (value) => value !== false && value != null;
 var browser_only_kinds = vector(keyword("external"), keyword("none"));
 function member_keyword_QMARK_(values, needle) {
-  return ((index, found) => {
-    (() => {
-      while (__eliscript_truthy15(((__eliscript_value_1) => __eliscript_truthy15(__eliscript_value_1) ? !__eliscript_truthy15(found) : __eliscript_value_1)(index < count(values)))) {
-        __eliscript_truthy15(nth(values, index) === needle) && (found = true);
+  {
+    const __eliscript_value_1 = 0;
+    const __eliscript_value_2 = false;
+    {
+      let index = __eliscript_value_1;
+      let found = __eliscript_value_2;
+      while (index < count(values) && !__eliscript_truthy14(found)) {
+        nth(values, index) === needle && (found = true);
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(0, false);
+      return found;
+    }
+  }
 }
 function find_adapter(adapters, id) {
-  return ((index, found) => {
-    (() => {
-      while (__eliscript_truthy15(index < count(adapters))) {
-        ((adapter) => {
-          return __eliscript_truthy15(get(adapter, keyword("id"), null) === id) ? found = adapter : null;
-        })(nth(adapters, index));
+  {
+    const __eliscript_value_3 = 0;
+    const __eliscript_value_4 = null;
+    {
+      let index = __eliscript_value_3;
+      let found = __eliscript_value_4;
+      while (index < count(adapters)) {
+        {
+          const __eliscript_value_5 = nth(adapters, index);
+          {
+            let adapter = __eliscript_value_5;
+            get(adapter, keyword("id"), null) === id && (found = adapter);
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(0, null);
+      return found;
+    }
+  }
 }
 function carrier_kind_of(adapters, kind) {
-  return ((adapter) => {
-    return __eliscript_truthy15(adapter === null) ? keyword("external") : get(adapter, keyword("carrier-kind"), keyword("external"));
-  })(find_adapter(adapters, kind));
+  {
+    const __eliscript_value_6 = find_adapter(adapters, kind);
+    {
+      let adapter = __eliscript_value_6;
+      return adapter === null ? keyword("external") : get(adapter, keyword("carrier-kind"), keyword("external"));
+    }
+  }
 }
 function enabled_channels(config) {
-  return ((comments) => {
-    return filter((channel) => {
-      return get(channel, keyword("enabled"), false);
-    }, get(comments, keyword("channels"), vector()));
-  })(get(config, keyword("comments"), hashMap()));
+  {
+    const __eliscript_value_7 = get(config, keyword("comments"), hashMap());
+    {
+      let comments = __eliscript_value_7;
+      return filter((channel) => {
+        return get(channel, keyword("enabled"), false);
+      }, get(comments, keyword("channels"), vector()));
+    }
+  }
 }
 function browser_only_channel_QMARK_(adapters, channel) {
   return member_keyword_QMARK_(browser_only_kinds, carrier_kind_of(adapters, get(channel, keyword("kind"), null)));
 }
 function channel_present_QMARK_(post, id) {
-  return ((channels, index, found) => {
-    (() => {
-      while (__eliscript_truthy15(((__eliscript_value_2) => __eliscript_truthy15(__eliscript_value_2) ? !__eliscript_truthy15(found) : __eliscript_value_2)(index < count(channels)))) {
-        __eliscript_truthy15(get(nth(channels, index), keyword("id"), null) === id) && (found = true);
+  {
+    const __eliscript_value_8 = get(post, keyword("comment-channels"), vector());
+    const __eliscript_value_9 = 0;
+    const __eliscript_value_10 = false;
+    {
+      let channels = __eliscript_value_8;
+      let index = __eliscript_value_9;
+      let found = __eliscript_value_10;
+      while (index < count(channels) && !__eliscript_truthy14(found)) {
+        get(nth(channels, index), keyword("id"), null) === id && (found = true);
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(get(post, keyword("comment-channels"), vector()), 0, false);
+      return found;
+    }
+  }
 }
 function provider_url(adapter) {
-  return __eliscript_truthy15(adapter === null) ? null : ((origins) => {
-    return __eliscript_truthy15(count(origins) === 0) ? null : nth(origins, 0);
+  return adapter === null ? null : ((origins) => {
+    return count(origins) === 0 ? null : nth(origins, 0);
   })(get(adapter, keyword("origins"), vector()));
 }
 function declared_channel(channel, adapter) {
   return hashMap(keyword("id"), get(channel, keyword("id"), null), keyword("kind"), get(channel, keyword("kind"), null), keyword("mode"), get(channel, keyword("mode"), keyword("embed")), keyword("items"), vector(), keyword("count"), 0, keyword("binding"), null, keyword("provider-url"), provider_url(adapter));
 }
 function attach_to_post(post, channels, adapters) {
-  return ((added) => {
-    ((index) => {
-      return (() => {
-        while (__eliscript_truthy15(index < count(channels))) {
-          ((channel) => {
-            return __eliscript_truthy15(!__eliscript_truthy15(channel_present_QMARK_(post, get(channel, keyword("id"), null)))) ? added = conj(added, declared_channel(channel, find_adapter(adapters, get(channel, keyword("kind"), null)))) : null;
-          })(nth(channels, index));
-          index = index + 1;
+  {
+    const __eliscript_value_11 = vector();
+    {
+      let added = __eliscript_value_11;
+      {
+        const __eliscript_value_12 = 0;
+        {
+          let index = __eliscript_value_12;
+          while (index < count(channels)) {
+            {
+              const __eliscript_value_13 = nth(channels, index);
+              {
+                let channel = __eliscript_value_13;
+                !__eliscript_truthy14(channel_present_QMARK_(post, get(channel, keyword("id"), null))) && (added = conj(added, declared_channel(channel, find_adapter(adapters, get(channel, keyword("kind"), null)))));
+              }
+            }
+            index = index + 1;
+          }
         }
-        return null;
-      })();
-    })(0);
-    return __eliscript_truthy15(count(added) === 0) ? post : post_with_channels(post, append_all3(get(post, keyword("comment-channels"), vector()), added));
-  })(vector());
+      }
+      return count(added) === 0 ? post : post_with_channels(post, append_all3(get(post, keyword("comment-channels"), vector()), added));
+    }
+  }
 }
 function append_all3(left, right) {
-  return ((result, index) => {
-    (() => {
-      while (__eliscript_truthy15(index < count(right))) {
+  {
+    const __eliscript_value_14 = left;
+    const __eliscript_value_15 = 0;
+    {
+      let result = __eliscript_value_14;
+      let index = __eliscript_value_15;
+      while (index < count(right)) {
         result = conj(result, nth(right, index));
         index = index + 1;
       }
-      return null;
-    })();
-    return result;
-  })(left, 0);
+      return result;
+    }
+  }
 }
 function post_with_channels(post, channels) {
   return __GT_Post(post["id"], post["slug"], post["title"], post["summary"], post["body"], post["published-at"], post["updated-at"], post["authors"], post["tags"], post["cover"], post["draft"], post["pinned-weight"], post["provenance"], post["aliases"], channels);
 }
 function attach_configured_channels(config, posts) {
-  return ((adapters) => {
-    return ((channels) => {
-      return __eliscript_truthy15(count(channels) === 0) ? posts : ((result, index) => {
-        (() => {
-          while (__eliscript_truthy15(index < count(posts))) {
-            result = conj(result, attach_to_post(nth(posts, index), channels, adapters));
-            index = index + 1;
-          }
-          return null;
-        })();
-        return result;
-      })(vector(), 0);
-    })(filter((channel) => {
-      return browser_only_channel_QMARK_(adapters, channel);
-    }, enabled_channels(config)));
-  })(get(config, keyword("adapters"), vector()));
+  {
+    const __eliscript_value_16 = get(config, keyword("adapters"), vector());
+    {
+      let adapters = __eliscript_value_16;
+      {
+        const __eliscript_value_17 = filter((channel) => {
+          return browser_only_channel_QMARK_(adapters, channel);
+        }, enabled_channels(config));
+        {
+          let channels = __eliscript_value_17;
+          return count(channels) === 0 ? posts : ((result, index) => {
+            while (index < count(posts)) {
+              result = conj(result, attach_to_post(nth(posts, index), channels, adapters));
+              index = index + 1;
+            }
+            return result;
+          })(vector(), 0);
+        }
+      }
+    }
+  }
 }
 function snapshot_count(posts) {
-  return ((total, index) => {
-    (() => {
-      while (__eliscript_truthy15(index < count(posts))) {
-        ((channels) => {
-          return ((channel_index) => {
-            return (() => {
-              while (__eliscript_truthy15(channel_index < count(channels))) {
-                ((mode) => {
-                  return __eliscript_truthy15(((__eliscript_value_3) => __eliscript_truthy15(__eliscript_value_3) ? __eliscript_value_3 : mode === keyword("hybrid"))(mode === keyword("snapshot"))) ? total = total + 1 : null;
-                })(get(nth(channels, channel_index), keyword("mode"), keyword("snapshot")));
-                channel_index = channel_index + 1;
+  {
+    const __eliscript_value_18 = 0;
+    const __eliscript_value_19 = 0;
+    {
+      let total = __eliscript_value_18;
+      let index = __eliscript_value_19;
+      while (index < count(posts)) {
+        {
+          const __eliscript_value_20 = get(nth(posts, index), keyword("comment-channels"), vector());
+          {
+            let channels = __eliscript_value_20;
+            {
+              const __eliscript_value_21 = 0;
+              {
+                let channel_index = __eliscript_value_21;
+                while (channel_index < count(channels)) {
+                  {
+                    const __eliscript_value_22 = get(nth(channels, channel_index), keyword("mode"), keyword("snapshot"));
+                    {
+                      let mode = __eliscript_value_22;
+                      (mode === keyword("snapshot") || mode === keyword("hybrid")) && (total = total + 1);
+                    }
+                  }
+                  channel_index = channel_index + 1;
+                }
               }
-              return null;
-            })();
-          })(0);
-        })(get(nth(posts, index), keyword("comment-channels"), vector()));
+            }
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return total;
-  })(0, 0);
+      return total;
+    }
+  }
 }
 
 // examples/dogfood/dist/src/builder/identity.mjs
-var __eliscript_truthy16 = (value) => value !== false && value != null;
+var __eliscript_truthy15 = (value) => value !== false && value != null;
 var authority_only = vector(keyword("slug"), keyword("body"));
 var comparable_fields = vector(keyword("title"), keyword("summary"), keyword("published-at"), keyword("updated-at"), keyword("authors"), keyword("tags"), keyword("cover"), keyword("draft"), keyword("pinned-weight"));
 function merged_field(post, overrides, key) {
@@ -6275,42 +7275,85 @@ function post_with(post, overrides) {
 }
 var provider_of = hashMap(keyword("markdown"), "markdown", keyword("issue"), "issues", keyword("discussion"), "discussions");
 function projection_matches_QMARK_(projection, post) {
-  return ((source) => {
-    return ((provider) => {
-      return ((provenance) => {
-        return ((repository) => {
-          return ((number) => {
-            return ((path) => {
-              return ((__eliscript_value_1) => __eliscript_truthy16(__eliscript_value_1) ? ((__eliscript_value_2) => __eliscript_truthy16(__eliscript_value_2) ? get(provenance, keyword("path"), "") === path : __eliscript_value_2)(get(provenance, keyword("provider"), "") === provider) : __eliscript_value_1)(!__eliscript_truthy16(provider === ""));
-            })(__eliscript_truthy16(number === null) ? repository : String(repository) + String("#") + String(number));
-          })(get(projection, keyword("number"), null));
-        })(get(projection, keyword("repository"), ""));
-      })(post["provenance"]);
-    })(get(provider_of, source, ""));
-  })(get(projection, keyword("source"), null));
+  {
+    const __eliscript_value_1 = get(projection, keyword("source"), null);
+    {
+      let source = __eliscript_value_1;
+      {
+        const __eliscript_value_2 = get(provider_of, source, "");
+        {
+          let provider = __eliscript_value_2;
+          {
+            const __eliscript_value_3 = post["provenance"];
+            {
+              let provenance = __eliscript_value_3;
+              {
+                const __eliscript_value_4 = get(projection, keyword("repository"), "");
+                {
+                  let repository = __eliscript_value_4;
+                  {
+                    const __eliscript_value_5 = get(projection, keyword("number"), null);
+                    {
+                      let number = __eliscript_value_5;
+                      {
+                        const __eliscript_value_6 = number === null ? repository : String(repository) + String("#") + String(number);
+                        {
+                          let path = __eliscript_value_6;
+                          return !(provider === "") && get(provenance, keyword("provider"), "") === provider && get(provenance, keyword("path"), "") === path;
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function group_by_id(posts) {
-  return ((groups, index) => {
-    (() => {
-      while (__eliscript_truthy16(index < count(posts))) {
-        ((post) => {
-          return ((id) => {
-            return ((existing) => {
-              return groups = assoc(groups, id, __eliscript_truthy16(existing === null) ? vector(post) : conj(existing, post));
-            })(get(groups, id, null));
-          })(post["id"]);
-        })(nth(posts, index));
+  {
+    const __eliscript_value_7 = hashMap();
+    const __eliscript_value_8 = 0;
+    {
+      let groups = __eliscript_value_7;
+      let index = __eliscript_value_8;
+      while (index < count(posts)) {
+        {
+          const __eliscript_value_9 = nth(posts, index);
+          {
+            let post = __eliscript_value_9;
+            {
+              const __eliscript_value_10 = post["id"];
+              {
+                let id = __eliscript_value_10;
+                {
+                  const __eliscript_value_11 = get(groups, id, null);
+                  {
+                    let existing = __eliscript_value_11;
+                    groups = assoc(groups, id, existing === null ? vector(post) : conj(existing, post));
+                  }
+                }
+              }
+            }
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return groups;
-  })(hashMap(), 0);
+      return groups;
+    }
+  }
 }
 function provenance_text(post) {
-  return ((provenance) => {
-    return String(get(provenance, keyword("provider"), "unknown")) + String(" ") + String(get(provenance, keyword("path"), "unknown"));
-  })(post["provenance"]);
+  {
+    const __eliscript_value_12 = post["provenance"];
+    {
+      let provenance = __eliscript_value_12;
+      return String(get(provenance, keyword("provider"), "unknown")) + String(" ") + String(get(provenance, keyword("path"), "unknown"));
+    }
+  }
 }
 function values_equal_QMARK_(left, right) {
   return equalValues(left, right);
@@ -6319,232 +7362,365 @@ function declared_fields(declaration, projection) {
   return dedupe(append_all2(get(declaration, keyword("fields"), vector()), get(projection, keyword("fields"), vector())));
 }
 function declared_QMARK_(fields, key) {
-  return ((index, found) => {
-    (() => {
-      while (__eliscript_truthy16(index < count(fields))) {
-        __eliscript_truthy16(nth(fields, index) === key) && (found = true);
+  {
+    const __eliscript_value_13 = 0;
+    const __eliscript_value_14 = false;
+    {
+      let index = __eliscript_value_13;
+      let found = __eliscript_value_14;
+      while (index < count(fields)) {
+        nth(fields, index) === key && (found = true);
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(0, false);
+      return found;
+    }
+  }
 }
 function check_agreement(authority, projected, projection, fields) {
-  return ((index) => {
-    return (() => {
-      while (__eliscript_truthy16(index < count(comparable_fields))) {
-        ((key) => {
-          return __eliscript_truthy16(((__eliscript_value_3) => __eliscript_truthy16(__eliscript_value_3) ? !__eliscript_truthy16(declared_QMARK_(fields, key)) : __eliscript_value_3)(!__eliscript_truthy16(values_equal_QMARK_(get(authority, key, null), get(projected, key, null))))) ? fail2("DOGFOOD-IDENTITY-004", String("projection ") + String(provenance_text(projected)) + String(" disagrees with authority ") + String(provenance_text(authority)) + String(" on ") + String(String(key))) : null;
-        })(nth(comparable_fields, index));
+  {
+    const __eliscript_value_15 = 0;
+    {
+      let index = __eliscript_value_15;
+      while (index < count(comparable_fields)) {
+        {
+          const __eliscript_value_16 = nth(comparable_fields, index);
+          {
+            let key = __eliscript_value_16;
+            !__eliscript_truthy15(values_equal_QMARK_(get(authority, key, null), get(projected, key, null))) && !__eliscript_truthy15(declared_QMARK_(fields, key)) && fail2("DOGFOOD-IDENTITY-004", String("projection ") + String(provenance_text(projected)) + String(" disagrees with authority ") + String(provenance_text(authority)) + String(" on ") + String(String(key)));
+          }
+        }
         index = index + 1;
       }
       return null;
-    })();
-  })(0);
+    }
+  }
 }
 function check_authority_only(authority, projected, projection, fields) {
-  return ((index) => {
-    return (() => {
-      while (__eliscript_truthy16(index < count(authority_only))) {
-        ((key) => {
-          return ((alias_QMARK_) => {
-            return __eliscript_truthy16(((__eliscript_value_5) => __eliscript_truthy16(__eliscript_value_5) ? ((__eliscript_value_6) => __eliscript_truthy16(__eliscript_value_6) ? !__eliscript_truthy16(alias_QMARK_) : __eliscript_value_6)(!__eliscript_truthy16(declared_QMARK_(fields, key))) : __eliscript_value_5)(!__eliscript_truthy16(values_equal_QMARK_(get(authority, key, null), get(projected, key, null))))) ? fail2("DOGFOOD-IDENTITY-005", String("projection ") + String(provenance_text(projected)) + String(" differs from authority ") + String(provenance_text(authority)) + String(" on ") + String(String(key)) + String(" without an alias or a declared field")) : null;
-          })(((__eliscript_value_4) => __eliscript_truthy16(__eliscript_value_4) ? contains_value_QMARK_(projected["aliases"], projected["slug"]) : __eliscript_value_4)(String(key) === ":slug"));
-        })(nth(authority_only, index));
+  {
+    const __eliscript_value_17 = 0;
+    {
+      let index = __eliscript_value_17;
+      while (index < count(authority_only)) {
+        {
+          const __eliscript_value_18 = nth(authority_only, index);
+          {
+            let key = __eliscript_value_18;
+            {
+              const __eliscript_value_19 = ((__eliscript_value_20) => __eliscript_truthy15(__eliscript_value_20) ? contains_value_QMARK_(projected["aliases"], projected["slug"]) : __eliscript_value_20)(String(key) === ":slug");
+              {
+                let alias_QMARK_ = __eliscript_value_19;
+                !__eliscript_truthy15(values_equal_QMARK_(get(authority, key, null), get(projected, key, null))) && !__eliscript_truthy15(declared_QMARK_(fields, key)) && !__eliscript_truthy15(alias_QMARK_) && fail2("DOGFOOD-IDENTITY-005", String("projection ") + String(provenance_text(projected)) + String(" differs from authority ") + String(provenance_text(authority)) + String(" on ") + String(String(key)) + String(" without an alias or a declared field"));
+              }
+            }
+          }
+        }
         index = index + 1;
       }
       return null;
-    })();
-  })(0);
+    }
+  }
 }
 function contains_value_QMARK_(values, needle) {
-  return ((index, found) => {
-    (() => {
-      while (__eliscript_truthy16(((__eliscript_value_7) => __eliscript_truthy16(__eliscript_value_7) ? !__eliscript_truthy16(found) : __eliscript_value_7)(index < count(values)))) {
-        __eliscript_truthy16(nth(values, index) === needle) && (found = true);
+  {
+    const __eliscript_value_21 = 0;
+    const __eliscript_value_22 = false;
+    {
+      let index = __eliscript_value_21;
+      let found = __eliscript_value_22;
+      while (index < count(values) && !__eliscript_truthy15(found)) {
+        nth(values, index) === needle && (found = true);
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(0, false);
+      return found;
+    }
+  }
 }
 function merged_overrides(authority, projected, fields) {
-  return ((overrides) => {
-    ((index) => {
-      return (() => {
-        while (__eliscript_truthy16(index < count(fields))) {
-          ((key) => {
-            return overrides = assoc(overrides, key, get(projected, key, null));
-          })(nth(fields, index));
-          index = index + 1;
+  {
+    const __eliscript_value_23 = hashMap();
+    {
+      let overrides = __eliscript_value_23;
+      {
+        const __eliscript_value_24 = 0;
+        {
+          let index = __eliscript_value_24;
+          while (index < count(fields)) {
+            {
+              const __eliscript_value_25 = nth(fields, index);
+              {
+                let key = __eliscript_value_25;
+                overrides = assoc(overrides, key, get(projected, key, null));
+              }
+            }
+            index = index + 1;
+          }
         }
-        return null;
-      })();
-    })(0);
-    overrides = assoc(overrides, keyword("comment-channels"), append_all2(authority["comment-channels"], projected["comment-channels"]));
-    overrides = assoc(overrides, keyword("aliases"), dedupe(append_all2(authority["aliases"], projected["aliases"])));
-    return overrides;
-  })(hashMap());
+      }
+      overrides = assoc(overrides, keyword("comment-channels"), append_all2(authority["comment-channels"], projected["comment-channels"]));
+      overrides = assoc(overrides, keyword("aliases"), dedupe(append_all2(authority["aliases"], projected["aliases"])));
+      return overrides;
+    }
+  }
 }
 function dedupe(values) {
-  return ((result, index) => {
-    (() => {
-      while (__eliscript_truthy16(index < count(values))) {
-        ((value) => {
-          return __eliscript_truthy16(!__eliscript_truthy16(contains_value_QMARK_(result, value))) ? result = conj(result, value) : null;
-        })(nth(values, index));
+  {
+    const __eliscript_value_26 = vector();
+    const __eliscript_value_27 = 0;
+    {
+      let result = __eliscript_value_26;
+      let index = __eliscript_value_27;
+      while (index < count(values)) {
+        {
+          const __eliscript_value_28 = nth(values, index);
+          {
+            let value = __eliscript_value_28;
+            !__eliscript_truthy15(contains_value_QMARK_(result, value)) && (result = conj(result, value));
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return result;
-  })(vector(), 0);
+      return result;
+    }
+  }
 }
 function resolve_projection(declaration, group) {
-  return ((id) => {
-    return ((authority_source) => {
-      return ((projections) => {
-        return ((authority) => {
-          return ((projection_index) => {
-            return ((overrides) => {
-              return (() => {
-                ((index) => {
-                  return (() => {
-                    while (__eliscript_truthy16(index < count(group))) {
-                      ((post) => {
-                        return ((provider) => {
-                          return ((expected) => {
-                            return __eliscript_truthy16(((__eliscript_value_8) => __eliscript_truthy16(__eliscript_value_8) ? provider === expected : __eliscript_value_8)(authority === null)) ? authority = post : null;
-                          })(get(provider_of, authority_source, ""));
-                        })(get(post["provenance"], keyword("provider"), ""));
-                      })(nth(group, index));
-                      index = index + 1;
-                    }
-                    return null;
-                  })();
-                })(0);
-                __eliscript_truthy16(authority === null) && fail2("DOGFOOD-IDENTITY-006", String('projection for "') + String(id) + String('" names authority ') + String(String(authority_source)) + String(" but no record from that source carries the id"));
-                (() => {
-                  while (__eliscript_truthy16(projection_index < count(projections))) {
-                    ((projection) => {
-                      return ((matched) => {
-                        return ((index) => {
-                          return (() => {
-                            (() => {
-                              while (__eliscript_truthy16(index < count(group))) {
-                                ((post) => {
-                                  return __eliscript_truthy16(projection_matches_QMARK_(projection, post)) ? matched = post : null;
-                                })(nth(group, index));
+  {
+    const __eliscript_value_29 = get(declaration, keyword("id"), "");
+    {
+      let id = __eliscript_value_29;
+      {
+        const __eliscript_value_30 = get(declaration, keyword("authority"), null);
+        {
+          let authority_source = __eliscript_value_30;
+          {
+            const __eliscript_value_31 = get(declaration, keyword("projections"), vector());
+            {
+              let projections = __eliscript_value_31;
+              {
+                const __eliscript_value_32 = null;
+                {
+                  let authority = __eliscript_value_32;
+                  {
+                    const __eliscript_value_33 = 0;
+                    {
+                      let projection_index = __eliscript_value_33;
+                      {
+                        const __eliscript_value_34 = hashMap();
+                        {
+                          let overrides = __eliscript_value_34;
+                          {
+                            const __eliscript_value_35 = 0;
+                            {
+                              let index = __eliscript_value_35;
+                              while (index < count(group)) {
+                                {
+                                  const __eliscript_value_36 = nth(group, index);
+                                  {
+                                    let post = __eliscript_value_36;
+                                    {
+                                      const __eliscript_value_37 = get(post["provenance"], keyword("provider"), "");
+                                      {
+                                        let provider = __eliscript_value_37;
+                                        {
+                                          const __eliscript_value_38 = get(provider_of, authority_source, "");
+                                          {
+                                            let expected = __eliscript_value_38;
+                                            authority === null && provider === expected && (authority = post);
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
                                 index = index + 1;
                               }
-                              return null;
-                            })();
-                            __eliscript_truthy16(matched === null) && fail2("DOGFOOD-IDENTITY-007", String('projection for "') + String(id) + String('" names a record that was not collected: ') + String(String(get(projection, keyword("source"), ""))) + String(" ") + String(String(get(projection, keyword("repository"), ""))) + String("#") + String(String(get(projection, keyword("number"), null))));
-                            return ((fields) => {
-                              check_agreement(authority, matched, projection, fields);
-                              check_authority_only(authority, matched, projection, fields);
-                              return overrides = merged_overrides(authority, matched, fields);
-                            })(declared_fields(declaration, projection));
-                          })();
-                        })(0);
-                      })(null);
-                    })(nth(projections, projection_index));
-                    projection_index = projection_index + 1;
+                            }
+                          }
+                          authority === null && fail2("DOGFOOD-IDENTITY-006", String('projection for "') + String(id) + String('" names authority ') + String(String(authority_source)) + String(" but no record from that source carries the id"));
+                          while (projection_index < count(projections)) {
+                            {
+                              const __eliscript_value_39 = nth(projections, projection_index);
+                              {
+                                let projection = __eliscript_value_39;
+                                {
+                                  const __eliscript_value_40 = null;
+                                  {
+                                    let matched = __eliscript_value_40;
+                                    {
+                                      const __eliscript_value_41 = 0;
+                                      {
+                                        let index = __eliscript_value_41;
+                                        while (index < count(group)) {
+                                          {
+                                            const __eliscript_value_42 = nth(group, index);
+                                            {
+                                              let post = __eliscript_value_42;
+                                              __eliscript_truthy15(projection_matches_QMARK_(projection, post)) && (matched = post);
+                                            }
+                                          }
+                                          index = index + 1;
+                                        }
+                                        matched === null && fail2("DOGFOOD-IDENTITY-007", String('projection for "') + String(id) + String('" names a record that was not collected: ') + String(String(get(projection, keyword("source"), ""))) + String(" ") + String(String(get(projection, keyword("repository"), ""))) + String("#") + String(String(get(projection, keyword("number"), null))));
+                                        {
+                                          const __eliscript_value_43 = declared_fields(declaration, projection);
+                                          {
+                                            let fields = __eliscript_value_43;
+                                            check_agreement(authority, matched, projection, fields);
+                                            check_authority_only(authority, matched, projection, fields);
+                                            overrides = merged_overrides(authority, matched, fields);
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                            projection_index = projection_index + 1;
+                          }
+                          return post_with(authority, overrides);
+                        }
+                      }
+                    }
                   }
-                  return null;
-                })();
-                return post_with(authority, overrides);
-              })();
-            })(hashMap());
-          })(0);
-        })(null);
-      })(get(declaration, keyword("projections"), vector()));
-    })(get(declaration, keyword("authority"), null));
-  })(get(declaration, keyword("id"), ""));
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function resolve_identity(config, posts) {
-  return ((identity2) => {
-    return ((declarations) => {
-      return ((groups) => {
-        return ((ids) => {
-          return ((resolved) => {
-            return ((index) => {
-              return (() => {
-                (() => {
-                  while (__eliscript_truthy16(index < count(ids))) {
-                    ((id) => {
-                      return ((group) => {
-                        return ((declaration) => {
-                          return __eliscript_truthy16(count(group) === 1) ? resolved = conj(resolved, nth(group, 0)) : __eliscript_truthy16(declaration === null) ? fail2("DOGFOOD-IDENTITY-001", String('duplicate canonical id "') + String(id) + String('" from ') + String(join(", ", map_provenance(group))) + String("; declare a projection to resolve it")) : resolved = conj(resolved, resolve_projection(declaration, group));
-                        })(find_declaration(declarations, id));
-                      })(get(groups, id));
-                    })(nth(ids, index));
-                    index = index + 1;
+  {
+    const __eliscript_value_44 = get(config, keyword("identity"), hashMap());
+    {
+      let identity2 = __eliscript_value_44;
+      {
+        const __eliscript_value_45 = get(identity2, keyword("projections"), vector());
+        {
+          let declarations = __eliscript_value_45;
+          {
+            const __eliscript_value_46 = group_by_id(posts);
+            {
+              let groups = __eliscript_value_46;
+              {
+                const __eliscript_value_47 = distinct_ids(posts);
+                {
+                  let ids = __eliscript_value_47;
+                  {
+                    const __eliscript_value_48 = vector();
+                    {
+                      let resolved = __eliscript_value_48;
+                      {
+                        const __eliscript_value_49 = 0;
+                        {
+                          let index = __eliscript_value_49;
+                          while (index < count(ids)) {
+                            {
+                              const __eliscript_value_50 = nth(ids, index);
+                              {
+                                let id = __eliscript_value_50;
+                                {
+                                  const __eliscript_value_51 = get(groups, id);
+                                  {
+                                    let group = __eliscript_value_51;
+                                    {
+                                      const __eliscript_value_52 = find_declaration(declarations, id);
+                                      {
+                                        let declaration = __eliscript_value_52;
+                                        count(group) === 1 ? resolved = conj(resolved, nth(group, 0)) : declaration === null ? fail2("DOGFOOD-IDENTITY-001", String('duplicate canonical id "') + String(id) + String('" from ') + String(join(", ", map_provenance(group))) + String("; declare a projection to resolve it")) : resolved = conj(resolved, resolve_projection(declaration, group));
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                            index = index + 1;
+                          }
+                          return resolved;
+                        }
+                      }
+                    }
                   }
-                  return null;
-                })();
-                return resolved;
-              })();
-            })(0);
-          })(vector());
-        })(distinct_ids(posts));
-      })(group_by_id(posts));
-    })(get(identity2, keyword("projections"), vector()));
-  })(get(config, keyword("identity"), hashMap()));
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function distinct_ids(posts) {
-  return ((ids, index) => {
-    (() => {
-      while (__eliscript_truthy16(index < count(posts))) {
-        ((id) => {
-          return __eliscript_truthy16(!__eliscript_truthy16(contains_value_QMARK_(ids, id))) ? ids = conj(ids, id) : null;
-        })(nth(posts, index)["id"]);
+  {
+    const __eliscript_value_53 = vector();
+    const __eliscript_value_54 = 0;
+    {
+      let ids = __eliscript_value_53;
+      let index = __eliscript_value_54;
+      while (index < count(posts)) {
+        {
+          const __eliscript_value_55 = nth(posts, index)["id"];
+          {
+            let id = __eliscript_value_55;
+            !__eliscript_truthy15(contains_value_QMARK_(ids, id)) && (ids = conj(ids, id));
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return ids;
-  })(vector(), 0);
+      return ids;
+    }
+  }
 }
 function find_declaration(declarations, id) {
-  return ((index, found) => {
-    (() => {
-      while (__eliscript_truthy16(index < count(declarations))) {
-        __eliscript_truthy16(get(nth(declarations, index), keyword("id"), "") === id) && (found = nth(declarations, index));
+  {
+    const __eliscript_value_56 = 0;
+    const __eliscript_value_57 = null;
+    {
+      let index = __eliscript_value_56;
+      let found = __eliscript_value_57;
+      while (index < count(declarations)) {
+        get(nth(declarations, index), keyword("id"), "") === id && (found = nth(declarations, index));
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(0, null);
+      return found;
+    }
+  }
 }
 function map_provenance(posts) {
-  return ((result, index) => {
-    (() => {
-      while (__eliscript_truthy16(index < count(posts))) {
+  {
+    const __eliscript_value_58 = vector();
+    const __eliscript_value_59 = 0;
+    {
+      let result = __eliscript_value_58;
+      let index = __eliscript_value_59;
+      while (index < count(posts)) {
         result = conj(result, provenance_text(nth(posts, index)));
         index = index + 1;
       }
-      return null;
-    })();
-    return result;
-  })(vector(), 0);
+      return result;
+    }
+  }
 }
 
 // examples/dogfood/dist/src/builder/preflight.mjs
-var __eliscript_truthy17 = (value) => value !== false && value != null;
+var __eliscript_truthy16 = (value) => value !== false && value != null;
 function repository_name(payload) {
-  return ((repository) => {
-    return __eliscript_truthy17(repository === null) ? "" : String(repository["full_name"] ?? "");
-  })(payload["repository"] ?? null);
+  {
+    const __eliscript_value_1 = payload["repository"] ?? null;
+    {
+      let repository = __eliscript_value_1;
+      return repository === null ? "" : String(repository["full_name"] ?? "");
+    }
+  }
 }
 function event_record(event_name, payload) {
-  return __eliscript_truthy17(event_name === "issues") ? ((issue) => {
-    return __eliscript_truthy17(issue === null) ? null : hashMap(keyword("kind"), keyword("issues"), keyword("record"), issue, keyword("author"), issue["user"] ?? null);
-  })(payload["issue"] ?? null) : __eliscript_truthy17(event_name === "discussions") ? ((discussion) => {
-    return __eliscript_truthy17(discussion === null) ? null : hashMap(keyword("kind"), keyword("discussions"), keyword("record"), discussion, keyword("author"), discussion["user"] ?? null);
+  return event_name === "issues" ? ((issue) => {
+    return issue === null ? null : hashMap(keyword("kind"), keyword("issues"), keyword("record"), issue, keyword("author"), issue["user"] ?? null);
+  })(payload["issue"] ?? null) : event_name === "discussions" ? ((discussion) => {
+    return discussion === null ? null : hashMap(keyword("kind"), keyword("discussions"), keyword("record"), discussion, keyword("author"), discussion["user"] ?? null);
   })(payload["discussion"] ?? null) : null;
 }
 function record_field(record, key) {
@@ -6552,135 +7728,217 @@ function record_field(record, key) {
 }
 function enabled_sources_of_kind(config, kind) {
   return filter((source) => {
-    return ((__eliscript_value_1) => __eliscript_truthy17(__eliscript_value_1) ? get(source, keyword("kind"), keyword("markdown")) === kind : __eliscript_value_1)(get(source, keyword("enabled"), false));
+    return ((__eliscript_value_2) => __eliscript_truthy16(__eliscript_value_2) ? get(source, keyword("kind"), keyword("markdown")) === kind : __eliscript_value_2)(get(source, keyword("enabled"), false));
   }, get(config, keyword("sources"), vector()));
 }
 function matching_source(config, kind, repository) {
-  return ((sources, index, found) => {
-    (() => {
-      while (__eliscript_truthy17(index < count(sources))) {
-        ((source) => {
-          return __eliscript_truthy17(get(source, keyword("repository"), "") === repository) ? found = source : null;
-        })(nth(sources, index));
+  {
+    const __eliscript_value_3 = enabled_sources_of_kind(config, kind);
+    const __eliscript_value_4 = 0;
+    const __eliscript_value_5 = null;
+    {
+      let sources = __eliscript_value_3;
+      let index = __eliscript_value_4;
+      let found = __eliscript_value_5;
+      while (index < count(sources)) {
+        {
+          const __eliscript_value_6 = nth(sources, index);
+          {
+            let source = __eliscript_value_6;
+            get(source, keyword("repository"), "") === repository && (found = source);
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(enabled_sources_of_kind(config, kind), 0, null);
+      return found;
+    }
+  }
 }
 function labelled_for_publication_QMARK_(source, issue) {
-  return ((required, labels, index, found) => {
-    (() => {
-      while (__eliscript_truthy17(index < (labels ?? []).length)) {
-        __eliscript_truthy17((((labels ?? [])[index] ?? null)["name"] ?? "") === required) && (found = true);
+  {
+    const __eliscript_value_7 = get(source, keyword("label"), "");
+    const __eliscript_value_8 = issue["labels"] ?? [];
+    const __eliscript_value_9 = 0;
+    const __eliscript_value_10 = false;
+    {
+      let required = __eliscript_value_7;
+      let labels = __eliscript_value_8;
+      let index = __eliscript_value_9;
+      let found = __eliscript_value_10;
+      while (index < (labels ?? []).length) {
+        (((labels ?? [])[index] ?? null)["name"] ?? "") === required && (found = true);
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(get(source, keyword("label"), ""), issue["labels"] ?? [], 0, false);
+      return found;
+    }
+  }
 }
 function carrier_shaped_QMARK_(config, author, body) {
-  return ((adapters, index, found) => {
-    (() => {
-      while (__eliscript_truthy17(index < count(adapters))) {
-        ((adapter) => {
-          return ((principal) => {
-            return ((marker) => {
-              return ((login) => {
-                return __eliscript_truthy17(((__eliscript_value_2) => __eliscript_truthy17(__eliscript_value_2) ? ((__eliscript_value_3) => __eliscript_truthy17(__eliscript_value_3) ? ((__eliscript_value_4) => __eliscript_truthy17(__eliscript_value_4) ? ((__eliscript_value_5) => __eliscript_truthy17(__eliscript_value_5) ? contains_QMARK_(String(marker), String(body)) : __eliscript_value_5)(to_lowercase(login) === to_lowercase(String(principal))) : __eliscript_value_4)(!__eliscript_truthy17(marker === null)) : __eliscript_value_3)(!__eliscript_truthy17(principal === null)) : __eliscript_value_2)(get(adapter, keyword("carrier-kind"), keyword("none")) === keyword("issue"))) ? found = true : null;
-              })(login_of(author));
-            })(get(adapter, keyword("marker"), null));
-          })(get(adapter, keyword("principal"), null));
-        })(nth(adapters, index));
+  {
+    const __eliscript_value_11 = get(config, keyword("adapters"), vector());
+    const __eliscript_value_12 = 0;
+    const __eliscript_value_13 = false;
+    {
+      let adapters = __eliscript_value_11;
+      let index = __eliscript_value_12;
+      let found = __eliscript_value_13;
+      while (index < count(adapters)) {
+        {
+          const __eliscript_value_14 = nth(adapters, index);
+          {
+            let adapter = __eliscript_value_14;
+            {
+              const __eliscript_value_15 = get(adapter, keyword("principal"), null);
+              {
+                let principal = __eliscript_value_15;
+                {
+                  const __eliscript_value_16 = get(adapter, keyword("marker"), null);
+                  {
+                    let marker = __eliscript_value_16;
+                    {
+                      const __eliscript_value_17 = login_of(author);
+                      {
+                        let login = __eliscript_value_17;
+                        __eliscript_truthy16(((__eliscript_value_18) => __eliscript_truthy16(__eliscript_value_18) ? ((__eliscript_value_19) => __eliscript_truthy16(__eliscript_value_19) ? ((__eliscript_value_20) => __eliscript_truthy16(__eliscript_value_20) ? ((__eliscript_value_21) => __eliscript_truthy16(__eliscript_value_21) ? contains_QMARK_(String(marker), String(body)) : __eliscript_value_21)(to_lowercase(login) === to_lowercase(String(principal))) : __eliscript_value_20)(!(marker === null)) : __eliscript_value_19)(!(principal === null)) : __eliscript_value_18)(get(adapter, keyword("carrier-kind"), keyword("none")) === keyword("issue"))) && (found = true);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(get(config, keyword("adapters"), vector()), 0, false);
+      return found;
+    }
+  }
 }
 function source_skip(config, kind, source, body, author) {
-  return __eliscript_truthy17(((__eliscript_value_6) => __eliscript_truthy17(__eliscript_value_6) ? !__eliscript_truthy17(labelled_for_publication_QMARK_(source, body)) : __eliscript_value_6)(kind === keyword("issues"))) ? String("the issue is not labelled ") + String(get(source, keyword("label"), "")) : __eliscript_truthy17(((__eliscript_value_7) => __eliscript_truthy17(__eliscript_value_7) ? !__eliscript_truthy17(allowed_category_QMARK_(source, body)) : __eliscript_value_7)(kind === keyword("discussions"))) ? "the discussion is in a category that is not published" : __eliscript_truthy17(carrier_shaped_QMARK_(config, author, body_of(body))) ? "the record is a comment carrier" : __eliscript_truthy17(!__eliscript_truthy17(authorized_author_QMARK_(publisher_set(get(config, keyword("publishing"), hashMap())), author))) ? String("the author ") + String(login_of(author)) + String(" is not a publisher") : "";
+  return kind === keyword("issues") && !__eliscript_truthy16(labelled_for_publication_QMARK_(source, body)) ? String("the issue is not labelled ") + String(get(source, keyword("label"), "")) : kind === keyword("discussions") && !__eliscript_truthy16(allowed_category_QMARK_(source, body)) ? "the discussion is in a category that is not published" : __eliscript_truthy16(carrier_shaped_QMARK_(config, author, body_of(body))) ? "the record is a comment carrier" : !__eliscript_truthy16(authorized_author_QMARK_(publisher_set(get(config, keyword("publishing"), hashMap())), author)) ? String("the author ") + String(login_of(author)) + String(" is not a publisher") : "";
 }
 function record_skip(config, record, repository) {
-  return ((kind) => {
-    return ((body) => {
-      return ((author) => {
-        return ((source) => {
-          return __eliscript_truthy17(!__eliscript_truthy17((body["pull_request"] ?? null) === null)) ? "the record is a pull request, not an article" : __eliscript_truthy17(source === null) ? String("no enabled ") + String(name_of(kind)) + String(" source selects ") + String(repository) : source_skip(config, kind, source, body, author);
-        })(matching_source(config, kind, repository));
-      })(record_field(record, keyword("author")));
-    })(record_field(record, keyword("record")));
-  })(record_field(record, keyword("kind")));
+  {
+    const __eliscript_value_22 = record_field(record, keyword("kind"));
+    {
+      let kind = __eliscript_value_22;
+      {
+        const __eliscript_value_23 = record_field(record, keyword("record"));
+        {
+          let body = __eliscript_value_23;
+          {
+            const __eliscript_value_24 = record_field(record, keyword("author"));
+            {
+              let author = __eliscript_value_24;
+              {
+                const __eliscript_value_25 = matching_source(config, kind, repository);
+                {
+                  let source = __eliscript_value_25;
+                  return !((body["pull_request"] ?? null) === null) ? "the record is a pull request, not an article" : source === null ? String("no enabled ") + String(name_of(kind)) + String(" source selects ") + String(repository) : source_skip(config, kind, source, body, author);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function skip_decision(config, classification2) {
-  return ((event_name) => {
-    return ((payload) => {
-      return ((record) => {
-        return ((detail) => {
-          return __eliscript_truthy17(blank_QMARK_(detail)) ? hashMap(keyword("skip"), false) : hashMap(keyword("skip"), true, keyword("detail"), detail);
-        })(__eliscript_truthy17(record === null) ? "" : record_skip(config, record, repository_name(payload)));
-      })(event_record(event_name, payload));
-    })(get(classification2, keyword("payload"), hashMap()));
-  })(get(classification2, keyword("event"), ""));
+  {
+    const __eliscript_value_26 = get(classification2, keyword("event"), "");
+    {
+      let event_name = __eliscript_value_26;
+      {
+        const __eliscript_value_27 = get(classification2, keyword("payload"), hashMap());
+        {
+          let payload = __eliscript_value_27;
+          {
+            const __eliscript_value_28 = event_record(event_name, payload);
+            {
+              let record = __eliscript_value_28;
+              {
+                const __eliscript_value_29 = record === null ? "" : record_skip(config, record, repository_name(payload));
+                {
+                  let detail = __eliscript_value_29;
+                  return __eliscript_truthy16(blank_QMARK_(detail)) ? hashMap(keyword("skip"), false) : hashMap(keyword("skip"), true, keyword("detail"), detail);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function body_of(body) {
-  return ((text) => {
-    return __eliscript_truthy17(text === null) ? "" : String(text);
-  })(body["body"] ?? null);
+  {
+    const __eliscript_value_30 = body["body"] ?? null;
+    {
+      let text = __eliscript_value_30;
+      return text === null ? "" : String(text);
+    }
+  }
 }
 function login_of(author) {
-  return __eliscript_truthy17(author === null) ? "" : String(author["login"] ?? "");
+  return author === null ? "" : String(author["login"] ?? "");
 }
 function name_of(kind) {
-  return __eliscript_truthy17(kind === keyword("discussions")) ? "discussions" : "issues";
+  return kind === keyword("discussions") ? "discussions" : "issues";
 }
 
 // examples/dogfood/dist/src/builder/sources.mjs
-var __eliscript_truthy18 = (value) => value !== false && value != null;
 function enabled_sources(config) {
   return filter((source) => {
     return get(source, keyword("enabled"), false);
   }, get(config, keyword("sources"), vector()));
 }
 function identity_list(posts) {
-  return ((result, index) => {
-    (() => {
-      while (__eliscript_truthy18(index < count(posts))) {
-        ((post) => {
-          return ((aliases) => {
-            return ((alias_index) => {
-              return (() => {
-                result = conj(result, post["id"]);
-                return (() => {
-                  while (__eliscript_truthy18(alias_index < count(aliases))) {
-                    result = conj(result, nth(aliases, alias_index));
-                    alias_index = alias_index + 1;
+  {
+    const __eliscript_value_1 = vector();
+    const __eliscript_value_2 = 0;
+    {
+      let result = __eliscript_value_1;
+      let index = __eliscript_value_2;
+      while (index < count(posts)) {
+        {
+          const __eliscript_value_3 = nth(posts, index);
+          {
+            let post = __eliscript_value_3;
+            {
+              const __eliscript_value_4 = post["aliases"];
+              {
+                let aliases = __eliscript_value_4;
+                {
+                  const __eliscript_value_5 = 0;
+                  {
+                    let alias_index = __eliscript_value_5;
+                    result = conj(result, post["id"]);
+                    while (alias_index < count(aliases)) {
+                      result = conj(result, nth(aliases, alias_index));
+                      alias_index = alias_index + 1;
+                    }
                   }
-                  return null;
-                })();
-              })();
-            })(0);
-          })(post["aliases"]);
-        })(nth(posts, index));
+                }
+              }
+            }
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return result;
-  })(vector(), 0);
+      return result;
+    }
+  }
 }
 async function source_posts(root, config, source, transport, identities) {
   return await (async (kind) => {
-    return __eliscript_truthy18(kind === keyword("markdown")) ? hashMap(keyword("posts"), read_posts(root, get(source, keyword("directory"), "content/posts")), keyword("carriers"), 0, keyword("unauthorized"), 0) : __eliscript_truthy18(kind === keyword("issues")) ? await collect_issues(hashMap(keyword("source"), source, keyword("publishing"), get(config, keyword("publishing")), keyword("adapters"), get(config, keyword("adapters"), vector()), keyword("identities"), identities, keyword("comments"), get(config, keyword("comments"), hashMap()), keyword("transport"), transport)) : __eliscript_truthy18(kind === keyword("discussions")) ? await collect_discussions(hashMap(keyword("source"), source, keyword("publishing"), get(config, keyword("publishing")), keyword("adapters"), get(config, keyword("adapters"), vector()), keyword("identities"), identities, keyword("comments"), get(config, keyword("comments"), hashMap()), keyword("transport"), transport)) : fail2("DOGFOOD-SOURCE-001", String("unsupported source kind: ") + String(kind));
+    return kind === keyword("markdown") ? hashMap(keyword("posts"), read_posts(root, get(source, keyword("directory"), "content/posts")), keyword("carriers"), 0, keyword("unauthorized"), 0) : kind === keyword("issues") ? await collect_issues(hashMap(keyword("source"), source, keyword("publishing"), get(config, keyword("publishing")), keyword("adapters"), get(config, keyword("adapters"), vector()), keyword("identities"), identities, keyword("comments"), get(config, keyword("comments"), hashMap()), keyword("transport"), transport)) : kind === keyword("discussions") ? await collect_discussions(hashMap(keyword("source"), source, keyword("publishing"), get(config, keyword("publishing")), keyword("adapters"), get(config, keyword("adapters"), vector()), keyword("identities"), identities, keyword("comments"), get(config, keyword("comments"), hashMap()), keyword("transport"), transport)) : fail2("DOGFOOD-SOURCE-001", String("unsupported source kind: ") + String(kind));
   })(get(source, keyword("kind"), keyword("markdown")));
 }
 
 // examples/dogfood/dist/src/support/config.mjs
 var import_node_fs2 = require("node:fs");
-var __eliscript_truthy19 = (value) => value !== false && value != null;
+var __eliscript_truthy17 = (value) => value !== false && value != null;
 var open_paren = 40;
 var close_paren = 41;
 var open_brace = 123;
@@ -6700,74 +7958,100 @@ function make_reader(source) {
   return { source, index: 0, length: text_length(source) };
 }
 function reader_code(reader) {
-  return ((index) => {
-    return __eliscript_truthy19(index < reader["length"]) ? char_code(reader["source"], index) : null;
-  })(reader["index"]);
+  {
+    const __eliscript_value_1 = reader["index"];
+    {
+      let index = __eliscript_value_1;
+      return index < reader["length"] ? char_code(reader["source"], index) : null;
+    }
+  }
 }
 function advance_reader(reader) {
   return reader["index"] = reader["index"] + 1;
 }
 function whitespace_code_QMARK_(code) {
-  return ((__eliscript_value_1) => __eliscript_truthy19(__eliscript_value_1) ? __eliscript_value_1 : ((__eliscript_value_2) => __eliscript_truthy19(__eliscript_value_2) ? __eliscript_value_2 : ((__eliscript_value_3) => __eliscript_truthy19(__eliscript_value_3) ? __eliscript_value_3 : code === 13)(code === 10))(code === 9))(code === 32);
+  return code === 32 || code === 9 || code === 10 || code === 13;
 }
 function delimiter_code_QMARK_(code) {
-  return ((__eliscript_value_4) => __eliscript_truthy19(__eliscript_value_4) ? __eliscript_value_4 : ((__eliscript_value_5) => __eliscript_truthy19(__eliscript_value_5) ? __eliscript_value_5 : ((__eliscript_value_6) => __eliscript_truthy19(__eliscript_value_6) ? __eliscript_value_6 : ((__eliscript_value_7) => __eliscript_truthy19(__eliscript_value_7) ? __eliscript_value_7 : ((__eliscript_value_8) => __eliscript_truthy19(__eliscript_value_8) ? __eliscript_value_8 : ((__eliscript_value_9) => __eliscript_truthy19(__eliscript_value_9) ? __eliscript_value_9 : ((__eliscript_value_10) => __eliscript_truthy19(__eliscript_value_10) ? __eliscript_value_10 : ((__eliscript_value_11) => __eliscript_truthy19(__eliscript_value_11) ? __eliscript_value_11 : ((__eliscript_value_12) => __eliscript_truthy19(__eliscript_value_12) ? __eliscript_value_12 : code === semicolon)(code === double_quote2))(code === close_bracket))(code === open_bracket))(code === close_brace))(code === open_brace))(code === close_paren))(code === open_paren))(whitespace_code_QMARK_(code)))(code === null);
+  return ((__eliscript_value_2) => __eliscript_truthy17(__eliscript_value_2) ? __eliscript_value_2 : ((__eliscript_value_3) => __eliscript_truthy17(__eliscript_value_3) ? __eliscript_value_3 : code === open_paren || code === close_paren || code === open_brace || code === close_brace || code === open_bracket || code === close_bracket || code === double_quote2 || code === semicolon)(whitespace_code_QMARK_(code)))(code === null);
 }
 function skip_space(reader) {
-  return ((done) => {
-    return (() => {
-      while (__eliscript_truthy19(!__eliscript_truthy19(done))) {
-        ((code) => {
-          return __eliscript_truthy19(code === null) ? done = true : __eliscript_truthy19(whitespace_code_QMARK_(code)) ? advance_reader(reader) : __eliscript_truthy19(code === semicolon) ? (() => {
-            while (__eliscript_truthy19(((__eliscript_value_13) => __eliscript_truthy19(__eliscript_value_13) ? !__eliscript_truthy19(reader_code(reader) === 10) : __eliscript_value_13)(!__eliscript_truthy19(reader_code(reader) === null)))) {
-              advance_reader(reader);
-            }
-            return null;
-          })() : done = true;
-        })(reader_code(reader));
+  {
+    const __eliscript_value_4 = false;
+    {
+      let done = __eliscript_value_4;
+      while (!__eliscript_truthy17(done)) {
+        {
+          const __eliscript_value_5 = reader_code(reader);
+          {
+            let code = __eliscript_value_5;
+            code === null ? done = true : __eliscript_truthy17(whitespace_code_QMARK_(code)) ? advance_reader(reader) : code === semicolon ? (() => {
+              while (!(reader_code(reader) === null) && !(reader_code(reader) === 10)) {
+                advance_reader(reader);
+              }
+              return null;
+            })() : done = true;
+          }
+        }
       }
       return null;
-    })();
-  })(false);
+    }
+  }
 }
 function read_failure(reader, message) {
   return fail2("DOGFOOD-CONFIG-001", String("configuration at offset ") + String(reader["index"]) + String(": ") + String(message));
 }
 function read_delimited(reader, open, close, kind) {
   advance_reader(reader);
-  return ((items, done) => {
-    (() => {
-      while (__eliscript_truthy19(!__eliscript_truthy19(done))) {
+  {
+    const __eliscript_value_6 = vector();
+    const __eliscript_value_7 = false;
+    {
+      let items = __eliscript_value_6;
+      let done = __eliscript_value_7;
+      while (!__eliscript_truthy17(done)) {
         skip_space(reader);
-        ((code) => {
-          return __eliscript_truthy19(code === null) ? read_failure(reader, String("unterminated ") + String(kind)) : __eliscript_truthy19(code === close) ? (() => {
-            advance_reader(reader);
-            return done = true;
-          })() : items = conj(items, read_value(reader));
-        })(reader_code(reader));
+        {
+          const __eliscript_value_8 = reader_code(reader);
+          {
+            let code = __eliscript_value_8;
+            code === null ? read_failure(reader, String("unterminated ") + String(kind)) : code === close ? (() => {
+              advance_reader(reader);
+              return done = true;
+            })() : items = conj(items, read_value(reader));
+          }
+        }
       }
-      return null;
-    })();
-    return items;
-  })(vector(), false);
+      return items;
+    }
+  }
 }
 function read_map_value(reader) {
-  return ((items) => {
-    return ((total) => {
-      return (() => {
-        __eliscript_truthy19(total % 2 === 1) && read_failure(reader, "map literal needs an even number of forms");
-        return ((result, index) => {
-          (() => {
-            while (__eliscript_truthy19(index < total)) {
-              result = assoc(result, nth(items, index), nth(items, index + 1)), index = index + 2;
+  {
+    const __eliscript_value_9 = read_delimited(reader, open_brace, close_brace, "map");
+    {
+      let items = __eliscript_value_9;
+      {
+        const __eliscript_value_10 = count(items);
+        {
+          let total = __eliscript_value_10;
+          total % 2 === 1 && read_failure(reader, "map literal needs an even number of forms");
+          {
+            const __eliscript_value_11 = hashMap();
+            const __eliscript_value_12 = 0;
+            {
+              let result = __eliscript_value_11;
+              let index = __eliscript_value_12;
+              while (index < total) {
+                result = assoc(result, nth(items, index), nth(items, index + 1)), index = index + 2;
+              }
+              return result;
             }
-            return null;
-          })();
-          return result;
-        })(hashMap(), 0);
-      })();
-    })(count(items));
-  })(read_delimited(reader, open_brace, close_brace, "map"));
+          }
+        }
+      }
+    }
+  }
 }
 function read_vector_value(reader) {
   return read_delimited(reader, open_bracket, close_bracket, "vector");
@@ -6777,147 +8061,211 @@ function read_list_value(reader) {
 }
 function read_escaped(reader) {
   advance_reader(reader);
-  return ((code) => {
-    __eliscript_truthy19(code === null) && read_failure(reader, "unterminated string literal");
-    advance_reader(reader);
-    return __eliscript_truthy19(code === 110) ? `
-` : __eliscript_truthy19(code === 116) ? "\t" : __eliscript_truthy19(code === 114) ? "\r" : __eliscript_truthy19(code === double_quote2) ? '"' : __eliscript_truthy19(code === backslash) ? "\\" : read_failure(reader, "unsupported string escape");
-  })(reader_code(reader));
+  {
+    const __eliscript_value_13 = reader_code(reader);
+    {
+      let code = __eliscript_value_13;
+      code === null && read_failure(reader, "unterminated string literal");
+      advance_reader(reader);
+      return code === 110 ? `
+` : code === 116 ? "\t" : code === 114 ? "\r" : code === double_quote2 ? '"' : code === backslash ? "\\" : read_failure(reader, "unsupported string escape");
+    }
+  }
 }
 function read_string_value(reader) {
   advance_reader(reader);
-  return ((result, done) => {
-    (() => {
-      while (__eliscript_truthy19(!__eliscript_truthy19(done))) {
-        ((code) => {
-          return __eliscript_truthy19(code === null) ? read_failure(reader, "unterminated string literal") : __eliscript_truthy19(code === double_quote2) ? (() => {
-            advance_reader(reader);
-            return done = true;
-          })() : __eliscript_truthy19(code === backslash) ? result = String(result) + String(read_escaped(reader)) : (() => {
-            result = String(result) + String(String.fromCharCode(code));
-            return advance_reader(reader);
-          })();
-        })(reader_code(reader));
+  {
+    const __eliscript_value_14 = "";
+    const __eliscript_value_15 = false;
+    {
+      let result = __eliscript_value_14;
+      let done = __eliscript_value_15;
+      while (!__eliscript_truthy17(done)) {
+        {
+          const __eliscript_value_16 = reader_code(reader);
+          {
+            let code = __eliscript_value_16;
+            code === null ? read_failure(reader, "unterminated string literal") : code === double_quote2 ? (() => {
+              advance_reader(reader);
+              return done = true;
+            })() : code === backslash ? result = String(result) + String(read_escaped(reader)) : (() => {
+              result = String(result) + String(String.fromCharCode(code));
+              return advance_reader(reader);
+            })();
+          }
+        }
       }
-      return null;
-    })();
-    return result;
-  })("", false);
+      return result;
+    }
+  }
 }
 function read_keyword_value(reader) {
   advance_reader(reader);
-  return ((name) => {
-    __eliscript_truthy19(blank_QMARK_(name)) && read_failure(reader, "empty keyword");
-    return keyword(name);
-  })(read_token(reader));
+  {
+    const __eliscript_value_17 = read_token(reader);
+    {
+      let name = __eliscript_value_17;
+      __eliscript_truthy17(blank_QMARK_(name)) && read_failure(reader, "empty keyword");
+      return keyword(name);
+    }
+  }
 }
 function token_end_QMARK_(code) {
   return delimiter_code_QMARK_(code);
 }
 function read_token(reader) {
-  return ((result, done) => {
-    (() => {
-      while (__eliscript_truthy19(!__eliscript_truthy19(done))) {
-        ((code) => {
-          return __eliscript_truthy19(token_end_QMARK_(code)) ? done = true : (() => {
-            result = String(result) + String(String.fromCharCode(code));
-            return advance_reader(reader);
-          })();
-        })(reader_code(reader));
+  {
+    const __eliscript_value_18 = "";
+    const __eliscript_value_19 = false;
+    {
+      let result = __eliscript_value_18;
+      let done = __eliscript_value_19;
+      while (!__eliscript_truthy17(done)) {
+        {
+          const __eliscript_value_20 = reader_code(reader);
+          {
+            let code = __eliscript_value_20;
+            __eliscript_truthy17(token_end_QMARK_(code)) ? done = true : (() => {
+              result = String(result) + String(String.fromCharCode(code));
+              return advance_reader(reader);
+            })();
+          }
+        }
       }
-      return null;
-    })();
-    return result;
-  })("", false);
+      return result;
+    }
+  }
 }
 function numeric_token_QMARK_(text) {
-  return ((start, index, ok) => {
-    __eliscript_truthy19(((__eliscript_value_14) => __eliscript_truthy19(__eliscript_value_14) ? char_code(text, 0) === minus_sign : __eliscript_value_14)(ok)) && (start = 1, index = 1);
-    (() => {
-      while (__eliscript_truthy19(index < text_length(text))) {
-        __eliscript_truthy19(!__eliscript_truthy19(digit_code_QMARK_(char_code(text, index)))) && (ok = false);
+  {
+    const __eliscript_value_21 = 0;
+    const __eliscript_value_22 = 0;
+    const __eliscript_value_23 = text_length(text) > 0;
+    {
+      let start = __eliscript_value_21;
+      let index = __eliscript_value_22;
+      let ok = __eliscript_value_23;
+      __eliscript_truthy17(((__eliscript_value_24) => __eliscript_truthy17(__eliscript_value_24) ? char_code(text, 0) === minus_sign : __eliscript_value_24)(ok)) && (start = 1, index = 1);
+      while (index < text_length(text)) {
+        !__eliscript_truthy17(digit_code_QMARK_(char_code(text, index))) && (ok = false);
         index = index + 1;
       }
-      return null;
-    })();
-    return ((__eliscript_value_15) => __eliscript_truthy19(__eliscript_value_15) ? text_length(text) > start : __eliscript_value_15)(ok);
-  })(0, 0, text_length(text) > 0);
+      return ((__eliscript_value_25) => __eliscript_truthy17(__eliscript_value_25) ? text_length(text) > start : __eliscript_value_25)(ok);
+    }
+  }
 }
 function read_atom(reader) {
-  return ((token) => {
-    return __eliscript_truthy19(token === "t") ? true : __eliscript_truthy19(token === "false") ? false : __eliscript_truthy19(token === "nil") ? null : __eliscript_truthy19(numeric_token_QMARK_(token)) ? Number(token) : __eliscript_truthy19(blank_QMARK_(token)) ? read_failure(reader, "unexpected character") : { "config-symbol": token };
-  })(read_token(reader));
+  {
+    const __eliscript_value_26 = read_token(reader);
+    {
+      let token = __eliscript_value_26;
+      return token === "t" ? true : token === "false" ? false : token === "nil" ? null : __eliscript_truthy17(numeric_token_QMARK_(token)) ? Number(token) : __eliscript_truthy17(blank_QMARK_(token)) ? read_failure(reader, "unexpected character") : { "config-symbol": token };
+    }
+  }
 }
 function read_value(reader) {
   skip_space(reader);
-  return ((code) => {
-    return __eliscript_truthy19(code === null) ? read_failure(reader, "unexpected end of configuration") : __eliscript_truthy19(code === open_paren) ? read_list_value(reader) : __eliscript_truthy19(code === open_brace) ? read_map_value(reader) : __eliscript_truthy19(code === open_bracket) ? read_vector_value(reader) : __eliscript_truthy19(code === double_quote2) ? read_string_value(reader) : __eliscript_truthy19(code === colon) ? read_keyword_value(reader) : read_atom(reader);
-  })(reader_code(reader));
+  {
+    const __eliscript_value_27 = reader_code(reader);
+    {
+      let code = __eliscript_value_27;
+      return code === null ? read_failure(reader, "unexpected end of configuration") : code === open_paren ? read_list_value(reader) : code === open_brace ? read_map_value(reader) : code === open_bracket ? read_vector_value(reader) : code === double_quote2 ? read_string_value(reader) : code === colon ? read_keyword_value(reader) : read_atom(reader);
+    }
+  }
 }
 function read_forms(reader) {
-  return ((forms) => {
-    skip_space(reader);
-    (() => {
-      while (__eliscript_truthy19(!__eliscript_truthy19(reader_code(reader) === null))) {
+  {
+    const __eliscript_value_28 = vector();
+    {
+      let forms = __eliscript_value_28;
+      skip_space(reader);
+      while (!(reader_code(reader) === null)) {
         forms = conj(forms, read_value(reader));
         skip_space(reader);
       }
-      return null;
-    })();
-    return forms;
-  })(vector());
+      return forms;
+    }
+  }
 }
 function symbol_named_QMARK_(value, name) {
-  return ((__eliscript_value_16) => __eliscript_truthy19(__eliscript_value_16) ? ((__eliscript_value_17) => __eliscript_truthy19(__eliscript_value_17) ? ((__eliscript_value_18) => __eliscript_truthy19(__eliscript_value_18) ? (value["config-symbol"] ?? null) === name : __eliscript_value_18)(!__eliscript_truthy19(isVector(value))) : __eliscript_value_17)(!__eliscript_truthy19(isMap(value))) : __eliscript_value_16)(!__eliscript_truthy19(value === null));
+  return !(value === null) && !__eliscript_truthy17(isMap(value)) && !__eliscript_truthy17(isVector(value)) && (value["config-symbol"] ?? null) === name;
 }
 function list_starting_with_QMARK_(value, name) {
-  return ((__eliscript_value_19) => __eliscript_truthy19(__eliscript_value_19) ? ((__eliscript_value_20) => __eliscript_truthy19(__eliscript_value_20) ? ((__eliscript_value_21) => __eliscript_truthy19(__eliscript_value_21) ? symbol_named_QMARK_(nth(value, 0), name) : __eliscript_value_21)(count(value) > 1) : __eliscript_value_20)(isVector(value)) : __eliscript_value_19)(!__eliscript_truthy19(value === null));
+  return ((__eliscript_value_29) => __eliscript_truthy17(__eliscript_value_29) ? ((__eliscript_value_30) => __eliscript_truthy17(__eliscript_value_30) ? ((__eliscript_value_31) => __eliscript_truthy17(__eliscript_value_31) ? symbol_named_QMARK_(nth(value, 0), name) : __eliscript_value_31)(count(value) > 1) : __eliscript_value_30)(isVector(value)) : __eliscript_value_29)(!(value === null));
 }
 function find_child_declaration(children, name) {
-  return ((index, found) => {
-    (() => {
-      while (__eliscript_truthy19(index < count(children))) {
-        ((child) => {
-          return __eliscript_truthy19(((__eliscript_value_22) => __eliscript_truthy19(__eliscript_value_22) ? list_starting_with_QMARK_(child, name) : __eliscript_value_22)(found === null)) ? found = child : null;
-        })(nth(children, index));
+  {
+    const __eliscript_value_32 = 0;
+    const __eliscript_value_33 = null;
+    {
+      let index = __eliscript_value_32;
+      let found = __eliscript_value_33;
+      while (index < count(children)) {
+        {
+          const __eliscript_value_34 = nth(children, index);
+          {
+            let child = __eliscript_value_34;
+            __eliscript_truthy17(((__eliscript_value_35) => __eliscript_truthy17(__eliscript_value_35) ? list_starting_with_QMARK_(child, name) : __eliscript_value_35)(found === null)) && (found = child);
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(0, null);
+      return found;
+    }
+  }
 }
 function find_declaration2(forms, name) {
-  return ((index, found) => {
-    (() => {
-      while (__eliscript_truthy19(index < count(forms))) {
-        ((form) => {
-          return __eliscript_truthy19(found === null) ? __eliscript_truthy19(list_starting_with_QMARK_(form, name)) ? found = form : __eliscript_truthy19(list_starting_with_QMARK_(form, "module")) ? found = find_child_declaration(form, name) : null : null;
-        })(nth(forms, index));
+  {
+    const __eliscript_value_36 = 0;
+    const __eliscript_value_37 = null;
+    {
+      let index = __eliscript_value_36;
+      let found = __eliscript_value_37;
+      while (index < count(forms)) {
+        {
+          const __eliscript_value_38 = nth(forms, index);
+          {
+            let form = __eliscript_value_38;
+            found === null && (__eliscript_truthy17(list_starting_with_QMARK_(form, name)) ? found = form : __eliscript_truthy17(list_starting_with_QMARK_(form, "module")) && (found = find_child_declaration(form, name)));
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(0, null);
+      return found;
+    }
+  }
 }
 function load_config_value(path) {
-  return ((source) => {
-    return ((reader) => {
-      return ((forms) => {
-        return ((declaration) => {
-          return (() => {
-            __eliscript_truthy19(declaration === null) && fail2("DOGFOOD-CONFIG-002", String(path) + String(": no (defconst config ...) declaration found"));
-            __eliscript_truthy19(count(declaration) < 3) && fail2("DOGFOOD-CONFIG-002", String(path) + String(": defconst must bind a value"));
-            return nth(declaration, 2);
-          })();
-        })(find_declaration2(forms, "defconst"));
-      })(read_forms(reader));
-    })(make_reader(source));
-  })(import_node_fs2.readFileSync(path, "utf8"));
+  {
+    const __eliscript_value_39 = import_node_fs2.readFileSync(path, "utf8");
+    {
+      let source = __eliscript_value_39;
+      {
+        const __eliscript_value_40 = make_reader(source);
+        {
+          let reader = __eliscript_value_40;
+          {
+            const __eliscript_value_41 = read_forms(reader);
+            {
+              let forms = __eliscript_value_41;
+              {
+                const __eliscript_value_42 = find_declaration2(forms, "defconst");
+                {
+                  let declaration = __eliscript_value_42;
+                  declaration === null && fail2("DOGFOOD-CONFIG-002", String(path) + String(": no (defconst config ...) declaration found"));
+                  count(declaration) < 3 && fail2("DOGFOOD-CONFIG-002", String(path) + String(": defconst must bind a value"));
+                  return nth(declaration, 2);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function scalar_value_QMARK_(value) {
-  return ((__eliscript_value_23) => __eliscript_truthy19(__eliscript_value_23) ? __eliscript_value_23 : ((__eliscript_value_24) => __eliscript_truthy19(__eliscript_value_24) ? __eliscript_value_24 : ((__eliscript_value_25) => __eliscript_truthy19(__eliscript_value_25) ? __eliscript_value_25 : ((__eliscript_value) => {
+  return ((__eliscript_value) => {
     if (__eliscript_value === null)
       return "null";
     const __eliscript_host_type = typeof __eliscript_value;
@@ -6938,7 +8286,7 @@ function scalar_value_QMARK_(value) {
     } catch {
       return __eliscript_host_type;
     }
-  })(value) === "keyword")(((__eliscript_value) => {
+  })(value) === "string" || ((__eliscript_value) => {
     if (__eliscript_value === null)
       return "null";
     const __eliscript_host_type = typeof __eliscript_value;
@@ -6959,7 +8307,7 @@ function scalar_value_QMARK_(value) {
     } catch {
       return __eliscript_host_type;
     }
-  })(value) === "boolean"))(((__eliscript_value) => {
+  })(value) === "number" || ((__eliscript_value) => {
     if (__eliscript_value === null)
       return "null";
     const __eliscript_host_type = typeof __eliscript_value;
@@ -6980,7 +8328,7 @@ function scalar_value_QMARK_(value) {
     } catch {
       return __eliscript_host_type;
     }
-  })(value) === "number"))(((__eliscript_value) => {
+  })(value) === "boolean" || ((__eliscript_value) => {
     if (__eliscript_value === null)
       return "null";
     const __eliscript_host_type = typeof __eliscript_value;
@@ -7001,47 +8349,41 @@ function scalar_value_QMARK_(value) {
     } catch {
       return __eliscript_host_type;
     }
-  })(value) === "string");
+  })(value) === "keyword";
 }
 function data_only_QMARK_(value) {
-  return __eliscript_truthy19(value === null) ? true : __eliscript_truthy19(((__eliscript_value_26) => __eliscript_truthy19(__eliscript_value_26) ? __eliscript_value_26 : scalar_value_QMARK_(value))(value === undefined)) ? !__eliscript_truthy19(value === undefined) : __eliscript_truthy19(isVector(value)) ? ((index, ok) => {
-    (() => {
-      while (__eliscript_truthy19(index < count(value))) {
-        __eliscript_truthy19(!__eliscript_truthy19(data_only_QMARK_(nth(value, index)))) && (ok = false);
-        index = index + 1;
-      }
-      return null;
-    })();
+  return value === null ? true : __eliscript_truthy17(((__eliscript_value_43) => __eliscript_truthy17(__eliscript_value_43) ? __eliscript_value_43 : scalar_value_QMARK_(value))(value === undefined)) ? !(value === undefined) : __eliscript_truthy17(isVector(value)) ? ((index, ok) => {
+    while (index < count(value)) {
+      !__eliscript_truthy17(data_only_QMARK_(nth(value, index))) && (ok = false);
+      index = index + 1;
+    }
     return ok;
-  })(0, true) : __eliscript_truthy19(isMap(value)) ? ((keys, index, ok) => {
-    (() => {
-      while (__eliscript_truthy19(index < count(keys))) {
-        __eliscript_truthy19(!__eliscript_truthy19(((__eliscript_value_27) => __eliscript_truthy19(__eliscript_value_27) ? data_only_QMARK_(get(value, nth(keys, index))) : __eliscript_value_27)(((__eliscript_value) => {
-          if (__eliscript_value === null)
-            return "null";
-          const __eliscript_host_type = typeof __eliscript_value;
-          if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function")
-            return __eliscript_host_type;
-          try {
-            const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type"));
-            if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol"))
-              return __eliscript_type.value;
-            const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind");
-            if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) {
-              if (__eliscript_kind.value === "eliscript/keyword")
-                return "keyword";
-              if (__eliscript_kind.value === "eliscript/symbol")
-                return "symbol";
-            }
-            return __eliscript_host_type;
-          } catch {
-            return __eliscript_host_type;
+  })(0, true) : __eliscript_truthy17(isMap(value)) ? ((keys, index, ok) => {
+    while (index < count(keys)) {
+      !__eliscript_truthy17(((__eliscript_value_44) => __eliscript_truthy17(__eliscript_value_44) ? data_only_QMARK_(get(value, nth(keys, index))) : __eliscript_value_44)(((__eliscript_value) => {
+        if (__eliscript_value === null)
+          return "null";
+        const __eliscript_host_type = typeof __eliscript_value;
+        if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function")
+          return __eliscript_host_type;
+        try {
+          const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type"));
+          if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol"))
+            return __eliscript_type.value;
+          const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind");
+          if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) {
+            if (__eliscript_kind.value === "eliscript/keyword")
+              return "keyword";
+            if (__eliscript_kind.value === "eliscript/symbol")
+              return "symbol";
           }
-        })(nth(keys, index)) === "keyword"))) && (ok = false);
-        index = index + 1;
-      }
-      return null;
-    })();
+          return __eliscript_host_type;
+        } catch {
+          return __eliscript_host_type;
+        }
+      })(nth(keys, index)) === "keyword")) && (ok = false);
+      index = index + 1;
+    }
     return ok;
   })(collect_keys(value), 0, true) : null;
 }
@@ -7049,11 +8391,11 @@ function map_value_QMARK_(value) {
   return isMap(value);
 }
 function require_map(value, label) {
-  __eliscript_truthy19(!__eliscript_truthy19(map_value_QMARK_(value))) && fail2("DOGFOOD-CONFIG-003", String(label) + String(" must be a map"));
+  !__eliscript_truthy17(map_value_QMARK_(value)) && fail2("DOGFOOD-CONFIG-003", String(label) + String(" must be a map"));
   return value;
 }
 function require_string(value, label) {
-  __eliscript_truthy19(!__eliscript_truthy19(((__eliscript_value_28) => __eliscript_truthy19(__eliscript_value_28) ? ((__eliscript_value) => {
+  !(!(value === null) && ((__eliscript_value) => {
     if (__eliscript_value === null)
       return "null";
     const __eliscript_host_type = typeof __eliscript_value;
@@ -7074,17 +8416,21 @@ function require_string(value, label) {
     } catch {
       return __eliscript_host_type;
     }
-  })(value) === "string" : __eliscript_value_28)(!__eliscript_truthy19(value === null)))) && fail2("DOGFOOD-CONFIG-003", String(label) + String(" must be a string"));
+  })(value) === "string") && fail2("DOGFOOD-CONFIG-003", String(label) + String(" must be a string"));
   return value;
 }
 function require_key(map2, key, label) {
-  return ((value) => {
-    __eliscript_truthy19(empty_value_QMARK_(value)) && fail2("DOGFOOD-CONFIG-003", String(label) + String(" is required"));
-    return value;
-  })(get(map2, key, null));
+  {
+    const __eliscript_value_45 = get(map2, key, null);
+    {
+      let value = __eliscript_value_45;
+      __eliscript_truthy17(empty_value_QMARK_(value)) && fail2("DOGFOOD-CONFIG-003", String(label) + String(" is required"));
+      return value;
+    }
+  }
 }
 function relative_path_QMARK_(text) {
-  return ((__eliscript_value_29) => __eliscript_truthy19(__eliscript_value_29) ? ((__eliscript_value_30) => __eliscript_truthy19(__eliscript_value_30) ? ((__eliscript_value_31) => __eliscript_truthy19(__eliscript_value_31) ? !__eliscript_truthy19(starts_with_QMARK_("..", text)) : __eliscript_value_31)(!__eliscript_truthy19(starts_with_QMARK_("~", text))) : __eliscript_value_30)(!__eliscript_truthy19(starts_with_QMARK_("/", text))) : __eliscript_value_29)(!__eliscript_truthy19(blank_QMARK_(text)));
+  return !__eliscript_truthy17(blank_QMARK_(text)) && !__eliscript_truthy17(starts_with_QMARK_("/", text)) && !__eliscript_truthy17(starts_with_QMARK_("~", text)) && !__eliscript_truthy17(starts_with_QMARK_("..", text));
 }
 function collect_keys(map2) {
   return reduceKV(map2, (accumulator, key, value) => {
@@ -7092,344 +8438,503 @@ function collect_keys(map2) {
   }, vector());
 }
 function known_key_QMARK_(key) {
-  return ((index, found) => {
-    (() => {
-      while (__eliscript_truthy19(((__eliscript_value_32) => __eliscript_truthy19(__eliscript_value_32) ? !__eliscript_truthy19(found) : __eliscript_value_32)(index < count(known_keys)))) {
-        __eliscript_truthy19(nth(known_keys, index) === key) && (found = true);
+  {
+    const __eliscript_value_46 = 0;
+    const __eliscript_value_47 = false;
+    {
+      let index = __eliscript_value_46;
+      let found = __eliscript_value_47;
+      while (index < count(known_keys) && !__eliscript_truthy17(found)) {
+        nth(known_keys, index) === key && (found = true);
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(0, false);
+      return found;
+    }
+  }
 }
 function check_source(source, index) {
   require_map(source, String("sources[") + String(index) + String("]"));
-  return ((label) => {
-    return ((kind) => {
-      return (() => {
-        require_key(source, keyword("id"), label);
-        return __eliscript_truthy19(kind === keyword("markdown")) ? check_contained(require_string(require_key(source, keyword("directory"), String(label) + String(" markdown")), String(label) + String(".directory")), String(label) + String(".directory")) : __eliscript_truthy19(kind === keyword("issues")) ? (() => {
-          check_repository(source, label);
-          check_visibility(source, label);
-          return check_optional_string(source, keyword("label"), label);
-        })() : __eliscript_truthy19(kind === keyword("discussions")) ? (() => {
-          check_repository(source, label);
-          check_visibility(source, label);
-          return require_string(require_key(source, keyword("category"), String(label) + String(" discussions")), String(label) + String(".category"));
-        })() : fail2("DOGFOOD-CONFIG-009", String(label) + String(".kind must be markdown, issues, or discussions"));
-      })();
-    })(require_key(source, keyword("kind"), label));
-  })(String("sources[") + String(index) + String("]"));
+  {
+    const __eliscript_value_48 = String("sources[") + String(index) + String("]");
+    {
+      let label = __eliscript_value_48;
+      {
+        const __eliscript_value_49 = require_key(source, keyword("kind"), label);
+        {
+          let kind = __eliscript_value_49;
+          require_key(source, keyword("id"), label);
+          return kind === keyword("markdown") ? check_contained(require_string(require_key(source, keyword("directory"), String(label) + String(" markdown")), String(label) + String(".directory")), String(label) + String(".directory")) : kind === keyword("issues") ? (() => {
+            check_repository(source, label);
+            check_visibility(source, label);
+            return check_optional_string(source, keyword("label"), label);
+          })() : kind === keyword("discussions") ? (() => {
+            check_repository(source, label);
+            check_visibility(source, label);
+            return require_string(require_key(source, keyword("category"), String(label) + String(" discussions")), String(label) + String(".category"));
+          })() : fail2("DOGFOOD-CONFIG-009", String(label) + String(".kind must be markdown, issues, or discussions"));
+        }
+      }
+    }
+  }
 }
 function check_contained(value, label) {
-  __eliscript_truthy19(!__eliscript_truthy19(relative_path_QMARK_(value))) && fail2("DOGFOOD-CONFIG-004", String(label) + String(" must be a contained repository-relative path"));
+  !__eliscript_truthy17(relative_path_QMARK_(value)) && fail2("DOGFOOD-CONFIG-004", String(label) + String(" must be a contained repository-relative path"));
   return value;
 }
 function check_repository(source, label) {
-  return ((repository) => {
-    __eliscript_truthy19(!__eliscript_truthy19(((__eliscript_value_33) => __eliscript_truthy19(__eliscript_value_33) ? ((__eliscript_value_34) => __eliscript_truthy19(__eliscript_value_34) ? !__eliscript_truthy19(blank_QMARK_(nth(split_on("/", repository), 1))) : __eliscript_value_34)(!__eliscript_truthy19(blank_QMARK_(nth(split_on("/", repository), 0)))) : __eliscript_value_33)(count(split_on("/", repository)) === 2))) && fail2("DOGFOOD-CONFIG-010", String(label) + String(".repository must be owner/name"));
-    return repository;
-  })(require_string(require_key(source, keyword("repository"), label), String(label) + String(".repository")));
+  {
+    const __eliscript_value_50 = require_string(require_key(source, keyword("repository"), label), String(label) + String(".repository"));
+    {
+      let repository = __eliscript_value_50;
+      !(count(split_on("/", repository)) === 2 && !__eliscript_truthy17(blank_QMARK_(nth(split_on("/", repository), 0))) && !__eliscript_truthy17(blank_QMARK_(nth(split_on("/", repository), 1)))) && fail2("DOGFOOD-CONFIG-010", String(label) + String(".repository must be owner/name"));
+      return repository;
+    }
+  }
 }
 function check_visibility(source, label) {
-  return ((value) => {
-    __eliscript_truthy19(!__eliscript_truthy19(((__eliscript_value_35) => __eliscript_truthy19(__eliscript_value_35) ? __eliscript_value_35 : ((__eliscript_value_36) => __eliscript_truthy19(__eliscript_value_36) ? __eliscript_value_36 : value === keyword("private"))(value === keyword("public")))(value === null))) && fail2("DOGFOOD-CONFIG-016", String(label) + String(".visibility must be public or private"));
-    return value;
-  })(get(source, keyword("visibility"), null));
+  {
+    const __eliscript_value_51 = get(source, keyword("visibility"), null);
+    {
+      let value = __eliscript_value_51;
+      !(value === null || value === keyword("public") || value === keyword("private")) && fail2("DOGFOOD-CONFIG-016", String(label) + String(".visibility must be public or private"));
+      return value;
+    }
+  }
 }
 function check_optional_string(source, key, label) {
-  return ((value) => {
-    return __eliscript_truthy19(((__eliscript_value_37) => __eliscript_truthy19(__eliscript_value_37) ? !__eliscript_truthy19(((__eliscript_value) => {
-      if (__eliscript_value === null)
-        return "null";
-      const __eliscript_host_type = typeof __eliscript_value;
-      if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function")
-        return __eliscript_host_type;
-      try {
-        const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type"));
-        if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol"))
-          return __eliscript_type.value;
-        const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind");
-        if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) {
-          if (__eliscript_kind.value === "eliscript/keyword")
-            return "keyword";
-          if (__eliscript_kind.value === "eliscript/symbol")
-            return "symbol";
+  {
+    const __eliscript_value_52 = get(source, key, null);
+    {
+      let value = __eliscript_value_52;
+      return !(value === null) && !(((__eliscript_value) => {
+        if (__eliscript_value === null)
+          return "null";
+        const __eliscript_host_type = typeof __eliscript_value;
+        if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function")
+          return __eliscript_host_type;
+        try {
+          const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type"));
+          if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol"))
+            return __eliscript_type.value;
+          const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind");
+          if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) {
+            if (__eliscript_kind.value === "eliscript/keyword")
+              return "keyword";
+            if (__eliscript_kind.value === "eliscript/symbol")
+              return "symbol";
+          }
+          return __eliscript_host_type;
+        } catch {
+          return __eliscript_host_type;
         }
-        return __eliscript_host_type;
-      } catch {
-        return __eliscript_host_type;
-      }
-    })(value) === "string") : __eliscript_value_37)(!__eliscript_truthy19(value === null))) ? fail2("DOGFOOD-CONFIG-003", String(label) + String(".") + String(String(key)) + String(" must be a string")) : null;
-  })(get(source, key, null));
+      })(value) === "string") ? fail2("DOGFOOD-CONFIG-003", String(label) + String(".") + String(String(key)) + String(" must be a string")) : null;
+    }
+  }
 }
 function check_sources(sources) {
-  __eliscript_truthy19(!__eliscript_truthy19(isVector(sources))) && fail2("DOGFOOD-CONFIG-003", "sources must be a vector");
-  __eliscript_truthy19(count(sources) === 0) && fail2("DOGFOOD-CONFIG-003", "at least one article source is required");
-  return ((index, enabled) => {
-    (() => {
-      while (__eliscript_truthy19(index < count(sources))) {
-        ((source) => {
-          check_source(source, index);
-          return __eliscript_truthy19(get(source, keyword("enabled"), false)) ? enabled = enabled + 1 : null;
-        })(nth(sources, index));
+  !__eliscript_truthy17(isVector(sources)) && fail2("DOGFOOD-CONFIG-003", "sources must be a vector");
+  count(sources) === 0 && fail2("DOGFOOD-CONFIG-003", "at least one article source is required");
+  {
+    const __eliscript_value_53 = 0;
+    const __eliscript_value_54 = 0;
+    {
+      let index = __eliscript_value_53;
+      let enabled = __eliscript_value_54;
+      while (index < count(sources)) {
+        {
+          const __eliscript_value_55 = nth(sources, index);
+          {
+            let source = __eliscript_value_55;
+            check_source(source, index);
+            __eliscript_truthy17(get(source, keyword("enabled"), false)) && (enabled = enabled + 1);
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    __eliscript_truthy19(enabled === 0) && fail2("DOGFOOD-CONFIG-003", "at least one article source must be enabled");
-    return check_unique_field(sources, keyword("id"), "provider id");
-  })(0, 0);
+      enabled === 0 && fail2("DOGFOOD-CONFIG-003", "at least one article source must be enabled");
+      return check_unique_field(sources, keyword("id"), "provider id");
+    }
+  }
 }
 function check_unique_field(values, key, label) {
-  return ((collected, index) => {
-    (() => {
-      while (__eliscript_truthy19(index < count(values))) {
-        ((value) => {
-          return __eliscript_truthy19(!__eliscript_truthy19(value === null)) ? collected = conj(collected, value) : null;
-        })(get(nth(values, index), key, null));
+  {
+    const __eliscript_value_56 = vector();
+    const __eliscript_value_57 = 0;
+    {
+      let collected = __eliscript_value_56;
+      let index = __eliscript_value_57;
+      while (index < count(values)) {
+        {
+          const __eliscript_value_58 = get(nth(values, index), key, null);
+          {
+            let value = __eliscript_value_58;
+            !(value === null) && (collected = conj(collected, value));
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return check_unique_values(collected, label);
-  })(vector(), 0);
+      return check_unique_values(collected, label);
+    }
+  }
 }
 function check_unique_values(values, label) {
-  return ((seen, index) => {
-    (() => {
-      while (__eliscript_truthy19(index < count(values))) {
-        ((value) => {
-          __eliscript_truthy19(member_of_QMARK_(seen, value)) && fail2("DOGFOOD-CONFIG-011", String(label) + String(" ") + String(String(value)) + String(" is declared more than once"));
-          return seen = conj(seen, value);
-        })(nth(values, index));
+  {
+    const __eliscript_value_59 = vector();
+    const __eliscript_value_60 = 0;
+    {
+      let seen = __eliscript_value_59;
+      let index = __eliscript_value_60;
+      while (index < count(values)) {
+        {
+          const __eliscript_value_61 = nth(values, index);
+          {
+            let value = __eliscript_value_61;
+            __eliscript_truthy17(member_of_QMARK_(seen, value)) && fail2("DOGFOOD-CONFIG-011", String(label) + String(" ") + String(String(value)) + String(" is declared more than once"));
+            seen = conj(seen, value);
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return seen;
-  })(vector(), 0);
+      return seen;
+    }
+  }
 }
 function member_of_QMARK_(values, needle) {
-  return ((index, found) => {
-    (() => {
-      while (__eliscript_truthy19(((__eliscript_value_38) => __eliscript_truthy19(__eliscript_value_38) ? !__eliscript_truthy19(found) : __eliscript_value_38)(index < count(values)))) {
-        __eliscript_truthy19(nth(values, index) === needle) && (found = true);
+  {
+    const __eliscript_value_62 = 0;
+    const __eliscript_value_63 = false;
+    {
+      let index = __eliscript_value_62;
+      let found = __eliscript_value_63;
+      while (index < count(values) && !__eliscript_truthy17(found)) {
+        nth(values, index) === needle && (found = true);
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(0, false);
+      return found;
+    }
+  }
 }
 function check_comments(config) {
-  return ((comments) => {
-    return __eliscript_truthy19(!__eliscript_truthy19(comments === null)) ? (() => {
-      require_map(comments, "config.comments");
-      return ((channels) => {
-        __eliscript_truthy19(!__eliscript_truthy19(isVector(channels))) && fail2("DOGFOOD-CONFIG-003", "comments.channels must be a vector");
-        ((index) => {
-          return (() => {
-            while (__eliscript_truthy19(index < count(channels))) {
-              require_map(nth(channels, index), String("comments.channels[") + String(index) + String("]"));
-              require_key(nth(channels, index), keyword("id"), String("comments.channels[") + String(index) + String("]"));
-              require_key(nth(channels, index), keyword("kind"), String("comments.channels[") + String(index) + String("]"));
-              check_mode(nth(channels, index), String("comments.channels[") + String(index) + String("]"));
-              index = index + 1;
+  {
+    const __eliscript_value_64 = get(config, keyword("comments"), null);
+    {
+      let comments = __eliscript_value_64;
+      return !(comments === null) ? (() => {
+        require_map(comments, "config.comments");
+        {
+          const __eliscript_value_65 = get(comments, keyword("channels"), vector());
+          {
+            let channels = __eliscript_value_65;
+            !__eliscript_truthy17(isVector(channels)) && fail2("DOGFOOD-CONFIG-003", "comments.channels must be a vector");
+            {
+              const __eliscript_value_66 = 0;
+              {
+                let index = __eliscript_value_66;
+                while (index < count(channels)) {
+                  require_map(nth(channels, index), String("comments.channels[") + String(index) + String("]"));
+                  require_key(nth(channels, index), keyword("id"), String("comments.channels[") + String(index) + String("]"));
+                  require_key(nth(channels, index), keyword("kind"), String("comments.channels[") + String(index) + String("]"));
+                  check_mode(nth(channels, index), String("comments.channels[") + String(index) + String("]"));
+                  index = index + 1;
+                }
+              }
             }
-            return null;
-          })();
-        })(0);
-        return check_unique_field(channels, keyword("id"), "channel id");
-      })(get(comments, keyword("channels"), vector()));
-    })() : null;
-  })(get(config, keyword("comments"), null));
+            return check_unique_field(channels, keyword("id"), "channel id");
+          }
+        }
+      })() : null;
+    }
+  }
 }
 function check_private_input(config) {
-  return ((private_sources, sources, index) => {
-    (() => {
-      while (__eliscript_truthy19(index < count(sources))) {
-        ((source) => {
-          __eliscript_truthy19(((__eliscript_value_39) => __eliscript_truthy19(__eliscript_value_39) ? get(source, keyword("visibility"), keyword("public")) === keyword("private") : __eliscript_value_39)(get(source, keyword("enabled"), false))) && (private_sources = conj(private_sources, source));
-          return index = index + 1;
-        })(nth(sources, index));
-      }
-      return null;
-    })();
-    return __eliscript_truthy19(count(private_sources) > 0) ? (() => {
-      ((publishing) => {
-        return __eliscript_truthy19(!__eliscript_truthy19(get(publishing, keyword("private-input"), keyword("open")) === keyword("acknowledged"))) ? fail2("DOGFOOD-CONFIG-017", String("a private source publishes into public output; declare ") + String("publishing.private-input :acknowledged to accept it")) : null;
-      })(get(config, keyword("publishing"), hashMap()));
-      return ((channels, channel_index) => {
-        return (() => {
-          while (__eliscript_truthy19(channel_index < count(channels))) {
-            ((channel) => {
-              return ((kind) => {
-                return ((mode) => {
-                  return __eliscript_truthy19(((__eliscript_value_40) => __eliscript_truthy19(__eliscript_value_40) ? ((__eliscript_value_41) => __eliscript_truthy19(__eliscript_value_41) ? ((__eliscript_value_43) => __eliscript_truthy19(__eliscript_value_43) ? __eliscript_value_43 : mode === keyword("hybrid"))(mode === keyword("live")) : __eliscript_value_41)(((__eliscript_value_42) => __eliscript_truthy19(__eliscript_value_42) ? __eliscript_value_42 : kind === keyword("discussion"))(kind === keyword("issue"))) : __eliscript_value_40)(get(channel, keyword("enabled"), false))) ? fail2("DOGFOOD-CONFIG-018", String("a private source cannot serve ") + String(String(mode)) + String(" comments: the reader holds no credential")) : null;
-                })(get(channel, keyword("mode"), keyword("snapshot")));
-              })(get(channel, keyword("kind"), null));
-            })(nth(channels, channel_index));
-            channel_index = channel_index + 1;
+  {
+    const __eliscript_value_67 = vector();
+    const __eliscript_value_68 = get(config, keyword("sources"), vector());
+    const __eliscript_value_69 = 0;
+    {
+      let private_sources = __eliscript_value_67;
+      let sources = __eliscript_value_68;
+      let index = __eliscript_value_69;
+      while (index < count(sources)) {
+        {
+          const __eliscript_value_70 = nth(sources, index);
+          {
+            let source = __eliscript_value_70;
+            __eliscript_truthy17(((__eliscript_value_71) => __eliscript_truthy17(__eliscript_value_71) ? get(source, keyword("visibility"), keyword("public")) === keyword("private") : __eliscript_value_71)(get(source, keyword("enabled"), false))) && (private_sources = conj(private_sources, source));
+            index = index + 1;
           }
-          return null;
-        })();
-      })(get(get(config, keyword("comments"), hashMap()), keyword("channels"), vector()), 0);
-    })() : null;
-  })(vector(), get(config, keyword("sources"), vector()), 0);
+        }
+      }
+      return count(private_sources) > 0 ? (() => {
+        {
+          const __eliscript_value_72 = get(config, keyword("publishing"), hashMap());
+          {
+            let publishing = __eliscript_value_72;
+            !(get(publishing, keyword("private-input"), keyword("open")) === keyword("acknowledged")) && fail2("DOGFOOD-CONFIG-017", String("a private source publishes into public output; declare ") + String("publishing.private-input :acknowledged to accept it"));
+          }
+        }
+        {
+          const __eliscript_value_73 = get(get(config, keyword("comments"), hashMap()), keyword("channels"), vector());
+          const __eliscript_value_74 = 0;
+          {
+            let channels = __eliscript_value_73;
+            let channel_index = __eliscript_value_74;
+            while (channel_index < count(channels)) {
+              {
+                const __eliscript_value_75 = nth(channels, channel_index);
+                {
+                  let channel = __eliscript_value_75;
+                  {
+                    const __eliscript_value_76 = get(channel, keyword("kind"), null);
+                    {
+                      let kind = __eliscript_value_76;
+                      {
+                        const __eliscript_value_77 = get(channel, keyword("mode"), keyword("snapshot"));
+                        {
+                          let mode = __eliscript_value_77;
+                          __eliscript_truthy17(((__eliscript_value_78) => __eliscript_truthy17(__eliscript_value_78) ? (kind === keyword("issue") || kind === keyword("discussion")) && (mode === keyword("live") || mode === keyword("hybrid")) : __eliscript_value_78)(get(channel, keyword("enabled"), false))) && fail2("DOGFOOD-CONFIG-018", String("a private source cannot serve ") + String(String(mode)) + String(" comments: the reader holds no credential"));
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+              channel_index = channel_index + 1;
+            }
+            return null;
+          }
+        }
+      })() : null;
+    }
+  }
 }
 function check_refresh(config) {
-  return ((refresh) => {
-    return __eliscript_truthy19(!__eliscript_truthy19(refresh === null)) ? (() => {
-      require_map(refresh, "config.refresh");
-      check_policy(refresh, keyword("articles"), refresh_article_policies, "articles");
-      check_policy(refresh, keyword("comments"), refresh_comment_policies, "comments");
-      return check_policy(refresh, keyword("no-change"), refresh_no_change_policies, "no-change");
-    })() : null;
-  })(get(config, keyword("refresh"), null));
+  {
+    const __eliscript_value_79 = get(config, keyword("refresh"), null);
+    {
+      let refresh = __eliscript_value_79;
+      return !(refresh === null) ? (() => {
+        require_map(refresh, "config.refresh");
+        check_policy(refresh, keyword("articles"), refresh_article_policies, "articles");
+        check_policy(refresh, keyword("comments"), refresh_comment_policies, "comments");
+        return check_policy(refresh, keyword("no-change"), refresh_no_change_policies, "no-change");
+      })() : null;
+    }
+  }
 }
 function check_policy(declaration, key, allowed, label) {
-  return ((value) => {
-    return __eliscript_truthy19(((__eliscript_value_44) => __eliscript_truthy19(__eliscript_value_44) ? !__eliscript_truthy19(member_of_QMARK_(allowed, value)) : __eliscript_value_44)(!__eliscript_truthy19(value === null))) ? fail2("DOGFOOD-CONFIG-015", String("refresh.") + String(label) + String(" must be one of ") + String(join_keywords(allowed))) : null;
-  })(get(declaration, key, null));
+  {
+    const __eliscript_value_80 = get(declaration, key, null);
+    {
+      let value = __eliscript_value_80;
+      return !(value === null) && !__eliscript_truthy17(member_of_QMARK_(allowed, value)) ? fail2("DOGFOOD-CONFIG-015", String("refresh.") + String(label) + String(" must be one of ") + String(join_keywords(allowed))) : null;
+    }
+  }
 }
 function join_keywords(values) {
-  return ((parts, index) => {
-    (() => {
-      while (__eliscript_truthy19(index < count(values))) {
+  {
+    const __eliscript_value_81 = vector();
+    const __eliscript_value_82 = 0;
+    {
+      let parts = __eliscript_value_81;
+      let index = __eliscript_value_82;
+      while (index < count(values)) {
         parts = conj(parts, collection_name(nth(values, index)));
         index = index + 1;
       }
-      return null;
-    })();
-    return join(", ", parts);
-  })(vector(), 0);
+      return join(", ", parts);
+    }
+  }
 }
 function collection_name(value) {
-  return ((text) => {
-    return __eliscript_truthy19(((__eliscript_value_45) => __eliscript_truthy19(__eliscript_value_45) ? char_code(text, 0) === 58 : __eliscript_value_45)(text_length(text) > 0)) ? slice(1, text_length(text), text) : text;
-  })(String(value));
+  {
+    const __eliscript_value_83 = String(value);
+    {
+      let text = __eliscript_value_83;
+      return text_length(text) > 0 && char_code(text, 0) === 58 ? slice(1, text_length(text), text) : text;
+    }
+  }
 }
 function check_adapters(config) {
-  return ((adapters) => {
-    __eliscript_truthy19(!__eliscript_truthy19(isVector(adapters))) && fail2("DOGFOOD-CONFIG-003", "adapters must be a vector");
-    ((index) => {
-      return (() => {
-        while (__eliscript_truthy19(index < count(adapters))) {
-          ((label) => {
-            return ((adapter) => {
-              return (() => {
-                require_map(adapter, label);
-                require_key(adapter, keyword("id"), label);
-                return ((kind) => {
-                  __eliscript_truthy19(!__eliscript_truthy19(carrier_kind_QMARK_(kind))) && fail2("DOGFOOD-CONFIG-012", String(label) + String(".carrier-kind must be issue, discussion, ") + String("external, or none"));
-                  __eliscript_truthy19(((__eliscript_value_46) => __eliscript_truthy19(__eliscript_value_46) ? __eliscript_value_46 : kind === keyword("discussion"))(kind === keyword("issue"))) && (() => {
-                    require_key(adapter, keyword("principal"), String(label) + String(" native carrier"));
-                    return require_key(adapter, keyword("marker"), String(label) + String(" native carrier"));
-                  })();
-                  return ((mode) => {
-                    return __eliscript_truthy19(((__eliscript_value_47) => __eliscript_truthy19(__eliscript_value_47) ? ((__eliscript_value_48) => __eliscript_truthy19(__eliscript_value_48) ? mode === keyword("snapshot") : __eliscript_value_48)(((__eliscript_value_49) => __eliscript_truthy19(__eliscript_value_49) ? __eliscript_value_49 : kind === keyword("none"))(kind === keyword("external"))) : __eliscript_value_47)(!__eliscript_truthy19(mode === null))) ? fail2("DOGFOOD-CONFIG-013", String(label) + String(" is browser-only and cannot snapshot")) : null;
-                  })(get(adapter, keyword("mode"), null));
-                })(require_key(adapter, keyword("carrier-kind"), label));
-              })();
-            })(nth(adapters, index));
-          })(String("adapters[") + String(index) + String("]"));
-          index = index + 1;
+  {
+    const __eliscript_value_84 = get(config, keyword("adapters"), vector());
+    {
+      let adapters = __eliscript_value_84;
+      !__eliscript_truthy17(isVector(adapters)) && fail2("DOGFOOD-CONFIG-003", "adapters must be a vector");
+      {
+        const __eliscript_value_85 = 0;
+        {
+          let index = __eliscript_value_85;
+          while (index < count(adapters)) {
+            {
+              const __eliscript_value_86 = String("adapters[") + String(index) + String("]");
+              {
+                let label = __eliscript_value_86;
+                {
+                  const __eliscript_value_87 = nth(adapters, index);
+                  {
+                    let adapter = __eliscript_value_87;
+                    require_map(adapter, label);
+                    require_key(adapter, keyword("id"), label);
+                    {
+                      const __eliscript_value_88 = require_key(adapter, keyword("carrier-kind"), label);
+                      {
+                        let kind = __eliscript_value_88;
+                        !__eliscript_truthy17(carrier_kind_QMARK_(kind)) && fail2("DOGFOOD-CONFIG-012", String(label) + String(".carrier-kind must be issue, discussion, ") + String("external, or none"));
+                        (kind === keyword("issue") || kind === keyword("discussion")) && (() => {
+                          require_key(adapter, keyword("principal"), String(label) + String(" native carrier"));
+                          return require_key(adapter, keyword("marker"), String(label) + String(" native carrier"));
+                        })();
+                        {
+                          const __eliscript_value_89 = get(adapter, keyword("mode"), null);
+                          {
+                            let mode = __eliscript_value_89;
+                            !(mode === null) && (kind === keyword("external") || kind === keyword("none")) && mode === keyword("snapshot") && fail2("DOGFOOD-CONFIG-013", String(label) + String(" is browser-only and cannot snapshot"));
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            index = index + 1;
+          }
         }
-        return null;
-      })();
-    })(0);
-    return check_unique_field(adapters, keyword("id"), "adapter id");
-  })(get(config, keyword("adapters"), vector()));
+      }
+      return check_unique_field(adapters, keyword("id"), "adapter id");
+    }
+  }
 }
 function check_mode(declaration, label) {
-  return ((mode) => {
-    return __eliscript_truthy19(((__eliscript_value_50) => __eliscript_truthy19(__eliscript_value_50) ? !__eliscript_truthy19(comment_mode_QMARK_(mode)) : __eliscript_value_50)(!__eliscript_truthy19(mode === null))) ? fail2("DOGFOOD-CONFIG-014", String(label) + String(".mode must be snapshot, live, hybrid, or embed")) : null;
-  })(get(declaration, keyword("mode"), null));
+  {
+    const __eliscript_value_90 = get(declaration, keyword("mode"), null);
+    {
+      let mode = __eliscript_value_90;
+      return !(mode === null) && !__eliscript_truthy17(comment_mode_QMARK_(mode)) ? fail2("DOGFOOD-CONFIG-014", String(label) + String(".mode must be snapshot, live, hybrid, or embed")) : null;
+    }
+  }
 }
 function comment_mode_QMARK_(mode) {
-  return ((__eliscript_value_51) => __eliscript_truthy19(__eliscript_value_51) ? __eliscript_value_51 : ((__eliscript_value_52) => __eliscript_truthy19(__eliscript_value_52) ? __eliscript_value_52 : ((__eliscript_value_53) => __eliscript_truthy19(__eliscript_value_53) ? __eliscript_value_53 : mode === keyword("embed"))(mode === keyword("hybrid")))(mode === keyword("live")))(mode === keyword("snapshot"));
+  return mode === keyword("snapshot") || mode === keyword("live") || mode === keyword("hybrid") || mode === keyword("embed");
 }
 function carrier_kind_QMARK_(kind) {
-  return ((__eliscript_value_54) => __eliscript_truthy19(__eliscript_value_54) ? __eliscript_value_54 : ((__eliscript_value_55) => __eliscript_truthy19(__eliscript_value_55) ? __eliscript_value_55 : ((__eliscript_value_56) => __eliscript_truthy19(__eliscript_value_56) ? __eliscript_value_56 : kind === keyword("none"))(kind === keyword("external")))(kind === keyword("discussion")))(kind === keyword("issue"));
+  return kind === keyword("issue") || kind === keyword("discussion") || kind === keyword("external") || kind === keyword("none");
 }
 function check_publishing(config) {
-  return ((publishing) => {
-    return __eliscript_truthy19(!__eliscript_truthy19(publishing === null)) ? (() => {
-      require_map(publishing, "config.publishing");
-      ((owner) => {
-        return ((logins) => {
-          return (() => {
-            ((coauthors) => {
-              return ((index) => {
-                return (() => {
-                  __eliscript_truthy19(!__eliscript_truthy19(isVector(coauthors))) && fail2("DOGFOOD-CONFIG-003", "publishing.coauthors must be a vector");
-                  return (() => {
-                    while (__eliscript_truthy19(index < count(coauthors))) {
-                      ((coauthor) => {
-                        return logins = conj(logins, login_of2(coauthor, String("publishing.coauthors[") + String(index) + String("]")));
-                      })(require_map(nth(coauthors, index), String("publishing.coauthors[") + String(index) + String("]")));
-                      index = index + 1;
+  {
+    const __eliscript_value_91 = get(config, keyword("publishing"), null);
+    {
+      let publishing = __eliscript_value_91;
+      return !(publishing === null) ? (() => {
+        require_map(publishing, "config.publishing");
+        {
+          const __eliscript_value_92 = require_map(require_key(publishing, keyword("owner"), "config.publishing.owner"), "config.publishing.owner");
+          {
+            let owner = __eliscript_value_92;
+            {
+              const __eliscript_value_93 = vector(login_of2(owner, "config.publishing.owner"));
+              {
+                let logins = __eliscript_value_93;
+                {
+                  const __eliscript_value_94 = get(publishing, keyword("coauthors"), vector());
+                  {
+                    let coauthors = __eliscript_value_94;
+                    {
+                      const __eliscript_value_95 = 0;
+                      {
+                        let index = __eliscript_value_95;
+                        !__eliscript_truthy17(isVector(coauthors)) && fail2("DOGFOOD-CONFIG-003", "publishing.coauthors must be a vector");
+                        while (index < count(coauthors)) {
+                          {
+                            const __eliscript_value_96 = require_map(nth(coauthors, index), String("publishing.coauthors[") + String(index) + String("]"));
+                            {
+                              let coauthor = __eliscript_value_96;
+                              logins = conj(logins, login_of2(coauthor, String("publishing.coauthors[") + String(index) + String("]")));
+                            }
+                          }
+                          index = index + 1;
+                        }
+                      }
                     }
-                    return null;
-                  })();
-                })();
-              })(0);
-            })(get(publishing, keyword("coauthors"), vector()));
-            return check_unique_values(logins, "publisher login");
-          })();
-        })(vector(login_of2(owner, "config.publishing.owner")));
-      })(require_map(require_key(publishing, keyword("owner"), "config.publishing.owner"), "config.publishing.owner"));
-      return require_map(get(publishing, keyword("owner"), null), "config.publishing.owner");
-    })() : null;
-  })(get(config, keyword("publishing"), null));
+                  }
+                }
+                check_unique_values(logins, "publisher login");
+              }
+            }
+          }
+        }
+        return require_map(get(publishing, keyword("owner"), null), "config.publishing.owner");
+      })() : null;
+    }
+  }
 }
 function login_of2(publisher, label) {
   return to_lowercase(require_string(require_key(publisher, keyword("login"), String(label) + String(".login")), String(label) + String(".login")));
 }
 function validate_config(config, path) {
   require_map(config, "config");
-  __eliscript_truthy19(!__eliscript_truthy19(data_only_QMARK_(config))) && fail2("DOGFOOD-CONFIG-005", String(path) + String(": configuration must contain data only, never code"));
-  ((keys, index) => {
-    return (() => {
-      while (__eliscript_truthy19(index < count(keys))) {
-        __eliscript_truthy19(!__eliscript_truthy19(known_key_QMARK_(nth(keys, index)))) && fail2("DOGFOOD-CONFIG-006", String(path) + String(": unknown configuration key ") + String(nth(keys, index)));
+  !__eliscript_truthy17(data_only_QMARK_(config)) && fail2("DOGFOOD-CONFIG-005", String(path) + String(": configuration must contain data only, never code"));
+  {
+    const __eliscript_value_97 = collect_keys(config);
+    const __eliscript_value_98 = 0;
+    {
+      let keys = __eliscript_value_97;
+      let index = __eliscript_value_98;
+      while (index < count(keys)) {
+        !__eliscript_truthy17(known_key_QMARK_(nth(keys, index))) && fail2("DOGFOOD-CONFIG-006", String(path) + String(": unknown configuration key ") + String(nth(keys, index)));
         index = index + 1;
       }
-      return null;
-    })();
-  })(collect_keys(config), 0);
-  ((version) => {
-    return __eliscript_truthy19(!__eliscript_truthy19(version === 1)) ? fail2("DOGFOOD-CONFIG-007", String(path) + String(": unsupported schema version ") + String(version)) : null;
-  })(require_key(config, keyword("schema-version"), "config.schema-version"));
-  return ((site) => {
-    return ((base_url) => {
-      return (() => {
-        require_string(require_key(site, keyword("title"), "config.site.title"), "site.title");
-        __eliscript_truthy19(!__eliscript_truthy19(starts_with_QMARK_("https://", base_url))) && fail2("DOGFOOD-CONFIG-008", "site.base-url must be an absolute https URL for production");
-        check_sources(require_key(config, keyword("sources"), "config.sources"));
-        check_private_input(config);
-        check_refresh(config);
-        check_adapters(config);
-        check_comments(config);
-        check_publishing(config);
-        ((output) => {
-          return ((directory) => {
-            return __eliscript_truthy19(!__eliscript_truthy19(relative_path_QMARK_(directory))) ? fail2("DOGFOOD-CONFIG-004", "output.directory must be a contained repository-relative path") : null;
-          })(require_string(require_key(output, keyword("directory"), "config.output.directory"), "output.directory"));
-        })(require_map(require_key(config, keyword("output"), "config.output"), "output"));
-        return config;
-      })();
-    })(require_string(require_key(site, keyword("base-url"), "config.site.base-url"), "site.base-url"));
-  })(require_map(require_key(config, keyword("site"), "config.site"), "site"));
+    }
+  }
+  {
+    const __eliscript_value_99 = require_key(config, keyword("schema-version"), "config.schema-version");
+    {
+      let version = __eliscript_value_99;
+      !(version === 1) && fail2("DOGFOOD-CONFIG-007", String(path) + String(": unsupported schema version ") + String(version));
+    }
+  }
+  {
+    const __eliscript_value_100 = require_map(require_key(config, keyword("site"), "config.site"), "site");
+    {
+      let site = __eliscript_value_100;
+      {
+        const __eliscript_value_101 = require_string(require_key(site, keyword("base-url"), "config.site.base-url"), "site.base-url");
+        {
+          let base_url = __eliscript_value_101;
+          require_string(require_key(site, keyword("title"), "config.site.title"), "site.title");
+          !__eliscript_truthy17(starts_with_QMARK_("https://", base_url)) && fail2("DOGFOOD-CONFIG-008", "site.base-url must be an absolute https URL for production");
+          check_sources(require_key(config, keyword("sources"), "config.sources"));
+          check_private_input(config);
+          check_refresh(config);
+          check_adapters(config);
+          check_comments(config);
+          check_publishing(config);
+          {
+            const __eliscript_value_102 = require_map(require_key(config, keyword("output"), "config.output"), "output");
+            {
+              let output = __eliscript_value_102;
+              {
+                const __eliscript_value_103 = require_string(require_key(output, keyword("directory"), "config.output.directory"), "output.directory");
+                {
+                  let directory = __eliscript_value_103;
+                  !__eliscript_truthy17(relative_path_QMARK_(directory)) && fail2("DOGFOOD-CONFIG-004", "output.directory must be a contained repository-relative path");
+                }
+              }
+            }
+          }
+          return config;
+        }
+      }
+    }
+  }
 }
 function load_config(path) {
   return validate_config(load_config_value(path), path);
 }
 
 // examples/dogfood/dist/src/builder/main.mjs
-var __eliscript_truthy20 = (value) => value !== false && value != null;
+var __eliscript_truthy18 = (value) => value !== false && value != null;
 var program_arguments = process.argv;
 var environment = process.env;
 var fetch_implementation = globalThis.fetch;
@@ -7438,138 +8943,190 @@ var set_exit_code = (code) => {
 };
 var to_native_array2 = (value) => Array.from(value);
 function env_value(name) {
-  return ((value) => {
-    return __eliscript_truthy20(((__eliscript_value_1) => __eliscript_truthy20(__eliscript_value_1) ? __eliscript_value_1 : value === "")(value === null)) ? null : value;
-  })(environment[name] ?? null);
+  {
+    const __eliscript_value_1 = environment[name] ?? null;
+    {
+      let value = __eliscript_value_1;
+      return value === null || value === "" ? null : value;
+    }
+  }
 }
 function truthy_input_QMARK_(value) {
-  return ((__eliscript_value_2) => __eliscript_truthy20(__eliscript_value_2) ? __eliscript_value_2 : ((__eliscript_value_3) => __eliscript_truthy20(__eliscript_value_3) ? __eliscript_value_3 : value === "yes")(value === "1"))(value === "true");
+  return value === "true" || value === "1" || value === "yes";
 }
 function action_input(name) {
-  return __eliscript_truthy20(name === "config-file") ? first_value(env_value("INPUT_CONFIG-FILE"), env_value("INPUT_CONFIG_FILE")) : __eliscript_truthy20(name === "output-directory") ? first_value(env_value("INPUT_OUTPUT-DIRECTORY"), env_value("INPUT_OUTPUT_DIRECTORY")) : __eliscript_truthy20(name === "force") ? env_value("INPUT_FORCE") : __eliscript_truthy20(name === "preview") ? env_value("INPUT_PREVIEW") : __eliscript_truthy20(name === "event-file") ? first_value(env_value("INPUT_EVENT-FILE"), env_value("INPUT_EVENT_FILE")) : __eliscript_truthy20(name === "previous-manifest") ? first_value(env_value("INPUT_PREVIOUS-MANIFEST"), env_value("INPUT_PREVIOUS_MANIFEST")) : __eliscript_truthy20(name === "github-token") ? first_value(env_value("INPUT_GITHUB-TOKEN"), env_value("INPUT_GITHUB_TOKEN")) : null;
+  return name === "config-file" ? first_value(env_value("INPUT_CONFIG-FILE"), env_value("INPUT_CONFIG_FILE")) : name === "output-directory" ? first_value(env_value("INPUT_OUTPUT-DIRECTORY"), env_value("INPUT_OUTPUT_DIRECTORY")) : name === "force" ? env_value("INPUT_FORCE") : name === "preview" ? env_value("INPUT_PREVIEW") : name === "event-file" ? first_value(env_value("INPUT_EVENT-FILE"), env_value("INPUT_EVENT_FILE")) : name === "previous-manifest" ? first_value(env_value("INPUT_PREVIOUS-MANIFEST"), env_value("INPUT_PREVIOUS_MANIFEST")) : name === "github-token" ? first_value(env_value("INPUT_GITHUB-TOKEN"), env_value("INPUT_GITHUB_TOKEN")) : null;
 }
 function first_value(first, second) {
-  return __eliscript_truthy20(first === null) ? second : first;
+  return first === null ? second : first;
 }
 function flag_present_QMARK_(arguments$, name) {
-  return ((index, found, total) => {
-    (() => {
-      while (__eliscript_truthy20(index < total)) {
-        __eliscript_truthy20(nth(arguments$, index) === name) && (found = true);
+  {
+    const __eliscript_value_2 = 0;
+    const __eliscript_value_3 = null;
+    const __eliscript_value_4 = count(arguments$);
+    {
+      let index = __eliscript_value_2;
+      let found = __eliscript_value_3;
+      let total = __eliscript_value_4;
+      while (index < total) {
+        nth(arguments$, index) === name && (found = true);
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(0, null, count(arguments$));
+      return found;
+    }
+  }
 }
 function option_value(arguments$, name, fallback) {
-  return ((index, found, total) => {
-    (() => {
-      while (__eliscript_truthy20(index < total)) {
-        __eliscript_truthy20(((__eliscript_value_4) => __eliscript_truthy20(__eliscript_value_4) ? index + 1 < total : __eliscript_value_4)(nth(arguments$, index) === name)) && (found = nth(arguments$, index + 1));
+  {
+    const __eliscript_value_5 = 2;
+    const __eliscript_value_6 = fallback;
+    const __eliscript_value_7 = count(arguments$);
+    {
+      let index = __eliscript_value_5;
+      let found = __eliscript_value_6;
+      let total = __eliscript_value_7;
+      while (index < total) {
+        nth(arguments$, index) === name && index + 1 < total && (found = nth(arguments$, index + 1));
         index = index + 1;
       }
-      return null;
-    })();
-    return found;
-  })(2, fallback, count(arguments$));
+      return found;
+    }
+  }
 }
 function absolute_path(root, value) {
-  return __eliscript_truthy20(slice(0, 1, value) === "/") ? value : Path2.join(root, value);
+  return slice(0, 1, value) === "/" ? value : Path2.join(root, value);
 }
 function prepare_staging(staging) {
-  __eliscript_truthy20(import_node_fs3.existsSync(staging)) && import_node_fs3.rmSync(staging, { recursive: true, force: true });
+  __eliscript_truthy18(import_node_fs3.existsSync(staging)) && import_node_fs3.rmSync(staging, { recursive: true, force: true });
   return import_node_fs3.mkdirSync(staging, { recursive: true });
 }
 function write_document(staging, document2) {
-  return ((relative) => {
-    return ((target) => {
-      return (() => {
-        import_node_fs3.mkdirSync(Path2.dirname(target), { recursive: true });
-        return import_node_fs3.writeFileSync(target, get(document2, keyword("content")));
-      })();
-    })(Path2.join(staging, relative));
-  })(get(document2, keyword("path")));
+  {
+    const __eliscript_value_8 = get(document2, keyword("path"));
+    {
+      let relative = __eliscript_value_8;
+      {
+        const __eliscript_value_9 = Path2.join(staging, relative);
+        {
+          let target = __eliscript_value_9;
+          import_node_fs3.mkdirSync(Path2.dirname(target), { recursive: true });
+          return import_node_fs3.writeFileSync(target, get(document2, keyword("content")));
+        }
+      }
+    }
+  }
 }
 function canonical_channel(channel) {
   return { id: String(get(channel, keyword("id"), null)), kind: String(get(channel, keyword("kind"), null)), mode: String(get(channel, keyword("mode"), null)), count: get(channel, keyword("count"), null), updatedAt: get(channel, keyword("updated-at"), null), binding: String(channel_binding_text(channel)), items: canonical_items(get(channel, keyword("items"), vector())) };
 }
 function channel_binding_text(channel) {
-  return ((binding) => {
-    return __eliscript_truthy20(binding === null) ? "" : String(get(binding, keyword("repository"), "")) + String("#") + String(get(binding, keyword("number"), null));
-  })(get(channel, keyword("binding"), null));
+  {
+    const __eliscript_value_10 = get(channel, keyword("binding"), null);
+    {
+      let binding = __eliscript_value_10;
+      return binding === null ? "" : String(get(binding, keyword("repository"), "")) + String("#") + String(get(binding, keyword("number"), null));
+    }
+  }
 }
 function canonical_items(items) {
-  return ((result, index) => {
-    (() => {
-      while (__eliscript_truthy20(index < count(items))) {
-        ((item) => {
-          return result["push"]({ id: String(get(item, keyword("id"), null)), author: String(get(get(item, keyword("author"), hashMap()), keyword("login"), "")), body: get(item, keyword("body"), ""), createdAt: get(item, keyword("created-at"), null), updatedAt: get(item, keyword("updated-at"), null), replies: canonical_items(get(item, keyword("replies"), vector())) });
-        })(nth(items, index));
+  {
+    const __eliscript_value_11 = [];
+    const __eliscript_value_12 = 0;
+    {
+      let result = __eliscript_value_11;
+      let index = __eliscript_value_12;
+      while (index < count(items)) {
+        {
+          const __eliscript_value_13 = nth(items, index);
+          {
+            let item = __eliscript_value_13;
+            result["push"]({ id: String(get(item, keyword("id"), null)), author: String(get(get(item, keyword("author"), hashMap()), keyword("login"), "")), body: get(item, keyword("body"), ""), createdAt: get(item, keyword("created-at"), null), updatedAt: get(item, keyword("updated-at"), null), replies: canonical_items(get(item, keyword("replies"), vector())) });
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return result;
-  })([], 0);
+      return result;
+    }
+  }
 }
 function canonical_post(post) {
   return { id: post["id"], slug: post["slug"], title: post["title"], summary: post["summary"], body: post["body"], publishedAt: post["published-at"], updatedAt: post["updated-at"], authors: values__GT_array(post["authors"]), tags: values__GT_array(post["tags"]), cover: post["cover"] ?? null, draft: post["draft"], pinnedWeight: post["pinned-weight"], provenance: { provider: get(post["provenance"], keyword("provider"), ""), path: get(post["provenance"], keyword("path"), "") }, aliases: values__GT_array(post["aliases"]), channels: channels__GT_array(post["comment-channels"]) };
 }
 function channels__GT_array(channels) {
-  return ((result, index) => {
-    (() => {
-      while (__eliscript_truthy20(index < count(channels))) {
+  {
+    const __eliscript_value_14 = [];
+    const __eliscript_value_15 = 0;
+    {
+      let result = __eliscript_value_14;
+      let index = __eliscript_value_15;
+      while (index < count(channels)) {
         result["push"](canonical_channel(nth(channels, index)));
         index = index + 1;
       }
-      return null;
-    })();
-    return result;
-  })([], 0);
+      return result;
+    }
+  }
 }
 function values__GT_array(values) {
-  return ((result, index) => {
-    (() => {
-      while (__eliscript_truthy20(index < count(values))) {
+  {
+    const __eliscript_value_16 = [];
+    const __eliscript_value_17 = 0;
+    {
+      let result = __eliscript_value_16;
+      let index = __eliscript_value_17;
+      while (index < count(values)) {
         result["push"](nth(values, index));
         index = index + 1;
       }
-      return null;
-    })();
-    return result;
-  })([], 0);
+      return result;
+    }
+  }
 }
 function publishable_inputs(config, site, posts, browser_text, renderer) {
   return { site: { title: get(site, keyword("title"), ""), baseUrl: get(site, keyword("base-url"), ""), language: get(site, keyword("language"), ""), theme: String(get(site, keyword("theme"), keyword("system"))), preview: get(site, keyword("preview"), false) }, presentation: String(get(get(config, keyword("comments"), hashMap()), keyword("presentation"), keyword("tabs"))), posts: posts__GT_array(posts), browserAsset: digest_of_text(browser_text), renderer: renderer_digest(renderer) };
 }
 function posts__GT_array(posts) {
-  return ((result, index) => {
-    (() => {
-      while (__eliscript_truthy20(index < count(posts))) {
+  {
+    const __eliscript_value_18 = [];
+    const __eliscript_value_19 = 0;
+    {
+      let result = __eliscript_value_18;
+      let index = __eliscript_value_19;
+      while (index < count(posts)) {
         result["push"](canonical_post(nth(posts, index)));
         index = index + 1;
       }
-      return null;
-    })();
-    return result;
-  })([], 0);
+      return result;
+    }
+  }
 }
 function digest_of_text(text) {
   return import_node_crypto.createHash("sha256")["update"](text)["digest"]("hex");
 }
 function renderer_module_path() {
-  return ((entry) => {
-    return ((sibling) => {
-      return __eliscript_truthy20(import_node_fs3.existsSync(sibling)) ? sibling : entry;
-    })(Path2.join(Path2.dirname(entry), "../renderer/server.mjs"));
-  })(program_arguments[1] ?? "");
+  {
+    const __eliscript_value_20 = program_arguments[1] ?? "";
+    {
+      let entry = __eliscript_value_20;
+      {
+        const __eliscript_value_21 = Path2.join(Path2.dirname(entry), "../renderer/server.mjs");
+        {
+          let sibling = __eliscript_value_21;
+          return __eliscript_truthy18(import_node_fs3.existsSync(sibling)) ? sibling : entry;
+        }
+      }
+    }
+  }
 }
 function renderer_digest() {
-  return ((path) => {
-    return __eliscript_truthy20(import_node_fs3.existsSync(path)) ? digest_of_text(import_node_fs3.readFileSync(path, "utf8")) : "unknown";
-  })(renderer_module_path());
+  {
+    const __eliscript_value_22 = renderer_module_path();
+    {
+      let path = __eliscript_value_22;
+      return __eliscript_truthy18(import_node_fs3.existsSync(path)) ? digest_of_text(import_node_fs3.readFileSync(path, "utf8")) : "unknown";
+    }
+  }
 }
 function input_digest(inputs) {
   return digest_of_text(JSON.stringify(inputs));
@@ -7578,43 +9135,58 @@ function no_change_policy(config) {
   return get(get(config, keyword("refresh"), hashMap()), keyword("no-change"), keyword("skip"));
 }
 function report_no_change(output, posts, inputs) {
-  ((count2) => {
-    console.log(String("dogfood: no change; ") + String(count2) + String(" published posts produce the fingerprint already on disk"));
-    console.log(String("dogfood: output ") + String(output));
-    console.log(String("dogfood: fingerprint ") + String(inputs));
-    set_output("built", "false");
-    set_output("reason", "no-change");
-    set_output("content-fingerprint", inputs);
-    set_output("output-directory", output);
-    set_output("post-count", String(count2));
-    set_output("comment-snapshot-count", String(snapshot_count(posts)));
-    return set_output("manifest", Path2.join(output, "_dogfood/build.json"));
-  })(count(posts));
+  {
+    const __eliscript_value_23 = count(posts);
+    {
+      let count2 = __eliscript_value_23;
+      console.log(String("dogfood: no change; ") + String(count2) + String(" published posts produce the fingerprint already on disk"));
+      console.log(String("dogfood: output ") + String(output));
+      console.log(String("dogfood: fingerprint ") + String(inputs));
+      set_output("built", "false");
+      set_output("reason", "no-change");
+      set_output("content-fingerprint", inputs);
+      set_output("output-directory", output);
+      set_output("post-count", String(count2));
+      set_output("comment-snapshot-count", String(snapshot_count(posts)));
+      set_output("manifest", Path2.join(output, "_dogfood/build.json"));
+    }
+  }
   return inputs;
 }
 function previous_input_digest(output) {
-  return ((manifest) => {
-    return __eliscript_truthy20(import_node_fs3.existsSync(manifest)) ? get(JSON.parse(import_node_fs3.readFileSync(manifest, "utf8")), "inputDigest", null) : null;
-  })(Path2.join(output, "_dogfood/build.json"));
+  {
+    const __eliscript_value_24 = Path2.join(output, "_dogfood/build.json");
+    {
+      let manifest = __eliscript_value_24;
+      return __eliscript_truthy18(import_node_fs3.existsSync(manifest)) ? get(JSON.parse(import_node_fs3.readFileSync(manifest, "utf8")), "inputDigest", null) : null;
+    }
+  }
 }
 function fingerprint(documents) {
-  return ((hash, index) => {
-    (() => {
-      while (__eliscript_truthy20(index < count(documents))) {
-        ((document2) => {
-          hash["update"](get(document2, keyword("path")));
-          hash["update"](`
+  {
+    const __eliscript_value_25 = import_node_crypto.createHash("sha256");
+    const __eliscript_value_26 = 0;
+    {
+      let hash = __eliscript_value_25;
+      let index = __eliscript_value_26;
+      while (index < count(documents)) {
+        {
+          const __eliscript_value_27 = nth(documents, index);
+          {
+            let document2 = __eliscript_value_27;
+            hash["update"](get(document2, keyword("path")));
+            hash["update"](`
 `);
-          hash["update"](get(document2, keyword("content")));
-          return hash["update"](`
+            hash["update"](get(document2, keyword("content")));
+            hash["update"](`
 `);
-        })(nth(documents, index));
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return hash["digest"]("hex");
-  })(import_node_crypto.createHash("sha256"), 0);
+      return hash["digest"]("hex");
+    }
+  }
 }
 function public_post(post) {
   return { id: post["id"], slug: post["slug"], title: post["title"], summary: post["summary"], publishedAt: post["published-at"], updatedAt: post["updated-at"], tags: to_native_array2(post["tags"]), source: get(post["provenance"], keyword("path"), "") };
@@ -7633,71 +9205,95 @@ function manifest_fingerprint(path) {
   return get(JSON.parse(import_node_fs3.readFileSync(path, "utf8")), "contentFingerprint", null);
 }
 function verify_previous_manifest(previous_manifest, output) {
-  return __eliscript_truthy20(!__eliscript_truthy20(previous_manifest === null)) ? ((expected_path) => {
+  return !(previous_manifest === null) ? ((expected_path) => {
     return ((current_path) => {
       return ((current) => {
         return ((expected) => {
-          return __eliscript_truthy20(current === null) ? null : __eliscript_truthy20(expected === null) ? fail2("DOGFOOD-BUILD-005", String("previous manifest is missing or unreadable: ") + String(expected_path)) : __eliscript_truthy20(!__eliscript_truthy20(current === expected)) ? fail2("DOGFOOD-BUILD-004", String("output ") + String(output) + String(" was not produced by the recorded build: ") + String(String(current)) + String(" does not match ") + String(String(expected))) : null;
-        })(__eliscript_truthy20(import_node_fs3.existsSync(expected_path)) ? manifest_fingerprint(expected_path) : null);
-      })(__eliscript_truthy20(import_node_fs3.existsSync(current_path)) ? manifest_fingerprint(current_path) : null);
+          return current === null ? null : expected === null ? fail2("DOGFOOD-BUILD-005", String("previous manifest is missing or unreadable: ") + String(expected_path)) : !(current === expected) ? fail2("DOGFOOD-BUILD-004", String("output ") + String(output) + String(" was not produced by the recorded build: ") + String(String(current)) + String(" does not match ") + String(String(expected))) : null;
+        })(__eliscript_truthy18(import_node_fs3.existsSync(expected_path)) ? manifest_fingerprint(expected_path) : null);
+      })(__eliscript_truthy18(import_node_fs3.existsSync(current_path)) ? manifest_fingerprint(current_path) : null);
     })(Path2.join(output, "_dogfood/build.json"));
   })(absolute_path(".", previous_manifest)) : null;
 }
 function publish(staging, output) {
-  return ((backup) => {
-    __eliscript_truthy20(import_node_fs3.existsSync(backup)) && import_node_fs3.rmSync(backup, { recursive: true, force: true });
-    __eliscript_truthy20(import_node_fs3.existsSync(output)) && import_node_fs3.renameSync(output, backup);
-    (() => {
-      try {
-        return import_node_fs3.renameSync(staging, output);
-      } catch (error) {
-        __eliscript_truthy20(import_node_fs3.existsSync(backup)) && import_node_fs3.renameSync(backup, output);
-        return ((__eliscript_value_5) => {
-          throw __eliscript_value_5;
-        })(error);
-      }
-    })();
-    return __eliscript_truthy20(import_node_fs3.existsSync(backup)) ? import_node_fs3.rmSync(backup, { recursive: true, force: true }) : null;
-  })(String(output) + String(".backup"));
+  {
+    const __eliscript_value_28 = String(output) + String(".backup");
+    {
+      let backup = __eliscript_value_28;
+      __eliscript_truthy18(import_node_fs3.existsSync(backup)) && import_node_fs3.rmSync(backup, { recursive: true, force: true });
+      __eliscript_truthy18(import_node_fs3.existsSync(output)) && import_node_fs3.renameSync(output, backup);
+      (() => {
+        try {
+          return import_node_fs3.renameSync(staging, output);
+        } catch (error) {
+          __eliscript_truthy18(import_node_fs3.existsSync(backup)) && import_node_fs3.renameSync(backup, output);
+          return ((__eliscript_value_29) => {
+            throw __eliscript_value_29;
+          })(error);
+        }
+      })();
+      return __eliscript_truthy18(import_node_fs3.existsSync(backup)) ? import_node_fs3.rmSync(backup, { recursive: true, force: true }) : null;
+    }
+  }
 }
 function publishable_QMARK_(post, preview) {
-  return ((__eliscript_value_6) => __eliscript_truthy20(__eliscript_value_6) ? __eliscript_value_6 : !__eliscript_truthy20(post["draft"]))(preview);
+  return ((__eliscript_value_30) => __eliscript_truthy18(__eliscript_value_30) ? __eliscript_value_30 : !__eliscript_truthy18(post["draft"]))(preview);
 }
 function preview_site(site) {
   return assoc(site, keyword("preview"), true);
 }
 function defined_values(values) {
-  return ((result, index) => {
-    (() => {
-      while (__eliscript_truthy20(index < count(values))) {
-        ((value) => {
-          return __eliscript_truthy20(!__eliscript_truthy20(value === null)) ? result = conj(result, value) : null;
-        })(nth(values, index));
+  {
+    const __eliscript_value_31 = vector();
+    const __eliscript_value_32 = 0;
+    {
+      let result = __eliscript_value_31;
+      let index = __eliscript_value_32;
+      while (index < count(values)) {
+        {
+          const __eliscript_value_33 = nth(values, index);
+          {
+            let value = __eliscript_value_33;
+            !(value === null) && (result = conj(result, value));
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return result;
-  })(vector(), 0);
+      return result;
+    }
+  }
 }
 function browser_bundle_candidates(root, override) {
-  return ((from_entry) => {
-    return defined_values(vector(override, env_value("DOGFOOD_BROWSER_BUNDLE"), String(root) + String("/dist/site/browser.js"), from_entry));
-  })(String(Path2.dirname(program_arguments[1] ?? ".")) + String("/../site/browser.js"));
+  {
+    const __eliscript_value_34 = String(Path2.dirname(program_arguments[1] ?? ".")) + String("/../site/browser.js");
+    {
+      let from_entry = __eliscript_value_34;
+      return defined_values(vector(override, env_value("DOGFOOD_BROWSER_BUNDLE"), String(root) + String("/dist/site/browser.js"), from_entry));
+    }
+  }
 }
 function browser_bundle(root, override) {
-  return ((candidates, index, found) => {
-    (() => {
-      while (__eliscript_truthy20(((__eliscript_value_7) => __eliscript_truthy20(__eliscript_value_7) ? found === null : __eliscript_value_7)(index < count(candidates)))) {
-        ((candidate) => {
-          return __eliscript_truthy20(((__eliscript_value_8) => __eliscript_truthy20(__eliscript_value_8) ? import_node_fs3.existsSync(candidate) : __eliscript_value_8)(!__eliscript_truthy20(candidate === null))) ? found = candidate : null;
-        })(nth(candidates, index));
+  {
+    const __eliscript_value_35 = browser_bundle_candidates(root, override);
+    const __eliscript_value_36 = 0;
+    const __eliscript_value_37 = null;
+    {
+      let candidates = __eliscript_value_35;
+      let index = __eliscript_value_36;
+      let found = __eliscript_value_37;
+      while (index < count(candidates) && found === null) {
+        {
+          const __eliscript_value_38 = nth(candidates, index);
+          {
+            let candidate = __eliscript_value_38;
+            __eliscript_truthy18(((__eliscript_value_39) => __eliscript_truthy18(__eliscript_value_39) ? import_node_fs3.existsSync(candidate) : __eliscript_value_39)(!(candidate === null))) && (found = candidate);
+          }
+        }
         index = index + 1;
       }
-      return null;
-    })();
-    return __eliscript_truthy20(found === null) ? fail2("DOGFOOD-BUILD-003", String("browser bundle not found; looked in ") + String(join(", ", candidates))) : import_node_fs3.readFileSync(found, "utf8");
-  })(browser_bundle_candidates(root, override), 0, null);
+      return found === null ? fail2("DOGFOOD-BUILD-003", String("browser bundle not found; looked in ") + String(join(", ", candidates))) : import_node_fs3.readFileSync(found, "utf8");
+    }
+  }
 }
 function append_all4(target, values) {
   return reduce(values, (accumulator, value) => {
@@ -7705,11 +9301,11 @@ function append_all4(target, values) {
   }, target);
 }
 function request_headers(token) {
-  return __eliscript_truthy20(token === null) ? { accept: "application/vnd.github+json", "user-agent": "dogfood" } : { accept: "application/vnd.github+json", "user-agent": "dogfood", authorization: String("Bearer ") + String(token) };
+  return token === null ? { accept: "application/vnd.github+json", "user-agent": "dogfood" } : { accept: "application/vnd.github+json", "user-agent": "dogfood", authorization: String("Bearer ") + String(token) };
 }
 function request_field(request, name, fallback) {
-  return __eliscript_truthy20(isMap(request)) ? get(request, keyword(name), fallback) : ((value) => {
-    return __eliscript_truthy20(value === undefined) ? fallback : value;
+  return __eliscript_truthy18(isMap(request)) ? get(request, keyword(name), fallback) : ((value) => {
+    return value === undefined ? fallback : value;
   })(request[name]);
 }
 async function github_transport(request) {
@@ -7720,8 +9316,8 @@ async function github_transport(request) {
           return await (async (body) => {
             return await (async (init) => {
               return await (async () => {
-                __eliscript_truthy20(blank_QMARK_(url)) && fail2("DOGFOOD-GITHUB-002", "a provider request carried no URL");
-                __eliscript_truthy20(!__eliscript_truthy20(body === null)) && (init["body"] = body);
+                __eliscript_truthy18(blank_QMARK_(url)) && fail2("DOGFOOD-GITHUB-002", "a provider request carried no URL");
+                !(body === null) && (init["body"] = body);
                 return await (async () => {
                   try {
                     return await (async (response) => {
@@ -7733,35 +9329,43 @@ async function github_transport(request) {
                 })();
               })();
             })({ method, headers: request_headers(token) });
-          })(__eliscript_truthy20(plain) ? null : request_field(request, "body", null));
-        })(__eliscript_truthy20(plain) ? "GET" : request_field(request, "method", "GET"));
-      })(__eliscript_truthy20(plain) ? request : request_field(request, "url", ""));
+          })(__eliscript_truthy18(plain) ? null : request_field(request, "body", null));
+        })(__eliscript_truthy18(plain) ? "GET" : request_field(request, "method", "GET"));
+      })(__eliscript_truthy18(plain) ? request : request_field(request, "url", ""));
     })(string_value_QMARK_(request));
   })(first_value(env_value("GITHUB_TOKEN"), action_input("github-token")));
 }
 function set_output(name, value) {
-  return ((destination) => {
-    return __eliscript_truthy20(!__eliscript_truthy20(destination === null)) ? import_node_fs3.appendFileSync(destination, String(name) + String("=") + String(value) + String(`
+  {
+    const __eliscript_value_40 = env_value("GITHUB_OUTPUT");
+    {
+      let destination = __eliscript_value_40;
+      return !(destination === null) ? import_node_fs3.appendFileSync(destination, String(name) + String("=") + String(value) + String(`
 `)) : null;
-  })(env_value("GITHUB_OUTPUT"));
+    }
+  }
 }
 function report(output, documents, posts, reason, fingerprint_value, inputs) {
-  return ((post_count) => {
-    console.log(String("dogfood: wrote ") + String(count(documents)) + String(" routes from ") + String(post_count) + String(" published posts"));
-    console.log(String("dogfood: output ") + String(output));
-    console.log(String("dogfood: fingerprint ") + String(inputs));
-    set_output("built", "true");
-    set_output("reason", reason);
-    set_output("content-fingerprint", inputs);
-    set_output("cache-key", String("dogfood-") + String(fingerprint_value));
-    set_output("output-directory", output);
-    set_output("post-count", String(post_count));
-    set_output("comment-snapshot-count", String(snapshot_count(posts)));
-    return set_output("manifest", Path2.join(output, "_dogfood/build.json"));
-  })(count(posts));
+  {
+    const __eliscript_value_41 = count(posts);
+    {
+      let post_count = __eliscript_value_41;
+      console.log(String("dogfood: wrote ") + String(count(documents)) + String(" routes from ") + String(post_count) + String(" published posts"));
+      console.log(String("dogfood: output ") + String(output));
+      console.log(String("dogfood: fingerprint ") + String(inputs));
+      set_output("built", "true");
+      set_output("reason", reason);
+      set_output("content-fingerprint", inputs);
+      set_output("cache-key", String("dogfood-") + String(fingerprint_value));
+      set_output("output-directory", output);
+      set_output("post-count", String(post_count));
+      set_output("comment-snapshot-count", String(snapshot_count(posts)));
+      return set_output("manifest", Path2.join(output, "_dogfood/build.json"));
+    }
+  }
 }
 function output_directory_of(root, config, override) {
-  return Path2.join(root, __eliscript_truthy20(override === null) ? get(get(config, keyword("output")), keyword("directory"), "_site") : override);
+  return Path2.join(root, override === null ? get(get(config, keyword("output")), keyword("directory"), "_site") : override);
 }
 async function build_site(root, config_path, output_override, browser_override, preview, reason) {
   return await (async (config) => {
@@ -7775,13 +9379,13 @@ async function build_site(root, config_path, output_override, browser_override, 
           })(String(output) + String(".staging"));
         })(output_directory_of(root, config, output_override));
       })(enabled_sources(config));
-    })(__eliscript_truthy20(preview) ? preview_site(get(config, keyword("site"))) : get(config, keyword("site")));
+    })(__eliscript_truthy18(preview) ? preview_site(get(config, keyword("site"))) : get(config, keyword("site")));
   })(load_config(config_path));
 }
 async function collect_sources(root, config, sources) {
   return await (async (collected, carriers, unauthorized, index) => {
     await (async () => {
-      while (__eliscript_truthy20(index < count(sources))) {
+      while (index < count(sources)) {
         await (async (source) => {
           return ((result) => {
             return collected = append_all4(collected, get(result, keyword("posts"), vector())), carriers = carriers + get(result, keyword("carriers"), 0), unauthorized = unauthorized + get(result, keyword("unauthorized"), 0);
@@ -7795,72 +9399,119 @@ async function collect_sources(root, config, sources) {
   })(vector(), 0, 0, 0);
 }
 function finish_build(root, config, site, output, staging, browser_override, preview, reason, collected) {
-  return ((collected_posts) => {
-    return ((carriers) => {
-      return ((unauthorized) => {
-        return ((posts) => {
-          return ((bundle) => {
-            return ((inputs) => {
-              return (() => {
-                check_identity(posts);
-                return __eliscript_truthy20(unchanged_inputs_QMARK_(config, output, inputs, reason)) ? report_no_change(output, posts, inputs) : render_and_publish(output, staging, config, site, posts, bundle, inputs, carriers, unauthorized, reason);
-              })();
-            })(input_digest(publishable_inputs(config, site, posts, bundle, renderer_digest())));
-          })(browser_bundle(root, browser_override));
-        })(sort_posts(attach_configured_channels(config, filter((post) => {
-          return publishable_QMARK_(post, preview);
-        }, resolve_identity(config, collected_posts)))));
-      })(get(collected, keyword("unauthorized"), 0));
-    })(get(collected, keyword("carriers"), 0));
-  })(get(collected, keyword("posts"), vector()));
+  {
+    const __eliscript_value_42 = get(collected, keyword("posts"), vector());
+    {
+      let collected_posts = __eliscript_value_42;
+      {
+        const __eliscript_value_43 = get(collected, keyword("carriers"), 0);
+        {
+          let carriers = __eliscript_value_43;
+          {
+            const __eliscript_value_44 = get(collected, keyword("unauthorized"), 0);
+            {
+              let unauthorized = __eliscript_value_44;
+              {
+                const __eliscript_value_45 = sort_posts(attach_configured_channels(config, filter((post) => {
+                  return publishable_QMARK_(post, preview);
+                }, resolve_identity(config, collected_posts))));
+                {
+                  let posts = __eliscript_value_45;
+                  {
+                    const __eliscript_value_46 = browser_bundle(root, browser_override);
+                    {
+                      let bundle = __eliscript_value_46;
+                      {
+                        const __eliscript_value_47 = input_digest(publishable_inputs(config, site, posts, bundle, renderer_digest()));
+                        {
+                          let inputs = __eliscript_value_47;
+                          check_identity(posts);
+                          return __eliscript_truthy18(unchanged_inputs_QMARK_(config, output, inputs, reason)) ? report_no_change(output, posts, inputs) : render_and_publish(output, staging, config, site, posts, bundle, inputs, carriers, unauthorized, reason);
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function unchanged_inputs_QMARK_(config, output, inputs, reason) {
-  return ((__eliscript_value_9) => __eliscript_truthy20(__eliscript_value_9) ? ((__eliscript_value_10) => __eliscript_truthy20(__eliscript_value_10) ? inputs === previous_input_digest(output) : __eliscript_value_10)(!__eliscript_truthy20(reason === "forced")) : __eliscript_value_9)(no_change_policy(config) === keyword("skip"));
+  return no_change_policy(config) === keyword("skip") && !(reason === "forced") && inputs === previous_input_digest(output);
 }
 function render_and_publish(output, staging, config, site, posts, bundle, inputs, carriers, unauthorized, reason) {
-  return ((documents) => {
-    return ((digest) => {
-      return ((index) => {
-        return (() => {
-          prepare_staging(staging);
-          (() => {
-            while (__eliscript_truthy20(index < count(documents))) {
-              write_document(staging, nth(documents, index));
-              index = index + 1;
+  {
+    const __eliscript_value_48 = conj(render_site(site, posts), hashMap(keyword("path"), "assets/browser.js", keyword("content"), bundle));
+    {
+      let documents = __eliscript_value_48;
+      {
+        const __eliscript_value_49 = fingerprint(documents);
+        {
+          let digest = __eliscript_value_49;
+          {
+            const __eliscript_value_50 = 0;
+            {
+              let index = __eliscript_value_50;
+              prepare_staging(staging);
+              while (index < count(documents)) {
+                write_document(staging, nth(documents, index));
+                index = index + 1;
+              }
+              write_manifests(staging, documents, posts, config, carriers, unauthorized, inputs);
+              publish(staging, output);
+              report(output, documents, posts, reason, digest, inputs);
+              return digest;
             }
-            return null;
-          })();
-          write_manifests(staging, documents, posts, config, carriers, unauthorized, inputs);
-          publish(staging, output);
-          report(output, documents, posts, reason, digest, inputs);
-          return digest;
-        })();
-      })(0);
-    })(fingerprint(documents));
-  })(conj(render_site(site, posts), hashMap(keyword("path"), "assets/browser.js", keyword("content"), bundle)));
+          }
+        }
+      }
+    }
+  }
 }
 function keyword_name(value) {
-  return ((text) => {
-    return ((size) => {
-      return __eliscript_truthy20(((__eliscript_value_11) => __eliscript_truthy20(__eliscript_value_11) ? text.charCodeAt(0) === 58 : __eliscript_value_11)(size > 0)) ? slice(1, size, text) : text;
-    })(text_length(text));
-  })(String(value));
+  {
+    const __eliscript_value_51 = String(value);
+    {
+      let text = __eliscript_value_51;
+      {
+        const __eliscript_value_52 = text_length(text);
+        {
+          let size = __eliscript_value_52;
+          return size > 0 && text.charCodeAt(0) === 58 ? slice(1, size, text) : text;
+        }
+      }
+    }
+  }
 }
 function skip(decision) {
-  return ((detail) => {
-    console.log(String("dogfood: skipped; ") + String(detail));
-    set_output("built", "false");
-    set_output("reason", "skipped");
-    return set_output("subject", "articles");
-  })(get(decision, keyword("detail"), ""));
+  {
+    const __eliscript_value_53 = get(decision, keyword("detail"), "");
+    {
+      let detail = __eliscript_value_53;
+      console.log(String("dogfood: skipped; ") + String(detail));
+      set_output("built", "false");
+      set_output("reason", "skipped");
+      return set_output("subject", "articles");
+    }
+  }
 }
 function defer(decision) {
-  return ((subject, event) => {
-    console.log(String("dogfood: deferred; ") + String(subject) + String(" event ") + String(__eliscript_truthy20(event === "") ? "(none)" : event) + String(" cannot change the site"));
-    set_output("built", "false");
-    set_output("reason", "deferred");
-    return set_output("subject", subject);
-  })(keyword_name(get(decision, keyword("subject"), keyword("unknown"))), String(get(decision, keyword("event"), "")));
+  {
+    const __eliscript_value_54 = keyword_name(get(decision, keyword("subject"), keyword("unknown")));
+    const __eliscript_value_55 = String(get(decision, keyword("event"), ""));
+    {
+      let subject = __eliscript_value_54;
+      let event = __eliscript_value_55;
+      console.log(String("dogfood: deferred; ") + String(subject) + String(" event ") + String(event === "" ? "(none)" : event) + String(" cannot change the site"));
+      set_output("built", "false");
+      set_output("reason", "deferred");
+      return set_output("subject", subject);
+    }
+  }
 }
 async function main() {
   return await (async (arguments$) => {
@@ -7879,15 +9530,15 @@ async function main() {
                             return await (async (classification2) => {
                               return await (async (config) => {
                                 return await (async (decision) => {
-                                  return __eliscript_truthy20(!__eliscript_truthy20(get(decision, keyword("build"), null))) ? defer(decision) : await (async (preflight) => {
-                                    return __eliscript_truthy20(get(preflight, keyword("skip"), false)) ? skip(preflight) : await (async () => {
+                                  return !__eliscript_truthy18(get(decision, keyword("build"), null)) ? defer(decision) : await (async (preflight) => {
+                                    return __eliscript_truthy18(get(preflight, keyword("skip"), false)) ? skip(preflight) : await (async () => {
                                       verify_previous_manifest(previous_manifest, output_directory_of(root, config, output_override));
                                       return await build_site(root, config_path, output_override, browser_override, preview, get(decision, keyword("reason"), "changed"));
                                     })();
                                   })(skip_decision(config, classification2));
                                 })(build_decision(config, classification2, forced));
                               })(load_config(config_path));
-                            })(__eliscript_truthy20(event_file === null) ? requested_event() : classify_event(first_value(env_value("GITHUB_EVENT_NAME"), "workflow_dispatch"), JSON.parse(import_node_fs3.readFileSync(absolute_path(root, event_file), "utf8"))));
+                            })(event_file === null ? requested_event() : classify_event(first_value(env_value("GITHUB_EVENT_NAME"), "workflow_dispatch"), JSON.parse(import_node_fs3.readFileSync(absolute_path(root, event_file), "utf8"))));
                           } catch (error) {
                             console.log(String("dogfood: ") + String(error["code"] ?? "DOGFOOD") + String(": ") + String(error["message"]));
                             set_output("built", "false");
@@ -7897,16 +9548,16 @@ async function main() {
                         })();
                       })(first_value(option_value(arguments$, "--previous-manifest", null), action_input("previous-manifest")));
                     })(first_value(option_value(arguments$, "--event-file", null), first_value(action_input("event-file"), env_value("GITHUB_EVENT_PATH"))));
-                  })(((__eliscript_value_13) => __eliscript_truthy20(__eliscript_value_13) ? __eliscript_value_13 : truthy_input_QMARK_(action_input("preview")))(flag_present_QMARK_(arguments$, "--preview")));
+                  })(((__eliscript_value_57) => __eliscript_truthy18(__eliscript_value_57) ? __eliscript_value_57 : truthy_input_QMARK_(action_input("preview")))(flag_present_QMARK_(arguments$, "--preview")));
                 })(option_value(arguments$, "--browser-bundle", null));
-              })(((__eliscript_value_12) => __eliscript_truthy20(__eliscript_value_12) ? __eliscript_value_12 : truthy_input_QMARK_(action_input("force")))(flag_present_QMARK_(arguments$, "--force")));
+              })(((__eliscript_value_56) => __eliscript_truthy18(__eliscript_value_56) ? __eliscript_value_56 : truthy_input_QMARK_(action_input("force")))(flag_present_QMARK_(arguments$, "--force")));
             })(first_value(option_value(arguments$, "--output", null), action_input("output-directory")));
           })(absolute_path(root, config_file));
-        })(__eliscript_truthy20(config_input === null) ? "dogfood.config.eli" : config_input);
+        })(config_input === null ? "dogfood.config.eli" : config_input);
       })(first_value(option_value(arguments$, "--config", null), action_input("config-file")));
     })(option_value(arguments$, "--root", first_value(env_value("GITHUB_WORKSPACE"), ".")));
   })(program_arguments);
 }
 main();
 
-//# debugId=907557D3AC0B179E64756E2164756E21
+//# debugId=0C2C92C55B366F3D64756E2164756E21
