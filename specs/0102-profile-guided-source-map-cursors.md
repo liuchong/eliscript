@@ -60,24 +60,35 @@ source names, `sourcesContent`, diagnostics, or Source Map v3 JSON shape.
 
 ## Reproducible Evidence
 
-`tools/compiler/source-map-cursor-benchmark.mjs` accepts only a detached
-baseline at revision `a6013833226af047622aceca42d687b6e33e3701`. It builds
-real emission artifacts for all thirteen current self-hosted compiler modules,
+`tools/compiler/source-map-cursor-benchmark.mjs` accepts only the pinned
+historical baseline revision `a6013833226af047622aceca42d687b6e33e3701`.
+Reacceptance restores only its `collect-generated-marks` and `source-locations`
+definitions into the current Source Map module, built with the current seed.
+The remaining twelve modules come from one fresh current bootstrap, so both
+compilers share today's language support and JS code generation. Reports record
+the historical source/function hashes, current and control sources, and each
+module's control/treatment artifact hashes. Validators require all shared
+modules to be identical. This is an isolated historical-function control,
+not the unchanged historical compiler.
+
+The benchmark builds real emission artifacts for all thirteen current modules,
 compares both cursor pairs with their references, and adds explicit empty,
-duplicate, trailing-offset, newline, tab, and non-BMP boundaries.
+duplicate, trailing-offset, newline, tab and non-BMP boundaries. Both complete
+compilers then compile the same current source corpus with Source Maps. Every
+JavaScript module and Source Map must be byte-identical before timing.
+Reference/optimized pipeline and complete-compiler timings alternate after
+warmup across 15 samples and 8 complete corpus rounds per compiler sample.
 
-Both the baseline and optimized compilers then compile the same current source
-corpus with Source Maps. Every JavaScript module and Source Map must be
-byte-identical before timing. Reference/optimized cursor timings and
-baseline/optimized complete-compiler timings alternate after warmup.
+The original thresholds remain 1.5x for the combined cursor pipeline and
+1.08x for the complete compiler; validators also reject weaker thresholds.
+Current samples, medians, checksums, host identity, corpus shape, SHA-256
+source identity and the passing decision are retained in
+`benchmarks/compiler-source-map-cursor-macos-arm64.json`. Default tests validate
+retained evidence without rerunning wall-clock timing.
 
-The predeclared acceptance thresholds are 1.5x for the combined cursor pipeline
-and 1.08x for the complete compiler. The reviewed macOS arm64 report covers 15
-pipeline cases and 26,289 artifact marks. It records a 4.701187x pipeline
-median speedup and a 1.107777x complete-compiler median speedup, plus raw
-samples, checksums, host identity, corpus shape, SHA-256 source identity, and
-the decision. Default tests validate the report without rerunning wall-clock
-timing.
+The current macOS arm64 reacceptance measures a 3.566872x pipeline speedup
+and a 1.109926x complete-compiler speedup. The retained source
+digest and raw samples identify this controlled run.
 
 ## Core Boundary
 

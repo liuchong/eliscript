@@ -11,6 +11,11 @@ export const COMPILER_READER_CHARACTER_VERSION = 1;
 export const COMPILER_READER_CHARACTER_BASELINE =
   "d6822134a187d4247611db56822ef47164a76a61";
 
+import { buildControlledBaseline, validateControlledBaseline } from "./controlled-baseline.mjs";
+
+const controlledTarget = "bootstrap/compiler/reader.eli";
+const controlledNames = ["whitespace-code-p", "delimiter-code-p", "read-token", "skip-space-and-comments"];
+
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const projectDirectory = path.resolve(directory, "../..");
 const compilerSources = Object.freeze([
@@ -31,6 +36,7 @@ const compilerSources = Object.freeze([
 const digestFiles = Object.freeze([
   ...compilerSources,
   "tools/compiler/reader-character-benchmark.mjs",
+  "tools/compiler/controlled-baseline.mjs",
 ]);
 
 function positiveInteger(value, name) {
@@ -150,6 +156,7 @@ export function validateCompilerReaderCharacterReport(report) {
       report?.baseline?.revision !== COMPILER_READER_CHARACTER_BASELINE) {
     throw new TypeError("invalid compiler reader character report identity");
   }
+  validateControlledBaseline(report.baseline.control, controlledTarget, controlledNames, compilerSources);
   const samples = report.parameters?.timingSamples;
   for (const measurement of ["referencePredicates", "optimizedPredicates",
     "baselineCompiler", "optimizedCompiler"]) {
@@ -169,10 +176,12 @@ export function validateCompilerReaderCharacterReport(report) {
         report.validation?.optimizedCompilerChecksum) {
     throw new TypeError("compiler reader character validation failed");
   }
-  if (report.decision?.passed !== true ||
+  if (!Number.isFinite(report.decision?.minimumCompleteCompilerSpeedup) ||
+      report.decision?.minimumCompleteCompilerSpeedup < 1.08 ||
+      report.decision?.passed !== true ||
       report.measurements.completeCompilerSpeedup <
         report.decision.minimumCompleteCompilerSpeedup) {
-    throw new TypeError("compiler reader character speedup decision failed");
+    throw new TypeError(`compiler reader character speedup decision failed: ${report.measurements.completeCompilerSpeedup} < ${report.decision.minimumCompleteCompilerSpeedup}`);
   }
   return report;
 }
@@ -217,6 +226,7 @@ export async function runCompilerReaderCharacterBenchmark(options) {
       `baseline must be ${COMPILER_READER_CHARACTER_BASELINE}, got ${revision}`,
     );
   }
+  const control = await buildControlledBaseline({ root: projectDirectory, baselineRoot, revision, sources: compilerSources, target: controlledTarget, names: controlledNames });
   const corpus = await Promise.all(compilerSources.map(async (relative) => ({
     relative,
     source: await readFile(path.join(projectDirectory, relative), "utf8"),
@@ -226,7 +236,7 @@ export async function runCompilerReaderCharacterBenchmark(options) {
     0,
   );
   const [baselineCompiler, optimizedCompiler, reader] = await Promise.all([
-    loadGenerated(baselineRoot, "compiler", "baseline"),
+    import(pathToFileURL(path.join(control.directory, "compiler.mjs")).href),
     loadGenerated(projectDirectory, "compiler", "optimized"),
     loadGenerated(projectDirectory, "reader", "predicates"),
   ]);
@@ -320,7 +330,7 @@ export async function runCompilerReaderCharacterBenchmark(options) {
       architecture: process.arch,
       operatingSystem: `${os.type()} ${os.release()}`,
     },
-    baseline: { revision, root: path.basename(baselineRoot) },
+    baseline: { revision, root: path.basename(baselineRoot), control: control.evidence },
     corpus: {
       files: compilerSources,
       sourceBytes,

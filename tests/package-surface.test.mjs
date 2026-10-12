@@ -108,13 +108,27 @@ test("the package keeps development trees out of the tarball", () => {
   }
 });
 
-test("the release metadata is present and the release latch is set", () => {
+test("the released package keeps its metadata and manual publication gates", async () => {
   expect(manifest.version).toBe("0.0.1");
   expect(manifest.description).toBeString();
   expect(manifest.repository.url).toContain("github.com/liuchong/eliscript");
   expect(manifest.license).toBe("GPL-3.0-or-later");
   expect(manifest.engines.node).toBeString();
   expect(manifest.publishConfig.access).toBe("public");
-  // Nothing may publish by accident: flipping this flag is the release step.
-  expect(manifest.private).toBe(true);
+  // 0.0.1 deliberately removed the development latch. Publication is now
+  // guarded by manual dispatch, a signed release tag, and reviewed tarball bytes.
+  expect(Object.hasOwn(manifest, "private")).toBe(false);
+  expect(manifest.publishConfig.registry).toBe("https://registry.npmjs.org/");
+  const workflow = await readFile(resolve(ROOT, ".github/workflows/release.yml"), "utf8");
+  const triggers = workflow.slice(workflow.indexOf("\non:"), workflow.indexOf("\npermissions:"));
+  expect(triggers).toContain("workflow_dispatch:");
+  expect(triggers).not.toMatch(/^  (?:push|pull_request|schedule|workflow_run):/mu);
+  expect(triggers).toMatch(/publish:[\s\S]*default: false/u);
+  expect(workflow).toContain(".verification.verified");
+  expect(workflow).toContain("grep -qx true");
+  expect(workflow).toContain('if [ "$packed" != "$VERSION" ]');
+  expect(workflow).toContain("if: ${{ !inputs.publish }}");
+  expect(workflow).toContain('npm stage publish "eliscript-$VERSION.tgz"');
+  expect(workflow).toContain("if: ${{ inputs.publish }}");
+  expect(workflow).toContain('npm publish "eliscript-$VERSION.tgz"');
 });

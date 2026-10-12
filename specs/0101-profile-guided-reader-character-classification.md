@@ -52,24 +52,42 @@ entries. Generated `delimiter-code-p` contained twelve nested value-preserving
 closures, while `whitespace-code-p` contained four.
 
 `tools/compiler/reader-character-benchmark.mjs` requires an exact detached
-baseline at revision `d6822134a187d4247611db56822ef47164a76a61`. Both generated
-compilers compile the same current thirteen-module self-hosted compiler corpus
-with Source Maps. Every generated module and Source Map must be byte-identical
-before timing begins.
+historical baseline at revision `d6822134a187d4247611db56822ef47164a76a61`.
+Reacceptance builds a controlled compiler from today's sources and seed code
+generator, restoring only that revision's `whitespace-code-p`,
+`delimiter-code-p`, `read-token`, and `skip-space-and-comments` definitions.
+All other generated modules are copied from the same fresh current bootstrap.
+The report records historical-source/function hashes, current source hashes,
+control-source identity, and both sets of module hashes. Shared module bytes
+must match; only the reader module may differ. This does not describe an
+unmodified historical compiler or compare different code generators.
 
-The predicate benchmark uses every code point encountered in that real source
-corpus plus the end-of-input sentinel. Default tests separately compare both
-predicate pairs over all Unicode code points and explicit host boundaries.
-Timing alternates reference and optimized predicates, then baseline and
-optimized complete compilers, to reduce order bias.
+General JS emission already accelerates the readable predicates. The current
+reader also scans token bodies and whitespace/comments using local cursors,
+committing index/offset/line/column once per scan. LF resets the one-based column
+to 1; CR is whitespace outside comments and ordinary content inside comments.
+Non-BMP characters consume two UTF-16 units but one reader offset and column.
+Original scanner functions remain executable as independent references.
 
-The reviewed macOS arm64 report records 335,901 real-source decisions, a
-4.652380x predicate median speedup, 15 timing samples, 8 complete corpus rounds
-per compiler sample, and a 1.246257x complete-compiler median speedup against a
-predeclared threshold of 1.08x. The report is source-bound by SHA-256 and
-records raw samples, medians, checksums, host identity, corpus size, and the
-final decision. Default tests validate the report without using wall-clock
-timing as a normal test gate.
+Both compilers compile the same current thirteen-module corpus with Source
+Maps. Every generated module and Source Map must be byte-identical before
+timing. Predicates are checked over all source code points and the EOF sentinel;
+default tests additionally cover every Unicode code point, host boundaries,
+and exact scanner states for comments, CRLF, non-BMP and lone surrogates.
+
+Timing alternates reference/optimized predicates and complete compilers after
+warmup, retaining 15 samples and 8 complete corpus rounds per compiler sample.
+The original complete-compiler threshold remains 1.08x and validators reject
+weaker thresholds. Current measurements are retained in
+`benchmarks/compiler-reader-character-macos-arm64.json`; the complete-compiler
+speedup includes the scanner improvement, rather than being attributed solely
+to the predicates. Raw samples, medians, checksums, host identity, corpus size,
+source identity and the passing decision remain required. Default tests verify
+retained evidence without using wall-clock timing as a normal test gate.
+
+The current macOS arm64 reacceptance measures a 1.398772x predicate speedup
+and a 1.104608x complete-compiler speedup. The retained source
+digest and raw samples identify this controlled run.
 
 ## Core Boundary
 

@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
+import { definition } from "../tools/compiler/controlled-baseline.mjs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -67,6 +69,23 @@ test("reader character predicates match their Eliscript references", async () =>
       checked += 1;
     }
     expect(checked).toBe(0x110000 + hostBoundaries.length);
+    const inputs = ["", "abc", "😀token\nnext", "a😀λ;end", "\t \r\nfoo",
+      ";😀λ\rcomment\n\nbar", ";trailing 😀", "\f\n;comment\n  :key/value", "foo\uD800bar"];
+    for (const source of inputs) {
+      for (const initialIndex of [0, Math.min(1, source.length)]) {
+        const state = { source, filename: "boundary.eli", index: initialIndex,
+          offset: 11, line: 3, column: 7 };
+        const fast = { ...state };
+        const reference = { ...state };
+        expect(reader.skip_space_and_comments(fast)).toBe(
+          reader.reference_skip_space_and_comments(reference));
+        expect(fast).toEqual(reference);
+        const start = { index: fast.index };
+        expect(reader.read_token(fast, start)).toBe(
+          reader.reference_read_token(reference, start));
+        expect(fast).toEqual(reference);
+      }
+    }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -86,4 +105,24 @@ test("committed reader character report matches measured sources", async () => {
   expect(report.measurements.completeCompilerSpeedup).toBeGreaterThanOrEqual(
     report.decision.minimumCompleteCompilerSpeedup,
   );
+});
+
+test("reader reacceptance rejects weakened thresholds and altered controls", async () => {
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+  for (const entry of report.baseline.control.inputs) {
+    expect(entry.sha256).toBe(hash(await readFile(path.join(projectDirectory, entry.path))));
+  }
+  const weakened = structuredClone(report);
+  weakened.decision.minimumCompleteCompilerSpeedup = 1.01;
+  expect(() => validateCompilerReaderCharacterReport(weakened)).toThrow("speedup decision failed");
+  const altered = structuredClone(report);
+  altered.baseline.control.artifacts[0].control = "0".repeat(64);
+  expect(() => validateCompilerReaderCharacterReport(altered)).toThrow("controlled compiler baseline");
+  const missing = structuredClone(report);
+  missing.baseline.control.restored.pop();
+  expect(() => validateCompilerReaderCharacterReport(missing)).toThrow("controlled compiler baseline");
+  const form = '(defun sample () ; ) ignored\n (js* "(nested)") (list 1 (list 2)))';
+  expect(definition(`${form}\n(defun next () nil)`, "sample")).toBe(form);
+  expect(() => definition("(defun unfinished ()", "unfinished")).toThrow("unterminated");
 });

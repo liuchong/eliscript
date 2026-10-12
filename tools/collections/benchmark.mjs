@@ -528,9 +528,11 @@ export function validateLayoutSuiteReport(report) {
     const measured =
       `${analysis.promotionCandidate ?? "none"}/` +
       `${analysis.demotionCandidate ?? "none"}`;
-    throw new TypeError(
+    const error = new TypeError(
       `HAMT runtime thresholds ${declared} do not match measured candidates ${measured}`,
     );
+    error.report = report;
+    throw error;
   }
   return report;
 }

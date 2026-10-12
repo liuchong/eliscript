@@ -253,3 +253,17 @@ The 0041 cross-engine node-layout comparison, portable integer bit operations,
 Eliscript implementation, and dense-node threshold-selection steps are
 complete. Recorded timings remain machine-specific observations rather than a
 fixed compatibility budget.
+
+## Current-source Reacceptance
+
+JS codegen changes alter the generated protocol dependency's source identity,
+so the retained layout report was measured again rather than relabeled with a
+new digest. The initial default-size sample did not justify 32/24. Reacceptance
+uses 500,000 lookups and 100,000 mutations per timing sample to reduce noise;
+all nine occupancies, seven timing samples, three memory samples, and the
+Bun/Node/Chrome host set remain unchanged. The mixed-operation weights, minimum
+two winning hosts, precise memory-host count and 1.15 demotion advantages are
+also unchanged. All three hosts support promotion at 32; the existing rule
+still selects demotion at 24. The report retains the larger measured workload
+parameters and all raw samples; no runtime threshold or collection algorithm
+was changed for this reacceptance.

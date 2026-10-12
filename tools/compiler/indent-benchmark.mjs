@@ -202,7 +202,9 @@ export function validateCompilerIndentReport(report) {
         report.parameters?.timingSamples) {
     throw new TypeError("compiler indent timing samples are incomplete");
   }
-  if (report.decision?.passed !== true ||
+  if (!Number.isFinite(report.decision?.minimumSpeedup) ||
+      report.decision?.minimumSpeedup < 10 ||
+      report.decision?.passed !== true ||
       report.measurements.speedup < report.decision.minimumSpeedup) {
     throw new TypeError("compiler indent speedup decision did not pass");
   }

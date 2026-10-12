@@ -142,3 +142,15 @@ test("committed Source Map cursor report matches measured sources", async () => 
     report.decision.minimumCompleteCompilerSpeedup,
   );
 });
+
+test("Source Map reacceptance rejects weaker speed and provenance claims", async () => {
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  for (const field of ["minimumPipelineSpeedup", "minimumCompleteCompilerSpeedup"]) {
+    const weakened = structuredClone(report);
+    weakened.decision[field] = 1.01;
+    expect(() => validateCompilerSourceMapCursorReport(weakened)).toThrow("speedup decision failed");
+  }
+  const altered = structuredClone(report);
+  altered.baseline.control.artifacts[0].control = "0".repeat(64);
+  expect(() => validateCompilerSourceMapCursorReport(altered)).toThrow("controlled compiler baseline");
+});

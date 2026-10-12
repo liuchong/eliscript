@@ -11,6 +11,11 @@ export const COMPILER_SOURCE_MAP_CURSOR_VERSION = 1;
 export const COMPILER_SOURCE_MAP_CURSOR_BASELINE =
   "a6013833226af047622aceca42d687b6e33e3701";
 
+import { buildControlledBaseline, validateControlledBaseline } from "./controlled-baseline.mjs";
+
+const controlledTarget = "bootstrap/compiler/source-map.eli";
+const controlledNames = ["collect-generated-marks", "source-locations"];
+
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const projectDirectory = path.resolve(directory, "../..");
 const compilerSources = Object.freeze([
@@ -31,6 +36,7 @@ const compilerSources = Object.freeze([
 const digestFiles = Object.freeze([
   ...compilerSources,
   "tools/compiler/source-map-cursor-benchmark.mjs",
+  "tools/compiler/controlled-baseline.mjs",
 ]);
 
 function positiveInteger(value, name) {
@@ -153,6 +159,7 @@ export function validateCompilerSourceMapCursorReport(report) {
       report?.baseline?.revision !== COMPILER_SOURCE_MAP_CURSOR_BASELINE) {
     throw new TypeError("invalid compiler Source Map cursor report identity");
   }
+  validateControlledBaseline(report.baseline.control, controlledTarget, controlledNames, compilerSources);
   const samples = report.parameters?.timingSamples;
   for (const measurement of ["referencePipeline", "optimizedPipeline",
     "baselineCompiler", "optimizedCompiler"]) {
@@ -173,12 +180,16 @@ export function validateCompilerSourceMapCursorReport(report) {
         report.validation?.optimizedCompilerChecksum) {
     throw new TypeError("compiler Source Map cursor validation failed");
   }
-  if (report.decision?.passed !== true ||
+  if (!Number.isFinite(report.decision?.minimumCompleteCompilerSpeedup) ||
+      report.decision?.minimumCompleteCompilerSpeedup < 1.08 ||
+      !Number.isFinite(report.decision?.minimumPipelineSpeedup) ||
+      report.decision?.minimumPipelineSpeedup < 1.5 ||
+      report.decision?.passed !== true ||
       report.measurements.pipelineSpeedup <
         report.decision.minimumPipelineSpeedup ||
       report.measurements.completeCompilerSpeedup <
         report.decision.minimumCompleteCompilerSpeedup) {
-    throw new TypeError("compiler Source Map cursor speedup decision failed");
+    throw new TypeError(`compiler Source Map cursor speedup decision failed: pipeline ${report.measurements.pipelineSpeedup}, compiler ${report.measurements.completeCompilerSpeedup}`);
   }
   return report;
 }
@@ -229,6 +240,7 @@ export async function runCompilerSourceMapCursorBenchmark(options) {
       `baseline must be ${COMPILER_SOURCE_MAP_CURSOR_BASELINE}, got ${revision}`,
     );
   }
+  const control = await buildControlledBaseline({ root: projectDirectory, baselineRoot, revision, sources: compilerSources, target: controlledTarget, names: controlledNames });
   const corpus = await Promise.all(compilerSources.map(async (relative) => ({
     relative,
     source: await readFile(path.join(projectDirectory, relative), "utf8"),
@@ -239,7 +251,7 @@ export async function runCompilerSourceMapCursorBenchmark(options) {
   );
   const [baselineCompiler, optimizedCompiler, emitter, sourceMap] =
     await Promise.all([
-      loadGenerated(baselineRoot, "compiler", "baseline"),
+      import(pathToFileURL(path.join(control.directory, "compiler.mjs")).href),
       loadGenerated(projectDirectory, "compiler", "optimized"),
       loadGenerated(projectDirectory, "emitter", "emitter"),
       loadGenerated(projectDirectory, "source-map", "source-map"),
@@ -366,7 +378,7 @@ export async function runCompilerSourceMapCursorBenchmark(options) {
       architecture: process.arch,
       operatingSystem: `${os.type()} ${os.release()}`,
     },
-    baseline: { revision, root: path.basename(baselineRoot) },
+    baseline: { revision, root: path.basename(baselineRoot), control: control.evidence },
     corpus: {
       files: compilerSources,
       sourceBytes,

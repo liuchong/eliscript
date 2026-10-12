@@ -163,3 +163,9 @@ test("committed compiler indentation report matches measured sources", async () 
     report.decision.minimumSpeedup,
   );
 });
+
+test("indentation reacceptance rejects a weaker decision threshold", async () => {
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  report.decision.minimumSpeedup = 9;
+  expect(() => validateCompilerIndentReport(report)).toThrow("speedup decision did not pass");
+});
