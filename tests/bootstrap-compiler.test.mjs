@@ -117,6 +117,7 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
     .toThrow("multiple input files are not supported yet");
 
   const directory = await mkdtemp(resolve(tmpdir(), "eliscript-compiler-"));
+  let automaticRun;
   try {
     const generationOne = resolve(directory, "generation-one");
     const generationTwo = resolve(directory, "generation-two");
@@ -129,12 +130,24 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
       },
     });
 
+    const coreSource = resolve(projectDirectory, "tests/fixtures/core.eli");
+    const automaticCompiler = resolve(directory, "automatic-compiler");
+    // Automatic bootstrap writes to its own directory and is independent of
+    // the portable generations below; overlap its process startup work.
+    automaticRun = run([publicCliPath, coreSource], {
+      env: {
+        ...process.env,
+        EMACS: emacs,
+        ELISCRIPT_BOOTSTRAP_MODULE_DIR: automaticCompiler,
+        ELISCRIPT_JS_RUNTIME: "node",
+      },
+    });
+
     await buildWithPortableCompiler(generationOne, generationTwo);
     await buildWithPortableCompiler(generationTwo, generationThree);
     await expectArtifactDirectoriesEqual(generationOne, generationTwo);
     await expectArtifactDirectoriesEqual(generationTwo, generationThree);
 
-    const coreSource = resolve(projectDirectory, "tests/fixtures/core.eli");
     const seedOutput = await runSuccessful([seedCliPath, coreSource], {
       env: { ...process.env, EMACS: emacs },
     });
@@ -161,15 +174,12 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
     expect(publicBunOutput).toBe(seedOutput);
     expect(publicNodeOutput).toBe(seedOutput);
 
-    const automaticCompiler = resolve(directory, "automatic-compiler");
-    const automaticOutput = await runSuccessful([publicCliPath, coreSource], {
-      env: {
-        ...process.env,
-        EMACS: emacs,
-        ELISCRIPT_BOOTSTRAP_MODULE_DIR: automaticCompiler,
-        ELISCRIPT_JS_RUNTIME: "node",
-      },
-    });
+    const automaticResult = await automaticRun;
+    if (automaticResult.exitCode !== 0) {
+      throw new Error(automaticResult.stderr.trim() || automaticResult.stdout.trim() ||
+        `${publicCliPath} exited with ${automaticResult.exitCode}`);
+    }
+    const automaticOutput = automaticResult.stdout;
     expect(automaticOutput).toBe(seedOutput);
     expect(await Bun.file(resolve(automaticCompiler, "compiler.mjs")).exists())
       .toBeTrue();
@@ -219,7 +229,7 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
     expect(JSON.parse(publicNodeDiagnostic.stderr))
       .toEqual(JSON.parse(diagnosticFailure.stderr));
 
-    for (const [sourcePath, expectedFunctions] of [
+    const libraryCases = [
       ["stdlib/sequence.eli", [
         "function map(function$, values)",
         "function range_by(start, end, step)",
@@ -411,24 +421,30 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
         "import {count_by} from \"../../stdlib/data.eli\";",
         "function score_document(id, terms, query_terms)",
       ]],
-    ]) {
-      const source = resolve(projectDirectory, sourcePath);
-      const seedLibraryOutput = await runSuccessful([seedCliPath, source], {
-        env: { ...process.env, EMACS: emacs },
-      });
-      const selfHostedLibraryOutput = await runSuccessful(
-        [portableCliPath, source],
-        {
-          env: {
-            ...process.env,
-            ELISCRIPT_BOOTSTRAP_MODULE_DIR: generationTwo,
+    ];
+    // Independent CLI invocations read the same completed compiler generation.
+    // Bound concurrency to two libraries while retaining every parity assertion.
+    for (let index = 0; index < libraryCases.length; index += 2) {
+      await Promise.all(libraryCases.slice(index, index + 2).map(async (libraryCase) => {
+        const [sourcePath, expectedFunctions] = libraryCase;
+        const source = resolve(projectDirectory, sourcePath);
+        const seedLibraryOutput = await runSuccessful([seedCliPath, source], {
+          env: { ...process.env, EMACS: emacs },
+        });
+        const selfHostedLibraryOutput = await runSuccessful(
+          [portableCliPath, source],
+          {
+            env: {
+              ...process.env,
+              ELISCRIPT_BOOTSTRAP_MODULE_DIR: generationTwo,
+            },
           },
-        },
-      );
-      expect(selfHostedLibraryOutput).toBe(seedLibraryOutput);
-      for (const expectedFunction of expectedFunctions) {
-        expect(seedLibraryOutput).toContain(expectedFunction);
-      }
+        );
+        expect(selfHostedLibraryOutput).toBe(seedLibraryOutput);
+        for (const expectedFunction of expectedFunctions) {
+          expect(seedLibraryOutput).toContain(expectedFunction);
+        }
+      }));
     }
 
     const portableSource = resolve(directory, "portable.eli");
@@ -581,6 +597,7 @@ test("portable compiler driver reaches a reproducible fixed point", async () => 
     expect(seedFailure.stderr).toContain(diagnostic);
     expect(portableFailure.stderr).toContain(diagnostic);
   } finally {
+    if (automaticRun) await automaticRun;
     await rm(directory, { recursive: true, force: true });
   }
 }, 30_000);
