@@ -11,6 +11,7 @@ import {
 import { dirname, join, posix, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
+const NODE = process.env.NODE ?? "node";
 const COMPILER = resolve(ROOT, "bin/eliscript");
 const BUILD = resolve(ROOT, "bin/eliscript-build");
 const PROJECT = resolve(ROOT, "examples/dogfood");
@@ -29,6 +30,9 @@ async function run(command, options = {}) {
     stdout: "pipe",
     stderr: "pipe",
     ...options,
+    // Each consumer is its own checkout. A CI runner's inherited workspace
+    // names this repository, so model the consumer Action workspace explicitly.
+    env: { ...process.env, ...options.env, GITHUB_WORKSPACE: options.cwd ?? ROOT },
   });
   const [exitCode, stdout, stderr] = await Promise.all([
     child.exited,
@@ -116,7 +120,7 @@ beforeAll(async () => {
   if (browser.exitCode !== 0) {
     throw new Error(browser.stderr.trim() || browser.stdout.trim());
   }
-  const packaged = await run(["node", tool, "--root", ROOT]);
+  const packaged = await run([NODE, tool, "--root", ROOT]);
   if (packaged.exitCode !== 0) {
     throw new Error(packaged.stderr.trim() || packaged.stdout.trim());
   }
@@ -125,6 +129,16 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (staging) await rm(staging, { recursive: true, force: true });
+});
+
+test("the Action tests use a supported Node host", async () => {
+  const result = await run([NODE, "-e",
+    "process.stdout.write(JSON.stringify({ bun: typeof Bun, major: Number(process.versions.node.split('.')[0]) }))",
+  ]);
+  expect(result.exitCode).toBe(0);
+  const host = JSON.parse(result.stdout);
+  expect(host.bun).toBe("undefined");
+  expect(host.major).toBeGreaterThanOrEqual(24);
 });
 
 test("the packaging tool emits one CommonJS Node entry", async () => {
@@ -198,7 +212,7 @@ test("the committed package reproduces from source", async () => {
 });
 
 test("the metadata satisfies the marketplace limits", async () => {
-  const { stdout } = await run([process.execPath, "-e", `
+  const { stdout } = await run([NODE, "-e", `
     const fs = require("node:fs");
     const text = fs.readFileSync(${JSON.stringify(resolve(PROJECT, "action.yml"))}, "utf8");
     const block = (key) => {
@@ -256,7 +270,7 @@ test("the bundle carries no credential shape or host path", async () => {
 
 test("rebuilding the bundle is byte-identical", async () => {
   const before = await readFile(ENTRY);
-  const rebuilt = await run(["node", tool, "--root", ROOT]);
+  const rebuilt = await run([NODE, tool, "--root", ROOT]);
   expect(rebuilt.exitCode).toBe(0);
   const after = await readFile(ENTRY);
   expect(after.equals(before)).toBe(true);
@@ -265,7 +279,7 @@ test("rebuilding the bundle is byte-identical", async () => {
 test("the packaged Action builds a consumer project on Node", async () => {
   const directory = await consumer(demoFiles());
   const outputFile = join(directory, "github-output.txt");
-  const result = await run([process.execPath, ENTRY], {
+  const result = await run([NODE, ENTRY], {
     cwd: directory,
     env: { ...process.env, GITHUB_OUTPUT: outputFile },
   });
@@ -305,7 +319,7 @@ test("the packaged Action builds a consumer project on Node", async () => {
 
 test("every relative link in the packaged output resolves", async () => {
   const directory = await consumer(demoFiles());
-  const result = await run([process.execPath, ENTRY], { cwd: directory });
+  const result = await run([NODE, ENTRY], { cwd: directory });
   expect(result.exitCode).toBe(0);
   const root = join(directory, "_site");
   const files = new Set(await tree(root));
@@ -338,7 +352,7 @@ test("configuration that is not closed data is rejected", async () => {
   (export config))
 `,
   }));
-  const result = await run([process.execPath, ENTRY], { cwd: directory });
+  const result = await run([NODE, ENTRY], { cwd: directory });
   expect(result.exitCode).toBe(1);
   expect(result.stdout).toContain("DOGFOOD-CONFIG-005");
 });
@@ -348,7 +362,7 @@ test("an unknown configuration key is rejected", async () => {
     "dogfood.config.eli": CONFIG.replace(":schema-version 1",
       ":schema-version 1\n     :unexpected t"),
   }));
-  const result = await run([process.execPath, ENTRY], { cwd: directory });
+  const result = await run([NODE, ENTRY], { cwd: directory });
   expect(result.exitCode).toBe(1);
   expect(result.stdout).toContain("DOGFOOD-CONFIG-006");
 });
@@ -357,7 +371,7 @@ test("a missing config file is reported, not crashed", async () => {
   const directory = await consumer({
     "content/posts/0001-alpha.md": post("notes/alpha", "alpha", "Alpha"),
   });
-  const result = await run([process.execPath, ENTRY], { cwd: directory });
+  const result = await run([NODE, ENTRY], { cwd: directory });
   expect(result.exitCode).toBe(1);
   expect(result.stdout).toContain("dogfood:");
 });
