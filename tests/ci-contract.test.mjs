@@ -84,6 +84,20 @@ describe("compatibility matrix contract", () => {
     expectMatrixFailure(matrix, /timeoutsMs must cover every command/);
   });
 
+  test("CI installs and verifies the contracted Node host before testing", () => {
+    const workflow = renderWorkflow(baseline);
+    expect(workflow).toContain(`node_version=${baseline.localEvidence.nodeHost.version}`);
+    expect(workflow).toContain("https://nodejs.org/dist/v$node_version/$node_archive");
+    expect(workflow).toContain("shasum -a 256 -c node.sha256");
+    expect(workflow).toContain(`test "$(node --version)" = "v${baseline.localEvidence.nodeHost.version}"`);
+    expect(workflow.indexOf("name: Install Node")).toBeLessThan(
+      workflow.indexOf("name: Run complete test suite"),
+    );
+    const unsupported = copyBaseline();
+    unsupported.localEvidence.nodeHost.version = "22.23.2";
+    expectMatrixFailure(unsupported, /exact Node version >=24/);
+  });
+
   test("checker rejects manual workflow drift", async () => {
     const workflow = renderWorkflow(baseline).replace(
       "timeout-minutes: 30",

@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import { access, readFile, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -15,6 +15,18 @@ const COMMANDS = [
   "eliscript-eval",
   "eliscript-watch",
 ];
+
+// Exercise the same build as npm packaging before checking published paths.
+// A clean CI checkout must not depend on browser assets from earlier suites.
+beforeAll(async () => {
+  const child = Bun.spawn(["bun", "run", "prepack"], {
+    cwd: ROOT, stdout: "pipe", stderr: "pipe",
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+  ]);
+  if (exitCode !== 0) throw new Error(stderr.trim() || stdout.trim());
+}, 30_000);
 
 test("the package declares one executable entry for every command", async () => {
   expect(Object.keys(manifest.bin)).toEqual(COMMANDS);

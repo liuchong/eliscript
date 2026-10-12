@@ -88,16 +88,19 @@ test("persistent zippers navigate edit and rebuild stack-safe trees", async () =
         outputRoot,
         "tests/fixtures/persistent-zipper.mjs",
       );
-      reports.push(JSON.parse(await runSuccessful([
-        "bun", "--preload", bunPreload, hostFixture, modulePath,
-      ])));
-      reports.push(JSON.parse(await runSuccessful([
-        process.env.NODE ?? "node",
-        "--experimental-loader",
-        nodeLoader,
-        hostFixture,
-        modulePath,
-      ])));
+      // The hosts read immutable outputs and report independently. Running
+      // this pair together keeps all four depth-12000 checks inside the same
+      // existing deadline without repeating host startup serially.
+      const hostReports = await Promise.all([
+        runSuccessful([
+          "bun", "--preload", bunPreload, hostFixture, modulePath,
+        ]),
+        runSuccessful([
+          process.env.NODE ?? "node",
+          "--experimental-loader", nodeLoader, hostFixture, modulePath,
+        ]),
+      ]);
+      reports.push(...hostReports.map((report) => JSON.parse(report)));
     }
     for (const report of reports) expect(report).toEqual(reports[0]);
 

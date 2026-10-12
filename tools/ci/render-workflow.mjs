@@ -151,8 +151,9 @@ export function validateCompatibilityMatrix(matrix) {
     }
     if (!isPlainObject(localEvidence.nodeHost) ||
         localEvidence.nodeHost.name !== "node" ||
-        !/^\d+\.\d+\.\d+$/.test(localEvidence.nodeHost.version ?? "")) {
-      errors.push("localEvidence nodeHost must declare an exact Node version");
+        !/^\d+\.\d+\.\d+$/.test(localEvidence.nodeHost.version ?? "") ||
+        Number(localEvidence.nodeHost.version.split(".")[0]) < 24) {
+      errors.push("localEvidence nodeHost must declare an exact Node version >=24");
     }
   }
 
@@ -255,11 +256,32 @@ export function renderWorkflow(matrix) {
 `        uses: ${setupBun.repository}@${setupBun.revision} # ${setupBun.label}\n` +
 `        with:\n` +
 `          bun-version: ${validated.javascriptHost.version}\n` +
+`      - name: Install Node\n` +
+`        run: |\n` +
+`          case "$(uname -s)" in\n` +
+`            Linux) node_platform=linux ;;\n` +
+`            Darwin) node_platform=darwin ;;\n` +
+`            *) exit 1 ;;\n` +
+`          esac\n` +
+`          node_version=${validated.localEvidence.nodeHost.version}\n` +
+`          node_archive="node-v$node_version-$node_platform-\${{ matrix.architecture }}.tar.gz"\n` +
+`          node_directory="$RUNNER_TEMP/eliscript-node"\n` +
+`          mkdir -p "$node_directory"\n` +
+`          cd "$node_directory"\n` +
+`          curl --fail --silent --show-error --location "https://nodejs.org/dist/v$node_version/$node_archive" --output "$node_archive"\n` +
+`          curl --fail --silent --show-error --location "https://nodejs.org/dist/v$node_version/SHASUMS256.txt" --output SHASUMS256.txt\n` +
+`          awk -v file="$node_archive" '$2 == file { print }' SHASUMS256.txt > node.sha256\n` +
+`          test -s node.sha256\n` +
+`          shasum -a 256 -c node.sha256\n` +
+`          tar -xzf "$node_archive"\n` +
+`          echo "$node_directory/node-v$node_version-$node_platform-\${{ matrix.architecture }}/bin" >> "$GITHUB_PATH"\n` +
 `      - name: Record toolchain\n` +
 `        run: |\n` +
 `          uname -a\n` +
 `          emacs --version\n` +
 `          bun --version\n` +
+`          node --version\n` +
+`          test "$(node --version)" = "v${validated.localEvidence.nodeHost.version}"\n` +
 `${commandSteps}\n`;
 }
 
