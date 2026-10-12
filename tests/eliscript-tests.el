@@ -399,7 +399,7 @@
           "(defun add-one (value) (let ((step 1)) (+ value step)))")))
     (should (string-match-p "function add_one(value)" output))
     (should (string-match-p
-             (regexp-quote "((step) => {\n    return (value + step);\n  })(1)")
+             (regexp-quote "let step = __eliscript_value_1;\n      return (value + step);")
              output))))
 
 (ert-deftest eliscript-supports-optional-and-rest-parameters ()
@@ -1323,7 +1323,7 @@
 (defun two () (begin 1 2))")))
     (should (string-match-p "function two()" output))
     (should (string-match-p
-             (regexp-quote "    1;\n    return 2;")
+             (regexp-quote "  1;\n  return 2;")
              output))))
 
 (ert-deftest eliscript-expander-can-generate-top-level-declarations ()
@@ -1562,7 +1562,7 @@
     (should (string-match-p
              (regexp-quote "return (2 * (1 + value));") output))
     (should (string-match-p
-             (regexp-quote "return ((item) => {") output))
+             (regexp-quote "let item = __eliscript_value_1;") output))
     (should (string-match-p "thread\\$G[0-9]+" output))
     (should (string-match-p
              (regexp-quote "__eliscript_truthy(item) ? item") output))
@@ -1745,9 +1745,9 @@
          (second (eliscript-compile-string source "generated.eli")))
     (should (equal first second))
     (should (string-match-p
-             (regexp-quote "((value$G2) =>") first))
+             (regexp-quote "let value$G2 =") first))
     (should-not (string-match-p
-                 (regexp-quote "((value$G1) =>") first))))
+                 (regexp-quote "let value$G1 =") first))))
 
 (ert-deftest eliscript-expander-rejects-runaway-expansion ()
   (should-error

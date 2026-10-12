@@ -27,7 +27,7 @@ function key_in_QMARK_(key, key_list) {
   }, false);
 }
 function dissoc(object, key) {
-  return (__eliscript_truthy((!__eliscript_truthy(has_QMARK_(object, key)))) ? object : Transducer.into(object, Transducer.filtering((entry) => {
+  return ((!__eliscript_truthy(has_QMARK_(object, key))) ? object : Transducer.into(object, Transducer.filtering((entry) => {
     return (!__eliscript_truthy(equalValues(key, entry_key(entry))));
   }), object));
 }

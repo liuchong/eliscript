@@ -14,7 +14,7 @@ const root = resolve(here, "../../..");
 const options = new Map();
 for (let index = 2; index < process.argv.length; index += 2) {
   const key = process.argv[index];
-  if (!["--out", "--compiler-dir"].includes(key) || !process.argv[index + 1]) throw new Error("usage: node run.mjs [--out DIR] [--compiler-dir DIR]");
+  if (!["--out", "--compiler-dir", "--baseline-js", "--baseline-report"].includes(key) || !process.argv[index + 1]) throw new Error("usage: node run.mjs [--out DIR] [--compiler-dir DIR] [--baseline-js FILE --baseline-report FILE]");
   options.set(key, process.argv[index + 1]);
 }
 const out = resolve(options.get("--out") ?? resolve(root, "dist/native-wasm-probe"));
@@ -98,11 +98,13 @@ const wasmInstance = new WebAssembly.Instance(wasmModule);
 const js = await import(pathToFileURL(resolve(out, "kernels.mjs")).href);
 const referenceJsPath = resolve(here, "reference-js.mjs");
 const referenceJs = await import(pathToFileURL(referenceJsPath).href);
+const inputCases = {};
 let parityChecks = 0;
 for (const fn of functions) {
   const inputs = fn.name === "recurrence"
     ? [[0, 0.123], [1, 0.123], [17, 0.71], [1000, 0.31], [1_000_000, 0.123], [0, -0], [1, NaN], [1, Infinity]]
     : [[0, 64], [1, 1], [8, 10], [32, 64], [160, 64]];
+  inputCases[fn.name] = inputs;
   for (const args of inputs) {
     const expected = js[fn.name.replaceAll("-", "_")](...args);
     assert(Object.is(referenceJs[fn.name.replaceAll("-", "_")](...args), expected), `reference JS parity: ${fn.name} ${args}`);
@@ -114,17 +116,37 @@ for (const fn of functions) {
   }
 }
 
+let baseline;
+const baselineJs = options.has("--baseline-js") ? resolve(options.get("--baseline-js")) : undefined;
+if (options.has("--baseline-js") !== options.has("--baseline-report")) throw new Error("baseline JS and report must be supplied together");
+if (baselineJs) {
+  const baselineReportPath = resolve(options.get("--baseline-report"));
+  const bytes = await readFile(baselineJs);
+  const retained = JSON.parse(await readFile(baselineReportPath, "utf8"));
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  assert.equal(hash, retained.artifactHashes["kernels.mjs"], "baseline artifact must match retained report");
+  assert.equal(createHash("sha256").update(source).digest("hex"), retained.sourceHashes[filename], "baseline uses the same kernel source");
+  const old = await import(pathToFileURL(baselineJs).href);
+  let checks = 0;
+  for (const fn of functions) {
+    for (const args of inputCases[fn.name]) {
+      assert(Object.is(old[fn.name.replaceAll("-", "_")](...args), js[fn.name.replaceAll("-", "_")](...args)), "baseline scalar parity");
+      checks++;
+    }
+  }
+  baseline = { gitBase: retained.gitBase, artifactSha256: hash, reportSha256: createHash("sha256").update(await readFile(baselineReportPath)).digest("hex"), compilerSourceHashes: Object.fromEntries(Object.entries(retained.sourceHashes).filter(([key]) => key.startsWith("generated-compiler/"))), scalarParityChecks: checks };
+}
 const engines = [process.env.NODE ?? "node", process.env.BUN ?? "bun"];
 const worker = resolve(here, "measure-js.mjs");
 const measurements = [];
 // Rotate variants between fresh processes rather than measuring only one order.
-const variants = engines.flatMap((engine) => ["js", "reference-js", "wasm"].map((mode) => ({ engine, mode })));
+const variants = engines.flatMap((engine) => ["js", ...(baselineJs ? ["baseline-js"] : []), "reference-js", "wasm"].map((mode) => ({ engine, mode })));
 variants.push({ engine: native, mode: "native" });
 const sessions = new Map(variants.map((variant) => [`${variant.engine}:${variant.mode}`, []]));
 for (let round = 0; round < 3; round++) {
   const order = [...variants.slice(round), ...variants.slice(0, round)];
   for (const variant of order) {
-    const args = variant.mode === "native" ? [] : [worker, variant.mode, variant.mode === "js" ? resolve(out, "kernels.mjs") : variant.mode === "reference-js" ? referenceJsPath : wasm, resolve(out, "functions.json")];
+    const args = variant.mode === "native" ? [] : [worker, variant.mode, variant.mode === "js" ? resolve(out, "kernels.mjs") : variant.mode === "baseline-js" ? baselineJs : variant.mode === "reference-js" ? referenceJsPath : wasm, resolve(out, "functions.json")];
     sessions.get(`${variant.engine}:${variant.mode}`).push(JSON.parse(run(variant.engine, args)));
   }
 }
@@ -149,7 +171,7 @@ for (const variant of variants) {
       const evalCode = variant.mode !== "wasm"
         ? "const m=await import(process.argv[1]); console.log(m.recurrence(1,0.123));"
         : "const fs=await import('node:fs'); const m=new WebAssembly.Instance(new WebAssembly.Module(fs.readFileSync(process.argv[1]))); console.log(m.exports.eli_0(1,0.123));";
-      const input = variant.mode === "js" ? pathToFileURL(resolve(out, "kernels.mjs")).href : variant.mode === "reference-js" ? pathToFileURL(referenceJsPath).href : wasm;
+      const input = variant.mode === "js" ? pathToFileURL(resolve(out, "kernels.mjs")).href : variant.mode === "baseline-js" ? pathToFileURL(baselineJs).href : variant.mode === "reference-js" ? pathToFileURL(referenceJsPath).href : wasm;
       assert.equal(Number(run(variant.engine, ["--input-type=module", "-e", evalCode, input])), js.recurrence(1, 0.123));
     }
     firstResult.push(performance.now() - begin);
@@ -172,6 +194,7 @@ const report = {
   scope: "Experimental f64-only IR backend; not full Eliscript native/WASM support or a browser benchmark",
   methodology: { warmups, samplesPerSession: samples, sessions: 3, noFastMath: true, fpContract: "off", freshProcess: "OS caches warm, parent spawn + load + one result; not cold boot", nativeBoundary: "in-process C call, not JS FFI", wasmBoundary: "scalar JS/WASM calls; no array serialization" },
   validation: { seedSelfHostedJsEqual: true, scalarParityChecks: parityChecks, referenceJsChecks: parityChecks / 2, measuredChecksumsEqual: true, wasmImports: [] },
+  ...(baseline ? { baseline } : {}),
   compilation: { frontendAndCEmissionMs, ...buildTimes },
   artifactBytes: Object.fromEntries(await Promise.all(artifactNames.map(async (file) => [file, (await stat(resolve(out, file))).size]))),
   measurements,

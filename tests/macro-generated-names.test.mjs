@@ -125,7 +125,7 @@ test("macro-generated names are deterministic and capture-safe", async () => {
     expect(await readFile(mapPath, "utf8")).toBe(seedSourceMap);
 
     expect(seedJavaScript).toContain("((value$G2) =>");
-    expect(seedJavaScript).toContain("((result$G3) =>");
+    expect(seedJavaScript).toContain("let result$G3 = __eliscript_value_1;");
     expect(seedJavaScript).toContain(
       '__eliscript_symbol("slot$G4"), __eliscript_symbol("slot$G5")',
     );

@@ -36,7 +36,7 @@
 
 ```sh
 node tools/experiments/native-wasm/run.mjs
-bun test tools/experiments/native-wasm/backend.test.mjs
+bun test tests/native-wasm-backend.test.mjs
 ```
 
 默认产物位于被忽略的 `dist/native-wasm-probe/`，包含 IR、C、JS、WASM、本机
@@ -58,3 +58,23 @@ bun test tools/experiments/native-wasm/backend.test.mjs
 - 原生微小调用在 C 进程内部；WASM 微小调用经过 JS 边界，不能把两者差值
   当成 native FFI 的收益。未测数组传输、序列化、峰值内存、浏览器、Linux/x64
   或真实集合/文本/业务负载。本地采样不是 CI 性能预算。
+
+## JS 优化前后对照
+
+保留的优化前报告仍描述原始实验。复测报告位于
+[results/js-codegen-probe-macos-arm64.json](results/js-codegen-probe-macos-arm64.json)。
+`run.mjs` 可加入 `--baseline-js FILE --baseline-report FILE`，将旧 JS 和新 JS
+放入同一轮测量；要求旧 JS 哈希与报告一致、内核源码相同，并逐项验证旧/新结果。
+报告记录旧产物/报告哈希和旧编译器模块哈希，不能随意用另一份 JS 当作基线。
+
+需要重建旧 JS 时，可将 `feacc9e` 的 Git archive 解到临时目录，在该目录运行
+原来的 `tools/experiments/native-wasm/run.mjs --out DIR`，然后把生成的
+`kernels.mjs` 和 `report.json` 作为基线参数传给当前脚本；无需切换当前工作区。
+重建基线需要上述工具链。复测报告保存当前实际生成的编译器模块哈希，因此
+工作区存在尚未提交的优化时也能追溯执行产物。
+
+未来 native/WASM 的验收门槛与唯一后续清单位于
+[评估文档的计划部分](../../../docs/native-wasm-feasibility.md#后续计划与决策门槛)。
+
+探索报告保存于本目录的 `results/`，与要求持续绑定当前源码和发布预算的核心
+`benchmarks/` 分开；优化前报告原样保留，其哈希仍是前后对照的校验依据。

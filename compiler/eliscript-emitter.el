@@ -127,29 +127,89 @@
      (t (eliscript-emitter--fail
          "invalid binding pattern: %S" (eliscript-form-strip form))))))
 
+(defun eliscript-emitter--boolean-p (form)
+  "Whether FORM is proven to return a JavaScript boolean."
+  (or (memq form '(t false))
+      (and (consp form)
+           (or (memq (car form)
+                     '(not = /= not= < <= > >= eq equal nil? undefined? null nullish?))
+               (and (memq (car form) '(and or)) (cdr form)
+                    (cl-every #'eliscript-emitter--boolean-p (cdr form)))))))
+
+(defun eliscript-emitter--emit-test (form)
+  "Emit FORM as a condition preserving Lisp truth semantics."
+  (let ((output (eliscript-emitter-emit-expression form)))
+    (if (eliscript-emitter--boolean-p form) output
+      (format "__eliscript_truthy(%s)" output))))
+
+(defun eliscript-emitter--emit-context-let (bindings body sequential returning)
+  "Emit parsed simple BINDINGS and BODY without a closure.
+Keep initializer and binding scopes separate, including sequential shadowing."
+  (if (null bindings)
+      (if returning (eliscript-emitter--emit-returning-body body)
+        (eliscript-emitter--emit-statement-body body))
+    (let* ((group (if sequential (list (car bindings)) bindings))
+           (temporaries (mapcar (lambda (_) (eliscript-emitter--fresh-name)) group))
+           initializers declarations)
+      (cl-mapc
+       (lambda (binding temporary)
+         (push (format "const %s = %s;" temporary
+                       (eliscript-emitter-emit-expression (cadr binding)))
+               initializers)) group temporaries)
+      (cl-mapc
+       (lambda (binding temporary)
+         (push (format "let %s = %s;"
+                       (eliscript-emitter--emit-binding-target (car binding)) temporary)
+               declarations)) group temporaries)
+      (push (eliscript-emitter--emit-context-let
+             (and sequential (cdr bindings)) body sequential returning) declarations)
+      (concat "{\n"
+              (eliscript-emitter--indent
+               (string-join
+                (append (nreverse initializers)
+                        (list (concat "{\n"
+                                      (eliscript-emitter--indent
+                                       (string-join (nreverse declarations) "\n"))
+                                      "\n}"))) "\n"))
+              "\n}"))))
+
+(defun eliscript-emitter--emit-context (form returning)
+  "Emit FORM as a statement or a RETURNING body value."
+  (let ((operator (and (consp form) (car form)))
+        (arguments (and (consp form) (cdr form))))
+    (cond
+     ((eliscript-emitter--contains-await-p form)
+      (concat (if returning "return " "") (eliscript-emitter-emit-expression form) ";"))
+     ((memq operator '(progn do))
+      (if returning (eliscript-emitter--emit-returning-body arguments)
+        (eliscript-emitter--emit-statement-body arguments)))
+     ((eq operator 'while)
+      (eliscript-emitter--require-arity "while" arguments 1)
+      (concat "while (" (eliscript-emitter--emit-test (car arguments)) ") {\n"
+              (eliscript-emitter--indent
+               (eliscript-emitter--emit-statement-body (cdr arguments)))
+              "\n}" (if returning "\nreturn null;" "")))
+     ((and (memq operator '(let let*))
+           (let ((parsed (mapcar #'eliscript-emitter--parse-binding (car arguments))))
+             (cl-every (lambda (binding) (symbolp (car binding))) parsed)))
+      (eliscript-emitter--emit-context-let
+       (mapcar #'eliscript-emitter--parse-binding (car arguments))
+       (cdr arguments) (eq operator 'let*) returning))
+     (t (concat (if returning "return " "")
+                (eliscript-emitter-emit-expression form) ";")))))
+
 (defun eliscript-emitter--emit-returning-body (forms)
   "Emit FORMS as a block body that returns its final value."
-  (if (null forms)
-      "return null;"
-    (let ((initial (butlast forms))
-          (final (car (last forms))))
-      (mapconcat #'identity
-                 (append
-                  (mapcar (lambda (form)
-                            (concat (eliscript-emitter-emit-expression form) ";"))
-                          initial)
-                  (list (concat "return "
-                                (eliscript-emitter-emit-expression final)
-                                ";")))
-                 "\n"))))
+  (if (null forms) "return null;"
+    (string-join
+     (append (mapcar (lambda (form) (eliscript-emitter--emit-context form nil))
+                     (butlast forms))
+             (list (eliscript-emitter--emit-context (car (last forms)) t)))
+     "\n")))
 
 (defun eliscript-emitter--emit-statement-body (forms)
   "Emit FORMS as statements whose values are discarded."
-  (mapconcat
-   (lambda (form)
-     (concat (eliscript-emitter-emit-expression form) ";"))
-   forms
-   "\n"))
+  (mapconcat (lambda (form) (eliscript-emitter--emit-context form nil)) forms "\n"))
 
 (defun eliscript-emitter--contains-await-p (form)
   "Return non-nil when FORM contains `await' in the current function."
@@ -492,8 +552,8 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
 (defun eliscript-emitter--emit-if (arguments)
   "Emit an if expression from ARGUMENTS."
   (eliscript-emitter--require-arity "if" arguments 2 3)
-  (format "(__eliscript_truthy(%s) ? %s : %s)"
-          (eliscript-emitter-emit-expression (nth 0 arguments))
+  (format "(%s ? %s : %s)"
+          (eliscript-emitter--emit-test (nth 0 arguments))
           (eliscript-emitter-emit-expression (nth 1 arguments))
           (eliscript-emitter-emit-expression (nth 2 arguments))))
 
@@ -508,8 +568,8 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
             (body (cdr clause)))
         (if (eq test t)
             (eliscript-emitter--emit-do body)
-          (format "(__eliscript_truthy(%s) ? %s : %s)"
-                  (eliscript-emitter-emit-expression test)
+          (format "(%s ? %s : %s)"
+                  (eliscript-emitter--emit-test test)
                   (eliscript-emitter--emit-do body)
                   (eliscript-emitter--emit-cond (cdr clauses))))))))
 
@@ -599,12 +659,10 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
      ""
      (eliscript-emitter--indent
       (concat
-       (format "while (__eliscript_truthy(%s)) {\n"
-               (eliscript-emitter-emit-expression test))
+       (format "while (%s) {\n"
+               (eliscript-emitter--emit-test test))
        (eliscript-emitter--indent
-        (mapconcat (lambda (form)
-                     (concat (eliscript-emitter-emit-expression form) ";"))
-                   body "\n"))
+        (eliscript-emitter--emit-statement-body body))
        "\n}\nreturn null;"))
      ""
      (eliscript-emitter--contains-await-p arguments))))
@@ -629,6 +687,11 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
    ((null arguments) (if (eq kind 'and) "true" "null"))
    ((null (cdr arguments))
     (eliscript-emitter-emit-expression (car arguments)))
+   ((and (cl-every #'eliscript-emitter--boolean-p arguments)
+         (not (eliscript-emitter--contains-await-p arguments)))
+    (format "(%s)"
+            (mapconcat #'eliscript-emitter-emit-expression arguments
+                       (if (eq kind 'and) " && " " || "))))
    (t
     (let ((temporary (eliscript-emitter--fresh-name))
           (first (eliscript-emitter-emit-expression (car arguments)))
@@ -837,8 +900,8 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
       ('or (eliscript-emitter--emit-short-circuit arguments 'or))
       ('not
        (eliscript-emitter--require-arity "not" arguments 1 1)
-       (format "(!__eliscript_truthy(%s))"
-               (eliscript-emitter-emit-expression (car arguments))))
+       (format "(!%s)"
+               (eliscript-emitter--emit-test (car arguments))))
       ('quote
        (eliscript-emitter--require-arity "quote" arguments 1 1)
        (eliscript-emitter--emit-quoted (car arguments)))

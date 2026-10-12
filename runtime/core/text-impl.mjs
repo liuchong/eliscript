@@ -6,27 +6,35 @@ function empty_QMARK_(text) {
   return (Collection.count(text) === 0);
 }
 function slice(start, end, text) {
-  return ((result, index, limit) => {
-    (() => {
-      while (__eliscript_truthy((index < limit))) {
+  {
+    const __eliscript_value_1 = "";
+    const __eliscript_value_2 = ((start < 0) ? 0 : start);
+    const __eliscript_value_3 = ((end > Collection.count(text)) ? Collection.count(text) : end);
+    {
+      let result = __eliscript_value_1;
+      let index = __eliscript_value_2;
+      let limit = __eliscript_value_3;
+      while ((index < limit)) {
         ((result = (String(result) + String(Collection.nth(text, index)))), (index = (index + 1)));
       }
-      return null;
-    })();
-    return result;
-  })("", (__eliscript_truthy((start < 0)) ? 0 : start), (__eliscript_truthy((end > Collection.count(text))) ? Collection.count(text) : end));
+      return result;
+    }
+  }
 }
 function starts_at_QMARK_(prefix, offset, text) {
-  return ((matched, index) => {
-    (() => {
-      while (__eliscript_truthy(((__eliscript_value_2) => (__eliscript_truthy(__eliscript_value_2) ? (index < Collection.count(prefix)) : __eliscript_value_2))(matched))) {
-        (__eliscript_truthy((!__eliscript_truthy((Collection.nth(prefix, index) === Collection.nth(text, (offset + index)))))) ? ((matched = false)) : null);
+  {
+    const __eliscript_value_4 = ((offset >= 0) && ((offset + Collection.count(prefix)) <= Collection.count(text)));
+    const __eliscript_value_5 = 0;
+    {
+      let matched = __eliscript_value_4;
+      let index = __eliscript_value_5;
+      while (__eliscript_truthy(((__eliscript_value_6) => (__eliscript_truthy(__eliscript_value_6) ? (index < Collection.count(prefix)) : __eliscript_value_6))(matched))) {
+        ((!(Collection.nth(prefix, index) === Collection.nth(text, (offset + index)))) ? ((matched = false)) : null);
         ((index = (index + 1)));
       }
-      return null;
-    })();
-    return matched;
-  })(((__eliscript_value_1) => (__eliscript_truthy(__eliscript_value_1) ? ((offset + Collection.count(prefix)) <= Collection.count(text)) : __eliscript_value_1))((offset >= 0)), 0);
+      return matched;
+    }
+  }
 }
 function starts_with_QMARK_(prefix, text) {
   return starts_at_QMARK_(prefix, 0, text);
@@ -35,16 +43,21 @@ function ends_with_QMARK_(suffix, text) {
   return starts_at_QMARK_(suffix, (Collection.count(text) - Collection.count(suffix)), text);
 }
 function contains_QMARK_(needle, text) {
-  return ((found, offset, last_offset) => {
-    (() => {
-      while (__eliscript_truthy(((__eliscript_value_3) => (__eliscript_truthy(__eliscript_value_3) ? (offset <= last_offset) : __eliscript_value_3))((!__eliscript_truthy(found))))) {
+  {
+    const __eliscript_value_7 = false;
+    const __eliscript_value_8 = 0;
+    const __eliscript_value_9 = (Collection.count(text) - Collection.count(needle));
+    {
+      let found = __eliscript_value_7;
+      let offset = __eliscript_value_8;
+      let last_offset = __eliscript_value_9;
+      while (((!__eliscript_truthy(found)) && (offset <= last_offset))) {
         (__eliscript_truthy(starts_at_QMARK_(needle, offset, text)) ? ((found = true)) : null);
         ((offset = (offset + 1)));
       }
-      return null;
-    })();
-    return found;
-  })(false, 0, (Collection.count(text) - Collection.count(needle)));
+      return found;
+    }
+  }
 }
 function strip_prefix(prefix, text) {
   return (__eliscript_truthy(starts_with_QMARK_(prefix, text)) ? slice(Collection.count(prefix), Collection.count(text), text) : text);
@@ -53,24 +66,24 @@ function strip_suffix(suffix, text) {
   return (__eliscript_truthy(ends_with_QMARK_(suffix, text)) ? slice(0, (Collection.count(text) - Collection.count(suffix)), text) : text);
 }
 function whitespace_QMARK_(character) {
-  return ((__eliscript_value_4) => (__eliscript_truthy(__eliscript_value_4) ? __eliscript_value_4 : ((__eliscript_value_5) => (__eliscript_truthy(__eliscript_value_5) ? __eliscript_value_5 : ((__eliscript_value_6) => (__eliscript_truthy(__eliscript_value_6) ? __eliscript_value_6 : (character === "\r")))((character === "\n"))))((character === "\t"))))((character === " "));
+  return ((character === " ") || (character === "\t") || (character === "\n") || (character === "\r"));
 }
 function trim(text) {
-  return ((start, end) => {
-    (() => {
-      while (__eliscript_truthy(((__eliscript_value_7) => (__eliscript_truthy(__eliscript_value_7) ? whitespace_QMARK_(Collection.nth(text, start)) : __eliscript_value_7))((start <= end)))) {
+  {
+    const __eliscript_value_10 = 0;
+    const __eliscript_value_11 = (Collection.count(text) - 1);
+    {
+      let start = __eliscript_value_10;
+      let end = __eliscript_value_11;
+      while (__eliscript_truthy(((__eliscript_value_12) => (__eliscript_truthy(__eliscript_value_12) ? whitespace_QMARK_(Collection.nth(text, start)) : __eliscript_value_12))((start <= end)))) {
         ((start = (start + 1)));
       }
-      return null;
-    })();
-    (() => {
-      while (__eliscript_truthy(((__eliscript_value_8) => (__eliscript_truthy(__eliscript_value_8) ? whitespace_QMARK_(Collection.nth(text, end)) : __eliscript_value_8))((end >= start)))) {
+      while (__eliscript_truthy(((__eliscript_value_13) => (__eliscript_truthy(__eliscript_value_13) ? whitespace_QMARK_(Collection.nth(text, end)) : __eliscript_value_13))((end >= start)))) {
         ((end = (end - 1)));
       }
-      return null;
-    })();
-    return slice(start, (end + 1), text);
-  })(0, (Collection.count(text) - 1));
+      return slice(start, (end + 1), text);
+    }
+  }
 }
 function blank_QMARK_(text) {
   return empty_QMARK_(trim(text));
@@ -81,15 +94,18 @@ function join(separator, values) {
   }, ({"first": true, "text": ""})))["text"];
 }
 function repeat(count, text) {
-  return ((result, index) => {
-    (() => {
-      while (__eliscript_truthy((index < count))) {
+  {
+    const __eliscript_value_14 = "";
+    const __eliscript_value_15 = 0;
+    {
+      let result = __eliscript_value_14;
+      let index = __eliscript_value_15;
+      while ((index < count)) {
         ((result = (String(result) + String(text))), (index = (index + 1)));
       }
-      return null;
-    })();
-    return result;
-  })("", 0);
+      return result;
+    }
+  }
 }
 export {blank_QMARK_, contains_QMARK_, empty_QMARK_, ends_with_QMARK_, join, repeat, slice, starts_at_QMARK_, starts_with_QMARK_, strip_prefix, strip_suffix, trim, whitespace_QMARK_};
 //# sourceMappingURL=text-impl.mjs.map

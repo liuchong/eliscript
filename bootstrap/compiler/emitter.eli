@@ -342,27 +342,95 @@
           output
         (combine (js-array "(" output ")")))))
 
+  (defun boolean-p (node)
+    (let ((kind (ir-kind node)) (value (ir-value node)))
+      (cond
+        ((= kind "literal") (or (eq value t) (eq value false)))
+        ((= kind "intrinsic")
+         (not (= (js-call
+                   (js-array "not" "=" "/=" "not=" "<" "<=" ">" ">="
+                     "eq" "equal" "nil?" "undefined?" "null" "nullish?")
+                   :indexOf value) -1)))
+        ((= kind "short-circuit")
+         (let ((nodes (children node)))
+           (and (> (get nodes :length) 0)
+                (js-call nodes :every boolean-p))))
+        (t false))))
+
+  (defun emit-test (node)
+    (let ((output (emit-expression node)))
+      (if (boolean-p node) output
+        (combine (js-array "__eliscript_truthy(" output ")")))))
+
+  ;; Evaluate initializers outside the new binding scope to avoid TDZ.
+  ;; Each sequential binding has its own scope, including duplicate names.
+  (defun emit-context-let (bindings body sequential returning)
+    (if (= (get bindings :length) 0)
+        (if returning (emit-returning-body body) (emit-statement-body body))
+      (let* ((group (if sequential (js-array (js-nth 0 bindings)) bindings))
+             (temporaries (temporary-names group))
+             (initializers (js-array))
+             (declarations (js-array))
+             (index 0))
+        (while (< index (get group :length))
+          (let* ((binding (js-nth index group))
+                 (initializer (binding-initializer binding)))
+            (js-call initializers :push
+              (combine
+                (js-array "const " (js-nth index temporaries) " = "
+                  (if initializer (emit-expression initializer) "null") ";"))))
+          (setq index (1+ index)))
+        (setq index 0)
+        (while (< index (get group :length))
+          (js-call declarations :push
+            (combine
+              (js-array "let " (emit-binding-target (js-nth index group)) " = "
+                (js-nth index temporaries) ";")))
+          (setq index (1+ index)))
+        (js-call declarations :push
+          (emit-context-let
+            (if sequential (js-call bindings :slice 1) (js-array))
+            body sequential returning))
+        (js-call initializers :push
+          (combine (js-array "{\n" (indent (join-fragments declarations "\n")) "\n}")))
+        (combine (js-array "{\n" (indent (join-fragments initializers "\n")) "\n}")))))
+
+  (defun emit-context (node returning)
+    (let ((kind (ir-kind node)) (nodes (children node)))
+      (locate node
+        (cond
+          ;; Preserve async expression boundaries and their promise scheduling.
+          ((contains-await-p node)
+           (combine (js-array (if returning "return " "") (emit-expression node) ";")))
+          ((= kind "sequence")
+           (if returning (emit-returning-body nodes) (emit-statement-body nodes)))
+          ((= kind "loop")
+           (combine
+             (js-array "while (" (emit-test (js-nth 0 nodes)) ") {\n"
+               (indent (emit-statement-body (js-call nodes :slice 1))) "\n}"
+               (if returning "\nreturn null;" ""))))
+          ((and (= kind "lexical-bindings")
+                (js-call (js-call nodes :slice 0 (ir-property node "bindingCount"))
+                  :every (lambda (binding) (not (ir-property binding "pattern")))))
+           (let ((parts (split-counted-children node "bindingCount")))
+             (emit-context-let (js-nth 0 parts) (js-nth 1 parts)
+               (ir-property node "sequential") returning)))
+          (t
+           (combine (js-array (if returning "return " "") (emit-expression node) ";")))))))
+
   (defun emit-returning-body (nodes)
     (if (= (get nodes :length) 0)
         (text-fragment "return null;")
-      (let ((parts (js-array))
-            (index 0)
-            (last-index (1- (get nodes :length))))
+      (let ((parts (js-array)) (index 0) (last-index (1- (get nodes :length))))
         (while (< index last-index)
-          (js-call parts :push (emit-expression (js-nth index nodes)))
-          (js-call parts :push ";\n")
+          (js-call parts :push (emit-context (js-nth index nodes) false))
           (setq index (1+ index)))
-        (js-call parts :push "return ")
-        (js-call parts :push (emit-expression (js-nth last-index nodes)))
-        (js-call parts :push ";")
-        (combine parts))))
+        (js-call parts :push (emit-context (js-nth last-index nodes) t))
+        (join-fragments parts "\n"))))
 
   (defun emit-statement-body (nodes)
-    (let ((parts (js-array)))
-      (js-call nodes :forEach
-        (lambda (node)
-          (js-call parts :push (combine (js-array (emit-expression node) ";")))))
-      (join-fragments parts "\n")))
+    (join-fragments
+      (js-call nodes :map (lambda (node) (emit-context node false))) "\n"))
 
   (defun contains-await-p (value)
     (let ((pending (js-array value))
@@ -647,9 +715,9 @@
 
   (defun emit-if (nodes)
     (combine
-      (js-array "(__eliscript_truthy("
-       (emit-expression (js-nth 0 nodes))
-       ") ? "
+      (js-array "("
+       (emit-test (js-nth 0 nodes))
+       " ? "
        (emit-expression (js-nth 1 nodes))
        " : "
        (if (> (get nodes :length) 2)
@@ -659,13 +727,12 @@
 
   (defun emit-conditional-sugar (node)
     (let* ((nodes (children node))
-           (test (emit-expression (js-nth 0 nodes)))
+           (test (emit-test (js-nth 0 nodes)))
            (body (emit-do (js-call nodes :slice 1))))
-      (if (= (ir-value node) "when")
-          (combine (js-array "(__eliscript_truthy(" test ") ? " body " : null)"))
-        (combine
-          (js-array "(__eliscript_truthy((!__eliscript_truthy("
-           test "))) ? " body " : null)")))))
+      (combine
+        (js-array "("
+          (if (= (ir-value node) "when") test
+            (combine (js-array "(!" test ")"))) " ? " body " : null)"))))
 
   (defun emit-cond (clauses)
     (if (= (get clauses :length) 0)
@@ -679,9 +746,9 @@
           (if (and (= (ir-kind test) "literal") (= (ir-value test) t))
               (emit-do body)
             (combine
-              (js-array "(__eliscript_truthy("
-               (emit-expression test)
-               ") ? "
+              (js-array "("
+               (emit-test test)
+               " ? "
                (emit-do body)
                " : "
                (emit-cond (js-call clauses :slice 1))
@@ -812,24 +879,14 @@
 
   (defun emit-loop (node)
     (let* ((nodes (children node))
-           (test (js-nth 0 nodes))
-           (body (js-call nodes :slice 1))
-           (test-output (emit-expression test))
-           (statements (js-array)))
-      (js-call body :forEach
-        (lambda (child)
-          (js-call statements :push (combine (js-array (emit-expression child) ";")))))
-      (emit-iife
-        ""
+           (test-output (emit-test (js-nth 0 nodes)))
+           (body (js-call nodes :slice 1)))
+      (emit-iife ""
         (indent
           (combine
-            (js-array "while (__eliscript_truthy("
-             test-output
-             ")) {\n"
-             (indent (join-fragments statements "\n"))
-             "\n}\nreturn null;")))
-        ""
-        (contains-await-p nodes))))
+            (js-array "while (" test-output ") {\n"
+              (indent (emit-statement-body body)) "\n}\nreturn null;")))
+        "" (contains-await-p nodes))))
 
   (defun emit-binding-loop (node)
     (let* ((parts (split-counted-children node "bindingCount"))
@@ -869,6 +926,12 @@
       ((= (get nodes :length) 0)
        (text-fragment (if (= kind "and") "true" "null")))
       ((= (get nodes :length) 1) (emit-expression (js-nth 0 nodes)))
+      ((and (js-call nodes :every boolean-p) (not (contains-await-p nodes)))
+       (combine
+         (js-array "("
+           (join-fragments
+             (js-call nodes :map (lambda (node) (emit-expression node)))
+             (if (= kind "and") " && " " || ")) ")")))
       (t
        (let ((temporary (fresh-name))
              (first (emit-expression (js-nth 0 nodes)))
@@ -956,7 +1019,7 @@
       (cond
         ((= name "not")
          (require-node-arity node 1 1)
-         (combine (js-array "(!__eliscript_truthy(" (emit-expression (js-nth 0 nodes)) "))")))
+         (combine (js-array "(!" (emit-test (js-nth 0 nodes)) ")")))
         ((= name "+")
          (if (= (get nodes :length) 0)
              (text-fragment "0")

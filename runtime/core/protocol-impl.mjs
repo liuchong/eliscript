@@ -28,227 +28,368 @@ function protocol_fail(message) {
   return ((__eliscript_value_1) => { throw __eliscript_value_1; })(new globalThis.TypeError(message));
 }
 function protocol_state(protocol) {
-  return ((state) => {
-    return (__eliscript_truthy((state === undefined)) ? protocol_fail("expected an Eliscript protocol") : state);
-  })((protocol_states)["get"](protocol));
+  {
+    const __eliscript_value_2 = (protocol_states)["get"](protocol);
+    {
+      let state = __eliscript_value_2;
+      return ((state === undefined) ? protocol_fail("expected an Eliscript protocol") : state);
+    }
+  }
 }
 function normalize_name(value, label) {
-  return (__eliscript_truthy(((__eliscript_value_2) => (__eliscript_truthy(__eliscript_value_2) ? __eliscript_value_2 : (((value) ?? []).length === 0)))((!__eliscript_truthy((((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(value) === "string"))))) ? protocol_fail((String(label) + String(" must be a non-empty string"))) : value);
+  return (((!(((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(value) === "string")) || (((value) ?? []).length === 0)) ? protocol_fail((String(label) + String(" must be a non-empty string"))) : value);
 }
 function normalize_protocol_operations(operations) {
-  (__eliscript_truthy((!__eliscript_truthy(protocol_array_QMARK_(operations)))) ? protocol_fail("protocol operations must be a non-empty dense array") : null);
-  return ((length) => {
-    (__eliscript_truthy((length === 0)) ? protocol_fail("protocol operations must be a non-empty dense array") : null);
-    (__eliscript_truthy((length > protocol_max_operations)) ? protocol_fail((String("protocol operations exceed ") + String(protocol_max_operations))) : null);
-    return ((descriptors) => {
-      return ((keys) => {
-        return ((normalized) => {
-          return ((index) => {
-            return (() => {
-              (__eliscript_truthy(((__eliscript_value_3, __eliscript_value_4) => (__eliscript_value_3 !== __eliscript_value_4))(((keys) ?? []).length, (length + 1))) ? protocol_fail("protocol operations must be a dense array with no extra properties") : null);
-              (() => {
-                while (__eliscript_truthy((index < length))) {
-                  ((descriptor) => {
-                    (__eliscript_truthy(((__eliscript_value_5) => (__eliscript_truthy(__eliscript_value_5) ? __eliscript_value_5 : ((__eliscript_value_6) => (__eliscript_truthy(__eliscript_value_6) ? __eliscript_value_6 : (!__eliscript_truthy(((descriptor)["enumerable"] ?? false)))))((!__eliscript_truthy(protocol_has_own(descriptor, "value"))))))((descriptor === undefined))) ? protocol_fail("protocol operations must contain enumerable data values") : null);
-                    return (normalized)["push"](normalize_name((descriptor)["value"], "protocol operation"));
-                  })(((descriptors)[(String(index))] ?? undefined));
-                  ((index = (index + 1)));
+  ((!__eliscript_truthy(protocol_array_QMARK_(operations))) ? protocol_fail("protocol operations must be a non-empty dense array") : null);
+  {
+    const __eliscript_value_3 = ((operations) ?? []).length;
+    {
+      let length = __eliscript_value_3;
+      ((length === 0) ? protocol_fail("protocol operations must be a non-empty dense array") : null);
+      ((length > protocol_max_operations) ? protocol_fail((String("protocol operations exceed ") + String(protocol_max_operations))) : null);
+      {
+        const __eliscript_value_4 = protocol_own_descriptors(operations);
+        {
+          let descriptors = __eliscript_value_4;
+          {
+            const __eliscript_value_5 = protocol_own_keys(descriptors);
+            {
+              let keys = __eliscript_value_5;
+              {
+                const __eliscript_value_6 = [];
+                {
+                  let normalized = __eliscript_value_6;
+                  {
+                    const __eliscript_value_7 = 0;
+                    {
+                      let index = __eliscript_value_7;
+                      (((__eliscript_value_8, __eliscript_value_9) => (__eliscript_value_8 !== __eliscript_value_9))(((keys) ?? []).length, (length + 1)) ? protocol_fail("protocol operations must be a dense array with no extra properties") : null);
+                      while ((index < length)) {
+                        {
+                          const __eliscript_value_10 = ((descriptors)[(String(index))] ?? undefined);
+                          {
+                            let descriptor = __eliscript_value_10;
+                            (((descriptor === undefined) || (!__eliscript_truthy(protocol_has_own(descriptor, "value"))) || (!__eliscript_truthy(((descriptor)["enumerable"] ?? false)))) ? protocol_fail("protocol operations must contain enumerable data values") : null);
+                            (normalized)["push"](normalize_name((descriptor)["value"], "protocol operation"));
+                          }
+                        }
+                        ((index = (index + 1)));
+                      }
+                      return normalized;
+                    }
+                  }
                 }
-                return null;
-              })();
-              return normalized;
-            })();
-          })(0);
-        })([]);
-      })(protocol_own_keys(descriptors));
-    })(protocol_own_descriptors(operations));
-  })(((operations) ?? []).length);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function protocol_definition_field(descriptors, name) {
-  return ((descriptor) => {
-    (__eliscript_truthy(((__eliscript_value_7) => (__eliscript_truthy(__eliscript_value_7) ? __eliscript_value_7 : ((__eliscript_value_8) => (__eliscript_truthy(__eliscript_value_8) ? __eliscript_value_8 : (!__eliscript_truthy(((descriptor)["enumerable"] ?? false)))))((!__eliscript_truthy(protocol_has_own(descriptor, "value"))))))((descriptor === undefined))) ? protocol_fail((String("protocol definition field ") + String(name) + String(" must be an enumerable data property"))) : null);
-    return (descriptor)["value"];
-  })(((descriptors)[name] ?? undefined));
+  {
+    const __eliscript_value_11 = ((descriptors)[name] ?? undefined);
+    {
+      let descriptor = __eliscript_value_11;
+      (((descriptor === undefined) || (!__eliscript_truthy(protocol_has_own(descriptor, "value"))) || (!__eliscript_truthy(((descriptor)["enumerable"] ?? false)))) ? protocol_fail((String("protocol definition field ") + String(name) + String(" must be an enumerable data property"))) : null);
+      return (descriptor)["value"];
+    }
+  }
 }
 function normalize_protocol_definition(definition) {
-  (__eliscript_truthy(((__eliscript_value_9) => (__eliscript_truthy(__eliscript_value_9) ? __eliscript_value_9 : ((__eliscript_value_10) => (__eliscript_truthy(__eliscript_value_10) ? __eliscript_value_10 : protocol_array_QMARK_(definition)))((!__eliscript_truthy((((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(definition) === "object"))))))((definition === null))) ? protocol_fail("protocol definition must be a plain object") : null);
-  ((prototype) => {
-    return (__eliscript_truthy(((__eliscript_value_11) => (__eliscript_truthy(__eliscript_value_11) ? (!__eliscript_truthy((prototype === null))) : __eliscript_value_11))(((__eliscript_value_12, __eliscript_value_13) => (__eliscript_value_12 !== __eliscript_value_13))(prototype, protocol_object_prototype))) ? protocol_fail("protocol definition must be a plain object") : null);
-  })(protocol_get_prototype(definition));
-  return ((descriptors) => {
-    return ((keys) => {
-      return (() => {
-        (__eliscript_truthy(((__eliscript_value_14, __eliscript_value_15) => (__eliscript_value_14 !== __eliscript_value_15))(((keys) ?? []).length, 4)) ? protocol_fail("protocol definition must contain exactly format, version, name, and operations") : null);
-        return ((format, version, name, operations) => {
-          (__eliscript_truthy(((__eliscript_value_16, __eliscript_value_17) => (__eliscript_value_16 !== __eliscript_value_17))(format, protocol_definition_format)) ? protocol_fail((String("unsupported protocol definition format ") + String(format))) : null);
-          (__eliscript_truthy(((__eliscript_value_18, __eliscript_value_19) => (__eliscript_value_18 !== __eliscript_value_19))(version, protocol_definition_version)) ? protocol_fail((String("unsupported protocol definition version ") + String(version))) : null);
-          return ({"name": normalize_name(name, "protocol name"), "operations": normalize_protocol_operations(operations)});
-        })(protocol_definition_field(descriptors, "format"), protocol_definition_field(descriptors, "version"), protocol_definition_field(descriptors, "name"), protocol_definition_field(descriptors, "operations"));
-      })();
-    })(protocol_own_keys(descriptors));
-  })(protocol_own_descriptors(definition));
+  (__eliscript_truthy(((__eliscript_value_12) => (__eliscript_truthy(__eliscript_value_12) ? __eliscript_value_12 : ((__eliscript_value_13) => (__eliscript_truthy(__eliscript_value_13) ? __eliscript_value_13 : protocol_array_QMARK_(definition)))((!(((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(definition) === "object")))))((definition === null))) ? protocol_fail("protocol definition must be a plain object") : null);
+  {
+    const __eliscript_value_14 = protocol_get_prototype(definition);
+    {
+      let prototype = __eliscript_value_14;
+      ((((__eliscript_value_15, __eliscript_value_16) => (__eliscript_value_15 !== __eliscript_value_16))(prototype, protocol_object_prototype) && (!(prototype === null))) ? protocol_fail("protocol definition must be a plain object") : null);
+    }
+  }
+  {
+    const __eliscript_value_17 = protocol_own_descriptors(definition);
+    {
+      let descriptors = __eliscript_value_17;
+      {
+        const __eliscript_value_18 = protocol_own_keys(descriptors);
+        {
+          let keys = __eliscript_value_18;
+          (((__eliscript_value_19, __eliscript_value_20) => (__eliscript_value_19 !== __eliscript_value_20))(((keys) ?? []).length, 4) ? protocol_fail("protocol definition must contain exactly format, version, name, and operations") : null);
+          {
+            const __eliscript_value_21 = protocol_definition_field(descriptors, "format");
+            const __eliscript_value_22 = protocol_definition_field(descriptors, "version");
+            const __eliscript_value_23 = protocol_definition_field(descriptors, "name");
+            const __eliscript_value_24 = protocol_definition_field(descriptors, "operations");
+            {
+              let format = __eliscript_value_21;
+              let version = __eliscript_value_22;
+              let name = __eliscript_value_23;
+              let operations = __eliscript_value_24;
+              (((__eliscript_value_25, __eliscript_value_26) => (__eliscript_value_25 !== __eliscript_value_26))(format, protocol_definition_format) ? protocol_fail((String("unsupported protocol definition format ") + String(format))) : null);
+              (((__eliscript_value_27, __eliscript_value_28) => (__eliscript_value_27 !== __eliscript_value_28))(version, protocol_definition_version) ? protocol_fail((String("unsupported protocol definition version ") + String(version))) : null);
+              return ({"name": normalize_name(name, "protocol name"), "operations": normalize_protocol_operations(operations)});
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function operation_record(protocol, operation) {
-  return ((state) => {
-    return ((record) => {
-      return (__eliscript_truthy((record === undefined)) ? protocol_fail((String("protocol ") + String((protocol)["name"]) + String(" has no operation ") + String(operation))) : record);
-    })(((state)["operations"])["get"](operation));
-  })(protocol_state(protocol));
+  {
+    const __eliscript_value_29 = protocol_state(protocol);
+    {
+      let state = __eliscript_value_29;
+      {
+        const __eliscript_value_30 = ((state)["operations"])["get"](operation);
+        {
+          let record = __eliscript_value_30;
+          return ((record === undefined) ? protocol_fail((String("protocol ") + String((protocol)["name"]) + String(" has no operation ") + String(operation))) : record);
+        }
+      }
+    }
+  }
 }
 function protocol_host_category(value) {
-  return (__eliscript_truthy((value === null)) ? "null" : protocol_host_type(value));
+  return ((value === null) ? "null" : protocol_host_type(value));
 }
 function known_host_category_QMARK_(category) {
-  return ((index, found) => {
-    (() => {
-      while (__eliscript_truthy(((__eliscript_value_20) => (__eliscript_truthy(__eliscript_value_20) ? (!__eliscript_truthy(found)) : __eliscript_value_20))((index < ((protocol_host_categories) ?? []).length)))) {
-        (__eliscript_truthy((category === ((((protocol_host_categories) ?? [])[index]) ?? null))) ? ((found = true)) : null);
+  {
+    const __eliscript_value_31 = 0;
+    const __eliscript_value_32 = false;
+    {
+      let index = __eliscript_value_31;
+      let found = __eliscript_value_32;
+      while (((index < ((protocol_host_categories) ?? []).length) && (!__eliscript_truthy(found)))) {
+        ((category === ((((protocol_host_categories) ?? [])[index]) ?? null)) ? ((found = true)) : null);
         ((index = (index + 1)));
       }
-      return null;
-    })();
-    return found;
-  })(0, false);
+      return found;
+    }
+  }
 }
 function normalize_implementations(protocol, implementations) {
-  (__eliscript_truthy(((__eliscript_value_21) => (__eliscript_truthy(__eliscript_value_21) ? __eliscript_value_21 : (!__eliscript_truthy((((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(implementations) === "object")))))((implementations === null))) ? protocol_fail((String("protocol ") + String((protocol)["name"]) + String(" implementations must be an object"))) : null);
-  return ((descriptors) => {
-    return ((keys) => {
-      return ((normalized) => {
-        return ((index) => {
-          return (() => {
-            (__eliscript_truthy((((keys) ?? []).length === 0)) ? protocol_fail((String("protocol ") + String((protocol)["name"]) + String(" extension must implement at least one operation"))) : null);
-            (() => {
-              while (__eliscript_truthy((index < ((keys) ?? []).length))) {
-                ((key) => {
-                  return ((descriptor) => {
-                    return (() => {
-                      (__eliscript_truthy((!__eliscript_truthy((((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(key) === "string")))) ? protocol_fail((String("protocol ") + String((protocol)["name"]) + String(" implementation names must be strings"))) : null);
-                      operation_record(protocol, key);
-                      (__eliscript_truthy(((__eliscript_value_22) => (__eliscript_truthy(__eliscript_value_22) ? __eliscript_value_22 : (!__eliscript_truthy((((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })((descriptor)["value"]) === "function")))))((!__eliscript_truthy(protocol_has_own(descriptor, "value"))))) ? protocol_fail((String("protocol ") + String((protocol)["name"]) + String("/") + String(key) + String(" implementation must be a function"))) : null);
-                      return protocol_define_enumerable(normalized, key, (descriptor)["value"]);
-                    })();
-                  })((descriptors)[key]);
-                })(((((keys) ?? [])[index]) ?? null));
-                ((index = (index + 1)));
+  (((implementations === null) || (!(((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(implementations) === "object"))) ? protocol_fail((String("protocol ") + String((protocol)["name"]) + String(" implementations must be an object"))) : null);
+  {
+    const __eliscript_value_33 = protocol_own_descriptors(implementations);
+    {
+      let descriptors = __eliscript_value_33;
+      {
+        const __eliscript_value_34 = protocol_own_keys(descriptors);
+        {
+          let keys = __eliscript_value_34;
+          {
+            const __eliscript_value_35 = protocol_null_object();
+            {
+              let normalized = __eliscript_value_35;
+              {
+                const __eliscript_value_36 = 0;
+                {
+                  let index = __eliscript_value_36;
+                  ((((keys) ?? []).length === 0) ? protocol_fail((String("protocol ") + String((protocol)["name"]) + String(" extension must implement at least one operation"))) : null);
+                  while ((index < ((keys) ?? []).length)) {
+                    {
+                      const __eliscript_value_37 = ((((keys) ?? [])[index]) ?? null);
+                      {
+                        let key = __eliscript_value_37;
+                        {
+                          const __eliscript_value_38 = (descriptors)[key];
+                          {
+                            let descriptor = __eliscript_value_38;
+                            ((!(((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(key) === "string")) ? protocol_fail((String("protocol ") + String((protocol)["name"]) + String(" implementation names must be strings"))) : null);
+                            operation_record(protocol, key);
+                            (((!__eliscript_truthy(protocol_has_own(descriptor, "value"))) || (!(((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })((descriptor)["value"]) === "function"))) ? protocol_fail((String("protocol ") + String((protocol)["name"]) + String("/") + String(key) + String(" implementation must be a function"))) : null);
+                            protocol_define_enumerable(normalized, key, (descriptor)["value"]);
+                          }
+                        }
+                      }
+                    }
+                    ((index = (index + 1)));
+                  }
+                  return protocol_freeze(normalized);
+                }
               }
-              return null;
-            })();
-            return protocol_freeze(normalized);
-          })();
-        })(0);
-      })(protocol_null_object());
-    })(protocol_own_keys(descriptors));
-  })(protocol_own_descriptors(implementations));
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function merge_implementations(current, incoming) {
-  return ((merged, copy) => {
-    ((copy = (source) => {
-      return (__eliscript_truthy((!__eliscript_truthy((source == null)))) ? ((keys, index) => {
-        return (() => {
-          while (__eliscript_truthy((index < ((keys) ?? []).length))) {
-            ((key) => {
-              return protocol_define_enumerable(merged, key, (source)[key]);
-            })(((((keys) ?? [])[index]) ?? null));
+  {
+    const __eliscript_value_39 = protocol_null_object();
+    const __eliscript_value_40 = null;
+    {
+      let merged = __eliscript_value_39;
+      let copy = __eliscript_value_40;
+      ((copy = (source) => {
+        return ((!(source == null)) ? ((keys, index) => {
+          while ((index < ((keys) ?? []).length)) {
+            {
+              const __eliscript_value_41 = ((((keys) ?? [])[index]) ?? null);
+              {
+                let key = __eliscript_value_41;
+                protocol_define_enumerable(merged, key, (source)[key]);
+              }
+            }
             ((index = (index + 1)));
           }
           return null;
-        })();
-      })(Object.keys((source) ?? {}), 0) : null);
-    }));
-    copy(current);
-    copy(incoming);
-    return protocol_freeze(merged);
-  })(protocol_null_object(), null);
+        })(Object.keys((source) ?? {}), 0) : null);
+      }));
+      copy(current);
+      copy(incoming);
+      return protocol_freeze(merged);
+    }
+  }
 }
 function direct_method(record, receiver) {
-  return (__eliscript_truthy(((__eliscript_value_23) => (__eliscript_truthy(__eliscript_value_23) ? __eliscript_value_23 : (receiver === undefined)))((receiver === null))) ? protocol_missing : ((slot) => {
-    return (__eliscript_truthy((!__eliscript_truthy(protocol_property_present(receiver, slot)))) ? protocol_missing : ((method) => {
-      return (__eliscript_truthy((((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(method) === "function")) ? method : null);
+  return (((receiver === null) || (receiver === undefined)) ? protocol_missing : ((slot) => {
+    return ((!__eliscript_truthy(protocol_property_present(receiver, slot))) ? protocol_missing : ((method) => {
+      return ((((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(method) === "function") ? method : null);
     })(protocol_property_value(receiver, slot)));
   })((record)["slot"]));
 }
 function external_method(state, record, receiver) {
-  return ((prototype) => {
-    return ((exact_implementations) => {
-      return ((exact) => {
-        return (__eliscript_truthy((!__eliscript_truthy((exact === undefined)))) ? exact : ((category_implementations) => {
-          return ((category) => {
-            return (__eliscript_truthy((!__eliscript_truthy((category === undefined)))) ? category : (((state)["defaults"])[(record)["name"]] ?? protocol_missing));
-          })((__eliscript_truthy((category_implementations === undefined)) ? undefined : ((category_implementations)[(record)["name"]] ?? undefined)));
-        })(((state)["categories"])["get"](protocol_host_category(receiver))));
-      })((__eliscript_truthy((exact_implementations === undefined)) ? undefined : ((exact_implementations)[(record)["name"]] ?? undefined)));
-    })((__eliscript_truthy((prototype === protocol_missing)) ? undefined : ((state)["types"])["get"](prototype)));
-  })(protocol_exact_prototype(receiver, protocol_missing));
+  {
+    const __eliscript_value_42 = protocol_exact_prototype(receiver, protocol_missing);
+    {
+      let prototype = __eliscript_value_42;
+      {
+        const __eliscript_value_43 = ((prototype === protocol_missing) ? undefined : ((state)["types"])["get"](prototype));
+        {
+          let exact_implementations = __eliscript_value_43;
+          {
+            const __eliscript_value_44 = ((exact_implementations === undefined) ? undefined : ((exact_implementations)[(record)["name"]] ?? undefined));
+            {
+              let exact = __eliscript_value_44;
+              return ((!(exact === undefined)) ? exact : ((category_implementations) => {
+                return ((category) => {
+                  return ((!(category === undefined)) ? category : (((state)["defaults"])[(record)["name"]] ?? protocol_missing));
+                })(((category_implementations === undefined) ? undefined : ((category_implementations)[(record)["name"]] ?? undefined)));
+              })(((state)["categories"])["get"](protocol_host_category(receiver))));
+            }
+          }
+        }
+      }
+    }
+  }
 }
 function dispatch(protocol, record, receiver, arguments$) {
-  return ((direct) => {
-    (__eliscript_truthy((direct === null)) ? ((__eliscript_value_24) => { throw __eliscript_value_24; })(new ProtocolDispatchError(protocol, (record)["name"], receiver, "invalid-direct-slot")) : null);
-    return (__eliscript_truthy(((__eliscript_value_25, __eliscript_value_26) => (__eliscript_value_25 !== __eliscript_value_26))(direct, protocol_missing)) ? (direct)["apply"](receiver, arguments$) : ((external) => {
-      return (__eliscript_truthy((external === protocol_missing)) ? ((__eliscript_value_27) => { throw __eliscript_value_27; })(new ProtocolDispatchError(protocol, (record)["name"], receiver)) : external(...[receiver, ...((arguments$) ?? [])]));
-    })(external_method(protocol_state(protocol), record, receiver)));
-  })(direct_method(record, receiver));
+  {
+    const __eliscript_value_45 = direct_method(record, receiver);
+    {
+      let direct = __eliscript_value_45;
+      ((direct === null) ? ((__eliscript_value_46) => { throw __eliscript_value_46; })(new ProtocolDispatchError(protocol, (record)["name"], receiver, "invalid-direct-slot")) : null);
+      return (((__eliscript_value_47, __eliscript_value_48) => (__eliscript_value_47 !== __eliscript_value_48))(direct, protocol_missing) ? (direct)["apply"](receiver, arguments$) : ((external) => {
+        return ((external === protocol_missing) ? ((__eliscript_value_49) => { throw __eliscript_value_49; })(new ProtocolDispatchError(protocol, (record)["name"], receiver)) : external(...[receiver, ...((arguments$) ?? [])]));
+      })(external_method(protocol_state(protocol), record, receiver)));
+    }
+  }
 }
 function define_protocol(name, operations) {
-  return ((protocol_name, protocol_operations) => {
-    return ((records, operation_table, protocol, index) => {
-      (() => {
-        while (__eliscript_truthy((index < ((protocol_operations) ?? []).length))) {
-          ((operation) => {
-            (__eliscript_truthy((records)["has"](operation)) ? protocol_fail((String("protocol ") + String(protocol_name) + String(" declares duplicate operation ") + String(operation))) : null);
-            return ((slot) => {
-              return ((method) => {
-                return ((record) => {
-                  return (() => {
-                    (records)["set"](operation, record);
-                    return protocol_define_enumerable(operation_table, operation, method);
-                  })();
-                })(({"name": operation, "slot": slot, "method": method}));
-              })((...invocation) => {
-                (__eliscript_truthy((((invocation) ?? []).length === 0)) ? protocol_fail((String("protocol ") + String(protocol_name) + String("/") + String(operation) + String(" requires a dispatch value"))) : null);
-                return dispatch(protocol, (records)["get"](operation), (invocation)[0], (invocation)["slice"](1));
-              });
-            })(protocol_symbol((String("eliscript.protocol.") + String(protocol_name) + String("/") + String(operation))));
-          })(((((protocol_operations) ?? [])[index]) ?? null));
-          ((index = (index + 1)));
+  {
+    const __eliscript_value_50 = normalize_name(name, "protocol name");
+    const __eliscript_value_51 = normalize_protocol_operations(operations);
+    {
+      let protocol_name = __eliscript_value_50;
+      let protocol_operations = __eliscript_value_51;
+      {
+        const __eliscript_value_52 = protocol_map();
+        const __eliscript_value_53 = protocol_null_object();
+        const __eliscript_value_54 = null;
+        const __eliscript_value_55 = 0;
+        {
+          let records = __eliscript_value_52;
+          let operation_table = __eliscript_value_53;
+          let protocol = __eliscript_value_54;
+          let index = __eliscript_value_55;
+          while ((index < ((protocol_operations) ?? []).length)) {
+            {
+              const __eliscript_value_56 = ((((protocol_operations) ?? [])[index]) ?? null);
+              {
+                let operation = __eliscript_value_56;
+                (__eliscript_truthy((records)["has"](operation)) ? protocol_fail((String("protocol ") + String(protocol_name) + String(" declares duplicate operation ") + String(operation))) : null);
+                {
+                  const __eliscript_value_57 = protocol_symbol((String("eliscript.protocol.") + String(protocol_name) + String("/") + String(operation)));
+                  {
+                    let slot = __eliscript_value_57;
+                    {
+                      const __eliscript_value_58 = (...invocation) => {
+                        ((((invocation) ?? []).length === 0) ? protocol_fail((String("protocol ") + String(protocol_name) + String("/") + String(operation) + String(" requires a dispatch value"))) : null);
+                        return dispatch(protocol, (records)["get"](operation), (invocation)[0], (invocation)["slice"](1));
+                      };
+                      {
+                        let method = __eliscript_value_58;
+                        {
+                          const __eliscript_value_59 = ({"name": operation, "slot": slot, "method": method});
+                          {
+                            let record = __eliscript_value_59;
+                            (records)["set"](operation, record);
+                            protocol_define_enumerable(operation_table, operation, method);
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            ((index = (index + 1)));
+          }
+          ((protocol = protocol_freeze(({"name": protocol_name, "operations": protocol_freeze(operation_table)}))));
+          ((index = 0));
+          while ((index < ((protocol_operations) ?? []).length)) {
+            {
+              const __eliscript_value_60 = ((((protocol_operations) ?? [])[index]) ?? null);
+              {
+                let operation = __eliscript_value_60;
+                {
+                  const __eliscript_value_61 = (records)["get"](operation);
+                  {
+                    let record = __eliscript_value_61;
+                    {
+                      const __eliscript_value_62 = (record)["method"];
+                      {
+                        let method = __eliscript_value_62;
+                        protocol_define_metadata(method, protocol, operation, (record)["slot"]);
+                        protocol_freeze(method);
+                        protocol_freeze(record);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            ((index = (index + 1)));
+          }
+          (protocol_states)["set"](protocol, ({"operations": records, "types": protocol_map(), "categories": protocol_map(), "defaults": protocol_freeze(protocol_null_object())}));
+          return protocol;
         }
-        return null;
-      })();
-      ((protocol = protocol_freeze(({"name": protocol_name, "operations": protocol_freeze(operation_table)}))));
-      ((index = 0));
-      (() => {
-        while (__eliscript_truthy((index < ((protocol_operations) ?? []).length))) {
-          ((operation) => {
-            return ((record) => {
-              return ((method) => {
-                return (() => {
-                  protocol_define_metadata(method, protocol, operation, (record)["slot"]);
-                  protocol_freeze(method);
-                  return protocol_freeze(record);
-                })();
-              })((record)["method"]);
-            })((records)["get"](operation));
-          })(((((protocol_operations) ?? [])[index]) ?? null));
-          ((index = (index + 1)));
-        }
-        return null;
-      })();
-      (protocol_states)["set"](protocol, ({"operations": records, "types": protocol_map(), "categories": protocol_map(), "defaults": protocol_freeze(protocol_null_object())}));
-      return protocol;
-    })(protocol_map(), protocol_null_object(), null, 0);
-  })(normalize_name(name, "protocol name"), normalize_protocol_operations(operations));
+      }
+    }
+  }
 }
 function protocol_definition(protocol) {
   protocol_state(protocol);
-  return ((operations) => {
-    protocol_freeze(operations);
-    return protocol_freeze(({"format": protocol_definition_format, "version": protocol_definition_version, "name": (protocol)["name"], "operations": operations}));
-  })((Object.keys(((protocol)["operations"]) ?? {}))["slice"]());
+  {
+    const __eliscript_value_63 = (Object.keys(((protocol)["operations"]) ?? {}))["slice"]();
+    {
+      let operations = __eliscript_value_63;
+      protocol_freeze(operations);
+      return protocol_freeze(({"format": protocol_definition_format, "version": protocol_definition_version, "name": (protocol)["name"], "operations": operations}));
+    }
+  }
 }
 function define_protocol_from_definition(definition) {
-  return ((normalized) => {
-    return define_protocol((normalized)["name"], (normalized)["operations"]);
-  })(normalize_protocol_definition(definition));
+  {
+    const __eliscript_value_64 = normalize_protocol_definition(definition);
+    {
+      let normalized = __eliscript_value_64;
+      return define_protocol((normalized)["name"], (normalized)["operations"]);
+    }
+  }
 }
 function protocol_method(protocol, operation) {
   return (operation_record(protocol, operation))["method"];
@@ -257,70 +398,131 @@ function protocol_slot(protocol, operation) {
   return (operation_record(protocol, operation))["slot"];
 }
 function extend_protocol_type(protocol, constructor, implementations) {
-  return ((state) => {
-    (__eliscript_truthy((!__eliscript_truthy((((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(constructor) === "function")))) ? protocol_fail((String("protocol ") + String((protocol)["name"]) + String(" exact type must be a constructor with a prototype"))) : null);
-    return ((prototype) => {
-      (__eliscript_truthy(((__eliscript_value_28) => (__eliscript_truthy(__eliscript_value_28) ? __eliscript_value_28 : (!__eliscript_truthy((((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(prototype) === "object")))))((prototype === null))) ? protocol_fail((String("protocol ") + String((protocol)["name"]) + String(" exact type must be a constructor with a prototype"))) : null);
-      ((normalized) => {
-        return ((current) => {
-          return ((state)["types"])["set"](prototype, merge_implementations(current, normalized));
-        })(((state)["types"])["get"](prototype));
-      })(normalize_implementations(protocol, implementations));
-      return protocol;
-    })(((constructor)["prototype"] ?? null));
-  })(protocol_state(protocol));
+  {
+    const __eliscript_value_65 = protocol_state(protocol);
+    {
+      let state = __eliscript_value_65;
+      ((!(((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(constructor) === "function")) ? protocol_fail((String("protocol ") + String((protocol)["name"]) + String(" exact type must be a constructor with a prototype"))) : null);
+      {
+        const __eliscript_value_66 = ((constructor)["prototype"] ?? null);
+        {
+          let prototype = __eliscript_value_66;
+          (((prototype === null) || (!(((__eliscript_value) => { if (__eliscript_value === null) return "null"; const __eliscript_host_type = typeof __eliscript_value; if (__eliscript_host_type !== "object" && __eliscript_host_type !== "function") return __eliscript_host_type; try { const __eliscript_type = Object.getOwnPropertyDescriptor(__eliscript_value, Symbol.for("eliscript.value.type")); if (__eliscript_type && Object.prototype.hasOwnProperty.call(__eliscript_type, "value") && (__eliscript_type.value === "keyword" || __eliscript_type.value === "symbol")) return __eliscript_type.value; const __eliscript_kind = Object.getOwnPropertyDescriptor(__eliscript_value, "kind"); if (__eliscript_kind && Object.prototype.hasOwnProperty.call(__eliscript_kind, "value")) { if (__eliscript_kind.value === "eliscript/keyword") return "keyword"; if (__eliscript_kind.value === "eliscript/symbol") return "symbol"; } return __eliscript_host_type; } catch { return __eliscript_host_type; } })(prototype) === "object"))) ? protocol_fail((String("protocol ") + String((protocol)["name"]) + String(" exact type must be a constructor with a prototype"))) : null);
+          {
+            const __eliscript_value_67 = normalize_implementations(protocol, implementations);
+            {
+              let normalized = __eliscript_value_67;
+              {
+                const __eliscript_value_68 = ((state)["types"])["get"](prototype);
+                {
+                  let current = __eliscript_value_68;
+                  ((state)["types"])["set"](prototype, merge_implementations(current, normalized));
+                }
+              }
+            }
+          }
+          return protocol;
+        }
+      }
+    }
+  }
 }
 function extend_protocol_category(protocol, category, implementations) {
-  return ((state) => {
-    (__eliscript_truthy((!__eliscript_truthy(known_host_category_QMARK_(category)))) ? protocol_fail((String("unknown protocol host category ") + String(category))) : null);
-    ((normalized) => {
-      return ((current) => {
-        return ((state)["categories"])["set"](category, merge_implementations(current, normalized));
-      })(((state)["categories"])["get"](category));
-    })(normalize_implementations(protocol, implementations));
-    return protocol;
-  })(protocol_state(protocol));
+  {
+    const __eliscript_value_69 = protocol_state(protocol);
+    {
+      let state = __eliscript_value_69;
+      ((!__eliscript_truthy(known_host_category_QMARK_(category))) ? protocol_fail((String("unknown protocol host category ") + String(category))) : null);
+      {
+        const __eliscript_value_70 = normalize_implementations(protocol, implementations);
+        {
+          let normalized = __eliscript_value_70;
+          {
+            const __eliscript_value_71 = ((state)["categories"])["get"](category);
+            {
+              let current = __eliscript_value_71;
+              ((state)["categories"])["set"](category, merge_implementations(current, normalized));
+            }
+          }
+        }
+      }
+      return protocol;
+    }
+  }
 }
 function extend_protocol_default(protocol, implementations) {
-  return ((state) => {
-    return ((normalized) => {
-      return (() => {
-        ((state)["defaults"] = merge_implementations((state)["defaults"], normalized));
-        return protocol;
-      })();
-    })(normalize_implementations(protocol, implementations));
-  })(protocol_state(protocol));
+  {
+    const __eliscript_value_72 = protocol_state(protocol);
+    {
+      let state = __eliscript_value_72;
+      {
+        const __eliscript_value_73 = normalize_implementations(protocol, implementations);
+        {
+          let normalized = __eliscript_value_73;
+          ((state)["defaults"] = merge_implementations((state)["defaults"], normalized));
+          return protocol;
+        }
+      }
+    }
+  }
 }
 function implements_protocol_operation_QMARK_(protocol, operation, value) {
-  return ((record) => {
-    return ((direct) => {
-      return ((__eliscript_value_29) => (__eliscript_truthy(__eliscript_value_29) ? ((__eliscript_value_30) => (__eliscript_truthy(__eliscript_value_30) ? __eliscript_value_30 : ((__eliscript_value_33, __eliscript_value_34) => (__eliscript_value_33 !== __eliscript_value_34))(external_method(protocol_state(protocol), record, value), protocol_missing)))(((__eliscript_value_31, __eliscript_value_32) => (__eliscript_value_31 !== __eliscript_value_32))(direct, protocol_missing)) : __eliscript_value_29))((!__eliscript_truthy((direct === null))));
-    })(direct_method(record, value));
-  })(operation_record(protocol, operation));
+  {
+    const __eliscript_value_74 = operation_record(protocol, operation);
+    {
+      let record = __eliscript_value_74;
+      {
+        const __eliscript_value_75 = direct_method(record, value);
+        {
+          let direct = __eliscript_value_75;
+          return ((!(direct === null)) && (((__eliscript_value_76, __eliscript_value_77) => (__eliscript_value_76 !== __eliscript_value_77))(direct, protocol_missing) || ((__eliscript_value_78, __eliscript_value_79) => (__eliscript_value_78 !== __eliscript_value_79))(external_method(protocol_state(protocol), record, value), protocol_missing)));
+        }
+      }
+    }
+  }
 }
 function implements_protocol_QMARK_(protocol, value) {
-  return ((state) => {
-    return ((operations) => {
-      return ((index) => {
-        return ((implemented) => {
-          return (() => {
-            (() => {
-              while (__eliscript_truthy(((__eliscript_value_35) => (__eliscript_truthy(__eliscript_value_35) ? implemented : __eliscript_value_35))((index < ((operations) ?? []).length)))) {
-                ((record) => {
-                  return ((direct) => {
-                    return (__eliscript_truthy(((__eliscript_value_36) => (__eliscript_truthy(__eliscript_value_36) ? __eliscript_value_36 : ((__eliscript_value_37) => (__eliscript_truthy(__eliscript_value_37) ? (external_method(state, record, value) === protocol_missing) : __eliscript_value_37))((direct === protocol_missing))))((direct === null))) ? ((implemented = false)) : null);
-                  })(direct_method(record, value));
-                })(((state)["operations"])["get"](((((operations) ?? [])[index]) ?? null)));
-                ((index = (index + 1)));
+  {
+    const __eliscript_value_80 = protocol_state(protocol);
+    {
+      let state = __eliscript_value_80;
+      {
+        const __eliscript_value_81 = Object.keys(((protocol)["operations"]) ?? {});
+        {
+          let operations = __eliscript_value_81;
+          {
+            const __eliscript_value_82 = 0;
+            {
+              let index = __eliscript_value_82;
+              {
+                const __eliscript_value_83 = true;
+                {
+                  let implemented = __eliscript_value_83;
+                  while (__eliscript_truthy(((__eliscript_value_84) => (__eliscript_truthy(__eliscript_value_84) ? implemented : __eliscript_value_84))((index < ((operations) ?? []).length)))) {
+                    {
+                      const __eliscript_value_85 = ((state)["operations"])["get"](((((operations) ?? [])[index]) ?? null));
+                      {
+                        let record = __eliscript_value_85;
+                        {
+                          const __eliscript_value_86 = direct_method(record, value);
+                          {
+                            let direct = __eliscript_value_86;
+                            (((direct === null) || ((direct === protocol_missing) && (external_method(state, record, value) === protocol_missing))) ? ((implemented = false)) : null);
+                          }
+                        }
+                      }
+                    }
+                    ((index = (index + 1)));
+                  }
+                  return implemented;
+                }
               }
-              return null;
-            })();
-            return implemented;
-          })();
-        })(true);
-      })(0);
-    })(Object.keys(((protocol)["operations"]) ?? {}));
-  })(protocol_state(protocol));
+            }
+          }
+        }
+      }
+    }
+  }
 }
 export {define_protocol, define_protocol_from_definition, extend_protocol_category, extend_protocol_default, extend_protocol_type, implements_protocol_operation_QMARK_, implements_protocol_QMARK_, protocol_definition, protocol_host_category, protocol_method, protocol_slot};
 //# sourceMappingURL=protocol-impl.mjs.map

@@ -5,9 +5,9 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { emitNumericC } from "./emit-c.mjs";
+import { emitNumericC } from "../tools/experiments/native-wasm/emit-c.mjs";
 
-const root = resolve(import.meta.dir, "../../..");
+const root = resolve(import.meta.dir, "..");
 let directory, compiler;
 function run(command, args, extra = {}) {
   const result = spawnSync(command, args, { cwd: root, encoding: "utf8", timeout: 120_000, ...extra });

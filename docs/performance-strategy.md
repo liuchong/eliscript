@@ -467,3 +467,14 @@ Emacs 路线沿既有服务补快照/补丁契约与端到端度量，确认产�
 | 0131 | Source-bound 核心性能基线 | stable |
 | 0176 | Memoized Lazy Sequences | stable |
 | 0180 | General Tail-Call Optimization | **draft / pending** |
+
+
+### JS codegen 与后端计划的当前证据
+
+同步语句/返回上下文和可证明布尔条件的首轮优化已完成；同机前后对照的三个
+数值测试中，Node 约快 2.39–5.21×、Bun 约快 1.67–3.90×，生成 JS 接近
+手写 JS。这只证明本次负载与组合优化，不能外推所有程序或单项优化成本。
+[报告](../tools/experiments/native-wasm/results/js-codegen-probe-macos-arm64.json)绑定旧 JS 哈希并保留原始采样，
+未覆盖原先的 native/WASM 探索报告。下一步仍先验证真实批量负载和端到端预算；
+native/WASM 的待办与退出门槛统一维护在
+[后续计划](native-wasm-feasibility.md#后续计划与决策门槛)，避免重复清单漂移。

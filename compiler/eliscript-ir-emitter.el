@@ -233,30 +233,103 @@
         output
       (format "(%s)" output))))
 
+(defun eliscript-ir-emitter--boolean-p (node)
+  "Whether NODE is proven to produce a JavaScript boolean."
+  (pcase (eliscript-ir-node-kind node)
+    ('literal (memq (eliscript-ir-node-value node) '(t false)))
+    ('intrinsic
+     (memq (eliscript-ir-node-value node)
+           '(not = /= not= < <= > >= eq equal nil? undefined? null nullish?)))
+    ('short-circuit
+     (let ((nodes (eliscript-ir-emitter--children node)))
+       (and nodes (cl-every #'eliscript-ir-emitter--boolean-p nodes))))))
+
+(defun eliscript-ir-emitter--emit-test (node)
+  "Emit NODE as a condition without redundant boolean conversion."
+  (let ((output (eliscript-ir-emitter-emit-expression node)))
+    (if (eliscript-ir-emitter--boolean-p node) output
+      (format "__eliscript_truthy(%s)" output))))
+
+(defun eliscript-ir-emitter--emit-context-let (bindings body sequential returning)
+  "Emit simple BINDINGS and BODY in statement or RETURNING context.
+Initializers live outside the new binding scope, avoiding lexical TDZ.
+Sequential bindings each have their own scope, including duplicate names."
+  (if (null bindings)
+      (if returning (eliscript-ir-emitter--emit-returning-body body)
+        (eliscript-ir-emitter--emit-statement-body body))
+    (let* ((group (if sequential (list (car bindings)) bindings))
+           (temporaries (mapcar (lambda (_) (eliscript-emitter--fresh-name)) group))
+           initializers declarations)
+      (cl-mapc
+       (lambda (binding temporary)
+         (let ((initializer (eliscript-ir-emitter--binding-initializer binding)))
+           (push (format "const %s = %s;" temporary
+                         (if initializer
+                             (eliscript-ir-emitter-emit-expression initializer)
+                           "null")) initializers)))
+       group temporaries)
+      (cl-mapc
+       (lambda (binding temporary)
+         (push (format "let %s = %s;"
+                       (eliscript-ir-emitter--emit-binding-target binding)
+                       temporary) declarations))
+       group temporaries)
+      (push (eliscript-ir-emitter--emit-context-let
+             (and sequential (cdr bindings)) body sequential returning)
+            declarations)
+      (concat "{\n"
+              (eliscript-emitter--indent
+               (string-join
+                (append (nreverse initializers)
+                        (list (concat "{\n"
+                                      (eliscript-emitter--indent
+                                       (string-join (nreverse declarations) "\n"))
+                                      "\n}"))) "\n"))
+              "\n}"))))
+
+(defun eliscript-ir-emitter--emit-context (node returning)
+  "Emit NODE with its value discarded or RETURNING from the current function."
+  (let ((kind (eliscript-ir-node-kind node))
+        (nodes (eliscript-ir-emitter--children node)))
+    (eliscript-ir-emitter--locate
+     node
+     (cond
+      ;; Keep asynchronous expression boundaries and their promise scheduling.
+      ((eliscript-ir-emitter--contains-await-p node)
+       (concat (if returning "return " "")
+               (eliscript-ir-emitter-emit-expression node) ";"))
+      ((eq kind 'sequence)
+       (if returning (eliscript-ir-emitter--emit-returning-body nodes)
+         (eliscript-ir-emitter--emit-statement-body nodes)))
+      ((eq kind 'loop)
+       (concat "while (" (eliscript-ir-emitter--emit-test (car nodes)) ") {\n"
+               (eliscript-emitter--indent
+                (eliscript-ir-emitter--emit-statement-body (cdr nodes)))
+               "\n}" (if returning "\nreturn null;" "")))
+      ((and (eq kind 'lexical-bindings)
+            (cl-every (lambda (binding)
+                        (not (eliscript-ir-property binding :pattern)))
+                      (seq-take nodes (eliscript-ir-property node :binding-count))))
+       (pcase-let ((`(,bindings ,body)
+                    (eliscript-ir-emitter--split-counted-children node :binding-count)))
+         (eliscript-ir-emitter--emit-context-let
+          bindings body (eliscript-ir-property node :sequential) returning)))
+      (t (concat (if returning "return " "")
+                 (eliscript-ir-emitter-emit-expression node) ";"))))))
+
 (defun eliscript-ir-emitter--emit-returning-body (nodes)
   "Emit NODES as a block body that returns its final value."
-  (if (null nodes)
-      "return null;"
-    (let ((initial (butlast nodes))
-          (final (car (last nodes))))
-      (mapconcat
-       #'identity
-       (append
-        (mapcar (lambda (node)
-                  (concat (eliscript-ir-emitter-emit-expression node) ";"))
-                initial)
-        (list (concat "return "
-                      (eliscript-ir-emitter-emit-expression final)
-                      ";")))
-       "\n"))))
+  (if (null nodes) "return null;"
+    (string-join
+     (append (mapcar (lambda (node) (eliscript-ir-emitter--emit-context node nil))
+                     (butlast nodes))
+             (list (eliscript-ir-emitter--emit-context (car (last nodes)) t)))
+     "\n")))
 
 (defun eliscript-ir-emitter--emit-statement-body (nodes)
   "Emit NODES as statements whose values are discarded."
-  (mapconcat
-   (lambda (node)
-     (concat (eliscript-ir-emitter-emit-expression node) ";"))
-   nodes
-   "\n"))
+  (mapconcat (lambda (node) (eliscript-ir-emitter--emit-context node nil))
+             nodes "\n"))
 
 (defun eliscript-ir-emitter--contains-await-p (value)
   "Return non-nil when VALUE contains `await' in the current function."
@@ -543,22 +616,21 @@
 
 (defun eliscript-ir-emitter--emit-if (nodes)
   "Emit conditional child NODES."
-  (format "(__eliscript_truthy(%s) ? %s : %s)"
-          (eliscript-ir-emitter-emit-expression (nth 0 nodes))
+  (format "(%s ? %s : %s)"
+          (eliscript-ir-emitter--emit-test (nth 0 nodes))
           (eliscript-ir-emitter-emit-expression (nth 1 nodes))
           (if (nth 2 nodes)
               (eliscript-ir-emitter-emit-expression (nth 2 nodes))
             "null")))
 
 (defun eliscript-ir-emitter--emit-conditional-sugar (node)
-  "Emit when or unless NODE."
+  "Emit when or unless NODE with one condition conversion."
   (let* ((children (eliscript-ir-emitter--children node))
-         (test (eliscript-ir-emitter-emit-expression (car children)))
+         (test (eliscript-ir-emitter--emit-test (car children)))
          (body (eliscript-ir-emitter--emit-do (cdr children))))
-    (if (eq (eliscript-ir-node-value node) 'when)
-        (format "(__eliscript_truthy(%s) ? %s : null)" test body)
-      (format "(__eliscript_truthy((!__eliscript_truthy(%s))) ? %s : null)"
-              test body))))
+    (format "(%s ? %s : null)"
+            (if (eq (eliscript-ir-node-value node) 'when) test
+              (format "(!%s)" test)) body)))
 
 (defun eliscript-ir-emitter--emit-cond (clauses)
   "Emit nested conditional expressions for IR CLAUSES."
@@ -573,8 +645,8 @@
        (if (and (eq (eliscript-ir-node-kind test) 'literal)
                 (eq (eliscript-ir-node-value test) t))
            (eliscript-ir-emitter--emit-do body)
-         (format "(__eliscript_truthy(%s) ? %s : %s)"
-                 (eliscript-ir-emitter-emit-expression test)
+         (format "(%s ? %s : %s)"
+                 (eliscript-ir-emitter--emit-test test)
                  (eliscript-ir-emitter--emit-do body)
                  (eliscript-ir-emitter--emit-cond (cdr clauses))))))))
 
@@ -733,13 +805,10 @@
      ""
      (eliscript-emitter--indent
       (concat
-       (format "while (__eliscript_truthy(%s)) {\n"
-               (eliscript-ir-emitter-emit-expression test))
+       (format "while (%s) {\n"
+               (eliscript-ir-emitter--emit-test test))
        (eliscript-emitter--indent
-        (mapconcat
-         (lambda (child)
-           (concat (eliscript-ir-emitter-emit-expression child) ";"))
-         body "\n"))
+        (eliscript-ir-emitter--emit-statement-body body))
        "\n}\nreturn null;"))
      ""
      (eliscript-ir-emitter--contains-await-p children))))
@@ -781,6 +850,11 @@
    ((null nodes) (if (eq kind 'and) "true" "null"))
    ((null (cdr nodes))
     (eliscript-ir-emitter-emit-expression (car nodes)))
+   ((and (cl-every #'eliscript-ir-emitter--boolean-p nodes)
+         (not (eliscript-ir-emitter--contains-await-p nodes)))
+    (format "(%s)"
+            (mapconcat #'eliscript-ir-emitter-emit-expression nodes
+                       (if (eq kind 'and) " && " " || "))))
    (t
     (let ((temporary (eliscript-emitter--fresh-name))
           (first (eliscript-ir-emitter-emit-expression (car nodes)))
@@ -860,8 +934,8 @@
     (pcase name
       ('not
        (eliscript-ir-emitter--require-arity node 1 1)
-       (format "(!__eliscript_truthy(%s))"
-               (eliscript-ir-emitter-emit-expression (car nodes))))
+       (format "(!%s)"
+               (eliscript-ir-emitter--emit-test (car nodes))))
       ('+ (if nodes
               (format "(%s)"
                       (mapconcat #'eliscript-ir-emitter-emit-expression

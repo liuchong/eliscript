@@ -4,23 +4,24 @@ const __eliscript_truthy = (value) => value !== false && value != null;
 
 const greeting = "hello";
 function factorial(n) {
-  return (__eliscript_truthy((n <= 1)) ? 1 : (n * factorial((n - 1))));
+  return ((n <= 1) ? 1 : (n * factorial((n - 1))));
 }
 function classify(n) {
-  return (__eliscript_truthy((n < 0)) ? "negative" : (__eliscript_truthy((n === 0)) ? "zero" : "positive"));
+  return ((n < 0) ? "negative" : ((n === 0) ? "zero" : "positive"));
 }
 function sum_to(n) {
-  return ((total, current) => {
-    return (() => {
-      (() => {
-        while (__eliscript_truthy((current > 0))) {
-          ((total = (total + current)), (current = (current - 1)));
-        }
-        return null;
-      })();
+  {
+    const __eliscript_value_1 = 0;
+    const __eliscript_value_2 = n;
+    {
+      let total = __eliscript_value_1;
+      let current = __eliscript_value_2;
+      while ((current > 0)) {
+        ((total = (total + current)), (current = (current - 1)));
+      }
       return total;
-    })();
-  })(0, n);
+    }
+  }
 }
 function collect(required, optional = null, ...rest) {
   return [required, optional, rest];

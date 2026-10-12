@@ -5,7 +5,7 @@ import { cases, samples, warmups } from "./cases.mjs";
 const [mode, modulePath, manifestPath] = process.argv.slice(2);
 const loadStart = performance.now();
 let functions;
-if (mode === "js" || mode === "reference-js") {
+if (mode === "js" || mode === "baseline-js" || mode === "reference-js") {
   functions = await import(pathToFileURL(modulePath).href);
 } else if (mode === "wasm") {
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
