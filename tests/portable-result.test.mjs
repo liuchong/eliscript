@@ -24,6 +24,8 @@ const sources = [
 const emacs = process.env.EMACS ?? "emacs";
 
 async function runSuccessful(command, extraEnvironment = {}) {
+  const started = performance.now();
+  if (process.env.CI) console.error("host check starting:", command.join(" "));
   const child = Bun.spawn(command, {
     cwd: projectDirectory,
     env: { ...process.env, EMACS: emacs, ...extraEnvironment },
@@ -35,6 +37,7 @@ async function runSuccessful(command, extraEnvironment = {}) {
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
   ]);
+  if (process.env.CI) console.error("host check completed:", command.join(" "), `(${Math.round(performance.now() - started)}ms; exit ${exitCode})`);
   if (exitCode !== 0) {
     throw new Error(stderr.trim() || stdout.trim() ||
       `${command[0]} exited with ${exitCode}`);

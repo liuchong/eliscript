@@ -5,6 +5,7 @@ import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { checkCompatibilityWorkflow } from "../ci/render-workflow.mjs";
+import { checkBrowserCompatibilityWorkflow } from "../ci/render-browser-workflow.mjs";
 import { generateApiArtifacts } from "../surface/generate-api.mjs";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -164,6 +165,7 @@ export function validateIntegrityContract(contract) {
   const derived = Array.isArray(artifacts?.derived) ? artifacts.derived : [];
   const derivedIds = derived.map((entry) => entry?.id);
   if (JSON.stringify(derivedIds) !== JSON.stringify([
+    "browser-compatibility-workflow",
     "compatibility-workflow",
     "library-api",
   ]) || derived.some((entry) => !isPlainObject(entry) ||
@@ -592,6 +594,13 @@ async function checkDeterministicArtifacts(root, contract, compiler) {
 async function checkDerivedArtifacts(root, contract) {
   const expected = new Map(contract.artifacts.derived.map((entry) =>
     [entry.id, entry.outputs]));
+  const browser = await checkBrowserCompatibilityWorkflow({ root });
+  if (JSON.stringify(expected.get("browser-compatibility-workflow")) !==
+      JSON.stringify([browser.workflow])) {
+    throw new RepositoryIntegrityError([
+      "browser workflow outputs differ from the artifact registry",
+    ]);
+  }
   const workflow = await checkCompatibilityWorkflow({ root });
   if (JSON.stringify(expected.get("compatibility-workflow")) !==
       JSON.stringify([workflow.workflow])) {
@@ -606,7 +615,7 @@ async function checkDerivedArtifacts(root, contract) {
       "library API outputs differ from the artifact registry",
     ]);
   }
-  return workflow.workflow ? 1 + api.files.length : api.files.length;
+  return 2 + api.files.length;
 }
 
 export async function checkGeneratedArtifacts(options = {}) {

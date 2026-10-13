@@ -42,6 +42,42 @@ make test-core
 Use `make test-applications` separately when changing an application adapter.
 Do not use an application result as evidence for a core criterion.
 
+### CI Coverage And Case Inventory
+
+`Compatibility` preserves four complete-suite and strict-byte-compilation jobs:
+Linux/macOS crossed with Emacs 29.4/30.2. The toolchain and commands remain
+owned by `contracts/compatibility-matrix.json`.
+
+`Browser compatibility` adds six required browser checks: Chromium, Firefox,
+and WebKit on each operating system. Its separate contract,
+`contracts/browser-compatibility.json`, reuses the exact core toolchain without
+changing the retained local matrix contract. Each job runs the entire direct
+WASM backend test file, installs its engine through the locked Playwright CLI,
+and retains `tests.log` even when a test fails. A failed test piped to the log
+must still fail the job.
+
+The browser cases cover identical WASM bytes, no host imports, JS/WASM numeric
+parity, signed zero, NaN, infinities, subnormals, integer boundaries, evaluation
+order, fractional loop guards, batching, and structured rejection of unsupported
+syntax. An unknown engine selection is an error rather than a fallback.
+Artifact packaging separately checks credential and path patterns at every
+position in Unicode text, Unicode live tokens, empty/unset tokens, and literal
+near misses. Scale fixtures retain their original sizes, assertions, and
+deadlines; independent immutable-output host runs may execute concurrently.
+Their CI logs identify the active command and completed phase timings.
+Site viewport checks use isolated contexts in parallel, retaining every wait,
+layout threshold, and scriptless check. Missing browsers fail validation;
+invalid engine lists are rejected and fingerprint failures release listeners.
+
+Regenerate the browser workflow with
+`bun tools/ci/render-browser-workflow.mjs --write`. Locally install all engines
+using `bun node_modules/playwright-core/cli.js install --with-deps chromium firefox webkit`,
+then run `ELISCRIPT_TEST_BROWSER=ENGINE bun test tests/direct-wasm-backend.test.mjs`
+for each engine. Generated workflow drift and omitted engines fail the contract
+gate. Acceptance requires all four core jobs and all six browser jobs for the
+same commit; these semantic checks do not replace production performance gates
+or prove a complete WASM compiler runtime, native backend, or 3×3 implementation.
+
 ## Documentation
 
 Add every required core document to `contracts/documentation.json`. Internal

@@ -38,7 +38,7 @@ test("repository dependencies and generated artifacts satisfy declared boundarie
     artifacts: {
       deterministicArtifacts: 4,
       deterministicOutputs: 7,
-      derivedArtifacts: 3,
+      derivedArtifacts: 4,
       benchmarkArtifacts: 14,
       benchmarkSources: 291,
     },

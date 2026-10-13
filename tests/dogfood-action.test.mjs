@@ -288,6 +288,15 @@ test("artifact scans reject forbidden text and live tokens throughout Unicode st
           error.code === (pattern === process.env.GITHUB_TOKEN ? "DOGFOOD-PACKAGE-005" : "DOGFOOD-PACKAGE-002"));
       }
     }
+    process.env.GITHUB_TOKEN = "eliscript-令牌-😀";
+    for (const text of [process.env.GITHUB_TOKEN + padding, padding + process.env.GITHUB_TOKEN + padding, padding + process.env.GITHUB_TOKEN]) {
+      assert.throws(() => scan(text, "Unicode token"), error => error.code === "DOGFOOD-PACKAGE-005");
+    }
+    process.env.GITHUB_TOKEN = "";
+    scan("😀ordinary text𝄞", "empty token");
+    delete process.env.GITHUB_TOKEN;
+    scan("eliscript-scan-fixture-token", "unset token");
+    for (const text of ["/User/", "/hom/", "ghp", "github_pat", "----BEGIN"]) scan(text, "literal near miss");
   `, pathToFileURL(module).href], { env: { GITHUB_TOKEN: "eliscript-scan-fixture-token" } });
   expect(checked.exitCode).toBe(0);
 });

@@ -232,17 +232,21 @@ export async function fingerprintTree(directory) {
  * @returns {Promise<{ report: object, failures: string[] }>}
  */
 export async function runMatrix({ site, engines = ENGINES, port = 8899 }) {
-  const origin = `http://127.0.0.1:${port}/`;
+  if (!Array.isArray(engines) || engines.length === 0 ||
+      new Set(engines).size !== engines.length || engines.some(name => typeof name !== "string" || !Object.hasOwn(DRIVERS, name))) {
+    throw new Error("engines must name nonempty, unique known engines");
+  }
   const server = await serveTree(site, port);
+  const origin = server.origin;
   const failures = [];
-  const report = {
-    format: "dogfood-browser-matrix",
-    version: 1,
-    viewports: VIEWPORTS.map((entry) => entry.name),
-    siteFingerprint: await fingerprintTree(site),
-    engines: [],
-  };
   try {
+    const report = {
+      format: "dogfood-browser-matrix",
+      version: 1,
+      viewports: VIEWPORTS.map((entry) => entry.name),
+      siteFingerprint: await fingerprintTree(site),
+      engines: [],
+    };
     for (const name of engines) {
       const driver = DRIVERS[name];
       if (!driver) throw new Error(`unknown engine ${name}`);
@@ -251,17 +255,17 @@ export async function runMatrix({ site, engines = ENGINES, port = 8899 }) {
       try {
         browser = await driver.launch();
         entry.version = browser.version();
-        for (const spec of VIEWPORTS) {
-          // The scripted pass, then the same page with scripts disabled.
+        const checks = await Promise.allSettled(VIEWPORTS.map(async spec => {
+          // Every viewport owns isolated scripted and scriptless contexts.
           const context = await browser.newContext({
             viewport: spec.viewport,
             isMobile: Boolean(spec.isMobile),
             hasTouch: Boolean(spec.hasTouch),
             deviceScaleFactor: spec.deviceScaleFactor ?? 1,
           });
-          const page = await context.newPage();
-          const scripted = await scriptedChecks(page, origin, spec);
-          await context.close();
+          let scripted;
+          try { scripted = await scriptedChecks(await context.newPage(), origin, spec); }
+          finally { await context.close(); }
 
           const plainContext = await browser.newContext({
             viewport: spec.viewport,
@@ -270,10 +274,16 @@ export async function runMatrix({ site, engines = ENGINES, port = 8899 }) {
             deviceScaleFactor: spec.deviceScaleFactor ?? 1,
             javaScriptEnabled: false,
           });
-          const plainPage = await plainContext.newPage();
-          const plain = await scriptlessChecks(plainPage, origin);
-          await plainContext.close();
+          let plain;
+          try { plain = await scriptlessChecks(await plainContext.newPage(), origin); }
+          finally { await plainContext.close(); }
 
+          return { scripted, plain };
+        }));
+        for (const [index, check] of checks.entries()) {
+          const spec = VIEWPORTS[index];
+          if (check.status === "rejected") throw check.reason;
+          const { scripted, plain } = check.value;
           const viewportFailures = [...scripted.failures, ...plain.failures];
           entry.viewports.push({
             name: spec.name,
@@ -293,10 +303,10 @@ export async function runMatrix({ site, engines = ENGINES, port = 8899 }) {
       }
       report.engines.push(entry);
     }
+    return { report, failures };
   } finally {
     server.stop();
   }
-  return { report, failures };
 }
 
 function parseArguments(argv) {

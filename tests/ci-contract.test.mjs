@@ -9,11 +9,17 @@ import {
   renderWorkflow,
   validateCompatibilityMatrix,
 } from "../tools/ci/render-workflow.mjs";
+import {
+  checkBrowserCompatibilityWorkflow,
+  renderBrowserWorkflow,
+  validateBrowserCompatibility,
+} from "../tools/ci/render-browser-workflow.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const baseline = JSON.parse(
   await readFile(path.join(root, "contracts/compatibility-matrix.json"), "utf8"),
 );
+const browserContract = JSON.parse(await readFile(path.join(root, "contracts/browser-compatibility.json"), "utf8"));
 
 function copyBaseline() {
   return structuredClone(baseline);
@@ -118,5 +124,44 @@ describe("compatibility matrix contract", () => {
     expect(browser).toBeGreaterThan(dependencies);
     expect(browser).toBeLessThan(tests);
     expect(workflow).toContain("bun node_modules/playwright-core/cli.js install --with-deps chromium");
+  });
+});
+
+describe("browser compatibility matrix", () => {
+  test("all three real engines run on both supported operating systems", async () => {
+    const report = await checkBrowserCompatibilityWorkflow({ root });
+    expect(report.jobs).toBe(6);
+    expect(report.browserEngines).toEqual(["chromium", "firefox", "webkit"]);
+    const workflow = renderBrowserWorkflow(browserContract, baseline);
+    for (const system of baseline.operatingSystems) for (const browser of report.browserEngines) {
+      expect(workflow).toContain(`name: ${system.id}-${browser}`);
+    }
+    expect(workflow).toContain('install --with-deps "${{ matrix.browser }}"');
+    expect(workflow).toContain("ELISCRIPT_TEST_BROWSER: ${{ matrix.browser }}");
+    expect(workflow).toContain("bun test tests/direct-wasm-backend.test.mjs 2>&1 | tee");
+    expect(workflow).toContain("set -o pipefail");
+    expect(workflow).toContain("if: always()");
+    expect(workflow).toContain(`actions/upload-artifact@${browserContract.artifactAction.revision}`);
+  });
+
+  test("browser coverage cannot omit, duplicate or silently rename an engine", () => {
+    for (const browserEngines of [[], ["chromium"], ["chromium", "chromium", "webkit"], ["chromium", "safari", "webkit"], ["webkit", "firefox", "chromium"]]) {
+      expect(() => validateBrowserCompatibility({ ...browserContract, browserEngines }, baseline)).toThrow(/browserEngines/);
+    }
+  });
+
+  test("browser gate rejects filtering, skipped execution and mutable artifact actions", () => {
+    for (const testCommand of ["true", `${browserContract.testCommand} || true`, `${browserContract.testCommand} --test-name-pattern browser`]) {
+      expect(() => validateBrowserCompatibility({ ...browserContract, testCommand }, baseline)).toThrow(/complete direct WASM/);
+    }
+    expect(() => validateBrowserCompatibility({ ...browserContract,
+      artifactAction: { ...browserContract.artifactAction, revision: "v4" } }, baseline)).toThrow(/full commit SHA/);
+  });
+
+  test("browser checker rejects a swallowed failure or removed evidence step", async () => {
+    const workflow = renderBrowserWorkflow(browserContract, baseline);
+    for (const drift of [workflow.replace("set -o pipefail", "true"), workflow.replace("if: always()", "if: success()")]) {
+      await expect(checkBrowserCompatibilityWorkflow({ contract: browserContract, matrix: baseline, workflowText: drift })).rejects.toThrow(/differs/);
+    }
   });
 });

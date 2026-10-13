@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { chromium } from "playwright-core";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
@@ -9,7 +8,6 @@ const ROOT = resolve(import.meta.dir, "..");
 const SITE = resolve(ROOT, "examples/dogfood/_site");
 
 let staging;
-let available = true;
 let report;
 
 async function ensureSite() {
@@ -31,13 +29,6 @@ async function ensureSite() {
 beforeAll(async () => {
   await ensureSite();
   staging = await mkdtemp(resolve(ROOT, ".eliscript-browser-matrix-"));
-  try {
-    const probe = await chromium.launch();
-    await probe.close();
-  } catch {
-    available = false;
-    return;
-  }
   const result = await runMatrix({ site: SITE, engines: ["chromium"], port: 8901 });
   report = result.report;
   report.failures = result.failures;
@@ -63,11 +54,6 @@ test("colour parsing and contrast follow the WCAG definition", () => {
 });
 
 test("a real engine passes every viewport", async () => {
-  if (!available) {
-    // A machine without the engine records the gap rather than claiming a pass.
-    expect(available).toBe(false);
-    return;
-  }
   expect(report.failures).toEqual([]);
   expect(report.engines.length).toBe(1);
   const [engine] = report.engines;
@@ -76,7 +62,6 @@ test("a real engine passes every viewport", async () => {
 });
 
 test("every viewport stays inside its width and keeps its text legible", async () => {
-  if (!available) return;
   for (const viewport of report.engines[0].viewports) {
     const { measured, failures } = viewport;
     expect(failures).toEqual([]);
@@ -95,7 +80,6 @@ test("every viewport stays inside its width and keeps its text legible", async (
 });
 
 test("the article is complete without scripts", async () => {
-  if (!available) return;
   for (const viewport of report.engines[0].viewports) {
     // A static article is the product: the browser must be able to read it with
     // scripting disabled.
@@ -104,7 +88,6 @@ test("the article is complete without scripts", async () => {
 });
 
 test("the report binds the tree it describes", async () => {
-  if (!available) return;
   expect(report.format).toBe("dogfood-browser-matrix");
   expect(report.version).toBe(1);
   expect(report.siteFingerprint).toMatch(/^[0-9a-f]{64}$/u);
@@ -126,4 +109,19 @@ test("the report binds the tree it describes", async () => {
   const written = JSON.parse(await readFile(join(staging, "report.json"), "utf8"));
   expect(written.siteFingerprint).toBe(report.siteFingerprint);
   expect(written.failures).toEqual([]);
+});
+
+test("the matrix rejects empty, duplicate and unknown engine selections", async () => {
+  for (const engines of [[], ["chromium", "chromium"], ["unknown"], ["toString"], [null], [1]]) {
+    await expect(runMatrix({ site: SITE, engines, port: 0 })).rejects.toThrow(/nonempty, unique known engines/);
+  }
+});
+
+test("a fingerprint failure releases the loopback listener", async () => {
+  const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("probe") });
+  const port = probe.port;
+  probe.stop(true);
+  await expect(runMatrix({ site: join(staging, "missing-tree"), engines: ["chromium"], port })).rejects.toThrow(/ENOENT/);
+  const rebound = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response("rebound") });
+  try { expect(rebound.port).toBe(port); } finally { rebound.stop(true); }
 });

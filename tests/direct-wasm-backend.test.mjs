@@ -4,12 +4,15 @@ import { mkdtemp, readFile, readdir, rm, writeFile, mkdir } from "node:fs/promis
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { resolve, relative } from "node:path";
-import { pathToFileURL } from "node:url";
-import { chromium } from "playwright-core";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { chromium, firefox, webkit } from "playwright-core";
 import { backendModules, buildBackends, root } from "../tools/backends/build.mjs";
 import { validateDirectWasmReport } from "../tools/backends/benchmark.mjs";
 
-let directory, generations;
+const browserName = process.env.ELISCRIPT_TEST_BROWSER ?? "chromium";
+const browsers = { chromium, firefox, webkit };
+assert(Object.hasOwn(browsers, browserName), `unknown ELISCRIPT_TEST_BROWSER: ${browserName}`);
+let directory, generations, browserBundle;
 const sameNumber = (actual, expected, label) => assert(Object.is(actual, expected), `${label}: ${actual} != ${expected}`);
 
 const optimizationCases = `
@@ -59,6 +62,29 @@ const optimizationCases = `
   (defun negated-condition (n) (let ((i 0))
     (while (not (or (>= i 3) (>= i n))) (setq i (1+ i))) i))
   (export bounded fractional negative-zero mutable-bound fractional-step conditional-set cyclic-truth non-power-cycle effects isolated squares squares-or condition-effects negated-condition)`;
+
+const unsupportedCases = [
+    '(defun f (x) "text") (export f)',
+    '(defun f (x) [x]) (export f)',
+    '(defun f (x) (js* "x")) (export f)',
+    '(defun f (x) (lambda (y) y)) (export f)',
+    '(defasync f (x) x) (export f)',
+    '(defun f (&optional x) x) (export f)',
+    '(defun f (x) (let ((a t)) (setq a x) x)) (export f)',
+    '(defun f (x) (+ x x x)) (export f)',
+    '(defun f (x) (= x 1)) (export f)',
+    '(defun f (x) (if false "unreachable" x)) (export f)',
+    '(import "host" g) (defun f (x) (g x)) (export f)',
+];
+
+const ieeeCases = `
+  (defun ieee-add (x y) (+ x y))
+  (defun ieee-multiply (x y) (* x y))
+  (defun ieee-divide (x y) (/ x y))
+  (defun ieee-ordered (x) (+ (+ x 10000000000000000) -10000000000000000))
+  (defun ieee-zero (x) (* x -0.0))
+  (defun ieee-truth (x) (if x 1 2))
+  (export ieee-add ieee-multiply ieee-divide ieee-ordered ieee-zero ieee-truth)`;
 
 const parallelCases = `
   (defun scalar (n seed) (let ((i 0) (x seed) (sum 0))
@@ -422,19 +448,7 @@ test("direct WASM rejects unsupported dynamic capabilities before optimization",
     assert.equal(error.eliscriptDiagnostic.location.file, "empty.eli");
     return true;
   });
-  for (const source of [
-    '(defun f (x) "text") (export f)',
-    '(defun f (x) [x]) (export f)',
-    '(defun f (x) (js* "x")) (export f)',
-    '(defun f (x) (lambda (y) y)) (export f)',
-    '(defasync f (x) x) (export f)',
-    '(defun f (&optional x) x) (export f)',
-    '(defun f (x) (let ((a t)) (setq a x) x)) (export f)',
-    '(defun f (x) (+ x x x)) (export f)',
-    '(defun f (x) (= x 1)) (export f)',
-    '(defun f (x) (if false "unreachable" x)) (export f)',
-    '(import "host" g) (defun f (x) (g x)) (export f)',
-  ]) {
+  for (const source of unsupportedCases) {
     const program = generations[2].compiler.compile_ir_string(source, "unsupported.eli");
     assert.throws(() => generations[2].wasm.emit_numeric_wasm(program), error => {
       assert.equal(error.eliscriptDiagnostic.code, "ELI-B0001");
@@ -488,46 +502,123 @@ test("direct WASM performance report preserves budgets and blocks failed promoti
   assert.equal(promotion.status, report.decision.productionPassed ? 0 : 1, promotion.stderr);
 });
 
-test("browser JS compiler emits the identical WASM bytes without an external backend", async () => {
-  const entry = resolve(directory, "browser-entry.mjs");
-  await writeFile(entry, `export {compile_ir_string,emit_ir_string} from ${JSON.stringify(resolve(directory, "g3/bootstrap/compiler.mjs"))};\nexport {emit_numeric_wasm} from ${JSON.stringify(resolve(directory, "g3/backends/wasm.mjs"))};`);
-  const build = await Bun.build({ entrypoints: [entry], target: "browser", format: "esm" });
-  assert(build.success);
-  const bundle = await build.outputs[0].text();
-  const source = await readFile(resolve(root, "tools/experiments/native-wasm/kernels.eli"), "utf8") + "\n" + optimizationCases + "\n" + parallelCases;
-  const browser = await chromium.launch();
+async function evaluateBrowser(evaluate, data) {
+  if (!browserBundle) {
+    const entry = resolve(directory, "browser-entry.mjs");
+    await writeFile(entry, `export {compile_ir_string,emit_ir_string} from ${JSON.stringify(resolve(directory, "g3/bootstrap/compiler.mjs"))};\nexport {emit_numeric_wasm} from ${JSON.stringify(resolve(directory, "g3/backends/wasm.mjs"))};`);
+    const build = await Bun.build({ entrypoints: [entry], target: "browser", format: "esm" });
+    assert(build.success);
+    browserBundle = await build.outputs[0].text();
+  }
+  const browser = await browsers[browserName].launch();
   try {
     const page = await browser.newPage();
-    const result = await page.evaluate(async ({ bundle, source }) => {
-      const url = URL.createObjectURL(new Blob([bundle], { type: "text/javascript" }));
-      try {
-        const compiler = await import(url);
-        const bytes = compiler.emit_numeric_wasm(compiler.compile_ir_string(source, "browser.eli"));
-        const module = new WebAssembly.Module(Uint8Array.from(bytes));
-        const instance = new WebAssembly.Instance(module);
-        const jsUrl = URL.createObjectURL(new Blob([compiler.emit_ir_string(compiler.compile_ir_string(source, "browser.eli"))], { type: "text/javascript" }));
-        try {
-          const js = await import(jsUrl);
-          for (const name of ["bounded", "fractional", "negative-zero", "mutable-bound", "fractional-step", "conditional-set", "cyclic-truth", "non-power-cycle", "effects", "isolated", "squares", "squares-or", "condition-effects", "negated-condition"]) {
-            for (const x of [-Infinity, -7, -0, 0, .5, 1, 1.1, 9, 129, 257, Infinity, NaN]) {
-              if (name === "fractional" && x === Infinity) continue;
-              if (!Object.is(instance.exports[name](x), js[name.replaceAll("-", "_")](x))) throw Error(name + ":" + x);
-            }
-          }
-          for (const name of ["scalar-batch", "indexed-batch", "moving-batch", "dependent-batch"]) {
-            for (const n of [0, .5, 1, 1.1, 2, 2.5, 9, NaN]) for (const seed of [-0, .123, NaN]) for (const calls of [.5, 1, 2, 2.1, 3, 5, NaN]) {
-              if (!Object.is(instance.exports[name](n, seed, calls), js[name.replaceAll("-", "_")](n, seed, calls))) throw Error(name + ":" + n + ":" + calls);
-            }
-          }
-          for (const width of [-0, 0, .5, 1, 1.5, 2.1, 3, NaN]) for (const limit of [-0, 0, .5, 1, 1.5, 2.1, 17, NaN]) {
-            if (!Object.is(instance.exports["escape-grid"](width, limit), js.escape_grid(width, limit))) throw Error("grid:" + width + ":" + limit);
-          }
-        } finally { URL.revokeObjectURL(jsUrl); }
-        return { bytes, result: instance.exports.recurrence(1000, .123), imports: WebAssembly.Module.imports(module) };
-      } finally { URL.revokeObjectURL(url); }
-    }, { bundle, source });
-    assert.deepEqual(Uint8Array.from(result.bytes), compile(source, "browser.eli").bytes);
-    assert.equal(result.result, 641.1641723326824);
-    assert.deepEqual(result.imports, []);
+    const result = await page.evaluate(evaluate, { bundle: browserBundle, ...data });
+    console.log(`browser engine verified: ${browserName} ${browser.version()}`);
+    return result;
   } finally { await browser.close(); }
+}
+
+test("browser JS compiler emits the identical WASM bytes without an external backend", async () => {
+  const source = await readFile(resolve(root, "tools/experiments/native-wasm/kernels.eli"), "utf8") + "\n" + optimizationCases + "\n" + parallelCases;
+  const result = await evaluateBrowser(async ({ bundle, source }) => {
+    const url = URL.createObjectURL(new Blob([bundle], { type: "text/javascript" }));
+    try {
+      const compiler = await import(url);
+      const program = compiler.compile_ir_string(source, "browser.eli");
+      // Keep the JS oracle independent of any WASM-side IR transformation,
+      // while parsing the source only once.
+      const javascript = compiler.emit_ir_string(structuredClone(program));
+      const bytes = compiler.emit_numeric_wasm(program);
+      const module = new WebAssembly.Module(Uint8Array.from(bytes));
+      const instance = new WebAssembly.Instance(module);
+      const jsUrl = URL.createObjectURL(new Blob([javascript], { type: "text/javascript" }));
+      try {
+        const js = await import(jsUrl);
+        for (const name of ["bounded", "fractional", "negative-zero", "mutable-bound", "fractional-step", "conditional-set", "cyclic-truth", "non-power-cycle", "effects", "isolated", "squares", "squares-or", "condition-effects", "negated-condition"]) {
+          for (const x of [-Infinity, -7, -0, 0, .5, 1, 1.1, 9, 129, 257, Infinity, NaN]) {
+            if (name === "fractional" && x === Infinity) continue;
+            if (!Object.is(instance.exports[name](x), js[name.replaceAll("-", "_")](x))) throw Error(name + ":" + x);
+          }
+        }
+        for (const name of ["scalar-batch", "indexed-batch", "moving-batch", "dependent-batch"]) {
+          for (const n of [0, .5, 1, 1.1, 2, 2.5, 9, NaN]) for (const seed of [-0, .123, NaN]) for (const calls of [.5, 1, 2, 2.1, 3, 5, NaN]) {
+            if (!Object.is(instance.exports[name](n, seed, calls), js[name.replaceAll("-", "_")](n, seed, calls))) throw Error(name + ":" + n + ":" + calls);
+          }
+        }
+        for (const width of [-0, 0, .5, 1, 1.5, 2.1, 3, NaN]) for (const limit of [-0, 0, .5, 1, 1.5, 2.1, 17, NaN]) {
+          if (!Object.is(instance.exports["escape-grid"](width, limit), js.escape_grid(width, limit))) throw Error("grid:" + width + ":" + limit);
+        }
+      } finally { URL.revokeObjectURL(jsUrl); }
+      return { bytes, result: instance.exports.recurrence(1000, .123), imports: WebAssembly.Module.imports(module) };
+    } finally { URL.revokeObjectURL(url); }
+  }, { source });
+  assert.deepEqual(Uint8Array.from(result.bytes), compile(source, "browser.eli").bytes);
+  assert.equal(result.result, 641.1641723326824);
+  assert.deepEqual(result.imports, []);
+});
+
+test("browser WASM preserves subnormals, signed zero, NaN and integer boundaries against JS", async () => {
+  const result = await evaluateBrowser(async ({ bundle, source }) => {
+    const compilerUrl = URL.createObjectURL(new Blob([bundle], { type: "text/javascript" }));
+    let jsUrl;
+    try {
+      const compiler = await import(compilerUrl);
+      const program = compiler.compile_ir_string(source, "browser-ieee.eli");
+      const javascript = compiler.emit_ir_string(structuredClone(program));
+      const bytes = compiler.emit_numeric_wasm(program);
+      const module = new WebAssembly.Module(Uint8Array.from(bytes));
+      const wasm = new WebAssembly.Instance(module).exports;
+      jsUrl = URL.createObjectURL(new Blob([javascript], { type: "text/javascript" }));
+      const js = await import(jsUrl);
+      const edges = [-Infinity, -Number.MAX_VALUE, -2147483649, -Number.MIN_VALUE, -0, 0, Number.MIN_VALUE, .5, 2147483647, 2147483648, 4294967295, Number.MAX_SAFE_INTEGER, Number.MAX_VALUE, Infinity, NaN];
+      let checked = 0;
+      for (const name of ["ieee-add", "ieee-multiply", "ieee-divide"]) for (const x of edges) for (const y of edges) {
+        if (!Object.is(wasm[name](x, y), js[name.replaceAll("-", "_")](x, y))) throw Error(name + ":" + x + ":" + y);
+        checked += 1;
+      }
+      for (const name of ["ieee-ordered", "ieee-zero", "ieee-truth"]) for (const x of edges) {
+        if (!Object.is(wasm[name](x), js[name.replaceAll("-", "_")](x))) throw Error(name + ":" + x);
+        checked += 1;
+      }
+      return { bytes, checked, imports: WebAssembly.Module.imports(module) };
+    } finally {
+      URL.revokeObjectURL(compilerUrl);
+      if (jsUrl) URL.revokeObjectURL(jsUrl);
+    }
+  }, { source: ieeeCases });
+  assert.equal(result.checked, 720);
+  assert.deepEqual(Uint8Array.from(result.bytes), compile(ieeeCases, "browser-ieee.eli").bytes);
+  assert.deepEqual(result.imports, []);
+});
+
+test("browser WASM rejects the complete unsupported syntax corpus with identical diagnostics", async () => {
+  const diagnostics = await evaluateBrowser(async ({ bundle, unsupportedCases }) => {
+    const url = URL.createObjectURL(new Blob([bundle], { type: "text/javascript" }));
+    try {
+      const compiler = await import(url);
+      return unsupportedCases.map(source => {
+        try { compiler.emit_numeric_wasm(compiler.compile_ir_string(source, "unsupported.eli")); }
+        catch (error) { return error.eliscriptDiagnostic; }
+        throw Error("unsupported source was accepted");
+      });
+    } finally { URL.revokeObjectURL(url); }
+  }, { unsupportedCases });
+  for (const diagnostic of diagnostics) {
+    assert.equal(diagnostic.code, "ELI-B0001");
+    assert.equal(diagnostic.location.file, "unsupported.eli");
+  }
+  assert.deepEqual(diagnostics, unsupportedCases.map(source => {
+    try { compile(source, "unsupported.eli"); }
+    catch (error) { return error.eliscriptDiagnostic; }
+    throw Error("unsupported source was accepted");
+  }));
+});
+
+test("browser engine selection rejects unknown names instead of falling back", () => {
+  const child = spawnSync(process.execPath, ["test", fileURLToPath(import.meta.url), "--test-name-pattern", "browser JS compiler"], {
+    env: { ...process.env, ELISCRIPT_TEST_BROWSER: "unknown-engine" }, encoding: "utf8", timeout: 10000,
+  });
+  assert.equal(child.status, 1, child.stderr);
+  assert.match(child.stderr, /unknown ELISCRIPT_TEST_BROWSER: unknown-engine/);
 });
