@@ -235,8 +235,8 @@ export function renderToolchainSteps(matrix) {
 `          node_directory="$RUNNER_TEMP/eliscript-node"\n` +
 `          mkdir -p "$node_directory"\n` +
 `          cd "$node_directory"\n` +
-`          curl --fail --silent --show-error --location "https://nodejs.org/dist/v$node_version/$node_archive" --output "$node_archive"\n` +
-`          curl --fail --silent --show-error --location "https://nodejs.org/dist/v$node_version/SHASUMS256.txt" --output SHASUMS256.txt\n` +
+`          curl --fail --silent --show-error --location --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 1 --retry-max-time 60 "https://nodejs.org/dist/v$node_version/$node_archive" --output "$node_archive"\n` +
+`          curl --fail --silent --show-error --location --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 1 --retry-max-time 60 "https://nodejs.org/dist/v$node_version/SHASUMS256.txt" --output SHASUMS256.txt\n` +
 `          awk -v file="$node_archive" '$2 == file { print }' SHASUMS256.txt > node.sha256\n` +
 `          test -s node.sha256\n` +
 `          shasum -a 256 -c node.sha256\n` +

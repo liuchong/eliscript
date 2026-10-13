@@ -79,8 +79,8 @@ jobs:
           node_directory="$RUNNER_TEMP/eliscript-node"
           mkdir -p "$node_directory"
           cd "$node_directory"
-          curl --fail --silent --show-error --location "https://nodejs.org/dist/v$node_version/$node_archive" --output "$node_archive"
-          curl --fail --silent --show-error --location "https://nodejs.org/dist/v$node_version/SHASUMS256.txt" --output SHASUMS256.txt
+          curl --fail --silent --show-error --location --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 1 --retry-max-time 60 "https://nodejs.org/dist/v$node_version/$node_archive" --output "$node_archive"
+          curl --fail --silent --show-error --location --connect-timeout 10 --max-time 60 --retry 2 --retry-delay 1 --retry-max-time 60 "https://nodejs.org/dist/v$node_version/SHASUMS256.txt" --output SHASUMS256.txt
           awk -v file="$node_archive" '$2 == file { print }' SHASUMS256.txt > node.sha256
           test -s node.sha256
           shasum -a 256 -c node.sha256

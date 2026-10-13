@@ -653,6 +653,16 @@ describe("browser compiler backends", () => {
     assert(build.success);
     browserBundle = await build.outputs[0].text();
     browserProcess = await browsers[browserName].launch();
+    // launch establishes the transport before the first renderer is ready.
+    // Prepare that host process with no compiler, WASM or benchmark workload;
+    // every semantic evaluation still creates its own isolated context and
+    // keeps the original test timeout.
+    const preparation=await browserProcess.newContext();
+    try {
+      const page=await preparation.newPage();
+      assert.equal(await page.evaluate(()=>{globalThis.eliscriptPreparation=true;return 1;}),1);
+      console.log(`browser renderer prepared: ${browserName} ${browserProcess.version()}`);
+    } finally {await preparation.close();}
   }, 120_000);
   afterAll(async () => { if (browserProcess) await browserProcess.close(); });
 
@@ -671,6 +681,7 @@ describe("browser compiler backends", () => {
 
   test("browser evaluations isolate state and recover after rejection", async () => {
     await assert.rejects(evaluateBrowser(() => {
+      if(typeof globalThis.eliscriptPreparation!=="undefined")throw Error("preparation state escaped");
       globalThis.eliscriptFixtureMutation = "must not escape";
       throw Error("isolated evaluation failure");
     }, {}), /isolated evaluation failure/);

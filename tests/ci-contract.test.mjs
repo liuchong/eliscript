@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdtemp, mkdir, writeFile, chmod, rm, access } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -102,6 +105,43 @@ describe("compatibility matrix contract", () => {
     const unsupported = copyBaseline();
     unsupported.localEvidence.nodeHost.version = "22.23.2";
     expectMatrixFailure(unsupported, /exact Node version >=24/);
+  });
+
+  test("Node installer bounds network waits and rejects bad or missing checksums before extraction", async () => {
+    const directory=await mkdtemp(path.join(tmpdir(),"eliscript-node-installer-"));
+    try {
+      const stub=path.join(directory,"bin"),payload=path.join(directory,"payload");
+      const version=baseline.localEvidence.nodeHost.version,platform=process.platform==="darwin"?"darwin":"linux";
+      const name=`node-v${version}-${platform}-${process.arch}`,archive=path.join(directory,"node.tar.gz");
+      await mkdir(stub);await mkdir(path.join(payload,name,"bin"),{recursive:true});
+      const executable=path.join(payload,name,"bin/node");await writeFile(executable,`#!/bin/sh\nprintf 'v${version}\\n'\n`);await chmod(executable,0o755);
+      const packed=spawnSync("tar",["-czf",archive,"-C",payload,name],{encoding:"utf8"});expect(packed.status).toBe(0);
+      const checksum=createHash("sha256").update(await readFile(archive)).digest("hex");
+      const curl=path.join(stub,"curl");await writeFile(curl,`#!/bin/sh
+case " $* " in *" --connect-timeout 10 "*) ;; *) echo 'unbounded connection' >&2; exit 42;; esac
+case " $* " in *" --max-time 60 "*) ;; *) echo 'unbounded transfer' >&2; exit 42;; esac
+case " $* " in *" --retry 2 "*) ;; *) echo 'missing retry policy' >&2; exit 42;; esac
+case " $* " in *" --retry-max-time 60 "*) ;; *) echo 'unbounded retries' >&2; exit 42;; esac
+while [ "$#" -gt 0 ]; do case "$1" in --output) shift; output=$1;; https://*) url=$1;; esac; shift; done
+case "$url" in */SHASUMS256.txt)
+  case "$ELISCRIPT_TEST_CHECKSUM" in missing) printf 'unused row\\n' > "$output";; bad) printf '%064d  %s.tar.gz\\n' 0 "$ELISCRIPT_TEST_NODE_NAME" > "$output";; *) printf '%s  %s.tar.gz\\n' "$ELISCRIPT_TEST_CHECKSUM" "$ELISCRIPT_TEST_NODE_NAME" > "$output";; esac;;
+  *) cp "$ELISCRIPT_TEST_ARCHIVE" "$output";; esac
+`);await chmod(curl,0o755);
+      const script=renderWorkflow(baseline).split("      - name: Install Node\n        run: |\n")[1].split("      - name: Record toolchain\n")[0]
+        .split("\n").map(line=>line.slice(10)).join("\n").replaceAll("${{ matrix.architecture }}",process.arch);
+      for(const [kind,sha] of [["valid",checksum],["bad","bad"],["missing","missing"]]) {
+        const temporary=path.join(directory,kind),githubPath=path.join(temporary,"path");await mkdir(temporary);
+        const result=spawnSync("bash",["-e","-c",script],{encoding:"utf8",env:{...process.env,PATH:stub+path.delimiter+process.env.PATH,
+          RUNNER_TEMP:temporary,GITHUB_PATH:githubPath,ELISCRIPT_TEST_ARCHIVE:archive,ELISCRIPT_TEST_CHECKSUM:sha,ELISCRIPT_TEST_NODE_NAME:name}});
+        if(kind==="valid") {
+          expect(result.status,result.stderr).toBe(0);expect(await readFile(githubPath,"utf8")).toBe(path.join(temporary,"eliscript-node",name,"bin")+"\n");
+          const node=spawnSync(path.join(temporary,"eliscript-node",name,"bin/node"),[],{encoding:"utf8"});expect(node.stdout.trim()).toBe("v"+version);
+        } else {
+          expect(result.status).not.toBe(0);await expect(access(path.join(temporary,"eliscript-node",name))).rejects.toThrow();
+          await expect(access(githubPath)).rejects.toThrow();
+        }
+      }
+    }finally{await rm(directory,{recursive:true,force:true});}
   });
 
   test("checker rejects manual workflow drift", async () => {
