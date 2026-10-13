@@ -192,6 +192,44 @@ test("direct WASM preserves bindings, assignment values, short circuit, calls an
   assert.deepEqual(JSON.parse(oracle.stdout), [wasm.exports.shadow(9), wasm.exports.sequential(9), wasm.exports.recursive(8)]);
 });
 
+test("discarded numeric results remove stack traffic while preserving effects and calls", async () => {
+  const plain = compile('(defun f (x) x) (export f)');
+  const unused = compile('(defun f (x) (* x x) (/ x 0) (< x 0) (not x) x) (export f)');
+  assert.deepEqual(unused.bytes, plain.bytes, "unused nontrapping arithmetic and truth results disappear");
+  const assigned = compile('(defun f (x) (setq x (- x)) x) (export f)');
+  // The sole code body: zero local groups, local.get 0, f64.neg,
+  // local.set 0, local.get 0, end. No local.tee followed by drop.
+  assert.deepEqual([...assigned.bytes.slice(-9)], [0, 32, 0, 154, 33, 0, 32, 0, 11]);
+  const source = `
+    (defun g (x) (if (> x 1) (g (- x 1)) x))
+    (defun f (x)
+      (g x)
+      (let ((a x) (b 0) (flag false))
+        (/ (setq a (+ a 1)) (setq b (+ b 2)))
+        (if (/ (setq b (+ b 3)) 0) (setq a (+ a 4)) (setq a 999))
+        (and a (setq b (+ b 5)))
+        (or a (setq b 999))
+        (and flag (= (setq b 999) 0))
+        (or flag (= (setq b (+ b 6)) 0))
+        (not (= (setq b (+ b 7)) 0))
+        (if (< a 0) (setq a (- a)) (setq a (* a 2)))
+        (while (< b 25) (setq b (1+ b)))
+        (+ a b)))
+    (defun assignment-value (x) (+ (setq x (- x)) x))
+    (defun loop-value (x) (if (while false (setq x 999)) 999 x))
+    (export f assignment-value loop-value)`;
+  const oracle = await javascript(source);
+  const wasm = compile(source);
+  for (const value of [-Infinity, -7, -0, 0, .123, 9, NaN]) {
+    for (const name of Object.keys(wasm.exports)) {
+      sameNumber(wasm.exports[name](value), oracle.module[name.replaceAll("-", "_")](value), name);
+    }
+  }
+  const called = compile('(defun g (x) x) (defun f (x) (g x) x) (export f)');
+  assert.deepEqual([...called.bytes.slice(-9)], [0, 32, 0, 16, 0, 26, 32, 0, 11],
+    "discarded calls remain, including their arguments and possible nontermination");
+});
+
 test("direct WASM differentially executes generated numeric programs and multi-byte indices", async () => {
   let state = 0x51a7;
   const random = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state; };

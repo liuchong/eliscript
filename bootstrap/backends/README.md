@@ -37,11 +37,19 @@ dynamic arity, host imports, raw JS, async/await, or exceptions in source
 programs. It does not claim general tail-call elimination or full-language
 semantic coverage.
 
-All float arithmetic uses individual f64 instructions in source order. There
-is no fast-math, FMA substitution, reassociation, or approximate equality.
+All observable float arithmetic uses individual f64 instructions in source
+order. There is no fast-math, FMA substitution, reassociation, or approximate equality.
 The shared optimizer folds proven numeric constants and literal conditions;
 non-finite fold results retain their original expression so canonical IR stays
 lossless. Original IR is not mutated and surviving source spans are retained.
+
+The WASM emitter distinguishes used and discarded results. Discarded
+assignments use `local.set`; discarded sequences and loops do not manufacture
+values only to drop them. Unused nontrapping numeric operations disappear,
+while their operand effects stay in source order. Numeric truth conditions
+retain evaluation effects and yield true, including for zero and NaN.
+Short-circuit branches and every function call remain, including calls that
+could fail to terminate. Assignment values remain available when used.
 
 Core byte arrays, records, string code units, float64 words and array operations
 are currently represented by the existing JS bootstrap runtime. Porting these
