@@ -158,13 +158,30 @@ test("Eliscript optimizer and direct WASM emitter reach a three-generation byte 
   assert.deepEqual(artifacts[0].bytes, artifacts[1].bytes);
   assert.deepEqual(artifacts[1].bytes, artifacts[2].bytes);
   assert.equal(artifacts[2].exports.recurrence(1000, .123), 641.1641723326824);
+  const nativeArtifacts = {};
+  for (const format of ["object", "library", "executable"]) {
+    const text = source + "\n(defun entry () (recurrence 1000 .123)) (export entry)";
+    const outputs = generations.map(g => {
+      const program = g.compiler.compile_ir_string(text, "native-fixed-point.eli");
+      return Uint8Array.from(format === "executable"
+        ? g.native.emit_native_numeric_executable(program, "arm64-macos", "entry")
+        : format === "library" ? g.native.emit_native_numeric_library(program, "arm64-macos")
+          : g.native.emit_native_numeric_object(program, "arm64-macos"));
+    });
+    assert.deepEqual(outputs[0], outputs[1], format);
+    assert.deepEqual(outputs[1], outputs[2], format);
+    nativeArtifacts[format] = Buffer.from(outputs[2]).toString("base64");
+  }
   const node = spawnSync(process.env.NODE ?? "node", ["--input-type=module", "-e",
-    'import{readFile}from"node:fs/promises";const c=await import(process.argv[1]);const w=await import(process.argv[2]);const s=await readFile(process.argv[3],"utf8");console.log(Buffer.from(w.emit_numeric_wasm(c.compile_ir_string(s,"kernels.eli"))).toString("base64"));',
+    'import{readFile}from"node:fs/promises";const c=await import(process.argv[1]);const w=await import(process.argv[2]);const s=await readFile(process.argv[3],"utf8");const n=await import(process.argv[4]);const p=c.compile_ir_string(s+"\\n(defun entry () (recurrence 1000 .123)) (export entry)","native-fixed-point.eli");console.log(JSON.stringify({wasm:Buffer.from(w.emit_numeric_wasm(c.compile_ir_string(s,"kernels.eli"))).toString("base64"),object:Buffer.from(n.emit_native_numeric_object(p,"arm64-macos")).toString("base64"),library:Buffer.from(n.emit_native_numeric_library(p,"arm64-macos")).toString("base64"),executable:Buffer.from(n.emit_native_numeric_executable(p,"arm64-macos","entry")).toString("base64")}));',
     pathToFileURL(resolve(directory, "g3/bootstrap/compiler.mjs")).href,
     pathToFileURL(resolve(directory, "g3/backends/wasm.mjs")).href,
-    resolve(root, "tools/experiments/native-wasm/kernels.eli")], { encoding: "utf8" });
+    resolve(root, "tools/experiments/native-wasm/kernels.eli"),
+    pathToFileURL(resolve(directory, "g3/backends/native.mjs")).href], { encoding: "utf8" });
   assert.equal(node.status, 0, node.stderr);
-  assert.deepEqual(Buffer.from(node.stdout.trim(), "base64"), Buffer.from(artifacts[2].bytes));
+  const fromNode = JSON.parse(node.stdout);
+  assert.deepEqual(Buffer.from(fromNode.wasm, "base64"), Buffer.from(artifacts[2].bytes));
+  for (const format of ["object", "library", "executable"]) assert.equal(fromNode[format], nativeArtifacts[format], format);
   for (const name of backendModules) {
     const source = await readFile(resolve(root, `bootstrap/backends/${name}.eli`), "utf8");
     const program = generations[2].compiler.compile_ir_string(source, name + ".eli");
@@ -439,6 +456,46 @@ test("nested grid optimization preserves fractional dimensions and escape limits
   sameNumber(wasm.exports["escape-grid"](1, Infinity), oracle.module.escape_grid(1, Infinity), "infinite escape limit");
 });
 
+test("compound loop expansion preserves each guard, effect and exact IEEE result", async () => {
+  const source = `
+    (defun compound (n x) (let ((i 0) (sum 0))
+      (while (and (< i n) (< (* x x) 100))
+        (setq x (+ (* x 1.25) 0.1)) (setq sum (+ sum x)) (setq i (1+ i))) sum))
+    (defun guarded-effect (n) (let ((i 0) (checks 0))
+      (while (and (< (setq checks (1+ checks)) n) (< i 5)) (setq i (1+ i))) (+ (* checks 10) i)))
+    (defun named-cache (n) (let ((i 0) (cached-square 0))
+      (while (and (< (setq cached-square (1+ cached-square)) n) (< i 5)) (setq i (1+ i))) cached-square))
+    (defun nested-guards (n) (let ((i 0) (sum 0))
+      (while (and (< i n) (< i 2))
+        (let ((j 0)) (while (and (< j n) (< j 3)) (setq sum (+ sum j)) (setq j (1+ j))))
+        (setq i (1+ i))) sum))
+    (export compound guarded-effect named-cache nested-guards)`;
+  const {compiler,numeric,wasm} = generations[2];
+  const typed = numeric.lower_numeric_program(compiler.compile_ir_string(source,"compound.eli"));
+  const saved = JSON.stringify(typed);
+  const oracle = await javascript(source);
+  const nodes = function* (node) { yield node; for (const child of node.children) yield* nodes(child); };
+  for (const guardedUnroll of [false,true]) {
+    const optimized = numeric.optimize_numeric_program(typed,{guardedUnroll});
+    assert.equal(JSON.stringify(typed),saved);
+    assert.equal([...nodes(optimized.functions.find(f=>f.name==="compound").body)].some(n=>n.kind==="guarded-while"),guardedUnroll);
+    assert(![...nodes(optimized.functions.find(f=>f.name==="guarded-effect").body)].some(n=>n.kind==="guarded-while"),"effectful guard stays unchanged");
+    assert(![...nodes(optimized.functions.find(f=>f.name==="named-cache").body)].some(n=>n.kind==="guarded-while"),"a user local name does not confer compiler-owned cache status");
+    for (const loop of nodes(optimized.functions.find(f=>f.name==="nested-guards").body)) if(loop.kind==="guarded-while") {
+      assert(![...nodes(loop.children[1])].some(n=>["while","remainder-while","guarded-while"].includes(n.kind)),"a guarded expansion must contain no nested loop");
+    }
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from(wasm.emit_typed_numeric_wasm(optimized))));
+    for (const n of [-Infinity,-0,0,.5,1,1.1,2,2.5,3,3.5,4,5,9,NaN]) {
+      sameNumber(instance.exports["guarded-effect"](n),oracle.module.guarded_effect(n),"condition effects");
+      sameNumber(instance.exports["named-cache"](n),oracle.module.named_cache(n),"private cache ownership");
+      sameNumber(instance.exports["nested-guards"](n),oracle.module.nested_guards(n),"nested loop guards");
+      for (const x of [-Infinity,-10,-1,-0,0,Number.MIN_VALUE,.123,1,9,10,Infinity,NaN]) {
+        sameNumber(instance.exports.compound(n,x),oracle.module.compound(n,x),`${guardedUnroll}/${n}/${x}`);
+      }
+    }
+  }
+});
+
 test("direct WASM rejects unsupported dynamic capabilities before optimization", () => {
   assert.throws(() => generations[2].numeric.optimize_numeric_program({ abi: "unknown" }),
     error => error.eliscriptDiagnostic.code === "ELI-B0001");
@@ -505,7 +562,7 @@ test("direct WASM performance report preserves budgets and blocks failed promoti
 async function evaluateBrowser(evaluate, data) {
   if (!browserBundle) {
     const entry = resolve(directory, "browser-entry.mjs");
-    await writeFile(entry, `export {compile_ir_string,emit_ir_string} from ${JSON.stringify(resolve(directory, "g3/bootstrap/compiler.mjs"))};\nexport {emit_numeric_wasm} from ${JSON.stringify(resolve(directory, "g3/backends/wasm.mjs"))};`);
+    await writeFile(entry, `export {compile_ir_string,emit_ir_string} from ${JSON.stringify(resolve(directory, "g3/bootstrap/compiler.mjs"))};\nexport {emit_numeric_wasm} from ${JSON.stringify(resolve(directory, "g3/backends/wasm.mjs"))};\nexport {emit_native_numeric_object,emit_native_numeric_library,emit_native_numeric_executable} from ${JSON.stringify(resolve(directory, "g3/backends/native.mjs"))};`);
     const build = await Bun.build({ entrypoints: [entry], target: "browser", format: "esm" });
     assert(build.success);
     browserBundle = await build.outputs[0].text();
@@ -621,4 +678,20 @@ test("browser engine selection rejects unknown names instead of falling back", (
   });
   assert.equal(child.status, 1, child.stderr);
   assert.match(child.stderr, /unknown ELISCRIPT_TEST_BROWSER: unknown-engine/);
+});
+
+test("browser compiler emits identical signed native images without external tools", async () => {
+  const source="(defun 中文 (n) (if (<= n 1) 1 (* n (中文 (- n 1))))) (defun entry () (中文 6)) (export 中文 entry)";
+  const result=await evaluateBrowser(async ({bundle,source}) => {
+    const url=URL.createObjectURL(new Blob([bundle],{type:"text/javascript"}));
+    try {
+      const c=await import(url),program=c.compile_ir_string(source,"browser-native.eli");
+      return [c.emit_native_numeric_object(program,"arm64-macos"),
+        c.emit_native_numeric_library(program,"arm64-macos"),
+        c.emit_native_numeric_executable(program,"arm64-macos","entry")];
+    } finally {URL.revokeObjectURL(url);}
+  },{source});
+  const c=generations[2],program=c.compiler.compile_ir_string(source,"browser-native.eli");
+  assert.deepEqual(result,[c.native.emit_native_numeric_object(program,"arm64-macos"),
+    c.native.emit_native_numeric_library(program,"arm64-macos"),c.native.emit_native_numeric_executable(program,"arm64-macos","entry")]);
 });

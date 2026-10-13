@@ -147,3 +147,13 @@ test("repository integrity rejects incomplete artifact registries", async () => 
     missingBenchmark,
   )).toThrow("benchmark reports differ from the artifact registry");
 });
+
+test("native FFI builtin is confined to its explicit measurement and test adapters", async () => {
+  const contract=await readJson("contracts/repository-integrity.json");
+  const record={file:"tests/native-backend.test.mjs",specifier:"bun:ffi",kind:"import-statement",language:"javascript"};
+  expect(()=>validateImportRecords([record],contract)).not.toThrow();
+  expect(()=>validateImportRecords([{...record,file:"tools/backends/native-benchmark.mjs"}],contract)).not.toThrow();
+  for(const file of ["bootstrap/backends/native.mjs","runtime/core/value.mjs","tools/unrelated.mjs","tests/unrelated.test.mjs"])
+    expect(()=>validateImportRecords([{...record,file}],contract)).toThrow("outside its allowed boundary");
+  expect(()=>validateImportRecords([{...record,specifier:"bun:unlisted"}],contract)).toThrow("imports undeclared package");
+});

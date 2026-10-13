@@ -1,7 +1,8 @@
 # Independent backend foundation
 
-`optimize.eli`, `numeric.eli` and `wasm.eli` implement the optimizer, typed
-numeric lowering and WASM binary emitter in Eliscript. No C, LLVM IR, WAT,
+`optimize.eli`, `numeric.eli`, `wasm.eli`, `native.eli` and `sha256.eli` implement
+the optimizer, typed numeric lowering, WASM/ARM64 emission and deterministic
+SHA-256 in Eliscript. No C, LLVM IR, WAT,
 external assembler or external optimizer participates in direct emission.
 `tools/backends/` supplies filesystem/bootstrap adapters only.
 
@@ -9,7 +10,7 @@ This is the first executable slice of the
 [independent 3×3 roadmap](../../docs/native-wasm-feasibility.md#后续计划与决策门槛).
 The compiler currently **runs as JavaScript**, including in the browser test;
 emitting WASM does not mean the compiler itself runs as WASM. Full dynamic
-runtime support and native emission remain open acceptance units.
+runtime support and WASM/native compiler execution remain open acceptance units.
 
 ## Explicit numeric ABI
 
@@ -131,7 +132,84 @@ required. External optimization is not automatically invoked by this slice.
 The retained 2026-10-13 report now passes all nine frozen numeric hot-execution
 pairs. Confirmation used identical JS/WASM artifact hashes. The generated JS
 control is unchanged from the previous failed report. The WASM module grows
-from 789 to 4714 bytes because guarded versions and unrolled code retain their
-fallbacks. This closes this numeric performance gate only; download, cold
+from 789 to 5197 bytes because guarded versions and unrolled code retain their
+fallbacks. The compound-guard expansion preserves a full guard check after
+every complete iteration. This closes this numeric performance gate only; download, cold
 startup, compiler throughput, memory and full-language/backend acceptance stay
 open. The full backend remains experimental.
+
+
+## Independent ARM64 native slice
+
+The explicit `arm64-macos` target emits baseline ARM64 instructions and Mach-O
+objects, dynamic libraries or standalone executables, with macOS 15 as the
+minimum deployment target. Compilation requires no C compiler, assembler,
+linker, host crypto or signing executable. The library/export table, symbol
+layout, PC-relative branches/calls/literals, content-derived UUID and SHA-256
+ad-hoc page signature are emitted by `.eli` algorithms. Ad-hoc signing supports
+local execution; it does not establish release identity or notarization.
+
+```sh
+bun tools/backends/compile.mjs --abi numeric-f64 --target native \
+  --platform arm64-macos --native-format object -o /tmp/kernels.o \
+  tools/experiments/native-wasm/kernels.eli
+bun tools/backends/compile.mjs --abi numeric-f64 --target native \
+  --platform arm64-macos --native-format library -o /tmp/kernels.dylib \
+  tools/experiments/native-wasm/kernels.eli
+# INPUT must export a zero-argument numeric function named entry.
+bun tools/backends/compile.mjs --abi numeric-f64 --target native \
+  --platform arm64-macos --native-format executable --entry entry \
+  -o /tmp/program INPUT.eli
+bun test tests/native-backend.test.mjs
+```
+
+`emit_native_numeric_object`, `emit_native_numeric_library` and
+`emit_native_numeric_executable` return ordinary byte arrays. Native functions
+follow the ARM64 f64 calling convention, including stack parameters after the
+first eight and ordinary recursive calls. The standalone numeric executable
+writes exactly eight little-endian f64 bytes to stdout, preserving signed zero,
+infinities and NaN; a failed/short write exits nonzero. This small output
+protocol does not provide a general-language I/O runtime.
+
+Default native optimization uses control-flow liveness and interference,
+f64/i32 register classes, reuse of nonoverlapping local lifetimes, expression
+scratch registers and preservation only of used/live registers. Arguments
+execute before call snapshots so their assignments remain visible. Constants
+use exact ARM64 immediates or deduplicated PC-relative f64 pools. Discarded nontrapping arithmetic retains operand effects, and floating
+expressions compute directly into registers without redundant result copies.
+Comparisons branch directly with ordered NaN behavior, and loops rotate without losing
+initial/final condition effects. The shared optional `unswitch` pass moves only
+pure guards whose reads cannot be written in the loop, with bounded code growth.
+The explicit `{registerAllocation:false}` native API option retains the initial
+stack emitter for independent before/after measurements and semantic regression.
+Neither path permits FMA, float reordering or approximate comparisons.
+
+Tests independently check SHA vectors and page hashes, verify actual macOS
+signatures, compare independently emitted and system-linked reference objects,
+and execute recursion, Unicode exports, deep expressions, more than eight
+arguments, nested argument effects, float immediates and IEEE boundaries. The
+system linker/signer in the reference test participates in verification only.
+Linux runners inspect emitted images; ARM64 macOS runners execute them. Browser
+JS compilers and three bootstrap generations emit identical native images;
+this does not prove native or WASM compiler execution.
+
+```sh
+bun tools/backends/native-benchmark.mjs --baseline
+bun tools/backends/native-benchmark.mjs
+bun tools/backends/native-benchmark.mjs --verify
+bun tools/backends/native-benchmark.mjs --require-production
+```
+
+The native report freezes the same workloads, optimized JS control, three fresh
+sessions, five warmups, nine samples and per-workload 1.0× minimum used by the
+numeric WASM gate. Measurement includes one Bun FFI call per entire batch.
+Baseline and optimized native evidence are retained separately and bound to
+compiler/backend sources. A failed report blocks promotion. Numeric native
+emission remains experimental; full dynamic runtime, compiler execution, native
+debug information, cold startup, memory and the full 3×3 matrix remain open.
+
+The retained native before/after reports use the identical optimized JS artifact
+hash and preserve the initial stack image hash. Speedups versus JS change from
+0.56×/0.22×/0.11× to 1.91×/0.62×/0.30× for recurrence/grid/tiny batches.
+Only recurrence passes; the native production decision remains false. These
+measurements concern numeric kernels, not compiler throughput or full self-hosting.

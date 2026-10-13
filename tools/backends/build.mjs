@@ -4,10 +4,10 @@ import { resolve, dirname, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-export const backendModules = ["optimize", "numeric", "wasm"];
+export const backendModules = ["optimize", "numeric", "wasm", "sha256", "native"];
 
 // This adapter only loads files and runs the bootstrap seed when requested.
-// Optimization, typed lowering and WASM encoding live in the .eli modules.
+// Optimization, typed lowering, WASM and native encoding live in the .eli modules.
 export async function buildBackends({ outputRoot = resolve(root, "dist"), seed = false, frontend } = {}) {
   const compilerDirectory = resolve(outputRoot, "bootstrap");
   const directory = resolve(outputRoot, "backends");
@@ -40,6 +40,8 @@ export async function buildBackends({ outputRoot = resolve(root, "dist"), seed =
     optimizer: await import(pathToFileURL(resolve(directory, "optimize.mjs")).href),
     numeric: await import(pathToFileURL(resolve(directory, "numeric.mjs")).href),
     wasm: await import(pathToFileURL(resolve(directory, "wasm.mjs")).href),
+    native: await import(pathToFileURL(resolve(directory, "native.mjs")).href),
+    sha256: await import(pathToFileURL(resolve(directory, "sha256.mjs")).href),
   };
 }
 

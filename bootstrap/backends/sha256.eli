@@ -1,0 +1,66 @@
+(module eliscript.backend.sha256
+  ;; Deterministic byte hashing for native image metadata and ad-hoc page
+  ;; signatures. No host crypto API or external signing process is involved.
+  (defconst constants (js-array
+    1116352408 1899447441 3049323471 3921009573 961987163 1508970993 2453635748 2870763221
+    3624381080 310598401 607225278 1426881987 1925078388 2162078206 2614888103 3248222580
+    3835390401 4022224774 264347078 604807628 770255983 1249150122 1555081692 1996064986
+    2554220882 2821834349 2952996808 3210313671 3336571891 3584528711 113926993 338241895
+    666307205 773529912 1294757372 1396182291 1695183700 1986661051 2177026350 2456956037
+    2730485921 2820302411 3259730800 3345764771 3516065817 3600352804 4094571909 275423344
+    430227734 506948616 659060556 883997877 958139571 1322822218 1537002063 1747873779
+    1955562222 2024104815 2227730452 2361852424 2428436474 2756734187 3204031479 3329325298))
+
+  (defun rotate (x n)
+    (uint32 (bit-or (unsigned-bit-shift-right x n) (bit-shift-left x (- 32 n)))))
+
+  (defun big-word (output value)
+    (js-call output :push (unsigned-bit-shift-right value 24)
+      (bit-and (unsigned-bit-shift-right value 16) 255)
+      (bit-and (unsigned-bit-shift-right value 8) 255) (bit-and value 255)))
+
+  (defun sha256-bytes (input)
+    (let* ((bytes (js-call input :slice)) (length (js-length bytes))
+           (hash (js-array 1779033703 3144134277 1013904242 2773480762
+             1359893119 2600822924 528734635 1541459225)) (offset 0))
+      (js-call bytes :push 128)
+      (while (/= (bit-and (js-length bytes) 63) 56) (js-call bytes :push 0))
+      (big-word bytes (uint32 (/ length 536870912)))
+      (big-word bytes (uint32 (* length 8)))
+      (while (< offset (js-length bytes))
+        (let ((words (js-array)) (i 0))
+          (while (< i 16)
+            (let ((at (+ offset (* i 4))))
+              (js-call words :push (+ (* (js-nth at bytes) 16777216) (* (js-nth (+ at 1) bytes) 65536)
+                (* (js-nth (+ at 2) bytes) 256) (js-nth (+ at 3) bytes))))
+            (setq i (1+ i)))
+          (while (< i 64)
+            (let* ((x (js-nth (- i 15) words)) (y (js-nth (- i 2) words))
+                   (s0 (bit-xor (rotate x 7) (bit-xor (rotate x 18) (unsigned-bit-shift-right x 3))))
+                   (s1 (bit-xor (rotate y 17) (bit-xor (rotate y 19) (unsigned-bit-shift-right y 10)))))
+              (js-call words :push (uint32 (+ (js-nth (- i 16) words) s0 (js-nth (- i 7) words) s1))))
+            (setq i (1+ i)))
+          (let ((a (js-nth 0 hash)) (b (js-nth 1 hash)) (c (js-nth 2 hash)) (d (js-nth 3 hash))
+                (e (js-nth 4 hash)) (f (js-nth 5 hash)) (g (js-nth 6 hash)) (h (js-nth 7 hash)))
+            (setq i 0)
+            (while (< i 64)
+              (let* ((s1 (bit-xor (rotate e 6) (bit-xor (rotate e 11) (rotate e 25))))
+                     (ch (bit-xor (bit-and e f) (bit-and (bit-xor e 4294967295) g)))
+                     (s0 (bit-xor (rotate a 2) (bit-xor (rotate a 13) (rotate a 22))))
+                     (maj (bit-xor (bit-and a b) (bit-xor (bit-and a c) (bit-and b c))))
+                     (t1 (uint32 (+ h s1 ch (js-nth i constants) (js-nth i words))))
+                     (t2 (uint32 (+ s0 maj))))
+                (setq h g) (setq g f) (setq f e) (setq e (uint32 (+ d t1)))
+                (setq d c) (setq c b) (setq b a) (setq a (uint32 (+ t1 t2))))
+              (setq i (1+ i)))
+            (let ((values (js-array a b c d e f g h)))
+              (setq i 0)
+              (while (< i 8)
+                (js-call hash :splice i 1 (uint32 (+ (js-nth i hash) (js-nth i values))))
+                (setq i (1+ i))))))
+        (setq offset (+ offset 64)))
+      (let ((output (js-array)) (i 0))
+        (while (< i 8) (big-word output (js-nth i hash)) (setq i (1+ i)))
+        output)))
+
+  (export sha256-bytes))
