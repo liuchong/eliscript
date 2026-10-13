@@ -819,6 +819,33 @@
                   (if (or (= (value-number-compare heap left right 0) 1)
                           (and (= (heap-number-nan heap left) 1) (= (heap-number-nan heap right) 1))) 1 0)
                   (if (= kind 5) (if (= (value-string-compare heap left right) 0) 1 0) 0)))))))))
+  ;; Ordinary strict equality is distinct from SameValueZero table keys.
+  ;; The partial relational profile accepts Number pairs or sealed String pairs;
+  ;; mixed coercion remains explicitly unsupported until ToPrimitive/ToNumber.
+  (defun value-compare (heap left right operation)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= (heap-key-check heap left) 0) (= (heap-key-check heap right) 0)) 0
+        (if (> operation 5) (fail 3)
+          (if (<= operation 1)
+            (let ((equal 0))
+              (if (and (> left 3) (> right 3))
+                (let ((kind (load-u32 (heap-block heap left))))
+                  (when (= kind (load-u32 (heap-block heap right)))
+                    (setq equal (if (= kind 4) (value-number-compare heap left right 0)
+                      (if (= kind 5) (if (= (value-string-compare heap left right) 0) 1 0)
+                        (if (= left right) 1 0))))) 0)
+                (setq equal (if (= left right) 1 0)))
+              (if (= operation 0) equal (- 1 equal)))
+            (if (or (<= left 3) (<= right 3)) (fail 3)
+              (let ((kind (load-u32 (heap-block heap left))))
+                (if (/= kind (load-u32 (heap-block heap right))) (fail 3)
+                  (if (= kind 4) (value-number-compare heap left right operation)
+                    (if (= kind 5)
+                      (let ((order (value-string-compare heap left right)))
+                        (if (if (= operation 2) (= order 1)
+                              (if (= operation 3) (/= order 2)
+                                (if (= operation 4) (= order 2) (/= order 1)))) 1 0))
+                      (fail 3)))))))))))
   (defun heap-key-number-hash (heap value block)
     (if (= (heap-number-nan heap value) 1) 1490037359
       (let ((low (load-u32 (+ block 32))) (high (load-u32 (+ block 36))))
@@ -1101,7 +1128,7 @@
     value-kind value-truth value-data value-length value-number value-number-binary
     value-refs value-get value-set value-refs-resize value-string value-bytes value-seal
     value-unit-get value-unit-set value-byte-get value-byte-set value-bytes-resize
-    value-number-negate value-number-compare heap-auto heap-collections
+    value-number-negate value-number-compare value-compare heap-auto heap-collections
     frame-new frame-set frame-get frame-pop frame-return frame-unwind frame-depth frame-current
     value-string-concat value-string-slice value-string-compare value-string-code-point value-string-find
     value-utf8-encode value-utf8-decode value-key-equal value-key-hash

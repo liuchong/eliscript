@@ -658,6 +658,14 @@ test("ordinary managed control has Seed and three-generation IR, descriptor and 
   for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const x=a.string('中😀\ud800');for(let i=0;i<100;i++){const result=a.invoke('call-choose',[x,x]);assert.equal(a.readString(result),'中😀\ud800');a.release(result);}a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
 });
 
+test("ordinary managed arithmetic has Seed and three-generation IR and byte fixed points",async()=>{
+ const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-arithmetic.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
+ const programs=generations.map(g=>g.compiler.compile_ir_string(source,'arithmetic.eli')),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtime,'runtime.eli'));
+ const lower=generations.map((g,i)=>g.managed.lower_managed_program(programs[i],runtimes[i]));assert.deepEqual(programs[0],programs[2]);assert.deepEqual(lower[0],lower[1]);assert.deepEqual(lower[1],lower[2]);
+ const bytes=generations.map((g,i)=>g.managed.emit_managed_wasm(programs[i],runtimes[i],{maximumPages:16}));assert.deepEqual(bytes[0],bytes[1]);assert.deepEqual(bytes[1],bytes[2]);
+ const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
+ for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const n=a.number(32),sum=a.invoke('recursive-sum',[n]);sameNumber(a.readNumber(sum),528,'managed recursion');a.release(sum);a.release(n);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
+});
 describe("browser compiler backends", () => {
   beforeAll(async () => {
     // Compiler bundling and browser process startup are fixture preparation.
@@ -1045,6 +1053,26 @@ describe("browser compiler backends", () => {
     assert.deepEqual(result,generations[2].wasm.emit_memory_wasm(generations[2].compiler.compile_ir_string(source,"browser-tables.eli"),{maximumPages:8}));
   });
 
+  test("browser ordinary managed arithmetic preserves IEEE bits, strict equality, order and automatic GC",async()=>{
+    const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-arithmetic.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
+    const result=await evaluateBrowser(async({bundle,source,runtime})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));let jsUrl;
+      try {
+        const c=await import(url),p=c.compile_ir_string(source,'browser-arithmetic.eli'),rt=c.compile_ir_string(runtime,'runtime.eli');
+        const bytes=Uint8Array.from(c.emit_managed_wasm(p,rt,{maximumPages:16})),module=new WebAssembly.Module(bytes),check=(v,m)=>{if(!v)throw Error(m);};check(WebAssembly.Module.imports(module).length===0,'imports');
+        jsUrl=URL.createObjectURL(new Blob([c.emit_ir_string(p)],{type:'text/javascript'}));const ref=await import(jsUrl),a=c.instantiateManagedRuntime(bytes,{maxSlots:256,initialBytes:8192,maxBytes:1048576});a.auto(1);
+        const box=x=>typeof x==='number'?a.number(x):typeof x==='string'?a.string(x):x,read=x=>x&&typeof x==='object'?x.kind===4?a.readNumber(x):a.readString(x):x;
+        const verify=(name,inputs)=>{const handles=inputs.map(box),out=a.invoke(name,handles);check(Object.is(read(out),ref[name.replaceAll('-','_')](...inputs)),name);a.release(out);handles.forEach(x=>a.release(x));a.collect();check(a.live()===0&&a.stats().frameDepth===0,'roots');};
+        const numbers=[0,-0,NaN,Infinity,-Infinity,Number.MIN_VALUE,-Number.MIN_VALUE,Number.MAX_VALUE,1,-.25];
+        for(const x of numbers){for(const name of['negate','reciprocal','increment','decrement'])verify(name,[x]);for(const y of numbers)for(const name of['add','subtract','multiply','divide','equal','distinct','less','less-equal','greater','greater-equal','snapshot'])verify(name,[x,y]);}
+        const values=[null,false,true,undefined,...numbers,'','中😀\ud800'];for(const x of values)for(const y of values)for(const name of['equal','identical','distinct'])verify(name,[x,y]);
+        for(const x of['','a','aa','\0','中','😀','\ud800'])for(const y of['','a','中','😀','\ud800'])for(const name of['less','less-equal','greater','greater-equal'])verify(name,[x,y]);
+        for(const triple of[[1,1e16,-1e16],[1e16,-1e16,1],[Number.MAX_VALUE,2,.5],[1,2,1],[-0,0,-0],[NaN,1,2]])for(const name of['ordered-sum','ordered-product','ordered-subtract','ordered-divide','equal-three','distinct-three','less-three','compare-snapshot'])verify(name,triple);
+        for(let i=0;i<20;i++)verify('sum-to',[32]);verify('recursive-sum',[32]);verify('comparison-effects',[2,1]);check(a.stats().collections>1000,'automatic GC');return [...bytes];
+      }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
+    },{source,runtime});
+    assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-arithmetic.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
+  });
   test("browser ordinary managed control executes boxed values with automatic roots and source-equivalent semantics",async()=>{
     const source=await readFile(resolve(root,"tests/fixtures/wasm-managed-control.eli"),"utf8"),runtime=await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8");
     const result=await evaluateBrowser(async({bundle,source,runtime})=>{

@@ -61,6 +61,7 @@ test-core: check-contracts
 		tests/wasm-managed-runtime.test.mjs \
 		tests/wasm-managed-tables.test.mjs \
 		tests/wasm-managed-control.test.mjs \
+		tests/wasm-managed-arithmetic.test.mjs \
 		tests/native-backend.test.mjs \
 		tests/compiler-reader-character.test.mjs \
 		tests/compiler-source-map-cursor.test.mjs \

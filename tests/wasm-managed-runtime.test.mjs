@@ -37,6 +37,16 @@ function managedBytes(r,h,input) {
 function readManagedBytes(r,h,value) {
  const length=r.value_length(h,value),p=r.value_data(h,value,6);assert(p>0);return new Uint8Array(r.memory.buffer,p,length).slice();
 }
+test('ordinary comparison rejects private frames, unfinished strings and stale values and keeps NaN non-reflexive',()=>{
+ const {r,h}=runtime();const nan=number(r,h,NaN),zero=number(r,h,-0),positive=number(r,h,0),text=managedString(r,h,'中\ud800'),same=managedString(r,h,'中\ud800');
+ const object=r.value_refs(h,7,0),other=r.value_refs(h,7,0),frame=r.frame_new(h,0),builder=r.value_string(h,0);
+ const before=r.heap_live(h),used=r.heap_used(h);assert.equal(r.value_compare(h,nan,nan,0),0);assert.equal(r.last_error(),0);assert.equal(r.value_compare(h,nan,nan,1),1);assert.equal(r.value_compare(h,zero,positive,0),1);
+ assert.equal(r.value_compare(h,text,same,0),1);assert.equal(r.value_compare(h,object,object,0),1);assert.equal(r.value_compare(h,object,other,0),0);
+ assert.equal(r.value_compare(h,0,0,0),1);assert.equal(r.value_compare(h,0,3,0),0);assert.equal(r.value_compare(h,zero,0,0),0);
+ for(const [left,right,op,code]of[[frame,frame,0,3],[builder,builder,0,6],[zero,positive,6,3],[text,zero,2,3],[2,positive,2,3]]){assert.equal(r.value_compare(h,left,right,op),0);assert.equal(r.last_error(),code);}
+ assert.equal(r.heap_live(h),before);assert.equal(r.heap_used(h),used);assert.equal(r.heap_collections(h),0);r.frame_pop(h,frame);r.heap_collect(h);
+ assert.equal(r.value_compare(h,object,object,0),0);assert.equal(r.last_error(),1);
+});
 test('managed heap reclaims cycles, preserves roots and rejects recycled generations',()=>{
  const {r,h}=runtime(); const a=r.value_refs(h,7,2),b=r.value_refs(h,8,1),n=number(r,h,-0);
  assert.equal(r.value_set(h,a,0,b),1);assert.equal(r.value_set(h,b,0,a),1);assert.equal(r.value_set(h,a,1,n),1);

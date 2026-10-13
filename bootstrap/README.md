@@ -119,5 +119,7 @@ self-bootstrap remain open in the [backend plan](../docs/native-wasm-feasibility
 `managed-control-v1` profile: primitive values, lexical/control forms and direct
 calls link the runtime with automatic root frames and a versioned entry
 descriptor. Its zero-import WASM outputs execute through the bulk checked host
-entry. Arithmetic, persistent literals, closures, interop and complete compiler
-lowering remain open; this is not a full WASM compiler host.
+entry. It also lowers Number arithmetic, strict equality, Number/String pair
+relations and variadic comparison order. Mixed coercion, remainder/bitwise,
+persistent literals, closures, interop and complete compiler lowering remain
+open; this is not a full WASM compiler host.

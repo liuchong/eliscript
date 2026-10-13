@@ -186,9 +186,25 @@ The profile accepts primitive literals, references, `let`/`let*`, assignments,
 sequences, `if`/`cond`/`when`/`unless`, `while`, `and`/`or`/`not`, required synchronous
 parameters and direct named calls. Lisp truth preserves Number zero, NaN and
 empty strings as true; short-circuit returns preserve actual operand values.
-Every unsupported node is rejected even in an unselected branch. Arithmetic,
-persistent literals, closures, imports, interop, async and exception expressions
+Every unsupported node is rejected even in an unselected branch. Mixed coercion,
+remainder/bitwise operations, persistent literals, closures, imports, interop, async and exception expressions
 remain open; this profile does not represent the complete dynamic backend.
+
+Number operands now support `+`, `-`, `*`, `/`, `1+` and `1-`, including zero-argument
+addition/multiplication, unary negation/reciprocal and left-associated variadic
+arithmetic. Single-argument `+`/`*` preserve the operand unchanged, matching the JS
+emitter. IEEE results retain signed zero, NaN, infinities and subnormal behavior;
+no floating-point rearrangement or approximation is used.
+
+`=`, `eq`, `/=` and `not=` implement ordinary strict equality across supported
+values: NaN is unequal to itself, positive and negative zero compare equal,
+strings compare their UTF-16 contents and opaque values compare by identity.
+This is separate from the SameValueZero equality used by Map/Set keys. `eq`
+requires two operands. Variadic `=` compares adjacent pairs; `/=` and `not=`
+compare every pair. All operands are evaluated once in source order before the
+comparisons, even if the first pair is false. `<`, `<=`, `>` and `>=` support
+Number pairs and String pairs (UTF-16 code-unit order); mixed-type coercion is
+explicitly refused. Unsupported coercion never runs JS on behalf of WASM.
 
 The bulk entry protects earlier arguments across later getters. Generated frames
 retain parameters, lexical variables and temporaries; each argument is captured
@@ -204,7 +220,7 @@ peak-memory and throughput acceptance remain separate, open gates.
 ## Verification
 
 ```sh
-bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs tests/wasm-managed-tables.test.mjs tests/wasm-managed-control.test.mjs
+bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs tests/wasm-managed-tables.test.mjs tests/wasm-managed-control.test.mjs tests/wasm-managed-arithmetic.test.mjs
 bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=firefox bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=webkit bun test tests/direct-wasm-backend.test.mjs
