@@ -1,0 +1,79 @@
+(module eliscript.backend.optimize
+  (import "../bootstrap/ir.mjs" make-node make-program)
+
+  ;; Only statically numeric literals are folded. No algebraic reassociation,
+  ;; identity rewrite, binding propagation, or speculative host coercion.
+  (defun finite-number? (value)
+    (and (= (value-type value) "number")
+         (= value value)
+         (/= value (/ 1 0))
+         (/= value (/ -1 0))))
+
+  (defun plain-literal? (node)
+    (and (= (get node :kind) "literal")
+         (not (get node :properties nil))))
+
+  (defun folded-literal (node value)
+    (make-node "literal" (get node :span) value (js-array)))
+
+  (defun optimize-node (node depth)
+    (when (> depth 512)
+      (throw (js-object :message "optimizer IR depth exceeds 512")))
+    (let ((children (js-array))
+          (original (get node :children)))
+      (let ((index 0))
+        (while (< index (js-length original))
+          (js-call children :push (optimize-node (js-nth index original) (1+ depth)))
+          (setq index (1+ index))))
+      (let* ((copy (make-node (get node :kind) (get node :span)
+                     (get node :value) children (get node :properties nil)))
+             (kind (get copy :kind))
+             (operator (get copy :value)))
+        (cond
+          ((and (= kind "conditional") (= (js-length children) 3)
+                (plain-literal? (js-nth 0 children)))
+           ;; Lisp truth: 0, -0, NaN, and empty strings are true.
+           (if (get (js-nth 0 children) :value)
+               (js-nth 1 children)
+             (js-nth 2 children)))
+          ((and (= kind "intrinsic") (= (js-length children) 2)
+                (plain-literal? (js-nth 0 children))
+                (plain-literal? (js-nth 1 children))
+                (finite-number? (get (js-nth 0 children) :value))
+                (finite-number? (get (js-nth 1 children) :value)))
+           (let* ((left (get (js-nth 0 children) :value))
+                  (right (get (js-nth 1 children) :value))
+                  (result
+                    (cond ((= operator "+") (+ left right))
+                          ((= operator "-") (- left right))
+                          ((= operator "*") (* left right))
+                          ((= operator "/") (/ left right))
+                          (t nil))))
+             ;; Non-finite literals cannot be serialized by canonical IR.
+             ;; Keep the original operation, including division by zero.
+             (cond
+               ((finite-number? result) (folded-literal copy result))
+               ((= operator "=") (folded-literal copy (= left right)))
+               ((= operator "<") (folded-literal copy (< left right)))
+               ((= operator "<=") (folded-literal copy (<= left right)))
+               ((= operator ">") (folded-literal copy (> left right)))
+               ((= operator ">=") (folded-literal copy (>= left right)))
+               (t copy))))
+          ((and (= kind "intrinsic") (= (js-length children) 1)
+                (plain-literal? (js-nth 0 children))
+                (finite-number? (get (js-nth 0 children) :value))
+                (or (= operator "1+") (= operator "1-")))
+           (let ((result (if (= operator "1+")
+                             (1+ (get (js-nth 0 children) :value))
+                           (1- (get (js-nth 0 children) :value)))))
+             (if (finite-number? result) (folded-literal copy result) copy)))
+          (t copy)))))
+
+  (defun optimize-program (program)
+    (let ((body (js-array)) (index 0))
+      (while (< index (js-length (get program :body)))
+        (js-call body :push (optimize-node (js-nth index (get program :body)) 0))
+        (setq index (1+ index)))
+      (make-program (get program :filename) body)))
+
+  (export optimize-program))

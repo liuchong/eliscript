@@ -56,6 +56,7 @@ test-core: check-contracts
 		tests/compiler-locate.test.mjs \
 		tests/compiler-binary-comparison.test.mjs \
 		tests/compiler-js-codegen.test.mjs \
+		tests/direct-wasm-backend.test.mjs \
 		tests/compiler-reader-character.test.mjs \
 		tests/compiler-source-map-cursor.test.mjs \
 		tests/bootstrap-compiler.test.mjs tests/bootstrap-project.test.mjs \

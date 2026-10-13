@@ -1,0 +1,18 @@
+;; The same batch loops execute inside JS and WASM. No per-element host call.
+(defun recurrence-batch (n seed calls)
+  (let ((i 0) (cycle 0) (sum 0))
+    (while (< i calls)
+      (setq sum (+ sum (recurrence n (+ seed (* cycle 0.000000001)))))
+      (setq cycle (if (< cycle 7) (1+ cycle) 0))
+      (setq i (1+ i)))
+    sum))
+
+(defun escape-grid-batch (width limit calls)
+  (let ((i 0) (cycle 0) (sum 0))
+    (while (< i calls)
+      (setq sum (+ sum (escape-grid width (+ limit (* cycle 0.000000001)))))
+      (setq cycle (if (< cycle 7) (1+ cycle) 0))
+      (setq i (1+ i)))
+    sum))
+
+(export recurrence-batch escape-grid-batch)
