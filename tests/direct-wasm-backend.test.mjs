@@ -614,7 +614,7 @@ const rootPressureSource = `
           (frame-set heap frame 0 sum) (frame-return heap frame sum))))))
 (export root-pressure root-pressure-trap root-recursive)`;
 test("managed runtime has seed and three-generation IR and WASM fixed points", async () => {
-  const source=(await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8"))+rootPressureSource+await readFile(resolve(root,"tests/fixtures/wasm-managed-text.eli"),"utf8");
+  const source=(await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8"))+rootPressureSource+await readFile(resolve(root,"tests/fixtures/wasm-managed-text.eli"),"utf8")+await readFile(resolve(root,"tests/fixtures/wasm-managed-tables.eli"),"utf8");
   const filename="managed-runtime.eli",programs=generations.map(g=>g.compiler.compile_ir_string(source,filename));
   assert.deepEqual(programs[0],programs[1]);assert.deepEqual(programs[1],programs[2]);
   const bytes=generations.map((g,i)=>g.wasm.emit_memory_wasm(programs[i]));
@@ -637,6 +637,9 @@ test("managed runtime has seed and three-generation IR and WASM fixed points", a
     const h4=e["heap-new"](12,768,768);e["heap-auto"](h4,1);const key=e["key-pressure"](h4,1000)>>>0;assert(key>0);
     assert.equal(e["value-key-hash"](h4,key)>>>0,1490037359);assert.equal(e["frame-depth"](h4),0);assert(e["heap-collections"](h4)>=2000);
     e["heap-release"](h4,key);e["heap-collect"](h4);assert.equal(e["heap-live"](h4),0);
+    const h5=e["heap-new"](96,8192,8192);e["heap-auto"](h5,1);const table=e["table-pressure"](h5,1000)>>>0;assert(table>0);
+    assert.equal(e["value-table-size"](h5,table),32);assert.equal(e["frame-depth"](h5),0);assert(e["heap-collections"](h5)>=1000);
+    e["heap-release"](h5,table);e["heap-collect"](h5);assert.equal(e["heap-live"](h5),0);
   }
   assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(Uint8Array.from(bytes[2]))),[]);
   const saved=JSON.stringify(programs[2]);generations[2].wasm.emit_memory_wasm(programs[2]);assert.equal(JSON.stringify(programs[2]),saved);
@@ -986,6 +989,49 @@ describe("browser compiler backends", () => {
       }finally{URL.revokeObjectURL(url);}
     },{source});
     assert.deepEqual(result,generations[2].wasm.emit_memory_wasm(generations[2].compiler.compile_ir_string(source,"browser-text.eli"),{maximumPages:8}));
+  });
+
+  test("browser managed Map and Set preserve order, live iteration, cycles and bounded WASM pressure",async()=>{
+    const source=await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8")+await readFile(resolve(root,"tests/fixtures/wasm-managed-tables.eli"),"utf8");
+    const result=await evaluateBrowser(async({bundle,source})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:"text/javascript"}));
+      try {
+        const c=await import(url),bytes=Uint8Array.from(c.emit_memory_wasm(c.compile_ir_string(source,"browser-tables.eli"),{maximumPages:8}));
+        const check=(value,message)=>{if(!value)throw Error(message);},module=new WebAssembly.Module(bytes);check(WebAssembly.Module.imports(module).length===0,"imports");
+        const e=new WebAssembly.Instance(module).exports,h=e["heap-new"](96,8192,8192);e["heap-auto"](h,1);
+        const table=e["table-pressure"](h,1000)>>>0;check(table>0&&e["value-table-size"](h,table)===32,"whole table pressure");
+        check(e["frame-depth"](h)===0&&e["heap-collections"](h)>=1000,"safepoints");e["heap-release"](h,table);e["heap-collect"](h);check(e["heap-live"](h)===0,"whole cleanup");
+        const a=c.instantiateManagedRuntime(bytes,{maxSlots:256,initialBytes:16384,maxBytes:262144}),b=c.instantiateManagedRuntime(bytes);a.auto(1);
+        const map=a.map(),set=a.setTable(),minus=a.number(-0),zero=a.number(0),nan=a.number(NaN),other=a.number(NaN);
+        a.tableSet(map,minus,minus);a.tableSet(map,zero,minus);a.tableAdd(set,nan);a.tableAdd(set,other);
+        check(a.tableSize(map)===1&&a.tableSize(set)===1,"SameValueZero");const initial=a.tableIterator(map),step=a.iteratorNext(initial);
+        check(!step.done&&Object.is(a.readNumber(step.key),0)&&Object.is(a.readNumber(step.value),-0),"zero key and value");a.release(step.key);a.release(step.value);a.closeIterator(initial);a.release(initial);
+        a.tableClear(map);a.tableClear(set);
+        const keys=Array.from({length:24},(_,i)=>a.string(`中😀\ud800\0${i}`));keys.push(a.string("collision-69051"),a.string("collision-123577"));
+        const values=[null,false,true,undefined,minus,zero,nan],plain=[null,false,true,undefined,-0,0,NaN];
+        const ref=new Map(),referenceSet=new Set();let state=0x1877af1;const next=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return state>>>0;};
+        for(let i=0;i<384;i++) {
+          const k=next()%keys.length,v=next()%values.length,op=next()%5,name=a.readString(keys[k]);
+          if(op<3){a.tableSet(map,keys[k],values[v]);a.tableAdd(set,keys[k]);ref.set(name,plain[v]);referenceSet.add(name);}
+          else if(op===3){check(a.tableDelete(map,keys[k])===ref.delete(name),"delete");check(a.tableDelete(set,keys[k])===referenceSet.delete(name),"Set delete");}
+          else {const got=a.tableGet(map,keys[k]);check(Object.is(got&&typeof got==='object'?a.readNumber(got):got,ref.get(name)),"get");a.release(got);}
+          a.collect();check(a.tableSize(map)===ref.size&&a.tableSize(set)===referenceSet.size,"size");
+          if(i%16===0) {
+            const it=a.tableIterator(map),seen=[];for(;;){const s=a.iteratorNext(it);if(s.done)break;seen.push([a.readString(s.key),s.value&&typeof s.value==='object'?a.readNumber(s.value):s.value]);a.release(s.key);a.release(s.value);}
+            a.release(it);const expected=[...ref];check(seen.length===expected.length&&seen.every(([k,v],j)=>k===expected[j][0]&&Object.is(v,expected[j][1])),"order");
+          }
+        }
+        a.tableClear(map);a.tableClear(set);a.tableSet(map,keys[0],false);a.tableSet(map,keys[1],true);
+        const iterator=a.tableIterator(map),first=a.iteratorNext(iterator);check(a.keyEqual(first.key,keys[0]),"first");a.release(first.key);a.release(first.value);
+        a.tableDelete(map,keys[1]);a.tableSet(map,keys[2],undefined);a.tableClear(map);a.tableSet(map,keys[3],null);
+        const second=a.iteratorNext(iterator);check(!second.done&&a.keyEqual(second.key,keys[3])&&second.value===null,"live clear/reinsert");a.release(second.key);a.release(second.value);
+        check(a.iteratorNext(iterator).done,"done");a.tableSet(map,keys[4],false);check(a.iteratorNext(iterator).done,"permanent done");a.release(iterator);
+        try{b.tableHas(map,keys[0]);throw Error("foreign accepted");}catch(error){check(error.eliscriptDiagnostic?.code==="ELI-RT0001","brands");}
+        a.tableClear(map);a.tableSet(map,map,set);a.tableAdd(set,map);const alias=a.tableGet(map,map);check(a.keyEqual(alias,set),"cycles");a.release(alias);
+        for(const value of [...keys,minus,zero,nan,other,map,set])a.release(value);a.collect();check(a.live()===0,"cyclic cleanup");return [...bytes];
+      }finally{URL.revokeObjectURL(url);}
+    },{source});
+    assert.deepEqual(result,generations[2].wasm.emit_memory_wasm(generations[2].compiler.compile_ir_string(source,"browser-tables.eli"),{maximumPages:8}));
   });
 
 });

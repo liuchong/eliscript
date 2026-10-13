@@ -105,11 +105,12 @@ The Emacs Lisp seed remains the readable bootstrap and reference implementation.
 numeric artifacts. `backends/memory.eli` validates the separate memory-u32 ABI,
 including explicit `word-xor` without narrowing ordinary f64 values.
 `runtime/memory.eli` supplies owned linear memory, managed values, root frames,
-collection, UTF-16/UTF-8 operations and internal Map/Set key comparison/hashing.
+collection, UTF-16/UTF-8 operations, Map/Set key comparison/hashing, mutable tables
+and live iterators.
 It has no host imports. The [runtime guide](../tools/backends/README.md) defines
 the checked APIs, rooting obligations and remaining capability limits.
 
-These runtime slices do not yet implement full Map/Set, persistent collection
-protocols, automatic root insertion or complete dynamic lowering. The complete
+These runtime slices do not yet implement general Map/Set JS interop, persistent
+collection protocols, automatic root insertion or complete dynamic lowering. The complete
 compiler still runs in JS; WASM/native compiler hosts and the complete nine-cell
 self-bootstrap remain open in the [backend plan](../docs/native-wasm-feasibility.md).

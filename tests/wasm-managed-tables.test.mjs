@@ -1,0 +1,249 @@
+import {beforeAll,afterAll,test} from 'bun:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import {tmpdir} from 'node:os';
+import {spawnSync} from 'node:child_process';
+import {buildBackends} from '../tools/backends/build.mjs';
+import {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';
+import {hashValue} from '../runtime/core/value.mjs';
+let directory,backend,bytes,program;
+beforeAll(async()=>{
+ directory=await mkdtemp(resolve(tmpdir(),'eliscript-managed-tables-'));
+ backend=await buildBackends({outputRoot:directory});
+ const source=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8');
+ program=backend.compiler.compile_ir_string(source,'tables-runtime.eli');
+ bytes=Uint8Array.from(backend.wasm.emit_memory_wasm(program,{maximumPages:256}));
+ assert(WebAssembly.validate(bytes));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);
+},120000);
+afterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});
+function raw(slots=256,initial=16384,max=1048576) {
+ const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;
+ const r=Object.fromEntries(Object.entries(e).map(([k,v])=>[k.replaceAll('-','_'),typeof v==='function'? (...args)=>v(...args)>>>0:v]));
+ const h=r.heap_new(slots,initial,max);assert(h>0);return{r,h};
+}
+function number(r,h,value) {const v=new DataView(new ArrayBuffer(8));v.setFloat64(0,value,true);return r.value_number(h,v.getUint32(0,true),v.getUint32(4,true));}
+function text(r,h,value) {const id=r.value_string(h,value.length);assert(id);for(let i=0;i<value.length;i++)r.value_unit_set(h,id,i,value.charCodeAt(i));r.value_seal(h,id);return id;}
+function entries(r,h,table) {
+ const iterator=r.value_table_iterator(h,table);assert(iterator);r.heap_pin(h,iterator);const out=[];
+ while(r.value_iterator_next(h,iterator))out.push([r.value_iterator_key(h,iterator),r.value_iterator_value(h,iterator)]);
+ assert.equal(r.last_error(),0);r.heap_release(h,iterator);return out;
+}
+function bridgeEntries(a,table) {
+ const iterator=a.tableIterator(table),out=[];
+ try {for(;;){const step=a.iteratorNext(iterator);if(step.done)break;out.push([step.key,step.value]);}}
+ finally{a.closeIterator(iterator);a.release(iterator);}return out;
+}
+function dropEntries(a,values) {for(const [key,value]of values){a.release(key);a.release(value);}}
+test('managed Map distinguishes missing undefined and nil, preserves order and makes reads allocation-free',()=>{
+ const {r,h}=raw(),m=r.value_table_new(h,10,4);assert(m);r.heap_pin(h,m);
+ for(const [key,value]of[[0,3],[1,0],[2,1],[3,2]])assert.equal(r.value_table_put(h,m,key,value),1);
+ assert.equal(r.value_table_size(h,m),4);assert.equal(r.value_table_get(h,m,0),3);assert.equal(r.value_table_has(h,m,0),1);
+ const key=text(r,h,'absent');r.heap_pin(h,key);const before=[r.heap_used(h),r.heap_live(h),r.heap_collections(h)];
+ for(let i=0;i<1000;i++){assert.equal(r.value_table_get(h,m,key),3);assert.equal(r.value_table_has(h,m,key),0);assert.equal(r.value_table_get(h,m,1),0);}
+ assert.deepEqual([r.heap_used(h),r.heap_live(h),r.heap_collections(h)],before);
+ assert.deepEqual(entries(r,h,m),[[0,3],[1,0],[2,1],[3,2]]);
+ assert.equal(r.value_table_put(h,m,1,2),1);assert.deepEqual(entries(r,h,m),[[0,3],[1,2],[2,1],[3,2]]);
+ assert.equal(r.value_table_delete(h,m,1),1);assert.equal(r.value_table_delete(h,m,1),0);r.value_table_put(h,m,1,0);
+ assert.deepEqual(entries(r,h,m),[[0,3],[2,1],[3,2],[1,0]]);
+ r.heap_release(h,key);r.heap_release(h,m);r.heap_collect(h);assert.equal(r.heap_live(h),0);
+});
+test('managed Map and Set canonicalize negative-zero keys, retain IEEE values and merge NaN payload keys',()=>{
+ const {r,h}=raw(),minus=number(r,h,-0),zero=number(r,h,0),nan=r.value_number(h,1,0x7ff00000),other=r.value_number(h,99,0xfff80000);
+ const m=r.value_table_new(h,10,4),s=r.value_table_new(h,11,4);r.heap_pin(h,m);r.heap_pin(h,s);
+ r.value_table_put(h,m,minus,minus);r.value_table_put(h,m,zero,minus);r.value_table_put(h,m,nan,1);r.value_table_put(h,m,other,2);
+ r.value_table_add(h,s,minus);r.value_table_add(h,s,zero);r.value_table_add(h,s,nan);r.value_table_add(h,s,other);
+ assert.equal(r.value_table_size(h,m),2);assert.equal(r.value_table_size(h,s),2);
+ for(const table of[m,s]) {
+  const list=entries(r,h,table),view=new DataView(r.memory.buffer),p=r.value_data(h,list[0][0],4);assert.equal(view.getUint32(p,true),0);assert.equal(view.getUint32(p+4,true),0);
+  assert.equal(r.value_key_equal(h,list[1][0],nan),1);
+ }
+ const p=r.value_data(h,r.value_table_get(h,m,zero),4);assert(Object.is(new DataView(r.memory.buffer).getFloat64(p,true),-0));
+ assert.equal(r.value_table_get(h,m,nan),2);assert.equal(r.value_table_has(h,s,other),1);
+ const used=r.heap_used(h);for(let i=0;i<100;i++){r.value_table_put(h,m,minus,minus);r.value_table_add(h,s,minus);}assert.equal(r.heap_used(h),used);
+ r.heap_release(h,m);r.heap_release(h,s);r.heap_collect(h);assert.equal(r.heap_live(h),0);
+});
+test('managed hash tables distinguish complete hash collisions and allow a zero hash',()=>{
+ const {r,h}=raw(),m=r.value_table_new(h,10,4);r.heap_pin(h,m);
+ const left=text(r,h,'collision-69051'),right=text(r,h,'collision-123577');
+ assert.equal(hashValue('collision-69051'),919441390);assert.equal(hashValue('collision-123577'),919441390);
+ assert.equal(r.value_key_hash(h,left),r.value_key_hash(h,right));assert.equal(r.value_key_equal(h,left,right),0);
+ r.value_table_put(h,m,left,1);r.value_table_put(h,m,right,2);
+ assert.equal(r.value_table_get(h,m,left),1);assert.equal(r.value_table_get(h,m,right),2);
+ assert.equal(r.value_table_delete(h,m,left),1);assert.equal(r.value_table_get(h,m,right),2);r.value_table_put(h,m,left,3);
+ assert.deepEqual(entries(r,h,m),[[right,2],[left,3]]);
+ const zeroHash=r.value_number(h,0,4229770793);assert.equal(r.value_key_hash(h,zeroHash),0);assert.equal(r.last_error(),0);
+ assert.equal(r.value_table_put(h,m,zeroHash,0),1);assert.equal(r.value_table_has(h,m,zeroHash),1);assert.equal(r.value_table_get(h,m,zeroHash),0);
+ assert.equal(r.value_table_get(h,m,right),2);assert.equal(r.value_table_delete(h,m,zeroHash),1);
+});
+test('managed Map and Set retain opaque identities and collect cyclic table references',()=>{
+ const {r,h}=raw(),m=r.value_table_new(h,10,4),s=r.value_table_new(h,11,4),a=r.value_refs(h,7,0),b=r.value_refs(h,7,0);
+ r.heap_pin(h,m);const identity=r.value_key_hash(h,m);
+ r.value_table_put(h,m,a,m);r.value_table_put(h,m,b,s);r.value_table_put(h,m,s,s);r.value_table_add(h,s,m);r.value_table_add(h,s,s);
+ assert.equal(r.heap_collect(h),0);assert.equal(r.value_table_size(h,m),3);assert.equal(r.value_table_has(h,s,m),1);
+ assert.equal(r.value_key_hash(h,m),identity);assert.equal(r.value_table_get(h,m,a),m);assert.equal(r.value_table_get(h,m,b),s);
+ r.value_table_delete(h,m,b);assert.equal(r.heap_collect(h),1);assert.equal(r.value_table_has(h,m,a),1);
+ r.heap_release(h,m);assert.equal(r.heap_collect(h),3);assert.equal(r.heap_live(h),0);
+ assert.equal(r.value_table_size(h,m),0);assert.equal(r.last_error(),1);
+});
+test('managed table iterators observe mutations, compaction and growth, then remain done',()=>{
+ const {r,h}=raw(512,32768),m=r.value_table_new(h,10,4);r.heap_pin(h,m);
+ const keys=Array.from({length:80},(_,i)=>text(r,h,`k${i}`));for(const key of keys)r.heap_pin(h,key);
+ for(let i=0;i<4;i++)r.value_table_put(h,m,keys[i],i%4);
+ const it=r.value_table_iterator(h,m);r.heap_pin(h,it);assert.equal(r.value_iterator_next(h,it),1);assert.equal(r.value_iterator_key(h,it),keys[0]);
+ r.value_table_delete(h,m,keys[1]);r.value_table_delete(h,m,keys[0]);r.value_table_put(h,m,keys[0],2);
+ for(let i=4;i<80;i++)r.value_table_put(h,m,keys[i],i%4);
+ const seen=[];while(r.value_iterator_next(h,it))seen.push(r.value_iterator_key(h,it));
+ assert.deepEqual(seen,[keys[2],keys[3],keys[0],...keys.slice(4)]);assert.equal(r.value_table_size(h,m),79);
+ r.value_table_clear(h,m);r.value_table_put(h,m,keys[1],3);assert.equal(r.value_iterator_next(h,it),0);
+ const live=r.value_table_iterator(h,m);r.heap_pin(h,live);assert.equal(r.value_iterator_next(h,live),1);
+ r.value_table_clear(h,m);r.value_table_put(h,m,keys[2],0);assert.equal(r.value_iterator_next(h,live),1);assert.equal(r.value_iterator_key(h,live),keys[2]);
+ assert.equal(r.value_iterator_close(h,live),1);r.value_table_put(h,m,keys[3],0);assert.equal(r.value_iterator_next(h,live),0);
+ for(const key of keys)r.heap_release(h,key);r.heap_release(h,m);r.heap_release(h,it);r.heap_release(h,live);r.heap_collect(h);assert.equal(r.heap_live(h),0);
+});
+test('managed iterator roots the table and current values until advance or close without allocating',()=>{
+ const {r,h}=raw(),m=r.value_table_new(h,10,4),key=text(r,h,'key'),value=number(r,h,42);r.heap_pin(h,m);r.value_table_put(h,m,key,value);
+ const it=r.value_table_iterator(h,m);r.heap_pin(h,it);r.heap_release(h,m);r.heap_collect(h);assert.equal(r.value_iterator_next(h,it),1);
+ r.value_table_clear(h,m);assert.equal(r.heap_collect(h),0);assert.equal(r.value_iterator_key(h,it),key);assert.equal(r.value_iterator_value(h,it),value);
+ const before=[r.heap_used(h),r.heap_live(h),r.heap_collections(h)];assert.equal(r.value_iterator_close(h,it),1);assert.equal(r.value_iterator_next(h,it),0);
+ assert.deepEqual([r.heap_used(h),r.heap_live(h),r.heap_collections(h)],before);
+ assert.equal(r.heap_collect(h),3);assert.equal(r.heap_live(h),1);r.heap_release(h,it);r.heap_collect(h);assert.equal(r.heap_live(h),0);
+});
+test('managed table allocation failure preserves entries, order, identity and roots',()=>{
+ const a=instantiateManagedRuntime(bytes,{maxSlots:32,initialBytes:2048,maxBytes:2048});a.auto(1);const m=a.map();
+ const inputs=[];let failed=false;
+ for(let i=0;i<40;i++) {
+  let key,value;try{key=a.number(i);value=a.number(i+100);a.tableSet(m,key,value);inputs.push([key,value]);}
+  catch(error){assert.equal(error.eliscriptDiagnostic?.code,'ELI-RT0002');if(key)a.release(key);if(value)a.release(value);failed=true;break;}
+ }
+ assert(failed);assert(inputs.length>=4);assert.equal(a.tableSize(m),inputs.length);const list=bridgeEntries(a,m);
+ assert.deepEqual(list.map(([k,v])=>[a.readNumber(k),a.readNumber(v)]),inputs.map(([k,v])=>[a.readNumber(k),a.readNumber(v)]));dropEntries(a,list);
+ assert.equal(a.stats().frameDepth,0);for(const pair of inputs){a.release(pair[0]);a.release(pair[1]);}a.release(m);a.collect();assert.equal(a.live(),0);
+});
+test('managed table bridge validates brands and kinds and returns individually owned iterator values',()=>{
+ const a=instantiateManagedRuntime(bytes),b=instantiateManagedRuntime(bytes),m=a.map(),s=a.setTable(),key=a.string('😀\ud800'),copy=a.string('😀\ud800'),value=a.array();
+ assert.equal(a.tableSet(m,key,value),m);assert.equal(a.tableAdd(s,key),s);assert(a.tableHas(m,copy));assert(a.tableHas(s,copy));
+ const alias=a.tableGet(m,copy);assert(a.keyEqual(alias,value));a.release(alias);
+ assert.throws(()=>b.tableHas(m,key),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');
+ assert.throws(()=>a.tableSet(s,key,value),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');assert.throws(()=>a.tableAdd(m,key),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');
+ assert.throws(()=>a.tableGet(s,key),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');assert.throws(()=>a.tableHas(m,0),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');
+ const list=bridgeEntries(a,s);assert.equal(list.length,1);assert(a.keyEqual(list[0][0],list[0][1]));dropEntries(a,list);
+ for(const x of[m,s,key,copy,value])a.release(x);a.collect();assert.equal(a.live(),0);
+});
+test('managed Map and Set agree with independent JS models through randomized mutation and GC',()=>{
+ const a=instantiateManagedRuntime(bytes,{maxSlots:256,initialBytes:16384,maxBytes:1048576});a.auto(1);const m=a.map(),s=a.setTable();
+ const objects=[a.array(),a.array(),a.record(),a.bytes([1])],values=[null,false,true,undefined,0,-0,NaN,Infinity,-Infinity,Number.MIN_VALUE,'','中😀','\ud800',...objects];
+ const handles=values.map(v=>typeof v==='number'?a.number(v):typeof v==='string'?a.string(v):v);
+ const ref=new Map(),set=new Set();let state=0x397cab1;const next=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return state>>>0;};
+ const decode=handle=>handle&&typeof handle==='object'?handle.kind===4?a.readNumber(handle):handle.kind===5?a.readString(handle):objects.find(object=>a.keyEqual(handle,object)):handle;
+ for(let i=0;i<4096;i++) {
+  const k=next()%handles.length,v=next()%handles.length,operation=next()%8;
+  if(operation<4){a.tableSet(m,handles[k],handles[v]);a.tableAdd(s,handles[k]);ref.set(values[k],values[v]);set.add(values[k]);}
+  else if(operation<6){assert.equal(a.tableDelete(m,handles[k]),ref.delete(values[k]));assert.equal(a.tableDelete(s,handles[k]),set.delete(values[k]));}
+  else if(operation===6){a.tableClear(m);a.tableClear(s);ref.clear();set.clear();}
+  else {assert.equal(a.tableHas(m,handles[k]),ref.has(values[k]));const result=a.tableGet(m,handles[k]);assert(Object.is(decode(result),ref.get(values[k])));a.release(result);}
+  a.collect();assert.equal(a.tableSize(m),ref.size);assert.equal(a.tableSize(s),set.size);
+  if(i%16===0){const mapEntries=bridgeEntries(a,m),setEntries=bridgeEntries(a,s);assert.deepEqual(mapEntries.map(([k,v])=>[decode(k),decode(v)]),[...ref]);assert.deepEqual(setEntries.map(([k])=>decode(k)),[...set]);dropEntries(a,mapEntries);dropEntries(a,setEntries);}
+ }
+ for(const handle of handles)a.release(handle);a.release(m);a.release(s);a.collect();assert.equal(a.live(),0);
+});
+test('managed table tickets carry between words, reject exhaustion and still permit existing-key updates',()=>{
+ const {r,h}=raw(),m=r.value_table_new(h,10,4);r.heap_pin(h,m);
+ const p=r.value_data(h,m,10)-32,view=new DataView(r.memory.buffer);view.setUint32(p+16,0xfffffffe,true);view.setUint32(p+20,123,true);
+ r.value_table_put(h,m,0,1);const it=r.value_table_iterator(h,m);r.heap_pin(h,it);assert.equal(r.value_iterator_next(h,it),1);assert.equal(r.value_iterator_key(h,it),0);
+ r.value_table_put(h,m,1,2);r.value_table_put(h,m,2,3);assert.equal(r.value_iterator_next(h,it),1);assert.equal(r.value_iterator_key(h,it),1);
+ assert.equal(r.value_iterator_next(h,it),1);assert.equal(r.value_iterator_key(h,it),2);assert.equal(view.getUint32(p+20,true),124);assert.equal(view.getUint32(p+16,true),1);
+ view.setUint32(p+16,0xffffffff,true);view.setUint32(p+20,0xffffffff,true);const before=entries(r,h,m);
+ assert.equal(r.value_table_put(h,m,3,0),0);assert.equal(r.last_error(),2);assert.deepEqual(entries(r,h,m),before);
+ assert.equal(r.value_table_put(h,m,0,3),1);assert.equal(r.value_table_get(h,m,0),3);assert.equal(r.value_iterator_next(h,it),0);
+ r.heap_release(h,it);r.heap_release(h,m);r.heap_collect(h);assert.equal(r.heap_live(h),0);
+});
+test('managed table compaction bounds long delete/reinsert logs and matches an active JS iterator without allocation',()=>{
+ const {r,h}=raw(),m=r.value_table_new(h,10,4);r.heap_pin(h,m);const values=[null,false,true,undefined],ref=new Map();
+ for(let i=0;i<4;i++){r.value_table_put(h,m,i,i);ref.set(values[i],values[i]);}
+ const it=r.value_table_iterator(h,m),iterator=ref.entries();r.heap_pin(h,it);const before=[r.heap_used(h),r.heap_live(h),r.heap_collections(h)];
+ for(let i=0;i<10000;i++){
+  if(i%17===0){r.value_table_clear(h,m);ref.clear();}
+  const key=i%4,val=(i+1)%4;r.value_table_delete(h,m,key);ref.delete(values[key]);r.value_table_put(h,m,key,val);ref.set(values[key],values[val]);
+  const expected=iterator.next(),actual=r.value_iterator_next(h,it);assert.equal(actual,Number(!expected.done));
+  if(actual)assert.deepEqual([values[r.value_iterator_key(h,it)],values[r.value_iterator_value(h,it)]],expected.value);
+ }
+ assert.deepEqual([r.heap_used(h),r.heap_live(h),r.heap_collections(h)],before);assert.equal(r.value_table_size(h,m),ref.size);
+ r.value_iterator_close(h,it);r.heap_release(h,it);r.heap_release(h,m);r.heap_collect(h);assert.equal(r.heap_live(h),0);
+});
+test('managed table growth fails at the actual WASM page limit without losing the old table or borrowed roots',()=>{
+ const limited=Uint8Array.from(backend.wasm.emit_memory_wasm(program,{initialPages:1,maximumPages:1}));
+ const e=new WebAssembly.Instance(new WebAssembly.Module(limited)).exports;
+ const r=Object.fromEntries(Object.entries(e).map(([k,v])=>[k.replaceAll('-','_'),typeof v==='function'?(...args)=>v(...args)>>>0:v]));
+ const h=r.heap_new(1024,32768,262144);assert(h);r.heap_auto(h,1);const m=r.value_table_new(h,10,4);r.heap_pin(h,m);let count=0,failed=false;
+ for(let i=1;i<512;i++){
+  const key=number(r,h,i);if(!key){assert.equal(r.last_error(),2);failed=true;break;}
+  const result=r.value_table_put(h,m,key,2);if(!result){assert.equal(r.last_error(),2);failed=true;break;}count++;
+ }
+ assert(failed);assert(count>=4);assert.equal(r.memory.buffer.byteLength,65536);assert.equal(r.value_table_size(h,m),count);
+ const list=entries(r,h,m);assert.equal(list.length,count);for(let i=0;i<count;i++){const point=r.value_data(h,list[i][0],4);assert.equal(new DataView(r.memory.buffer).getFloat64(point,true),i+1);assert.equal(list[i][1],2);}
+ r.heap_release(h,m);r.heap_collect(h);assert.equal(r.heap_live(h),0);assert.equal(r.frame_depth(h),0);
+});
+test('managed table refusal paths leave the table untouched and validate builders, frames, kinds and iterators',()=>{
+ const {r,h}=raw(),m=r.value_table_new(h,10,4),s=r.value_table_new(h,11,4),builder=r.value_string(h,1),frame=r.frame_new(h,0);
+ for(const [fn,args,code]of[
+  ['value_table_put',[m,builder,0],6],['value_table_has',[m,builder],6],['value_table_delete',[m,builder],6],
+  ['value_table_put',[m,0,frame],3],['value_table_add',[s,frame],3],['value_table_get',[m,frame],3],
+  ['value_table_put',[s,0,0],1],['value_table_add',[m,0],1],['value_table_get',[s,0],1],
+  ['value_table_clear',[builder],1],['value_table_new',[9,4],3],['value_table_new',[10,4194305],2]
+ ]) {const used=r.heap_used(h);assert.equal(r[fn](h,...args),0);assert.equal(r.last_error(),code);assert.equal(r.heap_used(h),used);assert.equal(r.value_table_size(h,m),0);assert.equal(r.value_table_size(h,s),0);}
+ const it=r.value_table_iterator(h,m);assert(it);assert.equal(r.value_iterator_key(h,it),0);assert.equal(r.last_error(),3);
+ assert.equal(r.value_iterator_next(h,it),0);assert.equal(r.value_iterator_value(h,it),0);assert.equal(r.last_error(),3);
+ r.frame_pop(h,frame);r.heap_collect(h);assert.equal(r.heap_live(h),0);assert.equal(r.value_table_has(h,m,0),0);assert.equal(r.last_error(),1);
+});
+test('managed table negative-zero normalization failure preserves bits, tickets and every borrowed root',()=>{
+ const {r,h}=raw(4,512,512),m=r.value_table_new(h,10,4),minus=number(r,h,-0),a=r.value_refs(h,7,0),b=r.value_refs(h,8,0);
+ for(const x of[m,minus,a,b])r.heap_pin(h,x);r.heap_auto(h,1);
+ const p=r.value_data(h,m,10)-32,view=new DataView(r.memory.buffer),low=view.getUint32(p+16,true),high=view.getUint32(p+20,true);
+ assert.equal(r.value_table_put(h,m,minus,minus),0);assert.equal(r.last_error(),2);assert.equal(r.value_table_size(h,m),0);
+ const current=r.value_data(h,m,10)-32;assert.equal(view.getUint32(current+16,true),low);assert.equal(view.getUint32(current+20,true),high);
+ assert(Object.is(view.getFloat64(r.value_data(h,minus,4),true),-0));assert.equal(r.frame_depth(h),0);
+ for(const x of[m,minus,a,b])r.heap_release(h,x);r.heap_collect(h);assert.equal(r.heap_live(h),0);
+});
+test('managed table growth defragments out-of-order live blocks without changing roots, aliases or IEEE payloads',()=>{
+ const {r,h}=raw(128,8192,8192),m=r.value_table_new(h,10,4);r.value_bytes(h,160);
+ const nan=r.value_number(h,0x12345678,0x7ff12345),minus=number(r,h,-0),str=text(r,h,'\ud800中😀'),data=r.value_bytes(h,8),array=r.value_refs(h,7,3),record=r.value_refs(h,8,3);
+ const pinned=[m,nan,minus,str,data,array,record];for(const x of pinned)r.heap_pin(h,x);
+ r.value_set(h,array,0,m);r.value_set(h,array,1,nan);r.value_set(h,array,2,str);
+ r.value_set(h,record,0,array);r.value_set(h,record,1,minus);r.value_set(h,record,2,data);
+ const values=[0,255,17,32,64,128,1,254],point=r.value_data(h,data,6);new Uint8Array(r.memory.buffer,point,8).set(values);
+ for(let i=0;i<4;i++)r.value_table_put(h,m,i,nan);
+ const frame=r.frame_new(h,2);r.frame_set(h,frame,0,array);r.frame_set(h,frame,1,record);
+ const it=r.value_table_iterator(h,m);r.heap_pin(h,it);pinned.push(it);assert.equal(r.value_iterator_next(h,it),1);
+ let index=0;
+ for(;;){const block=r.value_bytes(h,160);if(!block){assert.equal(r.last_error(),2);break;}if(index++%2){r.heap_pin(h,block);pinned.push(block);}}
+ for(;;){const block=r.value_bytes(h,0);if(!block){assert.equal(r.last_error(),2);break;}r.heap_pin(h,block);pinned.push(block);}
+ r.heap_collect(h);const outOfOrder=number(r,h,123);r.heap_pin(h,outOfOrder);pinned.push(outOfOrder);
+ const oldPoint=r.value_data(h,nan,4),before=[r.heap_used(h),r.heap_live(h),r.heap_collections(h)],identity=r.value_key_hash(h,m);
+ assert.equal(r.value_table_put(h,m,nan,record),1);assert.equal(r.value_table_size(h,m),5);
+ assert(r.heap_used(h)<before[0]);assert.equal(r.heap_live(h),before[1]);assert.equal(r.heap_collections(h),before[2]);assert.equal(r.value_key_hash(h,m),identity);
+ const fresh=r.value_data(h,nan,4),view=new DataView(r.memory.buffer);assert(fresh!==oldPoint);
+ assert.equal(view.getUint32(fresh,true),0x12345678);assert.equal(view.getUint32(fresh+4,true),0x7ff12345);assert(Object.is(view.getFloat64(r.value_data(h,minus,4),true),-0));
+ assert.equal(view.getFloat64(r.value_data(h,outOfOrder,4),true),123);
+ assert.deepEqual([...new Uint8Array(r.memory.buffer,r.value_data(h,data,6),8)],values);
+ assert.deepEqual(Array.from({length:4},(_,i)=>r.value_unit_get(h,str,i)),[0xd800,0x4e2d,0xd83d,0xde00]);
+ assert.equal(r.value_get(h,array,0),m);assert.equal(r.value_get(h,array,1),nan);assert.equal(r.value_get(h,record,0),array);assert.equal(r.frame_get(h,frame,1),record);
+ assert.equal(r.value_iterator_value(h,it),nan);assert.equal(r.value_table_get(h,m,nan),record);assert.equal(r.frame_depth(h),1);
+ r.value_iterator_close(h,it);r.frame_pop(h,frame);for(const x of pinned)r.heap_release(h,x);r.heap_collect(h);assert.equal(r.heap_live(h),0);
+});
+test('Node and Bun execute the whole bounded Map/Set pipeline inside zero-import WASM across allocation safepoints',async()=>{
+ const source=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8')+await readFile(resolve('tests/fixtures/wasm-managed-tables.eli'),'utf8');
+ const artifact=Uint8Array.from(backend.wasm.emit_memory_wasm(backend.compiler.compile_ir_string(source,'table-pipeline.eli'),{maximumPages:8}));
+ const module=new WebAssembly.Module(artifact);assert.deepEqual(WebAssembly.Module.imports(module),[]);
+ const path=resolve(directory,'table-pipeline.wasm');await writeFile(path,artifact);
+ const e=new WebAssembly.Instance(module).exports,h=e['heap-new'](96,8192,8192);e['heap-auto'](h,1);
+ const out=e['table-pressure'](h,1000)>>>0;assert(out>0);assert.equal(e['value-table-size'](h,out),32);assert.equal(e['frame-depth'](h),0);assert(e['heap-collections'](h)>=1000);
+ e['heap-release'](h,out);e['heap-collect'](h);assert.equal(e['heap-live'](h),0);
+ const result=spawnSync('node',['--input-type=module','-e',`
+ import assert from'node:assert/strict';import{readFileSync}from'node:fs';
+ const module=new WebAssembly.Module(readFileSync(${JSON.stringify(path)}));assert.deepEqual(WebAssembly.Module.imports(module),[]);
+ const e=new WebAssembly.Instance(module).exports,h=e['heap-new'](96,8192,8192);e['heap-auto'](h,1);
+ const out=e['table-pressure'](h,1000)>>>0;assert(out>0);assert.equal(e['value-table-size'](h,out),32);assert.equal(e['frame-depth'](h),0);assert(e['heap-collections'](h)>=1000);
+ e['heap-release'](h,out);e['heap-collect'](h);assert.equal(e['heap-live'](h),0);
+ `],{encoding:'utf8',timeout:30000});assert.equal(result.status,0,result.stderr);
+});

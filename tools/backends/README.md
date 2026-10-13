@@ -7,7 +7,8 @@ The implementation and remaining acceptance gates are tracked in
 
 `bootstrap/runtime/memory.eli` emits a module with owned, growable linear memory
 and zero imports. Its managed heap implements Numbers, UTF-16 strings, byte
-arrays, reference arrays, fixed records, root frames and collection in WASM.
+arrays, reference arrays, fixed records, mutable Map/Set tables, live iterators,
+root frames and collection in WASM.
 `instantiateManagedRuntime(bytes, options)` from `managed-runtime.mjs` supplies
 bulk host transfer and branded handles. A returned handle owns one root; release
 it with `release`, and call `collect` to reclaim unreachable objects. `auto(n)`
@@ -85,13 +86,79 @@ The raw APIs are `value-key-equal(heap, left, right)` returning word 0/1 and
 `value-key-hash(heap, value)` returning a full u32. A zero hash is valid; inspect
 `last-error` to distinguish failure. `word-xor` is an explicit memory32 capability
 and preserves all 32 bits; it cannot silently narrow ordinary f64 values.
-These APIs do not implement a complete Map/Set or the persistent collection
-IEquiv/IHash protocols. Those and complete compiler lowering remain open.
+The key APIs are also used by the managed tables below. Persistent collection
+IEquiv/IHash protocols and complete compiler lowering remain open.
+
+## Managed Map/Set and live iterators
+
+The checked APIs operate on managed handles; ordinary JS numbers require
+`number(...)`. All storage, lookup, mutation, iteration and GC execute in WASM.
+
+| Bridge method | Behavior |
+| --- | --- |
+| `map(capacity = 4)` / `setTable(capacity = 4)` | Create a mutable table, rounding capacity up to a power of two with minimum 4 |
+| `tableSize(table)` / `tableHas(table, key)` | Query either kind without allocating |
+| `tableGet(map, key)` | Return an individually rooted value; missing is `undefined`, so use `tableHas` to distinguish a stored `undefined` |
+| `tableSet(map, key, value)` | Insert/update and return the original map handle; updates retain key/order |
+| `tableAdd(set, key)` | Insert and return the original set handle; duplicates retain the original key/order |
+| `tableDelete(table, key)` | Remove and return a boolean; reinsertions move to the end |
+| `tableClear(table)` | Remove all entries and their references |
+| `tableIterator(table)` | Return an individually rooted live iterator |
+| `iteratorNext(iterator)` | Return `{done: true}` or `{done: false, key, value}`; each returned key/value handle owns a separate root, including Set pairs |
+| `closeIterator(iterator)` | Permanently finish and release its table/current-value references |
+
+Map-only and Set-only methods reject the other kind. SameValueZero applies;
+new negative-zero keys become positive zero, while negative-zero Map values
+keep their bits. Full hash collisions use key equality, and zero hashes/nil
+keys remain valid. Tables and iterators use opaque identity when used as keys.
+An iterator sees later insertions, skips unseen deletions and survives clear,
+growth and compaction. Once it returns `done`, later inserts never revive it.
+
+```javascript
+const map = runtime.map();
+runtime.tableSet(map, null, true);
+const iterator = runtime.tableIterator(map);
+try {
+  for (;;) {
+    const step = runtime.iteratorNext(iterator);
+    if (step.done) break;
+    console.log(step.key, step.value);
+    runtime.release(step.key);
+    runtime.release(step.value);
+  }
+} finally {
+  runtime.closeIterator(iterator);
+  runtime.release(iterator);
+  runtime.release(map);
+  runtime.collect();
+}
+```
+
+Raw `value-table-*` and `value-iterator-*` exports provide the same operations.
+`value-table-new(heap, kind, capacity)` accepts kinds 10/11; kind 12 is an iterator.
+Raw lookup/current values are borrowed references; `value-iterator-next` returns
+word 0/1, and current-value access before first advance or after done is rejected.
+Like all raw calls, inspect `last-error` to distinguish valid zero results.
+
+Buckets are separate from the insertion log. Full logs with holes compact in
+place, while full tables allocate a replacement block and publish once. Tickets
+are two monotonic u32 words, survive deletion/clear and refuse exhaustion.
+After a real allocation failure, a no-allocation O(n log n) merge sort orders
+live slots by address and packs all active blocks before retrying. It preserves
+IDs, roots and exact payloads, and does not itself collect. Refresh raw data
+addresses after any allocating call, even if `memory.buffer` stayed unchanged;
+failed allocating calls can also move objects. Failure leaves logical entries,
+order and tickets intact. Deleted entries stop retaining keys/values; completed
+iterators release references, and unrooted table cycles are collectible.
+
+These are internal storage/iteration primitives. General JS interop constructors,
+callbacks/iterable protocols, persistent collections, automatic root insertion
+and complete language/compiler lowering still require their own acceptance.
 
 ## Verification
 
 ```sh
-bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs
+bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs tests/wasm-managed-tables.test.mjs
 bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=firefox bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=webkit bun test tests/direct-wasm-backend.test.mjs

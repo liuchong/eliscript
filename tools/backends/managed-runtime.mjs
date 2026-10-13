@@ -45,6 +45,23 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
   truth(value) {return !!call('value-truth',heap,id(value));},
   keyEqual(left,right) {return !!call('value-key-equal',heap,id(left),id(right));},
   keyHash(value) {return call('value-key-hash',heap,id(value));},
+  map(capacity=4) {return wrap(call('value-table-new',heap,10,word(capacity)));},
+  setTable(capacity=4) {return wrap(call('value-table-new',heap,11,word(capacity)));},
+  tableSize(table) {return call('value-table-size',heap,id(table));},
+  tableHas(table,key) {return !!call('value-table-has',heap,id(table),id(key));},
+  tableGet(table,key) {return wrap(call('value-table-get',heap,id(table),id(key)));},
+  tableSet(table,key,value) {call('value-table-put',heap,id(table),id(key),id(value));return table;},
+  tableAdd(table,key) {call('value-table-add',heap,id(table),id(key));return table;},
+  tableDelete(table,key) {return !!call('value-table-delete',heap,id(table),id(key));},
+  tableClear(table) {call('value-table-clear',heap,id(table));},
+  tableIterator(table) {return wrap(call('value-table-iterator',heap,id(table)));},
+  iteratorNext(iterator) {
+   const it=id(iterator);if(!call('value-iterator-next',heap,it))return Object.freeze({done:true});
+   const key=wrap(call('value-iterator-key',heap,it));
+   try {return Object.freeze({done:false,key,value:wrap(call('value-iterator-value',heap,it))});}
+   catch(error){if(key!==null&&typeof key==='object'){const entry=handles.get(key);call('heap-release',heap,entry.id);entry.roots--;}throw error;}
+  },
+  closeIterator(iterator) {call('value-iterator-close',heap,id(iterator));},
   string(input) {
    if(typeof input!=='string')fail(3);const value=call('value-string',heap,word(input.length)),offset=call('value-data',heap,value,5),target=view();
    for(let i=0;i<input.length;i++)target.setUint16(offset+i*2,input.charCodeAt(i),true);
