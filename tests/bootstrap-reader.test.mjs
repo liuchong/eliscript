@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { beforeAll, afterAll, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -124,47 +124,45 @@ async function caseSource(testCase) {
   return Bun.file(resolve(projectDirectory, testCase.file)).text();
 }
 
+// Build both complete compiler generations as fixtures. Keep every artifact
+// comparison and reader/diagnostic assertion in the original 30-second test.
+let directory, firstArtifacts, secondArtifacts;
+beforeAll(async () => {
+  directory = await mkdtemp(resolve(tmpdir(), "eliscript-reader-"));
+  await buildBootstrap(directory);
+  firstArtifacts = new Map();
+  for (const name of artifactNames) firstArtifacts.set(name, await Bun.file(resolve(directory, name)).text());
+  await buildBootstrap(directory);
+  secondArtifacts = new Map();
+  for (const name of artifactNames) secondArtifacts.set(name, await Bun.file(resolve(directory, name)).text());
+}, 120_000);
+afterAll(async () => { if (directory) await rm(directory, {recursive: true, force: true}); });
+
 test("bootstrapped reader matches normalized seed syntax and diagnostics", async () => {
-  const directory = await mkdtemp(resolve(tmpdir(), "eliscript-reader-"));
-  try {
-    await buildBootstrap(directory);
-    const firstArtifacts = new Map();
-    for (const name of artifactNames) {
-      firstArtifacts.set(name, await Bun.file(resolve(directory, name)).text());
-    }
-
-    await buildBootstrap(directory);
-    for (const name of artifactNames) {
-      expect(await Bun.file(resolve(directory, name)).text())
-        .toBe(firstArtifacts.get(name));
-    }
-
-    const reader = await import(
-      `${pathToFileURL(resolve(directory, "reader.mjs")).href}?test`
-    );
-    const fixture = await Bun.file(fixturePath).json();
-    const cases = [...fixture.valid, ...fixture.invalid];
-    const generated = [];
-    for (const testCase of cases) {
-      generated.push(generatedResult(
-        reader.read_string,
-        testCase,
-        await caseSource(testCase),
-      ));
-    }
-
-    expect(generated).toEqual(await seedResults());
-    expect(generated.slice(fixture.valid.length)).toEqual(
-      diagnosticCases.map((entry) => ({
-        name: entry.name,
-        status: "error",
-        message: entry.human,
-        diagnostic: entry.diagnostic,
-      })),
-    );
-    expect(firstArtifacts.get("reader.mjs.map"))
-      .toContain("bootstrap/compiler/reader.eli");
-  } finally {
-    await rm(directory, { recursive: true, force: true });
+  for (const name of artifactNames) expect(secondArtifacts.get(name)).toBe(firstArtifacts.get(name));
+  const reader = await import(
+    `${pathToFileURL(resolve(directory, "reader.mjs")).href}?test`
+  );
+  const fixture = await Bun.file(fixturePath).json();
+  const cases = [...fixture.valid, ...fixture.invalid];
+  const generated = [];
+  for (const testCase of cases) {
+    generated.push(generatedResult(
+      reader.read_string,
+      testCase,
+      await caseSource(testCase),
+    ));
   }
+
+  expect(generated).toEqual(await seedResults());
+  expect(generated.slice(fixture.valid.length)).toEqual(
+    diagnosticCases.map((entry) => ({
+      name: entry.name,
+      status: "error",
+      message: entry.human,
+      diagnostic: entry.diagnostic,
+    })),
+  );
+  expect(firstArtifacts.get("reader.mjs.map"))
+    .toContain("bootstrap/compiler/reader.eli");
 }, 30_000);

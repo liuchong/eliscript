@@ -588,13 +588,26 @@ test("memory runtime emits identical IR and WASM through three compiler generati
   assert.equal(await readFile(seed, "utf8"), generations[2].compiler.compile_string(source, input));
 });
 
+test("managed runtime has seed and three-generation IR and WASM fixed points", async () => {
+  const source=await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8");
+  const filename="managed-runtime.eli",programs=generations.map(g=>g.compiler.compile_ir_string(source,filename));
+  assert.deepEqual(programs[0],programs[1]);assert.deepEqual(programs[1],programs[2]);
+  const bytes=generations.map((g,i)=>g.wasm.emit_memory_wasm(programs[i]));
+  assert.deepEqual(bytes[0],bytes[1]);assert.deepEqual(bytes[1],bytes[2]);
+  assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(Uint8Array.from(bytes[2]))),[]);
+  const saved=JSON.stringify(programs[2]);generations[2].wasm.emit_memory_wasm(programs[2]);assert.equal(JSON.stringify(programs[2]),saved);
+  const input=resolve(directory,filename),output=resolve(directory,"managed-seed.mjs");await writeFile(input,source);
+  const child=spawnSync(resolve(root,"bin/eliscript-seed"),["--output",output,input],{encoding:"utf8",timeout:30000});
+  assert.equal(child.status,0,child.stderr);assert.equal(await readFile(output,"utf8"),generations[2].compiler.compile_string(source,input));
+});
+
 describe("browser compiler backends", () => {
   beforeAll(async () => {
     // Compiler bundling and browser process startup are fixture preparation.
     // Keep every semantic test's existing timeout and use a fresh context for
     // each evaluation; performance benchmarks retain their separate policy.
     const entry = resolve(directory, "browser-entry.mjs");
-    await writeFile(entry, `export {compile_ir_string,emit_ir_string} from ${JSON.stringify(resolve(directory, "g3/bootstrap/compiler.mjs"))};\nexport {emit_numeric_wasm,emit_memory_wasm} from ${JSON.stringify(resolve(directory, "g3/backends/wasm.mjs"))};\nexport {instantiateMemoryRuntime} from ${JSON.stringify(resolve(root, "tools/backends/memory-runtime.mjs"))};\nexport {emit_native_numeric_object,emit_native_numeric_library,emit_native_numeric_executable} from ${JSON.stringify(resolve(directory, "g3/backends/native.mjs"))};`);
+    await writeFile(entry, `export {compile_ir_string,emit_ir_string} from ${JSON.stringify(resolve(directory, "g3/bootstrap/compiler.mjs"))};\nexport {emit_numeric_wasm,emit_memory_wasm} from ${JSON.stringify(resolve(directory, "g3/backends/wasm.mjs"))};\nexport {instantiateMemoryRuntime} from ${JSON.stringify(resolve(root, "tools/backends/memory-runtime.mjs"))};\nexport {instantiateManagedRuntime} from ${JSON.stringify(resolve(root, "tools/backends/managed-runtime.mjs"))};\nexport {emit_native_numeric_object,emit_native_numeric_library,emit_native_numeric_executable} from ${JSON.stringify(resolve(directory, "g3/backends/native.mjs"))};`);
     const build = await Bun.build({ entrypoints: [entry], target: "browser", format: "esm" });
     assert(build.success);
     browserBundle = await build.outputs[0].text();
@@ -771,6 +784,40 @@ describe("browser compiler backends", () => {
     }, {source});
     assert.deepEqual(result, generations[2].wasm.emit_memory_wasm(
       generations[2].compiler.compile_ir_string(source,"browser-memory.eli"),{maximumPages:8}));
+  });
+
+  test("browser managed heap reclaims cycles and preserves IEEE values and growth",async()=>{
+    const source=await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8");
+    const result=await evaluateBrowser(async({bundle,source})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:"text/javascript"}));
+      const check=(ok,label)=>{if(!ok)throw Error(label);};
+      try {
+        const c=await import(url),ir=c.compile_ir_string(source,"browser-managed.eli");
+        const bytes=Uint8Array.from(c.emit_memory_wasm(ir,{maximumPages:16}));
+        check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,"imports");
+        const a=c.instantiateManagedRuntime(bytes),b=c.instantiateManagedRuntime(bytes);
+        for(const x of [0,-0,NaN,Infinity,-Infinity,Number.MIN_VALUE,Number.MAX_VALUE])
+          for(const y of [0,-0,NaN,Infinity,Number.MIN_VALUE]) {
+            const l=a.number(x),r=a.number(y);
+            for(const [op,expected]of[[0,x+y],[1,x-y],[2,x*y],[3,x/y]]) {
+              const z=a.binary(l,r,op);check(Object.is(a.readNumber(z),expected),"IEEE");a.release(z);
+            }
+            a.release(l);a.release(r);check(a.collect()===6,"Number reclamation");
+          }
+        const prefix=a.stats().usedBytes;
+        for(let i=0;i<512;i++) {
+          const x=a.array([null]),y=a.record([x]);a.set(x,0,y);
+          a.release(x);a.release(y);check(a.collect()===2,"cycles");check(a.stats().usedBytes===prefix,"pool reuse");
+          try {a.length(x);throw Error("stale accepted");}catch(e){check(e.eliscriptDiagnostic?.code==="ELI-RT0001","generation");}
+        }
+        const text="\ud800中文😀\udc00",str=a.string(text);check(a.readString(str)===text,"UTF16");
+        const buffer=a.bytes([0,255]);a.resize(buffer,70000);check(a.readBytes(buffer)[1]===255,"growth");
+        const copy=a.readBytes(buffer);copy[1]=0;check(a.readBytes(buffer)[1]===255,"owned copy");
+        try {b.length(str);throw Error("foreign accepted");}catch(e){check(e.eliscriptDiagnostic?.code==="ELI-RT0001","brand");}
+        a.release(str);a.release(buffer);check(a.collect()===2,"roots");return [...bytes];
+      } finally {URL.revokeObjectURL(url);}
+    },{source});
+    assert.deepEqual(result,generations[2].wasm.emit_memory_wasm(generations[2].compiler.compile_ir_string(source,"browser-managed.eli"),{maximumPages:16}));
   });
 
 });

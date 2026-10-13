@@ -315,6 +315,8 @@
         ((= name "load-u8") (js-call output :push 45 0 0))
         ((= name "load-u16") (js-call output :push 47 1 0))
         ((= name "load-u32") (js-call output :push 40 2 0))
+        ((= name "load-f64") (js-call output :push 43 3 0))
+        ((= name "store-f64") (js-call output :push 57 3 0 65 0))
         ((= name "store-u8") (js-call output :push 58 0 0 65 0))
         ((= name "store-u16") (js-call output :push 59 1 0 65 0))
         ((= name "store-u32") (js-call output :push 54 2 0 65 0))
@@ -373,7 +375,7 @@
          (emit-expression output (js-nth 0 children))
          (emit-expression output (js-nth 1 children))
          (js-call output :push
-           (cond ((= value "=") 97) ((= value "<") 99)
+           (cond ((= value "=") 97) ((= value "/=") 98) ((= value "<") 99)
                  ((= value ">") 100) ((= value "<=") 101) (t 102))))
         ((= kind "not") (emit-condition output (js-nth 0 children))
          (js-call output :push 69))

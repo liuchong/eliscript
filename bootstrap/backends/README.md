@@ -217,7 +217,7 @@ debug information, cold startup, memory and the full 3×3 matrix remain open.
 
 The retained native before/after reports use the identical optimized JS artifact
 hash and preserve the initial stack image hash. Speedups versus JS change from
-0.58×/0.22×/0.11× to 1.96×/1.11×/1.23× for recurrence/grid/tiny batches.
+0.58×/0.22×/0.11× to 1.96×/1.10×/1.23× for recurrence/grid/tiny batches.
 All three pass the unchanged numeric gate. These
 measurements concern numeric kernels, not compiler throughput or full self-hosting.
 
@@ -247,7 +247,7 @@ calls are rejected before emission. Division uses explicit unsigned `word-div`
 with a zero-divisor trap; discarded loads/divisions retain their traps.
 
 Only `eliscript:memory32` named imports resolve to instructions: `load-u8/u16/u32`,
-`store-u8/u16/u32`, `memory-size`, `memory-grow`, `word-div`, `word-shr`,
+`store-u8/u16/u32`, `load-f64`, `store-f64`, `memory-size`, `memory-grow`, `word-div`, `word-shr`,
 `word-shl`, `word-and`, `word-or`. Stores return word zero. Raw exports use the
 WASM i32 ABI (normalize returned bits with `>>> 0`); the bulk bridge rejects JS
 coercion, invalid words, foreign handles and retired handles. These capabilities
@@ -274,7 +274,7 @@ surrogates, survive builder/readback; replacement encoding matches TextEncoder.
 reused, so stale pointers cannot alias later objects. This arena does **not**
 reclaim memory or implement GC, cyclic dynamic records, ownership transfer or
 untrusted raw-memory sandboxing. Records contain words; tagged dynamic values
-remain a later acceptance unit. The raw memory ABI is trusted internal storage;
+are supplied by the managed heap below. The raw memory ABI is trusted internal storage;
 the bridge supplies the instance/lifetime boundary for host handles.
 
 Run `bun test tests/wasm-memory-runtime.test.mjs tests/direct-wasm-backend.test.mjs`.
@@ -283,3 +283,40 @@ the memory runtime in the selected real browser. Use `ELISCRIPT_TEST_BROWSER`
 with chromium, firefox or webkit. Encoding semantics follow the
 [Encoding Standard](https://encoding.spec.whatwg.org/#utf-8-decoder), and byte
 emission follows the [WASM binary specification](https://webassembly.github.io/spec/core/binary/instructions.html).
+
+
+## Managed value heap
+
+Compile `bootstrap/runtime/memory.eli` with `emit_memory_wasm`. All exported parameters/results are words; restricted
+`load-f64` and `store-f64` additionally allow typed f64 locals and ordered Number
+operations inside the runtime. Implicit Word/f64 conversion is refused.
+`instantiateManagedRuntime(bytes, {maxSlots, initialBytes, maxBytes})` supplies a
+bulk host bridge. `number`, `string`, `bytes`, `array` and `record` return branded
+handles; `binary` (0 add, 1 subtract, 2 multiply, 3 divide), `negate` and `compare`
+(0 equal, 1 unequal, 2 less, 3 less-or-equal, 4 greater, 5 greater-or-equal) run
+inside WASM. NaN and signed-zero identity follow Number semantics. Strings keep
+UTF16 code units, including lone surrogates. These APIs remain internal.
+
+`readNumber`, `readString`, `readBytes`, `get`, `set`, `length`, `resize` and `truth`
+check lifetime and kind. Byte results are copied. Arrays and fixed mutable records
+hold handles or immediate null/false/true/undefined; ordinary Number input must
+first be boxed with `number`. Arrays and bytes can resize; records stay fixed.
+The internal reference record is not the language persistent Record type.
+
+Each returned handle owns one explicit root; `get` owns a new root for the
+returned child. `pin` adds a root and `release` drops one. `collect` marks rooted
+objects and their reference graphs iteratively, then frees unreachable blocks
+and recycles slots. Cyclic and shared graphs are supported. Pool-relative offsets
+survive growth; sorted free blocks coalesce, while resize failure leaves the old
+value intact. `stats` reports pool used/capacity bytes and live values, not full
+process peak memory. Values use 12-bit generations and 20-bit slots; slots stop
+recycling at generation 4095 to prevent stale identity reuse. Exhaustion returns
+the existing capacity diagnostic. A released handle remains usable until actual
+collection; using it after collection fails with ELI-RT0001.
+
+Collection is explicit and never occurs during allocation. Future compiler
+lowering must root live WASM locals and implement root frames/safepoints before
+automatic GC is enabled. The backing arena still retains previous regions on
+pool growth and does not yet destroy multiple heaps. Managed codecs, complete
+dynamic lowering, persistent collections and full compiler hosts remain open.
+No full compiler memory/performance acceptance is claimed by this heap slice.

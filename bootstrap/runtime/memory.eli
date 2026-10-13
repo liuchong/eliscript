@@ -1,6 +1,6 @@
 (module eliscript.runtime.memory
   (import "eliscript:memory32" load-u8 load-u16 load-u32 store-u8 store-u16 store-u32
-    memory-size memory-grow word-div word-shr word-shl word-and word-or)
+    load-f64 store-f64 memory-size memory-grow word-div word-shr word-shl word-and word-or)
 
   ;; Internal memory-u32 ABI; no dynamic Number semantics are changed.
   ;; Control words: bump cursor, lifetime epoch, error, live-object head. Objects: 32-byte
@@ -197,5 +197,308 @@
           (if (= ok 0) 0
             (progn (store-u32 (+ output 8) written) (store-u32 (+ output 20) 1) output))))))
 
+  ;; Managed value heap. Public values: 0 nil, 1 false, 2 true, 3 undefined.
+  ;; Others are 12-bit generation / 20-bit slot IDs scoped to one heap.
+  ;; Control record: magic,pool,maxSlots,slots,freeSlots,cursor,freeBlocks,live,maxBytes,work.
+  ;; Pool entries: generation,flags,blockOffset,blockSize,roots,next (24 bytes).
+  ;; Blocks: kind,length,capacity,sealed, four reserved words, then payload.
+  ;; Collection is explicit, allocation never runs GC. Callers root live WASM locals.
+  (defun heap-control (heap index)
+    (load-u32 (+ (load-u32 (+ heap 16)) (* index 4))))
+  (defun heap-control-set (heap index value)
+    (store-u32 (+ (load-u32 (+ heap 16)) (* index 4)) value))
+  (defun heap-base (heap) (load-u32 (+ (heap-control heap 1) 16)))
+  (defun heap-entry (heap slot) (+ (heap-base heap) (* slot 24)))
+  (defun heap-check (heap)
+    (if (and (= (valid heap 3) 1) (= (load-u32 (+ heap 8)) 10)
+             (= (heap-control heap 0) 1212498256)) 1 (fail 1)))
+  (defun heap-new (slots initial maximum)
+    (begin-operation)
+    (if (or (= slots 0) (> slots 1048575) (> maximum 268435456)
+            (> initial maximum) (< initial (+ (* (1+ slots) 24) 32))) (fail 3)
+      (let ((cursor (load-u32 0)) (head (load-u32 12)) (result 0))
+        (let ((pool (object-new 1 initial 1)))
+          (when (/= pool 0)
+            (let ((heap (object-new 3 10 4)))
+              (when (/= heap 0)
+                ;; The private pool's entire capacity must be copied on growth.
+                (store-u32 (+ pool 8) initial)
+                (heap-control-set heap 0 1212498256) (heap-control-set heap 1 pool)
+                (heap-control-set heap 2 slots) (heap-control-set heap 3 0)
+                (heap-control-set heap 4 0) (heap-control-set heap 5 (* (1+ slots) 24))
+                (heap-control-set heap 6 0) (heap-control-set heap 7 0)
+                (heap-control-set heap 8 maximum) (heap-control-set heap 9 0)
+                (setq result heap))) 0))
+        (when (= result 0) (store-u32 0 cursor) (store-u32 12 head)) result)))
+  (defun heap-capacity (heap)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (load-u32 (+ (heap-control heap 1) 12))))
+  (defun heap-used (heap)
+    (begin-operation) (if (= (heap-check heap) 0) 0 (heap-control heap 5)))
+  (defun heap-live (heap)
+    (begin-operation) (if (= (heap-check heap) 0) 0 (heap-control heap 7)))
+  (defun heap-value-valid (heap value)
+    (let ((slot (word-and value 1048575)) (generation (word-shr value 20)))
+      (if (and (/= generation 0) (/= slot 0) (<= slot (heap-control heap 3)))
+        (let ((entry (heap-entry heap slot)))
+          (if (and (= (load-u32 entry) generation) (/= (word-and (load-u32 (+ entry 4)) 1) 0)) 1 0)) 0)))
+  (defun heap-value-check (heap value)
+    (if (= (heap-value-valid heap value) 1) 1 (fail 1)))
+  (defun heap-block (heap value)
+    (+ (heap-base heap) (load-u32 (+ (heap-entry heap (word-and value 1048575)) 8))))
+  (defun heap-kind-check (heap value kind)
+    (if (= (heap-value-check heap value) 0) 0
+      (if (= (load-u32 (heap-block heap value)) kind) 1 (fail 1))))
+  (defun heap-grow (heap end)
+    (let* ((pool (heap-control heap 1)) (capacity (load-u32 (+ pool 12)))
+           (maximum (heap-control heap 8)))
+      (if (> end maximum) (fail 2)
+        (if (<= end capacity) 1
+          (let ((next capacity))
+            (while (< next end) (setq next (if (> (* next 2) maximum) maximum (* next 2))))
+            (if (= (reserve pool next) 0) 0 (progn (store-u32 (+ pool 8) next) 1)))))))
+  (defun heap-allocate-block (heap size)
+    (let ((current (heap-control heap 6)) (previous 0) (found 0))
+      (while (and (/= current 0) (= found 0))
+        (let* ((p (+ (heap-base heap) current)) (available (load-u32 p))
+               (next (load-u32 (+ p 4))))
+          (if (>= available size)
+            (progn
+              (if (>= (- available size) 32)
+                (let ((remaining (+ current size)))
+                  (store-u32 (+ (heap-base heap) remaining) (- available size))
+                  (store-u32 (+ (+ (heap-base heap) remaining) 4) next)
+                  (if (= previous 0) (heap-control-set heap 6 remaining)
+                    (store-u32 (+ (+ (heap-base heap) previous) 4) remaining)))
+                (progn
+                  (setq size available)
+                  (if (= previous 0) (heap-control-set heap 6 next)
+                    (store-u32 (+ (+ (heap-base heap) previous) 4) next)) 0))
+              ;; Return offset; chosen allocation size is carried in its first word.
+              (store-u32 p size) (setq found current) 0)
+            (progn (setq previous current) (setq current next) 0))))
+      (if (/= found 0) found
+        (let* ((cursor (heap-control heap 5)) (end (+ cursor size)))
+          (if (or (< end cursor) (= (heap-grow heap end) 0)) (fail 2)
+            (progn (heap-control-set heap 5 end) (store-u32 (+ (heap-base heap) cursor) size) cursor))))))
+  (defun heap-free-block (heap offset size)
+    ;; Address-ordered first fit; merge both neighbors and trim free tail blocks.
+    (let ((current (heap-control heap 6)) (previous 0))
+      (while (and (/= current 0) (< current offset))
+        (setq previous current) (setq current (load-u32 (+ (+ (heap-base heap) current) 4))))
+      (store-u32 (+ (heap-base heap) offset) size)
+      (store-u32 (+ (+ (heap-base heap) offset) 4) current)
+      (if (= previous 0) (heap-control-set heap 6 offset)
+        (store-u32 (+ (+ (heap-base heap) previous) 4) offset))
+      (when (and (/= current 0) (= (+ offset size) current))
+        (setq size (+ size (load-u32 (+ (heap-base heap) current))))
+        (store-u32 (+ (heap-base heap) offset) size)
+        (store-u32 (+ (+ (heap-base heap) offset) 4) (load-u32 (+ (+ (heap-base heap) current) 4))))
+      (when (and (/= previous 0) (= (+ previous (load-u32 (+ (heap-base heap) previous))) offset))
+        (store-u32 (+ (heap-base heap) previous)
+          (+ (load-u32 (+ (heap-base heap) previous)) size))
+        (store-u32 (+ (+ (heap-base heap) previous) 4) (load-u32 (+ (+ (heap-base heap) offset) 4))))
+      (setq current (heap-control heap 6)) (setq previous 0)
+      (while (/= current 0)
+        (let ((next (load-u32 (+ (+ (heap-base heap) current) 4))))
+          (if (= (+ current (load-u32 (+ (heap-base heap) current))) (heap-control heap 5))
+            (progn (heap-control-set heap 5 current)
+              (if (= previous 0) (heap-control-set heap 6 0)
+                (store-u32 (+ (+ (heap-base heap) previous) 4) 0)) (setq current 0) 0)
+            (progn (setq previous current) (setq current next) 0)))) 0))
+  (defun heap-object (heap kind count width)
+    (if (> count (word-div 268435416 width)) (fail 2)
+      (let* ((size (word-and (+ 39 (* count width)) 4294967288))
+             (slot (heap-control heap 4)) (fresh 0) (result 0))
+        (when (= slot 0) (setq slot (1+ (heap-control heap 3))) (setq fresh 1))
+        (if (> slot (heap-control heap 2)) (fail 2)
+          (let ((offset (heap-allocate-block heap size)))
+            (when (/= offset 0)
+              (let* ((entry (heap-entry heap slot)) (p (+ (heap-base heap) offset))
+                     (actual (load-u32 p)) (generation (1+ (load-u32 entry))) (index 0))
+                (if (= fresh 1) (heap-control-set heap 3 slot)
+                  (heap-control-set heap 4 (load-u32 (+ entry 20))))
+                (store-u32 entry generation) (store-u32 (+ entry 4) 1)
+                (store-u32 (+ entry 8) offset) (store-u32 (+ entry 12) actual)
+                (store-u32 (+ entry 16) 0) (store-u32 (+ entry 20) 0)
+                (while (< index actual) (store-u32 (+ p index) 0) (setq index (+ index 4)))
+                (store-u32 p kind) (store-u32 (+ p 4) count) (store-u32 (+ p 8) count)
+                (heap-control-set heap 7 (1+ (heap-control heap 7)))
+                (setq result (word-or (word-shl generation 20) slot)))) result)))))
+  (defun heap-pin (heap value)
+    (begin-operation)
+    (if (= (heap-check heap) 0) 0
+      (if (<= value 3) 1
+        (if (= (heap-value-check heap value) 0) 0
+          (let* ((entry (heap-entry heap (word-and value 1048575))) (count (load-u32 (+ entry 16))))
+            (if (= count 4294967295) (fail 2)
+              (progn (store-u32 (+ entry 16) (1+ count)) 1)))))))
+  (defun heap-release (heap value)
+    (begin-operation)
+    (if (= (heap-check heap) 0) 0
+      (if (<= value 3) 1
+        (if (= (heap-value-check heap value) 0) 0
+          (let* ((entry (heap-entry heap (word-and value 1048575))) (count (load-u32 (+ entry 16))))
+            (if (= count 0) (fail 3) (progn (store-u32 (+ entry 16) (1- count)) 1)))))))
+  (defun heap-mark (heap value)
+    (when (> value 3)
+      (let* ((slot (word-and value 1048575)) (entry (heap-entry heap slot)))
+        (when (= (load-u32 (+ entry 4)) 1)
+          (store-u32 (+ entry 4) 3) (store-u32 (+ entry 20) (heap-control heap 9))
+          (heap-control-set heap 9 slot)))) 0)
+  (defun heap-collect (heap)
+    (begin-operation)
+    (if (= (heap-check heap) 0) 0
+      (let ((slot 1) (reclaimed 0))
+        (while (<= slot (heap-control heap 3))
+          (let ((entry (heap-entry heap slot)))
+            (when (and (= (load-u32 (+ entry 4)) 1) (/= (load-u32 (+ entry 16)) 0))
+              (heap-mark heap (word-or (word-shl (load-u32 entry) 20) slot))))
+          (setq slot (1+ slot)))
+        (while (/= (heap-control heap 9) 0)
+          (let* ((current (heap-control heap 9)) (entry (heap-entry heap current))
+                 (p (+ (heap-base heap) (load-u32 (+ entry 8)))) (kind (load-u32 p)) (index 0))
+            (heap-control-set heap 9 (load-u32 (+ entry 20)))
+            (when (or (= kind 7) (= kind 8))
+              (while (< index (load-u32 (+ p 4)))
+                (heap-mark heap (load-u32 (+ (+ p 32) (* index 4)))) (setq index (1+ index))))))
+        (setq slot 1)
+        (while (<= slot (heap-control heap 3))
+          (let ((entry (heap-entry heap slot)))
+            (if (= (load-u32 (+ entry 4)) 3) (store-u32 (+ entry 4) 1)
+              (progn
+                (when (= (load-u32 (+ entry 4)) 1)
+                  (heap-free-block heap (load-u32 (+ entry 8)) (load-u32 (+ entry 12)))
+                  (store-u32 (+ entry 4) 0) (store-u32 (+ entry 8) 0)
+                  (when (< (load-u32 entry) 4095)
+                    (store-u32 (+ entry 20) (heap-control heap 4)) (heap-control-set heap 4 slot))
+                  (setq reclaimed (1+ reclaimed))) 0)))
+          (setq slot (1+ slot)))
+        (heap-control-set heap 7 (- (heap-control heap 7) reclaimed)) reclaimed)))
+  (defun value-kind (heap value)
+    (begin-operation)
+    (if (= (heap-check heap) 0) 0
+      (if (= (heap-value-check heap value) 0) 0 (load-u32 (heap-block heap value)))))
+  (defun value-truth (heap value)
+    (begin-operation)
+    (if (= (heap-check heap) 0) 0
+      (if (<= value 3) (if (= value 2) 1 0) (heap-value-check heap value))))
+  (defun value-data (heap value kind)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-kind-check heap value kind) 0) 0 (+ (heap-block heap value) 32))))
+  (defun value-length (heap value)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-value-check heap value) 0) 0 (load-u32 (+ (heap-block heap value) 4)))))
+  (defun value-number (heap low high)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (let ((value (heap-object heap 4 1 8)))
+        (when (/= value 0) (store-u32 (+ (heap-block heap value) 32) low)
+          (store-u32 (+ (heap-block heap value) 36) high)) value)))
+  (defun value-number-binary (heap left right operation)
+    (begin-operation)
+    (if (= (heap-check heap) 0) 0
+      (if (or (= (heap-kind-check heap left 4) 0) (= (heap-kind-check heap right 4) 0)) 0
+        (if (> operation 3) (fail 3)
+          ;; Read operands before allocating: pool growth moves both their payloads.
+          (let* ((a (load-f64 (+ (heap-block heap left) 32)))
+                 (b (load-f64 (+ (heap-block heap right) 32))) (value (heap-object heap 4 1 8)))
+            (when (/= value 0)
+              (store-f64 (+ (heap-block heap value) 32)
+                (if (= operation 0) (+ a b) (if (= operation 1) (- a b)
+                  (if (= operation 2) (* a b) (/ a b)))))) value)))))
+  (defun value-refs (heap kind count)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= kind 7) (= kind 8)) (heap-object heap kind count 4) (fail 3))))
+  (defun heap-refs-check (heap value)
+    (if (= (heap-value-check heap value) 0) 0
+      (let ((kind (load-u32 (heap-block heap value))))
+        (if (or (= kind 7) (= kind 8)) 1 (fail 1)))))
+  (defun value-get (heap value index)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-refs-check heap value) 0) 0
+        (let ((p (heap-block heap value)))
+          (if (>= index (load-u32 (+ p 4))) (fail 3) (load-u32 (+ (+ p 32) (* index 4))))))))
+  (defun value-set (heap value index child)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-refs-check heap value) 0) 0
+        (let ((p (heap-block heap value)))
+          (if (>= index (load-u32 (+ p 4))) (fail 3)
+            (if (and (> child 3) (= (heap-value-check heap child) 0)) 0
+              (progn (store-u32 (+ (+ p 32) (* index 4)) child) 1)))))))
+  (defun heap-value-resize (heap value count kind width)
+    (if (= (heap-kind-check heap value kind) 0) 0
+        (if (> count (word-div 268435416 width)) (fail 2)
+          (let* ((entry (heap-entry heap (word-and value 1048575)))
+                 (old-offset (load-u32 (+ entry 8))) (old-size (load-u32 (+ entry 12)))
+                 (old-p (+ (heap-base heap) old-offset)) (old-count (load-u32 (+ old-p 4))))
+            (if (<= count (load-u32 (+ old-p 8)))
+              (let ((i (* (if (< count old-count) count old-count) width)))
+                (while (< i (* (if (< count old-count) old-count count) width))
+                  (store-u8 (+ (+ old-p 32) i) 0) (setq i (1+ i)))
+                (store-u32 (+ old-p 4) count) 1)
+              (let ((offset (heap-allocate-block heap (word-and (+ 39 (* count width)) 4294967288))))
+                (if (= offset 0) 0
+                  (let* ((p (+ (heap-base heap) offset)) (actual (load-u32 p)) (i 0))
+                    (setq old-p (+ (heap-base heap) old-offset))
+                    (while (< i actual) (store-u32 (+ p i) 0) (setq i (+ i 4)))
+                    (store-u32 p kind) (store-u32 (+ p 4) count) (store-u32 (+ p 8) count)
+                    (setq i 0)
+                    (while (< i (* old-count width))
+                      (store-u8 (+ (+ p 32) i) (load-u8 (+ (+ old-p 32) i))) (setq i (1+ i)))
+                    (setq entry (heap-entry heap (word-and value 1048575)))
+                    (store-u32 (+ entry 8) offset) (store-u32 (+ entry 12) actual)
+                    (heap-free-block heap old-offset old-size) 1))))))))
+  (defun value-refs-resize (heap value count)
+    (begin-operation) (if (= (heap-check heap) 0) 0 (heap-value-resize heap value count 7 4)))
+  (defun value-bytes-resize (heap value count)
+    (begin-operation) (if (= (heap-check heap) 0) 0 (heap-value-resize heap value count 6 1)))
+  (defun value-number-negate (heap input)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-kind-check heap input 4) 0) 0
+        (let* ((number (load-f64 (+ (heap-block heap input) 32))) (output (heap-object heap 4 1 8)))
+          (when (/= output 0) (store-f64 (+ (heap-block heap output) 32) (- number))) output))))
+  (defun value-number-compare (heap left right operation)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= (heap-kind-check heap left 4) 0) (= (heap-kind-check heap right 4) 0)) 0
+        (if (> operation 5) (fail 3)
+          (let ((a (load-f64 (+ (heap-block heap left) 32))) (b (load-f64 (+ (heap-block heap right) 32))))
+            (if (if (= operation 0) (= a b) (if (= operation 1) (/= a b)
+                  (if (= operation 2) (< a b) (if (= operation 3) (<= a b)
+                    (if (= operation 4) (> a b) (>= a b)))))) 1 0))))))
+  (defun value-string (heap count)
+    (begin-operation) (if (= (heap-check heap) 0) 0 (heap-object heap 5 count 2)))
+  (defun value-bytes (heap count)
+    (begin-operation) (if (= (heap-check heap) 0) 0 (heap-object heap 6 count 1)))
+  (defun value-seal (heap value)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-kind-check heap value 5) 0) 0
+        (progn (store-u32 (+ (heap-block heap value) 12) 1) value))))
+  (defun value-unit-get (heap value index)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-kind-check heap value 5) 0) 0
+        (let ((p (heap-block heap value)))
+          (if (>= index (load-u32 (+ p 4))) (fail 3) (load-u16 (+ (+ p 32) (* index 2))))))))
+  (defun value-unit-set (heap value index unit)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-kind-check heap value 5) 0) 0
+        (let ((p (heap-block heap value)))
+          (if (/= (load-u32 (+ p 12)) 0) (fail 6)
+            (if (or (>= index (load-u32 (+ p 4))) (> unit 65535)) (fail 3)
+              (progn (store-u16 (+ (+ p 32) (* index 2)) unit) 1)))))))
+  (defun value-byte-get (heap value index)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-kind-check heap value 6) 0) 0
+        (let ((p (heap-block heap value)))
+          (if (>= index (load-u32 (+ p 4))) (fail 3) (load-u8 (+ (+ p 32) index)))))))
+  (defun value-byte-set (heap value index byte)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-kind-check heap value 6) 0) 0
+        (let ((p (heap-block heap value)))
+          (if (or (>= index (load-u32 (+ p 4))) (> byte 255)) (fail 3)
+            (progn (store-u8 (+ (+ p 32) index) byte) 1))))))
   (export last-error retire buffer-new buffer-length buffer-reserve buffer-push buffer-get
-    record-new record-length record-get record-set string-new string-length string-get string-set string-seal utf8-encode utf8-decode))
+    record-new record-length record-get record-set string-new string-length string-get string-set string-seal utf8-encode utf8-decode heap-new heap-capacity heap-used heap-live heap-pin heap-release heap-collect
+    value-kind value-truth value-data value-length value-number value-number-binary
+    value-refs value-get value-set value-refs-resize value-string value-bytes value-seal
+    value-unit-get value-unit-set value-byte-get value-byte-set value-bytes-resize
+    value-number-negate value-number-compare))
