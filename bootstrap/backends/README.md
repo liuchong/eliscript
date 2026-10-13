@@ -48,8 +48,30 @@ assignments use `local.set`; discarded sequences and loops do not manufacture
 values only to drop them. Unused nontrapping numeric operations disappear,
 while their operand effects stay in source order. Numeric truth conditions
 retain evaluation effects and yield true, including for zero and NaN.
-Short-circuit branches and every function call remain, including calls that
-could fail to terminate. Assignment values remain available when used.
+Short-circuit effects and possible nontermination remain. Eligible leaf calls
+expand with isolated local slots and arguments evaluated once; recursive or
+oversized calls stay intact. Assignment values remain available when used.
+
+`numeric.eli` also owns the shared typed optimization stage. It performs:
+
+- leaf inlining with ordered argument capture and immutable-parameter aliases;
+- nonnegative integer counter specialization behind finite bounds through
+  `2^31 - 1`, with f64 fallback; fractional limits use `ceil` once;
+- proven cyclic integer locals, power-of-two wrap masks, zero/one-iteration
+  loop versions and four-iteration unrolling with an untouched remainder;
+- pure lexical-initializer hoisting and loop-square reuse with dependency
+  invalidation; writes, branches and calls conservatively end availability;
+- two-lane scheduling of independent scalar call loops. Arguments and caller
+  updates must be independent of the reduction result, and the callee bound
+  must be invariant. Private lanes may interleave, while each lane's arithmetic
+  and the final additions keep their original order. Dependent inputs, mutable
+  limits, nonfinite or large bounds and unsupported shapes use the normal path.
+
+The WASM emitter rotates loops, branches directly on boolean `and`/`or`, and
+selects cheap pure numeric arms without executing unselected effects. Numeric
+counter values still use Lisp truth; they are not exposed as boolean i32s.
+No transform recognizes benchmark function names or fixed argument values.
+The typed optimizer consumes validated `numeric-f64` IR and does not mutate it.
 
 Core byte arrays, records, string code units, float64 words and array operations
 are currently represented by the existing JS bootstrap runtime. Porting these
@@ -78,6 +100,10 @@ Generation 3, compare JS and Source Maps byte-for-byte, then compare emitted
 WASM bytes. They execute semantic differential cases under Bun/Node, generated
 numeric programs, multi-byte indices, and real browser compilation/execution.
 Those are mandatory semantic checks; performance is evaluated separately.
+Regression cases cover every inlining/loop/integer option combination, counter
+range boundaries, signed zero and nonfinite values, fractional loop and grid
+bounds, cyclic wraparound, ordered reductions, and rejected dependent/mutable
+call-loop pipelines. Node, Bun and Chromium execute the optimized results.
 
 ## Performance decisions
 
@@ -101,3 +127,11 @@ budgets remain in force. Local production may eventually select an explicitly
 identified external optimizing backend after its own semantic and performance
 acceptance; the browser independent path and full self-hosting roadmap remain
 required. External optimization is not automatically invoked by this slice.
+
+The retained 2026-10-13 report now passes all nine frozen numeric hot-execution
+pairs. Confirmation used identical JS/WASM artifact hashes. The generated JS
+control is unchanged from the previous failed report. The WASM module grows
+from 789 to 4714 bytes because guarded versions and unrolled code retain their
+fallbacks. This closes this numeric performance gate only; download, cold
+startup, compiler throughput, memory and full-language/backend acceptance stay
+open. The full backend remains experimental.

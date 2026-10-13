@@ -12,6 +12,69 @@ import { validateDirectWasmReport } from "../tools/backends/benchmark.mjs";
 let directory, generations;
 const sameNumber = (actual, expected, label) => assert(Object.is(actual, expected), `${label}: ${actual} != ${expected}`);
 
+const optimizationCases = `
+  (defun bounded (n) (let ((i 0) (sum 0))
+    (while (and (< i n) (< i 3)) (setq sum (+ sum i)) (setq i (1+ i))) (+ sum i)))
+  (defun fractional (n) (let ((i 0)) (while (< i n) (setq i (1+ i))) i))
+  (defun negative-zero (n) (let ((i -0.0))
+    (while (and (< i n) (< i 3)) (setq i (1+ i))) (/ 1 i)))
+  (defun mutable-bound (n) (let ((i 0))
+    (while (and (< i n) (< i 3)) (setq n (1- n)) (setq i (1+ i))) (+ n i)))
+  (defun fractional-step (n) (let ((i 0))
+    (while (and (< i n) (< i 3)) (setq i (+ i 0.5))) i))
+  (defun conditional-set (n) (let ((i 0) (x n) (sum 0))
+    (while (and (< i n) (< i 3))
+      (if (< i 1) (setq x 5) x)
+      (let ((y (/ 1 n))) (setq sum (+ sum (+ x y))))
+      (setq i (1+ i))) (+ sum x)))
+  (defun cyclic-truth (n) (let ((i 0) (cycle 0) (sum 0))
+    (while (and (< i n) (< i 300))
+      (setq sum (+ sum (if cycle 1 999)))
+      (setq cycle (if (< cycle 127) (1+ cycle) 0))
+      (setq i (1+ i))) (+ sum cycle)))
+  (defun non-power-cycle (n) (let ((i 0) (cycle 0) (sum 0))
+    (while (and (< i n) (< i 300))
+      (setq sum (+ sum cycle))
+      (setq cycle (if (< cycle 6) (1+ cycle) 0))
+      (setq i (1+ i))) (+ sum cycle)))
+  (defun arguments (a b) (+ (* a 10) b))
+  (defun effects (x) (let ((value (arguments x (setq x (+ x 1))))) (+ (* x 100) value)))
+  (defun mutate (a b) (setq a (+ a b)) (+ a b))
+  (defun isolated (x) (+ (* x 100) (mutate x x)))
+  (defun squares (x) (let ((i 0) (sum 0))
+    (while (and (< i 3) (< (* x x) 1000))
+      (setq sum (+ sum (* x x)))
+      (setq x (/ x 2))
+      (setq sum (+ sum (* x x)))
+      (if (< x 0) (setq x (- x)) x)
+      (setq sum (+ sum (* x x)))
+      (setq i (1+ i))) sum))
+  (defun squares-or (x) (let ((i 0) (sum 0))
+    (while (and (< i 3) (or (> x 0) (< (* x x) 1000)))
+      (setq sum (+ sum (* x x)))
+      (setq x (/ x 2)) (setq i (1+ i))) sum))
+  (defun condition-effects (n) (let ((i 0) (sum 0))
+    (while (and (< i 3) (or (< (setq sum (1+ sum)) n) (not (> i 1))))
+      (setq i (1+ i))) (+ (* sum 10) i)))
+  (defun negated-condition (n) (let ((i 0))
+    (while (not (or (>= i 3) (>= i n))) (setq i (1+ i))) i))
+  (export bounded fractional negative-zero mutable-bound fractional-step conditional-set cyclic-truth non-power-cycle effects isolated squares squares-or condition-effects negated-condition)`;
+
+const parallelCases = `
+  (defun scalar (n seed) (let ((i 0) (x seed) (sum 0))
+    (while (< i n) (setq x (* (* 3.8 x) (- 1 x))) (setq sum (+ sum x)) (setq i (1+ i))) sum))
+  (defun indexed (n seed) (let ((i 0) (x seed) (sum 0))
+    (while (< i n) (setq x (/ (+ x i) 2)) (setq sum (+ sum x)) (setq i (1+ i))) (+ sum i)))
+  (defun moving (n seed) (let ((i 0) (x seed) (sum 0))
+    (while (< i n) (setq n (1- n)) (setq x (/ (+ x i) 2)) (setq sum (+ sum x)) (setq i (1+ i))) sum))
+  ${["scalar", "indexed", "moving"].map(kernel => `
+    (defun ${kernel}-batch (n seed calls) (let ((i 0) (cycle 0) (sum 0))
+      (while (< i calls) (setq sum (+ sum (${kernel} n (+ seed (* cycle 0.000000001)))))
+        (setq cycle (if (< cycle 7) (1+ cycle) 0)) (setq i (1+ i))) sum))`).join("\n")}
+  (defun dependent-batch (n seed calls) (let ((i 0) (sum 0))
+    (while (< i calls) (setq sum (+ sum (scalar n (+ seed sum)))) (setq i (1+ i))) sum))
+  (export scalar-batch indexed-batch moving-batch dependent-batch)`;
+
 beforeAll(async () => {
   directory = await mkdtemp(resolve(tmpdir(), "eliscript-direct-backend-"));
   generations = [await buildBackends({ outputRoot: resolve(directory, "g1"), seed: true })];
@@ -225,7 +288,7 @@ test("discarded numeric results remove stack traffic while preserving effects an
       sameNumber(wasm.exports[name](value), oracle.module[name.replaceAll("-", "_")](value), name);
     }
   }
-  const called = compile('(defun g (x) x) (defun f (x) (g x) x) (export f)');
+  const called = compile('(defun g (x) (g x)) (defun f (x) (g x) x) (export f)');
   assert.deepEqual([...called.bytes.slice(-9)], [0, 32, 0, 16, 0, 26, 32, 0, 11],
     "discarded calls remain, including their arguments and possible nontermination");
 });
@@ -248,7 +311,111 @@ test("direct WASM differentially executes generated numeric programs and multi-b
   }
 });
 
+test("typed optimization variants preserve ranges, fractional bounds, scope and IEEE edges", async () => {
+  const oracle = await javascript(optimizationCases);
+  const { compiler, numeric, wasm } = generations[2];
+  const original = numeric.lower_numeric_program(compiler.compile_ir_string(optimizationCases, "typed-cases.eli"));
+  const saved = JSON.stringify(original);
+  const inputs = [-Infinity, -7, -0, 0, Number.MIN_VALUE, .5, 1, 1.1, 2, 2.5, 3, 9, 129, 257, Infinity, NaN];
+  for (let bits = 0; bits < 8; bits++) {
+    const options = { inlining: !!(bits & 1), loops: !!(bits & 2), integers: !!(bits & 4) };
+    const optimized = numeric.optimize_numeric_program(original, options);
+    assert.equal(JSON.stringify(original), saved, "typed input is immutable");
+    const bytes = Uint8Array.from(wasm.emit_typed_numeric_wasm(optimized));
+    assert(WebAssembly.validate(bytes));
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes));
+    for (const name of Object.keys(instance.exports)) for (const value of inputs) {
+      if (name === "fractional" && (value === Infinity || value > 100)) continue;
+      sameNumber(instance.exports[name](value), oracle.module[name.replaceAll("-", "_")](value), `${bits}/${name}/${value}`);
+    }
+    // The second conjunct bounds execution while the first exercises both
+    // sides of the signed-i32 limit and the original f64 fallback.
+    for (const value of [2147483646.5, 2147483647, 2147483647.5, 2147483648, 2 ** 53, Infinity, NaN]) {
+      sameNumber(instance.exports.bounded(value), oracle.module.bounded(value), `range/${bits}/${value}`);
+    }
+    const nodes = function* (node) { yield node; for (const child of node.children) yield* nodes(child); };
+    if (options.integers) {
+      assert([...nodes(optimized.functions.find(f => f.name === "bounded").body)].some(n => n.kind === "ceil-int"));
+      for (const name of ["negative-zero", "mutable-bound", "fractional-step"]) {
+        assert(![...nodes(optimized.functions.find(f => f.name === name).body)].some(n => n.kind === "ceil-int"), name);
+      }
+    }
+    if (options.inlining) {
+      assert(![...nodes(optimized.functions.find(f => f.name === "effects").body)].some(n => n.kind === "call"));
+    }
+  }
+  const artifacts = generations.map(g => compile(optimizationCases, "typed-cases.eli", g).bytes);
+  assert.deepEqual(artifacts[0], artifacts[1]);
+  assert.deepEqual(artifacts[1], artifacts[2]);
+  const check = spawnSync(process.env.NODE ?? "node", ["--input-type=module", "-e",
+    'const m=await import(process.argv[1]);const w=new WebAssembly.Instance(new WebAssembly.Module(Buffer.from(process.argv[2],"base64"))).exports;for(const name of Object.keys(w))for(const x of[-Infinity,-7,-0,0,.5,1,1.1,9,Infinity,NaN]){if(name==="fractional"&&x===Infinity)continue;if(!Object.is(w[name](x),m[name.replaceAll("-","_")](x)))throw Error(name+":"+x)}',
+    pathToFileURL(oracle.path).href, Buffer.from(artifacts[2]).toString("base64")], { encoding: "utf8", timeout: 30_000 });
+  assert.equal(check.status, 0, check.stderr);
+});
+
+test("independent call-loop pipelining preserves lane state and ordered reductions", async () => {
+  const { compiler, numeric, wasm } = generations[2];
+  const program = numeric.lower_numeric_program(compiler.compile_ir_string(parallelCases, "parallel-cases.eli"));
+  const saved = JSON.stringify(program);
+  const oracle = await javascript(parallelCases);
+  let enabled;
+  for (const parallel of [false, true]) {
+    const optimized = numeric.optimize_numeric_program(program, { parallel });
+    assert.equal(JSON.stringify(program), saved);
+    const bytes = Uint8Array.from(wasm.emit_typed_numeric_wasm(optimized));
+    assert(WebAssembly.validate(bytes));
+    const instance = new WebAssembly.Instance(new WebAssembly.Module(bytes));
+    for (const name of Object.keys(instance.exports)) {
+      for (const n of [-Infinity, -0, 0, .5, 1, 1.1, 2, 2.5, 3, 9, 17, NaN]) {
+        for (const seed of [-Infinity, -0, 0, .123, Infinity, NaN]) {
+          for (const calls of [-Infinity, -0, 0, .5, 1, 1.1, 2, 2.1, 3, 3.7, 5, 9, NaN]) {
+            sameNumber(instance.exports[name](n, seed, calls), oracle.module[name.replaceAll("-", "_")](n, seed, calls), `${parallel}/${name}/${n}/${seed}/${calls}`);
+          }
+        }
+      }
+    }
+    if (parallel) {
+      enabled = bytes;
+      // A >= 2 guard is the observable pipeline selection. Both dependent
+      // arguments and a mutable callee limit must reject this transformation.
+      for (const name of ["scalar-batch", "indexed-batch", "moving-batch", "dependent-batch"]) {
+        const body = optimized.functions.find(f => f.name === name).body;
+        const guard = body.kind === "if" && body.children[0].kind === "and" &&
+          body.children[0].children[0].kind === "compare" && body.children[0].children[0].value === ">=" &&
+          body.children[0].children[0].children[1].value === 2;
+        assert.equal(guard, ["scalar-batch", "indexed-batch"].includes(name), name);
+      }
+    }
+  }
+  const outputs = generations.map(g => compile(parallelCases, "parallel-cases.eli", g).bytes);
+  assert.deepEqual(outputs[0], outputs[1]);
+  assert.deepEqual(outputs[1], outputs[2]);
+  const check = spawnSync(process.env.NODE ?? "node", ["--input-type=module", "-e",
+    'const m=await import(process.argv[1]);const w=new WebAssembly.Instance(new WebAssembly.Module(Buffer.from(process.argv[2],"base64"))).exports;for(const name of Object.keys(w))for(const n of[0,.5,1,1.1,2,2.5,9,NaN])for(const seed of[-0,.123,NaN])for(const calls of[.5,1,2,2.1,3,5,NaN])if(!Object.is(w[name](n,seed,calls),m[name.replaceAll("-","_")](n,seed,calls)))throw Error(name+":"+n+":"+calls);',
+    pathToFileURL(oracle.path).href, Buffer.from(enabled).toString("base64")], { encoding: "utf8", timeout: 30_000 });
+  assert.equal(check.status, 0, check.stderr);
+});
+
+test("nested grid optimization preserves fractional dimensions and escape limits", async () => {
+  const source = await readFile(resolve(root, "tools/experiments/native-wasm/kernels.eli"), "utf8") + "\n" + await readFile(resolve(root, "tools/backends/batches.eli"), "utf8");
+  const oracle = await javascript(source);
+  const wasm = compile(source);
+  for (const width of [-Infinity, -3, -0, 0, .5, 1, 1.5, 2, 2.1, 3, NaN]) {
+    for (const limit of [-Infinity, -3, -0, 0, .5, 1, 1.5, 2, 2.1, 3, 17, 64, NaN]) {
+      sameNumber(wasm.exports["escape-grid"](width, limit), oracle.module.escape_grid(width, limit), `${width}/${limit}`);
+      for (const calls of [0, .5, 1, 2, 2.1, 3]) {
+        sameNumber(wasm.exports["escape-grid-batch"](width, limit, calls), oracle.module.escape_grid_batch(width, limit, calls), `${width}/${limit}/${calls}`);
+      }
+    }
+  }
+  // This one-cell coordinate escapes after one step, so an infinite limit
+  // terminates and exercises the original f64 fallback without hanging.
+  sameNumber(wasm.exports["escape-grid"](1, Infinity), oracle.module.escape_grid(1, Infinity), "infinite escape limit");
+});
+
 test("direct WASM rejects unsupported dynamic capabilities before optimization", () => {
+  assert.throws(() => generations[2].numeric.optimize_numeric_program({ abi: "unknown" }),
+    error => error.eliscriptDiagnostic.code === "ELI-B0001");
   assert.throws(() => generations[2].wasm.emit_numeric_wasm(
     generations[2].compiler.compile_ir_string("", "empty.eli")), error => {
     assert.equal(error.eliscriptDiagnostic.code, "ELI-B0001");
@@ -323,11 +490,11 @@ test("direct WASM performance report preserves budgets and blocks failed promoti
 
 test("browser JS compiler emits the identical WASM bytes without an external backend", async () => {
   const entry = resolve(directory, "browser-entry.mjs");
-  await writeFile(entry, `export {compile_ir_string} from ${JSON.stringify(resolve(directory, "g3/bootstrap/compiler.mjs"))};\nexport {emit_numeric_wasm} from ${JSON.stringify(resolve(directory, "g3/backends/wasm.mjs"))};`);
+  await writeFile(entry, `export {compile_ir_string,emit_ir_string} from ${JSON.stringify(resolve(directory, "g3/bootstrap/compiler.mjs"))};\nexport {emit_numeric_wasm} from ${JSON.stringify(resolve(directory, "g3/backends/wasm.mjs"))};`);
   const build = await Bun.build({ entrypoints: [entry], target: "browser", format: "esm" });
   assert(build.success);
   const bundle = await build.outputs[0].text();
-  const source = await readFile(resolve(root, "tools/experiments/native-wasm/kernels.eli"), "utf8");
+  const source = await readFile(resolve(root, "tools/experiments/native-wasm/kernels.eli"), "utf8") + "\n" + optimizationCases + "\n" + parallelCases;
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage();
@@ -338,6 +505,24 @@ test("browser JS compiler emits the identical WASM bytes without an external bac
         const bytes = compiler.emit_numeric_wasm(compiler.compile_ir_string(source, "browser.eli"));
         const module = new WebAssembly.Module(Uint8Array.from(bytes));
         const instance = new WebAssembly.Instance(module);
+        const jsUrl = URL.createObjectURL(new Blob([compiler.emit_ir_string(compiler.compile_ir_string(source, "browser.eli"))], { type: "text/javascript" }));
+        try {
+          const js = await import(jsUrl);
+          for (const name of ["bounded", "fractional", "negative-zero", "mutable-bound", "fractional-step", "conditional-set", "cyclic-truth", "non-power-cycle", "effects", "isolated", "squares", "squares-or", "condition-effects", "negated-condition"]) {
+            for (const x of [-Infinity, -7, -0, 0, .5, 1, 1.1, 9, 129, 257, Infinity, NaN]) {
+              if (name === "fractional" && x === Infinity) continue;
+              if (!Object.is(instance.exports[name](x), js[name.replaceAll("-", "_")](x))) throw Error(name + ":" + x);
+            }
+          }
+          for (const name of ["scalar-batch", "indexed-batch", "moving-batch", "dependent-batch"]) {
+            for (const n of [0, .5, 1, 1.1, 2, 2.5, 9, NaN]) for (const seed of [-0, .123, NaN]) for (const calls of [.5, 1, 2, 2.1, 3, 5, NaN]) {
+              if (!Object.is(instance.exports[name](n, seed, calls), js[name.replaceAll("-", "_")](n, seed, calls))) throw Error(name + ":" + n + ":" + calls);
+            }
+          }
+          for (const width of [-0, 0, .5, 1, 1.5, 2.1, 3, NaN]) for (const limit of [-0, 0, .5, 1, 1.5, 2.1, 17, NaN]) {
+            if (!Object.is(instance.exports["escape-grid"](width, limit), js.escape_grid(width, limit))) throw Error("grid:" + width + ":" + limit);
+          }
+        } finally { URL.revokeObjectURL(jsUrl); }
         return { bytes, result: instance.exports.recurrence(1000, .123), imports: WebAssembly.Module.imports(module) };
       } finally { URL.revokeObjectURL(url); }
     }, { bundle, source });
