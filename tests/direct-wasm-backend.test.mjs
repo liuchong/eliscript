@@ -588,12 +588,46 @@ test("memory runtime emits identical IR and WASM through three compiler generati
   assert.equal(await readFile(seed, "utf8"), generations[2].compiler.compile_string(source, input));
 });
 
+const rootPressureSource = `
+(defun root-pressure (heap rounds)
+  (let* ((frame (frame-new heap 1)) (i 0) (one (value-number heap 0 1072693248)))
+    (frame-set heap frame 0 one)
+    (while (< i rounds)
+      (let* ((inner (frame-new heap 2)) (two (value-number heap 0 1073741824)))
+        (frame-set heap inner 0 two)
+        (let ((sum (value-number-binary heap (frame-get heap frame 0) two 0)))
+          (frame-set heap inner 1 sum)
+          (let ((output (frame-return heap inner sum)))
+            (frame-set heap frame 0 output) (heap-release heap output))))
+      (setq i (1+ i)))
+    (frame-return heap frame (frame-get heap frame 0))))
+(defun root-pressure-trap (heap)
+  (let* ((frame (frame-new heap 1)) (one (value-number heap 0 1072693248)))
+    (frame-set heap frame 0 one) (load-u32 4294967295) 0))
+(defun root-recursive (heap depth)
+  (let* ((frame (frame-new heap 2)) (one (value-number heap 0 1072693248)))
+    (frame-set heap frame 0 one)
+    (if (= depth 0) (frame-return heap frame one)
+      (let ((child (root-recursive heap (1- depth))))
+        (frame-set heap frame 1 child) (heap-release heap child)
+        (let ((sum (value-number-binary heap one child 0)))
+          (frame-set heap frame 0 sum) (frame-return heap frame sum))))))
+(export root-pressure root-pressure-trap root-recursive)`;
 test("managed runtime has seed and three-generation IR and WASM fixed points", async () => {
-  const source=await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8");
+  const source=(await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8"))+rootPressureSource;
   const filename="managed-runtime.eli",programs=generations.map(g=>g.compiler.compile_ir_string(source,filename));
   assert.deepEqual(programs[0],programs[1]);assert.deepEqual(programs[1],programs[2]);
   const bytes=generations.map((g,i)=>g.wasm.emit_memory_wasm(programs[i]));
   assert.deepEqual(bytes[0],bytes[1]);assert.deepEqual(bytes[1],bytes[2]);
+  for (const artifact of bytes) {
+    const e=new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from(artifact))).exports,h=e["heap-new"](12,768,768);
+    e["heap-auto"](h,1);const p=e["root-pressure"](h,1000)>>>0;assert(p>0);
+    assert.equal(new DataView(e.memory.buffer).getFloat64(e["value-data"](h,p,4)>>>0,true),2001);
+    assert.equal(e["frame-depth"](h),0);e["heap-release"](h,p);e["heap-collect"](h);assert.equal(e["heap-live"](h),0);
+    const h2=e["heap-new"](192,8192,32768);e["heap-auto"](h2,1);const recursive=e["root-recursive"](h2,64)>>>0;
+    assert(recursive>0);assert.equal(new DataView(e.memory.buffer).getFloat64(e["value-data"](h2,recursive,4)>>>0,true),65);
+    assert.equal(e["frame-depth"](h2),0);e["heap-release"](h2,recursive);e["heap-collect"](h2);assert.equal(e["heap-live"](h2),0);
+  }
   assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(Uint8Array.from(bytes[2]))),[]);
   const saved=JSON.stringify(programs[2]);generations[2].wasm.emit_memory_wasm(programs[2]);assert.equal(JSON.stringify(programs[2]),saved);
   const input=resolve(directory,filename),output=resolve(directory,"managed-seed.mjs");await writeFile(input,source);
@@ -818,6 +852,43 @@ describe("browser compiler backends", () => {
       } finally {URL.revokeObjectURL(url);}
     },{source});
     assert.deepEqual(result,generations[2].wasm.emit_memory_wasm(generations[2].compiler.compile_ir_string(source,"browser-managed.eli"),{maximumPages:16}));
+  });
+
+  test("browser root safepoints retain WASM locals, transfer ownership and unwind after traps",async()=>{
+    const source=(await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8"))+rootPressureSource;
+    const result=await evaluateBrowser(async({bundle,source})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:"text/javascript"}));
+      const check=(ok,label)=>{if(!ok)throw Error(label);};
+      try {
+        const c=await import(url),bytes=Uint8Array.from(c.emit_memory_wasm(c.compile_ir_string(source,"browser-roots.eli"),{maximumPages:8}));
+        const module=new WebAssembly.Module(bytes);check(WebAssembly.Module.imports(module).length===0,"imports");
+        const e=new WebAssembly.Instance(module).exports,h=e["heap-new"](12,768,768);e["heap-auto"](h,1);
+        const p=e["root-pressure"](h,1000)>>>0;check(p>0,"result");
+        check(new DataView(e.memory.buffer).getFloat64(e["value-data"](h,p,4)>>>0,true)===2001,"live Number");
+        check(e["frame-depth"](h)===0&&e["heap-collections"](h)>3000,"automatic GC");
+        e["heap-release"](h,p);e["heap-collect"](h);check(e["heap-live"](h)===0,"release");
+        try{e["root-pressure-trap"](h);throw Error("trap missing");}catch(error){check(error instanceof WebAssembly.RuntimeError,"trap class");}
+        check(e["frame-depth"](h)===1,"trap frame");e["frame-unwind"](h,0);check(e["heap-collect"](h)===2,"unwind");
+        const h2=e["heap-new"](192,8192,32768);e["heap-auto"](h2,1);const recursive=e["root-recursive"](h2,64)>>>0;
+        check(recursive>0,"recursive result");check(new DataView(e.memory.buffer).getFloat64(e["value-data"](h2,recursive,4)>>>0,true)===65,"recursive value");
+        check(e["frame-depth"](h2)===0,"recursive frames");e["heap-release"](h2,recursive);e["heap-collect"](h2);check(e["heap-live"](h2)===0,"recursive cleanup");
+        const a=c.instantiateManagedRuntime(bytes),b=c.instantiateManagedRuntime(bytes);a.auto(1);
+        const frame=a.frame(1),n=a.number(NaN);a.frameSet(frame,0,n);a.release(n);
+        for(let i=0;i<100;i++){const temporary=a.number(i);a.release(temporary);}
+        const value=a.frameGet(frame,0);check(Number.isNaN(a.readNumber(value)),"bridge root");
+        const escaped=a.frameReturn(frame,value);a.release(value);a.collect();check(a.live()===1,"return roots");
+        try{b.frameGet(frame,0);throw Error("foreign accepted");}catch(error){check(error.eliscriptDiagnostic?.code==="ELI-RT0001","foreign frame");}
+        a.release(escaped);check(a.collect()===1&&a.live()===0,"root ownership");
+        for(const kind of ["array","record"]) {
+          const child=a.number(-0);a.release(child);const input=[child,child];
+          Object.defineProperty(input,1,{get(){const temporary=a.number(7);a.release(temporary);return child;}});
+          const owner=a[kind](input),output=a.get(owner,1);check(Object.is(a.readNumber(output),-0),"borrowed operand");
+          a.release(output);a.release(owner);a.collect();check(a.live()===0,"borrowed roots cleanup");
+        }
+        return [...bytes];
+      }finally{URL.revokeObjectURL(url);}
+    },{source});
+    assert.deepEqual(result,generations[2].wasm.emit_memory_wasm(generations[2].compiler.compile_ir_string(source,"browser-roots.eli"),{maximumPages:8}));
   });
 
 });

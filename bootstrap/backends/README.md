@@ -314,9 +314,37 @@ recycling at generation 4095 to prevent stale identity reuse. Exhaustion returns
 the existing capacity diagnostic. A released handle remains usable until actual
 collection; using it after collection fails with ELI-RT0001.
 
-Collection is explicit and never occurs during allocation. Future compiler
-lowering must root live WASM locals and implement root frames/safepoints before
-automatic GC is enabled. The backing arena still retains previous regions on
-pool growth and does not yet destroy multiple heaps. Managed codecs, complete
-dynamic lowering, persistent collections and full compiler hosts remain open.
-No full compiler memory/performance acceptance is claimed by this heap slice.
+Collection defaults to explicit. `auto(thresholdBytes)` enables allocation
+safepoints at a nonzero byte threshold; `auto(0)` disables them. Successful
+allocations accumulate byte debt, checked before the next allocation. With this
+mode enabled, exhausted slots or blocks trigger collection and one complete
+retry. Resize temporarily roots its operand and preserves its identity and data
+on failure. Number operations capture their f64 operands before allocation.
+`array`/`record` construction temporarily roots each borrowed argument before
+subsequent getters or allocation and releases those roots on success or failure.
+
+`frame(count)` creates a private root frame; `frameSet`/`frameGet` access its
+locals, including locals of an active ancestor. `frameGet` returns an owned root.
+`leaveFrame` requires the current top frame. `frameReturn(frame, value)` roots the
+result before popping and returns a handle with exactly one transferred root;
+place it in a caller frame and release that root when ownership is transferred.
+Existing roots remain independent. Popped or unwound frames expire immediately,
+and frame tokens cannot appear as ordinary values or cross runtime instances.
+`unwindFrames(target)` discards frames above an active ancestor; omission unwinds
+all frames. Invalid targets leave the stack unchanged. Pop/unwind clear references
+without allocation or GC. Use unwind in trap/exception cleanup before the next
+allocation. `stats` also reports `frameDepth` and a saturating collection counter.
+
+The raw WASM exports are `heap-auto`, `heap-collections` and
+`frame-new/set/get/pop/return/unwind/depth`, with word arguments/results.
+`frame-return` adds one explicit result root; immediate nil returns word zero on
+success, so raw callers must inspect `last-error` to distinguish failure.
+Collection traces the active frame chain and all its locals. Before enabling
+automatic collection, raw callers must keep every live reference in a frame or
+explicit root. Complete compiler insertion of these calls remains open; the
+internal loop/recursive fixtures insert them explicitly.
+
+The backing arena still retains previous regions on pool growth and does not yet
+destroy multiple heaps. Managed codecs, complete dynamic lowering, persistent
+collections and full compiler hosts remain open. No full compiler memory or
+performance acceptance is claimed by this heap slice.

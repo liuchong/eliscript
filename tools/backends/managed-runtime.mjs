@@ -8,7 +8,7 @@ function word(x,max=0xffffffff) {if(typeof x!=='number'||!Number.isInteger(x)||x
 export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=65536,maxBytes=16777216}={}) {
  const module=new WebAssembly.Module(bytes);if(WebAssembly.Module.imports(module).length)throw Error('managed runtime requires zero imports');
  const e=new WebAssembly.Instance(module).exports;if(!(e.memory instanceof WebAssembly.Memory))throw Error('managed runtime requires owned memory');
- const handles=new WeakMap(),view=()=>new DataView(e.memory.buffer);
+ const handles=new WeakMap(),frames=new WeakMap(),view=()=>new DataView(e.memory.buffer);
  const call=(name,...args)=>{const result=e[name](...args)>>>0;const code=e['last-error']();if(code)fail(code);return result;};
  const heap=call('heap-new',word(maxSlots),word(initialBytes),word(maxBytes));
  function id(value) {
@@ -16,15 +16,21 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
   const entry=handles.get(value);if(!entry)fail(typeof value==='number'?3:1);
   call('value-kind',heap,entry.id);return entry.id;
  }
- function wrap(value) {
+ function wrap(value,owned=false) {
   if(value<=3)return [null,false,true,undefined][value];
   const kind=call('value-kind',heap,value),handle=Object.freeze({kind});
-  call('heap-pin',heap,value);handles.set(handle,{id:value,roots:1});return handle;
+  if(!owned)call('heap-pin',heap,value);handles.set(handle,{id:value,roots:1});return handle;
  }
+ function frameId(token) {const entry=frames.get(token);if(!entry)fail(1);return entry.id;}
  function data(value,kind) {const v=id(value);return {v,length:call('value-length',heap,v),offset:call('value-data',heap,v,kind)};}
  function refs(input,kind) {
-  if(!Array.isArray(input))fail(3);const values=Array.from(input,id),value=call('value-refs',heap,kind,word(values.length));
-  const offset=call('value-data',heap,value,kind),target=view();values.forEach((v,i)=>target.setUint32(offset+i*4,v,true));return wrap(value);
+  if(!Array.isArray(input))fail(3);const borrowed=[];
+  try {
+   // Protect operands before later getters or result allocation can collect them.
+   const values=Array.from(input,x=>{const v=id(x);call('heap-pin',heap,v);borrowed.push(v);return v;});
+   const value=call('value-refs',heap,kind,word(values.length)),offset=call('value-data',heap,value,kind),target=view();
+   values.forEach((v,i)=>target.setUint32(offset+i*4,v,true));return wrap(value);
+  } finally {for(const value of borrowed)call('heap-release',heap,value);}
  }
  return Object.freeze({
   number(input) {
@@ -64,7 +70,14 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
    const entry=handles.get(value);if(!entry)fail(1);if(!entry.roots)fail(3);
    call('heap-release',heap,entry.id);entry.roots--;
   },
+  auto(thresholdBytes) {call('heap-auto',heap,word(thresholdBytes));},
+  frame(count) {const value=call('frame-new',heap,word(count)),token=Object.freeze({frame:true});frames.set(token,{id:value});return token;},
+  frameSet(token,index,value) {call('frame-set',heap,frameId(token),word(index),id(value));},
+  frameGet(token,index) {return wrap(call('frame-get',heap,frameId(token),word(index)));},
+  leaveFrame(token) {call('frame-pop',heap,frameId(token));},
+  frameReturn(token,value) {return wrap(call('frame-return',heap,frameId(token),id(value)),true);},
+  unwindFrames(target=null) {call('frame-unwind',heap,target===null?0:frameId(target));},
   collect() {return call('heap-collect',heap);},live() {return call('heap-live',heap);},
-  stats() {return Object.freeze({usedBytes:call('heap-used',heap),capacityBytes:call('heap-capacity',heap),liveValues:call('heap-live',heap)});},
+  stats() {return Object.freeze({usedBytes:call('heap-used',heap),capacityBytes:call('heap-capacity',heap),liveValues:call('heap-live',heap),frameDepth:call('frame-depth',heap),collections:call('heap-collections',heap)});},
  });
 }
