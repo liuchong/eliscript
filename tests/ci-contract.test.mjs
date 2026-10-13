@@ -109,4 +109,14 @@ describe("compatibility matrix contract", () => {
       workflowText: workflow,
     })).rejects.toThrow(/differs from the compatibility matrix/);
   });
+
+  test("CI provisions the locked Chromium browser before the mandatory browser test", () => {
+    const workflow = renderWorkflow(baseline);
+    const dependencies = workflow.indexOf("name: Install locked dependencies");
+    const browser = workflow.indexOf("name: Install Chromium");
+    const tests = workflow.indexOf("name: Run complete test suite");
+    expect(browser).toBeGreaterThan(dependencies);
+    expect(browser).toBeLessThan(tests);
+    expect(workflow).toContain("bun node_modules/playwright-core/cli.js install --with-deps chromium");
+  });
 });

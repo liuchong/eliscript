@@ -82,6 +82,8 @@ jobs:
           test "$(node --version)" = "v24.20.0"
       - name: Install locked dependencies
         run: bun install --frozen-lockfile
+      - name: Install Chromium
+        run: bun node_modules/playwright-core/cli.js install --with-deps chromium
       - name: Run complete test suite
         run: bun run test
       - name: Strict byte compilation

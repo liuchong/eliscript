@@ -67,10 +67,14 @@ test("persistent zippers navigate edit and rebuild stack-safe trees", async () =
   const selfHostedDirectory = resolve(directory, "self-hosted");
 
   try {
-    await compileFamily(seedCompiler, seedDirectory);
-    await runSuccessful([bootstrapBuilder], {
-      ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
-    });
+    // These independent builds write disjoint output trees. Keep the same
+    // deadline without making seed compilation wait for bootstrap startup.
+    await Promise.all([
+      compileFamily(seedCompiler, seedDirectory),
+      runSuccessful([bootstrapBuilder], {
+        ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
+      }),
+    ]);
     await compileFamily(portableCompiler, selfHostedDirectory, {
       ELISCRIPT_BOOTSTRAP_MODULE_DIR: bootstrapDirectory,
     });
@@ -82,16 +86,14 @@ test("persistent zippers navigate edit and rebuild stack-safe trees", async () =
         .toBe(await Bun.file(resolve(seedDirectory, `${output}.map`)).text());
     }
 
-    const reports = [];
-    for (const outputRoot of [seedDirectory, selfHostedDirectory]) {
+    // All four hosts consume immutable outputs independently. Keep every
+    // depth-12000 run and the existing deadline; avoid two serial host waves.
+    const reports = await Promise.all([seedDirectory, selfHostedDirectory].flatMap((outputRoot) => {
       const modulePath = resolve(
         outputRoot,
         "tests/fixtures/persistent-zipper.mjs",
       );
-      // The hosts read immutable outputs and report independently. Running
-      // this pair together keeps all four depth-12000 checks inside the same
-      // existing deadline without repeating host startup serially.
-      const hostReports = await Promise.all([
+      return [
         runSuccessful([
           "bun", "--preload", bunPreload, hostFixture, modulePath,
         ]),
@@ -99,9 +101,8 @@ test("persistent zippers navigate edit and rebuild stack-safe trees", async () =
           process.env.NODE ?? "node",
           "--experimental-loader", nodeLoader, hostFixture, modulePath,
         ]),
-      ]);
-      reports.push(...hostReports.map((report) => JSON.parse(report)));
-    }
+      ].map(async (report) => JSON.parse(await report));
+    }));
     for (const report of reports) expect(report).toEqual(reports[0]);
 
     expect(reports[0].recognition).toEqual([true, false, true]);
