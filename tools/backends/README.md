@@ -155,10 +155,56 @@ These are internal storage/iteration primitives. General JS interop constructors
 callbacks/iterable protocols, persistent collections, automatic root insertion
 and complete language/compiler lowering still require their own acceptance.
 
+## Ordinary managed control programs
+
+`managed-control-v1` is an explicit experimental ABI for ordinary Eliscript
+control flow. The `.eli` managed lowering links the checked runtime, emits WASM
+directly and adds a versioned export/arity descriptor. It uses zero imports.
+The compiler host remains JavaScript, and this profile supports WASM output.
+
+```sh
+bun tools/backends/compile.mjs --abi managed-control-v1 --target wasm \
+  -o control.wasm tests/fixtures/wasm-managed-control.eli
+```
+
+`instantiateManagedRuntime(bytes, options)` reads the descriptor and exposes
+`invoke(name, arguments)`. Only declared source exports are callable; raw runtime
+exports, incorrect arity, foreign handles and implicit JS numeric coercion are
+rejected. Use `number(...)` and `string(...)` for those arguments; nil, booleans
+and undefined cross directly. An invocation result handle owns one root.
+
+```javascript
+const input = runtime.string('中😀');
+const output = runtime.invoke('identity', [input]);
+console.log(runtime.readString(output));
+runtime.release(output);
+runtime.release(input);
+runtime.collect();
+```
+
+The profile accepts primitive literals, references, `let`/`let*`, assignments,
+sequences, `if`/`cond`/`when`/`unless`, `while`, `and`/`or`/`not`, required synchronous
+parameters and direct named calls. Lisp truth preserves Number zero, NaN and
+empty strings as true; short-circuit returns preserve actual operand values.
+Every unsupported node is rejected even in an unselected branch. Arithmetic,
+persistent literals, closures, imports, interop, async and exception expressions
+remain open; this profile does not represent the complete dynamic backend.
+
+The bulk entry protects earlier arguments across later getters. Generated frames
+retain parameters, lexical variables and temporaries; each argument is captured
+before later argument effects. Internal calls return borrowed values and install
+them in the parent frame before further allocation. The raw entry caller must
+retain parameter roots until return and pin its borrowed result before allocating.
+No transient root counts are left inside generated functions. Runtime errors
+skip later evaluation, clean only their own frames and retain the original code;
+the bulk host unwinds a real WASM trap only to its pre-call frame. The current
+root strategy conservatively retains temporaries until function return; compiler
+peak-memory and throughput acceptance remain separate, open gates.
+
 ## Verification
 
 ```sh
-bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs tests/wasm-managed-tables.test.mjs
+bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs tests/wasm-managed-tables.test.mjs tests/wasm-managed-control.test.mjs
 bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=firefox bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=webkit bun test tests/direct-wasm-backend.test.mjs

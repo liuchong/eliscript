@@ -114,3 +114,10 @@ These runtime slices do not yet implement general Map/Set JS interop, persistent
 collection protocols, automatic root insertion or complete dynamic lowering. The complete
 compiler still runs in JS; WASM/native compiler hosts and the complete nine-cell
 self-bootstrap remain open in the [backend plan](../docs/native-wasm-feasibility.md).
+
+`backends/managed.eli` starts ordinary-value lowering through the explicit
+`managed-control-v1` profile: primitive values, lexical/control forms and direct
+calls link the runtime with automatic root frames and a versioned entry
+descriptor. Its zero-import WASM outputs execute through the bulk checked host
+entry. Arithmetic, persistent literals, closures, interop and complete compiler
+lowering remain open; this is not a full WASM compiler host.

@@ -608,6 +608,8 @@
       (if (and (/= target 0) (= (heap-frame-check heap target) 0)) 0
         (progn (while (/= (heap-meta heap 0) target)
           (heap-frame-discard heap (heap-meta heap 0))) 1))))
+  (defun frame-current (heap)
+    (begin-operation) (if (= (heap-check heap) 0) 0 (heap-meta heap 0)))
   ;; Managed text uses sealed UTF16 code units. These internal word intervals
   ;; are checked before allocation; general language index conversion is separate.
   (defun heap-string-check (heap value)
@@ -1100,7 +1102,7 @@
     value-refs value-get value-set value-refs-resize value-string value-bytes value-seal
     value-unit-get value-unit-set value-byte-get value-byte-set value-bytes-resize
     value-number-negate value-number-compare heap-auto heap-collections
-    frame-new frame-set frame-get frame-pop frame-return frame-unwind frame-depth
+    frame-new frame-set frame-get frame-pop frame-return frame-unwind frame-depth frame-current
     value-string-concat value-string-slice value-string-compare value-string-code-point value-string-find
     value-utf8-encode value-utf8-decode value-key-equal value-key-hash
     value-table-new value-table-size value-table-has value-table-get value-table-put value-table-add

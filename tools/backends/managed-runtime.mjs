@@ -9,6 +9,16 @@ function flag(value) {if(typeof value!=='boolean')fail(3);return Number(value);}
 export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=65536,maxBytes=16777216}={}) {
  const module=new WebAssembly.Module(bytes);if(WebAssembly.Module.imports(module).length)throw Error('managed runtime requires zero imports');
  const e=new WebAssembly.Instance(module).exports;if(!(e.memory instanceof WebAssembly.Memory))throw Error('managed runtime requires owned memory');
+ const sections=WebAssembly.Module.customSections(module,'eliscript-managed-control'),entries=new Map();
+ if(sections.length>1)fail(3);
+ if(sections.length) {
+  const payload=new Uint8Array(sections[0]);let length=0,index=0,shift=0,ended=false;
+  while(index<payload.length&&index<5){const byte=payload[index++];if(index===5&&(byte&0xf0))fail(3);length+=(byte&127)*2**shift;if(!(byte&128)){ended=true;break;}shift+=7;}
+  if(!ended||index+length!==payload.length)fail(3);let descriptor;
+  try{descriptor=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(payload.subarray(index)));}catch{fail(3);}
+  if(descriptor?.format!=='eliscript-managed-control'||descriptor.version!==1||descriptor.abi!=='managed-control-v1'||!Array.isArray(descriptor.functions))fail(3);
+  for(const item of descriptor.functions){if(typeof item?.name!=='string'||!Number.isInteger(item.arity)||item.arity<0||item.arity>65535||entries.has(item.name)||typeof e[item.name]!=='function')fail(3);entries.set(item.name,item.arity);}
+ }
  const handles=new WeakMap(),frames=new WeakMap(),view=()=>new DataView(e.memory.buffer);
  const call=(name,...args)=>{const result=e[name](...args)>>>0;const code=e['last-error']();if(code)fail(code);return result;};
  const heap=call('heap-new',word(maxSlots),word(initialBytes),word(maxBytes));
@@ -34,6 +44,16 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
   } finally {for(const value of borrowed)call('heap-release',heap,value);}
  }
  return Object.freeze({
+  invoke(name,args=[]) {
+   if(typeof name!=='string'||!entries.has(name)||!Array.isArray(args)||args.length!==entries.get(name))fail(3);
+   const borrowed=[];let entered=false,target=0;
+   try {
+    const values=Array.from(args,value=>{const v=id(value);call('heap-pin',heap,v);borrowed.push(v);return v;});
+    target=call('frame-current',heap);entered=true;
+    return wrap(call(name,heap,...values));
+   } catch(error){if(entered)call('frame-unwind',heap,target);throw error;}
+   finally{for(const value of borrowed)call('heap-release',heap,value);}
+  },
   number(input) {
    if(typeof input!=='number')fail(3);const bits=new DataView(new ArrayBuffer(8));bits.setFloat64(0,input,true);
    return wrap(call('value-number',heap,bits.getUint32(0,true),bits.getUint32(4,true)));

@@ -492,7 +492,7 @@
       (while (< index (js-length functions))
         (unsigned-leb declarations (js-nth index type-indices))
         (setq index (1+ index)))
-      (unsigned-leb exports (+ (js-length (get program :exports)) (if memory 1 0)))
+      (unsigned-leb exports (+ (js-length (get program :exports)) (js-length (get program :aliases (js-array))) (if memory 1 0)))
       (when memory (utf8-name exports "memory") (js-call exports :push 2 0))
       (setq index 0)
       (while (< index (js-length (get program :exports)))
@@ -500,6 +500,13 @@
           (utf8-name exports name)
           (js-call exports :push 0)
           (unsigned-leb exports (get (find-function functions name) :index)))
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (< index (js-length (get program :aliases (js-array))))
+        (let* ((alias (js-nth index (get program :aliases)))
+               (function (find-function functions (get alias :function))))
+          (unless function (backend-fail program "unknown WASM export alias target"))
+          (utf8-name exports (get alias :name)) (js-call exports :push 0) (unsigned-leb exports (get function :index)))
         (setq index (1+ index)))
       (unsigned-leb bodies (js-length functions))
       (setq index 0)
@@ -539,10 +546,17 @@
     ;; apply to this explicit internal word ABI.
     (emit-typed-scalar-wasm (lower-memory-program program) (or options (js-object))))
 
+  (defun emit-typed-memory-wasm (program &optional options)
+    (unless (= (get program :abi) "memory-u32") (backend-fail program "typed memory emitter requires memory-u32"))
+    (emit-typed-scalar-wasm program (or options (js-object))))
+  (defun append-metadata-section (bytes name value)
+    (let ((payload (js-array)))
+      (utf8-name payload name) (utf8-name payload value) (section bytes 0 payload)) bytes)
+
   (defun emit-numeric-wasm (program)
     ;; Validate the complete input, including unselected branches, first.
     (lower-numeric-program program)
     (emit-typed-numeric-wasm (optimize-numeric-program
       (lower-numeric-program (optimize-program program)) (js-object :constantFlow t :unswitch t))))
 
-  (export emit-numeric-wasm emit-typed-numeric-wasm emit-memory-wasm))
+  (export emit-numeric-wasm emit-typed-numeric-wasm emit-memory-wasm emit-typed-memory-wasm append-metadata-section))

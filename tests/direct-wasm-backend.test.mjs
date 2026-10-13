@@ -648,6 +648,16 @@ test("managed runtime has seed and three-generation IR and WASM fixed points", a
   assert.equal(child.status,0,child.stderr);assert.equal(await readFile(output,"utf8"),generations[2].compiler.compile_string(source,input));
 });
 
+test("ordinary managed control has Seed and three-generation IR, descriptor and WASM fixed points",async()=>{
+  const source=await readFile(resolve(root,"tests/fixtures/wasm-managed-control.eli"),"utf8"),runtime=await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8");
+  const programs=generations.map(g=>g.compiler.compile_ir_string(source,"ordinary-control.eli")),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtime,"runtime.eli"));
+  assert.deepEqual(programs[0],programs[1]);assert.deepEqual(programs[1],programs[2]);assert.deepEqual(runtimes[0],runtimes[2]);
+  const lowered=generations.map((g,i)=>g.managed.lower_managed_program(programs[i],runtimes[i]));assert.deepEqual(lowered[0],lowered[1]);assert.deepEqual(lowered[1],lowered[2]);
+  const bytes=generations.map((g,i)=>g.managed.emit_managed_wasm(programs[i],runtimes[i],{maximumPages:16}));assert.deepEqual(bytes[0],bytes[1]);assert.deepEqual(bytes[1],bytes[2]);
+  const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
+  for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const x=a.string('中😀\ud800');for(let i=0;i<100;i++){const result=a.invoke('call-choose',[x,x]);assert.equal(a.readString(result),'中😀\ud800');a.release(result);}a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
+});
+
 describe("browser compiler backends", () => {
   beforeAll(async () => {
     // Compiler bundling and browser process startup are fixture preparation.
@@ -655,6 +665,7 @@ describe("browser compiler backends", () => {
     // each evaluation; performance benchmarks retain their separate policy.
     const entry = resolve(directory, "browser-entry.mjs");
     await writeFile(entry, `export {compile_ir_string,emit_ir_string} from ${JSON.stringify(resolve(directory, "g3/bootstrap/compiler.mjs"))};\nexport {emit_numeric_wasm,emit_memory_wasm} from ${JSON.stringify(resolve(directory, "g3/backends/wasm.mjs"))};\nexport {instantiateMemoryRuntime} from ${JSON.stringify(resolve(root, "tools/backends/memory-runtime.mjs"))};\nexport {instantiateManagedRuntime} from ${JSON.stringify(resolve(root, "tools/backends/managed-runtime.mjs"))};\nexport {emit_native_numeric_object,emit_native_numeric_library,emit_native_numeric_executable} from ${JSON.stringify(resolve(directory, "g3/backends/native.mjs"))};`);
+    await writeFile(entry,(await readFile(entry,'utf8'))+`\nexport {emit_managed_wasm} from ${JSON.stringify(resolve(directory,'g3/backends/managed.mjs'))};`);
     const build = await Bun.build({ entrypoints: [entry], target: "browser", format: "esm" });
     assert(build.success);
     browserBundle = await build.outputs[0].text();
@@ -1034,4 +1045,24 @@ describe("browser compiler backends", () => {
     assert.deepEqual(result,generations[2].wasm.emit_memory_wasm(generations[2].compiler.compile_ir_string(source,"browser-tables.eli"),{maximumPages:8}));
   });
 
+  test("browser ordinary managed control executes boxed values with automatic roots and source-equivalent semantics",async()=>{
+    const source=await readFile(resolve(root,"tests/fixtures/wasm-managed-control.eli"),"utf8"),runtime=await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8");
+    const result=await evaluateBrowser(async({bundle,source,runtime})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:"text/javascript"}));let jsUrl;
+      try {
+        const c=await import(url),program=c.compile_ir_string(source,"browser-control.eli"),rt=c.compile_ir_string(runtime,"runtime.eli");
+        const bytes=Uint8Array.from(c.emit_managed_wasm(program,rt,{maximumPages:16})),module=new WebAssembly.Module(bytes);
+        const check=(v,m)=>{if(!v)throw Error(m);};check(WebAssembly.Module.imports(module).length===0,"imports");
+        jsUrl=URL.createObjectURL(new Blob([c.emit_ir_string(program)],{type:"text/javascript"}));const ref=await import(jsUrl);
+        const a=c.instantiateManagedRuntime(bytes,{maxSlots:128,initialBytes:8192,maxBytes:65536});a.auto(1);
+        const box=v=>typeof v==='number'?a.number(v):typeof v==='string'?a.string(v):v,read=v=>v&&typeof v==='object'?v.kind===4?a.readNumber(v):a.readString(v):v;
+        const values=[null,false,true,undefined,0,-0,NaN,Infinity,Number.MIN_VALUE,'','中😀\ud800'];
+        for(const value of values){const v=box(value);for(const name of['truth','invert','once','recurse','optional-result','unless-result']){const out=a.invoke(name,[v]);check(Object.is(read(out),ref[name.replaceAll('-','_')](value)),name);a.release(out);}a.release(v);a.collect();check(a.live()===0&&a.stats().frameDepth===0,"cleanup");}
+        for(const left of values)for(const right of values){const x=box(left),y=box(right);for(const name of['both','either','parallel','sequential','effects','clauses','call-choose']){const out=a.invoke(name,[x,y]);check(Object.is(read(out),ref[name.replaceAll('-','_')](left,right)),name);a.release(out);}a.release(x);a.release(y);a.collect();check(a.live()===0,"pair roots");}
+        const object=a.map(),text=a.string('😀\ud800');for(let i=0;i<1000;i++){const out=a.invoke('call-choose',[object,text]);check(a.keyEqual(out,text),"opaque argument roots");a.release(out);}a.release(object);a.release(text);a.collect();check(a.live()===0&&a.stats().frameDepth===0,"final roots");
+        return [...bytes];
+      }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
+    },{source,runtime});
+    assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,"browser-control.eli"),generations[2].compiler.compile_ir_string(runtime,"runtime.eli"),{maximumPages:16}));
+  });
 });
