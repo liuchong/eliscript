@@ -11,7 +11,6 @@
 (module dogfood.tools.package
   (import "eliscript/runtime/core/collection.mjs" :as Collection)
   (import "eliscript/runtime/core/order.mjs" :as Order)
-  (import "eliscript/runtime/core/text.mjs" contains endsWith startsWith)
   (import "node:child_process" spawnSync)
   (import "node:crypto" createHash)
   (import "node:fs"
@@ -90,7 +89,7 @@
           (while (< index (Collection/count names))
             (let* ((name (Collection/nth names index))
                    (child (str relative "/" name)))
-              (unless (startsWith "." name)
+              (unless (js-call name :startsWith ".")
                 (if (js-call (statSync (Path/join root child)) :isDirectory)
                     (js-call pending :push child)
                   (when (= (substring-after-last child ".") "eli")
@@ -109,9 +108,11 @@
       (if (< found 0) text (js-call text :slice (+ found 1)))))
 
   (defun assert-clean (text label)
+    ;; Artifacts are serialized strings and these checks match literal text.
+    ;; Scan them directly instead of repeated collection character traversal.
     (let ((index 0))
       (while (< index (Collection/count forbidden-patterns))
-        (when (contains (Collection/nth forbidden-patterns index) text)
+        (when (js-call text :includes (Collection/nth forbidden-patterns index))
           (throw (js-object
                    :code "DOGFOOD-PACKAGE-002"
                    :message (str label " contains the forbidden pattern \""
@@ -119,7 +120,7 @@
         (setq index (1+ index))))
     (let ((token (get (js* "process.env") "GITHUB_TOKEN" nil)))
       (when (and (not (nil? token)) (> (Collection/count token) 0))
-        (when (contains token text)
+        (when (js-call text :includes token)
           (throw (js-object :code "DOGFOOD-PACKAGE-005"
                             :message (str label " embeds the live GITHUB_TOKEN")))))))
 
@@ -137,7 +138,7 @@
                    (js-object :path (js-call relative :slice
                                              (+ (Collection/count project) 1))
                               :sha256 (sha256-of-text text)))
-          (when (contains absolute-root text)
+          (when (js-call text :includes absolute-root)
             (throw (js-object :code "DOGFOOD-PACKAGE-003"
                               :message (str relative " embeds an absolute path")))))
         (setq index (1+ index)))
@@ -232,7 +233,7 @@
               (index 0)
               (eliscript 0))
           (while (< index (Collection/count map-sources))
-            (when (endsWith ".eli" (Collection/nth map-sources index))
+            (when (js-call (Collection/nth map-sources index) :endsWith ".eli")
               (setq eliscript (1+ eliscript)))
             (setq index (1+ index)))
           (when (= eliscript 0)
@@ -240,8 +241,8 @@
                               :message "the source map names no .eli source"))))
         ;; The shell loads this from the document head as a classic script, so
         ;; a top-level import statement would leave it unable to run.
-        (when (or (startsWith "import " browser-bundle)
-                  (contains (str (string-from-code-unit 10) "import ") browser-bundle))
+        (when (or (js-call browser-bundle :startsWith "import ")
+                  (js-call browser-bundle :includes (str (string-from-code-unit 10) "import ")))
           (throw (js-object :code "DOGFOOD-PACKAGE-007"
                             :message "the browser bundle must be a classic script")))
         (writeFileSync

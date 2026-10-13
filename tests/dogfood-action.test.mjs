@@ -9,6 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join, posix, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const ROOT = resolve(import.meta.dir, "..");
 const NODE = process.env.NODE ?? "node";
@@ -266,6 +267,29 @@ test("the bundle carries no credential shape or host path", async () => {
   for (const pattern of ["/Users/", "/home/", "ghp_", "github_pat_", "-----BEGIN"]) {
     expect(bundle.includes(pattern)).toBe(false);
   }
+});
+
+test("artifact scans reject forbidden text and live tokens throughout Unicode strings", async () => {
+  const source = resolve(staging, "scan.eli");
+  const module = resolve(staging, "scan.mjs");
+  const text = await readFile(PACKAGE_TOOL, "utf8");
+  await writeFile(source, text.replace(/\(main\)\)\s*$/u, "(export assert-clean))"));
+  const compiled = await run([COMPILER, "--output", module, source]);
+  expect(compiled.exitCode).toBe(0);
+  const checked = await run([NODE, "--input-type=module", "-e", `
+    import assert from "node:assert/strict";
+    const {assert_clean: scan} = await import(process.argv[1]);
+    scan("", "empty");
+    scan("😀INPUT_GITHUB_TOKEN𝄞", "allowed");
+    const padding = "😀safe𝄞".repeat(20000);
+    for (const pattern of ["/Users/", "/home/", "ghp_", "github_pat_", "-----BEGIN", process.env.GITHUB_TOKEN]) {
+      for (const text of [pattern + padding, padding + pattern + padding, padding + pattern]) {
+        assert.throws(() => scan(text, "fixture"), error =>
+          error.code === (pattern === process.env.GITHUB_TOKEN ? "DOGFOOD-PACKAGE-005" : "DOGFOOD-PACKAGE-002"));
+      }
+    }
+  `, pathToFileURL(module).href], { env: { GITHUB_TOKEN: "eliscript-scan-fixture-token" } });
+  expect(checked.exitCode).toBe(0);
 });
 
 test("rebuilding the bundle is byte-identical", async () => {
