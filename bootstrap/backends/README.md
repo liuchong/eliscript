@@ -180,6 +180,13 @@ expressions compute directly into registers without redundant result copies.
 Comparisons branch directly with ordered NaN behavior, and loops rotate without losing
 initial/final condition effects. The shared optional `unswitch` pass moves only
 pure guards whose reads cannot be written in the loop, with bounded code growth.
+Native additionally enables the shared optional `constantFlow`, `parallelSingle`
+and `cyclicMultiple` passes. Constant flow invalidates loop/short-circuit writes
+and joins exact IEEE constants, preserving signed zero. Single-trip lane dispatch
+runs outside batch loops; each cyclic initialization and update needs a range
+proof. Unread storage is removed while retaining RHS effects and result values.
+Loop constants occupy only unused registers and survive actual calls, and integer
+updates/comparisons use proven ARM64 immediates. WASM defaults are unchanged.
 The explicit `{registerAllocation:false}` native API option retains the initial
 stack emitter for independent before/after measurements and semantic regression.
 Neither path permits FMA, float reordering or approximate comparisons.
@@ -210,6 +217,6 @@ debug information, cold startup, memory and the full 3×3 matrix remain open.
 
 The retained native before/after reports use the identical optimized JS artifact
 hash and preserve the initial stack image hash. Speedups versus JS change from
-0.56×/0.22×/0.11× to 1.91×/0.62×/0.30× for recurrence/grid/tiny batches.
-Only recurrence passes; the native production decision remains false. These
+0.58×/0.22×/0.11× to 1.96×/1.11×/1.23× for recurrence/grid/tiny batches.
+All three pass the unchanged numeric gate. These
 measurements concern numeric kernels, not compiler throughput or full self-hosting.

@@ -540,6 +540,12 @@ test("explicit ABI CLI writes executable JS and directly encoded WASM", async ()
 test("direct WASM performance report preserves budgets and blocks failed promotion", async () => {
   const report = JSON.parse(await readFile(resolve(root, "tools/backends/results/direct-wasm-macos-arm64.json"), "utf8"));
   await validateDirectWasmReport(report);
+  const first = JSON.parse(await readFile(resolve(root, "tools/backends/results/direct-wasm-native-recheck-first-macos-arm64.json"), "utf8"));
+  // Historical failures keep their original source identity and all samples.
+  await validateDirectWasmReport(first, { verifySources: false });
+  assert.equal(first.decision.productionPassed, false);
+  const forgedFirst = structuredClone(first);forgedFirst.decision.productionPassed = true;
+  await assert.rejects(validateDirectWasmReport(forgedFirst, { verifySources: false }));
   const forgedBudget = structuredClone(report);
   forgedBudget.parameters.minimumSpeedup = .5;
   await assert.rejects(validateDirectWasmReport(forgedBudget));

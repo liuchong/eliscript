@@ -69,11 +69,188 @@ test("loop unswitching hoists only invariant pure guards and preserves zero-trip
   }
 });
 
+test("constant flow folds only dominating values and exposes invariant single-trip guards", async () => {
+  const source=`
+    (defun f (n x) (let ((i 0) (sum x)) (while (and (< i n) (< i 8))
+      (let ((j 0)) (if (< j n) (setq sum (+ sum 2)) (setq sum (- sum 3))))
+      (let ((j 0)) (if (< j n) (setq sum (+ sum 5)) (setq sum (- sum 7))))
+      (setq i (1+ i))) sum))
+    (defun writes (n x) (let ((i 0)) (while (and (< (setq i (1+ i)) 5) (< (setq x (+ x 1)) n))
+      (if (< x 3) (setq x (+ x 10)) (setq x (- x 2)))) (+ x i)))
+    (defun branches (n x) (let ((a -0.0)) (if (< n 0) (setq a -0.0) (setq a 0.0)) (/ x a)))
+    (defun short (n x) (let ((a 1)) (or (< n 0) (> (setq a (+ a x)) 0)) (+ a x)))
+    (defun truth (n x) (let ((a 0)) (if a x n)))
+    (defun joined (n x) (let ((a 1)) (if (< n 0) (setq a 2) (setq a 2)) (+ a x)))
+    (export f writes branches short truth joined)`;
+  const program=backend.compiler.compile_ir_string(source,"constant-flow.eli");
+  const typed=backend.numeric.lower_numeric_program(program),saved=JSON.stringify(typed);
+  const walk=function*(n){yield n;for(const c of n.children)yield*walk(c)};
+  const oracle=await import("data:text/javascript;base64,"+Buffer.from(backend.compiler.emit_ir_string(program)).toString("base64"));
+  for(const constantFlow of [false,true]) {
+    const optimized=backend.numeric.optimize_numeric_program(typed,{constantFlow,unswitch:true,inlining:false,loops:false,integers:false,parallel:false,guardedUnroll:false});
+    const hoisted=[...walk(optimized.functions.find(f=>f.name==="f").body)].some(n=>n.kind==="if"&&n.children[1].kind==="while"&&n.children[2].kind==="while");
+    assert.equal(hoisted,constantFlow,"reset private counter must become an invariant guard without freezing changing loop locals");
+    if(constantFlow) assert.equal([...walk(optimized.functions.find(f=>f.name==="f").body)].filter(n=>n.kind==="if").length,1,"all repeated copies of the same invariant guard must be selected together");
+    if(constantFlow) {const f=optimized.functions.find(f=>f.name==="f"),j=f.locals.find(l=>l.name==="j").index;assert(![...walk(f.body)].some(n=>["initialize","set"].includes(n.kind)&&n.value===j),"unread private counter stores must disappear while retaining RHS effects and values")}
+    assert.equal(JSON.stringify(typed),saved);
+    const wasm=new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from(backend.wasm.emit_typed_numeric_wasm(optimized)))).exports;
+    for(const n of [-Infinity,-1,-0,0,.5,1,1.1,3,8,Infinity,NaN]) for(const x of [-Infinity,-3,-0,0,Number.MIN_VALUE,.123,3,Infinity,NaN])
+      for(const name of Object.keys(wasm)) assert(Object.is(wasm[name](n,x),oracle[name](n,x)),`${constantFlow}/${name}/${n}/${x}`);
+  }
+});
+
+test("single-trip call pipelining preserves lane state, ordered reduction and fractional limits", async () => {
+  const source=`(defun scalar (n x) (let ((i 0) (sum 0)) (while (< i n) (setq x (* (* 3.7 x) (- 1 x))) (setq sum (+ sum x)) (setq i (1+ i))) (+ sum i)))
+    (defun batch (n x calls) (let ((i 0) (cycle 0) (sum 0)) (while (< i calls)
+      (setq sum (+ sum (scalar n (+ x (* cycle 0.00000003)))))
+      (setq cycle (if (< cycle 3) (1+ cycle) 0)) (setq i (1+ i))) sum)) (export batch)`;
+  const program=backend.compiler.compile_ir_string(source,"single-trip-lanes.eli"),typed=backend.numeric.lower_numeric_program(program),saved=JSON.stringify(typed);
+  const oracle=await import("data:text/javascript;base64,"+Buffer.from(backend.compiler.emit_ir_string(program)).toString("base64"));
+  for(const parallelSingle of [false,true]) {
+    const optimized=backend.numeric.optimize_numeric_program(typed,{parallelSingle,cyclicMultiple:parallelSingle});
+    assert.equal(optimized.functions.find(f=>f.name==="batch").body.children[0].children[0].children[1].value,parallelSingle?1:2,"single-trip policy must leave the default WASM policy unchanged");
+    if(parallelSingle) assert.equal(optimized.functions.find(f=>f.name==="batch").body.children[1].kind,"if","single-trip lane dispatch must be outside the outer batch loop");
+    if(parallelSingle) assert(optimized.functions.find(f=>f.name==="batch").locals.some(l=>l.name==="integer-cycle"),"multiple proven cyclic updates must use integer storage after lane expansion");
+    assert.equal(JSON.stringify(typed),saved);
+    const wasm=new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from(backend.wasm.emit_typed_numeric_wasm(optimized)))).exports;
+    for(const n of [-Infinity,-0,0,.5,1,1.1,2,2.1,5,NaN]) for(const x of [-Infinity,-0,0,Number.MIN_VALUE,.12,Infinity,NaN]) for(const calls of [-Infinity,-0,0,.5,1,1.1,2,2.1,3.9,9,NaN])
+      assert(Object.is(wasm.batch(n,x,calls),oracle.batch(n,x,calls)),`${parallelSingle}/${n}/${x}/${calls}`);
+  }
+  if(process.platform!=="darwin"||process.arch!=="arm64") return;
+  const file=resolve(directory,"single-trip-lanes.dylib");await writeFile(file,Uint8Array.from(backend.native.emit_native_numeric_library(program,"arm64-macos")));
+  const {dlopen}=await import("bun:ffi"),lib=dlopen(file,{batch:{args:["f64","f64","f64"],returns:"f64"}});
+  try {for(const n of [-Infinity,-0,0,.5,1,1.1,2,2.1,5,NaN]) for(const x of [-Infinity,-0,0,Number.MIN_VALUE,.12,Infinity,NaN]) for(const calls of [-Infinity,-0,0,.5,1,1.1,2,2.1,3.9,9,NaN])
+    assert(Object.is(lib.symbols.batch(n,x,calls),oracle.batch(n,x,calls)),`native/${n}/${x}/${calls}`)} finally {lib.close()}
+});
+
+test("multiple cyclic update proof rejects late writes, nonzero resets and negative zero", async () => {
+  const update="(setq cycle (if (< cycle 7) (1+ cycle) 0))";
+  const definition=(name,init,late)=>`(defun ${name} (n x) (let* ((i 0) (cycle ${init}) (sum (/ x cycle)))
+    (while (and (< i n) (< i 16)) ${update} (setq sum (+ sum cycle)) ${late}
+      (setq sum (+ sum cycle)) (setq i (1+ i))) (+ sum cycle)))`;
+  const source=[definition("good","0",update),definition("late","0","(setq cycle (+ cycle x))"),
+    definition("reset","0","(setq cycle 1)"),definition("negative","-0.0",update),definition("nonzero","1",update)].join("\n")+" (export good late reset negative nonzero)";
+  const program=backend.compiler.compile_ir_string(source,"cycle-proofs.eli"),typed=backend.numeric.lower_numeric_program(program),saved=JSON.stringify(typed);
+  const optimized=backend.numeric.optimize_numeric_program(typed,{cyclicMultiple:true,inlining:false,loops:false,integers:false,parallel:false,guardedUnroll:false});
+  for(const f of optimized.functions) assert.equal(f.locals.some(l=>l.name==="integer-cycle"),f.name==="good",f.name);
+  assert.equal(JSON.stringify(typed),saved);
+  const oracle=await import("data:text/javascript;base64,"+Buffer.from(backend.compiler.emit_ir_string(program)).toString("base64"));
+  const wasm=new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from(backend.wasm.emit_typed_numeric_wasm(optimized)))).exports;
+  let lib;
+  if(process.platform==="darwin"&&process.arch==="arm64") {
+    const file=resolve(directory,"cycle-proofs.dylib");await writeFile(file,Uint8Array.from(backend.native.emit_native_numeric_library(program,"arm64-macos")));
+    const {dlopen}=await import("bun:ffi");lib=dlopen(file,Object.fromEntries(Object.keys(wasm).map(n=>[n,{args:["f64","f64"],returns:"f64"}])));
+  }
+  try {for(const n of [-Infinity,-0,0,.5,1,1.1,7,8,15,Infinity,NaN]) for(const x of [-Infinity,-0,0,Number.MIN_VALUE,.12,Infinity,NaN]) for(const name of Object.keys(wasm)) {
+    assert(Object.is(wasm[name](n,x),oracle[name](n,x)),`wasm/${name}/${n}/${x}`);
+    if(lib) assert(Object.is(lib.symbols[name](n,x),oracle[name](n,x)),`native/${name}/${n}/${x}`);
+  }} finally {lib?.close()}
+});
+
 test("native discarded pure arithmetic adds no work while operand assignments remain observable", () => {
   const compile=source=>backend.compiler.compile_ir_string(source,"discard.eli");
   const full=compile("(defun f (x) (+ x x) (* x 4) (+ (setq x (+ x 1)) x) (+ x 3)) (export f)");
   const minimal=compile("(defun f (x) (setq x (+ x 1)) (+ x 3)) (export f)");
   assert.deepEqual(backend.native.emit_native_numeric_object(full,"arm64-macos"),backend.native.emit_native_numeric_object(minimal,"arm64-macos"));
+});
+
+test("native discarded conditionals remove unused branches but retain condition calls", () => {
+  const emit=source=>backend.native.emit_native_numeric_object(backend.compiler.compile_ir_string(source,"unused-condition.eli"),"arm64-macos");
+  assert.deepEqual(emit("(defun f (x) (if (< x 3) (+ x 1) (* x 2)) x) (export f)"),emit("(defun f (x) x) (export f)"));
+  const prefix="(defun identity (x) (if (> x 0) (+ 0 (identity (- x 1))) x)) ";
+  assert.deepEqual(emit(prefix+"(defun f (x) (if (< (identity x) 3) (+ x 1) (* x 2)) x) (export f)"),emit(prefix+"(defun f (x) (identity x) x) (export f)"));
+});
+
+test("native dead stores respect branch liveness and retain RHS effects", () => {
+  const emit=source=>backend.native.emit_native_numeric_object(backend.compiler.compile_ir_string(source,"branch-stores.eli"),"arm64-macos");
+  const prefix="(defun effect (x) (if (> x 0) (+ 0 (effect (- x 1))) x)) ";
+  const body=left=>prefix+`(defun f (x) (let ((y 0)) (if (< x 0) (progn ${left} x) (progn (setq y (* x 2)) (+ y 1))))) (export f)`;
+  assert.deepEqual(emit(body("(setq y (* x 2))")),emit(body("(* x 2)")));
+  assert.deepEqual(emit(body("(setq y (effect x))")),emit(body("(effect x)")));
+});
+
+test("native integer counter updates use immediate instructions and preserve fractional bounds", async () => {
+  const source="(defun f (n) (let ((i 0) (sum 0)) (while (and (< i n) (< i 16)) (setq sum (+ sum i)) (setq i (1+ i))) sum)) (export f)";
+  const program=backend.compiler.compile_ir_string(source,"integer-immediates.eli");
+  const bytes=Uint8Array.from(backend.native.emit_native_numeric_object(program,"arm64-macos")),view=new DataView(bytes.buffer);
+  const words=Array.from({length:view.getUint32(80,true)/4},(_,i)=>view.getUint32(208+i*4,true));
+  assert(words.some(w=>w>>>24===0x11&&(w&31)!==0&&(w&31)!==31),"integer loop updates must target their allocated register without a temporary constant or result copy");
+  assert(words.some(w=>(w&0xfffffc00)===0x1e620000&&((w>>>5)&31)!==0),"counter-to-f64 conversion must read its allocated integer register directly");
+  if(process.platform!=="darwin"||process.arch!=="arm64") return;
+  const file=resolve(directory,"integer-immediates.dylib");
+  await writeFile(file,Uint8Array.from(backend.native.emit_native_numeric_library(program,"arm64-macos")));
+  const {dlopen}=await import("bun:ffi"),lib=dlopen(file,{f:{args:["f64"],returns:"f64"}});
+  const oracle=await import("data:text/javascript;base64,"+Buffer.from(backend.compiler.emit_ir_string(program)).toString("base64"));
+  try {for(const n of [-Infinity,-0,0,Number.MIN_VALUE,.5,1,1.1,7.9,16,2147483647,Infinity,NaN]) assert(Object.is(lib.symbols.f(n),oracle.f(n)),`immediate/${n}`)} finally {lib.close()}
+});
+
+test("native cyclic counters and unrolled bounds use logical and compare immediates", async () => {
+  const source="(defun f (n x) (let ((i 0) (cycle 0) (sum x)) (while (< i n) (setq sum (+ sum cycle)) (setq cycle (if (< cycle 7) (1+ cycle) 0)) (setq i (1+ i))) (+ sum cycle))) (export f)";
+  const program=backend.compiler.compile_ir_string(source,"counter-masks.eli");
+  const bytes=Uint8Array.from(backend.native.emit_native_numeric_object(program,"arm64-macos")),v=new DataView(bytes.buffer);
+  const words=Array.from({length:v.getUint32(80,true)/4},(_,i)=>v.getUint32(208+i*4,true));
+  assert(words.some(w=>(w&0xfffffc00)===0x12000800),"mask 7 must use a logical immediate without a constant/result copy");
+  assert(words.some(w=>(w&0xffc0001f)>>>0===0x7100001f),"integer unroll bounds must compare an immediate without GP/FP transfers");
+  if(process.platform!=="darwin"||process.arch!=="arm64") return;
+  const file=resolve(directory,"counter-masks.dylib");await writeFile(file,Uint8Array.from(backend.native.emit_native_numeric_library(program,"arm64-macos")));
+  const {dlopen}=await import("bun:ffi"),lib=dlopen(file,{f:{args:["f64","f64"],returns:"f64"}});
+  const oracle=await import("data:text/javascript;base64,"+Buffer.from(backend.compiler.emit_ir_string(program)).toString("base64"));
+  try {for(const n of [-Infinity,-0,0,.1,1,1.1,3,3.1,4,7,8,15.2,32,NaN]) for(const x of [-Infinity,-0,0,Number.MIN_VALUE,.123,Infinity,NaN]) assert(Object.is(lib.symbols.f(n,x),oracle.f(n,x)),`${n}/${x}`)} finally {lib.close()}
+});
+
+test("native sequence operands use direct registers and preserve assignment order", async () => {
+  const source=`(defun f (x y) (+ x (let ((a y)) (* a y))))
+    (defun alias (x y) (+ x (progn (setq x (+ y 1)) (* x y))))
+    (export f alias)`;
+  const program=backend.compiler.compile_ir_string(source,"sequence-values.eli");
+  const bytes=Uint8Array.from(backend.native.emit_native_numeric_object(program,"arm64-macos")),v=new DataView(bytes.buffer);
+  const words=Array.from({length:v.getUint32(80,true)/4},(_,i)=>v.getUint32(208+i*4,true));
+  assert(!words.some(w=>(w&0xfffffc1f)===0x1e604001),"sequence operands must avoid D1 return-register shuffling");
+  if(process.platform!=="darwin"||process.arch!=="arm64") return;
+  const file=resolve(directory,"sequence-values.dylib");await writeFile(file,Uint8Array.from(backend.native.emit_native_numeric_library(program,"arm64-macos")));
+  const {dlopen}=await import("bun:ffi"),lib=dlopen(file,{f:{args:["f64","f64"],returns:"f64"},alias:{args:["f64","f64"],returns:"f64"}});
+  const oracle=await import("data:text/javascript;base64,"+Buffer.from(backend.compiler.emit_ir_string(program)).toString("base64"));
+  try {for(const n of [-Infinity,-0,0,.1,1,Number.MAX_VALUE,NaN]) for(const x of [-Infinity,-0,0,Number.MIN_VALUE,.123,Infinity,NaN]) for(const name of ["f","alias"]) assert(Object.is(lib.symbols[name](n,x),oracle[name](n,x)),`${name}/${n}/${x}`)} finally {lib.close()}
+});
+
+test("native loop-invariant literals are materialized once outside repeated arithmetic", () => {
+  const source="(defun f (n x) (let ((i 0) (total 0)) (while (and (< i n) (< i 8)) (setq total (+ total (* x 3.8))) (setq i (1+ i))) total)) (export f)";
+  const program=backend.compiler.compile_ir_string(source,"constant-registers.eli");
+  const bytes=Uint8Array.from(backend.native.emit_native_numeric_object(program,"arm64-macos")),view=new DataView(bytes.buffer);
+  const words=Array.from({length:view.getUint32(80,true)/4},(_,i)=>view.getUint32(208+i*4,true));
+  const bits=new DataView(new ArrayBuffer(8));bits.setFloat64(0,3.8,true);
+  const loads=words.filter((w,i)=>{
+    if(w>>>24!==0x5c) return false;
+    let relative=(w>>>5)&0x7ffff;if(relative&0x40000) relative-=0x80000;
+    return words[i+relative]===bits.getUint32(0,true)&&words[i+relative+1]===bits.getUint32(4,true);
+  });
+  assert.equal(loads.length,1,"the same loop coefficient must not be reloaded on every emitted iteration");
+});
+
+test("native constant registers survive recursive callees, argument effects and stack arguments", async () => {
+  if(process.platform!=="darwin"||process.arch!=="arm64") return;
+  const source=`(defun touch (n x) (if (> n 0)
+      (let ((i 0) (total 0)) (while (and (< i n) (< i 4))
+        (setq total (+ total (* x 2.7))) (setq i (1+ i))) (+ total (touch (- n 1) x))) x))
+    (defun f (n x) (let ((i 0) (sum 0)) (while (and (< i n) (< i 3))
+      (setq sum (+ sum (* x 3.8))) (setq sum (+ sum (touch 2 (setq x (+ x 0.5)))))
+      (setq sum (+ sum (* x 3.8))) (setq i (1+ i))) sum))
+    (defun wide (a b c d e f g h i j k l) (let ((count 0) (sum 0))
+      (while (< count 2) (setq sum (+ sum (+ (* l 3.8) a))) (setq count (1+ count))) sum))
+    (defun stack (x) (wide x 2 3 4 5 6 7 8 9 10 11 x)) (export f stack)`;
+  const program=backend.compiler.compile_ir_string(source,"constant-calls.eli"),saved=JSON.stringify(program);
+  const oracle=await import("data:text/javascript;base64,"+Buffer.from(backend.compiler.emit_ir_string(program)).toString("base64"));
+  const {dlopen}=await import("bun:ffi");
+  for(const registerAllocation of [false,true]) {
+    const file=resolve(directory,`constant-calls-${registerAllocation}.dylib`);
+    await writeFile(file,Uint8Array.from(backend.native.emit_native_numeric_library(program,"arm64-macos",{registerAllocation})));
+    assert.equal(JSON.stringify(program),saved);
+    const lib=dlopen(file,{f:{args:["f64","f64"],returns:"f64"},stack:{args:["f64"],returns:"f64"}});
+    try {for(const x of [-Infinity,-Number.MAX_VALUE,-7,-0,0,Number.MIN_VALUE,.123,1,Number.MAX_VALUE,Infinity,NaN]) {
+      assert(Object.is(lib.symbols.stack(x),oracle.stack(x)),`${registerAllocation}/stack/${x}`);
+      for(const n of [-Infinity,-0,0,.5,1,1.1,3,Infinity,NaN]) assert(Object.is(lib.symbols.f(n,x),oracle.f(n,x)),`${registerAllocation}/constants/${n}/${x}`);
+    }} finally {lib.close()}
+  }
 });
 
 test("native leaf identity does not save registers it never uses", () => {
@@ -280,6 +457,36 @@ test("native generated numeric programs and many local slots match an independen
       assert(Object.is(lib.symbols[name](x),oracle[name](x)),`${registerAllocation}/${name}/${x}`);
     } finally {lib.close()}
   }
+});
+
+test("generated effectful expressions preserve snapshots, shadowing and exact IEEE results", async () => {
+  let state=0x91c5;const random=()=>state=(Math.imul(state,1664525)+1013904223)>>>0;
+  const expr=depth=>{
+    if(!depth) return ["x","y","-0.0","0","1","3.7"][(random()>>>16)%6];
+    const kind=(random()>>>16)%5;
+    if(kind===0) return `(progn (setq x ${expr(depth-1)}) ${expr(depth-1)})`;
+    if(kind===1) return `(let ((x ${expr(depth-1)})) (+ x (progn (setq y ${expr(depth-1)}) y)))`;
+    if(kind===2) return `(if (< x y) ${expr(depth-1)} ${expr(depth-1)})`;
+    return `(${["+","-","*","/"][(random()>>>16)%4]} ${expr(depth-1)} ${expr(depth-1)})`;
+  };
+  const names=Array.from({length:48},(_,i)=>`f${i}`);
+  const source=names.map((n,i)=>`(defun ${n} (x y) (+ ${expr(1+i%4)} ${expr(1+i%3)}))`).join("\n")+` (export ${names.join(" ")})`;
+  const program=backend.compiler.compile_ir_string(source,"generated-effects.eli"),saved=JSON.stringify(program);
+  const oracle=await import("data:text/javascript;base64,"+Buffer.from(backend.compiler.emit_ir_string(program)).toString("base64"));
+  const typed=backend.numeric.lower_numeric_program(program);
+  const wasm=new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from(backend.wasm.emit_typed_numeric_wasm(backend.numeric.optimize_numeric_program(typed,{constantFlow:true}))))).exports;
+  const edges=[-Infinity,-Number.MAX_VALUE,-7,-0,0,Number.MIN_VALUE,.123,1,Number.MAX_VALUE,Infinity,NaN];
+  for(const name of names) for(const x of edges) for(const y of edges) assert(Object.is(wasm[name](x,y),oracle[name](x,y)),`wasm/${name}/${x}/${y}`);
+  if(process.platform==="darwin"&&process.arch==="arm64") {
+    const {dlopen}=await import("bun:ffi");
+    for(const registerAllocation of [false,true]) {
+      const file=resolve(directory,`generated-effects-${registerAllocation}.dylib`);
+      await writeFile(file,Uint8Array.from(backend.native.emit_native_numeric_library(program,"arm64-macos",{registerAllocation})));
+      const lib=dlopen(file,Object.fromEntries(names.map(n=>[n,{args:["f64","f64"],returns:"f64"}])));
+      try {for(const name of names) for(const x of edges) for(const y of edges) assert(Object.is(lib.symbols[name](x,y),oracle[name](x,y)),`${registerAllocation}/${name}/${x}/${y}`)} finally {lib.close()}
+    }
+  }
+  assert.equal(JSON.stringify(program),saved);
 });
 
 test("native entry validation rejects nonexported, missing and parameterized entry points", () => {

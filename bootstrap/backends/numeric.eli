@@ -467,9 +467,16 @@
           (when (and (get (or options (js-object)) :inlining t)
                      (get (or options (js-object)) :parallel t))
             (setq body (parallelize-call-loop (get function :body) functions locals
-                         (get function :arity) body)))
+                         (get function :arity) body (get (or options (js-object)) :parallelSingle nil))))
+          (when (get (or options (js-object)) :cyclicMultiple nil)
+            (setq body (specialize-cyclic-locals body locals)))
           (when (get (or options (js-object)) :guardedUnroll t)
             (setq body (expand-compound-loops body locals)))
+          (when (get (or options (js-object)) :constantFlow nil)
+            (let ((reads (js-array)))
+              (setq body (fold-constant-flow body (js-array)))
+              (collect-flow-reads body reads)
+              (setq body (remove-unread-stores body reads))))
           (when (get (or options (js-object)) :unswitch nil)
             (setq body (unswitch-numeric-loops body)))
           (js-call output :push (js-object :name (get function :name)
@@ -577,7 +584,7 @@
         (setq index (1+ index)))
       offset))
 
-  (defun parallelize-call-loop (original functions locals arity fallback)
+  (defun parallelize-call-loop (original functions locals arity fallback single)
     (let ((outer (single-loop-shape original)))
       (if (not outer) fallback
         (let* ((loop (get outer :node)) (bound (get outer :bound))
@@ -628,13 +635,13 @@
                                (and (= (get input :kind) "local") (< (get input :value) arity)
                                     (= (writes-local original (get input :value)) 0)))) fallback
                     (emit-parallel-call-loop outer inner callee call statements input bound
-                      accumulator locals fallback))))))))))
+                      accumulator locals fallback single))))))))))
 
-  (defun emit-parallel-call-loop (outer inner callee call statements input bound accumulator locals fallback)
+  (defun emit-parallel-call-loop (outer inner callee call statements input bound accumulator locals fallback single)
     (let* ((offset0 (append-numeric-frame locals callee))
            (offset1 (append-numeric-frame locals callee))
            (aliases0 (js-array)) (aliases1 (js-array))
-           (pair (js-array)) (work (js-array)) (index 0)
+           (pair (js-array)) (work (js-array)) (index 0) (lane-loop nil)
            (kernel-statements (get inner :statements))
            (kernel-body (flatten-statements (js-nth 1 (get (get inner :node) :children)) (js-array)))
            (counter (get inner :counter)) (limit-parameter (get (get inner :bound) :value)))
@@ -665,9 +672,10 @@
               (setq index (1+ index))))
           (setq lane (1+ lane))))
       (js-call work :push (copy-offset (js-nth (1- (js-length kernel-body)) kernel-body) offset0 aliases0))
-      (js-call pair :push (typed "while" "i32" (js-array
+      (setq lane-loop (typed "while" "i32" (js-array
         (copy-offset (js-nth 0 (get (get inner :node) :children)) offset0 aliases0)
         (typed "sequence" "f64" work nil)) nil))
+      (js-call pair :push lane-loop)
       (let ((lane 0))
         (while (< lane 2)
           (let* ((offset (if (= lane 0) offset0 offset1))
@@ -698,11 +706,29 @@
         ;; The final reductions execute in original call order. Bounds exclude
         ;; nontermination and counter rounding; all other inputs use fallback.
         (typed "if" "f64" (js-array (typed "and" "i32" (js-array
-          (typed "compare" "i32" (js-array input (typed "literal" "f64" (js-array) 2)) ">=")
+          (typed "compare" "i32" (js-array input (typed "literal" "f64" (js-array) (if single 1 2))) ">=")
           (typed "compare" "i32" (js-array input (typed "literal" "f64" (js-array) 2147483647)) "<=")
           (typed "compare" "i32" (js-array bound (typed "literal" "f64" (js-array) 2)) ">=")
           (typed "compare" "i32" (js-array bound (typed "literal" "f64" (js-array) 2147483647)) "<=")) nil)
-          (typed "sequence" "f64" body nil) fallback) nil))))
+          (if single
+              ;; The enclosing finite input >= 1 guard and this <= 1 test
+              ;; prove exactly one iteration. Dispatch once before the batch;
+              ;; preserve both lane bodies and their ordered reductions.
+              (typed "if" "f64" (js-array
+                (typed "compare" "i32" (js-array input (typed "literal" "f64" (js-array) 1)) "<=")
+                (replace-numeric-node (typed "sequence" "f64" body nil) lane-loop
+                  (typed "sequence" "i32" (js-array (typed "sequence" "f64" work nil)
+                    (typed "literal" "i32" (js-array) 0)) nil))
+                (typed "sequence" "f64" body nil)) nil)
+            (typed "sequence" "f64" body nil)) fallback) nil))))
+
+  (defun replace-numeric-node (node selected replacement)
+    (if (= node selected) replacement
+      (let ((children (js-array)) (i 0))
+        (while (< i (js-length (get node :children)))
+          (js-call children :push (replace-numeric-node (js-nth i (get node :children)) selected replacement))
+          (setq i (1+ i)))
+        (typed (get node :kind) (get node :type) children (get node :value)))))
 
   (defun positive-integer-literal (node)
     (and (= (get node :kind) "literal") (= (get node :type) "f64")
@@ -762,6 +788,35 @@
              (positive-integer-literal (js-nth 1 (get condition :children)))
              (<= (get (js-nth 1 (get condition :children)) :value) 2147483646)
              (increment-is yes index) (positive-integer-literal no) (= (get no :value) 0)))))
+
+  (defun cycle-writes-proven (node index)
+    (let ((kind (get node :kind)) (valid t) (i 0))
+      (when (= (get node :value) index)
+        (cond
+          ((= kind "initialize")
+           (setq valid (and (positive-integer-literal (js-nth 0 (get node :children)))
+                           (= (get (js-nth 0 (get node :children)) :value) 0))))
+          ((= kind "set") (setq valid (cyclic-integer (js-nth 0 (get node :children)) index)))))
+      (while (and valid (< i (js-length (get node :children))))
+        (setq valid (cycle-writes-proven (js-nth i (get node :children)) index)) (setq i (1+ i)))
+      valid))
+
+  (defun specialize-cyclic-locals (body locals)
+    ;; Every initialization and update must satisfy the range proof. Lane
+    ;; expansion may introduce several updates, resets and branch copies;
+    ;; accepting only the first update would freeze an unproven later write.
+    (let ((descriptors (js-array)) (count (js-length locals)) (i 0) (selected nil))
+      (while (< i count)
+        (let ((entry nil))
+          (when (and (= (get (js-nth i locals) :type) "f64")
+                     (find-write body i "initialize") (find-write body i "set")
+                     (cycle-writes-proven body i))
+            (setq entry (js-object :storage (js-length locals)))
+            (js-call locals :push (js-object :name "integer-cycle" :index (js-length locals) :type "i32"))
+            (setq selected t))
+          (js-call descriptors :push entry))
+        (setq i (1+ i)))
+      (if selected (rewrite-integers body descriptors) body)))
 
   (defun counter-depth (node index depth)
     (let* ((kind (get node :kind)) (children (get node :children))
@@ -976,6 +1031,113 @@
             "guarded-while" (get node :kind))
         (get node :type) children (get node :value))))
 
+  (defun flow-literal (node)
+    (or (= (get node :kind) "literal") (= (get node :kind) "int-literal")))
+
+  (defun invalidate-flow-writes (node known)
+    (when (and (or (= (get node :kind) "set") (= (get node :kind) "initialize"))
+               (< (get node :value) (js-length known)))
+      (js-call known :splice (get node :value) 1 nil))
+    (let ((i 0)) (while (< i (js-length (get node :children)))
+      (invalidate-flow-writes (js-nth i (get node :children)) known) (setq i (1+ i)))))
+
+  (defun same-flow-literal (left right)
+    ;; Join constants by bits: +0 and -0 are distinct IEEE values.
+    (and left right (= (get left :type) (get right :type))
+      (or (/= (get left :value) 0) (= (/ 1 (get left :value)) (/ 1 (get right :value))))
+      (let ((a (number-float64-words (get left :value)))
+            (b (number-float64-words (get right :value))))
+        (and (= (js-nth 0 a) (js-nth 0 b)) (= (js-nth 1 a) (js-nth 1 b))))))
+
+  (defun fold-literal-operation (node)
+    (let* ((kind (get node :kind)) (children (get node :children))
+           (op (get node :value)) (i 0) (all t))
+      (while (< i (js-length children))
+        (unless (flow-literal (js-nth i children)) (setq all nil)) (setq i (1+ i)))
+      (if (not all) node
+        (let ((a (if (> (js-length children) 0) (get (js-nth 0 children) :value) 0))
+              (b (if (> (js-length children) 1) (get (js-nth 1 children) :value) 1))
+              (value nil) (valid t))
+          (cond
+            ((= kind "arithmetic")
+             (setq value (cond
+               ((= (js-length children) 0) (if (= op "*") 1 0))
+               ((= op "1+") (+ a 1)) ((= op "1-") (- a 1))
+               ((= (js-length children) 1)
+                (cond ((= op "-") (- a)) ((= op "/") (/ 1 a)) (t a)))
+               ((= op "+") (+ a b)) ((= op "-") (- a b))
+               ((= op "*") (* a b)) (t (/ a b)))))
+            ((or (= kind "compare") (= kind "int-compare"))
+             (setq value (if (cond ((= op "=") (= a b)) ((= op "<") (< a b))
+               ((= op "<=") (<= a b)) ((= op ">") (> a b)) (t (>= a b))) 1 0)))
+            ((= kind "int-number") (setq value a))
+            ((= kind "int-add") (setq value (bit-or (+ a b) 0)))
+            ((= kind "int-sub") (setq value (bit-or (- a b) 0)))
+            ((= kind "int-and") (setq value (bit-and a b)))
+            ((= kind "not") (setq value (if (and (= (get (js-nth 0 children) :type) "i32") (= a 0)) 1 0)))
+            (t (setq valid nil)))
+          (if valid (typed "literal" (get node :type) (js-array) value) node)))))
+
+  (defun fold-constant-flow (node known)
+    (let ((kind (get node :kind)) (value (get node :value)) (children (get node :children)))
+      (cond
+        ((= kind "local") (or (js-nth value known) node))
+        ((= kind "if")
+         (let ((guard (fold-constant-flow (js-nth 0 children) known)))
+           (if (flow-literal guard)
+               (fold-constant-flow (js-nth (if (or (= (get guard :type) "f64")
+                 (/= (get guard :value) 0)) 1 2) children) known)
+             (let* ((yes-known (js-call known :slice)) (no-known (js-call known :slice))
+                    (yes (fold-constant-flow (js-nth 1 children) yes-known))
+                    (no (fold-constant-flow (js-nth 2 children) no-known)) (i 0))
+               (while (< i (js-length known))
+                 (js-call known :splice i 1
+                   (if (same-flow-literal (js-nth i yes-known) (js-nth i no-known))
+                       (js-nth i yes-known) nil))
+                 (setq i (1+ i)))
+               (typed kind (get node :type) (js-array guard yes no) value)))))
+        ((or (= kind "while") (= kind "remainder-while") (= kind "guarded-while"))
+         ;; Invalidate before folding the first guard, including guard writes.
+         ;; Initial values cannot stand in for values of later iterations.
+         (invalidate-flow-writes node known)
+         (let* ((inner (js-call known :slice))
+                (guard (fold-constant-flow (js-nth 0 children) inner))
+                (body (fold-constant-flow (js-nth 1 children) inner)))
+           (typed kind (get node :type) (js-array guard body) value)))
+        ((or (= kind "and") (= kind "or"))
+         (invalidate-flow-writes node known)
+         (let ((output (js-array)) (i 0))
+           (while (< i (js-length children))
+             (js-call output :push (fold-constant-flow (js-nth i children) (js-call known :slice)))
+             (setq i (1+ i)))
+           (typed kind (get node :type) output value)))
+        (t
+         (let ((output (js-array)) (i 0))
+           (while (< i (js-length children))
+             (js-call output :push (fold-constant-flow (js-nth i children) known)) (setq i (1+ i)))
+           (let ((copy (fold-literal-operation (typed kind (get node :type) output value))))
+             (when (or (= kind "set") (= kind "initialize"))
+               (while (<= (js-length known) value) (js-call known :push nil))
+               (js-call known :splice value 1 (if (flow-literal (js-nth 0 output)) (js-nth 0 output) nil)))
+             copy))))))
+
+  (defun collect-flow-reads (node reads)
+    (when (= (get node :kind) "local") (js-call reads :push (get node :value)))
+    (let ((i 0)) (while (< i (js-length (get node :children)))
+      (collect-flow-reads (js-nth i (get node :children)) reads) (setq i (1+ i)))))
+
+  (defun remove-unread-stores (node reads)
+    (let ((children (js-array)) (i 0) (kind (get node :kind)))
+      (while (< i (js-length (get node :children)))
+        (js-call children :push (remove-unread-stores (js-nth i (get node :children)) reads))
+        (setq i (1+ i)))
+      ;; Keep the RHS as an expression: its effects and assignment result
+      ;; remain observable even when the storage itself is never read.
+      (if (and (or (= kind "set") (= kind "initialize"))
+               (not (js-call reads :includes (get node :value))))
+          (js-nth 0 children)
+        (typed kind (get node :type) children (get node :value)))))
+
   (defun invariant-guard (node body)
     (let ((kind (get node :kind)) (children (get node :children)) (i 0) (valid t))
       (cond
@@ -1001,10 +1163,24 @@
               (setq i (1+ i))))
           found))))
 
-  (defun selected-if-arm (node path depth arm)
-    (if (= depth (js-length path)) (js-nth arm (get node :children))
-      (let ((children (js-call (get node :children) :slice)) (index (js-nth depth path)))
-        (js-call children :splice index 1 (selected-if-arm (js-nth index children) path (1+ depth) arm))
+  (defun same-numeric-tree (left right)
+    (let ((a (get left :children)) (b (get right :children)) (i 0)
+          (same (and (= (get left :kind) (get right :kind)) (= (get left :type) (get right :type))
+                     (= (js-length (get left :children)) (js-length (get right :children))))))
+      (when same
+        (setq same (if (flow-literal left) (same-flow-literal left right)
+                    (= (get left :value) (get right :value)))))
+      (while (and same (< i (js-length a)))
+        (setq same (same-numeric-tree (js-nth i a) (js-nth i b))) (setq i (1+ i)))
+      same))
+
+  (defun select-invariant-copies (node guard arm)
+    (if (and (= (get node :kind) "if") (same-numeric-tree (js-nth 0 (get node :children)) guard))
+        (select-invariant-copies (js-nth arm (get node :children)) guard arm)
+      (let ((children (js-array)) (i 0))
+        (while (< i (js-length (get node :children)))
+          (js-call children :push (select-invariant-copies (js-nth i (get node :children)) guard arm))
+          (setq i (1+ i)))
         (typed (get node :kind) (get node :type) children (get node :value)))))
 
   (defun unswitch-numeric-loops (node)
@@ -1018,9 +1194,9 @@
               (if choice
                   (typed "if" (get copy :type) (js-array (get choice :condition)
                     (typed kind (get copy :type) (js-array (js-nth 0 children)
-                      (selected-if-arm body (get choice :path) 0 1)) (get copy :value))
+                      (select-invariant-copies body (get choice :condition) 1)) (get copy :value))
                     (typed kind (get copy :type) (js-array (js-nth 0 children)
-                      (selected-if-arm body (get choice :path) 0 2)) (get copy :value))) nil)
+                      (select-invariant-copies body (get choice :condition) 2)) (get copy :value))) nil)
                 copy))
           copy))))
 
