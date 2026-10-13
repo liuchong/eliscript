@@ -101,24 +101,20 @@ test("portable Result values are byte-identical and short-circuit at scale", asy
         .toBe(await Bun.file(`${seed}.map`).text());
     }
 
-    const reports = [];
-    for (const outputDirectory of [seedDirectory, selfHostedDirectory]) {
+    // Each host reads immutable compiler outputs and runs the full 50,000-item
+    // semantic fixture. Run all four independently within the same deadline.
+    const reports = await Promise.all([seedDirectory, selfHostedDirectory].flatMap((outputDirectory) => {
       const resultModule = resolve(outputDirectory, "result.mjs");
-      reports.push(JSON.parse(await runSuccessful([
-        "bun",
-        "--preload",
-        bunPreload,
-        hostFixture,
-        resultModule,
-      ])));
-      reports.push(JSON.parse(await runSuccessful([
-        process.env.NODE ?? "node",
-        "--experimental-loader",
-        nodeLoader,
-        hostFixture,
-        resultModule,
-      ])));
-    }
+      return [
+        runSuccessful([
+          "bun", "--preload", bunPreload, hostFixture, resultModule,
+        ]),
+        runSuccessful([
+          process.env.NODE ?? "node",
+          "--experimental-loader", nodeLoader, hostFixture, resultModule,
+        ]),
+      ].map(async (report) => JSON.parse(await report));
+    }));
     for (const report of reports) expect(report).toEqual(reports[0]);
     expect(reports[0]).toEqual({
       constructors: {
