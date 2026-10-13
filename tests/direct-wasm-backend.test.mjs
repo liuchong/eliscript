@@ -653,6 +653,9 @@ describe("browser compiler backends", () => {
     const context = await browserProcess.newContext();
     try {
       const page = await context.newPage();
+      page.on("console", message => {
+        if (message.text().startsWith("eliscript browser phase:")) console.log(message.text());
+      });
       const result = await page.evaluate(evaluate, { bundle: browserBundle, ...data });
       console.log(`browser engine verified: ${browserName} ${browserProcess.version()}`);
       return result;
@@ -863,15 +866,19 @@ describe("browser compiler backends", () => {
         const c=await import(url),bytes=Uint8Array.from(c.emit_memory_wasm(c.compile_ir_string(source,"browser-roots.eli"),{maximumPages:8}));
         const module=new WebAssembly.Module(bytes);check(WebAssembly.Module.imports(module).length===0,"imports");
         const e=new WebAssembly.Instance(module).exports,h=e["heap-new"](12,768,768);e["heap-auto"](h,1);
+        console.log("eliscript browser phase: root loop");
         const p=e["root-pressure"](h,1000)>>>0;check(p>0,"result");
         check(new DataView(e.memory.buffer).getFloat64(e["value-data"](h,p,4)>>>0,true)===2001,"live Number");
         check(e["frame-depth"](h)===0&&e["heap-collections"](h)>3000,"automatic GC");
         e["heap-release"](h,p);e["heap-collect"](h);check(e["heap-live"](h)===0,"release");
+        console.log("eliscript browser phase: root trap");
         try{e["root-pressure-trap"](h);throw Error("trap missing");}catch(error){check(error instanceof WebAssembly.RuntimeError,"trap class");}
         check(e["frame-depth"](h)===1,"trap frame");e["frame-unwind"](h,0);check(e["heap-collect"](h)===2,"unwind");
+        console.log("eliscript browser phase: root recursion");
         const h2=e["heap-new"](192,8192,32768);e["heap-auto"](h2,1);const recursive=e["root-recursive"](h2,64)>>>0;
         check(recursive>0,"recursive result");check(new DataView(e.memory.buffer).getFloat64(e["value-data"](h2,recursive,4)>>>0,true)===65,"recursive value");
         check(e["frame-depth"](h2)===0,"recursive frames");e["heap-release"](h2,recursive);e["heap-collect"](h2);check(e["heap-live"](h2)===0,"recursive cleanup");
+        console.log("eliscript browser phase: root bridge");
         const a=c.instantiateManagedRuntime(bytes),b=c.instantiateManagedRuntime(bytes);a.auto(1);
         const frame=a.frame(1),n=a.number(NaN);a.frameSet(frame,0,n);a.release(n);
         for(let i=0;i<100;i++){const temporary=a.number(i);a.release(temporary);}
