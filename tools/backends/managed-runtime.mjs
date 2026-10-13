@@ -43,6 +43,8 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
   negate(value) {return wrap(call('value-number-negate',heap,id(value)));},
   compare(a,b,operation) {return !!call('value-number-compare',heap,id(a),id(b),word(operation,5));},
   truth(value) {return !!call('value-truth',heap,id(value));},
+  keyEqual(left,right) {return !!call('value-key-equal',heap,id(left),id(right));},
+  keyHash(value) {return call('value-key-hash',heap,id(value));},
   string(input) {
    if(typeof input!=='string')fail(3);const value=call('value-string',heap,word(input.length)),offset=call('value-data',heap,value,5),target=view();
    for(let i=0;i<input.length;i++)target.setUint16(offset+i*2,input.charCodeAt(i),true);

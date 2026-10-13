@@ -65,6 +65,29 @@ these roots into the full compiler and complete dynamic lowering remain open.
 Pool growth also retains prior arena regions; local collection tests do not
 establish the complete compiler's peak-memory budget.
 
+## Internal Map/Set keys
+
+`keyEqual(left, right)` and `keyHash(value)` implement the internal mutable
+Map/Set key foundation. Equality uses SameValueZero: all NaN payloads compare
+equal, positive/negative zero compare equal, and null, false, true and undefined
+remain distinct categories. Arithmetic `compare(..., 0)` keeps IEEE equality,
+including false for NaN. Sealed strings compare UTF-16 code units; Number,
+string and immediate hashes exactly match the existing primitive value runtime.
+
+Bytes, mutable reference arrays and fixed records use their managed identity.
+Two wrappers for the same underlying value form the same key; equal contents in
+separate objects do not. Identity/hash survives mutation, resize and pool moves.
+Different heaps/instances must use their own branded handles. Private frames and
+unsealed builders are rejected, and expired values never become valid keys.
+Comparison and hashing perform no allocation or GC and do not alter input data.
+
+The raw APIs are `value-key-equal(heap, left, right)` returning word 0/1 and
+`value-key-hash(heap, value)` returning a full u32. A zero hash is valid; inspect
+`last-error` to distinguish failure. `word-xor` is an explicit memory32 capability
+and preserves all 32 bits; it cannot silently narrow ordinary f64 values.
+These APIs do not implement a complete Map/Set or the persistent collection
+IEquiv/IHash protocols. Those and complete compiler lowering remain open.
+
 ## Verification
 
 ```sh

@@ -54,6 +54,21 @@ test('memory32 checks every access width before host faults and preserves nested
  }
  assert.equal(e['after-growth'](65536),0);assert.equal(e.read32(65536),123);
 });
+test('memory32 word xor preserves every bit and left-to-right operand effects',()=>{
+ const {exports:e}=compile(`(import "eliscript:memory32" word-xor)
+ (defun bits (a b) (word-xor a b))
+ (defun effects (x) (let ((out (word-xor (setq x (1+ x)) (setq x (* x 2))))) (+ (* x 100) out)))
+ (export bits effects)`);
+ for(const a of [0,1,0x7fffffff,0x80000000,0xffffffff,0x55555555,0xaaaaaaaa])
+  for(const b of [0,1,0x7fffffff,0x80000000,0xffffffff,0x55555555,0xaaaaaaaa])assert.equal(e.bits(a,b)>>>0,(a^b)>>>0);
+ let state=0x815daf1;const next=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return state>>>0;};
+ for(let i=0;i<4096;i++){const a=next(),b=next();assert.equal(e.bits(a,b)>>>0,(a^b)>>>0);}
+ for(const x of [0,1,15,65535,0x7fffffff,0xffffffff]) {
+  const first=(x+1)>>>0,second=(first*2)>>>0;assert.equal(e.effects(x)>>>0,(second*100+(first^second))>>>0);
+ }
+ assert.throws(()=>compile(`(import "eliscript:memory32" word-xor load-f64) (defun bad (p) (word-xor (load-f64 p) 1))`),
+  error=>error.eliscriptDiagnostic?.code==='ELI-B0001'&&error.eliscriptDiagnostic.phase==='memory-backend');
+});
 
 async function runtime(options={}) {
  const source=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8');

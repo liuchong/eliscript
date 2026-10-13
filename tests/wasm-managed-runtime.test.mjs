@@ -4,6 +4,7 @@ import {mkdtemp,rm,readFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {buildBackends} from '../tools/backends/build.mjs';
+import {hashValue,equalValues} from '../runtime/core/value.mjs';
 let directory,backend,bytes;
 beforeAll(async()=>{
  directory=await mkdtemp(resolve(tmpdir(),'eliscript-managed-'));
@@ -619,5 +620,89 @@ test('Node and Bun execute a whole managed text pipeline inside zero-import WASM
  const output=e['text-pipeline'](h,input,1000)>>>0;assert(output>0);assert.equal(e['value-length'](h,output),7);
  assert.deepEqual(Array.from({length:7},(_,i)=>e['value-unit-get'](h,output,i)),[0xfeff,0x4e2d,0xd83d,0xde00,0,0xfffd,97]);
  assert.equal(e['frame-depth'](h),0);assert(e['heap-collections'](h)>5000);e['heap-release'](h,output);e['heap-collect'](h);assert.equal(e['heap-live'](h),0);
+ `],{encoding:'utf8',timeout:30000});assert.equal(result.status,0,result.stderr);
+});
+test('managed keys use SameValueZero, exact scalar hashes and distinct immediate categories without allocation',()=>{
+ const {r,h}=runtime(128),values=[null,false,true,undefined,0,-0,NaN,Infinity,-Infinity,Number.MIN_VALUE,-Number.MIN_VALUE,1,-1,'','a\0😀\ud800','\udc00'];
+ const handles=values.map(value=>typeof value==='number'?number(r,h,value):typeof value==='string'?managedString(r,h,value):[null,false,true,undefined].indexOf(value));
+ const used=r.heap_used(h),live=r.heap_live(h),collections=r.heap_collections(h);
+ for(let i=0;i<values.length;i++) {
+  assert.equal(r.value_key_hash(h,handles[i]),hashValue(values[i]));assert.equal(r.last_error(),0);
+  for(let j=0;j<values.length;j++)assert.equal(r.value_key_equal(h,handles[i],handles[j]),Number(equalValues(values[i],values[j])));
+ }
+ const duplicate=managedString(r,h,'a\0😀\ud800');assert.equal(r.value_key_equal(h,handles[14],duplicate),1);
+ assert.equal(r.value_key_hash(h,handles[14]),r.value_key_hash(h,duplicate));
+ assert.equal(r.heap_live(h),live+1);assert.equal(r.heap_collections(h),collections);assert(r.heap_used(h)>used);
+ const before=r.heap_used(h);for(let i=0;i<1000;i++)assert.equal(r.value_key_hash(h,duplicate),hashValue(values[14]));assert.equal(r.heap_used(h),before);
+});
+test('managed key hashing canonicalizes every NaN payload and signed zero while arithmetic equality stays IEEE',()=>{
+ const {r,h}=runtime(),zero=number(r,h,0),minusZero=number(r,h,-0);assert.equal(r.value_key_hash(h,zero),r.value_key_hash(h,minusZero));
+ for(const [low,high] of [[1,0x7ff00000],[0,0x7ff80000],[0x12345678,0x7ff12345],[0,0xfff80000],[1,0xfff00000]]) {
+  const x=r.value_number(h,low,high),y=number(r,h,NaN);assert(x&&y);
+  assert.equal(r.value_key_equal(h,x,y),1);assert.equal(r.value_number_compare(h,x,y,0),0);
+  assert.equal(r.value_key_hash(h,x),hashValue(NaN));assert.equal(r.value_key_hash(h,y),hashValue(NaN));
+  const p=r.value_data(h,x,4),view=new DataView(r.memory.buffer);assert.equal(view.getUint32(p,true),low);assert.equal(view.getUint32(p+4,true),high);
+ }
+ assert.equal(r.value_key_equal(h,zero,minusZero),1);assert.equal(r.value_number_compare(h,zero,minusZero,0),1);
+});
+test('managed key hashes and equality match independent JS for randomized Number bits and Unicode units',()=>{
+ const {r,h}=runtime(16,4096,32768);let state=0x4934fa1;
+ const next=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return state>>>0;};
+ const bits=new DataView(new ArrayBuffer(8));
+ for(let i=0;i<4096;i++) {
+  const low=next(),high=next();bits.setUint32(0,low,true);bits.setUint32(4,high,true);const value=bits.getFloat64(0,true),a=r.value_number(h,low,high),b=number(r,h,value);
+  assert(a&&b);assert.equal(r.value_key_equal(h,a,b),1);assert.equal(r.value_key_hash(h,a),hashValue(value));
+  const other=number(r,h,i);assert.equal(r.value_key_equal(h,a,other),Number(equalValues(value,i)));
+  const text=Array.from({length:next()%64},()=>String.fromCharCode(next()&65535)).join(''),x=managedString(r,h,text),y=managedString(r,h,text);
+  assert.equal(r.value_key_equal(h,x,y),1);assert.equal(r.value_key_hash(h,x),hashValue(text));assert.equal(r.value_key_hash(h,y),hashValue(text));
+  assert.equal(r.heap_collect(h),5);
+ }
+});
+test('managed opaque keys retain identity through mutation, growth and collection and reject invalid lifetime',()=>{
+ const {r,h}=runtime(32,2048,1048576);r.heap_auto(h,1);
+ for(const kind of [6,7,8]) {
+  const a=kind===6?r.value_bytes(h,8):r.value_refs(h,kind,1);assert(a>0);r.heap_pin(h,a);
+  const b=kind===6?r.value_bytes(h,8):r.value_refs(h,kind,1);assert(b>0);r.heap_pin(h,b);
+  const hash=r.value_key_hash(h,a);assert.equal(r.value_key_equal(h,a,a),1);assert.equal(r.value_key_equal(h,a,b),0);
+  if(kind===6)assert.equal(r.value_bytes_resize(h,a,70000),1);
+  else {assert.equal(r.value_set(h,a,0,b),1);if(kind===7)assert.equal(r.value_refs_resize(h,a,10000),1);}
+  assert.equal(r.value_key_hash(h,a),hash);assert.equal(r.value_key_equal(h,a,b),0);assert.equal(r.heap_collect(h),0);
+  r.heap_release(h,a);r.heap_release(h,b);assert.equal(r.heap_collect(h),2);
+  assert.equal(r.value_key_hash(h,a),0);assert.equal(r.last_error(),1);
+  assert.equal(r.value_key_equal(h,a,a),0);assert.equal(r.last_error(),1);
+ }
+ const builder=r.value_string(h,1);r.heap_pin(h,builder);assert.equal(r.value_key_hash(h,builder),0);assert.equal(r.last_error(),6);
+ assert.equal(r.value_key_equal(h,builder,builder),0);assert.equal(r.last_error(),6);
+ const frame=r.frame_new(h,0);assert(frame>0);assert.equal(r.value_key_hash(h,frame),0);assert.equal(r.last_error(),3);
+ assert.equal(r.value_key_equal(h,frame,frame),0);assert.equal(r.last_error(),3);r.frame_pop(h,frame);r.heap_release(h,builder);r.heap_collect(h);
+});
+test('managed key bridge preserves brands and SameValueZero and performs no allocation',async()=>{
+ const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');const a=instantiateManagedRuntime(bytes),b=instantiateManagedRuntime(bytes);a.auto(1);
+ const x=a.number(-0),y=a.number(0),n=a.number(NaN),m=a.number(NaN),text=a.string('中😀\ud800'),copy=a.string('中😀\ud800'),array=a.array(),other=a.array();
+ const before=a.stats();assert(a.keyEqual(x,y));assert(a.keyEqual(n,m));assert(a.keyEqual(text,copy));assert(!a.keyEqual(array,other));assert(a.keyEqual(array,array));
+ for(const [handle,value]of[[x,-0],[y,0],[n,NaN],[text,'中😀\ud800'],[null,null],[false,false],[true,true],[undefined,undefined]])assert.equal(a.keyHash(handle),hashValue(value));
+ assert.equal(a.keyHash(array),a.keyHash(array));assert.deepEqual(a.stats(),before);
+ const owner=a.array([array]),alias=a.get(owner,0);assert.notEqual(array,alias);assert(a.keyEqual(array,alias));assert.equal(a.keyHash(array),a.keyHash(alias));
+ a.release(alias);a.release(owner);
+ assert.throws(()=>b.keyHash(text),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');
+ assert.throws(()=>a.keyEqual(0,x),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');
+ for(const handle of [x,y,n,m,text,copy,array,other])a.release(handle);a.collect();assert.equal(a.live(),0);
+});
+test('Node and Bun execute the same whole key pipeline through repeated WASM allocation safepoints',async()=>{
+ const {writeFile}=await import('node:fs/promises'),{spawnSync}=await import('node:child_process');
+ const source=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8')+await readFile(resolve('tests/fixtures/wasm-managed-text.eli'),'utf8');
+ const artifact=Uint8Array.from(backend.wasm.emit_memory_wasm(backend.compiler.compile_ir_string(source,'key-pipeline.eli'),{maximumPages:8}));
+ const module=new WebAssembly.Module(artifact);assert.deepEqual(WebAssembly.Module.imports(module),[]);
+ const e=new WebAssembly.Instance(module).exports,h=e['heap-new'](12,768,768);e['heap-auto'](h,1);
+ const value=e['key-pressure'](h,1000)>>>0;assert(value>0);assert.equal(e['value-key-hash'](h,value)>>>0,hashValue(NaN));
+ assert.equal(e['frame-depth'](h),0);assert(e['heap-collections'](h)>=2000);e['heap-release'](h,value);e['heap-collect'](h);assert.equal(e['heap-live'](h),0);
+ const path=resolve(directory,'key-pipeline.wasm');await writeFile(path,artifact);
+ const result=spawnSync('node',['--input-type=module','-e',`
+ import assert from 'node:assert/strict';import {readFileSync}from'node:fs';
+ const module=new WebAssembly.Module(readFileSync(${JSON.stringify(path)}));assert.deepEqual(WebAssembly.Module.imports(module),[]);
+ const e=new WebAssembly.Instance(module).exports,h=e['heap-new'](12,768,768);e['heap-auto'](h,1);
+ const value=e['key-pressure'](h,1000)>>>0;assert(value>0);assert.equal(e['value-key-hash'](h,value)>>>0,1490037359);
+ const point=e['value-data'](h,value,4)>>>0,view=new DataView(e.memory.buffer);assert.equal(view.getUint32(point,true),999);assert.equal(view.getUint32(point+4,true),2146959360);
+ assert.equal(e['frame-depth'](h),0);assert(e['heap-collections'](h)>=2000);e['heap-release'](h,value);e['heap-collect'](h);assert.equal(e['heap-live'](h),0);
  `],{encoding:'utf8',timeout:30000});assert.equal(result.status,0,result.stderr);
 });

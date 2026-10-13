@@ -27,3 +27,21 @@
           (setq i (1+ i)))
         (frame-return heap frame (frame-get heap frame 0))))))
 (export text-pipeline)
+
+;; Repeated managed key operations stay inside the module across allocation
+;; safepoints. Map key NaN equality is separate from arithmetic IEEE equality.
+(defun key-pressure (heap rounds)
+  (let ((frame (frame-new heap 2)) (index 0) (ok 1))
+    (while (and (< index rounds) (= ok 1))
+      (let ((left (value-number heap index 2146959360)))
+        (frame-set heap frame 0 left)
+        (let ((right (value-number heap (word-xor index 255) 2146959360)))
+          (frame-set heap frame 1 right)
+          (when (not (and (= (value-key-equal heap left right) 1)
+                         (= (value-number-compare heap left right 0) 0)
+                         (= (value-key-hash heap left) 1490037359)
+                         (= (value-key-hash heap right) 1490037359))) (setq ok 0))))
+      (setq index (1+ index)))
+    (if (= ok 1) (frame-return heap frame (frame-get heap frame 0))
+      (progn (frame-pop heap frame) (fail 3)))))
+(export key-pressure)

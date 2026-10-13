@@ -634,6 +634,9 @@ test("managed runtime has seed and three-generation IR and WASM fixed points", a
     assert.deepEqual(Array.from({length:7},(_,i)=>e["value-unit-get"](h3,output,i)),[0xfeff,0x4e2d,0xd83d,0xde00,0,0xfffd,97]);
     assert.equal(e["frame-depth"](h3),0);assert(e["heap-collections"](h3)>5000);
     e["heap-release"](h3,output);e["heap-collect"](h3);assert.equal(e["heap-live"](h3),0);
+    const h4=e["heap-new"](12,768,768);e["heap-auto"](h4,1);const key=e["key-pressure"](h4,1000)>>>0;assert(key>0);
+    assert.equal(e["value-key-hash"](h4,key)>>>0,1490037359);assert.equal(e["frame-depth"](h4),0);assert(e["heap-collections"](h4)>=2000);
+    e["heap-release"](h4,key);e["heap-collect"](h4);assert.equal(e["heap-live"](h4),0);
   }
   assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(Uint8Array.from(bytes[2]))),[]);
   const saved=JSON.stringify(programs[2]);generations[2].wasm.emit_memory_wasm(programs[2]);assert.equal(JSON.stringify(programs[2]),saved);
@@ -945,6 +948,10 @@ describe("browser compiler backends", () => {
         for(const [i,u] of [0xfeff,0x4e2d,0xd83d,0xde00,0,0xfffd,97].entries())check(e["value-unit-get"](h,output,i)===u,"pipeline");
         check(e["frame-depth"](h)===0&&e["heap-collections"](h)>5000,"safepoints");
         e["heap-release"](h,output);e["heap-collect"](h);check(e["heap-live"](h)===0,"cleanup");
+        const keyHeap=e["heap-new"](12,768,768);e["heap-auto"](keyHeap,1);const key=e["key-pressure"](keyHeap,1000)>>>0;
+        check(key>0&&e["value-key-hash"](keyHeap,key)>>>0===1490037359,"whole key pipeline");
+        check(e["frame-depth"](keyHeap)===0&&e["heap-collections"](keyHeap)>=2000,"key safepoints");
+        e["heap-release"](keyHeap,key);e["heap-collect"](keyHeap);check(e["heap-live"](keyHeap)===0,"key cleanup");
         const a=c.instantiateManagedRuntime(bytes),b=c.instantiateManagedRuntime(bytes);a.auto(1);
         let state=0x346f195;const next=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return state>>>0;};
         for(let round=0;round<128;round++) {
@@ -968,6 +975,12 @@ describe("browser compiler backends", () => {
           a.release(value);a.collect();check(a.live()===0,"codec roots");
         }
         const lone=a.string('\ud800');try{a.encodeUtf8(lone,{strict:true});throw Error("surrogate accepted");}catch(error){check(error.eliscriptDiagnostic?.code==="ELI-RT0005","surrogate");}
+        const copied=a.string('\ud800');check(a.keyEqual(lone,copied)&&a.keyHash(lone)===a.keyHash(copied),"string keys");a.release(copied);
+        const minusZero=a.number(-0),zero=a.number(0),nan=a.number(NaN),otherNan=a.number(NaN);
+        check(a.keyEqual(minusZero,zero)&&a.keyHash(minusZero)===a.keyHash(zero),"zero keys");
+        check(a.keyEqual(nan,otherNan)&&a.keyHash(nan)===1490037359&&a.compare(nan,otherNan,0)===false,"NaN key equality");
+        check(!a.keyEqual(null,false)&&!a.keyEqual(undefined,null),"immediate key categories");
+        for(const value of [minusZero,zero,nan,otherNan])a.release(value);
         try{b.sliceString(lone,0,1);throw Error("foreign accepted");}catch(error){check(error.eliscriptDiagnostic?.code==="ELI-RT0001","brand");}
         a.release(lone);a.collect();check(a.live()===0,"final roots");return [...bytes];
       }finally{URL.revokeObjectURL(url);}

@@ -1,6 +1,6 @@
 (module eliscript.runtime.memory
   (import "eliscript:memory32" load-u8 load-u16 load-u32 store-u8 store-u16 store-u32
-    load-f64 store-f64 memory-size memory-grow word-div word-shr word-shl word-and word-or)
+    load-f64 store-f64 memory-size memory-grow word-div word-shr word-shl word-and word-or word-xor)
 
   ;; Internal memory-u32 ABI; no dynamic Number semantics are changed.
   ;; Control words: bump cursor, lifetime epoch, error, live-object head. Objects: 32-byte
@@ -779,6 +779,55 @@
                 (when (/= output 0)
                   (heap-utf8-encode-pass (+ (heap-block heap input) 32) length strict (+ (heap-block heap output) 32)))
                 (when (= borrowed 1) (heap-return-root heap input)) output)))))))
+  ;; Internal Map/Set key semantics, distinct from arithmetic equality and
+  ;; persistent collection protocols. Opaque mutable objects use stable IDs.
+  (defun heap-key-check (heap value)
+    (if (= (heap-reference-check heap value) 0) 0
+      (if (and (> value 3) (= (load-u32 (heap-block heap value)) 5))
+        (heap-string-check heap value) 1)))
+  (defun heap-hash-mix (hash value)
+    (let ((mixed (* (word-xor hash value) 1540483477)))
+      (word-xor mixed (word-shr mixed 15))))
+  (defun heap-hash-finish (hash count)
+    (let ((mixed (heap-hash-mix hash count)))
+      (setq mixed (* (word-xor mixed (word-shr mixed 16)) 2246822507))
+      (setq mixed (* (word-xor mixed (word-shr mixed 13)) 3266489909))
+      (word-xor mixed (word-shr mixed 16))))
+  (defun heap-number-nan (heap value)
+    (let* ((p (+ (heap-block heap value) 32)) (high (word-and (load-u32 (+ p 4)) 2147483647)))
+      (if (or (> high 2146435072) (and (= high 2146435072) (/= (load-u32 p) 0))) 1 0)))
+  (defun value-key-equal (heap left right)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= (heap-key-check heap left) 0) (= (heap-key-check heap right) 0)) 0
+        (if (= left right) 1
+          (if (or (<= left 3) (<= right 3)) 0
+            (let ((kind (load-u32 (heap-block heap left))))
+              (if (/= kind (load-u32 (heap-block heap right))) 0
+                (if (= kind 4)
+                  (if (or (= (value-number-compare heap left right 0) 1)
+                          (and (= (heap-number-nan heap left) 1) (= (heap-number-nan heap right) 1))) 1 0)
+                  (if (= kind 5) (if (= (value-string-compare heap left right) 0) 1 0) 0)))))))))
+  (defun heap-key-number-hash (heap value block)
+    (if (= (heap-number-nan heap value) 1) 1490037359
+      (let ((low (load-u32 (+ block 32))) (high (load-u32 (+ block 36))))
+        (when (and (= low 0) (= (word-and high 2147483647) 0)) (setq high 0))
+        (heap-hash-finish (heap-hash-mix (heap-hash-mix 374761393 low) high) 2))))
+  (defun heap-key-string-hash (block)
+    (let* ((length (load-u32 (+ block 4))) (hash (heap-hash-mix 1831565813 length)) (index 0))
+      (while (< index length)
+        (setq hash (heap-hash-mix hash (load-u16 (+ (+ block 32) (* index 2))))) (setq index (1+ index)))
+      (heap-hash-finish hash length)))
+  (defun value-key-hash (heap value)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-key-check heap value) 0) 0
+        (if (= value 0) 1108378657
+          (if (= value 1) (heap-hash-mix 1260232563 423263297)
+            (if (= value 2) (heap-hash-mix 1260232563 1911856395)
+              (if (= value 3) 2135587861
+                (let* ((block (heap-block heap value)) (kind (load-u32 block)))
+                  (if (= kind 4) (heap-key-number-hash heap value block)
+                    (if (= kind 5) (heap-key-string-hash block)
+                      (heap-hash-finish (heap-hash-mix 762272397 value) 1)))))))))))
   (export last-error retire buffer-new buffer-length buffer-reserve buffer-push buffer-get
     record-new record-length record-get record-set string-new string-length string-get string-set string-seal utf8-encode utf8-decode heap-new heap-capacity heap-used heap-live heap-pin heap-release heap-collect
     value-kind value-truth value-data value-length value-number value-number-binary
@@ -787,4 +836,4 @@
     value-number-negate value-number-compare heap-auto heap-collections
     frame-new frame-set frame-get frame-pop frame-return frame-unwind frame-depth
     value-string-concat value-string-slice value-string-compare value-string-code-point value-string-find
-    value-utf8-encode value-utf8-decode))
+    value-utf8-encode value-utf8-decode value-key-equal value-key-hash))
