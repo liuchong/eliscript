@@ -20,6 +20,22 @@ function runtime(slots=64,initial=4096,max=1048576) {
 }
 function number(r,h,x) {const v=new DataView(new ArrayBuffer(8));v.setFloat64(0,x,true);return r.value_number(h,v.getUint32(0,true),v.getUint32(4,true));}
 function unbox(r,h,x) {const p=r.value_data(h,x,4);assert(p>0);return new DataView(r.memory.buffer).getFloat64(p,true);}
+function managedString(r,h,text) {
+ const value=r.value_string(h,text.length);assert(value>0);
+ for(let i=0;i<text.length;i++)assert.equal(r.value_unit_set(h,value,i,text.charCodeAt(i)),1);
+ assert.equal(r.value_seal(h,value),value);return value;
+}
+function readManagedString(r,h,value) {
+ const length=r.value_length(h,value),p=r.value_data(h,value,5);assert(p>0);const view=new DataView(r.memory.buffer),parts=[];
+ for(let i=0;i<length;i+=8192){const units=[];for(let j=i;j<Math.min(i+8192,length);j++)units.push(view.getUint16(p+2*j,true));parts.push(String.fromCharCode(...units));}
+ return parts.join('');
+}
+function managedBytes(r,h,input) {
+ const value=r.value_bytes(h,input.length);assert(value>0);for(let i=0;i<input.length;i++)assert.equal(r.value_byte_set(h,value,i,input[i]),1);return value;
+}
+function readManagedBytes(r,h,value) {
+ const length=r.value_length(h,value),p=r.value_data(h,value,6);assert(p>0);return new Uint8Array(r.memory.buffer,p,length).slice();
+}
 test('managed heap reclaims cycles, preserves roots and rejects recycled generations',()=>{
  const {r,h}=runtime(); const a=r.value_refs(h,7,2),b=r.value_refs(h,8,1),n=number(r,h,-0);
  assert.equal(r.value_set(h,a,0,b),1);assert.equal(r.value_set(h,b,0,a),1);assert.equal(r.value_set(h,a,1,n),1);
@@ -445,4 +461,163 @@ test('automatic frames match an independent random graph and nested-stack refere
  }
  const deadCount=nodes.length+frames.length+inactive;assert.equal(r.frame_unwind(h,0),1);
  assert.equal(r.heap_collect(h),deadCount);assert.equal(r.heap_live(h),0);assert.equal(r.heap_used(h),129*24);
+});
+test('managed text primitives preserve UTF16 code units, lexicographic order and checked intervals',()=>{
+ const {r,h}=runtime();const left=managedString(r,h,'a\0😀\ud800'),right=managedString(r,h,'\udc00z');
+ const joined=r.value_string_concat(h,left,right);assert(joined>0);assert.equal(readManagedString(r,h,joined),'a\0😀\ud800\udc00z');
+ const slice=r.value_string_slice(h,joined,3,6);assert(slice>0);assert.equal(readManagedString(r,h,slice),'\ude00\ud800\udc00');
+ assert.equal(r.value_string_code_point(h,joined,2),0x1f600);assert.equal(r.value_string_code_point(h,left,4),0xd800);
+ assert.equal(r.value_string_compare(h,left,left),0);assert.equal(r.value_string_compare(h,left,right),1);assert.equal(r.value_string_compare(h,right,left),2);
+ const empty=managedString(r,h,''),needle=managedString(r,h,'\ud800\udc00');
+ assert.equal(r.value_string_find(h,joined,needle,0),4);assert.equal(r.value_string_find(h,joined,needle,5),0xffffffff);
+ assert.equal(r.value_string_find(h,joined,empty,7),7);assert.equal(r.value_string_find(h,empty,needle,0),0xffffffff);
+ const before=r.heap_live(h);assert.equal(r.value_string_slice(h,left,4,2),0);assert.equal(r.last_error(),3);
+ assert.equal(r.value_string_slice(h,left,0,6),0);assert.equal(r.last_error(),3);
+ assert.equal(r.value_string_code_point(h,left,5),0);assert.equal(r.last_error(),3);
+ assert.equal(r.value_string_find(h,left,empty,6),0);assert.equal(r.last_error(),3);assert.equal(r.heap_live(h),before);
+ const builder=r.value_string(h,1);assert.equal(r.value_string_concat(h,left,builder),0);assert.equal(r.last_error(),6);
+ assert.equal(r.value_string_compare(h,left,0),0);assert.equal(r.last_error(),1);
+});
+test('managed UTF8 codecs match replacement, strict errors, maximal subparts and BOM',()=>{
+ const {r,h}=runtime();
+ for(const text of ['', 'ASCII\0','中文😀','\ufeffx','\ud800x\udc00','\udbff\udfff','\ud800\ud800\udc00']) {
+  const source=managedString(r,h,text),encoded=r.value_utf8_encode(h,source,0);assert(encoded>0);
+  assert.deepEqual(readManagedBytes(r,h,encoded),new TextEncoder().encode(text));
+  const live=r.heap_live(h),strict=r.value_utf8_encode(h,source,1);
+  if(/\p{Surrogate}/u.test(text)){assert.equal(strict,0);assert.equal(r.last_error(),5);assert.equal(r.heap_live(h),live);}
+  else{assert(strict>0);assert.deepEqual(readManagedBytes(r,h,strict),new TextEncoder().encode(text));}
+  r.heap_collect(h);
+ }
+ for(const input of [[],[0],[0xff],[0xc0,0xaf],[0xe0,0x80,0x80],[0xed,0xa0,0x80],[0xf4,0x90,0x80,0x80],[0xf0,0x9f],[0xe2,0x82,0x22],[0xe2,0x28,0xa1],[0xef,0xbb,0xbf,65],[0xef,0xbb,0xbf,0xef,0xbb,0xbf],[0xf4,0x8f,0xbf,0xbf]]) {
+  const source=managedBytes(r,h,input);
+  for(const preserve of [0,1]){const output=r.value_utf8_decode(h,source,0,preserve);assert(output>0);
+   assert.equal(readManagedString(r,h,output),new TextDecoder('utf-8',{ignoreBOM:!!preserve}).decode(Uint8Array.from(input)));}
+  let expected;try{expected=new TextDecoder('utf-8',{fatal:true}).decode(Uint8Array.from(input));}catch{}
+  const live=r.heap_live(h),strict=r.value_utf8_decode(h,source,1,0);
+  if(expected===undefined){assert.equal(strict,0);assert.equal(r.last_error(),4);assert.equal(r.heap_live(h),live);}
+  else{assert(strict>0);assert.equal(readManagedString(r,h,strict),expected);}
+  r.heap_collect(h);
+ }
+ const builder=r.value_string(h,0);assert.equal(r.value_utf8_encode(h,builder,0),0);assert.equal(r.last_error(),6);
+ const source=managedBytes(r,h,[65]);assert.equal(r.value_utf8_decode(h,source,2,0),0);assert.equal(r.last_error(),3);
+ assert.equal(r.value_utf8_decode(h,source,0,2),0);assert.equal(r.last_error(),3);
+ assert.equal(r.value_utf8_encode(h,source,0),0);assert.equal(r.last_error(),1);
+});
+test('managed text allocation protects unrooted operands during moving GC and capacity failure',()=>{
+ const {r,h}=runtime(32,2048,1048576),left=managedString(r,h,'x'.repeat(20000)),right=managedString(r,h,'😀'.repeat(10000));
+ r.heap_auto(h,1);const joined=r.value_string_concat(h,left,right);assert(joined>0);
+ assert.equal(readManagedString(r,h,joined),'x'.repeat(20000)+'😀'.repeat(10000));assert.equal(readManagedString(r,h,left),'x'.repeat(20000));
+ assert.equal(readManagedString(r,h,right),'😀'.repeat(10000));r.heap_pin(h,joined);
+ const encoded=r.value_utf8_encode(h,joined,1);assert(encoded>0);assert.deepEqual(readManagedBytes(r,h,encoded),new TextEncoder().encode(readManagedString(r,h,joined)));
+ const decoded=r.value_utf8_decode(h,encoded,1,1);assert(decoded>0);assert.equal(readManagedString(r,h,decoded),readManagedString(r,h,joined));
+ r.heap_release(h,joined);r.heap_collect(h);assert.equal(r.heap_live(h),0);
+ const tiny=runtime(2,512,512),source=managedString(tiny.r,tiny.h,'a'.repeat(100));tiny.r.heap_auto(tiny.h,1);
+ assert.equal(tiny.r.value_string_concat(tiny.h,source,source),0);assert.equal(tiny.r.last_error(),2);
+ assert.equal(readManagedString(tiny.r,tiny.h,source),'a'.repeat(100));assert.equal(tiny.r.heap_collect(tiny.h),1);assert.equal(tiny.r.heap_live(tiny.h),0);
+});
+test('managed text search agrees exhaustively with an independent small-alphabet oracle without allocation',()=>{
+ const {r,h}=runtime(256,32768,1048576),texts=[''];
+ for(let length=1;length<=6;length++)for(let bits=0;bits<2**length;bits++)texts.push(Array.from({length},(_,i)=>(bits>>i)&1?'b':'a').join(''));
+ const values=texts.map(text=>managedString(r,h,text)),before=r.heap_used(h),live=r.heap_live(h);
+ for(let i=0;i<texts.length;i++)for(let j=0;j<texts.length;j++)for(let start=0;start<=texts[i].length;start++) {
+  const result=r.value_string_find(h,values[i],values[j],start),expected=texts[i].indexOf(texts[j],start);
+  assert.equal(result,expected===-1?0xffffffff:expected,`${JSON.stringify(texts[i])},${JSON.stringify(texts[j])},${start}`);assert.equal(r.last_error(),0);
+ }
+ assert.equal(r.heap_used(h),before);assert.equal(r.heap_live(h),live);
+});
+test('managed text random Unicode slices, search, ordering and code points preserve every code unit',()=>{
+ const {r,h}=runtime();let state=0x693fec1;
+ const next=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return state>>>0;};
+ const randomText=()=>Array.from({length:next()%64},()=>String.fromCharCode(next()%4?next()&65535:0xd800+next()%2048)).join('');
+ for(let round=0;round<1024;round++) {
+  const text=randomText(),needle=round%2?randomText():text.slice(next()%(text.length+1)),a=managedString(r,h,text),b=managedString(r,h,needle);
+  const start=next()%(text.length+1),end=start+next()%(text.length-start+1);
+  const sliced=r.value_string_slice(h,a,start,end);assert(sliced>0);assert.equal(readManagedString(r,h,sliced),text.slice(start,end));
+  const joined=r.value_string_concat(h,a,b);assert(joined>0);assert.equal(readManagedString(r,h,joined),text+needle);
+  const found=text.indexOf(needle,start);assert.equal(r.value_string_find(h,a,b,start),found===-1?0xffffffff:found);
+  assert.equal(r.value_string_compare(h,a,b),text===needle?0:text<needle?1:2);
+  for(let index=0;index<text.length;index++)assert.equal(r.value_string_code_point(h,a,index),text.codePointAt(index));
+  assert.equal(r.heap_collect(h),4);
+ }
+});
+test('managed text search handles long periodic and nonperiodic prefixes in bounded space',()=>{
+ const {r,h}=runtime(16,4096,1048576),text='a'.repeat(250000)+'b',a=managedString(r,h,text);
+ for(const needle of ['a'.repeat(8192)+'c','a'.repeat(8192)+'b','abab'.repeat(2000),'a'.repeat(8192)]) {
+  const b=managedString(r,h,needle),before=r.heap_used(h),live=r.heap_live(h);
+  for(const start of [0,1,100000,text.length]){const expected=text.indexOf(needle,start);assert.equal(r.value_string_find(h,a,b,start),expected===-1?0xffffffff:expected);}
+  assert.equal(r.heap_used(h),before);assert.equal(r.heap_live(h),live);r.heap_pin(h,a);r.heap_collect(h);r.heap_release(h,a);
+ }
+});
+test('managed UTF8 random differentials survive per-allocation collection and reject before allocation',()=>{
+ const {r,h}=runtime(16,4096,32768);r.heap_auto(h,1);let state=0x84601b3;
+ const next=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return state>>>0;};
+ for(let round=0;round<2048;round++) {
+  const text=Array.from({length:next()%64},()=>String.fromCharCode(next()&65535)).join(''),source=managedString(r,h,text);r.heap_pin(h,source);
+  const encoded=r.value_utf8_encode(h,source,0);assert(encoded>0);assert.deepEqual(readManagedBytes(r,h,encoded),new TextEncoder().encode(text));
+  const before=r.heap_live(h),collections=r.heap_collections(h),strict=r.value_utf8_encode(h,source,1);
+  if(/\p{Surrogate}/u.test(text)){assert.equal(strict,0);assert.equal(r.last_error(),5);assert.equal(r.heap_live(h),before);assert.equal(r.heap_collections(h),collections);}
+  else{assert(strict>0);assert.deepEqual(readManagedBytes(r,h,strict),new TextEncoder().encode(text));}
+  r.heap_release(h,source);r.heap_collect(h);
+  const input=Uint8Array.from({length:next()%64},()=>next()&255),value=managedBytes(r,h,input);r.heap_pin(h,value);
+  for(const preserve of [0,1]) {
+   const decoded=r.value_utf8_decode(h,value,0,preserve);assert(decoded>0);assert.equal(readManagedString(r,h,decoded),new TextDecoder('utf-8',{ignoreBOM:!!preserve}).decode(input));
+   let expected;try{expected=new TextDecoder('utf-8',{ignoreBOM:!!preserve,fatal:true}).decode(input);}catch{}
+   const live=r.heap_live(h),collections=r.heap_collections(h),strict=r.value_utf8_decode(h,value,1,preserve);
+   if(expected===undefined){assert.equal(strict,0);assert.equal(r.last_error(),4);assert.equal(r.heap_live(h),live);assert.equal(r.heap_collections(h),collections);}
+   else{assert(strict>0);assert.equal(readManagedString(r,h,strict),expected);}
+  }
+  r.heap_release(h,value);r.heap_collect(h);assert.equal(r.heap_live(h),0);
+ }
+});
+test('managed text bridge executes operations in WASM, preserves brands and transfers owned codec results',async()=>{
+ const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
+ const a=instantiateManagedRuntime(bytes),b=instantiateManagedRuntime(bytes);a.auto(1);
+ const text=a.string('a\0😀\ud800'),tail=a.string('\udc00z'),joined=a.concatStrings(text,tail);a.release(text);a.release(tail);
+ assert.equal(a.readString(joined),'a\0😀\ud800\udc00z');assert.equal(a.codePoint(joined,2),0x1f600);
+ const sliced=a.sliceString(joined,3,6);assert.equal(a.readString(sliced),'\ude00\ud800\udc00');a.release(sliced);
+ const needle=a.string('\ud800\udc00');assert.equal(a.findString(joined,needle),4);assert.equal(a.findString(joined,needle,5),-1);assert.equal(a.compareStrings(joined,needle),-1);a.release(needle);
+ const encoded=a.encodeUtf8(joined,{strict:true});assert.deepEqual(a.readBytes(encoded),new TextEncoder().encode(a.readString(joined)));
+ const decoded=a.decodeUtf8(encoded,{strict:true,preserveBOM:true});assert.equal(a.readString(decoded),a.readString(joined));
+ const invalid=a.bytes([0xc0,0xaf]);assert.throws(()=>a.decodeUtf8(invalid,{strict:true}),e=>e.eliscriptDiagnostic?.code==='ELI-RT0004');a.release(invalid);
+ assert.throws(()=>b.sliceString(joined,0,1),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');
+ for(const operation of [()=>a.sliceString(joined,-0),()=>a.encodeUtf8(joined,{strict:1}),()=>a.decodeUtf8(encoded,{preserveBOM:'true'})])
+  assert.throws(operation,e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');
+ a.release(decoded);a.release(encoded);a.release(joined);a.collect();assert.equal(a.live(),0);
+});
+test('managed text OOM and invalid encoding leave input data and temporary roots transactional',()=>{
+ for(const operation of ['slice','encode','decode']) {
+  const {r,h}=runtime(2,512,512),text='中'.repeat(100);
+  const source=operation==='decode'?managedBytes(r,h,Array(150).fill(65)):managedString(r,h,text);
+  r.heap_auto(h,1);
+  const result=operation==='slice'?r.value_string_slice(h,source,0,100):operation==='encode'?r.value_utf8_encode(h,source,1):r.value_utf8_decode(h,source,1,0);
+  assert.equal(result,0,operation);assert.equal(r.last_error(),2);
+  if(operation==='decode')assert.deepEqual(readManagedBytes(r,h,source),new Uint8Array(150).fill(65));
+  else assert.equal(readManagedString(r,h,source),text);
+  assert.equal(r.heap_live(h),1);assert.equal(r.heap_collect(h),1);assert.equal(r.heap_live(h),0);
+ }
+ const {r,h}=runtime(),bad=managedBytes(r,h,[0xff]),lone=managedString(r,h,'\ud800');
+ const used=r.heap_used(h),live=r.heap_live(h);
+ assert.equal(r.value_utf8_decode(h,bad,1,0),0);assert.equal(r.last_error(),4);
+ assert.equal(r.value_utf8_encode(h,lone,1),0);assert.equal(r.last_error(),5);
+ assert.equal(r.heap_used(h),used);assert.equal(r.heap_live(h),live);assert.equal(r.heap_collect(h),2);
+});
+test('Node and Bun execute a whole managed text pipeline inside zero-import WASM under GC pressure',async()=>{
+ const {writeFile}=await import('node:fs/promises'),{spawnSync}=await import('node:child_process');
+ const source=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8')+await readFile(resolve('tests/fixtures/wasm-managed-text.eli'),'utf8');
+ const artifact=Uint8Array.from(backend.wasm.emit_memory_wasm(backend.compiler.compile_ir_string(source,'text-pipeline.eli'),{maximumPages:8}));
+ const module=new WebAssembly.Module(artifact);assert.deepEqual(WebAssembly.Module.imports(module),[]);
+ const e=new WebAssembly.Instance(module).exports,r=Object.fromEntries(Object.entries(e).map(([k,v])=>[k.replaceAll('-','_'),typeof v==='function'?(...args)=>v(...args)>>>0:v]));
+ const h=r.heap_new(24,2048,2048),input=managedString(r,h,'\ufeff中😀\0\ud800a');r.heap_auto(h,1);
+ const output=r.text_pipeline(h,input,1000);assert(output>0);assert.equal(readManagedString(r,h,output),'\ufeff中😀\0\ufffda');
+ assert.equal(r.frame_depth(h),0);assert(r.heap_collections(h)>5000);r.heap_release(h,output);r.heap_collect(h);assert.equal(r.heap_live(h),0);
+ const path=resolve(directory,'text-pipeline.wasm');await writeFile(path,artifact);
+ const result=spawnSync('node',['--input-type=module','-e',`
+ import assert from 'node:assert/strict';import {readFileSync}from'node:fs';
+ const module=new WebAssembly.Module(readFileSync(${JSON.stringify(path)}));assert.deepEqual(WebAssembly.Module.imports(module),[]);
+ const e=new WebAssembly.Instance(module).exports,h=e['heap-new'](24,2048,2048),units=[0xfeff,0x4e2d,0xd83d,0xde00,0,0xd800,97];
+ const input=e['value-string'](h,units.length)>>>0;for(let i=0;i<units.length;i++)assert.equal(e['value-unit-set'](h,input,i,units[i]),1);e['value-seal'](h,input);e['heap-auto'](h,1);
+ const output=e['text-pipeline'](h,input,1000)>>>0;assert(output>0);assert.equal(e['value-length'](h,output),7);
+ assert.deepEqual(Array.from({length:7},(_,i)=>e['value-unit-get'](h,output,i)),[0xfeff,0x4e2d,0xd83d,0xde00,0,0xfffd,97]);
+ assert.equal(e['frame-depth'](h),0);assert(e['heap-collections'](h)>5000);e['heap-release'](h,output);e['heap-collect'](h);assert.equal(e['heap-live'](h),0);
+ `],{encoding:'utf8',timeout:30000});assert.equal(result.status,0,result.stderr);
 });

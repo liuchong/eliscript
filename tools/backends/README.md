@@ -1,0 +1,81 @@
+# Direct backends and the managed WASM runtime
+
+The standalone backend CLI supports the experimental `numeric-f64` and
+`memory-u32` capability subsets. The complete compiler still runs as JavaScript.
+The implementation and remaining acceptance gates are tracked in
+[the backend plan](../../docs/native-wasm-feasibility.md).
+
+`bootstrap/runtime/memory.eli` emits a module with owned, growable linear memory
+and zero imports. Its managed heap implements Numbers, UTF-16 strings, byte
+arrays, reference arrays, fixed records, root frames and collection in WASM.
+`instantiateManagedRuntime(bytes, options)` from `managed-runtime.mjs` supplies
+bulk host transfer and branded handles. A returned handle owns one root; release
+it with `release`, and call `collect` to reclaim unreachable objects. `auto(n)`
+enables collection at allocation safepoints after a byte debt of `n`; zero
+disables automatic collection. Handles and frames belong to one instance.
+
+## Managed text and encoding
+
+Strings preserve UTF-16 code units, including NUL and unpaired surrogates. The
+following operations execute in WASM; the bridge only transfers inputs/results
+and validates handles and parameters.
+
+| Bridge method | Behavior |
+| --- | --- |
+| `string(text)` / `readString(handle)` | Transfer a sealed UTF-16 string in bulk |
+| `concatStrings(left, right)` | Return a new sealed concatenation |
+| `sliceString(value, start, end = length)` | Copy the checked interval `0 <= start <= end <= length`, including split surrogate pairs |
+| `compareStrings(left, right)` | Lexicographic UTF-16 order: `-1`, `0` or `1` |
+| `findString(value, needle, start = 0)` | Return a code-unit index or `-1`; an empty needle returns `start` |
+| `codePoint(value, index)` | Combine a valid surrogate pair; otherwise return its code unit; require `index < length` |
+| `encodeUtf8(value, {strict = false})` | Return managed bytes; replace unpaired surrogates with U+FFFD, or reject them in strict mode |
+| `decodeUtf8(value, {strict = false, preserveBOM = false})` | Return a sealed string; use maximal-subpart replacement or strict rejection; strip only the first BOM by default |
+
+Indices must be unsigned integers; negative zero and coercions are rejected.
+Codec flags must be booleans. These are checked internal runtime primitives;
+full language/JavaScript interop index coercion and out-of-range conventions
+still require dynamic lowering.
+
+```javascript
+const value = runtime.string('中文😀');
+const bytes = runtime.encodeUtf8(value, {strict: true});
+const text = runtime.decodeUtf8(bytes, {strict: true});
+console.log(runtime.readString(text));
+for (const handle of [value, bytes, text]) runtime.release(handle);
+runtime.collect();
+```
+
+Encoding first validates/counts and then allocates exactly one result. Invalid
+strict input allocates no result. Allocating operations temporarily root their
+operands and refresh addresses after pool growth; successful and failed calls
+return borrowed roots. Search uses constant auxiliary space and linear scanning
+to handle long repeated prefixes without allocating temporary heap objects.
+
+Runtime errors carry an `eliscriptDiagnostic`: `ELI-RT0001` for invalid/foreign
+handles or kinds, `0002` for capacity exhaustion, `0003` for arguments/bounds,
+`0004` for invalid strict UTF-8, `0005` for strict unpaired UTF-16 and `0006` for
+string sealing violations. Raw loads/stores perform explicit width checks with
+unsigned 64-bit arithmetic and raise `WebAssembly.RuntimeError` before a host
+memory fault. Store operand effects and memory growth finish before checking.
+
+Eliscript functions using the internal word ABI must root parameters across the
+first frame allocation and keep live locals in frames across allocating calls.
+The text pipeline fixture demonstrates this explicitly. Automatic insertion of
+these roots into the full compiler and complete dynamic lowering remain open.
+Pool growth also retains prior arena regions; local collection tests do not
+establish the complete compiler's peak-memory budget.
+
+## Verification
+
+```sh
+bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs
+bun test tests/direct-wasm-backend.test.mjs
+ELISCRIPT_TEST_BROWSER=firefox bun test tests/direct-wasm-backend.test.mjs
+ELISCRIPT_TEST_BROWSER=webkit bun test tests/direct-wasm-backend.test.mjs
+```
+
+The tests include independent Node/Bun execution, Seed and three-generation
+IR/byte fixed points, random codec/Unicode differentials, allocation failure,
+moving collection, explicit root cleanup and real Chromium/Firefox/WebKit.
+Numeric production reports retain their original inputs and per-case thresholds;
+they do not establish complete compiler performance or any missing 3×3 host cell.

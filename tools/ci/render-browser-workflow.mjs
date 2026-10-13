@@ -49,7 +49,7 @@ export function renderBrowserWorkflow(contract, matrix) {
     `      - name: Install locked dependencies\n        run: bun install --frozen-lockfile\n` +
     `      - name: Install selected browser\n        run: bun node_modules/playwright-core/cli.js install --with-deps "\${{ matrix.browser }}"\n` +
     `      - name: Run complete backend differential suite\n        shell: bash\n` +
-    `        env:\n          ELISCRIPT_TEST_BROWSER: \${{ matrix.browser }}\n` +
+    `        env:\n          ELISCRIPT_TEST_BROWSER: \${{ matrix.browser }}\n          DEBUG: pw:browser\n` +
     `        run: |\n          set -o pipefail\n          mkdir -p "$RUNNER_TEMP/eliscript-browser-ci"\n` +
     `          ${contract.testCommand} 2>&1 | tee "$RUNNER_TEMP/eliscript-browser-ci/tests.log"\n` +
     `      - name: Preserve browser test evidence\n        if: always()\n` +

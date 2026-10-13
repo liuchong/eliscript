@@ -129,10 +129,10 @@ identified external optimizing backend after its own semantic and performance
 acceptance; the browser independent path and full self-hosting roadmap remain
 required. External optimization is not automatically invoked by this slice.
 
-The retained 2026-10-13 report now passes all nine frozen numeric hot-execution
+The retained 2026-10-14 report passes all nine frozen numeric hot-execution
 pairs. Confirmation used identical JS/WASM artifact hashes. The generated JS
 control is unchanged from the previous failed report. The WASM module grows
-from 789 to 5197 bytes because guarded versions and unrolled code retain their
+from 789 to 5517 bytes because guarded versions and unrolled code retain their
 fallbacks. The compound-guard expansion preserves a full guard check after
 every complete iteration. This closes this numeric performance gate only; download, cold
 startup, compiler throughput, memory and full-language/backend acceptance stay
@@ -217,7 +217,7 @@ debug information, cold startup, memory and the full 3×3 matrix remain open.
 
 The retained native before/after reports use the identical optimized JS artifact
 hash and preserve the initial stack image hash. Speedups versus JS change from
-0.58×/0.22×/0.11× to 1.96×/1.10×/1.23× for recurrence/grid/tiny batches.
+0.58×/0.22×/0.11× to 1.97×/1.11×/1.27× for recurrence/grid/tiny batches.
 All three pass the unchanged numeric gate. These
 measurements concern numeric kernels, not compiler throughput or full self-hosting.
 
@@ -344,7 +344,15 @@ automatic collection, raw callers must keep every live reference in a frame or
 explicit root. Complete compiler insertion of these calls remains open; the
 internal loop/recursive fixtures insert them explicitly.
 
+Managed text now includes sealed UTF-16 concat, checked slice, lexical compare,
+constant-space linear find and code points, plus exact-allocation UTF-8 codecs.
+Strict errors allocate no result; allocating operations protect inputs across
+collection and refresh addresses after growth. The bridge APIs and internal word
+contracts are documented in the [runtime reference](../../tools/backends/README.md).
+Raw accesses explicitly check the complete access width before executing a load
+or store, preserving operand effects and growth before a catchable WASM trap.
+
 The backing arena still retains previous regions on pool growth and does not yet
-destroy multiple heaps. Managed codecs, complete dynamic lowering, persistent
-collections and full compiler hosts remain open. No full compiler memory or
-performance acceptance is claimed by this heap slice.
+destroy multiple heaps. Complete dynamic lowering, persistent collections and
+full compiler hosts remain open. No full compiler memory or performance
+acceptance is claimed by these runtime slices.

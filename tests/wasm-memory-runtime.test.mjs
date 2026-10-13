@@ -35,6 +35,25 @@ test('memory32 preserves stores, traps, growth and operand order without host im
  const old=e.memory.buffer; assert.equal(e.grow(1),1); assert.equal(old.byteLength,0);
  assert.equal(e.size(),2); assert.equal(e.grow(1)>>>0,0xffffffff); assert.equal(e.set(65536,42),42);
 });
+test('memory32 checks every access width before host faults and preserves nested store and growth effects',()=>{
+ const {exports:e}=compile(`(import "eliscript:memory32" load-u8 load-u16 load-u32 load-f64 store-u8 store-u16 store-u32 store-f64 memory-grow)
+ (defun read8 (p) (load-u8 p)) (defun read16 (p) (load-u16 p)) (defun read32 (p) (load-u32 p))
+ (defun read64 (p) (load-f64 p) 1)
+ (defun write8 (p) (store-u8 p (progn (store-u8 16 7) 42)))
+ (defun write16 (p) (store-u16 p (progn (store-u8 16 7) 42)))
+ (defun write32 (p) (store-u32 p (progn (store-u8 16 7) 42)))
+ (defun write64 (p) (store-f64 p (progn (store-u8 16 7) (load-f64 24))))
+ (defun after-growth (p) (store-u32 p (progn (memory-grow 1) 123)))
+ (export read8 read16 read32 read64 write8 write16 write32 write64 after-growth)`,{initialPages:1,maximumPages:2});
+ for(const [width,read,write] of [[1,e.read8,e.write8],[2,e.read16,e.write16],[4,e.read32,e.write32],[8,e.read64,e.write64]]) {
+  const last=65536-width;assert.equal(write(last),0);assert.equal(read(last),width===8?1:42);
+  for(const address of [last+1,65536,0xfffffff8,0xfffffffc,0xffffffff]) {
+   assert.throws(()=>read(address),WebAssembly.RuntimeError);assert.throws(()=>write(address),WebAssembly.RuntimeError);
+   assert.equal(e.read8(16),7); // RHS effects survive the subsequent bounds trap.
+  }
+ }
+ assert.equal(e['after-growth'](65536),0);assert.equal(e.read32(65536),123);
+});
 
 async function runtime(options={}) {
  const source=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8');

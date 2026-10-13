@@ -61,6 +61,10 @@ Org sources. Each has a documented page in the
 | Editor | [`eliscript-mode`](editor/README.md) and an evaluation REPL |
 | Applications | The [proving-ground site](https://liuchong.org/eliscript/examples/dogfood/_site/) and the packaged Action built from it, plus React, Org, and Vite probes as replaceable application evidence |
 
+Experimental direct backends and the zero-import managed WASM heap are described
+in the [backend runtime reference](tools/backends/README.md). The complete
+WASM/native compiler hosts and full 3×3 self-bootstrap remain under development.
+
 ## Project Status
 
 The retained core acceptance audit records **35 of 35 mandatory criteria

@@ -1,10 +1,11 @@
 // Bulk host boundary for the .eli managed heap. GC, value operations and allocation
 // execute inside WASM, with zero imports. Handles own explicit roots until release.
 function fail(code) {
- const error=new Error(code===1?'invalid managed value handle':code===2?'managed capacity exhausted':code===6?'sealed string builder':'managed argument or bounds error');
+ const error=new Error(code===1?'invalid managed value handle':code===2?'managed capacity exhausted':code===4?'invalid UTF-8 input':code===5?'invalid UTF-16 surrogate':code===6?'managed string sealing error':'managed argument or bounds error');
  error.eliscriptDiagnostic={format:'eliscript-diagnostic',version:1,code:`ELI-RT${String(code).padStart(4,'0')}`,severity:'error',phase:'runtime',message:error.message};throw error;
 }
 function word(x,max=0xffffffff) {if(typeof x!=='number'||!Number.isInteger(x)||x<0||x>max||Object.is(x,-0))fail(3);return x;}
+function flag(value) {if(typeof value!=='boolean')fail(3);return Number(value);}
 export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=65536,maxBytes=16777216}={}) {
  const module=new WebAssembly.Module(bytes);if(WebAssembly.Module.imports(module).length)throw Error('managed runtime requires zero imports');
  const e=new WebAssembly.Instance(module).exports;if(!(e.memory instanceof WebAssembly.Memory))throw Error('managed runtime requires owned memory');
@@ -52,6 +53,13 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
    for(let start=0;start<length;start+=8192) {const units=[];for(let i=start;i<Math.min(start+8192,length);i++)units.push(source.getUint16(offset+i*2,true));parts.push(String.fromCharCode(...units));}
    return parts.join('');
   },
+  concatStrings(left,right) {return wrap(call('value-string-concat',heap,id(left),id(right)));},
+  sliceString(value,start,end) {const v=id(value);return wrap(call('value-string-slice',heap,v,word(start),end===undefined?call('value-length',heap,v):word(end)));},
+  compareStrings(left,right) {const result=call('value-string-compare',heap,id(left),id(right));return result===0?0:result===1?-1:1;},
+  findString(value,needle,start=0) {const result=call('value-string-find',heap,id(value),id(needle),word(start));return result===0xffffffff?-1:result;},
+  codePoint(value,index) {return call('value-string-code-point',heap,id(value),word(index));},
+  encodeUtf8(value,{strict=false}={}) {return wrap(call('value-utf8-encode',heap,id(value),flag(strict)));},
+  decodeUtf8(value,{strict=false,preserveBOM=false}={}) {return wrap(call('value-utf8-decode',heap,id(value),flag(strict),flag(preserveBOM)));},
   bytes(input) {
    if(!Array.isArray(input)&&!(input instanceof Uint8Array))fail(3);
    const values=Array.from(input,x=>word(x,255)),value=call('value-bytes',heap,word(values.length)),offset=call('value-data',heap,value,6);

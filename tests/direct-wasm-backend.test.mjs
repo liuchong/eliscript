@@ -614,7 +614,7 @@ const rootPressureSource = `
           (frame-set heap frame 0 sum) (frame-return heap frame sum))))))
 (export root-pressure root-pressure-trap root-recursive)`;
 test("managed runtime has seed and three-generation IR and WASM fixed points", async () => {
-  const source=(await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8"))+rootPressureSource;
+  const source=(await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8"))+rootPressureSource+await readFile(resolve(root,"tests/fixtures/wasm-managed-text.eli"),"utf8");
   const filename="managed-runtime.eli",programs=generations.map(g=>g.compiler.compile_ir_string(source,filename));
   assert.deepEqual(programs[0],programs[1]);assert.deepEqual(programs[1],programs[2]);
   const bytes=generations.map((g,i)=>g.wasm.emit_memory_wasm(programs[i]));
@@ -627,6 +627,13 @@ test("managed runtime has seed and three-generation IR and WASM fixed points", a
     const h2=e["heap-new"](192,8192,32768);e["heap-auto"](h2,1);const recursive=e["root-recursive"](h2,64)>>>0;
     assert(recursive>0);assert.equal(new DataView(e.memory.buffer).getFloat64(e["value-data"](h2,recursive,4)>>>0,true),65);
     assert.equal(e["frame-depth"](h2),0);e["heap-release"](h2,recursive);e["heap-collect"](h2);assert.equal(e["heap-live"](h2),0);
+    const h3=e["heap-new"](24,2048,2048),units=[0xfeff,0x4e2d,0xd83d,0xde00,0,0xd800,97];
+    const input=e["value-string"](h3,units.length)>>>0;assert(input>0);
+    for(let i=0;i<units.length;i++)assert.equal(e["value-unit-set"](h3,input,i,units[i]),1);
+    e["value-seal"](h3,input);e["heap-auto"](h3,1);const output=e["text-pipeline"](h3,input,1000)>>>0;assert(output>0);
+    assert.deepEqual(Array.from({length:7},(_,i)=>e["value-unit-get"](h3,output,i)),[0xfeff,0x4e2d,0xd83d,0xde00,0,0xfffd,97]);
+    assert.equal(e["frame-depth"](h3),0);assert(e["heap-collections"](h3)>5000);
+    e["heap-release"](h3,output);e["heap-collect"](h3);assert.equal(e["heap-live"](h3),0);
   }
   assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(Uint8Array.from(bytes[2]))),[]);
   const saved=JSON.stringify(programs[2]);generations[2].wasm.emit_memory_wasm(programs[2]);assert.equal(JSON.stringify(programs[2]),saved);
@@ -653,6 +660,9 @@ describe("browser compiler backends", () => {
     const context = await browserProcess.newContext();
     try {
       const page = await context.newPage();
+      page.on("console", message => {
+        if (message.text().startsWith("eliscript browser phase:")) console.log(message.text());
+      });
       const result = await page.evaluate(evaluate, { bundle: browserBundle, ...data });
       console.log(`browser engine verified: ${browserName} ${browserProcess.version()}`);
       return result;
@@ -787,7 +797,12 @@ describe("browser compiler backends", () => {
       c.native.emit_native_numeric_library(program,"arm64-macos"),c.native.emit_native_numeric_executable(program,"arm64-macos","entry")]);
   });
   test("browser owned-memory runtime compiles and checks codecs, growth and isolated handles", async () => {
-    const source = await readFile(resolve(root, "bootstrap/runtime/memory.eli"), "utf8");
+    const source = await readFile(resolve(root, "bootstrap/runtime/memory.eli"), "utf8")+`
+      (defun bounds-read8 (p) (load-u8 p)) (defun bounds-read16 (p) (load-u16 p))
+      (defun bounds-read32 (p) (load-u32 p)) (defun bounds-read64 (p) (load-f64 p) 1)
+      (defun bounds-write8 (p) (store-u8 p 42)) (defun bounds-write16 (p) (store-u16 p 42))
+      (defun bounds-write32 (p) (store-u32 p 42)) (defun bounds-write64 (p) (store-f64 p (load-f64 24)))
+      (export bounds-read8 bounds-read16 bounds-read32 bounds-read64 bounds-write8 bounds-write16 bounds-write32 bounds-write64)`;
     const result = await evaluateBrowser(async ({bundle, source}) => {
       const url = URL.createObjectURL(new Blob([bundle], {type: "text/javascript"}));
       const check = (condition, label) => { if (!condition) throw Error(label); };
@@ -795,6 +810,14 @@ describe("browser compiler backends", () => {
         const c = await import(url), ir = c.compile_ir_string(source, "browser-memory.eli");
         const bytes = Uint8Array.from(c.emit_memory_wasm(ir, {maximumPages: 8}));
         check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length === 0, "imports");
+        const raw=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;
+        for(const [width,suffix] of [[1,8],[2,16],[4,32],[8,64]]) {
+          const read=raw[`bounds-read${suffix}`],write=raw[`bounds-write${suffix}`],last=65536-width;
+          check(write(last)===0&&read(last)===(width===8?1:42),"last in-bounds access");
+          for(const address of [last+1,65536,0xfffffff8,0xfffffffc,0xffffffff])for(const access of [read,write]) {
+            try{access(address);throw Error("bounds accepted");}catch(error){check(error instanceof WebAssembly.RuntimeError,"bounds trap class");}
+          }
+        }
         const a = c.instantiateMemoryRuntime(bytes), b = c.instantiateMemoryRuntime(bytes);
         const text = "中文😀\ud800\0", h = a.string(text), p = a.encode(h);
         check([...a.bytes(p)].join() === [...new TextEncoder().encode(text)].join(), "encode");
@@ -863,15 +886,19 @@ describe("browser compiler backends", () => {
         const c=await import(url),bytes=Uint8Array.from(c.emit_memory_wasm(c.compile_ir_string(source,"browser-roots.eli"),{maximumPages:8}));
         const module=new WebAssembly.Module(bytes);check(WebAssembly.Module.imports(module).length===0,"imports");
         const e=new WebAssembly.Instance(module).exports,h=e["heap-new"](12,768,768);e["heap-auto"](h,1);
+        console.log("eliscript browser phase: root loop");
         const p=e["root-pressure"](h,1000)>>>0;check(p>0,"result");
         check(new DataView(e.memory.buffer).getFloat64(e["value-data"](h,p,4)>>>0,true)===2001,"live Number");
         check(e["frame-depth"](h)===0&&e["heap-collections"](h)>3000,"automatic GC");
         e["heap-release"](h,p);e["heap-collect"](h);check(e["heap-live"](h)===0,"release");
+        console.log("eliscript browser phase: root trap");
         try{e["root-pressure-trap"](h);throw Error("trap missing");}catch(error){check(error instanceof WebAssembly.RuntimeError,"trap class");}
         check(e["frame-depth"](h)===1,"trap frame");e["frame-unwind"](h,0);check(e["heap-collect"](h)===2,"unwind");
+        console.log("eliscript browser phase: root recursion");
         const h2=e["heap-new"](192,8192,32768);e["heap-auto"](h2,1);const recursive=e["root-recursive"](h2,64)>>>0;
         check(recursive>0,"recursive result");check(new DataView(e.memory.buffer).getFloat64(e["value-data"](h2,recursive,4)>>>0,true)===65,"recursive value");
         check(e["frame-depth"](h2)===0,"recursive frames");e["heap-release"](h2,recursive);e["heap-collect"](h2);check(e["heap-live"](h2)===0,"recursive cleanup");
+        console.log("eliscript browser phase: root bridge");
         const a=c.instantiateManagedRuntime(bytes),b=c.instantiateManagedRuntime(bytes);a.auto(1);
         const frame=a.frame(1),n=a.number(NaN);a.frameSet(frame,0,n);a.release(n);
         for(let i=0;i<100;i++){const temporary=a.number(i);a.release(temporary);}
@@ -889,6 +916,52 @@ describe("browser compiler backends", () => {
       }finally{URL.revokeObjectURL(url);}
     },{source});
     assert.deepEqual(result,generations[2].wasm.emit_memory_wasm(generations[2].compiler.compile_ir_string(source,"browser-roots.eli"),{maximumPages:8}));
+  });
+
+  test("browser managed text pipelines retain UTF16, codec semantics and roots without host callbacks",async()=>{
+    const source=await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8")+await readFile(resolve(root,"tests/fixtures/wasm-managed-text.eli"),"utf8");
+    const result=await evaluateBrowser(async({bundle,source})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:"text/javascript"}));
+      const check=(ok,label)=>{if(!ok)throw Error(label);};
+      try {
+        const c=await import(url),bytes=Uint8Array.from(c.emit_memory_wasm(c.compile_ir_string(source,"browser-text.eli"),{maximumPages:8}));
+        const module=new WebAssembly.Module(bytes);check(WebAssembly.Module.imports(module).length===0,"imports");
+        const e=new WebAssembly.Instance(module).exports,h=e["heap-new"](24,2048,2048),units=[0xfeff,0x4e2d,0xd83d,0xde00,0,0xd800,97];
+        const input=e["value-string"](h,units.length)>>>0;check(input>0,"input");
+        for(let i=0;i<units.length;i++)check(e["value-unit-set"](h,input,i,units[i])===1,"unit");
+        e["value-seal"](h,input);e["heap-auto"](h,1);const output=e["text-pipeline"](h,input,1000)>>>0;
+        check(output>0&&e["value-length"](h,output)===7,"result");
+        for(const [i,u] of [0xfeff,0x4e2d,0xd83d,0xde00,0,0xfffd,97].entries())check(e["value-unit-get"](h,output,i)===u,"pipeline");
+        check(e["frame-depth"](h)===0&&e["heap-collections"](h)>5000,"safepoints");
+        e["heap-release"](h,output);e["heap-collect"](h);check(e["heap-live"](h)===0,"cleanup");
+        const a=c.instantiateManagedRuntime(bytes),b=c.instantiateManagedRuntime(bytes);a.auto(1);
+        let state=0x346f195;const next=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return state>>>0;};
+        for(let round=0;round<128;round++) {
+          const text=Array.from({length:next()%48},()=>String.fromCharCode(next()&65535)).join(''),value=a.string(text);
+          const start=next()%(text.length+1),end=start+next()%(text.length-start+1),slice=a.sliceString(value,start,end),joined=a.concatStrings(value,slice);
+          check(a.readString(slice)===text.slice(start,end)&&a.readString(joined)===text+text.slice(start,end),"UTF16");
+          check(a.findString(value,slice,start)===text.indexOf(text.slice(start,end),start),"search");
+          check(a.compareStrings(value,slice)===(text===text.slice(start,end)?0:text<text.slice(start,end)?-1:1),"ordering");
+          for(let i=0;i<text.length;i++)check(a.codePoint(value,i)===text.codePointAt(i),"code point");
+          const encoded=a.encodeUtf8(value),expected=new TextEncoder().encode(text);
+          check(JSON.stringify([...a.readBytes(encoded)])===JSON.stringify([...expected]),"encoding");
+          const decoded=a.decodeUtf8(encoded,{strict:true,preserveBOM:true});check(a.readString(decoded)===new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(expected),"decoding");
+          for(const item of [value,slice,joined,encoded,decoded])a.release(item);a.collect();check(a.live()===0,"random roots");
+        }
+        for(const input of [[0xff],[0xe0,0x80,0x80],[0xf4,0x90,0x80,0x80],[0xe2,0x82],[0xef,0xbb,0xbf,65]]) {
+          const value=a.bytes(input);
+          for(const preserveBOM of [false,true]) {
+            const decoded=a.decodeUtf8(value,{preserveBOM});check(a.readString(decoded)===new TextDecoder('utf-8',{ignoreBOM:preserveBOM}).decode(Uint8Array.from(input)),"replacement and BOM");a.release(decoded);
+          }
+          if(input[0]!==0xef)try{a.decodeUtf8(value,{strict:true});throw Error("invalid accepted");}catch(error){check(error.eliscriptDiagnostic?.code==="ELI-RT0004","strict");}
+          a.release(value);a.collect();check(a.live()===0,"codec roots");
+        }
+        const lone=a.string('\ud800');try{a.encodeUtf8(lone,{strict:true});throw Error("surrogate accepted");}catch(error){check(error.eliscriptDiagnostic?.code==="ELI-RT0005","surrogate");}
+        try{b.sliceString(lone,0,1);throw Error("foreign accepted");}catch(error){check(error.eliscriptDiagnostic?.code==="ELI-RT0001","brand");}
+        a.release(lone);a.collect();check(a.live()===0,"final roots");return [...bytes];
+      }finally{URL.revokeObjectURL(url);}
+    },{source});
+    assert.deepEqual(result,generations[2].wasm.emit_memory_wasm(generations[2].compiler.compile_ir_string(source,"browser-text.eli"),{maximumPages:8}));
   });
 
 });
