@@ -546,6 +546,15 @@ test("direct WASM performance report preserves budgets and blocks failed promoti
   assert.equal(first.decision.productionPassed, false);
   const forgedFirst = structuredClone(first);forgedFirst.decision.productionPassed = true;
   await assert.rejects(validateDirectWasmReport(forgedFirst, { verifySources: false }));
+  const memoryFirst = JSON.parse(await readFile(resolve(root, "tools/backends/results/direct-wasm-memory-recheck-first-macos-arm64.json"), "utf8"));
+  await validateDirectWasmReport(memoryFirst, {verifySources:false});
+  assert.equal(memoryFirst.decision.productionPassed,false);
+  const memoryConfirmation = JSON.parse(await readFile(resolve(root, "tools/backends/results/direct-wasm-memory-recheck-confirmation-macos-arm64.json"), "utf8"));
+  await validateDirectWasmReport(memoryConfirmation, {verifySources:false});
+  assert.equal(memoryConfirmation.decision.productionPassed,true);
+  assert.deepEqual(memoryFirst.artifacts,memoryConfirmation.artifacts);
+  const forgedMemory = structuredClone(memoryFirst); forgedMemory.decision.productionPassed = true;
+  await assert.rejects(validateDirectWasmReport(forgedMemory,{verifySources:false}));
   const forgedBudget = structuredClone(report);
   forgedBudget.parameters.minimumSpeedup = .5;
   await assert.rejects(validateDirectWasmReport(forgedBudget));
@@ -565,13 +574,27 @@ test("direct WASM performance report preserves budgets and blocks failed promoti
   assert.equal(promotion.status, report.decision.productionPassed ? 0 : 1, promotion.stderr);
 });
 
+test("memory runtime emits identical IR and WASM through three compiler generations", async () => {
+  const filename = "memory-runtime.eli", source = await readFile(resolve(root, "bootstrap/runtime/memory.eli"), "utf8");
+  const programs = generations.map(g => g.compiler.compile_ir_string(source, filename));
+  assert.deepEqual(programs[0], programs[1]); assert.deepEqual(programs[1], programs[2]);
+  const bytes = generations.map((g, i) => Uint8Array.from(g.wasm.emit_memory_wasm(programs[i])));
+  assert.deepEqual(bytes[0], bytes[1]); assert.deepEqual(bytes[1], bytes[2]);
+  const saved = JSON.stringify(programs[2]); generations[2].wasm.emit_memory_wasm(programs[2]);
+  assert.equal(JSON.stringify(programs[2]), saved);
+  const seed = resolve(directory, "memory-seed.mjs"), input = resolve(root, "bootstrap/runtime/memory.eli");
+  const child = spawnSync(resolve(root, "bin/eliscript-seed"), ["--output", seed, input], {encoding: "utf8", timeout: 30000});
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(await readFile(seed, "utf8"), generations[2].compiler.compile_string(source, input));
+});
+
 describe("browser compiler backends", () => {
   beforeAll(async () => {
     // Compiler bundling and browser process startup are fixture preparation.
     // Keep every semantic test's existing timeout and use a fresh context for
     // each evaluation; performance benchmarks retain their separate policy.
     const entry = resolve(directory, "browser-entry.mjs");
-    await writeFile(entry, `export {compile_ir_string,emit_ir_string} from ${JSON.stringify(resolve(directory, "g3/bootstrap/compiler.mjs"))};\nexport {emit_numeric_wasm} from ${JSON.stringify(resolve(directory, "g3/backends/wasm.mjs"))};\nexport {emit_native_numeric_object,emit_native_numeric_library,emit_native_numeric_executable} from ${JSON.stringify(resolve(directory, "g3/backends/native.mjs"))};`);
+    await writeFile(entry, `export {compile_ir_string,emit_ir_string} from ${JSON.stringify(resolve(directory, "g3/bootstrap/compiler.mjs"))};\nexport {emit_numeric_wasm,emit_memory_wasm} from ${JSON.stringify(resolve(directory, "g3/backends/wasm.mjs"))};\nexport {instantiateMemoryRuntime} from ${JSON.stringify(resolve(root, "tools/backends/memory-runtime.mjs"))};\nexport {emit_native_numeric_object,emit_native_numeric_library,emit_native_numeric_executable} from ${JSON.stringify(resolve(directory, "g3/backends/native.mjs"))};`);
     const build = await Bun.build({ entrypoints: [entry], target: "browser", format: "esm" });
     assert(build.success);
     browserBundle = await build.outputs[0].text();
@@ -716,4 +739,38 @@ describe("browser compiler backends", () => {
     assert.deepEqual(result,[c.native.emit_native_numeric_object(program,"arm64-macos"),
       c.native.emit_native_numeric_library(program,"arm64-macos"),c.native.emit_native_numeric_executable(program,"arm64-macos","entry")]);
   });
+  test("browser owned-memory runtime compiles and checks codecs, growth and isolated handles", async () => {
+    const source = await readFile(resolve(root, "bootstrap/runtime/memory.eli"), "utf8");
+    const result = await evaluateBrowser(async ({bundle, source}) => {
+      const url = URL.createObjectURL(new Blob([bundle], {type: "text/javascript"}));
+      const check = (condition, label) => { if (!condition) throw Error(label); };
+      try {
+        const c = await import(url), ir = c.compile_ir_string(source, "browser-memory.eli");
+        const bytes = Uint8Array.from(c.emit_memory_wasm(ir, {maximumPages: 8}));
+        check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length === 0, "imports");
+        const a = c.instantiateMemoryRuntime(bytes), b = c.instantiateMemoryRuntime(bytes);
+        const text = "中文😀\ud800\0", h = a.string(text), p = a.encode(h);
+        check([...a.bytes(p)].join() === [...new TextEncoder().encode(text)].join(), "encode");
+        check(a.text(a.decode(p)) === "中文😀�\0", "decode");
+        try { b.bytes(p); throw Error("cross-instance accepted"); }
+        catch (e) { check(e.eliscriptDiagnostic?.code === "ELI-RT0001", "brand"); }
+        const large = Uint8Array.from({length: 70000}, (_,i) => i & 255), buffer = a.buffer(large);
+        a.reserve(buffer, 150000); check([...a.bytes(buffer)].join() === [...large].join(), "growth contents");
+        const words = a.record([0, 0xffffffff, 42]); check([...a.words(words)].join() === "0,4294967295,42", "words");
+        let state = 0x51ea63;
+        const next = () => {state ^= state << 13; state ^= state >>> 17; state ^= state << 5; return state >>> 0;};
+        for (let round = 0; round < 128; round++) {
+          const input = Uint8Array.from({length: next() % 64}, () => next() & 255), handle = a.buffer(input);
+          for (const preserveBOM of [false,true])
+            check(a.text(a.decode(handle,{preserveBOM})) === new TextDecoder("utf-8", {ignoreBOM:preserveBOM}).decode(input), "random decode");
+        }
+        a.retire(); try {a.bytes(buffer); throw Error("stale accepted");}
+        catch(e) {check(e.eliscriptDiagnostic?.code === "ELI-RT0001", "retire");}
+        return [...bytes];
+      } finally { URL.revokeObjectURL(url); }
+    }, {source});
+    assert.deepEqual(result, generations[2].wasm.emit_memory_wasm(
+      generations[2].compiler.compile_ir_string(source,"browser-memory.eli"),{maximumPages:8}));
+  });
+
 });

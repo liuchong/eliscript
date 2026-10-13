@@ -1,10 +1,10 @@
 # Independent backend foundation
 
-`optimize.eli`, `numeric.eli`, `wasm.eli`, `native.eli` and `sha256.eli` implement
+`optimize.eli`, `numeric.eli`, `memory.eli`, `wasm.eli`, `native.eli` and `sha256.eli` implement
 the optimizer, typed numeric lowering, WASM/ARM64 emission and deterministic
 SHA-256 in Eliscript. No C, LLVM IR, WAT,
 external assembler or external optimizer participates in direct emission.
-`tools/backends/` supplies filesystem/bootstrap adapters only.
+`tools/backends/` supplies filesystem/bootstrap and bulk-memory boundary adapters.
 
 This is the first executable slice of the
 [independent 3×3 roadmap](../../docs/native-wasm-feasibility.md#后续计划与决策门槛).
@@ -220,3 +220,66 @@ hash and preserve the initial stack image hash. Speedups versus JS change from
 0.58×/0.22×/0.11× to 1.96×/1.11×/1.23× for recurrence/grid/tiny batches.
 All three pass the unchanged numeric gate. These
 measurements concern numeric kernels, not compiler throughput or full self-hosting.
+
+The numeric WASM entry also enables strict constant data flow, unread-store
+removal and invariant loop-condition hoisting. These retain exact IEEE operation
+order, signed-zero identity, effects and the original fallback paths. Retained
+failed/confirmation measurements distinguish unchanged-artifact variation from
+actual emission changes; low-margin stability remains open in the roadmap.
+
+## Internal memory ABI
+
+`emit_memory_wasm(program, {initialPages: 1, maximumPages: 256})` compiles the
+explicit `memory-u32` runtime subset to owned, exported memory without WASM
+imports. `bootstrap/runtime/memory.eli` supplies allocation, growable bytes,
+fixed word records, sealed UTF16 builders and UTF8 encoding/decoding. All
+algorithms are Eliscript; `tools/backends/memory-runtime.mjs` marshals bulk data
+and brands handles per instance. No character decoding or allocation is delegated
+to host callbacks. This is an internal experimental runtime slice; the complete
+dynamic runtime and WASM/native compiler hosts remain open.
+
+Every required parameter/result is a word with an unsigned 32-bit bit pattern;
+boolean temporaries are separate. `+`, `-`, `*`, `1+`, `1-` wrap modulo 2^32,
+comparisons are unsigned, and every word is true including zero. General language
+Numbers retain their existing f64 semantics. Fractional/out-of-range literals,
+negative zero, heterogeneous branches, value-position `when`/`unless`, arbitrary imports and shadowed capability
+calls are rejected before emission. Division uses explicit unsigned `word-div`
+with a zero-divisor trap; discarded loads/divisions retain their traps.
+
+Only `eliscript:memory32` named imports resolve to instructions: `load-u8/u16/u32`,
+`store-u8/u16/u32`, `memory-size`, `memory-grow`, `word-div`, `word-shr`,
+`word-shl`, `word-and`, `word-or`. Stores return word zero. Raw exports use the
+WASM i32 ABI (normalize returned bits with `>>> 0`); the bulk bridge rejects JS
+coercion, invalid words, foreign handles and retired handles. These capabilities
+are restricted to internal runtime source by repository integrity checks.
+
+Memory uses little-endian words and 8-byte alignment. Control words at 0/4/8/12
+store cursor/epoch/error/live-object head; allocation begins at 256. Each 32-byte
+header holds kind/epoch/length/capacity/data/sealed/next/reserved. Byte arrays,
+UTF16 strings and word records have kinds 1/2/3. Membership must come from the
+live allocation list, rather than a tag in arbitrary byte data. Growth preserves
+handles and contents and reacquires host views after `memory.grow`. Failed object
+allocation rolls back unpublished storage; failed reserve preserves the buffer.
+Pages must satisfy `1 <= initialPages <= maximumPages <= 65535`.
+
+Public raw operations clear the last error; zero may be a valid read, so always
+check `last-error`. Codes 1..7 mean invalid handle, capacity, bounds, invalid UTF8,
+unpaired UTF16, sealed-state violation and exhausted epoch. The bulk bridge
+throws structured `ELI-RT0001`..`ELI-RT0007` diagnostics. UTF8 replacement follows
+maximal-subpart decoding, strict mode rejects malformed input, and a leading BOM
+is stripped unless preservation is requested. UTF16 code units, including lone
+surrogates, survive builder/readback; replacement encoding matches TextEncoder.
+
+`retire` invalidates all live handles and advances the epoch. Addresses are never
+reused, so stale pointers cannot alias later objects. This arena does **not**
+reclaim memory or implement GC, cyclic dynamic records, ownership transfer or
+untrusted raw-memory sandboxing. Records contain words; tagged dynamic values
+remain a later acceptance unit. The raw memory ABI is trusted internal storage;
+the bridge supplies the instance/lifetime boundary for host handles.
+
+Run `bun test tests/wasm-memory-runtime.test.mjs tests/direct-wasm-backend.test.mjs`.
+The latter also verifies seed/second/third-generation emission identity and runs
+the memory runtime in the selected real browser. Use `ELISCRIPT_TEST_BROWSER`
+with chromium, firefox or webkit. Encoding semantics follow the
+[Encoding Standard](https://encoding.spec.whatwg.org/#utf-8-decoder), and byte
+emission follows the [WASM binary specification](https://webassembly.github.io/spec/core/binary/instructions.html).

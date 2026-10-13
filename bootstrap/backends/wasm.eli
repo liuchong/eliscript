@@ -2,6 +2,8 @@
   (import "./optimize.mjs" optimize-program)
   (import "./numeric.mjs" lower-numeric-program optimize-numeric-program numeric-pure tree-size backend-fail find-function)
 
+  (import "./memory.mjs" lower-memory-program)
+
   ;; Byte encoding and instruction selection are Eliscript algorithms. The
   ;; returned ordinary byte array needs no assembler, linker, or optimizer.
   (defun append-bytes (output bytes)
@@ -46,6 +48,20 @@
     (if (>= value 64) (js-call output :push (bit-or value 128) 0)
       (js-call output :push value)))
 
+  (defun signed-word-leb (output value)
+    (setq value (bit-or value 0))
+    (let ((done nil))
+      (while (not done)
+        (let ((byte (bit-and value 127)))
+          (setq value (bit-shift-right value 7))
+          (setq done (or (and (= value 0) (< byte 64))
+                         (and (= value -1) (>= byte 64))))
+          (js-call output :push (if done byte (bit-or byte 128))))))
+    output)
+
+  (defun number-type (expression)
+    (or (= (get expression :type) "f64") (= (get expression :type) "u32")))
+
   (defun utf8-name (output name)
     (let ((bytes (js-array)) (index 0))
       (while (< index (js-length name))
@@ -89,7 +105,7 @@
   (defun emit-condition (output expression)
     ;; Every Number is true in Eliscript, including zero and NaN. Retain
     ;; evaluation effects; do not use C/JS numeric truth or f64 comparisons.
-    (if (= (get expression :type) "f64")
+    (if (number-type expression)
         (progn (emit-discarded output expression) (js-call output :push 65 1))
       (emit-expression output expression)))
 
@@ -117,7 +133,7 @@
   (defun emit-branch-true (output expression depth)
     (let ((kind (get expression :kind)) (children (get expression :children)))
       (cond
-        ((= (get expression :type) "f64")
+        ((number-type expression)
          (emit-discarded output expression)
          (js-call output :push 12) (unsigned-leb output depth))
         ((= kind "or")
@@ -140,7 +156,7 @@
   (defun emit-branch-false (output expression depth)
     (let ((kind (get expression :kind)) (children (get expression :children)))
       (cond
-        ((= (get expression :type) "f64") (emit-discarded output expression))
+        ((number-type expression) (emit-discarded output expression))
         ((= kind "and")
          (let ((index 0))
            (while (< index (js-length children))
@@ -166,7 +182,7 @@
            (operator (get expression :kind)))
       (cond
         ((= index (1- (js-length children))) (emit-discarded output operand))
-        ((= (get expression :type) "f64")
+        ((number-type expression)
          (emit-discarded output operand)
          (when (= operator "and")
            (emit-discarded-short-circuit output expression (1+ index))))
@@ -225,7 +241,7 @@
            (operator (get expression :kind)))
       (cond
         ((= index (1- (js-length children))) (emit-expression output operand))
-        ((= (get expression :type) "f64")
+        ((number-type expression)
          (emit-expression output operand)
          (when (= operator "and")
            (js-call output :push 26)
@@ -275,11 +291,54 @@
             (float64-bytes output 1)
             (js-call output :push (arithmetic-opcode operator))))))))
 
+  (defun emit-word-arithmetic (output expression)
+    (let* ((children (get expression :children)) (count (js-length children))
+           (operator (get expression :value)))
+      (cond
+        ((= count 0) (js-call output :push 65 (if (= operator "*") 1 0)))
+        ((and (= count 1) (= operator "-"))
+         (js-call output :push 65 0) (emit-expression output (js-nth 0 children))
+         (js-call output :push 107))
+        (t
+         (emit-expression output (js-nth 0 children))
+         (when (or (= count 2) (= operator "1+") (= operator "1-"))
+           (if (= count 2) (emit-expression output (js-nth 1 children))
+             (js-call output :push 65 1))
+           (js-call output :push (cond ((or (= operator "+") (= operator "1+")) 106)
+             ((or (= operator "-") (= operator "1-")) 107) (t 108))))))))
+
+  (defun emit-memory-op (output expression)
+    (let ((children (get expression :children)) (name (get expression :value)) (i 0))
+      (while (< i (js-length children))
+        (emit-expression output (js-nth i children)) (setq i (1+ i)))
+      (cond
+        ((= name "load-u8") (js-call output :push 45 0 0))
+        ((= name "load-u16") (js-call output :push 47 1 0))
+        ((= name "load-u32") (js-call output :push 40 2 0))
+        ((= name "store-u8") (js-call output :push 58 0 0 65 0))
+        ((= name "store-u16") (js-call output :push 59 1 0 65 0))
+        ((= name "store-u32") (js-call output :push 54 2 0 65 0))
+        ((= name "memory-size") (js-call output :push 63 0))
+        ((= name "memory-grow") (js-call output :push 64 0))
+        ((= name "word-div") (js-call output :push 110))
+        ((= name "word-shr") (js-call output :push 118))
+        ((= name "word-shl") (js-call output :push 116))
+        ((= name "word-and") (js-call output :push 113))
+        ((= name "word-or") (js-call output :push 114))
+        (t (backend-fail expression "unknown memory32 opcode")))))
+
   (defun emit-expression (output expression)
     (let ((kind (get expression :kind))
           (children (get expression :children))
           (value (get expression :value)))
       (cond
+        ((= kind "memory-op") (emit-memory-op output expression))
+        ((= kind "word-arithmetic") (emit-word-arithmetic output expression))
+        ((= kind "word-compare")
+         (emit-expression output (js-nth 0 children))
+         (emit-expression output (js-nth 1 children))
+         (js-call output :push (cond ((= value "=") 70) ((= value "/=") 71) ((= value "<") 73)
+           ((= value ">") 75) ((= value "<=") 77) (t 79))))
         ((= kind "int-number")
          (emit-expression output (js-nth 0 children))
          (js-call output :push 183))
@@ -297,9 +356,12 @@
          (emit-expression output (js-nth 0 children))
          (js-call output :push 155 170))
         ((= kind "literal")
-         (if (= (get expression :type) "f64")
-             (progn (js-call output :push 68) (float64-bytes output value))
-           (js-call output :push 65 value)))
+         (cond
+           ((= (get expression :type) "f64")
+            (js-call output :push 68) (float64-bytes output value))
+           ((= (get expression :type) "u32")
+            (js-call output :push 65) (signed-word-leb output value))
+           (t (js-call output :push 65 value))))
         ((= kind "local") (js-call output :push 32) (unsigned-leb output value))
         ((or (= kind "set") (= kind "initialize"))
          (emit-expression output (js-nth 0 children))
@@ -347,14 +409,21 @@
          (unsigned-leb output value))
         (t (backend-fail expression (str "unknown typed WASM expression: " kind))))))
 
-  (defun emit-typed-numeric-wasm (program)
-    (unless (= (get program :abi) "numeric-f64")
-      (backend-fail program "WASM emitter requires numeric-f64 typed input"))
-    (let* ((functions (get program :functions))
+  (defun emit-typed-scalar-wasm (program options)
+    (let* ((memory (= (get program :abi) "memory-u32"))
+           (scalar-byte (if memory 127 124))
+           (initial (get options :initialPages 1)) (maximum (get options :maximumPages 256))
+           (functions (get program :functions))
            (arities (js-array)) (type-indices (js-array))
            (types (js-array)) (declarations (js-array))
            (exports (js-array)) (bodies (js-array))
            (output (js-array 0 97 115 109 1 0 0 0)) (index 0))
+      (when memory
+        (unless (and (= initial (uint32 initial)) (= maximum (uint32 maximum))
+                     (>= initial 1) (<= initial maximum) (<= maximum 65535))
+          (backend-fail program "memory32 requires 1 <= initialPages <= maximumPages <= 65535"))
+        (when (find-function functions "memory")
+          (backend-fail program "memory32 reserves the memory export name")))
       (while (< index (js-length functions))
         (let* ((arity (get (js-nth index functions) :arity))
                (position 0))
@@ -371,16 +440,17 @@
         (unsigned-leb types (js-nth index arities))
         (let ((parameter 0))
           (while (< parameter (js-nth index arities))
-            (js-call types :push 124)
+            (js-call types :push scalar-byte)
             (setq parameter (1+ parameter))))
-        (js-call types :push 1 124)
+        (js-call types :push 1 scalar-byte)
         (setq index (1+ index)))
       (unsigned-leb declarations (js-length functions))
       (setq index 0)
       (while (< index (js-length functions))
         (unsigned-leb declarations (js-nth index type-indices))
         (setq index (1+ index)))
-      (unsigned-leb exports (js-length (get program :exports)))
+      (unsigned-leb exports (+ (js-length (get program :exports)) (if memory 1 0)))
+      (when memory (utf8-name exports "memory") (js-call exports :push 2 0))
       (setq index 0)
       (while (< index (js-length (get program :exports)))
         (let ((name (js-nth index (get program :exports))))
@@ -408,14 +478,28 @@
         (setq index (1+ index)))
       (section output 1 types)
       (section output 3 declarations)
+      (when memory
+        (let ((limits (js-array 1 1)))
+          (unsigned-leb limits initial) (unsigned-leb limits maximum)
+          (section output 5 limits)))
       (section output 7 exports)
       (section output 10 bodies)
       output))
+
+  (defun emit-typed-numeric-wasm (program)
+    (unless (= (get program :abi) "numeric-f64")
+      (backend-fail program "WASM emitter requires numeric-f64 typed input"))
+    (emit-typed-scalar-wasm program (js-object)))
+
+  (defun emit-memory-wasm (program &optional options)
+    ;; Memory effects and traps are retained; numeric-only optimizations do not
+    ;; apply to this explicit internal word ABI.
+    (emit-typed-scalar-wasm (lower-memory-program program) (or options (js-object))))
 
   (defun emit-numeric-wasm (program)
     ;; Validate the complete input, including unselected branches, first.
     (lower-numeric-program program)
     (emit-typed-numeric-wasm (optimize-numeric-program
-      (lower-numeric-program (optimize-program program)))))
+      (lower-numeric-program (optimize-program program)) (js-object :constantFlow t :unswitch t))))
 
-  (export emit-numeric-wasm emit-typed-numeric-wasm))
+  (export emit-numeric-wasm emit-typed-numeric-wasm emit-memory-wasm))

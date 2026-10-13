@@ -4,7 +4,7 @@ import { resolve, dirname, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-export const backendModules = ["optimize", "numeric", "wasm", "sha256", "native"];
+export const backendModules = ["optimize", "numeric", "memory", "wasm", "sha256", "native"];
 
 // This adapter only loads files and runs the bootstrap seed when requested.
 // Optimization, typed lowering, WASM and native encoding live in the .eli modules.
