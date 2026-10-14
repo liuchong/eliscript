@@ -722,6 +722,14 @@ test("ordinary source arrays have Seed and three-generation IR, descriptor and W
  const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
  for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const n=a.number(128),arr=a.invoke('grow-loop',[n]);assert.equal(a.length(arr),128);const last=a.invoke('remove-last',[arr]);sameNumber(a.readNumber(last),127,'array pop');a.release(last);a.release(arr);a.release(n);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
 });
+test("named source objects have Seed and three-generation IR, descriptor and WASM fixed points",async()=>{
+ const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-objects.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
+ const programs=generations.map(g=>g.compiler.compile_ir_string(source,'objects.eli')),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtime,'runtime.eli'));
+ const lowered=generations.map((g,i)=>g.managed.lower_managed_program(programs[i],runtimes[i]));assert.deepEqual(programs[0],programs[2]);assert.deepEqual(lowered[0],lowered[1]);assert.deepEqual(lowered[1],lowered[2]);
+ const bytes=generations.map((g,i)=>g.managed.emit_managed_wasm(programs[i],runtimes[i],{maximumPages:16}));assert.deepEqual(bytes[0],bytes[1]);assert.deepEqual(bytes[1],bytes[2]);
+ const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
+ for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const n=a.number(128),object=a.invoke('grow-loop',[n]),keys=a.invoke('keys',[object]);assert.equal(a.length(keys),128);const first=a.get(keys,0),last=a.get(keys,127);assert.equal(a.readString(first),'0');assert.equal(a.readString(last),'127');for(const v of[first,last,keys,object,n])a.release(v);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
+});
 describe("browser compiler backends", () => {
   beforeAll(async () => {
     // Compiler bundling and browser process startup are fixture preparation.
@@ -1133,6 +1141,27 @@ describe("browser compiler backends", () => {
       }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
     },{source,runtime});
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-arrays.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
+  });
+  test("browser named source objects preserve own order, inheritance, copy effects and cycles without host callbacks",async()=>{
+    const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-objects.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
+    const result=await evaluateBrowser(async({bundle,source,runtime})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));let jsUrl;
+      try {
+        const c=await import(url),p=c.compile_ir_string(source,'browser-objects.eli'),rt=c.compile_ir_string(runtime,'runtime.eli'),bytes=Uint8Array.from(c.emit_managed_wasm(p,rt,{maximumPages:16})),check=(v,m)=>{if(!v)throw Error(m);};
+        check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'imports');jsUrl=URL.createObjectURL(new Blob([c.emit_ir_string(p)],{type:'text/javascript'}));const js=await import(jsUrl),a=c.instantiateManagedRuntime(bytes,{maxSlots:512,initialBytes:32768,maxBytes:1048576});a.auto(1);
+        const read=x=>x&&typeof x==='object'?x.kind===4?a.readNumber(x):x.kind===5?a.readString(x):Array.from({length:a.length(x)},(_,i)=>{const v=a.get(x,i);try{return read(v);}finally{a.release(v);}}):x;
+        const call=(name,args)=>{const r=a.invoke(name,args);try{return read(r);}finally{a.release(r);}};
+        const verify=(x,y,label)=>{if(Array.isArray(y)){check(Array.isArray(x)&&x.length===y.length,label);for(let i=0;i<y.length;i++)verify(x[i],y[i],label);}else check(Object.is(x,y),label);};
+        const value=a.number(-0),parent=a.invoke('make',[value,true]),child=a.invoke('inherit',[parent,false]),key=a.string('x');verify(call('read-value',[child,key]),-0,'inherited signed zero');verify(call('has',[child,key]),false,'own only');verify(call('keys',[child]),['own'],'own order');
+        const proto=a.invoke('proto',[child]);check(a.keyEqual(proto,parent),'prototype identity');a.release(proto);let refused=false;try{a.invoke('set-proto',[parent,child]);}catch(e){refused=e.eliscriptDiagnostic?.code==='ELI-RT0003';}check(refused,'prototype cycle');
+        const object=a.invoke('empty',[]),ref={};for(const name of['z','10','2','01','4294967294','4294967295','constructor','中😀','']){const k=a.string(name);verify(call('write',[object,k,false]),js.write(ref,name,false),'write');verify(call('keys',[object]),js.keys(ref),'ordered keys');a.release(k);}
+        const old=a.string('old'),newKey=a.string('new'),zero=a.number(0),original=a.invoke('computed',[old,zero]),originalRef=js.computed('old',0),copy=a.invoke('assoc-order',[original,newKey]),copyRef=js.assoc_order(originalRef,'new');verify(call('keys',[copy]),js.keys(copyRef),'copy order');verify(call('read-value',[original,old]),3,'RHS effects');verify(call('read-value',[copy,old]),0,'copy before effects');
+        const bulk=a.sourceObject({['__proto__']:true,empty:undefined}),protoKey=a.string('__proto__');verify(a.objectGet(bulk,protoKey),true,'bulk own proto data');verify(a.objectHas(bulk,protoKey),true,'bulk has');
+        const n=a.number(128),grown=a.invoke('grow-loop',[n]);verify(call('keys',[grown]),Array.from({length:128},(_,i)=>String(i)),'growth order');const cycle=a.invoke('self-cycle',[grown]),selfKey=a.string('self'),self=a.invoke('read-value',[cycle,selfKey]);check(a.keyEqual(cycle,self),'cycle identity');a.release(self);
+        for(const v of[value,parent,child,key,object,old,newKey,zero,original,copy,bulk,protoKey,n,grown,cycle,selfKey])a.release(v);a.collect();check(a.live()===0&&a.stats().frameDepth===0&&a.stats().collections>128,'GC cleanup');return [...bytes];
+      }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
+    },{source,runtime});
+    assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-objects.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
   });
   test("browser ordinary managed word operations preserve exact remainder, conversions and bit semantics",async()=>{
     const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-word.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');

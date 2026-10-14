@@ -248,11 +248,39 @@ presence/enumeration, hole-presence metadata, overridden methods or generic
 ToPrimitive/ToNumber conversions. Non-numeric property names other than length,
 non-index writes, dynamic methods and unsupported values are explicitly refused;
 none silently invoke JS. Heap inspection reads dense cells, not JS hole-presence
-metadata. Named object records and persistent vector literals remain separate,
-unimplemented source capabilities. The bulk `sourceArray(input = [])` constructor creates kind-14 arrays, protects
+metadata. Persistent vector literals remain a separate, unimplemented source
+capability. The bulk `sourceArray(input = [])` constructor creates kind-14 arrays, protects
 earlier operands across later getters and rejects foreign handles. The existing
 `array()` constructor retains raw kind 7. The exported setter protects a borrowed child
 across allocation even when called without a generated frame.
+
+Named `js-object` values use kind 13, a property table and a GC-traced prototype
+edge. Object literals (including computed keys), `aref`/`get`/`put`/`js-nth`,
+`js-length`, `object-has?`, `object-keys` and `object-assoc` are admitted.
+Nullish receivers use the empty-own fallback for keys/has/assoc; other boxed
+receiver kinds are explicitly refused for these operators.
+Own enumeration sorts canonical array indices through 2^32-2 before other string
+keys in insertion order; updates preserve positions. Assoc copies own fields
+before evaluating its key and RHS, retains shallow aliases and defines an own
+`__proto__` data property. Literal static `__proto__` sets a prototype; computed
+keys define own data. Prototype chains support source objects and null, with
+shadowing and cycle rejection. Ordinary length reads can return any field value.
+
+Keys support sealed UTF-16 strings, nil/booleans/undefined, NaN/infinities and
+exact signed integer Numbers with magnitude through 2^32-1; negative zero becomes
+`"0"`. Other numeric formatting, Symbols and general ToPrimitive are explicitly
+refused. Inherited standard Object prototype functions and an opaque default
+prototype result remain unsupported; array or other container prototypes,
+accessors/descriptors, named array properties and hole/presence semantics remain
+open. Unsupported values fail rather than silently invoke a JS helper.
+
+The bulk `sourceObject(input)` copies own enumerable string fields into kind 13,
+protecting values across subsequent host getters and defining own proto data.
+`objectGet`, `objectHas`, `objectSet`, `objectKeys` and `objectCopy` expose the same
+managed operations; sealed-string reads/own checks allocate no frames. Raw
+constructors/setters protect borrowed prototypes/operands across allocating GC.
+Private frames unwind to the caller on runtime failures and actual WASM traps.
+All object semantics, sorting and collection execute in zero-import WASM.
 
 The bulk entry protects earlier arguments across later getters. Generated frames
 retain parameters, lexical variables and temporaries; each argument is captured
@@ -268,7 +296,7 @@ peak-memory and throughput acceptance remain separate, open gates.
 ## Verification
 
 ```sh
-bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs tests/wasm-managed-tables.test.mjs tests/wasm-managed-control.test.mjs tests/wasm-managed-arithmetic.test.mjs tests/wasm-managed-word.test.mjs tests/wasm-managed-arrays.test.mjs
+bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs tests/wasm-managed-tables.test.mjs tests/wasm-managed-control.test.mjs tests/wasm-managed-arithmetic.test.mjs tests/wasm-managed-word.test.mjs tests/wasm-managed-arrays.test.mjs tests/wasm-managed-objects.test.mjs
 bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=firefox bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=webkit bun test tests/direct-wasm-backend.test.mjs

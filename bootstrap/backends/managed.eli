@@ -259,6 +259,57 @@
           (js-call steps :push (checked-control state "value-set" (runtime-arguments state
             (js-array (get result :result) (word-constant i) (js-nth i values))))) (setq i (1+ i)))
         (put result :steps (word-sequence steps)) result)))
+  (defun lower-managed-object (node scope state functions)
+    (let* ((properties (get node :children))
+           (result (managed-result state (runtime-call state "value-object-new" (runtime-arguments state (js-array (word-constant 3)))) t))
+           (steps (js-array (get result :steps))) (i 0) (prototype-seen nil))
+      ;; Validate property shapes before lowering any child or reading its IR.
+      (while (< i (js-length properties))
+        (let ((property (js-nth i properties)))
+          (unless (and (= (get property :kind) "object-property") (get property :children)
+                       (= (js-length (get property :children)) (if (get (get property :properties) :computed) 2 1)))
+            (managed-fail property "invalid managed object property"))) (setq i (1+ i)))
+      (setq i 0)
+      (while (< i (js-length properties))
+        (let* ((property (js-nth i properties)) (children (get property :children))
+               (computed (get (get property :properties) :computed))
+               (prototype (and (not computed) (= (get property :value) "__proto__")))
+               (key (snapshot-managed (if computed
+                      (lower-managed-expression (js-nth 0 children) scope state functions)
+                      (lower-managed-literal (js-object :kind "literal" :value (get property :value) :children (js-array)) state)) state))
+               (value (snapshot-managed (lower-managed-expression (js-nth (if computed 1 0) children) scope state functions) state)))
+          (when prototype
+            (when prototype-seen (managed-fail property "duplicate object prototype setter")) (setq prototype-seen t))
+          (js-call steps :push (get key :steps)
+            (checked-control state "value-property-key-check" (runtime-arguments state (js-array (get result :result) (get key :result))))
+            (get value :steps) (checked-control state "value-object-put" (runtime-arguments state
+              (js-array (get result :result) (get key :result) (get value :result) (word-constant (if prototype 1 2)))))))
+        (setq i (1+ i))) (put result :steps (word-sequence steps)) result))
+  (defun lower-managed-object-operation (node scope state functions)
+    (let* ((children (get node :children)) (operation (get node :value)) (count (js-length children))
+           (assoc (= operation "object-assoc")) (keys (= operation "object-keys")))
+      (unless (= count (if assoc 3 (if keys 1 2))) (managed-fail node "invalid managed object operator arity"))
+      (let* ((receiver (snapshot-managed (lower-managed-expression (js-nth 0 children) scope state functions) state))
+             (steps (js-array (get receiver :steps))))
+        (if keys
+          (let ((result (managed-result state (runtime-call state "value-object-keys" (runtime-arguments state (js-array (get receiver :result)))) t)))
+            (js-call steps :push (get result :steps)) (put result :steps (word-sequence steps)) result)
+          (let* ((copy (and assoc (managed-result state (runtime-call state "value-object-copy" (runtime-arguments state (js-array (get receiver :result)))) t)))
+                 (key (snapshot-managed (lower-managed-key (js-nth 1 children) scope state functions) state)))
+            ;; Object spread is evaluated before the computed key and RHS.
+            (when assoc (js-call steps :push (get copy :steps))) (js-call steps :push (get key :steps))
+            (if assoc
+              (let ((value (snapshot-managed (lower-managed-expression (js-nth 2 children) scope state functions) state)))
+                (js-call steps :push (checked-control state "value-property-key-check" (runtime-arguments state
+                  (js-array (get copy :result) (get key :result)))) (get value :steps)
+                  (checked-control state "value-object-put" (runtime-arguments state
+                    (js-array (get copy :result) (get key :result) (get value :result) (word-constant 2)))))
+                (put copy :steps (word-sequence steps)) copy)
+              (let ((result (managed-result state (word-if
+                              (word-compare (runtime-call state "value-object-has" (runtime-arguments state
+                                (js-array (get receiver :result) (get key :result)))) (word-constant 0) "/=")
+                              (word-constant 2) (word-constant 1)) t)))
+                (js-call steps :push (get result :steps)) (put result :steps (word-sequence steps)) result)))))))
   (defun lower-managed-access (node scope state functions)
     (let* ((children (get node :children)) (kind (get node :kind))
            (nth (and (= kind "intrinsic") (= (get node :value) "js-nth")))
@@ -272,12 +323,12 @@
         (if write
           (let ((value (snapshot-managed (lower-managed-expression (js-nth 2 children) scope state functions) state)))
             ;; Capture the assignment reference before evaluating the RHS.
-            (js-call steps :push (checked-control state "value-array-key-check" (runtime-arguments state
+            (js-call steps :push (checked-control state "value-property-key-check" (runtime-arguments state
               (js-array (get receiver :result) (get key :result)))) (get value :steps)
-              (checked-control state "value-array-put" (runtime-arguments state
+              (checked-control state "value-property-put" (runtime-arguments state
                 (js-array (get receiver :result) (get key :result) (get value :result)))))
             (js-object :steps (word-sequence steps) :result (get value :result)))
-          (let ((result (managed-result state (runtime-call state "value-array-get" (runtime-arguments state
+          (let ((result (managed-result state (runtime-call state "value-property-get" (runtime-arguments state
                          (js-array (get receiver :result) (get key :result) (word-constant (if nth 1 0))))) t)))
             (js-call steps :push (get result :steps))
             (when (= count 3)
@@ -338,6 +389,9 @@
       (cond
         ((= kind "literal") (lower-managed-literal node state))
         ((= kind "array-literal") (lower-managed-array node scope state functions))
+        ((= kind "object-literal") (lower-managed-object node scope state functions))
+        ((and (= kind "intrinsic") (or (= value "object-keys") (= value "object-has?") (= value "object-assoc")))
+         (lower-managed-object-operation node scope state functions))
         ((or (= kind "property-read") (= kind "property-write")
              (and (= kind "intrinsic") (or (= value "aref") (= value "js-nth"))))
          (lower-managed-access node scope state functions))

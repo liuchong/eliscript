@@ -36,7 +36,7 @@ test('array operations refuse invalid lengths, missing capabilities and stale/fo
  for(const value of[-1,.5,NaN,Infinity,2**32]){const n=a.number(value);assert.throws(()=>a.invoke('truncate',[arr,n]));assert.equal(a.length(arr),0);a.release(n);}
  assert.throws(()=>a.invoke('append',[arr,foreign,false]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');b.release(foreign);b.collect();
  const before=JSON.stringify(program);backend.managed.emit_managed_wasm(program,runtimeProgram);assert.equal(JSON.stringify(program),before);
- for(const expr of['(js-call x :map (lambda (a) a))','(js-call x k)','(js-object :x x)','(js-nth :length x)']){const ir=backend.compiler.compile_ir_string(`(defun f (x k) (if false ${expr} x)) (export f)`,'unsupported-container.eli');assert.throws(()=>backend.managed.emit_managed_wasm(ir,runtimeProgram),e=>e.eliscriptDiagnostic?.code==='ELI-B0001'&&e.eliscriptDiagnostic.location.file==='unsupported-container.eli');}
+ for(const expr of['(js-call x :map (lambda (a) a))','(js-call x k)','(new globalThis.Object)','(js-nth :length x)']){const ir=backend.compiler.compile_ir_string(`(defun f (x k) (if false ${expr} x)) (export f)`,'unsupported-container.eli');assert.throws(()=>backend.managed.emit_managed_wasm(ir,runtimeProgram),e=>e.eliscriptDiagnostic?.code==='ELI-B0001'&&e.eliscriptDiagnostic.location.file==='unsupported-container.eli');}
  a.release(arr);a.collect();assert.throws(()=>a.invoke('size',[arr]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');assert.equal(a.live(),0);
 });
 

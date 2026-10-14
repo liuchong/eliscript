@@ -422,7 +422,7 @@ JS 对照。接续复测 numeric-f64 九项均通过，但 Node/Chromium 网格�
 - [x] **N-PERF 数值 native 原门槛验收**：热执行含整批一次 Bun FFI 调用，
   固定同样三负载、3×5×9 采样及每项至少 1.0× 优化 JS。当前
   [保留报告](../tools/backends/results/native-macos-arm64.json)分别为递推
-  1.9664×、网格 1.1075×、微小批量 1.2317×；三项精确校验和通过，
+  1.9680×、网格 1.1104×、微小批量 1.2189×；三项精确校验和通过，
   数值门禁判定通过。旧优化路径 1.9147×/0.6221×/0.3023× 的失败报告
   保留在历史提交中，初始栈基线按原参数重新采样，产物仍为相同哈希，
   JS 对照字节也未变。通用优化包括循环常量寄存器、活跃存储与有序表达式
@@ -495,6 +495,15 @@ JS 对照。接续复测 numeric-f64 九项均通过，但 Node/Chromium 网格�
     TDD 验证真实 Code section 指令、完整六种 unsigned 比较、符号位边界、
     否定 guard 副作用和所有 Number 真值；原参数性能与三引擎/运行时/门禁
     分别验收，不把热计算或低余量通过当作完整后端稳定化。
+  - [x] **普通源数组的局部运行时与 lowering 验收**：kind 14 与 raw 数组分离，
+    几何增长/length 缩短、get/put/nth 与静态 push/pop/slice，保持效果顺序、
+    浅别名、borrowed 参数根及容量失败语义；十二项专项、Seed/三代、三浏览器
+    与全量门禁通过。命名数组属性、holes/presence、通用转换等仍开放。
+  - [x] **普通命名对象的局部运行时与 lowering 验收**：kind 13 GC 标记属性表/
+    原型边，接通字面量/属性读写、own 检查/枚举/浅拷贝及 source-object/null
+    原型。十四项专项覆盖随机差分、求值顺序、容量/陷阱、bulk getters 和 raw
+    borrowed 参数；Seed/三代、三浏览器与全量门禁通过。默认原型函数、通用
+    key 转换、accessor/descriptor 等仍开放，不关闭完整动态运行时/宿主。
 - [ ] **WASM-CAP 运行时布局与能力验收**：先给线性内存/GC 路径及 imports
   明确目标能力与内存 ABI；TDD 覆盖循环引用、逃逸闭包、跨界句柄、拒绝缺失
   特性和回收后访问，浏览器三引擎与 CLI 实际执行，不改变九格或语义门槛。
@@ -1071,7 +1080,7 @@ NaN、无穷、负零、分数及巨大范围，nil/bool/undefined 使用既定�
 非索引 Number 和不规范数字字符串读作缺失，不能截断/回绕为其他索引。
 length 目前只接收精确 uint32 Number，合法但超过容量的长度是 RT0002，
 非法长度为 RT0003。命名属性、原型、方法覆写、presence/枚举和 hole 位图、
-通用 ToPrimitive/ToNumber、动态方法及普通命名对象记录继续开放，并有
+通用 ToPrimitive/ToNumber 与动态方法继续开放，并有
 明确拒绝路径；当前仅密集单元读取与支持的源操作得到验收，不宣称一般
 JS 对象/数组语义完成，更不关闭 RT-COMMON 或任何完整宿主/九格。
 
@@ -1117,7 +1126,7 @@ WASM Node/Chromium 网格约 1.0220×/1.0325×；数值 JS/WASM/native
 ```text
 /goal 在 /Users/liu/projects/src/github.com/liuchong/eliscript 持续完成纯 Eliscript 独立后端与完整 3×3 自举，直到下面全部必要验收和签名推送条件真实满足。
 
-开始及恢复时读取当前规则、仓库 AGENTS.md 和唯一施工计划 docs/native-wasm-feasibility.md；核对分支、git status、已有进程/日志、最新代码及原始报告，保留无关修改，避免重复启动仍在运行的测试。当前已有共享优化层、numeric-f64 WASM 直接发射器和 ARM64 macOS native 对象/库/可执行文件发射器；编译器目前仍由 JS 宿主运行。WASM 数值九项与 native 三项已有通过报告，owned-memory、受管理值堆、根帧/自动回收、托管文本/编码、Map/Set、普通托管控制流/Number/Word 运算及源数组子集已通过各自局部门禁；按最新证据接续命名对象、hole/presence、完整属性/转换、集合、闭包及完整宿主，不能把数值发射、局部运行时或 JS 三代固定点当作完整自举。
+开始及恢复时读取当前规则、仓库 AGENTS.md 和唯一施工计划 docs/native-wasm-feasibility.md；核对分支、git status、已有进程/日志、最新代码及原始报告，保留无关修改，避免重复启动仍在运行的测试。当前已有共享优化层、numeric-f64 WASM 直接发射器和 ARM64 macOS native 对象/库/可执行文件发射器；编译器目前仍由 JS 宿主运行。WASM 数值九项与 native 三项已有通过报告，owned-memory、受管理值堆、根帧/自动回收、托管文本/编码、Map/Set、普通托管控制流/Number/Word 运算及源数组/命名对象子集已通过各自局部门禁；按最新证据接续 hole/presence、完整属性/转换、集合、闭包及完整宿主，不能把数值发射、局部运行时或 JS 三代固定点当作完整自举。
 
 按依赖顺序核实并继续本计划中的 N-PERF → RT-COMMON/WASM-CAP → HOST-WASM → HOST-NATIVE → MATRIX-3X3，并落实 AI-TOOLS 验收：
 1. 保持当前 native 三负载及 WASM 九项的通过状态和原报告输入、3 会话×5 预热×9 样本、交替顺序、每项至少 1.0× 当前优化 JS 的门槛。跟踪 WASM 网格低余量与后续回归；用真实失败语义/代码生成用例、原始样本与反汇编定位开销，实施通用、可证明且保序的优化，并保持既有历史性能门禁。
@@ -1134,3 +1143,59 @@ WASM Node/Chromium 网格约 1.0220×/1.0325×；数值 JS/WASM/native
 
 保持版本号、验收标准与无关修改不变。每个可交付能力批次完成必要验证、make test、make byte-compile 和受影响的契约/真实浏览器检查后，检查 git status、diff、测试证据和提交内容；签名提交并及时推送对应分支，核验签名、远端哈希与工作区，处理新提交的 CI 失败。签名失败立即停止并报告，不绕过。仅在全部必要性能、语义、完整九格、多代自举、测试及交付条件实际满足时标记目标完成，最终报告实际证据和仍存在的使用边界。
 ```
+
+
+### 普通命名对象的运行时与 lowering 契约
+
+当前能力批次在实验 managed-control-v1 增加 kind 13 命名源对象：拥有
+Map 属性表与原型边，GC 标记属性键/值和 source-object 原型。接通 js-object、
+computed key、aref/get/put/js-nth、普通 length 属性读取、object-has?、
+object-keys 和 object-assoc。枚举先按数值排序规范索引 0..2^32-2，其他
+字符串按插入顺序；更新不改位置。assoc 在 key/RHS 副作用之前浅拷贝
+own 数据；__proto__ 区分静态字面量原型 setter、继承 setter 和 computed/assoc
+own 数据，支持 source-object/null 原型、遮蔽及循环拒绝。
+
+支持 sealed UTF-16 key、nil/bool/undefined、NaN/正负无穷与绝对值到
+2^32-1 的精确整数 Number，负零转为 "0"。分数/更大有限 Number 的
+通用字符串格式化、Symbol/ToPrimitive、默认 Object 原型函数/opaque
+原型结果、其他容器原型、accessor/descriptor，以及数组命名属性/holes
+仍明确开放并拒绝。keys/has/assoc 支持 nullish empty-own fallback，
+其他 receiver kind 不假装已完成装箱语义。此批不关闭 RT-COMMON、
+WASM-CAP、完整宿主或完整九格。
+
+新增 bulk sourceObject 与 objectGet/Has/Set/Keys/Copy，构造前保护各 getter
+已经返回的值；own __proto__ 数据不变成宿主 setter。String 查询无分配；
+raw 导出构造器/setter 在 frame 分配与自动 GC 时保护 borrowed prototype/
+receiver/key/child。失败保留原错误，真实 WASM 陷阱展开私有帧、保留外层帧。
+
+TDD 保留最初 object-literal 源位置拒绝、bulk 构造器缺失与畸形属性 IR
+错误三个真实 Red；Green 验证求值顺序、Unicode/IEEE、1024 次随机差分、
+浅拷贝/别名、原型循环、容量失败原状态和根清理。容量耗尽后的状态查询
+使用实际无分配运行时 String 路径，避免检查自身再次耗尽；不增加容量预算。
+Seed/三代 canonical/typed IR、descriptor、WASM 字节及三浏览器实际执行
+纳入原测试，最终全量门禁与源码绑定在本批冻结后记录。
+
+
+本批源码冻结后的原 3×5×9/交替顺序重测，WASM 九项、native 三项均
+通过每项至少 1.0× 当前优化 JS 门槛。native 递推/网格/微小批量约
+1.9680×/1.1104×/1.2189×；WASM Node/Chromium 网格约 1.0309×/1.0075×，
+余量稳定化继续开放。优化 JS、WASM 与 native 数值产物哈希均与上一批
+相同，不能把采样差异解释为命名对象的性能收益；原 native 栈基线仍失败。
+当前报告由原采样器生成并真实校验源码身份，完整命名对象运行时与完整
+编译器生产性能仍须另行冻结预算及验收。
+
+
+本批本地原始全量门禁通过：核心 Emacs 167/167、Bun 686/686（129 文件），
+应用 Emacs 3/3、Bun 216/216（23 文件）与 CLI；严格字节编译通过。
+新增十四项对象专项与 Seed/三代固定点、零 imports 实际执行纳入默认套件。
+原生成器更新为 110 fixtures/419 绑定文件，stable 173/provisional 1、
+证据 679 locators/134 files 均未放宽；版本与原拒绝路径保持不变。
+
+下一可测量增量为普通字符串属性/方法 lowering 与其求值顺序、Unicode/
+转换/容量及 Seed/三代/三浏览器验收，再推进完整属性/转换、持久集合/
+闭包、JSON/正则/异常等编译器依赖；完整 WASM/native 宿主和完整九格
+仍未完成，数值性能低余量稳定化仍开放。
+
+Chromium（默认全量）、Firefox 与 WebKit 的完整后端套件各 39/39 通过，
+包含命名对象在浏览器内发射后的零 imports 执行与相同 WASM 字节对照。
+签名交付前再次通过受影响契约检查；所有测量与失败记录按实际结果保留。

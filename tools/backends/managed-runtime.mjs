@@ -43,7 +43,21 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
    values.forEach((v,i)=>target.setUint32(offset+i*4,v,true));return wrap(value);
   } finally {for(const value of borrowed)call('heap-release',heap,value);}
  }
- return Object.freeze({
+ function objectCall(name,...args) {
+  const target=call('frame-current',heap);
+  try{return call(name,heap,...args);}catch(error){call('frame-unwind',heap,target);throw error;}
+ }
+ function sourceObject(input) {
+  if(input===null||typeof input!=='object'||Array.isArray(input))fail(3);
+  const borrowed=[];let object=0;
+  try {
+   const values=Object.keys(input).map(key=>{const value=id(input[key]);call('heap-pin',heap,value);borrowed.push(value);return [key,value];});
+   object=objectCall('value-object-new',3);call('heap-pin',heap,object);
+   for(const [key,value]of values){const name=api.string(key);try{objectCall('value-object-put',object,id(name),value,2);}finally{api.release(name);}}
+   return wrap(object);
+  }finally{if(object)call('heap-release',heap,object);for(const value of borrowed)call('heap-release',heap,value);}
+ }
+ const api=Object.freeze({
   invoke(name,args=[]) {
    if(typeof name!=='string'||!entries.has(name)||!Array.isArray(args)||args.length!==entries.get(name))fail(3);
    const borrowed=[];let entered=false,target=0;
@@ -106,6 +120,12 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
   },
   readBytes(value) {const {length,offset}=data(value,6);return new Uint8Array(e.memory.buffer,offset,length).slice();},
   array(input=[]) {return refs(input,7);},sourceArray(input=[]) {return refs(input,14);},record(input=[]) {return refs(input,8);},
+  sourceObject,
+  objectGet(value,key) {return wrap(objectCall('value-object-get',id(value),id(key)));},
+  objectHas(value,key) {return !!objectCall('value-object-has',id(value),id(key));},
+  objectSet(value,key,child) {objectCall('value-object-put',id(value),id(key),id(child),0);return value;},
+  objectKeys(value) {return wrap(objectCall('value-object-keys',id(value)));},
+  objectCopy(value) {return wrap(objectCall('value-object-copy',id(value)));},
   get(value,index) {return wrap(call('value-get',heap,id(value),word(index)));},
   set(value,index,child) {call('value-set',heap,id(value),word(index),id(child));},
   length(value) {return call('value-length',heap,id(value));},
@@ -127,4 +147,5 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
   collect() {return call('heap-collect',heap);},live() {return call('heap-live',heap);},
   stats() {return Object.freeze({usedBytes:call('heap-used',heap),capacityBytes:call('heap-capacity',heap),liveValues:call('heap-live',heap),frameDepth:call('frame-depth',heap),collections:call('heap-collections',heap)});},
  });
+ return api;
 }
