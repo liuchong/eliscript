@@ -289,8 +289,12 @@ them in the parent frame before further allocation. The raw entry caller must
 retain parameter roots until return and pin its borrowed result before allocating.
 No transient root counts are left inside generated functions. Runtime errors
 skip later evaluation, clean only their own frames and retain the original code;
-the bulk host unwinds a real WASM trap only to its pre-call frame. The current
-root strategy conservatively retains temporaries until function return; compiler
+the bulk host unwinds a real WASM trap only to its pre-call frame. Direct property-reader leaves whose receiver and key are plain parameter
+references avoid a generated frame. Full IR validation still precedes selection;
+effectful keys, literal construction, defaults, assignments and larger bodies keep
+the ordinary rooting path. Callers retain parameter roots, and allocating runtime
+operations retain their own operands until the borrowed result is returned.
+The current root strategy otherwise conservatively retains temporaries until function return; compiler
 peak-memory and throughput acceptance remain separate, open gates.
 
 ## Verification

@@ -9,6 +9,11 @@ function read(a,x){if(!x||typeof x!=='object')return x;if(x.kind===4)return a.re
 function invoke(a,name,args){const v=a.invoke(name,args);try{return read(a,v);}finally{a.release(v);}}
 function field(a,o,k){const key=box(a,k);try{return invoke(a,'read-value',[o,key]);}finally{a.release(key);}}
 function inspect(a,o){return Object.fromEntries(invoke(a,'keys',[o]).map(k=>[k,field(a,o,k)]));}
+function inspectRootedKeys(a,o){
+ const keys=a.invoke('keys',[o]),fields=[];
+ try{for(let i=0;i<a.length(keys);i++){const key=a.get(keys,i);try{fields.push([a.readString(key),invoke(a,'read-value',[o,key])]);}finally{a.release(key);}}return Object.fromEntries(fields);}finally{a.release(keys);}
+}
+
 test('named source objects preserve own values, missing/nullish defaults, duplicate keys, Unicode and identity through GC',()=>{
  const a=instantiateManagedRuntime(bytes);a.auto(1);for(const value of[null,false,true,undefined,0,-0,NaN,Infinity,Number.MIN_VALUE,'','中😀\ud800']){const x=box(a,value),o=a.invoke('make',[x,false]),ref=js.make(value,false);assert.equal(o.kind,13);assert.deepEqual(inspect(a,o),ref);
   for(const k of['x','y','missing','','absent','中😀\ud800']){const key=a.string(k),fallback=a.number(9);assert.deepEqual(invoke(a,'read-value',[o,key]),js.read_value(ref,k));assert.deepEqual(invoke(a,'nth-value',[key,o]),js.nth_value(k,ref));assert.deepEqual(invoke(a,'default-value',[o,key,fallback]),js.default_value(ref,k,9));assert.equal(invoke(a,'has',[o,key]),js.has(ref,k));assert.equal(invoke(a,'default-order',[o,key]),js.default_order(ref,k));a.release(key);a.release(fallback);}
@@ -49,8 +54,8 @@ test('property-key conversions preserve exact signed integer and nonfinite names
 test('radix key order and shallow assoc agree with deterministic random JS updates under collection',()=>{
  const a=instantiateManagedRuntime(bytes);a.auto(1);let state=0x23417ad;const next=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return state>>>0;};const o=a.invoke('empty',[]),ref={};
  const values=[null,false,true,undefined,NaN,-0,Infinity,-Infinity,Number.MIN_VALUE,'中😀\ud800'];
- for(let i=0;i<1024;i++){const name=next()%2?String(next()%256):'k'+next()%128,key=a.string(name),value=values[next()%values.length],v=box(a,value);assert.deepEqual(invoke(a,'write',[o,key,v]),js.write(ref,name,value));assert.deepEqual(invoke(a,'keys',[o]),js.keys(ref));assert.deepEqual(inspect(a,o),ref);
-  if(i%16===0){const copy=a.invoke('assoc',[o,key,false]);assert.deepEqual(inspect(a,copy),js.assoc(ref,name,false));a.release(copy);}a.release(key);a.release(v);a.collect();assert.equal(a.stats().frameDepth,0);
+ for(let i=0;i<1024;i++){const name=next()%2?String(next()%256):'k'+next()%128,key=a.string(name),value=values[next()%values.length],v=box(a,value);assert.deepEqual(invoke(a,'write',[o,key,v]),js.write(ref,name,value));assert.deepEqual(invoke(a,'keys',[o]),js.keys(ref));assert.deepEqual(inspectRootedKeys(a,o),ref);
+  if(i%16===0){const copy=a.invoke('assoc',[o,key,false]);assert.deepEqual(inspectRootedKeys(a,copy),js.assoc(ref,name,false));a.release(copy);}a.release(key);a.release(v);a.collect();assert.equal(a.stats().frameDepth,0);
  }
  a.release(o);a.collect();assert.equal(a.live(),0);
 });
@@ -94,6 +99,24 @@ test('raw exported object constructors and setters protect borrowed prototype, r
  const parent=call('value-object-new',0),key=call('value-string',1);new DataView(e.memory.buffer).setUint16(call('value-data',key,5),120,true);call('value-seal',key);const child=call('value-number',0,0x80000000);
  call('heap-auto',1);call('value-object-put',parent,key,child,2);call('heap-pin',parent);call('heap-pin',key);assert.equal(call('value-object-has',parent,key),1);const value=call('value-object-get',parent,key);assert(Object.is(new DataView(e.memory.buffer).getFloat64(call('value-data',value,4),true),-0));
  call('heap-release',parent);const inherited=call('value-object-new',parent);call('heap-pin',inherited);assert.equal(call('value-object-get',inherited,key),child);assert(call('heap-collections')>0);call('heap-release',inherited);call('heap-release',key);call('heap-collect');assert.equal(call('heap-live'),0);assert.equal(call('frame-depth'),0);
+});
+test('direct property reader leaves perform no allocations or collections and transfer aliased results with unchanged ownership',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);const child=a.string('held'),object=a.sourceObject({x:child}),key=a.string('x'),before=a.stats();
+ for(let i=0;i<1024;i++){const value=a.invoke('read-value',[object,key]);assert(a.keyEqual(value,child));a.release(value);const nth=a.invoke('nth-value',[key,object]);assert(a.keyEqual(nth,child));a.release(nth);}
+ assert.equal(a.stats().collections,before.collections);assert.equal(a.stats().usedBytes,before.usedBytes);assert.equal(a.stats().frameDepth,0);for(const value of[object,key,child])a.release(value);a.collect();assert.equal(a.live(),0);
+});
+test('direct readers retain allocating runtime operands and caller roots, while effectful key readers keep automatic frames',async()=>{
+ const text='(defun direct (o k) (get o k)) (defun aref-direct (o k) (aref o k)) (defun nth-direct (o k) (js-nth k o)) (defun literal (o) (get o :x)) (defun assigned (o k p) (get o (progn (setq o p) k))) (defun caller (o k) (let ((v (direct o k))) (js-array v (js-object :saved v)))) (export direct aref-direct nth-direct literal assigned caller)';
+ const ir=backend.compiler.compile_ir_string(text,'readers.eli'),artifact=Uint8Array.from(backend.managed.emit_managed_wasm(ir,runtimeProgram)),a=instantiateManagedRuntime(artifact);a.auto(1);const child=a.string('held'),object=a.sourceObject({0:child,x:child}),zero=a.number(0),x=a.string('x');
+ for(const name of['direct','aref-direct','nth-direct']){const v=a.invoke(name,[object,zero]);assert(a.keyEqual(v,child));a.release(v);}const before=a.stats().collections,result=a.invoke('literal',[object]);assert(a.keyEqual(result,child));a.release(result);assert(a.stats().collections>before,'literal construction still allocates and requires a frame');
+ const other=a.sourceObject({x:false}),collections=a.stats().collections,assigned=a.invoke('assigned',[object,x,other]);assert(a.keyEqual(assigned,child));a.release(assigned);assert(a.stats().collections>collections);a.release(other);
+ const array=a.invoke('caller',[object,x]),first=a.get(array,0),record=a.get(array,1),saved=a.string('saved'),nested=a.objectGet(record,saved);assert(a.keyEqual(first,child));assert(a.keyEqual(nested,child));for(const v of[first,record,saved,nested,array,child,object,zero,x])a.release(v);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+ const held=a.string('getter-held'),receiver=a.sourceObject({x:held}),getterKey=a.string('x');a.release(held);const args=[receiver];Object.defineProperty(args,1,{get(){a.release(receiver);a.collect();return getterKey;}});const transferred=a.invoke('direct',args);assert.equal(a.readString(transferred),'getter-held');a.release(transferred);a.release(getterKey);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+});
+test('a real trap inside a direct reader preserves the caller frame and does not strand argument or result roots',async()=>{
+ const source=await readFile('bootstrap/runtime/memory.eli','utf8'),start=source.indexOf('  (defun heap-object-read '),end=source.indexOf('  (defun value-object-get ',start);assert(start>=0&&end>start);const injected=backend.compiler.compile_ir_string(source.slice(0,start)+'  (defun heap-object-read (heap object key) (load-u32 4294967295))\n'+source.slice(end),'trap-runtime.eli');
+ const a=instantiateManagedRuntime(Uint8Array.from(backend.managed.emit_managed_wasm(program,injected)));a.auto(1);const o=a.sourceObject({0:true,x:false}),key=a.string('x'),number=a.number(0),frame=a.frame(1);a.frameSet(frame,0,o);
+ for(const k of[key,number]){assert.throws(()=>a.invoke('read-value',[o,k]),e=>e instanceof WebAssembly.RuntimeError);assert.equal(a.stats().frameDepth,1);const retained=a.frameGet(frame,0);assert(a.keyEqual(retained,o));a.release(retained);}const keys=a.objectKeys(o);assert.deepEqual(read(a,keys),['0','x']);a.release(keys);a.leaveFrame(frame);for(const v of[o,key,number])a.release(v);a.collect();assert.equal(a.live(),0);
 });
 test('Node executes identical zero-import named-object bytes, preserves order and inherited properties, and releases all roots',async()=>{
  const path=resolve(directory,'objects.wasm');await writeFile(path,bytes);const result=spawnSync('node',['--input-type=module','-e',`

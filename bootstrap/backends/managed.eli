@@ -466,6 +466,20 @@
              (js-call steps :push (get result :steps)) (put result :steps (word-sequence steps)) result)))
         (t (managed-fail node (str "unsupported managed control IR: " kind ":" value))))))
 
+  (defun managed-direct-reader (children arity scope state)
+    (let ((result nil))
+      (when (= (js-length children) (1+ arity))
+        (let* ((node (js-nth arity children)) (kind (get node :kind)) (value (get node :value))
+               (operands (get node :children))
+               (nth (and (= kind "intrinsic") (= value "js-nth"))))
+          (when (and (= (js-length operands) 2)
+                     (or (= kind "property-read") (and (= kind "intrinsic") (or nth (= value "aref"))))
+                     (= (get (js-nth 0 operands) :kind) "reference") (= (get (js-nth 1 operands) :kind) "reference"))
+            (let ((receiver (find-local scope (get (js-nth (if nth 1 0) operands) :value)))
+                  (key (find-local scope (get (js-nth (if nth 0 1) operands) :value))))
+              (when (and receiver key)
+                (setq result (runtime-call state "value-property-get" (runtime-arguments state
+                  (js-array (word-local receiver) (word-local key) (word-constant (if nth 1 0))))))))))) result))
   (defun lower-managed-function (function functions runtime)
     (let* ((node (get function :source)) (children (get node :children))
            (arity (get function :publicArity)) (state (js-object :locals (js-array) :roots 0 :runtime runtime))
@@ -486,16 +500,24 @@
         (while (< index arity)
           (js-call steps :push (checked-control state "heap-reference-check" (runtime-arguments state (js-array (word-local (js-nth index scope))))))
           (setq index (1+ index)))
-        (js-call steps :push (managed-guard state (word-set (get state :frame)
-          (runtime-call state "frame-new" (runtime-arguments state (js-array (word-constant (get state :roots)))))))
-          (managed-guard state (capture-error state)))
-        (setq index 0)
-        (while (< index arity) (js-call steps :push (root-local state (js-nth index scope))) (setq index (1+ index)))
-        (js-call steps :push (get body :steps) (managed-guard state (word-set result (get body :result))))
-        ;; Internal calls return borrowed values. Neither pop nor the parent's
-        ;; immediately following root installation allocates or collects.
-        (js-call steps :push (word-if (word-compare (word-local (get state :frame)) (word-constant 0) "/=")
-          (runtime-call state "frame-pop" (runtime-arguments state (js-array (word-local (get state :frame))))) (word-constant 0)))
+        (let ((reader (managed-direct-reader children arity scope state)))
+          (if reader
+            ;; A direct leaf has no evaluating key/RHS, lexical assignment or
+            ;; intermediate value. Callers retain parameter roots; allocating
+            ;; runtime operations protect their operands until a borrowed return.
+            (js-call steps :push (managed-guard state (word-set result reader)) (managed-guard state (capture-error state)))
+            (progn
+              (js-call steps :push (managed-guard state (word-set (get state :frame)
+                (runtime-call state "frame-new" (runtime-arguments state (js-array (word-constant (get state :roots)))))))
+                (managed-guard state (capture-error state)))
+              (setq index 0)
+              (while (< index arity) (js-call steps :push (root-local state (js-nth index scope))) (setq index (1+ index)))
+              (js-call steps :push (get body :steps) (managed-guard state (word-set result (get body :result))))
+              ;; Internal calls return borrowed values. Neither pop nor the parent's
+              ;; immediately following root installation allocates or collects.
+              (js-call steps :push (word-if (word-compare (word-local (get state :frame)) (word-constant 0) "/=")
+                (runtime-call state "frame-pop" (runtime-arguments state (js-array (word-local (get state :frame))))) (word-constant 0)))
+              0)))
         (js-call steps :push (word-if (word-compare (word-local (get state :error)) (word-constant 0) "=")
           (word-local result) (runtime-call state "fail" (js-array (word-local (get state :error))))))
         (put function :locals (get state :locals)) (put function :body (word-node "sequence" steps nil))))
