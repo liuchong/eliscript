@@ -446,3 +446,30 @@ retains holes at other indices, protects earlier getter values and ignores the
 input's iterator override.
 Own proto data is copied as data; changing Array prototypes, general descriptors,
 Symbol/BigInt keys and object ToPrimitive remain explicitly unsupported.
+
+## Source Map, Set and live iterators
+
+The managed profile accepts unshadowed builtin Map/Set constructors, their
+get/set/add/has/delete/clear calls, size, and entries/keys/values/next. Constructors
+consume arrays, source collections, live source iterators and String code points;
+Map entries must be objects and are read at properties 0 and 1. Null and undefined
+initializers create empty collections. Ignored arguments still evaluate in order.
+
+Source wrappers use heap kinds 15/16/17 while raw Map/Set/iterator kinds 10/11/12
+retain their existing ABI. Collection entries are separate from named own data;
+size is inherited and read-only, and own enumeration/copy includes only named
+own data. Method lookup is captured before arguments. Noncallable shadows fail
+after argument evaluation, and replacing a method during argument evaluation
+does not change the captured builtin. Simple parameter-only get/has leaves use
+no private frame, allocation or GC.
+
+Table iteration stays live across insertion, deletion, clear and storage growth.
+Array iterators observe current length and return undefined for holes; String
+iteration consumes code points and preserves lone surrogates. Each next call
+returns a fresh value/done object. Completion is sticky and releases its source.
+GC traces wrappers, named data, active iterators and their current values.
+
+Arbitrary constructors, callbacks, function values, Symbol protocols, descriptors,
+prototype changes and other collection APIs remain unsupported. Missing members
+return undefined; known unsupported builtin function values are refused. These
+zero-import WASM slices do not complete either compiler host or the full matrix.

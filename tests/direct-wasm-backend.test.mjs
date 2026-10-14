@@ -577,6 +577,13 @@ test("explicit ABI CLI writes executable JS and directly encoded WASM", async ()
 test("direct WASM performance report preserves budgets and blocks failed promotion", async () => {
   const report = JSON.parse(await readFile(resolve(root, "tools/backends/results/direct-wasm-macos-arm64.json"), "utf8"));
   await validateDirectWasmReport(report);
+  const collectionFirst = JSON.parse(await readFile(resolve(root, "tools/backends/results/direct-wasm-source-collections-first-macos-arm64.json"), "utf8"));
+  await validateDirectWasmReport(collectionFirst, { verifySources: false });
+  assert.equal(collectionFirst.decision.productionPassed, false);
+  assert.deepEqual(collectionFirst.artifacts, report.artifacts);
+  const forgedCollection = structuredClone(collectionFirst);
+  forgedCollection.decision.productionPassed = true;
+  await assert.rejects(validateDirectWasmReport(forgedCollection, { verifySources: false }));
   const first = JSON.parse(await readFile(resolve(root, "tools/backends/results/direct-wasm-native-recheck-first-macos-arm64.json"), "utf8"));
   // Historical failures keep their original source identity and all samples.
   await validateDirectWasmReport(first, { verifySources: false });
@@ -739,6 +746,14 @@ test("ordinary source text has Seed and three-generation IR, descriptor and WASM
  const bytes=generations.map((g,i)=>g.managed.emit_managed_wasm(programs[i],runtimes[i],{maximumPages:16}));assert.deepEqual(bytes[0],bytes[1]);assert.deepEqual(bytes[1],bytes[2]);
  const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
  for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const s=a.string('中😀\ud800'),p=a.number(1),point=a.invoke('code-point',[s,p]);assert.equal(a.readNumber(point),0x1f600);a.release(point);const fixed=a.invoke('repair',[s]);assert.equal(a.readString(fixed),'中😀�');const needle=a.string('😀'),last=a.invoke('last',[s,needle,undefined]);assert.equal(a.readNumber(last),1);for(const v of[s,p,fixed,needle,last])a.release(v);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
+});
+test("ordinary source collections have Seed and three-generation IR, descriptor and WASM fixed points",async()=>{
+ const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-source-collections.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
+ const programs=generations.map(g=>g.compiler.compile_ir_string(source,'source-collections.eli')),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtime,'runtime.eli'));
+ const lowered=generations.map((g,i)=>g.managed.lower_managed_program(programs[i],runtimes[i]));assert.deepEqual(programs[0],programs[1]);assert.deepEqual(programs[1],programs[2]);assert.deepEqual(lowered[0],lowered[1]);assert.deepEqual(lowered[1],lowered[2]);
+ const bytes=generations.map((g,i)=>g.managed.emit_managed_wasm(programs[i],runtimes[i],{maximumPages:16}));assert.deepEqual(bytes[0],bytes[1]);assert.deepEqual(bytes[1],bytes[2]);
+ const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
+ for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const n=a.number(64),map=a.invoke('map-loop',[n]),size=a.invoke('size',[map]);assert.equal(a.readNumber(size),64);a.release(size);const it=a.invoke('entries',[map]),step=a.invoke('next',[it]),key=a.string('value'),pair=a.objectGet(step,key),first=a.get(pair,0);assert.equal(a.readNumber(first),0);for(const x of[first,pair,key,step,it,map,n])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
 });
 test("primitive Number and text conversions have Seed and three-generation IR, descriptor and WASM fixed points", async () => {
   const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-number-conversion.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
@@ -1307,6 +1322,29 @@ describe("browser compiler backends", () => {
       }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
     },{source,runtime});
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-arithmetic.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
+  });
+  test("browser ordinary Map and Set constructors and live iterators match source JS without host callbacks",async()=>{
+    const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-source-collections.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
+    const result=await evaluateBrowser(async({bundle,source,runtime})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));let jsUrl;
+      try{
+        const c=await import(url),p=c.compile_ir_string(source,'browser-source-collections.eli'),rt=c.compile_ir_string(runtime,'runtime.eli'),bytes=Uint8Array.from(c.emit_managed_wasm(p,rt,{maximumPages:16})),check=(value,label)=>{if(!value)throw Error(label);};check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'imports');
+        jsUrl=URL.createObjectURL(new Blob([c.emit_ir_string(p)],{type:'text/javascript'}));const js=await import(jsUrl),a=c.instantiateManagedRuntime(bytes,{maxSlots:512,initialBytes:32768,maxBytes:1048576});a.auto(1);
+        const box=value=>typeof value==='number'?a.number(value):typeof value==='string'?a.string(value):value;
+        const read=value=>{if(!value||typeof value!=='object')return value;if(value.kind===4)return a.readNumber(value);if(value.kind===5)return a.readString(value);if(value.kind===14)return Array.from({length:a.length(value)},(_,i)=>{const x=a.get(value,i);try{return read(x);}finally{a.release(x);}});if(value.kind===13){const out={},keys=a.objectKeys(value);try{for(let i=0;i<a.length(keys);i++){const key=a.get(keys,i),x=a.objectGet(value,key);try{Object.defineProperty(out,a.readString(key),{value:read(x),enumerable:true});}finally{a.release(key);a.release(x);}}}finally{a.release(keys);}return out;}throw Error('unexpected source value');};
+        const verify=(actual,expected,label)=>{if(expected&&typeof expected==='object'){check(actual&&typeof actual==='object',label);const keys=Object.keys(expected);check(Object.keys(actual).length===keys.length,label+' shape');for(const key of keys)verify(actual[key],expected[key],label);}else check(Object.is(actual,expected),label);};
+        const call=(name,args=[])=>{const out=a.invoke(name,args);try{return read(out);}finally{a.release(out);}},list=(value,method='entries')=>{const it=a.invoke(method,[value]),out=[];try{for(;;){const step=call('next',[it]);if(step.done)break;out.push(step.value);}}finally{a.release(it);}return out;};
+        const map=a.invoke('empty-map'),set=a.invoke('empty-set'),reference=js.empty_map(),referenceSet=js.empty_set();
+        for(const[k,v]of[[null,undefined],[false,null],[true,false],[undefined,true],[-0,-0],[NaN,Infinity],['中😀\ud800','text']]){const key=box(k),value=box(v),written=a.invoke('set-value',[map,key,value]),added=a.invoke('add-value',[set,key]);check(a.keyEqual(map,written)&&a.keyEqual(set,added),'receiver result');a.release(written);a.release(added);js.set_value(reference,k,v);js.add_value(referenceSet,k);verify(call('lookup',[map,key]),js.lookup(reference,k),'get');a.release(key);a.release(value);}
+        verify(list(map),[...reference],'entries');verify(list(set,'values'),[...referenceSet],'Set values');verify(call('own-keys',[map]),[],'entries are not own fields');const size=a.string('size');verify(call('own',[map,size]),false,'inherited size');a.release(size);
+        const it=a.invoke('entries',[map]),rit=js.entries(reference);verify(call('next',[it]),js.next(rit),'live first');call('clear',[map]);js.clear(reference);const late=a.string('late'),written=a.invoke('set-value',[map,late,true]);a.release(written);js.set_value(reference,'late',true);verify(call('next',[it]),js.next(rit),'live clear/reinsert');verify(call('next',[it]),js.next(rit),'done');
+        const word=a.string('a😀a\ud800'),unicode=a.invoke('from-set',[word]);verify(list(unicode,'values'),[...js.from_set('a😀a\ud800')],'code points');const one=a.number(1),two=a.number(2),pair=a.sourceArray([one,two]),input=a.sourceArray([pair]),constructed=a.invoke('from-map',[input]);verify(list(constructed),[...js.from_map([[1,2]])],'entry constructor');
+        const holes=a.sourceArray([true,,undefined]),arrayIterator=a.invoke('entries',[holes]),arrayReference=[true,,undefined].entries();for(let i=0;i<4;i++)verify(call('next',[arrayIterator]),arrayReference.next(),'array iteration');
+        const marker=a.sourceArray([false]),referenceMarker=[false],get=a.string('get');call('write',[map,get,false]);reference.get=false;let refused=false;try{a.invoke('method-shadow',[map,marker]);}catch(e){refused=e.eliscriptDiagnostic?.code==='ELI-RT0003';}check(refused,'method shadow');try{js.method_shadow(reference,referenceMarker);}catch{}verify(read(marker),referenceMarker,'argument effect');const absent=a.string('next');verify(call('read-value',[map,absent]),js.read_value(reference,'next'),'missing member');
+        for(const value of[map,set,it,late,word,unicode,one,two,pair,input,constructed,holes,arrayIterator,marker,get,absent])a.release(value);a.collect();check(a.live()===0&&a.stats().frameDepth===0,'cleanup');return [...bytes];
+      }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
+    },{source,runtime});
+    assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-source-collections.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
   });
   test("browser ordinary managed control executes boxed values with automatic roots and source-equivalent semantics",async()=>{
     const source=await readFile(resolve(root,"tests/fixtures/wasm-managed-control.eli"),"utf8"),runtime=await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8");

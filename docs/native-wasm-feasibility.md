@@ -525,6 +525,11 @@ JS 对照。接续复测 numeric-f64 九项均通过，但 Node/Chromium 网格�
     命名 primitive 键、own 查询/枚举、浅对象拷贝、length/slice 转换与方法
     遮蔽；保留 raw 数组 ABI、GC/容量失败与求值顺序。按下述契约完成三代/
     三浏览器、原性能和全量门禁后关闭，不代替完整属性/原型/动态宿主。
+  - [x] **普通 Map/Set 与源迭代器的本地验收**：接通静态且未被遮蔽的内建
+    构造器、get/set/add/has/delete/clear、size、entries/keys/values/next，
+    支持数组、集合、源迭代器与 String code-point 输入及 own 属性隔离；
+    保持 raw 表 ABI。补齐 GC/容量/trap、三代/三浏览器和原门禁后关闭，
+    回调、完整 Symbol/原型及其他集合 API 不由本批代替。
 - [ ] **WASM-CAP 运行时布局与能力验收**：先给线性内存/GC 路径及 imports
   明确目标能力与内存 ABI；TDD 覆盖循环引用、逃逸闭包、跨界句柄、拒绝缺失
   特性和回收后访问，浏览器三引擎与 CLI 实际执行，不改变九格或语义门槛。
@@ -1702,3 +1707,47 @@ make byte-compile 严格检查通过，548 个冻结源码文件未变化。本�
 验收通过，保留完整 Array 原型/descriptor、动态转换、编译器宿主与九格缺口。
 前一签名提交 0b9a6be 的兼容性 CI 四格、浏览器六格及 Pages 均通过，其中
 此前超时的 macOS/Emacs 30.2 保持原 CI 预算完成；本批提交的 CI 须另行核验。
+
+### 普通 Map/Set 构造与源迭代器接续
+
+源构造器当前在 managed lowering 拒绝，底层已验收 raw 表仍无法由普通
+new/方法调用使用，形成真实 Red。本批用 kind 15/16 包装 raw Map/Set 表与
+独立 own 属性，kind 17 表示源迭代器；不改变 kind 10/11/12 的 raw ABI。
+源迭代器连接已验收的表 ticket 活迭代，也支持数组的实时 length/空洞与
+String code-point。返回新的 value/done 对象，完成后保持 done，构造器
+消费输入时保留求值、entry 读取和异常顺序；不以提前快照替代活迭代。
+
+只识别未被局部或模块声明遮蔽的内建 Map/Set 名称及其简单 js* 引用，
+其他构造器或任意 JS 均明确拒绝。构造及方法的忽略实参仍依序求值，方法
+数据遮蔽在参数完成后拒绝。集合条目与 own 数据属性分离，size 是继承的
+只读 getter，浅对象拷贝仅复制 own 数据。构造/查询/增删/基础迭代为本批
+范围；回调、原型修改、descriptor/Symbol、其他集合 API 与完整编译器
+宿主继续开放。依据规范核对 [Map 构造及 entry 读取](https://tc39.es/ecma262/multipage/keyed-collections.html#sec-map-iterable)
+和 [IteratorClose](https://tc39.es/ecma262/multipage/abstract-operations.html#sec-iteratorclose)，
+新切片仍须通过原始全量、性能和真实浏览器门禁后才能验收与交付。
+
+本批已保留源构造器拒绝、查询额外 GC、成员品牌及非法标记的真实 Red，
+并修复句柄错误码被覆盖和静态构造器/方法 IR 隐藏子树的问题。当前十六项
+专项通过，包含独立 Node 执行同一 WASM 与生成 JS；最新数组/对象/字符串/
+源集合四文件 70/70，通过前一轮十二文件运行时回归 218/218。简单 get/has
+读取保持零帧、零分配、零 GC；效果参数和真实陷阱保持调用者根与错误顺序。
+原参数性能报告源码绑定、三浏览器、全量和严格字节编译仍待本批最终验收。
+
+本批第一次原参数数值复测为 8/9，Chromium 网格 0.9783×；对应
+[完整失败报告](../tools/backends/results/direct-wasm-source-collections-first-macos-arm64.json)
+保留。后两轮 WASM 网格中位数约 1.385/1.470 ms，JS 约 1.345 ms；
+JS/WASM 字节未变，不能将该失败笼统归因为环境。随后仅作一次同参数确认，
+九项通过，Node/Chromium 网格约 1.0213×/1.0264×；native 三项约
+1.8465×/1.1247×/1.2354×，初始栈 baseline 仍失败。原参数、输入、优化 JS
+及所有产物哈希均未改变。这关闭源码绑定复测，不关闭已知低余量稳定化，
+也不能把采样差异计为本批集合能力带来的数值收益。
+
+本批最终冻结 560 个源码文件，Chromium/Firefox/WebKit 各自完整 47/47
+通过，包含三代 IR、lowered descriptor 和实际 WASM 字节固定点。原始
+make test 完整退出 0：核心 ERT 168/168、Bun 783/783（136 文件）、核心
+CLI、应用 ERT 3/3、Bun 217/217（23 文件）及应用 CLI 均通过；严格
+make byte-compile 通过，冻结源码未变化。兼容契约含 114 个夹具和 423 个
+源码绑定，14 份历史报告的完整性检查通过。前一提交 62fa214 的兼容性四格、
+浏览器六格及 Pages 已核验通过；本批提交 CI 仍须另行核验。关闭的仅是
+普通集合与迭代器局部能力，完整 Symbol/原型/回调、动态运行时、WASM/native
+编译器宿主、九格联合自举与稳定化继续开放，版本仍为 0.0.1。

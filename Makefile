@@ -63,6 +63,7 @@ test-core: check-contracts
 		tests/wasm-memory-runtime.test.mjs \
 		tests/wasm-managed-runtime.test.mjs \
 		tests/wasm-managed-tables.test.mjs \
+		tests/wasm-managed-source-collections.test.mjs \
 		tests/wasm-managed-control.test.mjs \
 		tests/wasm-managed-arithmetic.test.mjs \
 		tests/wasm-managed-word.test.mjs \
