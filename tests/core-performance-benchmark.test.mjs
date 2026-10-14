@@ -97,3 +97,13 @@ test("core performance report validator rejects incomplete or stale evidence", a
     "core performance report does not match current sources",
   );
 });
+
+test("failed core gates retain the complete measured report", async () => {
+  const report = await readReport();
+  report.decision.passed = false;
+  let failure;
+  try { validateCoreBenchmarkReport(report); } catch (error) { failure = error; }
+  expect(failure).toBeInstanceOf(TypeError);
+  expect(Boolean(failure.report)).toBe(true);
+  expect(failure.report).toBe(report);
+});

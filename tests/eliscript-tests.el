@@ -840,7 +840,7 @@
    (equal
     (eliscript-emitter-emit-expression
      '(js-call (js-array 1 2 3) :map (lambda (value) (* value 2))))
-    "([1, 2, 3])[\"map\"]((value) => {\n  return __eliscript_numeric_mul(value, 2);\n})"))
+    "([1, 2, 3])[\"map\"](((value) => {\n  return __eliscript_numeric_mul(value, 2);\n}))"))
   (should
    (equal (eliscript-emitter-emit-expression '(get user :name "unknown"))
           "((user)[\"name\"] ?? \"unknown\")")))
@@ -1349,11 +1349,11 @@
           "declarative.eli")))
     (should (string-match-p
              (regexp-quote
-              "const render = multi_fn(\"render\", (kind, value) =>")
+              "const render = multi_fn(\"render\", ((kind, value) =>")
              output))
     (should (string-match-p
              (regexp-quote
-              "add_method_BANG_(render, \"text\", (kind, value) =>")
+              "add_method_BANG_(render, \"text\", ((kind, value) =>")
              output))
     (should-not (string-match-p "defmulti\\|defmethod" output))))
 
@@ -1454,16 +1454,16 @@
              output))
     (should (string-match-p
              (regexp-quote
-              "const __GT_Person = (name, age) =>")
+              "const __GT_Person = ((name, age) =>")
              output))
     (should (string-match-p
              (regexp-quote "(Person)[\"create\"](name, age)") output))
     (should (string-match-p
-             (regexp-quote "const map__GT_Person = (source) =>") output))
+             (regexp-quote "const map__GT_Person = ((source) =>") output))
     (should (string-match-p
              (regexp-quote "(Person)[\"fromMap\"](source)") output))
     (should (string-match-p
-             (regexp-quote "const Person_QMARK_ = (value) =>") output))
+             (regexp-quote "const Person_QMARK_ = ((value) =>") output))
     (should-not (string-match-p "defrecord" output))))
 
 (ert-deftest eliscript-expander-validates-record-declarations ()
@@ -1507,11 +1507,11 @@
               "const Box = define_type(\"Box\", [\"value\"], [[IRead")
              output))
     (should (string-match-p
-             (regexp-quote "const __GT_Box = (value) =>") output))
+             (regexp-quote "const __GT_Box = ((value) =>") output))
     (should (string-match-p
              (regexp-quote "(Box)[\"create\"](value)") output))
     (should (string-match-p
-             (regexp-quote "const Box_QMARK_ = (value) =>") output))
+             (regexp-quote "const Box_QMARK_ = ((value) =>") output))
     (should (string-match-p
              (regexp-quote "return reify_protocols([[IRead") output))
     (should-not (string-match-p "deftype\|reify " output))))
@@ -1702,9 +1702,9 @@
            "          (later async (n) n))\n"
            "    (even? 10)))")
           "letfn.eli")))
-    (should (string-match-p "even_QMARK_ = (n) =>" output))
-    (should (string-match-p "odd_QMARK_ = (\\.\\.\\.arity_arguments\\$G" output))
-    (should (string-match-p "later = async (n) =>" output))
+    (should (string-match-p "even_QMARK_ = ((n) =>" output))
+    (should (string-match-p "odd_QMARK_ = ((\\.\\.\\.arity_arguments\\$G" output))
+    (should (string-match-p "later = (async (n) =>" output))
     (should-not (string-match-p "letfn" output))))
 
 (ert-deftest eliscript-expander-validates-local-recursive-functions ()

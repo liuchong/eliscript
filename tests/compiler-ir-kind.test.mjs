@@ -141,3 +141,13 @@ test("committed compiler IR kind report matches measured sources", async () => {
     report.decision.minimumSpeedup,
   );
 });
+
+
+test("failed ir-kind gates retain complete measurement evidence", async () => {
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  report.decision.passed = false;
+  let failure;
+  try { validateCompilerIrKindReport(report); } catch (error) { failure = error; }
+  expect(failure).toBeInstanceOf(TypeError);
+  expect(failure.report).toBe(report);
+});

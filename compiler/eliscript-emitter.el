@@ -313,7 +313,7 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
          (eliscript-parameters-parse
           arguments
           (lambda (_form message) (eliscript-emitter--fail "%s" message)))))
-    (format "%s(%s) => {\n%s\n}"
+    (format "(%s(%s) => {\n%s\n})"
             (if asynchronous "async " "")
             (mapconcat #'eliscript-emitter--emit-parameter parameters ", ")
             (eliscript-emitter--indent

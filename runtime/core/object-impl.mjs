@@ -22,41 +22,41 @@ function assoc(object, key, value, ...key_values) {
   return Collection.assoc(...[object, ...(([key, ...(([value, ...((key_values) ?? [])]) ?? [])]) ?? [])]);
 }
 function key_in_QMARK_(key, key_list) {
-  return Collection.reduce(key_list, (matched, current) => {
+  return Collection.reduce(key_list, ((matched, current) => {
     return (__eliscript_truthy(equalValues(key, current)) ? Collection.reduced(true) : matched);
-  }, false);
+  }), false);
 }
 function dissoc(object, key) {
-  return ((!__eliscript_truthy(has_QMARK_(object, key))) ? object : Transducer.into(object, Transducer.filtering((entry) => {
+  return ((!__eliscript_truthy(has_QMARK_(object, key))) ? object : Transducer.into(object, Transducer.filtering(((entry) => {
     return (!__eliscript_truthy(equalValues(key, entry_key(entry))));
-  }), object));
+  })), object));
 }
 function merge(left, right) {
-  return Collection.reduce(right, (result, entry) => {
+  return Collection.reduce(right, ((result, entry) => {
     return Collection.assoc(result, entry_key(entry), entry_value(entry));
-  }, left);
+  }), left);
 }
 function map_values(function$, object) {
-  return Transducer.into(object, Transducer.mapping((entry) => {
+  return Transducer.into(object, Transducer.mapping(((entry) => {
     return [entry_key(entry), function$(entry_value(entry))];
-  }), object);
+  })), object);
 }
 function filter_values(predicate, object) {
-  return Transducer.into(object, Transducer.filtering((entry) => {
+  return Transducer.into(object, Transducer.filtering(((entry) => {
     return isTruthy(predicate(entry_value(entry)));
-  }), object);
+  })), object);
 }
 function pick(object, wanted_keys) {
-  return Transducer.into(object, Transducer.composeTransducers(Transducer.filtering((key) => {
+  return Transducer.into(object, Transducer.composeTransducers(Transducer.filtering(((key) => {
     return has_QMARK_(object, key);
-  }), Transducer.mapping((key) => {
+  })), Transducer.mapping(((key) => {
     return [key, Collection.get(object, key)];
-  })), wanted_keys);
+  }))), wanted_keys);
 }
 function omit(object, omitted_keys) {
-  return Transducer.into(object, Transducer.filtering((entry) => {
+  return Transducer.into(object, Transducer.filtering(((entry) => {
     return (!__eliscript_truthy(key_in_QMARK_(entry_key(entry), omitted_keys)));
-  }), object);
+  })), object);
 }
 function update(object, key, function$) {
   return Collection.assoc(object, key, function$(Collection.get(object, key)));

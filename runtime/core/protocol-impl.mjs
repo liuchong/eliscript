@@ -313,7 +313,7 @@ function merge_implementations(current, incoming) {
     {
       let merged = __eliscript_value_39;
       let copy = __eliscript_value_40;
-      ((copy = (source) => {
+      ((copy = ((source) => {
         return ((!(source == null)) ? ((keys, index) => {
           while (__eliscript_numeric_relation("<", index, ((keys) ?? []).length)) {
             {
@@ -327,7 +327,7 @@ function merge_implementations(current, incoming) {
           }
           return null;
         })(Object.keys((source) ?? {}), 0) : null);
-      }));
+      })));
       copy(current);
       copy(incoming);
       return protocol_freeze(merged);
@@ -406,10 +406,10 @@ function define_protocol(name, operations) {
                   {
                     let slot = __eliscript_value_57;
                     {
-                      const __eliscript_value_58 = (...invocation) => {
+                      const __eliscript_value_58 = ((...invocation) => {
                         ((((invocation) ?? []).length === 0) ? protocol_fail((String("protocol ") + String(protocol_name) + String("/") + String(operation) + String(" requires a dispatch value"))) : null);
                         return dispatch(protocol, (records)["get"](operation), (invocation)[0], (invocation)["slice"](1));
-                      };
+                      });
                       {
                         let method = __eliscript_value_58;
                         {

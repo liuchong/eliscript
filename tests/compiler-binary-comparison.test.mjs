@@ -96,3 +96,13 @@ test("committed binary comparison report matches measured sources", async () => 
     report.decision.minimumSpeedup,
   );
 });
+
+
+test("failed binary-comparison gates retain complete measurement evidence", async () => {
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  report.decision.passed = false;
+  let failure;
+  try { validateCompilerBinaryComparisonReport(report); } catch (error) { failure = error; }
+  expect(failure).toBeInstanceOf(TypeError);
+  expect(failure.report).toBe(report);
+});

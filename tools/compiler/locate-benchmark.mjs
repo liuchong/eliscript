@@ -170,7 +170,9 @@ export function validateCompilerLocateReport(report) {
   }
   if (report.decision?.passed !== true ||
       report.measurements.speedup < report.decision.minimumSpeedup) {
-    throw new TypeError("compiler locate speedup decision did not pass");
+    const error = new TypeError("compiler locate speedup decision did not pass");
+    error.report = report;
+    throw error;
   }
   return report;
 }
@@ -318,7 +320,16 @@ export async function runCompilerLocateBenchmark(options = {}) {
 
 if (import.meta.main) {
   const { output } = parseArguments(process.argv.slice(2));
-  const report = await runCompilerLocateBenchmark();
+  let report;
+  try { report = await runCompilerLocateBenchmark(); }
+  catch (error) {
+    if (error.report) {
+      const failed = `${JSON.stringify(error.report, null, 2)}\n`;
+      if (output === undefined) process.stdout.write(failed);
+      else await writeFile(path.resolve(output), failed);
+    }
+    throw error;
+  }
   const serialized = `${JSON.stringify(report, null, 2)}\n`;
   if (output === undefined) {
     process.stdout.write(serialized);

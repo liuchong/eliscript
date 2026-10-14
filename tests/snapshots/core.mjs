@@ -131,9 +131,9 @@ function sum_to(n) {
 function collect(required, optional = null, ...rest) {
   return [required, optional, rest];
 }
-let result = ({"message": (String(greeting) + String(" from Eliscript")), "values": [1, 2, 3], "factorial": factorial(5), "class": classify(7), "sum": sum_to(5), "doubled": ([1, 2, 3])["map"]((value) => {
+let result = ({"message": (String(greeting) + String(" from Eliscript")), "values": [1, 2, 3], "factorial": factorial(5), "class": classify(7), "sum": sum_to(5), "doubled": ([1, 2, 3])["map"](((value) => {
   return __eliscript_numeric_mul(value, 2);
-}), "consed": [0, ...(([1, 2]) ?? [])], "empty-car": __eliscript_first(null), "nil-only": [(null === null), (undefined === null)], "undefined-only": [(null === undefined), (undefined === undefined)], "nullish": [(null == null), (undefined == null), (false == null)], "legacy-null": [(null == null), (undefined == null), (false == null)]});
+})), "consed": [0, ...(([1, 2]) ?? [])], "empty-car": __eliscript_first(null), "nil-only": [(null === null), (undefined === null)], "undefined-only": [(null === undefined), (undefined === undefined)], "nullish": [(null == null), (undefined == null), (false == null)], "legacy-null": [(null == null), (undefined == null), (false == null)]});
 ((result)["parameters"] = [collect("required"), collect("required", undefined), collect("required", "optional", 3, 4)]);
 console.log(JSON.stringify(result));
 export {factorial, classify, sum_to, collect, result};

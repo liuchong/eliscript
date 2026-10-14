@@ -168,3 +168,13 @@ test("committed compiler location report matches measured sources", async () => 
     report.decision.minimumSpeedup,
   );
 });
+
+
+test("failed locate gates retain complete measurement evidence", async () => {
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  report.decision.passed = false;
+  let failure;
+  try { validateCompilerLocateReport(report); } catch (error) { failure = error; }
+  expect(failure).toBeInstanceOf(TypeError);
+  expect(failure.report).toBe(report);
+});

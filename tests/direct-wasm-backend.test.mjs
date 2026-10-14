@@ -236,6 +236,47 @@ test("seed and self-hosted JS emission preserve literal and quoted negative zero
   sameNumber(module.quoted(), -0, "quoted");
 });
 
+test("Seed and three generations group lambda and async expressions in operator contexts", async () => {
+  const source = `
+    (defun fresh-eq () (eq (lambda () 1) (lambda () 1)))
+    (defun fresh-compare () (= (lambda () 1) (lambda () 1)))
+    (defun right-lambda () (eq nil (lambda () 1)))
+    (defun nil-lambda () (nil? (lambda () 1)))
+    (defun undefined-lambda () (undefined? (lambda () 1)))
+    (defun lambda-type () (value-type (lambda () 1)))
+    (defun async-type () (value-type (async () 1)))
+    (defun negate-lambda () (- (lambda () 1)))
+    (defun increment-lambda () (1+ (lambda () 1)))
+    (defun call-lambda () ((lambda (x) (+ x 1)) 2))
+    (export fresh-eq fresh-compare right-lambda nil-lambda undefined-lambda
+      lambda-type async-type negate-lambda increment-lambda call-lambda)`;
+  const input = resolve(directory, "arrow-operands.eli"), output = resolve(directory, "arrow-operands.mjs");
+  await writeFile(input, source);
+  const seed = await seedJavascript(input, output);
+  for (const generation of generations) assert.equal(generation.compiler.compile_string(source, input), seed);
+  const syntax = spawnSync(process.env.NODE ?? "node", ["--check", output], { encoding: "utf8" });
+  assert.equal(syntax.status, 0, syntax.stderr);
+  const legacy = spawnSync(process.env.EMACS ?? "emacs", ["--batch", "-Q", "-L", resolve(root, "compiler"), "--eval",
+    "(progn (require 'eliscript-emitter) (princ (eliscript-emitter-emit-expression '(eq (lambda () 1) (lambda () 1)))))"], { encoding: "utf8" });
+  assert.equal(legacy.status, 0, legacy.stderr);
+  const legacyModule = await import(`data:text/javascript;base64,${Buffer.from("export default " + legacy.stdout + ";").toString("base64")}`);
+  assert.equal(legacyModule.default, false);
+  const module = await import(`data:text/javascript;base64,${Buffer.from(seed).toString("base64")}`);
+  for (const name of ["fresh_eq", "fresh_compare", "right_lambda", "nil_lambda", "undefined_lambda"]) assert.equal(module[name](), false, name);
+  assert.equal(module.lambda_type(), "function"); assert.equal(module.async_type(), "function");
+  assert(Number.isNaN(module.negate_lambda()));
+  assert.equal(typeof module.increment_lambda(), "string"); assert(module.increment_lambda().endsWith("1"));
+  assert.equal(module.call_lambda(), 3);
+  const node = spawnSync(process.env.NODE ?? "node", ["--input-type=module", "-e", `
+    import assert from 'node:assert/strict';const m=await import(process.argv[1]);
+    for(const name of ['fresh_eq','fresh_compare','right_lambda','nil_lambda','undefined_lambda'])assert.equal(m[name](),false);
+    assert.equal(m.lambda_type(),'function');assert.equal(m.async_type(),'function');
+    assert(Number.isNaN(m.negate_lambda()));assert.equal(typeof m.increment_lambda(),'string');
+    assert(m.increment_lambda().endsWith('1'));assert.equal(m.call_lambda(),3);
+  `, pathToFileURL(output).href], { encoding: "utf8" });
+  assert.equal(node.status, 0, node.stderr);
+});
+
 test("shared optimizer preserves IEEE order, Lisp truth, effects, spans and canonical IR", async () => {
   const source = `
     (defun folded (x) (+ x (* (+ 2 3) 4)))

@@ -122,6 +122,15 @@ test("committed reader character report matches measured sources", async () => {
 
 test("reader reacceptance rejects weakened thresholds and altered controls", async () => {
   const report = JSON.parse(await readFile(reportPath, "utf8"));
+  const failed = JSON.parse(await readFile(path.join(projectDirectory,
+    "tools/compiler/results/reader-character-arrow-first-macos-arm64.json"), "utf8"));
+  expect(failed.parameters).toEqual(report.parameters);
+  expect(failed.measurements.completeCompilerSpeedup).toBeLessThan(failed.decision.minimumCompleteCompilerSpeedup);
+  let failure;
+  try { validateCompilerReaderCharacterReport(failed); } catch (error) { failure = error; }
+  expect(failure?.report).toBe(failed);
+  const forged = structuredClone(failed); forged.decision.passed = true;
+  expect(() => validateCompilerReaderCharacterReport(forged)).toThrow("speedup decision failed");
   const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
   for (const entry of report.baseline.control.inputs) {
     expect(entry.sha256).toBe(hash(await readFile(path.join(projectDirectory, entry.path))));

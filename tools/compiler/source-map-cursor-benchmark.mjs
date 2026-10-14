@@ -189,7 +189,9 @@ export function validateCompilerSourceMapCursorReport(report) {
         report.decision.minimumPipelineSpeedup ||
       report.measurements.completeCompilerSpeedup <
         report.decision.minimumCompleteCompilerSpeedup) {
-    throw new TypeError(`compiler Source Map cursor speedup decision failed: pipeline ${report.measurements.pipelineSpeedup}, compiler ${report.measurements.completeCompilerSpeedup}`);
+    const error = new TypeError(`compiler Source Map cursor speedup decision failed: pipeline ${report.measurements.pipelineSpeedup}, compiler ${report.measurements.completeCompilerSpeedup}`);
+    error.report = report;
+    throw error;
   }
   return report;
 }
@@ -432,7 +434,16 @@ export async function runCompilerSourceMapCursorBenchmark(options) {
 
 if (import.meta.main) {
   const options = parseArguments(process.argv.slice(2));
-  const report = await runCompilerSourceMapCursorBenchmark(options);
+  let report;
+  try { report = await runCompilerSourceMapCursorBenchmark(options); }
+  catch (error) {
+    if (error.report) {
+      const failed = `${JSON.stringify(error.report, null, 2)}\n`;
+      if (options.output) await writeFile(path.resolve(options.output), failed);
+      else process.stdout.write(failed);
+    }
+    throw error;
+  }
   const json = `${JSON.stringify(report, null, 2)}\n`;
   if (options.output) await writeFile(path.resolve(options.output), json);
   else process.stdout.write(json);

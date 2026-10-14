@@ -143,6 +143,15 @@ test("committed Source Map cursor report matches measured sources", async () => 
   );
 });
 
+test("failed Source Map gates retain complete measurement evidence", async () => {
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  report.decision.passed = false;
+  let failure;
+  try { validateCompilerSourceMapCursorReport(report); } catch (error) { failure = error; }
+  expect(failure).toBeInstanceOf(TypeError);
+  expect(failure.report).toBe(report);
+});
+
 test("Source Map reacceptance rejects weaker speed and provenance claims", async () => {
   const report = JSON.parse(await readFile(reportPath, "utf8"));
   for (const field of ["minimumPipelineSpeedup", "minimumCompleteCompilerSpeedup"]) {

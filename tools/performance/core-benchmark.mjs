@@ -639,7 +639,9 @@ export function validateCoreBenchmarkReport(report) {
           `spread=${metric.spreadRatio}/${threshold.maximumSpreadRatio}`;
       });
     const detail = failures.length === 0 ? "" : `: ${failures.join("; ")}`;
-    throw new TypeError(`core performance benchmark decision failed${detail}`);
+    const error = new TypeError(`core performance benchmark decision failed${detail}`);
+    error.report = report;
+    throw error;
   }
   return report;
 }
@@ -744,11 +746,21 @@ function parseArguments(arguments_) {
 
 if (import.meta.main) {
   const options = parseArguments(process.argv.slice(2));
-  const report = options.singleRun
-    ? await runCoreBenchmarkSample(parametersFrom(JSON.parse(
-      process.env.ELISCRIPT_CORE_BENCHMARK_PARAMETERS ?? "{}",
-    )))
-    : await runCorePerformanceBenchmark();
+  let report;
+  try {
+    report = options.singleRun
+      ? await runCoreBenchmarkSample(parametersFrom(JSON.parse(
+        process.env.ELISCRIPT_CORE_BENCHMARK_PARAMETERS ?? "{}",
+      )))
+      : await runCorePerformanceBenchmark();
+  } catch (error) {
+    if (error.report) {
+      const failed = `${JSON.stringify(error.report, null, options.singleRun ? 0 : 2)}\n`;
+      if (options.output) await writeFile(path.resolve(options.output), failed);
+      else process.stdout.write(failed);
+    }
+    throw error;
+  }
   const json = `${JSON.stringify(report, null, options.singleRun ? 0 : 2)}\n`;
   if (options.output) await writeFile(path.resolve(options.output), json);
   else process.stdout.write(json);

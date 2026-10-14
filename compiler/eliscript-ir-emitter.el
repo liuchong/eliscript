@@ -377,7 +377,7 @@ Sequential bindings each have their own scope, including duplicate names."
   (pcase-let ((`(,parameters ,body)
                (eliscript-ir-emitter--split-counted-children
                 node :parameter-count)))
-    (format "%s(%s) => {\n%s\n}"
+    (format "(%s(%s) => {\n%s\n})"
             (if (eliscript-ir-property node :async) "async " "")
             (mapconcat
              (lambda (parameter)

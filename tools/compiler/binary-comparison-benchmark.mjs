@@ -138,7 +138,9 @@ export function validateCompilerBinaryComparisonReport(report) {
   }
   if (report.decision?.passed !== true ||
       report.measurements.speedup < report.decision.minimumSpeedup) {
-    throw new TypeError("compiler binary comparison speedup decision failed");
+    const error = new TypeError("compiler binary comparison speedup decision failed");
+    error.report = report;
+    throw error;
   }
   return report;
 }
@@ -266,7 +268,16 @@ export async function runCompilerBinaryComparisonBenchmark(options) {
 
 if (import.meta.main) {
   const options = parseArguments(process.argv.slice(2));
-  const report = await runCompilerBinaryComparisonBenchmark(options);
+  let report;
+  try { report = await runCompilerBinaryComparisonBenchmark(options); }
+  catch (error) {
+    if (error.report) {
+      const failed = `${JSON.stringify(error.report, null, 2)}\n`;
+      if (options.output === undefined) process.stdout.write(failed);
+      else await writeFile(path.resolve(options.output), failed);
+    }
+    throw error;
+  }
   const json = `${JSON.stringify(report, null, 2)}\n`;
   if (options.output) await writeFile(path.resolve(options.output), json);
   else process.stdout.write(json);

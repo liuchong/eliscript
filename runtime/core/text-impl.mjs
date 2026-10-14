@@ -179,9 +179,9 @@ function blank_QMARK_(text) {
   return empty_QMARK_(trim(text));
 }
 function join(separator, values) {
-  return (Collection.reduce(values, (state, value) => {
+  return (Collection.reduce(values, ((state, value) => {
     return ({"first": false, "text": (String((state)["text"]) + String((__eliscript_truthy((state)["first"]) ? "" : separator)) + String(value))});
-  }, ({"first": true, "text": ""})))["text"];
+  }), ({"first": true, "text": ""})))["text"];
 }
 function repeat(count, text) {
   {

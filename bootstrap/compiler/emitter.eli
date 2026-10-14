@@ -469,14 +469,14 @@
            (parameters (js-nth 0 parts))
            (body (js-nth 1 parts)))
       (combine
-        (js-array (if (ir-property node "async") "async " "") "("
+        (js-array "(" (if (ir-property node "async") "async " "") "("
          (join-fragments
            (js-call parameters :map
              (lambda (parameter) (emit-parameter parameter)))
            ", ")
          ") => {\n"
          (indent (emit-function-body parameters body))
-         "\n}"))))
+         "\n})"))))
 
   (defun contains-recur-target-p (value target-kind)
     (let ((pending (js-array value))
