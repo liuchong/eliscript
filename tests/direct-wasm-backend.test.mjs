@@ -14,6 +14,13 @@ const browsers = { chromium, firefox, webkit };
 assert(Object.hasOwn(browsers, browserName), `unknown ELISCRIPT_TEST_BROWSER: ${browserName}`);
 let directory, generations, browserBundle, browserProcess;
 const sameNumber = (actual, expected, label) => assert(Object.is(actual, expected), `${label}: ${actual} != ${expected}`);
+function scalarFunctionInstructions(bytes) {
+ let cursor=8;const leb=()=>{let value=0,shift=0,byte;do{byte=bytes[cursor++];value+=(byte&127)*2**shift;shift+=7;}while(byte&128);return value;};
+ while(cursor<bytes.length){const id=bytes[cursor++],length=leb(),end=cursor+length;if(id!==10){cursor=end;continue;}const functions=leb(),result=[];
+  for(let i=0;i<functions;i++){const size=leb(),finish=cursor+size,groups=leb();for(let j=0;j<groups;j++){leb();assert([124,127].includes(bytes[cursor++]));}result.push(bytes.slice(cursor,finish));cursor=finish;}
+  return result;
+ }throw Error('WASM code section missing');
+}
 
 const optimizationCases = `
   (defun bounded (n) (let ((i 0) (sum 0))
@@ -456,6 +463,36 @@ test("nested grid optimization preserves fractional dimensions and escape limits
   sameNumber(wasm.exports["escape-grid"](1, Infinity), oracle.module.escape_grid(1, Infinity), "infinite escape limit");
 });
 
+test("compound loop backedges use direct exits and preserve every short-circuit guard and IEEE boundary",async()=>{
+ const source=`(defun step (n x) (let ((i 0) (sum 0)) (while (and (< i n) (< (* x x) 100)) (setq x (+ (* x 1.25) 0.1)) (setq sum (+ sum x)) (setq i (1+ i))) sum)) (export step)`;
+ const {compiler,numeric,wasm}=generations[2],program=compiler.compile_ir_string(source,'backedge.eli'),typed=numeric.lower_numeric_program(program),saved=JSON.stringify(typed);
+ const lowered=numeric.optimize_numeric_program(typed,{loops:false,integers:false,inlining:false,guardedUnroll:true});
+ const bytes=Uint8Array.from(wasm.emit_typed_numeric_wasm(lowered));assert(WebAssembly.validate(bytes));assert.equal(JSON.stringify(typed),saved);
+ const bodies=scalarFunctionInstructions(bytes);assert.equal(bodies.length,1);const body=bodies[0],directExitAndBackedge=[13,1,12,0,11,11];
+ assert([...body].some((_,i)=>directExitAndBackedge.every((byte,j)=>body[i+j]===byte)),'last guard exits the loop directly, without a nested conjunction block');
+ const instance=new WebAssembly.Instance(new WebAssembly.Module(bytes)),ref=await javascript(source);
+ for(const n of[-Infinity,-0,0,.5,1,1.1,2,3,3.5,4,7,NaN])for(const x of[-Infinity,-10,-1,-0,0,Number.MIN_VALUE,.123,1,9,10,Infinity,NaN])sameNumber(instance.exports.step(n,x),ref.module.step(n,x),`${n}/${x}`);
+});
+test("integer guard inversions and negated compound guards avoid Boolean materialization without narrowing Numbers",async()=>{
+ const source=`(defun bounded (start limit) (let ((x start) (i 0)) (while (and (< x limit) (< i 3)) (setq x (1+ x)) (setq i (1+ i))) x))
+ (defun negated (start limit) (let ((x start) (i 0)) (while (not (or (>= x limit) (>= i 3))) (setq x (1+ x)) (setq i (1+ i))) x)) (export bounded negated)`;
+ const {compiler,wasm}=generations[2],ir=compiler.compile_ir_string(source,'integer-guards.eli'),saved=JSON.stringify(ir),bytes=Uint8Array.from(wasm.emit_memory_wasm(ir));assert.equal(JSON.stringify(ir),saved);assert(WebAssembly.validate(bytes));
+ const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;
+ // A direct unsigned >= exit is exact for integer words, including the sign bit.
+ const bodies=scalarFunctionInstructions(bytes);assert(bodies.some(body=>[...body].some((x,i)=>x===79&&body[i+1]===13)),'unsigned compare branches directly without eqz');
+ const hasOrValueBlock=[4,127];assert(!bodies.some(body=>[...body].some((_,i)=>hasOrValueBlock.every((x,j)=>body[i+j]===x))),'a negated guard uses branches instead of a Boolean-valued if');
+ for(const start of[0,1,3,0x7fffffff,0x80000000,0xfffffffd,0xffffffff])for(const limit of[0,1,4,0x7fffffff,0x80000000,0xffffffff]){let expected=start,i=0;while(expected<limit&&i<3){expected=(expected+1)>>>0;i++;}assert.equal(e.bounded(start,limit)>>>0,expected);assert.equal(e.negated(start,limit)>>>0,expected);}
+ const operators=['=','/=','<','<=','>','>='],predicates=[(a,b)=>a===b,(a,b)=>a!==b,(a,b)=>a<b,(a,b)=>a<=b,(a,b)=>a>b,(a,b)=>a>=b];
+ const comparisons=operators.map((op,i)=>`(defun c${i} (x y) (let ((i 0)) (while (and (< i 3) (${op} x y)) (setq i (1+ i))) i))`).join('\n')+' (export c0 c1 c2 c3 c4 c5)';
+ const pairs=new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from(wasm.emit_memory_wasm(compiler.compile_ir_string(comparisons,'word-comparisons.eli'))))).exports;
+ for(const a of[0,1,0x7fffffff,0x80000000,0xffffffff])for(const b of[0,1,0x7fffffff,0x80000000,0xffffffff])for(let i=0;i<operators.length;i++)assert.equal(pairs[`c${i}`](a,b),predicates[i](a,b)?3:0,operators[i]);
+ const numeric='(defun truth (n) (let ((i 0)) (while (not n) (setq i (1+ i))) i)) (export truth)',ref=await javascript(numeric),program=compiler.compile_ir_string(numeric,'numeric-truth.eli');
+ const n=new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from(wasm.emit_numeric_wasm(program)))).exports;
+ for(const value of[0,-0,NaN,Infinity,-Infinity,Number.MIN_VALUE,1])sameNumber(n.truth(value),ref.module.truth(value),'Number truth is retained');
+ const effects='(defun effects (n) (let ((i 0) (checks 0)) (while (not (or (>= (setq checks (1+ checks)) n) (>= i 5))) (setq i (1+ i))) (+ (* checks 10) i))) (export effects)',effectRef=await javascript(effects);
+ const effectModule=new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from(wasm.emit_numeric_wasm(compiler.compile_ir_string(effects,'negated-effects.eli'))))).exports;
+ for(const value of[-Infinity,-0,0,.5,1,2,5,NaN,Infinity])sameNumber(effectModule.effects(value),effectRef.module.effects(value),'negated guard effect counts');
+});
 test("compound loop expansion preserves each guard, effect and exact IEEE result", async () => {
   const source = `
     (defun compound (n x) (let ((i 0) (sum 0))

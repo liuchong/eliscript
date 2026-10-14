@@ -124,9 +124,11 @@
     (let ((index 0))
       (while (< index 4)
         (emit-discarded output (js-nth 1 children))
-        (if (< index 3)
-            (emit-branch-false output (js-nth 0 children) 1)
-          (emit-branch-true output (js-nth 0 children) 0))
+        ;; Every failing guard exits the outer block directly. The last
+        ;; successful guard falls through to the backedge, without building
+        ;; another nested block for a true conjunction.
+        (emit-branch-false output (js-nth 0 children) 1)
+        (when (= index 3) (js-call output :push 12 0))
         (setq index (1+ index))))
     (js-call output :push 11 11))
 
@@ -136,6 +138,7 @@
         ((number-type expression)
          (emit-discarded output expression)
          (js-call output :push 12) (unsigned-leb output depth))
+        ((= kind "not") (emit-branch-false output (js-nth 0 children) depth))
         ((= kind "or")
          (let ((index 0))
            (while (< index (js-length children))
@@ -157,6 +160,20 @@
     (let ((kind (get expression :kind)) (children (get expression :children)))
       (cond
         ((number-type expression) (emit-discarded output expression))
+        ((= kind "not") (emit-branch-true output (js-nth 0 children) depth))
+        ((or (= kind "int-compare") (= kind "word-compare"))
+         ;; Integer comparisons have no unordered/NaN case. Float comparisons
+         ;; deliberately retain eqz, since !(a < b) is not a >= b for NaN.
+         (emit-expression output (js-nth 0 children))
+         (emit-expression output (js-nth 1 children))
+         (js-call output :push
+           (if (= kind "int-compare") 78
+             (let ((operator (get expression :value)))
+               (cond ((= operator "=") 71) ((= operator "/=") 70)
+                     ((= operator "<") 79) ((= operator ">") 77)
+                     ((= operator "<=") 75) (t 73))))
+           13)
+         (unsigned-leb output depth))
         ((= kind "and")
          (let ((index 0))
            (while (< index (js-length children))
@@ -172,8 +189,7 @@
            (emit-branch-false output (js-nth index children) (1+ depth)))
          (js-call output :push 11))
         (t
-         (if (= kind "not") (emit-condition output (js-nth 0 children))
-           (progn (emit-condition output expression) (js-call output :push 69)))
+         (emit-condition output expression) (js-call output :push 69)
          (js-call output :push 13) (unsigned-leb output depth)))))
 
   (defun emit-discarded-short-circuit (output expression index)
