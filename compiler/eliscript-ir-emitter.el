@@ -1006,7 +1006,7 @@ Sequential bindings each have their own scope, including duplicate names."
                (eliscript-ir-emitter-emit-expression (car nodes))))
       ('string-to-number
        (eliscript-ir-emitter--require-arity node 1 1)
-       (format "Number(%s)"
+       (format "__eliscript_to_number(%s)"
                (eliscript-ir-emitter-emit-expression (car nodes))))
       ('string-to-bigint
        (eliscript-ir-emitter--require-arity node 1 1)
@@ -1428,6 +1428,7 @@ JavaScript property or tag string rather than an Eliscript value."
         uses-list-runtime
         uses-value-runtime
         uses-host-identity-token
+        uses-number-conversion
         portable-functions
         exported-bindings)
     (eliscript-ir-walk
@@ -1444,6 +1445,9 @@ JavaScript property or tag string rather than an Eliscript value."
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (eq (eliscript-ir-node-value node) 'equal))
          (setq uses-value-runtime t))
+       (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
+                  (eq (eliscript-ir-node-value node) 'string-to-number))
+         (setq uses-number-conversion t))
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (eq (eliscript-ir-node-value node) 'host-identity-token))
          (setq uses-host-identity-token t))
@@ -1475,6 +1479,9 @@ JavaScript property or tag string rather than an Eliscript value."
          eliscript-ir-emitter--value-runtime-import
        "")
      "const __eliscript_truthy = (value) => value !== false && value != null;\n"
+     (if uses-number-conversion
+         eliscript-emitter--number-conversion-helper
+       "")
      (if uses-host-identity-token
          eliscript-emitter--host-identity-token-helper
        "")

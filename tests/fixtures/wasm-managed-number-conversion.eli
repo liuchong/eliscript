@@ -1,0 +1,7 @@
+(defun parse (value) (string-to-number value))
+(defun text (value) (str value))
+(defun join (first second) (str first (setq first second) first))
+(defun position (value) (js-call "abcdef" :at value))
+(defun named-key (value)
+  (let ((instance (js-object))) (put instance value "ok") (get instance value)))
+(export parse text join position named-key)

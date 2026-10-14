@@ -509,6 +509,12 @@ JS 对照。接续复测 numeric-f64 九项均通过，但 Node/Chromium 网格�
     越界结果。十三项专项含 1024 轮随机、长周期、容量/实际 trap、borrowed
     参数/返回、独立 Node；Seed/三代、三浏览器及原全量门禁通过。通用转换、
     regex/case/normalization 等仍开放，不关闭完整字符串或编译器宿主。
+  - [x] **primitive Number/文本转换的本地验收**：精确十进制/进制解析、最短
+    binary64 文本、str、字符串位置与有限 Number 命名属性键已实现；十六项
+    专项、原性能重测、严格字节编译与三浏览器各 43 项通过。核心 726 项及
+    应用 217 项通过；同步 Action 产物和 index 可复现性检查后，原始
+    make test 完整成功。Object/Symbol/BigInt ToPrimitive 及完整
+    混合类型运算继续开放，不关闭完整动态运行时或任何编译器宿主格。
 - [ ] **WASM-CAP 运行时布局与能力验收**：先给线性内存/GC 路径及 imports
   明确目标能力与内存 ABI；TDD 覆盖循环引用、逃逸闭包、跨界句柄、拒绝缺失
   特性和回收后访问，浏览器三引擎与 CLI 实际执行，不改变九格或语义门槛。
@@ -1338,3 +1344,139 @@ seed/self-hosted × Bun/Node 组合、输出/Source Map 字节对照及 30 秒 d
 远端 CI 须在本修复签名提交并推送后继续核对，不能以本地通过宣称完成。
 下一功能增量仍为完整精确的 Number/文本转换，随后推进完整动态运行时及
 编译器宿主；本次标准库性能修复不关闭完整九格或 WASM 网格稳定化。
+
+### Number/文本转换接续：真实 Red 与实施边界
+
+zipper 修复已以签名提交 `1368bf9` 推送，远端与本地 master 一致；新提交的
+Pages、Browser compatibility 与四格 Compatibility 均已通过，原 zipper
+30 秒预算未变。下一能力批次已在隔离工作区开始，版本保持不变。
+
+新增 `tests/wasm-managed-number-conversion.test.mjs` 七项真实 Red：
+普通 string-to-number lowering、str lowering 尚未实现；原 concat/属性键在
+有限小数上报边界错误，字符串位置实参转换也报边界错误。初始及最终 Red
+均退出 1（0 pass / 7 fail），不是预期拒绝被标记为通过；尚无 Green 或交付。
+新测试待能力完整后纳入原默认全量门禁，不以当前失败文件替代已通过测试。
+
+本批按当前 JS emitter 的 Number(value)/String(value) 定义冻结 primitive
+转换语义：nil/bool/undefined、完整数值字符串 grammar 与 whitespace、二/八/
+十六进制、无穷/NaN、符号零、次正规数、精确最近偶数舍入，以及 String 的
+最短可往返十进制与指数区间。覆盖 long coefficients/balanced exponents、
+精确 midpoint 两侧、全部关键指数边界及跨指数范围样本；另有 1024 轮随机
+十进制/非十进制语料、2048 个任意 f64 位模式格式化，使用独立当前 JS 参考。
+原 concat/属性键、字符串位置使用共享转换，保持各方法截断/夹取/NaN 默认
+语义。仍须补全求值顺序、非法/未封存句柄、容量失败、borrowed 参数与 GC/
+真实 trap、Node、Seed/三代和三浏览器验收，不能由 Red 清单宣称完成。
+
+实现采用纯 .eli 整数精度辅助表示与准确舍入/格式化，不能逐位浮点累计或
+只保留固定十进制位数而丢掉 sticky 信息。完整 ToPrimitive 的 Object/Symbol/
+用户方法转换依赖闭包与协议能力，仍单独开放并显式拒绝；本批 primitive
+转换不冒充完整混合类型算术、完整 Number 或任何编译器宿主格。
+
+
+### Number/文本转换：局部 Green 与回归接续
+
+已实现纯 .eli 的 base-2^16 精度辅助整数，私有 scratch bytes 由调用根帧保活。
+完整 primitive string-to-number 先验证 grammar，再以精确整数分子/分母求商、
+余数与最近偶数舍入；超大指数仅在完整 grammar 验证后判定符号零/无穷，
+长系数与平衡指数保留全部有效位。Number 输出用精确上下舍入区间生成最短
+可往返十进制，正常二次幂的下界保持不对称；不采用浮点累计或固定精度截断。
+
+接通 str 的零/一/多参数转换、concat 和完整有限 Number 命名属性键，并将
+String 的索引位置/端点/repeat 复用 primitive Number 转换。转化发生在原求值
+位置，所有地址在可能增长的转换或结果分配后重新取得。原不支持小数键和
+字符串位置的测试现在增加精确 JS 对照；仍保留 opaque key 拒绝、原错误压过
+后续真实 trap、原容量预算、输入字节和调用者根清理标准。
+
+随机进制语料发现一个实际跨宿主差异：保留的长十六进制字符串在 Bun 直接
+Number(string) 上少进一位，结果与 Node、精确 BigInt→Number 和独立整数
+参考相差 1 ULP。新增 JS 生成代码的真实 Red 后，seed/IR/self-hosted 发射器
+统一按需添加共享 helper：有效非十进制字符串先精确取整数，再舍入为 Number；
+其余输入保持原 Number 路径与一次求值。未使用 primitive 的模块不添加 helper。
+独立运行时不依赖该 JS helper，仍为零 imports。此修复对应规范中的数学整数
+到 Number 转换，不让 WASM 模仿宿主偏差，不删除导致偏差的随机输入。
+
+十六项 Number 专项已局部 Green，含 1024 轮 grammar/进制随机、2048 个任意
+f64 位模式格式化、精确 midpoint 两侧与关键指数、4000 位以上系数/平衡指数、
+512 轮宽整数独立模型、Node、seed/自举 JS 字节、局部 constructor shadowing、
+一次求值、未封存/私有/外来/过期句柄、增长/原容量失败与真实 trap。
+三个相关文件共 45/45 通过（当时 Number 为 15 项）；补充 JS 字节/遮蔽后
+Number 十六项与 runtime scan 语义检查通过，旧报告源码绑定仍须真实重新验收。
+Seed/三代 canonical/typed IR、descriptor/WASM 字节固定点及真实 Chromium
+Number 专项通过；direct suite 当前 42/43 的唯一失败为旧性能报告源码绑定，
+不是跳过门禁。Firefox/WebKit、受影响性能报告、原始全量与严格字节编译
+尚在接续，不将局部 Green 作为本批签名交付或完整后端完成。
+
+Object/Symbol/BigInt 的托管 ToPrimitive、混合类型算术、完整 JSON/正则/闭包/
+异常等及完整编译器宿主仍开放。完整九格与 WASM 网格稳定化均未关闭；
+性能重测保持原输入、对照、参数和所有门槛，失败样本与日志保留。
+
+
+冻结源码后的受影响报告已按原生成器重新验收：runtime scan、IR kind、indent、
+locate、binary comparison、Reader、Source Map cursor 七项，及三会话原始
+core-performance 均通过。采样参数、阈值与原报告逐项核对一致；Reader 与
+Source Map 仍使用固定历史函数和当前其余源码/代码生成的受控基线。
+WASM 原 3×5×9 九项及 native 原三项通过；Node/Chromium 网格约
+1.0265×/1.0491×，native 递推/网格/微小批量约 1.9649×/1.0931×/1.2684×。
+旧 native 栈基线仍失败。数值产物与上一批相同，不将采样变化解释为本批文本
+转换的数值收益；稳定化与完整生产验收保持开放。原始全量、严格字节编译、
+三浏览器完整门禁和签名推送仍须接续。
+
+
+原始全量首次在前置 integrity 检查停止：旧 worker lifecycle soak 还绑定修改的
+seed emitter，未进入 ERT/Bun 测试。按原 100000 请求、批量 64、每 2500
+检查点、180 秒与原资源预算真实重跑，verified/acceptanceQualified 均为 true，
+重复/丢失响应为零；原源码绑定由原生成器生成，不手改哈希。检查器通过后
+重新进入全量。新 fixture 登记后原 corpus 为 112 fixtures/421 绑定文件，
+stable/provisional、679/134 证据库存、全部参数与版本保持不变。
+
+
+历史 final 门禁发现原 M13 run 固定绑定旧 soak 哈希，当前重新测量的报告
+不能假装是当时的同一份文件。保留原 run、manifest、report 与哈希；旧 soak
+及其 26 个源码绑定逐项在 run 的真实 Git commit/tree 中核对，完全匹配。
+对这一特定报告增加严格的重新验收规则：只有接受快照/哈希仍匹配且当前
+报告独立满足原 100000 请求、完整五代恢复、180 秒与绝对/趋势内存预算、
+清理及当前全部源码绑定时，才能承认有效重测。其他历史 artifact 更改仍拒绝。
+不改旧结果、源码身份、历史哈希或任何门槛；原 final manifest/report 仍逐字节
+一致。真实 Red 保留，三个新增拒绝/来源测试与五个原 final 测试共 8/8 Green，
+覆盖假合格标记、改预算、丢恢复、伪趋势/峰值、改源码哈希和接受快照身份。
+当前完整门禁须继续真实执行，不能由这次来源修复宣称已通过。
+
+
+第一轮真正进入核心测试的全量结果为 721/726，通过与五个失败均保留：
+三个旧不支持/fixture 库存断言、一处 fixture 的局部 object 名称被旧 host
+constructor 扫描器匹配，以及旧 JS codegen 对照报告源码绑定。补齐对应
+正向语义和拒绝路径，增加新 fixture 库存断言，局部绑定改为 instance；
+未改 constructor 检查器或门槛。JS 对照用接受记录的同一内核源码重建旧 JS，
+旧产物及全部十三个编译器模块哈希完全匹配；原实验脚本重跑，保留 baseline
+报告/产物身份、完整 methodology、9×3×27 样本和校验。使用原脚本的外部
+工具仅重现这个历史探索报告，不改变独立生成、默认目标或后端选择。
+修正后须重新执行完整门禁，不把第一轮部分通过当作最终全量成功。
+
+
+### Number 转换批次：全量失败修复与提交前接续
+
+修正后的核心全量 726/726、ERT 167/167 和核心 CLI 通过；应用全量首次
+215/216，唯一失败是 Number helper 改变 Action 产物后，旧包未同步。由原
+打包器更新 bundle、source map 和 artifact manifest，保留原源码与版本。
+原检查把已暂存的新产物也视作不可复现，无法在签名提交前验证候选树；改为
+逐字节比较 Git index，干净 CI 中 index 与 HEAD 相同。冻结六个发布文件的
+完整库存，不允许删除文件后获得空比较，也拒绝未暂存变化、缺失文件及
+未跟踪产物。真实 Red 与回归保留，Action 15/15、应用完整 217/217 和
+ERT 3/3 通过，应用 CLI 通过；不会将应用证据计入核心成熟度。
+
+严格字节编译成功。Chromium 在核心全量中执行，Firefox 155.0 与 WebKit
+26.6 各完成 direct 后端 43/43，包括实际 Number 转换、随机精确浮点、根与
+容量语义；三浏览器均未跳过。提交前再次执行原始 make test 以核实修复后的
+整条命令，不把上一轮核心成功、应用失败的退出状态改称全量成功。
+签名推送仍待该命令的真实结果；完整动态转换、编译器宿主、九格与低余量
+稳定化继续开放。
+
+
+最终原始 make test 命令已正常退出（0）：核心 ERT 167/167、Bun 726/726
+（132 文件）、全部核心 CLI，应用 ERT 3/3、Bun 217/217（23 文件）及
+应用 CLI 全部通过。修复后的 Action 可复现检查实际包含在这次完整执行中；
+上一轮失败日志继续保留。严格字节编译、受影响契约、三浏览器各 43 项及
+前述原参数性能重新验收均通过。此状态关闭本批 primitive 转换的本地验收；
+签名提交和远端结果另以真实 Git 状态核实，完整动态运行时、WASM/native
+编译器宿主、九格联合验收与性能稳定化保持开放。下一可执行增量为保序的
+混合 primitive 运算/关系转换，随后补齐对象 ToPrimitive 与其他完整宿主依赖。

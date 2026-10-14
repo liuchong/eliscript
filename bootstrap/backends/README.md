@@ -84,9 +84,9 @@ Eliscript algorithm ownership does not prove that host migration is finished.
 ```sh
 bun tools/backends/build.mjs
 bun tools/backends/compile.mjs --abi numeric-f64 --target wasm \
-  -o /tmp/kernels.wasm tools/experiments/native-wasm/kernels.eli
+  -o dist/experiments/kernels.wasm tools/experiments/native-wasm/kernels.eli
 bun tools/backends/compile.mjs --abi numeric-f64 --target js \
-  -o /tmp/kernels.mjs tools/experiments/native-wasm/kernels.eli
+  -o dist/experiments/kernels.mjs tools/experiments/native-wasm/kernels.eli
 bun test tests/direct-wasm-backend.test.mjs
 ```
 
@@ -151,15 +151,15 @@ local execution; it does not establish release identity or notarization.
 
 ```sh
 bun tools/backends/compile.mjs --abi numeric-f64 --target native \
-  --platform arm64-macos --native-format object -o /tmp/kernels.o \
+  --platform arm64-macos --native-format object -o dist/experiments/kernels.o \
   tools/experiments/native-wasm/kernels.eli
 bun tools/backends/compile.mjs --abi numeric-f64 --target native \
-  --platform arm64-macos --native-format library -o /tmp/kernels.dylib \
+  --platform arm64-macos --native-format library -o dist/experiments/kernels.dylib \
   tools/experiments/native-wasm/kernels.eli
 # INPUT must export a zero-argument numeric function named entry.
 bun tools/backends/compile.mjs --abi numeric-f64 --target native \
   --platform arm64-macos --native-format executable --entry entry \
-  -o /tmp/program INPUT.eli
+  -o dist/experiments/program INPUT.eli
 bun test tests/native-backend.test.mjs
 ```
 
@@ -356,3 +356,28 @@ The backing arena still retains previous regions on pool growth and does not yet
 destroy multiple heaps. Complete dynamic lowering, persistent collections and
 full compiler hosts remain open. No full compiler memory or performance
 acceptance is claimed by these runtime slices.
+
+## Primitive Number and text conversion
+
+The experimental managed profile now lowers `string-to-number` and variadic
+`str`, and reuses those primitive conversions for String positions, concat and
+Number-valued named-object keys. Decimal and binary/octal/hexadecimal strings
+retain all significant digits before exact nearest-even binary64 rounding.
+Empty text, ECMAScript whitespace, signed zero, subnormals, NaN and infinities
+keep their separate semantics. Number text uses exact rounding intervals to
+produce the shortest roundtripping ECMAScript spelling; it does not format a
+fixed count of decimal digits or discard rounding information.
+
+Private base-2^16 integers live in GC-rooted scratch bytes inside the same WASM
+heap. No host parser, formatter or per-character imports are used. Scratch
+addresses are used only between allocation safepoints, and all addresses are
+reloaded after result allocation. Borrowed inputs, capacity failures and real
+WASM traps retain the caller's roots and exact input values.
+
+Generated JS uses a shared primitive helper for nondecimal Number conversion:
+it parses valid radix integers exactly before converting to binary64, avoiding
+host differences in direct Number(string) conversion. Modules that do not use
+`string-to-number` receive no helper. Seed and self-hosted emitters retain the
+same bytes and source marks. Object/Symbol/BigInt coercion in the managed
+profile, complete ToPrimitive, mixed-type arithmetic and full compiler hosts
+remain open and explicitly refused; these primitive slices do not close them.

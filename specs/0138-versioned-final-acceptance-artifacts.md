@@ -26,6 +26,17 @@ defect register, canonical output paths, blocking severities, and five evidence
 groups: test, fuzz, benchmark, scale, and soak. Group criteria and artifacts
 must be unique, ordered, tracked by the source run, and complete.
 
+A source-bound worker lifecycle soak may be remeasured after compiler changes.
+Its original artifact and all recorded source bindings must still match the
+accepted run's real Git commit and tree, without editing that run or its hashes.
+The replacement must independently pass the original complete workload,
+recovery, timeout, memory/trend and cleanup policies and bind every current
+measurement source. A flag alone, weakened budget, incomplete source inventory,
+forged trend or missing historical snapshot is insufficient. This exception is
+limited to that report; other changed evidence remains a verification failure.
+The canonical manifest/report continue to describe the accepted run, and a fresh
+soak does not make the current checkout a newly accepted complete language.
+
 The contract never treats application frameworks, publishing, hosting, or
 development servers as core evidence. Application status is copied from the
 source run and remains separately labeled and non-contributing.

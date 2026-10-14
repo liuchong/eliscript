@@ -4518,6 +4518,14 @@ function join(separator, values) {
 }
 // examples/dogfood/dist/src/support/text.mjs
 var __eliscript_truthy3 = (value) => value !== false && value != null;
+var __eliscript_to_number = (value) => {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (/^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/.test(text))
+      return Number(BigInt(text));
+  }
+  return Number(value);
+};
 function text_length(text) {
   return count(text);
 }
@@ -4679,7 +4687,7 @@ function without_suffix(suffix, text) {
 }
 function parse_integer(text, fallback) {
   {
-    const __eliscript_value_21 = Number(trim(text));
+    const __eliscript_value_21 = __eliscript_to_number(trim(text));
     {
       let value = __eliscript_value_21;
       return value === value ? value : fallback;
@@ -7939,6 +7947,14 @@ async function source_posts(root, config, source, transport, identities) {
 // examples/dogfood/dist/src/support/config.mjs
 var import_node_fs2 = require("node:fs");
 var __eliscript_truthy17 = (value) => value !== false && value != null;
+var __eliscript_to_number2 = (value) => {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (/^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/.test(text))
+      return Number(BigInt(text));
+  }
+  return Number(value);
+};
 var open_paren = 40;
 var close_paren = 41;
 var open_brace = 123;
@@ -8159,7 +8175,7 @@ function read_atom(reader) {
     const __eliscript_value_26 = read_token(reader);
     {
       let token = __eliscript_value_26;
-      return token === "t" ? true : token === "false" ? false : token === "nil" ? null : __eliscript_truthy17(numeric_token_QMARK_(token)) ? Number(token) : __eliscript_truthy17(blank_QMARK_(token)) ? read_failure(reader, "unexpected character") : { "config-symbol": token };
+      return token === "t" ? true : token === "false" ? false : token === "nil" ? null : __eliscript_truthy17(numeric_token_QMARK_(token)) ? __eliscript_to_number2(token) : __eliscript_truthy17(blank_QMARK_(token)) ? read_failure(reader, "unexpected character") : { "config-symbol": token };
     }
   }
 }
@@ -9560,4 +9576,4 @@ async function main() {
 }
 main();
 
-//# debugId=0C2C92C55B366F3D64756E2164756E21
+//# debugId=65367CB4E42A29D364756E2164756E21

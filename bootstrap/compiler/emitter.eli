@@ -21,6 +21,8 @@
     "import { equalValues as __eliscript_equal } from \"eliscript/runtime/core/value.mjs\";\n")
   (defconst binding-runtime
     "import { get as __eliscript_get } from \"eliscript/runtime/core/collection.mjs\";\nconst __eliscript_binding_missing = Symbol(\"eliscript.binding.missing\");\nconst __eliscript_binding_get = (value, key, notFound) => { if (value == null) return notFound; const prototype = typeof value === \"object\" ? Object.getPrototypeOf(value) : undefined; if (prototype === Object.prototype || prototype === null) { const type = key && Object.getOwnPropertyDescriptor(key, Symbol.for(\"eliscript.value.type\")); if (type?.value === \"keyword\" || type?.value === \"symbol\") key = key.qualifiedName; } return __eliscript_get(value, key, notFound); };\n")
+  (defconst number-conversion-helper
+    "const __eliscript_to_number = (value) => { if (typeof value === \"string\") { const text = value.trim(); if (/^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/.test(text)) return Number(BigInt(text)); } return Number(value); };\n")
   (defconst host-identity-token-helper
     "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n")
   (defconst fail
@@ -1057,7 +1059,7 @@
            (js-array "String.fromCharCode(" (emit-expression (js-nth 0 nodes)) ")")))
         ((= name "string-to-number")
          (require-node-arity node 1 1)
-         (combine (js-array "Number(" (emit-expression (js-nth 0 nodes)) ")")))
+         (combine (js-array "__eliscript_to_number(" (emit-expression (js-nth 0 nodes)) ")")))
         ((= name "string-to-bigint")
          (require-node-arity node 1 1)
          (combine
@@ -1438,6 +1440,17 @@
            (combine (js-array (emit-expression (js-nth 0 nodes)) ";")))
           (t (fail (str "IR node is not valid at module top level: " kind)))))))
 
+  (defun node-uses-number-conversion-p (node)
+    (if (and (= (ir-kind node) "intrinsic")
+             (= (ir-value node) "string-to-number"))
+        t
+      (let ((found false))
+        (js-call (children node) :forEach
+          (lambda (child)
+            (when (node-uses-number-conversion-p child)
+              (setq found t))))
+        found)))
+
   (defun node-uses-host-identity-token-p (node)
     (if (and (= (ir-kind node) "intrinsic")
              (= (ir-value node) "host-identity-token"))
@@ -1540,6 +1553,14 @@
               (setq found t))))
         found)))
 
+  (defun program-uses-number-conversion-p (program)
+    (let ((found false))
+      (js-call (program-body program) :forEach
+        (lambda (node)
+          (when (node-uses-number-conversion-p node)
+            (setq found t))))
+      found))
+
   (defun program-uses-host-identity-token-p (program)
     (let ((found false))
       (js-call (program-body program) :forEach
@@ -1590,6 +1611,7 @@
 
   (defun reference-runtime-requirements (program)
     (js-object
+      :numberConversion (program-uses-number-conversion-p program)
       :hostIdentityToken (program-uses-host-identity-token-p program)
       :literal (program-uses-literal-runtime-p program)
       :collection (program-uses-collection-runtime-p program)
@@ -1631,6 +1653,7 @@
          (put requirements :literal t))
         ((= kind "intrinsic")
          (cond
+           ((= value "string-to-number") (put requirements :numberConversion t))
            ((= value "host-identity-token")
             (put requirements :hostIdentityToken t))
            ((or (= value "nth") (= value "length"))
@@ -1652,6 +1675,7 @@
   (defun runtime-requirements (program)
     (let ((requirements
            (js-object
+             :numberConversion false
              :hostIdentityToken false
              :literal false
              :collection false
@@ -1734,6 +1758,7 @@
              value-runtime-import
            "")
          "const __eliscript_truthy = (value) => value !== false && value != null;\n"
+         (if (get requirements :numberConversion) number-conversion-helper "")
          (if (get requirements :hostIdentityToken)
              host-identity-token-helper
            "")

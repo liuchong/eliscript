@@ -90,5 +90,7 @@ test('Node independently executes the ordinary numeric artifact with exact signe
 });
 test('unsupported numeric operations remain rejected in dead branches and input IR stays immutable',()=>{
  const before=JSON.stringify(program);backend.managed.emit_managed_wasm(program,runtimeProgram);assert.equal(JSON.stringify(program),before);
- for(const expression of['(string-to-number x)','(string-to-bigint x)','(int32 x 1)','(bit-and x 1 2)']){const ir=backend.compiler.compile_ir_string(`(defun f (x) (if false ${expression} x)) (export f)`,'unsupported-number.eli');assert.throws(()=>backend.managed.emit_managed_wasm(ir,runtimeProgram),e=>e.eliscriptDiagnostic?.code==='ELI-B0001'&&e.eliscriptDiagnostic.location.file==='unsupported-number.eli');}
+ const supported=backend.compiler.compile_ir_string('(defun f (x) (if false (string-to-number x) x)) (export f)','supported-number.eli'),saved=JSON.stringify(supported);
+ const a=instantiateManagedRuntime(Uint8Array.from(backend.managed.emit_managed_wasm(supported,runtimeProgram)));const x=a.string('unconverted'),out=a.invoke('f',[x]);assert(a.keyEqual(x,out));a.release(out);a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(JSON.stringify(supported),saved);
+ for(const expression of['(string-to-bigint x)','(int32 x 1)','(bit-and x 1 2)']){const ir=backend.compiler.compile_ir_string(`(defun f (x) (if false ${expression} x)) (export f)`,'unsupported-number.eli');assert.throws(()=>backend.managed.emit_managed_wasm(ir,runtimeProgram),e=>e.eliscriptDiagnostic?.code==='ELI-B0001'&&e.eliscriptDiagnostic.location.file==='unsupported-number.eli');}
 });

@@ -738,6 +738,15 @@ test("ordinary source text has Seed and three-generation IR, descriptor and WASM
  const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
  for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const s=a.string('中😀\ud800'),p=a.number(1),point=a.invoke('code-point',[s,p]);assert.equal(a.readNumber(point),0x1f600);a.release(point);const fixed=a.invoke('repair',[s]);assert.equal(a.readString(fixed),'中😀�');const needle=a.string('😀'),last=a.invoke('last',[s,needle,undefined]);assert.equal(a.readNumber(last),1);for(const v of[s,p,fixed,needle,last])a.release(v);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
 });
+test("primitive Number and text conversions have Seed and three-generation IR, descriptor and WASM fixed points", async () => {
+  const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-number-conversion.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
+  const programs=generations.map(g=>g.compiler.compile_ir_string(source,'number-conversion.eli')),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtime,'runtime.eli'));
+  const lowered=generations.map((g,i)=>g.managed.lower_managed_program(programs[i],runtimes[i]));
+  assert.deepEqual(programs[0],programs[1]);assert.deepEqual(programs[1],programs[2]);assert.deepEqual(lowered[0],lowered[1]);assert.deepEqual(lowered[1],lowered[2]);
+  const bytes=generations.map((g,i)=>g.managed.emit_managed_wasm(programs[i],runtimes[i],{maximumPages:16}));assert.deepEqual(bytes[0],bytes[1]);assert.deepEqual(bytes[1],bytes[2]);
+  const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
+  for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const source=a.string('-0'),parsed=a.invoke('parse',[source]);assert(Object.is(a.readNumber(parsed),-0));const number=a.number(1000000000000000100),text=a.invoke('text',[number]);assert.equal(a.readString(text),'1000000000000000100');for(const value of[source,parsed,number,text])a.release(value);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
+});
 describe("browser compiler backends", () => {
   beforeAll(async () => {
     // Compiler bundling and browser process startup are fixture preparation.
@@ -1194,6 +1203,29 @@ describe("browser compiler backends", () => {
       }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
     },{source,runtime});
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-strings.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
+  });
+  test("browser primitive Number conversions match exact IEEE rounding, shortest text and corrected JS primitives without host callbacks", async () => {
+    const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-number-conversion.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
+    const result=await evaluateBrowser(async({bundle,source,runtime})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));let jsUrl;
+      try {
+        const c=await import(url),p=c.compile_ir_string(source,'browser-number-conversion.eli'),rt=c.compile_ir_string(runtime,'runtime.eli'),bytes=Uint8Array.from(c.emit_managed_wasm(p,rt,{maximumPages:16}));
+        const check=(value,message)=>{if(!value)throw Error(message);};check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'imports');
+        jsUrl=URL.createObjectURL(new Blob([c.emit_ir_string(p)],{type:'text/javascript'}));const js=await import(jsUrl),a=c.instantiateManagedRuntime(bytes,{maxSlots:256,initialBytes:8192,maxBytes:1048576});a.auto(1);
+        const box=value=>typeof value==='number'?a.number(value):typeof value==='string'?a.string(value):value;
+        const read=value=>value&&typeof value==='object'?value.kind===4?a.readNumber(value):a.readString(value):value;
+        const verify=(name,values,expected)=>{const args=values.map(box),out=a.invoke(name,args);check(Object.is(read(out),expected),name+' WASM');check(Object.is(js[name.replaceAll('-','_')](...values),expected),name+' JS');a.release(out);args.forEach(value=>a.release(value));a.collect();check(a.live()===0&&a.stats().frameDepth===0,'roots');};
+        const hex='0xbcf8f9bdba22840724d028768a8a77b3e6b0f283670085477910eccc4e9d6b278a11db79c280d4e9c237774812029ac7ce82daaafca38';verify('parse',[hex],Number(BigInt(hex)));
+        for(const value of[null,false,true,undefined,-0,NaN,Infinity,Number.MIN_VALUE,'','-0','5e-324','2e-324','2.2250738585072012e-308','1.7976931348623157e308','1.7976931348623159e308','0b101','0o777','0x1000000000000001','invalid','１'])verify('parse',[value],typeof value==='string'&&/^0[box]/i.test(value)?Number(BigInt(value)):Number(value));
+        for(const value of[null,false,true,undefined,-0,NaN,Infinity,-Infinity,Number.MIN_VALUE,Number.MAX_VALUE,1e-7,1e-6,1e20,1e21,.1,1000000000000000100]){verify('text',[value],String(value));verify('named-key',[value],'ok');}
+        for(const value of['1','-1','0x2','1.9','NaN','Infinity'])verify('position',[value],'abcdef'.at(value));
+        verify('join',[.5,1e21],String(.5)+String(1e21)+String(1e21));
+        let seed=0x93f7a281;const next=()=>{seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;return seed>>>0;},bits=new DataView(new ArrayBuffer(8));
+        for(let i=0;i<512;i++){bits.setUint32(0,next(),true);bits.setUint32(4,next(),true);const value=bits.getFloat64(0,true);verify('text',[value],String(value));verify('parse',[String(value)],Number(String(value)));}
+        return [...bytes];
+      }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
+    },{source,runtime});
+    assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-number-conversion.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
   });
   test("browser ordinary managed word operations preserve exact remainder, conversions and bit semantics",async()=>{
     const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-word.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');

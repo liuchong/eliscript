@@ -59,7 +59,8 @@ test('a word-operation error suppresses a later genuine trap and unwinds only it
 });
 test('unsupported coercion and invalid word IR are explicit, source-bound and do not mutate input IR',()=>{
  const saved=JSON.stringify(program);backend.managed.emit_managed_wasm(program,runtimeProgram);assert.equal(JSON.stringify(program),saved);
- for(const expression of['(string-to-number x)','(string-to-bigint x)','(imul32 x)','(bit-or x 1 2)','(int32 x x)']){const ir=backend.compiler.compile_ir_string(`(defun f (x) (if false ${expression} x)) (export f)`,'unsupported-word.eli');assert.throws(()=>backend.managed.emit_managed_wasm(ir,runtimeProgram),e=>e.eliscriptDiagnostic?.code==='ELI-B0001'&&e.eliscriptDiagnostic.location.file==='unsupported-word.eli');}
+ const supported=backend.compiler.compile_ir_string('(defun f (x) (if false (string-to-number x) x)) (export f)','supported-word.eli'),original=JSON.stringify(supported);assert(WebAssembly.validate(Uint8Array.from(backend.managed.emit_managed_wasm(supported,runtimeProgram))));assert.equal(JSON.stringify(supported),original);
+ for(const expression of['(string-to-bigint x)','(imul32 x)','(bit-or x 1 2)','(int32 x x)']){const ir=backend.compiler.compile_ir_string(`(defun f (x) (if false ${expression} x)) (export f)`,'unsupported-word.eli');assert.throws(()=>backend.managed.emit_managed_wasm(ir,runtimeProgram),e=>e.eliscriptDiagnostic?.code==='ELI-B0001'&&e.eliscriptDiagnostic.location.file==='unsupported-word.eli');}
  const a=instantiateManagedRuntime(bytes),n=a.number(1),text=a.string('1');for(const name of['remainder','multiply','exclusive'])assert.throws(()=>a.invoke(name,[text,n]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');a.release(n);a.release(text);a.collect();assert.equal(a.live(),0);
 });
 test('Node independently executes the identical ordinary word artifact and collects every result',async()=>{

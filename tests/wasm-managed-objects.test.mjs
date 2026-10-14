@@ -43,11 +43,11 @@ test('objects retain cycles and array/table children, grow under GC and release 
  const n=a.number(128),o=a.invoke('grow-loop',[n]);assert.deepEqual(invoke(a,'keys',[o]),Array.from({length:128},(_,i)=>String(i)));for(let i=0;i<128;i++)assert.equal(field(a,o,i),i);assert(a.stats().collections>128);a.release(n);a.release(o);a.collect();assert.equal(a.live(),0);
 });
 
-test('property-key conversions preserve exact signed integer and nonfinite names; object length is an ordinary property read',()=>{
+test('property-key conversions preserve complete finite Number and nonfinite names; object length is an ordinary property read',()=>{
  const a=instantiateManagedRuntime(bytes);a.auto(1);const o=a.invoke('empty',[]),ref={};
- for(const key of[null,false,true,undefined,0,-0,1,-1,2**31,2**32-1,-(2**32-1),NaN,Infinity,-Infinity,'0.5','constructor','valueOf','__proto__\0','中😀\ud800']){const k=box(a,key),v=a.number(7);assert.equal(invoke(a,'write',[o,k,v]),js.write(ref,key,7));assert.deepEqual(inspect(a,o),ref);assert.equal(invoke(a,'has',[o,k]),js.has(ref,key));a.release(k);a.release(v);}
+ for(const key of[null,false,true,undefined,0,-0,1,-1,2**31,2**32-1,-(2**32-1),NaN,Infinity,-Infinity,.5,Number.MIN_VALUE,2**32,Number.MAX_VALUE,'0.5','constructor','valueOf','__proto__\0','中😀\ud800']){const k=box(a,key),v=a.number(7);assert.equal(invoke(a,'write',[o,k,v]),js.write(ref,key,7));assert.deepEqual(inspect(a,o),ref);assert.equal(invoke(a,'has',[o,k]),js.has(ref,key));a.release(k);a.release(v);}
  const length=a.string('length'),v=a.string('len');invoke(a,'write',[o,length,v]);assert.equal(invoke(a,'size',[o]),js.size({...ref,length:'len'}));const inherited=a.invoke('inherit',[o,false]);assert.equal(invoke(a,'size',[inherited]),'len');a.release(inherited);
- for(const key of[.5,Number.MIN_VALUE,2**32,Number.MAX_VALUE]){const k=a.number(key);assert.throws(()=>a.invoke('write',[o,k,true]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');a.release(k);}
+ const unsupported=a.sourceObject({});assert.throws(()=>a.invoke('write',[o,unsupported,true]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');a.release(unsupported);
  for(const x of[o,length,v])a.release(x);a.collect();assert.equal(a.live(),0);
 });
 
@@ -62,7 +62,7 @@ test('radix key order and shallow assoc agree with deterministic random JS updat
 test('object failures and real traps preserve original codes, caller frames, input properties and private-root cleanup',async()=>{
  const source=await readFile('bootstrap/runtime/memory.eli','utf8'),start=source.indexOf('  (defun heap-object-key-index '),end=source.indexOf('  (defun heap-object-sort-keys ',start);assert(start>=0&&end>start);
  const injected=backend.compiler.compile_ir_string(source.slice(0,start)+'  (defun heap-object-key-index (heap key) (load-u32 4294967295))\n'+source.slice(end),'trap-runtime.eli');const a=instantiateManagedRuntime(Uint8Array.from(backend.managed.emit_managed_wasm(program,injected)));a.auto(1);
- const o=a.invoke('make',[true,false]),bad=a.number(.5),good=a.string('x'),frame=a.frame(1);a.frameSet(frame,0,o);
+ const o=a.invoke('make',[true,false]),bad=a.sourceObject({}),good=a.string('x'),frame=a.frame(1);a.frameSet(frame,0,o);
  assert.throws(()=>a.invoke('fault',[o,bad]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.equal(a.stats().frameDepth,1);
  assert.throws(()=>a.invoke('fault',[o,good]),e=>e instanceof WebAssembly.RuntimeError);assert.equal(a.stats().frameDepth,1);assert.throws(()=>a.objectKeys(o),e=>e instanceof WebAssembly.RuntimeError);assert.equal(a.stats().frameDepth,1);assert.equal(field(a,o,'x'),true);assert.equal(field(a,o,'y'),false);
  const retained=a.frameGet(frame,0);assert(a.keyEqual(retained,o));a.release(retained);a.leaveFrame(frame);for(const v of[o,bad,good])a.release(v);a.collect();assert.equal(a.live(),0);

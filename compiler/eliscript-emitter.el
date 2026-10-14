@@ -14,6 +14,9 @@
 (require 'eliscript-diagnostic)
 (require 'eliscript-parameters)
 
+(defconst eliscript-emitter--number-conversion-helper
+  "const __eliscript_to_number = (value) => { if (typeof value === \"string\") { const text = value.trim(); if (/^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/.test(text)) return Number(BigInt(text)); } return Number(value); };\n"
+  "Generated helper for exact nondecimal Number conversion across JS hosts.")
 (defconst eliscript-emitter--host-identity-token-helper
   "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n"
   "Generated module helper for process-local opaque host identities.")
@@ -980,7 +983,7 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
                (eliscript-emitter-emit-expression (car arguments))))
       ('string-to-number
        (eliscript-emitter--require-arity "string-to-number" arguments 1 1)
-       (format "Number(%s)"
+       (format "__eliscript_to_number(%s)"
                (eliscript-emitter-emit-expression (car arguments))))
       ('string-to-bigint
        (eliscript-emitter--require-arity "string-to-bigint" arguments 1 1)
@@ -1281,6 +1284,19 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
                  (eliscript-emitter-emit-expression (car arguments))))
         (_ (concat (eliscript-emitter-emit-expression form) ";"))))))
 
+(defun eliscript-emitter--uses-number-conversion-p (forms)
+  "Return non-nil when FORMS contain a Number conversion call."
+  (cl-labels
+      ((walk
+        (form)
+        (cond
+         ((vectorp form) (cl-some #'walk (append form nil)))
+         ((consp form)
+          (and (not (eq (car form) 'quote))
+               (or (eq (car form) 'string-to-number) (cl-some #'walk form))))
+         (t nil))))
+    (cl-some #'walk forms)))
+
 (defun eliscript-emitter--uses-host-identity-token-p (forms)
   "Return non-nil when FORMS contain a host identity token call."
   (cl-labels
@@ -1402,6 +1418,9 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
          eliscript-emitter--value-runtime-import
        "")
      "const __eliscript_truthy = (value) => value !== false && value != null;\n"
+     (if (eliscript-emitter--uses-number-conversion-p forms)
+         eliscript-emitter--number-conversion-helper
+       "")
      (if (eliscript-emitter--uses-host-identity-token-p forms)
          eliscript-emitter--host-identity-token-helper
        "")

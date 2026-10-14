@@ -36,10 +36,10 @@ test("stable compatibility corpus covers every frozen core behavior", async () =
     provisionalFeatures: 1,
     excludedApplicationFeatures: 2,
     migrations: 3,
-    fixtures: 111,
+    fixtures: 112,
     evidenceLocators: 679,
     evidenceFiles: 134,
-    sourceFiles: 420,
+    sourceFiles: 421,
     readyForAc02: false,
     identity: expect.stringMatching(/^[0-9a-f]{64}$/u),
   });
@@ -51,6 +51,7 @@ test("stable compatibility corpus covers every frozen core behavior", async () =
   expect((await contract()).fixtureFiles).toContain("tests/fixtures/wasm-managed-arrays.eli");
   expect((await contract()).fixtureFiles).toContain("tests/fixtures/wasm-managed-objects.eli");
   expect((await contract()).fixtureFiles).toContain("tests/fixtures/wasm-managed-strings.eli");
+  expect((await contract()).fixtureFiles).toContain("tests/fixtures/wasm-managed-number-conversion.eli");
 });
 
 test("stable compatibility corpus rejects omitted behavior and migrations", async () => {

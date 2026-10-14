@@ -106,6 +106,30 @@ async function tree(root, prefix = "") {
   return files.sort();
 }
 
+async function verifyIndexedPackage(repository, directory, requiredFiles = [
+  "action/artifact.json", "action/index.eli.map", "action/index.js",
+  "action/index.js.map", "action/workflow.yml", "site/browser.js",
+].map(file => `${directory}/${file}`)) {
+  const workflow = `${directory}/action/workflow.yml`;
+  // The index is the exact candidate tree before a signed commit, and equals
+  // HEAD in a clean CI checkout. Rebuilt bytes must match it, including maps
+  // and manifests; staging source changes alone cannot bless new artifacts.
+  const indexed = await run(["git", "ls-files", "-z", "--", directory], { cwd: repository });
+  if (indexed.exitCode !== 0 || JSON.stringify(indexed.stdout.split("\0").filter(Boolean).sort()) !== JSON.stringify([...requiredFiles].sort())) {
+    throw new Error("indexed package inventory is incomplete or changed");
+  }
+  const compared = await run([
+    "git", "diff", "--exit-code", "--", directory, `:(exclude)${workflow}`,
+  ], { cwd: repository });
+  if (compared.exitCode !== 0) throw new Error("reproduced package differs from the indexed artifacts");
+  const untracked = await run([
+    "git", "ls-files", "--others", "--exclude-standard", "-z", "--", directory,
+  ], { cwd: repository });
+  if (untracked.exitCode !== 0 || untracked.stdout.split("\0").some(file => file && file !== workflow)) {
+    throw new Error("reproduced package contains untracked artifacts");
+  }
+}
+
 beforeAll(async () => {
   staging = await mkdtemp(resolve(ROOT, ".eliscript-dogfood-action-"));
   tool = resolve(staging, "package.mjs");
@@ -195,13 +219,7 @@ test("the committed package reproduces from source", async () => {
   // Action pin is a release-time substitution rather than a build output, so it
   // is checked for the property that matters: it names a commit that carries
   // the entry.
-  const { exitCode, stdout } = await run([
-    "git", "status", "--porcelain", "--", "examples/dogfood/dist",
-  ]);
-  expect(exitCode).toBe(0);
-  const changed = stdout.trim().split("\n")
-    .filter((line) => line.trim() !== "" && !line.endsWith("dist/action/workflow.yml"));
-  expect(changed).toEqual([]);
+  await verifyIndexedPackage(ROOT, "examples/dogfood/dist");
 
   const template = await readFile(resolve(PROJECT, "dist/action/workflow.yml"), "utf8");
   const pin = /uses: liuchong\/eliscript\/examples\/dogfood@([0-9a-f]{40})/u.exec(template)?.[1];
@@ -210,6 +228,28 @@ test("the committed package reproduces from source", async () => {
     "git", "cat-file", "-e", `${pin}:examples/dogfood/dist/action/index.js`,
   ]);
   expect(pinned.exitCode).toBe(0);
+});
+
+test("package reproduction verifies staged bytes and rejects unstaged, missing and untracked artifacts", async () => {
+  const repository = await mkdtemp(resolve(staging, "indexed-"));
+  const artifact = "package/action/index.js";
+  const verify = () => verifyIndexedPackage(repository, "package", [artifact]);
+  await mkdir(join(repository, "package/action"), { recursive: true });
+  expect((await run(["git", "init", "--quiet"], { cwd: repository })).exitCode).toBe(0);
+  await writeFile(join(repository, artifact), "first\n");
+  expect((await run(["git", "add", artifact], { cwd: repository })).exitCode).toBe(0);
+  await verify();
+  await writeFile(join(repository, artifact), "changed\n");
+  await expect(verify()).rejects.toThrow("reproduced package differs");
+  expect((await run(["git", "add", artifact], { cwd: repository })).exitCode).toBe(0);
+  await verify();
+  await rm(join(repository, artifact));
+  await expect(verify()).rejects.toThrow("reproduced package differs");
+  await writeFile(join(repository, artifact), "changed\n");
+  await writeFile(join(repository, "package/action/extra.js"), "untracked\n");
+  await expect(verify()).rejects.toThrow("untracked artifacts");
+  expect((await run(["git", "rm", "--cached", artifact], { cwd: repository })).exitCode).toBe(0);
+  await expect(verify()).rejects.toThrow("indexed package inventory");
 });
 
 test("the metadata satisfies the marketplace limits", async () => {

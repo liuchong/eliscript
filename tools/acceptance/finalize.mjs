@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 
 import { createHash } from "node:crypto";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -7,6 +6,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { verifyAcceptanceRun } from "./check.mjs";
+import { validateRefreshedWorkerSoak } from "./retained-soak.mjs";
 
 const TOOL_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_ROOT = path.resolve(TOOL_DIRECTORY, "../..");
@@ -135,9 +135,15 @@ export async function validateFinalAcceptanceContract(contract, run, options = {
         errors.push(`${label} artifact is missing: ${file}`);
         continue;
       }
-      const digest = sha256(await readFile(path.join(root, file)));
+      const currentBytes = await readFile(path.join(root, file));
+      const digest = sha256(currentBytes);
       if (digest !== runArtifacts.get(file)) {
-        errors.push(`${label} artifact changed after the source run: ${file}`);
+        if (file === "benchmarks/worker-lifecycle-soak-macos-arm64.json") {
+          try { await validateRefreshedWorkerSoak(root, file, currentBytes, run); }
+          catch (error) { errors.push(`${label} artifact changed after the source run: ${file}: ${error.message}`); }
+        } else {
+          errors.push(`${label} artifact changed after the source run: ${file}`);
+        }
       }
     }
   }
