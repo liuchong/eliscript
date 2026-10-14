@@ -1,3 +1,4 @@
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,7 +8,6 @@ import { pathToFileURL } from "node:url";
 const projectDirectory = resolve(import.meta.dir, "..");
 const compiler = resolve(projectDirectory, "bin/eliscript");
 const projectBuilder = resolve(projectDirectory, "bin/eliscript-build");
-const bootstrapBuilder = resolve(projectDirectory, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(projectDirectory, "bin/eliscript-portable");
 const mapSource = resolve(projectDirectory, "stdlib/persistent-map.eli");
 const setSource = resolve(projectDirectory, "stdlib/persistent-set.eli");
@@ -172,9 +172,7 @@ test("Eliscript-authored persistent Set compiles and agrees across hosts", async
       seedSet,
       setSource,
     ]);
-    await runSuccessful([bootstrapBuilder], {
-      ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
-    });
+    await seedCompilerFixture(bootstrapDirectory);
     for (const [source, output] of [
       [mapSource, selfHostedMap],
       [setSource, selfHostedSet],

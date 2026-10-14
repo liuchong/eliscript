@@ -1,3 +1,4 @@
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -5,7 +6,6 @@ import { dirname, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
 const seedCompiler = resolve(root, "bin/eliscript-seed");
-const bootstrapBuilder = resolve(root, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(root, "bin/eliscript-portable");
 const compilationUnits = [
   ["stdlib/core/zipper.eli", "stdlib/core/zipper.eli"],
@@ -74,9 +74,7 @@ test("persistent zippers navigate edit and rebuild stack-safe trees", async () =
     // deadline without making seed compilation wait for bootstrap startup.
     await Promise.all([
       compileFamily(seedCompiler, seedDirectory),
-      runSuccessful([bootstrapBuilder], {
-        ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
-      }),
+      seedCompilerFixture(bootstrapDirectory),
     ]);
     await compileFamily(portableCompiler, selfHostedDirectory, {
       ELISCRIPT_BOOTSTRAP_MODULE_DIR: bootstrapDirectory,

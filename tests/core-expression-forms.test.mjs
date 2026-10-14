@@ -1,3 +1,4 @@
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,7 +7,6 @@ import { pathToFileURL } from "node:url";
 
 const root = resolve(import.meta.dir, "..");
 const seedCompiler = resolve(root, "bin/eliscript-seed");
-const bootstrapBuilder = resolve(root, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(root, "bin/eliscript-portable");
 const source = resolve(root, "tests/fixtures/core-expression-forms.eli");
 const hostFixture = resolve(
@@ -75,9 +75,7 @@ test("core expression forms preserve threading and single-evaluation semantics",
   const bootstrapDirectory = resolve(directory, "bootstrap");
   try {
     const seedModule = await compile(seedCompiler, resolve(directory, "seed"));
-    await runSuccessful([bootstrapBuilder], {
-      ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
-    });
+    await seedCompilerFixture(bootstrapDirectory);
     const selfHostedModule = await compile(
       portableCompiler,
       resolve(directory, "self-hosted"),

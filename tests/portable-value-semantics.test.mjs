@@ -1,3 +1,4 @@
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,7 +12,6 @@ const projectDirectory = resolve(import.meta.dir, "..");
 const stdlibDirectory = resolve(projectDirectory, "stdlib");
 const compiler = resolve(projectDirectory, "bin/eliscript");
 const projectBuilder = resolve(projectDirectory, "bin/eliscript-build");
-const bootstrapBuilder = resolve(projectDirectory, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(projectDirectory, "bin/eliscript-portable");
 const sources = [
   "bit",
@@ -121,9 +121,7 @@ test("Eliscript-authored value semantics compile and agree across hosts", async 
       resolve(seedDirectory, "host-identity-token.mjs"),
       identityTokenSource,
     ]);
-    await runSuccessful([bootstrapBuilder], {
-      ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
-    });
+    await seedCompilerFixture(bootstrapDirectory);
     for (const name of sources) {
       const extension = name === "value" ? "mjs" : "eli";
       await runSuccessful([

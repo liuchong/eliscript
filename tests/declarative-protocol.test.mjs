@@ -1,3 +1,4 @@
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -5,7 +6,6 @@ import { dirname, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
 const seedCompiler = resolve(root, "bin/eliscript-seed");
-const bootstrapBuilder = resolve(root, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(root, "bin/eliscript-portable");
 const protocolSource = resolve(root, "stdlib/core/protocol.eli");
 const declarationSource = resolve(
@@ -81,9 +81,7 @@ test("declarative protocols preserve protocol identity and host dispatch", async
 
   try {
     await compileFamily(seedCompiler, seedDirectory);
-    await runSuccessful([bootstrapBuilder], {
-      ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
-    });
+    await seedCompilerFixture(bootstrapDirectory);
     await compileFamily(portableCompiler, selfHostedDirectory, {
       ELISCRIPT_BOOTSTRAP_MODULE_DIR: bootstrapDirectory,
     });

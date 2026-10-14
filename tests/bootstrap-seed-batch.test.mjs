@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {buildBackends} from '../tools/backends/build.mjs';
+import {seedCompilerFixture} from './helpers/seed-compiler.mjs';
 
 test('backend fixtures seed all compiler modules in one Emacs process with byte-identical independent CLI artifacts',async()=>{
  const root=resolve(import.meta.dir,'..'),directory=await mkdtemp(resolve(tmpdir(),'eliscript-seed-batch-')),output=resolve(directory,'bootstrap'),calls=resolve(directory,'calls'),proxy=resolve(directory,'emacs-proxy.mjs');
@@ -20,6 +21,10 @@ test('backend fixtures seed all compiler modules in one Emacs process with byte-
   assert.equal((await readFile(calls,'utf8')).trim().split('\n').length,1);
   assert.deepEqual((await readdir(output)).sort(),[...expected.keys()].sort());
   for(const[name,bytes]of expected)assert((await readFile(resolve(output,name))).equals(bytes),name);
+  await writeFile(calls,'');const semantic=resolve(directory,'semantic');await seedCompilerFixture(semantic);
+  assert.equal((await readFile(calls,'utf8')).trim().split('\n').length,1);
+  assert.deepEqual((await readdir(semantic)).sort(),[...expected.keys()].sort());
+  for(const[name,bytes]of expected)assert((await readFile(resolve(semantic,name))).equals(bytes),'semantic fixture '+name);
  }finally{
   for(const key of keys)if(saved[key]===undefined)delete process.env[key];else process.env[key]=saved[key];
   await rm(directory,{recursive:true,force:true});
@@ -34,3 +39,13 @@ test('the batch seed entry passes strict byte compilation and refuses malformed 
   const result=spawnSync(emacs,['--batch','-Q','--script',tool,'--',root,resolve(directory,'output'),'../outside'],{encoding:'utf8',timeout:30000});assert.equal(result.status,1);assert.match(result.stderr,/invalid bootstrap module name/);assert.deepEqual((await readdir(directory)).sort(),['tools']);
  }finally{await rm(directory,{recursive:true,force:true});}
 },60000);
+
+test('semantic compiler fixture setup rejects a failing seed process instead of reusing stale artifacts',async()=>{
+ const directory=await mkdtemp(resolve(tmpdir(),'eliscript-semantic-seed-failure-'));
+ try{
+  const proxy=resolve(directory,'failing-emacs.mjs');
+  await writeFile(proxy,`#!${process.execPath}\nprocess.stderr.write('intentional semantic seed failure');process.exit(17);\n`,{mode:0o700});
+  const output=resolve(directory,'output');await mkdir(output);await writeFile(resolve(output,'compiler.mjs'),'stale fixture must not bypass the seed');
+  await assert.rejects(seedCompilerFixture(output,{emacs:proxy}),e=>e.exitCode===17&&/intentional semantic seed failure/.test(e.message));
+ }finally{await rm(directory,{recursive:true,force:true});}
+});

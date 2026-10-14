@@ -1,3 +1,4 @@
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,7 +7,6 @@ import { dirname, resolve } from "node:path";
 const root = resolve(import.meta.dir, "..");
 const source = resolve(root, "stdlib/core/protocol.eli");
 const seedCompiler = resolve(root, "bin/eliscript");
-const bootstrapBuilder = resolve(root, "bin/eliscript-bootstrap");
 const selfHostedCompiler = resolve(root, "bin/eliscript-portable");
 const hostFixture = resolve(
   root,
@@ -88,9 +88,7 @@ test("Eliscript-authored protocol policy preserves open dispatch semantics", asy
       ),
     ]);
     await compile(seedCompiler, seed);
-    await run([bootstrapBuilder], {
-      ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
-    });
+    await seedCompilerFixture(bootstrapDirectory);
     await compile(selfHostedCompiler, selfHosted, {
       ELISCRIPT_BOOTSTRAP_MODULE_DIR: bootstrapDirectory,
     });

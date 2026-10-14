@@ -1,3 +1,4 @@
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -53,7 +54,6 @@ import { equalValues, hashValue } from "../runtime/core/value.mjs";
 
 const root = resolve(import.meta.dir, "..");
 const seedCompiler = resolve(root, "bin/eliscript-seed");
-const bootstrapBuilder = resolve(root, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(root, "bin/eliscript-portable");
 const hostFixture = resolve(root, "tests/fixtures/persistent-sorted-host.mjs");
 const bunPreload = resolve(root, "tests/fixtures/compiled-eli-bun-preload.mjs");
@@ -308,9 +308,7 @@ test("Eliscript sorted API agrees across compilers and local hosts", async () =>
   const selfHostedDirectory = resolve(directory, "self-hosted");
   try {
     await compileFamily(seedCompiler, seedDirectory);
-    await runSuccessful([bootstrapBuilder], {
-      ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
-    });
+    await seedCompilerFixture(bootstrapDirectory);
     await compileFamily(portableCompiler, selfHostedDirectory, {
       ELISCRIPT_BOOTSTRAP_MODULE_DIR: bootstrapDirectory,
     });

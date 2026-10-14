@@ -1,3 +1,4 @@
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,7 +7,6 @@ import { resolve } from "node:path";
 const projectDirectory = resolve(import.meta.dir, "..");
 const stdlibDirectory = resolve(projectDirectory, "stdlib");
 const compiler = resolve(projectDirectory, "bin/eliscript");
-const bootstrapBuilder = resolve(projectDirectory, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(projectDirectory, "bin/eliscript-portable");
 const projectBuilder = resolve(projectDirectory, "bin/eliscript-build");
 const emacs = process.env.EMACS ?? "emacs";
@@ -54,9 +54,7 @@ test("portable numeric functions preserve exact Number and safe-integer contract
       resolve(seedDirectory, "numeric.mjs"),
       resolve(stdlibDirectory, "numeric.eli"),
     ]);
-    await runSuccessful([bootstrapBuilder], {
-      ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
-    });
+    await seedCompilerFixture(bootstrapDirectory);
     await runSuccessful(
       [
         portableCompiler,

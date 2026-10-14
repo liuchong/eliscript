@@ -1,3 +1,4 @@
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -5,7 +6,6 @@ import { resolve } from "node:path";
 
 const projectDirectory = resolve(import.meta.dir, "..");
 const compiler = resolve(projectDirectory, "bin/eliscript");
-const bootstrapBuilder = resolve(projectDirectory, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(projectDirectory, "bin/eliscript-portable");
 const emacs = process.env.EMACS ?? "emacs";
 
@@ -57,9 +57,7 @@ test("portable 32-bit operations and algorithms agree under Bun and Node", async
         source,
       ]);
     }
-    await runSuccessful([bootstrapBuilder], {
-      ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
-    });
+    await seedCompilerFixture(bootstrapDirectory);
     await runSuccessful([
       portableCompiler,
       "--source-map",

@@ -1,3 +1,4 @@
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -13,7 +14,6 @@ import { persistentVector } from "../runtime/core/vector.mjs";
 const projectDirectory = resolve(import.meta.dir, "..");
 const stdlibDirectory = resolve(projectDirectory, "stdlib");
 const compiler = resolve(projectDirectory, "bin/eliscript");
-const bootstrapBuilder = resolve(projectDirectory, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(projectDirectory, "bin/eliscript-portable");
 const bun = process.env.BUN ?? process.execPath;
 const sources = [
@@ -90,9 +90,7 @@ test("portable canonical data text is byte-identical and host-independent", asyn
         resolve(stdlibDirectory, `${name}.eli`),
       ]);
     }
-    await runSuccessful([bootstrapBuilder], {
-      ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
-    });
+    await seedCompilerFixture(bootstrapDirectory);
     for (const name of sources) {
       const extension = name === "data-text" ? "mjs" : "eli";
       await runSuccessful([

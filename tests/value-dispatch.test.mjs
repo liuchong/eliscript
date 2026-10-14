@@ -1,3 +1,4 @@
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -5,7 +6,6 @@ import { dirname, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
 const seedCompiler = resolve(root, "bin/eliscript-seed");
-const bootstrapBuilder = resolve(root, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(root, "bin/eliscript-portable");
 const source = resolve(root, "tests/fixtures/value-dispatch.eli");
 const output = "tests/fixtures/value-dispatch.mjs";
@@ -57,9 +57,7 @@ test("case and condp agree across compilers and local hosts", async () => {
 
   try {
     const seedOutput = await compile(seedCompiler, seedDirectory);
-    await runSuccessful([bootstrapBuilder], {
-      ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
-    });
+    await seedCompilerFixture(bootstrapDirectory);
     const selfHostedOutput = await compile(
       portableCompiler,
       selfHostedDirectory,

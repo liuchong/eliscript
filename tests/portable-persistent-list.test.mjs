@@ -1,3 +1,4 @@
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,7 +7,6 @@ import { pathToFileURL } from "node:url";
 
 const projectDirectory = resolve(import.meta.dir, "..");
 const compiler = resolve(projectDirectory, "bin/eliscript");
-const bootstrapBuilder = resolve(projectDirectory, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(projectDirectory, "bin/eliscript-portable");
 const source = resolve(projectDirectory, "stdlib/persistent-list.eli");
 const generatedModule = resolve(
@@ -82,9 +82,7 @@ test("Eliscript-authored persistent list compiles and agrees across hosts", asyn
       seedModule,
       source,
     ]);
-    await runSuccessful([bootstrapBuilder], {
-      ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
-    });
+    await seedCompilerFixture(bootstrapDirectory);
     await runSuccessful([
       portableCompiler,
       "--source-map",

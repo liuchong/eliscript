@@ -1,3 +1,4 @@
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 import { expect, test } from "bun:test";
 import {
   copyFile,
@@ -16,7 +17,6 @@ const root = resolve(import.meta.dir, "..");
 const packageFixtures = resolve(root, "tests/fixtures/packages");
 const seedBuild = resolve(root, "bin/eliscript-seed-build");
 const selfHostedBuild = resolve(root, "bin/eliscript-build");
-const bootstrapBuilder = resolve(root, "bin/eliscript-bootstrap");
 const emacs = process.env.EMACS ?? "emacs";
 const repositoryPackage = JSON.parse(
   await readFile(resolve(root, "package.json"), "utf8"),
@@ -138,9 +138,7 @@ test("maintained JavaScript package consumes native values across compilers and 
       mkdir(selfHostedPackage, { recursive: true }),
     ]);
     await compilePackage(seedBuild, seedPackage);
-    await runSuccessful([bootstrapBuilder], {
-      env: { ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory },
-    });
+    await seedCompilerFixture(bootstrapDirectory);
     await compilePackage(selfHostedBuild, selfHostedPackage, {
       ELISCRIPT_BOOTSTRAP_MODULE_DIR: bootstrapDirectory,
     });

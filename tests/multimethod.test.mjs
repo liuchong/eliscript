@@ -1,3 +1,4 @@
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,7 +7,6 @@ import { resolve } from "node:path";
 const root = resolve(import.meta.dir, "..");
 const stdlib = resolve(root, "stdlib");
 const compiler = resolve(root, "bin/eliscript");
-const bootstrapBuilder = resolve(root, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(root, "bin/eliscript-portable");
 const declarativeFixture = resolve(
   root,
@@ -87,9 +87,7 @@ test("Eliscript multimethods dispatch on values with persistent method snapshots
 
   try {
     await compileFamily(compiler, seedDirectory);
-    await runSuccessful([bootstrapBuilder], {
-      ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
-    });
+    await seedCompilerFixture(bootstrapDirectory);
     await compileFamily(portableCompiler, selfHostedDirectory, {
       ELISCRIPT_BOOTSTRAP_MODULE_DIR: bootstrapDirectory,
     });

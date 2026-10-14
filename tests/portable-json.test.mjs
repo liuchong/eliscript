@@ -1,3 +1,4 @@
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,7 +7,6 @@ import { resolve } from "node:path";
 const projectDirectory = resolve(import.meta.dir, "..");
 const stdlibDirectory = resolve(projectDirectory, "stdlib");
 const compiler = resolve(projectDirectory, "bin/eliscript");
-const bootstrapBuilder = resolve(projectDirectory, "bin/eliscript-bootstrap");
 const portableCompiler = resolve(projectDirectory, "bin/eliscript-portable");
 const projectBuilder = resolve(projectDirectory, "bin/eliscript-build");
 const sources = [
@@ -76,9 +76,7 @@ test("portable JSON values are strict, canonical, bounded, and self-hosted", asy
         resolve(stdlibDirectory, `${name}.eli`),
       ]);
     }
-    await runSuccessful([bootstrapBuilder], {
-      ELISCRIPT_BOOTSTRAP_OUT_DIR: bootstrapDirectory,
-    });
+    await seedCompilerFixture(bootstrapDirectory);
     for (const name of sources) {
       const extension = name === "json" ? "mjs" : "eli";
       await runSuccessful(
