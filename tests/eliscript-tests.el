@@ -752,7 +752,10 @@
            (n-ary (eliscript-emitter-emit-expression
                    (list operator '(first) '(second) '(third)))))
       (should (equal binary
-                     (format "(left() %s right())" javascript-operator)))
+                     (if (eq operator '=)
+                         (format "(left() %s right())" javascript-operator)
+                       (format "__eliscript_numeric_relation(\"%s\", left(), right())"
+                               javascript-operator))))
       (should-not (string-match-p "=>" binary))
       (should (string-match-p "=>" n-ary))
       (should (string-match-p "first()" n-ary))
@@ -837,7 +840,7 @@
    (equal
     (eliscript-emitter-emit-expression
      '(js-call (js-array 1 2 3) :map (lambda (value) (* value 2))))
-    "([1, 2, 3])[\"map\"]((value) => {\n  return (value * 2);\n})"))
+    "([1, 2, 3])[\"map\"]((value) => {\n  return __eliscript_numeric_mul(value, 2);\n})"))
   (should
    (equal (eliscript-emitter-emit-expression '(get user :name "unknown"))
           "((user)[\"name\"] ?? \"unknown\")")))
@@ -1558,9 +1561,9 @@
            "(when-let (item value) (print item) (1+ item)))")
           "core-forms.eli")))
     (should (string-match-p
-             (regexp-quote "return ((value + 1) * 2);") output))
+             (regexp-quote "return __eliscript_numeric_mul((value + 1), 2);") output))
     (should (string-match-p
-             (regexp-quote "return (2 * (1 + value));") output))
+             (regexp-quote "return __eliscript_numeric_mul(2, (1 + value));") output))
     (should (string-match-p
              (regexp-quote "let item = __eliscript_value_1;") output))
     (should (string-match-p "thread\\$G[0-9]+" output))
@@ -1944,16 +1947,16 @@
     (should
      (equal output (eliscript-tests--legacy-compile-string source filename)))
     (dolist (fragment
-             '("(value | 0)"
-               "(value >>> 0)"
-               "Math.imul(value, 31)"
-               "(value & 255)"
-               "(value | 256)"
-               "(value ^ 85)"
-               "(~value)"
-               "(value << distance)"
-               "(value >> distance)"
-               "(value >>> distance)"))
+             '("__eliscript_numeric_int32(value)"
+               "__eliscript_numeric_uint32(value)"
+               "__eliscript_numeric_imul(value, 31)"
+               "__eliscript_numeric_and(value, 255)"
+               "__eliscript_numeric_or(value, 256)"
+               "__eliscript_numeric_xor(value, 85)"
+               "__eliscript_numeric_not(value)"
+               "__eliscript_numeric_shl(value, distance)"
+               "__eliscript_numeric_shr(value, distance)"
+               "__eliscript_numeric_ushr(value, distance)"))
       (should (string-match-p (regexp-quote fragment) output)))))
 
 (ert-deftest eliscript-rejects-invalid-32-bit-operation-arities ()
@@ -2061,10 +2064,23 @@
     (should-error (eliscript-compile-string source "value-invalid.eli")
                   :type 'eliscript-compile-error)))
 
+(ert-deftest eliscript-closed-scalar-loop-proofs-match-reader-and-ir-backends ()
+  (dolist (body '("(let ((i 0) (x seed)) (while (< i n) (setq x (- x)) (setq i (1+ i))) x)"
+                  "(do (while (< n 0) (setq n (1+ n))) seed)"
+                  "(let (x) (while (< n 0) (setq n (1+ n))) (+ x seed))"
+                  "(let ((x)) (while (< n 0) (setq n (1+ n))) (+ x seed))"
+                  "(let* ((x seed) (y (* x 2))) (while (< n 0) (setq n (1+ n))) y)"
+                  "(let ((seed (+ seed 1)) (x seed)) (while (< n 0) (setq n (1+ n))) (+ seed x))"
+                  "(progn (while (< n 0 10) (setq n (1+ n))) seed)"
+                  "(progn (while (< n 0) (setq n (1+ n))) (* seed captured))"))
+    (let ((source (concat "(defvar captured \"2\") (defun f (n seed) " body ") (export f)")))
+      (should (equal (eliscript-compile-string source "scalar-proof.eli")
+                     (eliscript-tests--legacy-compile-string source "scalar-proof.eli"))))))
+
 (ert-deftest eliscript-ir-emitter-does-not-call-form-backend ()
   (let ((program
          (eliscript-compile-ir-string
-          "(defun identity (value) value) (export identity)"
+          "(defun identity (value) (let ((i 0)) (while (< i value) (setq i (1+ i))) value)) (export identity)"
           "direct-ir.eli")))
     (cl-letf (((symbol-function 'eliscript-ir-program-to-forms)
                (lambda (&rest _arguments)

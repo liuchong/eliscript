@@ -65,6 +65,89 @@ class ProtocolDispatchError extends TypeError {
 }
 // runtime/core/protocol-impl.mjs
 var __eliscript_truthy = (value) => value !== false && value != null;
+var __eliscript_number_intrinsic = globalThis.Number;
+var __eliscript_bigint_intrinsic = globalThis.BigInt;
+var __eliscript_numeric_apply = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error = globalThis.TypeError;
+var __eliscript_numeric_trim = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive = (value) => {
+  if (!__eliscript_numeric_object(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object(result))
+      return result;
+    throw new __eliscript_numeric_error("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply(method, value, []);
+      if (!__eliscript_numeric_object(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error("Cannot convert object to primitive value");
+};
+var __eliscript_to_number = (value) => {
+  const primitive = __eliscript_numeric_primitive(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply(__eliscript_numeric_trim, primitive, []);
+    if (__eliscript_numeric_apply(__eliscript_numeric_exec, __eliscript_numeric_radix, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply(__eliscript_numeric_slice, text, [0, 2]) + __eliscript_numeric_apply(__eliscript_numeric_slice, text, [first]);
+      return __eliscript_number_intrinsic(__eliscript_bigint_intrinsic(token));
+    }
+  }
+  return __eliscript_number_intrinsic(primitive);
+};
+var __eliscript_numeric = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number(primitive) : +primitive;
+};
+var __eliscript_numeric_relation = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive(left);
+  let b = __eliscript_numeric_primitive(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric(a);
+    b = __eliscript_numeric(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 var protocol_states = new WeakMap;
 var protocol_missing = Symbol("eliscript.protocol.missing");
 var protocol_host_categories = ["null", "undefined", "boolean", "number", "bigint", "string", "symbol", "function", "object"];
@@ -139,7 +222,7 @@ function normalize_protocol_operations(operations) {
     {
       let length = __eliscript_value_3;
       length === 0 && protocol_fail("protocol operations must be a non-empty dense array");
-      length > protocol_max_operations && protocol_fail(String("protocol operations exceed ") + String(protocol_max_operations));
+      __eliscript_numeric_relation(">", length, protocol_max_operations) && protocol_fail(String("protocol operations exceed ") + String(protocol_max_operations));
       {
         const __eliscript_value_4 = protocol_own_descriptors(operations);
         {
@@ -157,7 +240,7 @@ function normalize_protocol_operations(operations) {
                     {
                       let index = __eliscript_value_7;
                       ((__eliscript_value_8, __eliscript_value_9) => __eliscript_value_8 !== __eliscript_value_9)((keys ?? []).length, length + 1) && protocol_fail("protocol operations must be a dense array with no extra properties");
-                      while (index < length) {
+                      while (__eliscript_numeric_relation("<", index, length)) {
                         {
                           const __eliscript_value_10 = descriptors[String(index)] ?? undefined;
                           {
@@ -205,7 +288,7 @@ function known_host_category_QMARK_(category) {
     {
       let index = __eliscript_value_31;
       let found = __eliscript_value_32;
-      while (index < (protocol_host_categories ?? []).length && !__eliscript_truthy(found)) {
+      while (__eliscript_numeric_relation("<", index, (protocol_host_categories ?? []).length) && !__eliscript_truthy(found)) {
         category === ((protocol_host_categories ?? [])[index] ?? null) && (found = true);
         index = index + 1;
       }
@@ -253,7 +336,7 @@ function normalize_implementations(protocol, implementations) {
                 {
                   let index = __eliscript_value_36;
                   (keys ?? []).length === 0 && protocol_fail(String("protocol ") + String(protocol["name"]) + String(" extension must implement at least one operation"));
-                  while (index < (keys ?? []).length) {
+                  while (__eliscript_numeric_relation("<", index, (keys ?? []).length)) {
                     {
                       const __eliscript_value_37 = (keys ?? [])[index] ?? null;
                       {
@@ -333,7 +416,7 @@ function merge_implementations(current, incoming) {
       let copy = __eliscript_value_40;
       copy = (source) => {
         return !(source == null) ? ((keys, index) => {
-          while (index < (keys ?? []).length) {
+          while (__eliscript_numeric_relation("<", index, (keys ?? []).length)) {
             {
               const __eliscript_value_41 = (keys ?? [])[index] ?? null;
               {
@@ -438,7 +521,7 @@ function define_protocol(name, operations) {
           let operation_table = __eliscript_value_53;
           let protocol = __eliscript_value_54;
           let index = __eliscript_value_55;
-          while (index < (protocol_operations ?? []).length) {
+          while (__eliscript_numeric_relation("<", index, (protocol_operations ?? []).length)) {
             {
               const __eliscript_value_56 = (protocol_operations ?? [])[index] ?? null;
               {
@@ -473,7 +556,7 @@ function define_protocol(name, operations) {
           }
           protocol = protocol_freeze({ name: protocol_name, operations: protocol_freeze(operation_table) });
           index = 0;
-          while (index < (protocol_operations ?? []).length) {
+          while (__eliscript_numeric_relation("<", index, (protocol_operations ?? []).length)) {
             {
               const __eliscript_value_60 = (protocol_operations ?? [])[index] ?? null;
               {
@@ -1483,11 +1566,11 @@ function promoteBitmapNode(node, shift, hash, key, value) {
   metrics3.promotions += 1;
   return new ArrayNode(node.items.length + 1, children);
 }
-function packArrayNode(node) {
+function packArrayNode(children) {
   let bitmap = 0;
   const items = [];
   for (let index = 0;index < 32; index += 1) {
-    const child = node.children[index];
+    const child = children[index];
     if (child !== undefined) {
       bitmap = (bitmap | 1 << index) >>> 0;
       items.push(child);
@@ -1508,10 +1591,9 @@ function findInNode(node, shift, hash, key, notFound) {
   }
   if (node instanceof ArrayNode) {
     const item = node.children[branchIndex(hash, shift)];
-    if (item === undefined) {
-      return notFound;
-    }
-    return item instanceof MapEntry ? findEntry(item, hash, key, notFound) : findInNode(item, shift + 5, hash, key, notFound);
+    if (item instanceof MapEntry)
+      return findEntry(item, hash, key, notFound);
+    return item === undefined ? notFound : findInNode(item, shift + 5, hash, key, notFound);
   }
   if (node.hash !== hash) {
     return notFound;
@@ -1560,6 +1642,23 @@ function assocNode(node, shift, hash, key, value) {
   if (node instanceof ArrayNode) {
     const index2 = branchIndex(hash, shift);
     const existing = node.children[index2];
+    if (node.count === BRANCH_MASK + 1 && existing instanceof MapEntry) {
+      let replacement;
+      let added;
+      if (sameEntry(existing, hash, key)) {
+        if (equalValues(existing.value, value)) {
+          return { item: node, added: false, changed: false };
+        }
+        replacement = new MapEntry(existing.key, value, existing.hash);
+        added = false;
+      } else {
+        replacement = mergeEntries(shift + 5, existing, new MapEntry(key, value, hash));
+        added = true;
+      }
+      const children2 = node.children.slice();
+      children2[index2] = replacement;
+      return { item: new ArrayNode(node.count, children2), added, changed: true };
+    }
     if (existing === undefined) {
       const children2 = node.children.slice();
       children2[index2] = new MapEntry(key, value, hash);
@@ -1669,9 +1768,8 @@ function dissocNode(node, shift, hash, key) {
     const children = node.children.slice();
     children[index2] = result.item;
     const count = result.item === undefined ? node.count - 1 : node.count;
-    const updated = new ArrayNode(count, children);
     return {
-      item: count <= BITMAP_NODE_THRESHOLD ? packArrayNode(updated) : updated,
+      item: count <= BITMAP_NODE_THRESHOLD ? packArrayNode(children) : new ArrayNode(count, children),
       removed: true
     };
   }
@@ -4427,19 +4525,116 @@ function sort(...arguments_) {
 
 // runtime/core/text-impl.mjs
 var __eliscript_truthy2 = (value) => value !== false && value != null;
+var __eliscript_number_intrinsic2 = globalThis.Number;
+var __eliscript_bigint_intrinsic2 = globalThis.BigInt;
+var __eliscript_numeric_apply2 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol2 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error2 = globalThis.TypeError;
+var __eliscript_numeric_trim2 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice2 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec2 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix2 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object2 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive2 = (value) => {
+  if (!__eliscript_numeric_object2(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol2];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply2(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object2(result))
+      return result;
+    throw new __eliscript_numeric_error2("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply2(method, value, []);
+      if (!__eliscript_numeric_object2(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error2("Cannot convert object to primitive value");
+};
+var __eliscript_to_number2 = (value) => {
+  const primitive = __eliscript_numeric_primitive2(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply2(__eliscript_numeric_trim2, primitive, []);
+    if (__eliscript_numeric_apply2(__eliscript_numeric_exec2, __eliscript_numeric_radix2, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply2(__eliscript_numeric_slice2, text, [0, 2]) + __eliscript_numeric_apply2(__eliscript_numeric_slice2, text, [first]);
+      return __eliscript_number_intrinsic2(__eliscript_bigint_intrinsic2(token));
+    }
+  }
+  return __eliscript_number_intrinsic2(primitive);
+};
+var __eliscript_numeric2 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive2(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number2(primitive) : +primitive;
+};
+var __eliscript_implicit_number = (value) => {
+  if (typeof value === "number")
+    return value;
+  const primitive = __eliscript_numeric_primitive2(value);
+  if (typeof primitive === "bigint")
+    throw new __eliscript_numeric_error2("Cannot convert a BigInt value to a number");
+  return typeof primitive === "string" ? __eliscript_to_number2(primitive) : +primitive;
+};
+var __eliscript_numeric_decrement = (value) => __eliscript_implicit_number(value) - 1;
+var __eliscript_numeric_sub = (a, b) => {
+  if (typeof a === "number" && typeof b === "number")
+    return a - b;
+  return __eliscript_numeric2(a) - __eliscript_numeric2(b);
+};
+var __eliscript_numeric_relation2 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive2(left);
+  let b = __eliscript_numeric_primitive2(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric2(a);
+    b = __eliscript_numeric2(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 function empty_QMARK_(text) {
   return count(text) === 0;
 }
 function slice(start, end, text) {
   {
     const __eliscript_value_1 = "";
-    const __eliscript_value_2 = start < 0 ? 0 : start;
-    const __eliscript_value_3 = end > count(text) ? count(text) : end;
+    const __eliscript_value_2 = __eliscript_numeric_relation2("<", start, 0) ? 0 : start;
+    const __eliscript_value_3 = __eliscript_numeric_relation2(">", end, count(text)) ? count(text) : end;
     {
       let result = __eliscript_value_1;
       let index = __eliscript_value_2;
       let limit = __eliscript_value_3;
-      while (index < limit) {
+      while (__eliscript_numeric_relation2("<", index, limit)) {
         result = String(result) + String(nth(text, index)), index = index + 1;
       }
       return result;
@@ -4448,12 +4643,12 @@ function slice(start, end, text) {
 }
 function starts_at_QMARK_(prefix, offset, text) {
   {
-    const __eliscript_value_4 = offset >= 0 && offset + count(prefix) <= count(text);
+    const __eliscript_value_4 = __eliscript_numeric_relation2(">=", offset, 0) && __eliscript_numeric_relation2("<=", offset + count(prefix), count(text));
     const __eliscript_value_5 = 0;
     {
       let matched = __eliscript_value_4;
       let index = __eliscript_value_5;
-      while (__eliscript_truthy2(((__eliscript_value_6) => __eliscript_truthy2(__eliscript_value_6) ? index < count(prefix) : __eliscript_value_6)(matched))) {
+      while (__eliscript_truthy2(((__eliscript_value_6) => __eliscript_truthy2(__eliscript_value_6) ? __eliscript_numeric_relation2("<", index, count(prefix)) : __eliscript_value_6)(matched))) {
         !(nth(prefix, index) === nth(text, offset + index)) && (matched = false);
         index = index + 1;
       }
@@ -4465,18 +4660,18 @@ function starts_with_QMARK_(prefix, text) {
   return starts_at_QMARK_(prefix, 0, text);
 }
 function ends_with_QMARK_(suffix, text) {
-  return starts_at_QMARK_(suffix, count(text) - count(suffix), text);
+  return starts_at_QMARK_(suffix, __eliscript_numeric_sub(count(text), count(suffix)), text);
 }
 function contains_QMARK_(needle, text) {
   {
     const __eliscript_value_7 = false;
     const __eliscript_value_8 = 0;
-    const __eliscript_value_9 = count(text) - count(needle);
+    const __eliscript_value_9 = __eliscript_numeric_sub(count(text), count(needle));
     {
       let found = __eliscript_value_7;
       let offset = __eliscript_value_8;
       let last_offset = __eliscript_value_9;
-      while (!__eliscript_truthy2(found) && offset <= last_offset) {
+      while (!__eliscript_truthy2(found) && __eliscript_numeric_relation2("<=", offset, last_offset)) {
         __eliscript_truthy2(starts_at_QMARK_(needle, offset, text)) && (found = true);
         offset = offset + 1;
       }
@@ -4494,15 +4689,15 @@ function whitespace_QMARK_(character) {
 function trim(text) {
   {
     const __eliscript_value_10 = 0;
-    const __eliscript_value_11 = count(text) - 1;
+    const __eliscript_value_11 = __eliscript_numeric_decrement(count(text));
     {
       let start = __eliscript_value_10;
       let end = __eliscript_value_11;
-      while (__eliscript_truthy2(((__eliscript_value_12) => __eliscript_truthy2(__eliscript_value_12) ? whitespace_QMARK_(nth(text, start)) : __eliscript_value_12)(start <= end))) {
+      while (__eliscript_truthy2(((__eliscript_value_12) => __eliscript_truthy2(__eliscript_value_12) ? whitespace_QMARK_(nth(text, start)) : __eliscript_value_12)(__eliscript_numeric_relation2("<=", start, end)))) {
         start = start + 1;
       }
-      while (__eliscript_truthy2(((__eliscript_value_13) => __eliscript_truthy2(__eliscript_value_13) ? whitespace_QMARK_(nth(text, end)) : __eliscript_value_13)(end >= start))) {
-        end = end - 1;
+      while (__eliscript_truthy2(((__eliscript_value_13) => __eliscript_truthy2(__eliscript_value_13) ? whitespace_QMARK_(nth(text, end)) : __eliscript_value_13)(__eliscript_numeric_relation2(">=", end, start)))) {
+        end = __eliscript_numeric_decrement(end);
       }
       return slice(start, end + 1, text);
     }
@@ -4518,13 +4713,93 @@ function join(separator, values) {
 }
 // examples/dogfood/dist/src/support/text.mjs
 var __eliscript_truthy3 = (value) => value !== false && value != null;
-var __eliscript_to_number = (value) => {
-  if (typeof value === "string") {
-    const text = value.trim();
-    if (/^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/.test(text))
-      return Number(BigInt(text));
+var __eliscript_number_intrinsic3 = globalThis.Number;
+var __eliscript_bigint_intrinsic3 = globalThis.BigInt;
+var __eliscript_numeric_apply3 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol3 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error3 = globalThis.TypeError;
+var __eliscript_numeric_trim3 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice3 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec3 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix3 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object3 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive3 = (value) => {
+  if (!__eliscript_numeric_object3(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol3];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply3(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object3(result))
+      return result;
+    throw new __eliscript_numeric_error3("Cannot convert object to primitive value");
   }
-  return Number(value);
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply3(method, value, []);
+      if (!__eliscript_numeric_object3(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error3("Cannot convert object to primitive value");
+};
+var __eliscript_to_number3 = (value) => {
+  const primitive = __eliscript_numeric_primitive3(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply3(__eliscript_numeric_trim3, primitive, []);
+    if (__eliscript_numeric_apply3(__eliscript_numeric_exec3, __eliscript_numeric_radix3, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply3(__eliscript_numeric_slice3, text, [0, 2]) + __eliscript_numeric_apply3(__eliscript_numeric_slice3, text, [first]);
+      return __eliscript_number_intrinsic3(__eliscript_bigint_intrinsic3(token));
+    }
+  }
+  return __eliscript_number_intrinsic3(primitive);
+};
+var __eliscript_numeric3 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive3(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number3(primitive) : +primitive;
+};
+var __eliscript_numeric_sub2 = (a, b) => {
+  if (typeof a === "number" && typeof b === "number")
+    return a - b;
+  return __eliscript_numeric3(a) - __eliscript_numeric3(b);
+};
+var __eliscript_numeric_relation3 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive3(left);
+  let b = __eliscript_numeric_primitive3(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric3(a);
+    b = __eliscript_numeric3(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
 };
 function text_length(text) {
   return count(text);
@@ -4581,13 +4856,13 @@ function char_code(text, index) {
   return text.charCodeAt(index);
 }
 function upper_code_QMARK_(code) {
-  return code >= 65 && code <= 90;
+  return __eliscript_numeric_relation3(">=", code, 65) && __eliscript_numeric_relation3("<=", code, 90);
 }
 function lower_code_QMARK_(code) {
-  return code >= 97 && code <= 122;
+  return __eliscript_numeric_relation3(">=", code, 97) && __eliscript_numeric_relation3("<=", code, 122);
 }
 function digit_code_QMARK_(code) {
-  return code >= 48 && code <= 57;
+  return __eliscript_numeric_relation3(">=", code, 48) && __eliscript_numeric_relation3("<=", code, 57);
 }
 function lower_code(code) {
   return __eliscript_truthy3(upper_code_QMARK_(code)) ? code + 32 : code;
@@ -4599,7 +4874,7 @@ function to_lowercase(text) {
     {
       let result = __eliscript_value_4;
       let index = __eliscript_value_5;
-      while (index < text_length(text)) {
+      while (__eliscript_numeric_relation3("<", index, text_length(text))) {
         result = String(result) + String(String.fromCharCode(lower_code(char_code(text, index)))), index = index + 1;
       }
       return result;
@@ -4617,7 +4892,7 @@ function split_lines(text) {
       let start = __eliscript_value_7;
       let index = __eliscript_value_8;
       let size = __eliscript_value_9;
-      while (index < size) {
+      while (__eliscript_numeric_relation3("<", index, size)) {
         char_code(text, index) === 10 && (lines = conj(lines, slice(start, index, text)), start = index + 1);
         index = index + 1;
       }
@@ -4638,8 +4913,8 @@ function split_on(separator, text) {
       let index = __eliscript_value_12;
       let size = __eliscript_value_13;
       let width = __eliscript_value_14;
-      while (index < size) {
-        width > 0 && index + width <= size && slice(index, index + width, text) === separator ? (parts = conj(parts, slice(start, index, text)), index = index + width, start = index) : index = index + 1;
+      while (__eliscript_numeric_relation3("<", index, size)) {
+        __eliscript_numeric_relation3(">", width, 0) && __eliscript_numeric_relation3("<=", index + width, size) && slice(index, index + width, text) === separator ? (parts = conj(parts, slice(start, index, text)), index = index + width, start = index) : index = index + 1;
       }
       return conj(parts, slice(start, size, text));
     }
@@ -4650,13 +4925,13 @@ function index_of_from(needle, text, start) {
     const __eliscript_value_15 = -1;
     const __eliscript_value_16 = start;
     const __eliscript_value_17 = text_length(needle);
-    const __eliscript_value_18 = text_length(text) - text_length(needle);
+    const __eliscript_value_18 = __eliscript_numeric_sub2(text_length(text), text_length(needle));
     {
       let found = __eliscript_value_15;
       let index = __eliscript_value_16;
       let width = __eliscript_value_17;
       let limit = __eliscript_value_18;
-      while (found < 0 && index <= limit) {
+      while (__eliscript_numeric_relation3("<", found, 0) && __eliscript_numeric_relation3("<=", index, limit)) {
         slice(index, index + width, text) === needle && (found = index);
         index = index + 1;
       }
@@ -4674,20 +4949,20 @@ function basename(path) {
     {
       let last = __eliscript_value_19;
       let index = __eliscript_value_20;
-      while (index < text_length(path)) {
+      while (__eliscript_numeric_relation3("<", index, text_length(path))) {
         char_code(path, index) === 47 && (last = index);
         index = index + 1;
       }
-      return last < 0 ? path : slice(last + 1, text_length(path), path);
+      return __eliscript_numeric_relation3("<", last, 0) ? path : slice(last + 1, text_length(path), path);
     }
   }
 }
 function without_suffix(suffix, text) {
-  return __eliscript_truthy3(ends_with_QMARK_(suffix, text)) ? slice(0, text_length(text) - text_length(suffix), text) : text;
+  return __eliscript_truthy3(ends_with_QMARK_(suffix, text)) ? slice(0, __eliscript_numeric_sub2(text_length(text), text_length(suffix)), text) : text;
 }
 function parse_integer(text, fallback) {
   {
-    const __eliscript_value_21 = __eliscript_to_number(trim(text));
+    const __eliscript_value_21 = __eliscript_to_number3(trim(text));
     {
       let value = __eliscript_value_21;
       return value === value ? value : fallback;
@@ -4705,8 +4980,8 @@ function replace_all(needle, replacement, text) {
       let index = __eliscript_value_23;
       let size = __eliscript_value_24;
       let width = __eliscript_value_25;
-      while (index < size) {
-        width > 0 && index + width <= size && slice(index, index + width, text) === needle ? (result = String(result) + String(replacement), index = index + width) : (result = String(result) + String(String.fromCharCode(char_code(text, index))), index = index + 1);
+      while (__eliscript_numeric_relation3("<", index, size)) {
+        __eliscript_numeric_relation3(">", width, 0) && __eliscript_numeric_relation3("<=", index + width, size) && slice(index, index + width, text) === needle ? (result = String(result) + String(replacement), index = index + width) : (result = String(result) + String(String.fromCharCode(char_code(text, index))), index = index + 1);
       }
       return result;
     }
@@ -4723,7 +4998,7 @@ function strip_tags(html) {
       let index = __eliscript_value_27;
       let in_tag = __eliscript_value_28;
       let size = __eliscript_value_29;
-      while (index < size) {
+      while (__eliscript_numeric_relation3("<", index, size)) {
         {
           const __eliscript_value_30 = char_code(html, index);
           {
@@ -4751,12 +5026,12 @@ function slugify(text) {
       let result = __eliscript_value_32;
       let pending_dash = __eliscript_value_33;
       let index = __eliscript_value_34;
-      while (index < text_length(lowered)) {
+      while (__eliscript_numeric_relation3("<", index, text_length(lowered))) {
         {
           const __eliscript_value_35 = char_code(lowered, index);
           {
             let code = __eliscript_value_35;
-            __eliscript_truthy3(((__eliscript_value_36) => __eliscript_truthy3(__eliscript_value_36) ? __eliscript_value_36 : digit_code_QMARK_(code))(lower_code_QMARK_(code))) ? (result = String(result) + String(__eliscript_truthy3(pending_dash) ? "-" : "") + String(String.fromCharCode(code)), pending_dash = false) : pending_dash = text_length(result) > 0;
+            __eliscript_truthy3(((__eliscript_value_36) => __eliscript_truthy3(__eliscript_value_36) ? __eliscript_value_36 : digit_code_QMARK_(code))(lower_code_QMARK_(code))) ? (result = String(result) + String(__eliscript_truthy3(pending_dash) ? "-" : "") + String(String.fromCharCode(code)), pending_dash = false) : pending_dash = __eliscript_numeric_relation3(">", text_length(result), 0);
           }
         }
         index = index + 1;
@@ -4768,6 +5043,89 @@ function slugify(text) {
 
 // examples/dogfood/dist/src/support/sanitize.mjs
 var __eliscript_truthy4 = (value) => value !== false && value != null;
+var __eliscript_number_intrinsic4 = globalThis.Number;
+var __eliscript_bigint_intrinsic4 = globalThis.BigInt;
+var __eliscript_numeric_apply4 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol4 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error4 = globalThis.TypeError;
+var __eliscript_numeric_trim4 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice4 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec4 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix4 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object4 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive4 = (value) => {
+  if (!__eliscript_numeric_object4(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol4];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply4(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object4(result))
+      return result;
+    throw new __eliscript_numeric_error4("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply4(method, value, []);
+      if (!__eliscript_numeric_object4(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error4("Cannot convert object to primitive value");
+};
+var __eliscript_to_number4 = (value) => {
+  const primitive = __eliscript_numeric_primitive4(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply4(__eliscript_numeric_trim4, primitive, []);
+    if (__eliscript_numeric_apply4(__eliscript_numeric_exec4, __eliscript_numeric_radix4, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply4(__eliscript_numeric_slice4, text, [0, 2]) + __eliscript_numeric_apply4(__eliscript_numeric_slice4, text, [first]);
+      return __eliscript_number_intrinsic4(__eliscript_bigint_intrinsic4(token));
+    }
+  }
+  return __eliscript_number_intrinsic4(primitive);
+};
+var __eliscript_numeric4 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive4(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number4(primitive) : +primitive;
+};
+var __eliscript_numeric_relation4 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive4(left);
+  let b = __eliscript_numeric_primitive4(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric4(a);
+    b = __eliscript_numeric4(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 var ampersand = 38;
 var less_than = 60;
 var greater_than = 62;
@@ -4780,7 +5138,7 @@ function escape_html(text) {
     {
       let result = __eliscript_value_1;
       let index = __eliscript_value_2;
-      while (index < text_length(text)) {
+      while (__eliscript_numeric_relation4("<", index, text_length(text))) {
         {
           const __eliscript_value_3 = char_code(text, index);
           {
@@ -4914,6 +5272,98 @@ function document(site, root, title, description, content) {
 
 // examples/dogfood/dist/src/renderer/server.mjs
 var __eliscript_truthy6 = (value) => value !== false && value != null;
+var __eliscript_number_intrinsic5 = globalThis.Number;
+var __eliscript_bigint_intrinsic5 = globalThis.BigInt;
+var __eliscript_numeric_apply5 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol5 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error5 = globalThis.TypeError;
+var __eliscript_numeric_trim5 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice5 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec5 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix5 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object5 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive5 = (value) => {
+  if (!__eliscript_numeric_object5(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol5];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply5(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object5(result))
+      return result;
+    throw new __eliscript_numeric_error5("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply5(method, value, []);
+      if (!__eliscript_numeric_object5(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error5("Cannot convert object to primitive value");
+};
+var __eliscript_to_number5 = (value) => {
+  const primitive = __eliscript_numeric_primitive5(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply5(__eliscript_numeric_trim5, primitive, []);
+    if (__eliscript_numeric_apply5(__eliscript_numeric_exec5, __eliscript_numeric_radix5, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply5(__eliscript_numeric_slice5, text, [0, 2]) + __eliscript_numeric_apply5(__eliscript_numeric_slice5, text, [first]);
+      return __eliscript_number_intrinsic5(__eliscript_bigint_intrinsic5(token));
+    }
+  }
+  return __eliscript_number_intrinsic5(primitive);
+};
+var __eliscript_numeric5 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive5(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number5(primitive) : +primitive;
+};
+var __eliscript_implicit_number2 = (value) => {
+  if (typeof value === "number")
+    return value;
+  const primitive = __eliscript_numeric_primitive5(value);
+  if (typeof primitive === "bigint")
+    throw new __eliscript_numeric_error5("Cannot convert a BigInt value to a number");
+  return typeof primitive === "string" ? __eliscript_to_number5(primitive) : +primitive;
+};
+var __eliscript_numeric_decrement2 = (value) => __eliscript_implicit_number2(value) - 1;
+var __eliscript_numeric_relation5 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive5(left);
+  let b = __eliscript_numeric_primitive5(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric5(a);
+    b = __eliscript_numeric5(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 var recent_limit = 12;
 var to_native_array = (value) => Array.from(value);
 function compare_posts(left, right) {
@@ -4923,7 +5373,7 @@ function compare_posts(left, right) {
     {
       let left_pinned = __eliscript_value_1;
       let right_pinned = __eliscript_value_2;
-      return !(left_pinned === right_pinned) ? left_pinned > right_pinned ? -1 : 1 : !(left["published-at"] === right["published-at"]) ? left["published-at"] > right["published-at"] ? -1 : 1 : left["id"] === right["id"] ? 0 : left["id"] < right["id"] ? -1 : 1;
+      return !(left_pinned === right_pinned) ? __eliscript_numeric_relation5(">", left_pinned, right_pinned) ? -1 : 1 : !(left["published-at"] === right["published-at"]) ? __eliscript_numeric_relation5(">", left["published-at"], right["published-at"]) ? -1 : 1 : left["id"] === right["id"] ? 0 : __eliscript_numeric_relation5("<", left["id"], right["id"]) ? -1 : 1;
     }
   }
 }
@@ -4950,7 +5400,7 @@ function render_tag_links(root, post) {
       let tags = __eliscript_value_3;
       let result = __eliscript_value_4;
       let index = __eliscript_value_5;
-      while (index < count(tags)) {
+      while (__eliscript_numeric_relation5("<", index, count(tags))) {
         {
           const __eliscript_value_6 = nth(tags, index);
           {
@@ -4980,7 +5430,7 @@ function render_post_list(root, posts) {
     {
       let items = __eliscript_value_8;
       let index = __eliscript_value_9;
-      while (index < count(posts)) {
+      while (__eliscript_numeric_relation5("<", index, count(posts))) {
         items = String(items) + String(render_card(root, nth(posts, index))), index = index + 1;
       }
       return String('<ul class="list">') + String(items) + String("</ul>");
@@ -4999,7 +5449,7 @@ function tagged_QMARK_(post, tag) {
       let tags = __eliscript_value_10;
       let index = __eliscript_value_11;
       let found = __eliscript_value_12;
-      while (index < count(tags) && !__eliscript_truthy6(found)) {
+      while (__eliscript_numeric_relation5("<", index, count(tags)) && !__eliscript_truthy6(found)) {
         nth(tags, index) === tag && (found = true);
         index = index + 1;
       }
@@ -5021,7 +5471,7 @@ function collect_tags(posts) {
       let seen = __eliscript_value_13;
       let tags = __eliscript_value_14;
       let index = __eliscript_value_15;
-      while (index < count(posts)) {
+      while (__eliscript_numeric_relation5("<", index, count(posts))) {
         {
           const __eliscript_value_16 = nth(posts, index)["tags"];
           {
@@ -5030,7 +5480,7 @@ function collect_tags(posts) {
               const __eliscript_value_17 = 0;
               {
                 let tag_index = __eliscript_value_17;
-                while (tag_index < count(post_tags)) {
+                while (__eliscript_numeric_relation5("<", tag_index, count(post_tags))) {
                   {
                     const __eliscript_value_18 = nth(post_tags, tag_index);
                     {
@@ -5073,8 +5523,8 @@ function neighbour_link(root, label, post) {
 }
 function render_neighbours(root, posts, position) {
   {
-    const __eliscript_value_21 = position > 0 ? nth(posts, position - 1) : null;
-    const __eliscript_value_22 = position < count(posts) - 1 ? nth(posts, position + 1) : null;
+    const __eliscript_value_21 = __eliscript_numeric_relation5(">", position, 0) ? nth(posts, __eliscript_numeric_decrement2(position)) : null;
+    const __eliscript_value_22 = __eliscript_numeric_relation5("<", position, __eliscript_numeric_decrement2(count(posts))) ? nth(posts, position + 1) : null;
     {
       let newer = __eliscript_value_21;
       let older = __eliscript_value_22;
@@ -5146,7 +5596,7 @@ function alias_documents(site, posts) {
     {
       let documents = __eliscript_value_30;
       let index = __eliscript_value_31;
-      while (index < count(posts)) {
+      while (__eliscript_numeric_relation5("<", index, count(posts))) {
         {
           const __eliscript_value_32 = nth(posts, index);
           {
@@ -5159,7 +5609,7 @@ function alias_documents(site, posts) {
                   const __eliscript_value_34 = 0;
                   {
                     let alias_index = __eliscript_value_34;
-                    while (alias_index < count(aliases)) {
+                    while (__eliscript_numeric_relation5("<", alias_index, count(aliases))) {
                       documents = conj(documents, render_alias_page(site, post, nth(aliases, alias_index))), alias_index = alias_index + 1;
                     }
                   }
@@ -5214,7 +5664,7 @@ function render_refresh_note(channel, binding) {
                 const __eliscript_value_40 = provider_thread_url(binding);
                 {
                   let posting = __eliscript_value_40;
-                  return String('<p class="comment-note refresh-note"') + String(' data-comment-refresh="1"') + String(' data-comment-kind="') + String(escape_html(kind_name)) + String('"') + String(' data-comment-count="') + String(String(count_value)) + String('"') + String(' data-comment-binding="') + String(escape_html(binding)) + String('"') + String(__eliscript_truthy6(blank_QMARK_(snapshot)) ? "" : String(' data-comment-snapshot="') + String(escape_html(String(snapshot))) + String('"')) + String(">Snapshot") + String(__eliscript_truthy6(blank_QMARK_(snapshot)) ? "" : String(" from ") + String(escape_html(String(snapshot)))) + String(count_value > 0 ? String(" with ") + String(count_value) + String(" comments") : "") + String(".") + String(__eliscript_truthy6(blank_QMARK_(posting)) ? "" : String(' <a href="') + String(escape_html(posting)) + String('">Read or reply at ') + String(escape_html(posting)) + String("</a>.")) + String('<span class="refresh-verdict"></span>') + String("</p>");
+                  return String('<p class="comment-note refresh-note"') + String(' data-comment-refresh="1"') + String(' data-comment-kind="') + String(escape_html(kind_name)) + String('"') + String(' data-comment-count="') + String(String(count_value)) + String('"') + String(' data-comment-binding="') + String(escape_html(binding)) + String('"') + String(__eliscript_truthy6(blank_QMARK_(snapshot)) ? "" : String(' data-comment-snapshot="') + String(escape_html(String(snapshot))) + String('"')) + String(">Snapshot") + String(__eliscript_truthy6(blank_QMARK_(snapshot)) ? "" : String(" from ") + String(escape_html(String(snapshot)))) + String(__eliscript_numeric_relation5(">", count_value, 0) ? String(" with ") + String(count_value) + String(" comments") : "") + String(".") + String(__eliscript_truthy6(blank_QMARK_(posting)) ? "" : String(' <a href="') + String(escape_html(posting)) + String('">Read or reply at ') + String(escape_html(posting)) + String("</a>.")) + String('<span class="refresh-verdict"></span>') + String("</p>");
                 }
               }
             }
@@ -5229,8 +5679,8 @@ function provider_thread_url(binding) {
     return ((path) => {
       return ((number) => {
         return __eliscript_truthy6(blank_QMARK_(number)) ? String("https://github.com/") + String(path) : String("https://github.com/") + String(path) + String("/issues/") + String(number);
-      })(hash < 0 ? "" : slice(hash + 1, text_length(binding), binding));
-    })(hash < 0 ? binding : slice(0, hash, binding));
+      })(__eliscript_numeric_relation5("<", hash, 0) ? "" : slice(hash + 1, text_length(binding), binding));
+    })(__eliscript_numeric_relation5("<", hash, 0) ? binding : slice(0, hash, binding));
   })(index_of("#", binding));
 }
 function render_comment_item(comment) {
@@ -5275,7 +5725,7 @@ function render_reply_items(items) {
     {
       let markup = __eliscript_value_46;
       let index = __eliscript_value_47;
-      while (index < count(items)) {
+      while (__eliscript_numeric_relation5("<", index, count(items))) {
         markup = String(markup) + String(render_comment_item(nth(items, index))), index = index + 1;
       }
       return markup;
@@ -5289,7 +5739,7 @@ function render_comment_items(items) {
     {
       let markup = __eliscript_value_48;
       let index = __eliscript_value_49;
-      while (index < count(items)) {
+      while (__eliscript_numeric_relation5("<", index, count(items))) {
         markup = String(markup) + String(render_comment_item(nth(items, index))), index = index + 1;
       }
       return String('<ol class="comments-list">') + String(markup) + String("</ol>");
@@ -5303,7 +5753,7 @@ function render_channel_heading(channel) {
     {
       let count_value = __eliscript_value_50;
       let freshness = __eliscript_value_51;
-      return String("<h2>Comments") + String(!(count_value === null) && count_value > 0 ? String(" (") + String(count_value) + String(")") : "") + String("</h2>") + String(__eliscript_truthy6(blank_QMARK_(freshness)) ? "" : String('<p class="comment-note">Snapshot from ') + String(escape_html(String(freshness))) + String(".</p>"));
+      return String("<h2>Comments") + String(!(count_value === null) && __eliscript_numeric_relation5(">", count_value, 0) ? String(" (") + String(count_value) + String(")") : "") + String("</h2>") + String(__eliscript_truthy6(blank_QMARK_(freshness)) ? "" : String('<p class="comment-note">Snapshot from ') + String(escape_html(String(freshness))) + String(".</p>"));
     }
   }
 }
@@ -5353,7 +5803,7 @@ function render_comment_channels(post) {
         {
           let markup = __eliscript_value_59;
           let index = __eliscript_value_60;
-          while (index < count(channels)) {
+          while (__eliscript_numeric_relation5("<", index, count(channels))) {
             markup = String(markup) + String(render_channel(nth(channels, index))), index = index + 1;
           }
           return markup;
@@ -5369,7 +5819,7 @@ function render_tag_index(site, tags, posts) {
     {
       let items = __eliscript_value_61;
       let index = __eliscript_value_62;
-      while (index < count(tags)) {
+      while (__eliscript_numeric_relation5("<", index, count(tags))) {
         {
           const __eliscript_value_63 = nth(tags, index);
           {
@@ -5411,7 +5861,7 @@ function render_feed(site, posts) {
       let title = __eliscript_value_66;
       let entries = __eliscript_value_67;
       let index = __eliscript_value_68;
-      while (index < count(posts)) {
+      while (__eliscript_numeric_relation5("<", index, count(posts))) {
         {
           const __eliscript_value_69 = nth(posts, index);
           {
@@ -5440,7 +5890,7 @@ function render_sitemap(site, posts) {
     {
       let urls = __eliscript_value_71;
       let index = __eliscript_value_72;
-      while (index < count(posts)) {
+      while (__eliscript_numeric_relation5("<", index, count(posts))) {
         urls = String(urls) + String("<url><loc>") + String(escape_html(absolute_url(site, String("posts/") + String(nth(posts, index)["slug"]) + String("/")))) + String("</loc></url>");
         index = index + 1;
       }
@@ -5499,7 +5949,7 @@ function render_site(site, posts) {
                         const __eliscript_value_78 = 0;
                         {
                           let index = __eliscript_value_78;
-                          while (index < count(sorted)) {
+                          while (__eliscript_numeric_relation5("<", index, count(sorted))) {
                             post_pages = conj(post_pages, render_post_page(site, nth(sorted, index), sorted, index)), index = index + 1;
                           }
                         }
@@ -5508,7 +5958,7 @@ function render_site(site, posts) {
                         const __eliscript_value_79 = 0;
                         {
                           let index = __eliscript_value_79;
-                          while (index < count(tags)) {
+                          while (__eliscript_numeric_relation5("<", index, count(tags))) {
                             tag_pages = conj(tag_pages, render_tag_page(site, nth(tags, index), sorted)), index = index + 1;
                           }
                         }
@@ -5551,12 +6001,104 @@ function fail2(code, message) {
 
 // examples/dogfood/dist/src/support/fields.mjs
 var __eliscript_truthy7 = (value) => value !== false && value != null;
+var __eliscript_number_intrinsic6 = globalThis.Number;
+var __eliscript_bigint_intrinsic6 = globalThis.BigInt;
+var __eliscript_numeric_apply6 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol6 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error6 = globalThis.TypeError;
+var __eliscript_numeric_trim6 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice6 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec6 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix6 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object6 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive6 = (value) => {
+  if (!__eliscript_numeric_object6(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol6];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply6(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object6(result))
+      return result;
+    throw new __eliscript_numeric_error6("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply6(method, value, []);
+      if (!__eliscript_numeric_object6(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error6("Cannot convert object to primitive value");
+};
+var __eliscript_to_number6 = (value) => {
+  const primitive = __eliscript_numeric_primitive6(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply6(__eliscript_numeric_trim6, primitive, []);
+    if (__eliscript_numeric_apply6(__eliscript_numeric_exec6, __eliscript_numeric_radix6, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply6(__eliscript_numeric_slice6, text, [0, 2]) + __eliscript_numeric_apply6(__eliscript_numeric_slice6, text, [first]);
+      return __eliscript_number_intrinsic6(__eliscript_bigint_intrinsic6(token));
+    }
+  }
+  return __eliscript_number_intrinsic6(primitive);
+};
+var __eliscript_numeric6 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive6(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number6(primitive) : +primitive;
+};
+var __eliscript_implicit_number3 = (value) => {
+  if (typeof value === "number")
+    return value;
+  const primitive = __eliscript_numeric_primitive6(value);
+  if (typeof primitive === "bigint")
+    throw new __eliscript_numeric_error6("Cannot convert a BigInt value to a number");
+  return typeof primitive === "string" ? __eliscript_to_number6(primitive) : +primitive;
+};
+var __eliscript_numeric_decrement3 = (value) => __eliscript_implicit_number3(value) - 1;
+var __eliscript_numeric_relation6 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive6(left);
+  let b = __eliscript_numeric_primitive6(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric6(a);
+    b = __eliscript_numeric6(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 function parse_field_line(line) {
   {
     const __eliscript_value_1 = index_of(":", line);
     {
       let colon = __eliscript_value_1;
-      return colon < 1 ? null : vector(trim(slice(0, colon, line)), trim(slice(colon + 1, text_length(line), line)));
+      return __eliscript_numeric_relation6("<", colon, 1) ? null : vector(trim(slice(0, colon, line)), trim(slice(colon + 1, text_length(line), line)));
     }
   }
 }
@@ -5567,7 +6109,7 @@ function parse_fields(lines, start, end) {
     {
       let fields = __eliscript_value_2;
       let index = __eliscript_value_3;
-      while (index < end) {
+      while (__eliscript_numeric_relation6("<", index, end)) {
         {
           const __eliscript_value_4 = parse_field_line(nth(lines, index));
           {
@@ -5583,7 +6125,7 @@ function parse_fields(lines, start, end) {
 }
 function parse_list(value) {
   {
-    const __eliscript_value_5 = __eliscript_truthy7(((__eliscript_value_6) => __eliscript_truthy7(__eliscript_value_6) ? ends_with_QMARK_("]", value) : __eliscript_value_6)(starts_with_QMARK_("[", value))) ? slice(1, text_length(value) - 1, value) : value;
+    const __eliscript_value_5 = __eliscript_truthy7(((__eliscript_value_6) => __eliscript_truthy7(__eliscript_value_6) ? ends_with_QMARK_("]", value) : __eliscript_value_6)(starts_with_QMARK_("[", value))) ? slice(1, __eliscript_numeric_decrement3(text_length(value)), value) : value;
     {
       let inner = __eliscript_value_5;
       {
@@ -5598,7 +6140,7 @@ function parse_list(value) {
                 const __eliscript_value_9 = 0;
                 {
                   let index = __eliscript_value_9;
-                  while (index < count(parts)) {
+                  while (__eliscript_numeric_relation6("<", index, count(parts))) {
                     {
                       const __eliscript_value_10 = trim(nth(parts, index));
                       {
@@ -5644,6 +6186,89 @@ function define_record_type(name, fields) {
 
 // examples/dogfood/dist/src/support/markdown.mjs
 var __eliscript_truthy8 = (value) => value !== false && value != null;
+var __eliscript_number_intrinsic7 = globalThis.Number;
+var __eliscript_bigint_intrinsic7 = globalThis.BigInt;
+var __eliscript_numeric_apply7 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol7 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error7 = globalThis.TypeError;
+var __eliscript_numeric_trim7 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice7 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec7 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix7 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object7 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive7 = (value) => {
+  if (!__eliscript_numeric_object7(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol7];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply7(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object7(result))
+      return result;
+    throw new __eliscript_numeric_error7("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply7(method, value, []);
+      if (!__eliscript_numeric_object7(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error7("Cannot convert object to primitive value");
+};
+var __eliscript_to_number7 = (value) => {
+  const primitive = __eliscript_numeric_primitive7(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply7(__eliscript_numeric_trim7, primitive, []);
+    if (__eliscript_numeric_apply7(__eliscript_numeric_exec7, __eliscript_numeric_radix7, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply7(__eliscript_numeric_slice7, text, [0, 2]) + __eliscript_numeric_apply7(__eliscript_numeric_slice7, text, [first]);
+      return __eliscript_number_intrinsic7(__eliscript_bigint_intrinsic7(token));
+    }
+  }
+  return __eliscript_number_intrinsic7(primitive);
+};
+var __eliscript_numeric7 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive7(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number7(primitive) : +primitive;
+};
+var __eliscript_numeric_relation7 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive7(left);
+  let b = __eliscript_numeric_primitive7(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric7(a);
+    b = __eliscript_numeric7(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 var space = 32;
 var hash_mark = 35;
 function block_start_QMARK_(line) {
@@ -5660,10 +6285,10 @@ function heading_level(text) {
     const __eliscript_value_8 = 0;
     {
       let index = __eliscript_value_8;
-      while (index < text_length(text) && char_code(text, index) === hash_mark) {
+      while (__eliscript_numeric_relation7("<", index, text_length(text)) && char_code(text, index) === hash_mark) {
         index = index + 1;
       }
-      return index > 0 && index <= 6 && index < text_length(text) && char_code(text, index) === space ? index : 0;
+      return __eliscript_numeric_relation7(">", index, 0) && __eliscript_numeric_relation7("<=", index, 6) && __eliscript_numeric_relation7("<", index, text_length(text)) && char_code(text, index) === space ? index : 0;
     }
   }
 }
@@ -5672,15 +6297,15 @@ function ordered_prefix_length(text) {
     const __eliscript_value_9 = 0;
     {
       let index = __eliscript_value_9;
-      while (__eliscript_truthy8(((__eliscript_value_10) => __eliscript_truthy8(__eliscript_value_10) ? digit_code_QMARK_(char_code(text, index)) : __eliscript_value_10)(index < text_length(text)))) {
+      while (__eliscript_truthy8(((__eliscript_value_10) => __eliscript_truthy8(__eliscript_value_10) ? digit_code_QMARK_(char_code(text, index)) : __eliscript_value_10)(__eliscript_numeric_relation7("<", index, text_length(text))))) {
         index = index + 1;
       }
-      return index > 0 && index + 1 < text_length(text) && slice(index, index + 2, text) === ". " ? index + 2 : -1;
+      return __eliscript_numeric_relation7(">", index, 0) && __eliscript_numeric_relation7("<", index + 1, text_length(text)) && slice(index, index + 2, text) === ". " ? index + 2 : -1;
     }
   }
 }
 function ordered_item_QMARK_(text) {
-  return ordered_prefix_length(text) > 0;
+  return __eliscript_numeric_relation7(">", ordered_prefix_length(text), 0);
 }
 function unordered_item_QMARK_(text) {
   return starts_with_QMARK_("- ", text);
@@ -5692,7 +6317,7 @@ function fence_close(lines, start, total) {
     {
       let index = __eliscript_value_11;
       let close = __eliscript_value_12;
-      while (index < total) {
+      while (__eliscript_numeric_relation7("<", index, total)) {
         __eliscript_truthy8(starts_with_QMARK_("```", trim(nth(lines, index)))) && (close = index, index = total);
         index = index + 1;
       }
@@ -5710,7 +6335,7 @@ function list_end(lines, start, total, ordered) {
       let index = __eliscript_value_13;
       while (__eliscript_truthy8(((__eliscript_value_14) => __eliscript_truthy8(__eliscript_value_14) ? ((trimmed) => {
         return ((__eliscript_value_15) => __eliscript_truthy8(__eliscript_value_15) ? __eliscript_value_15 : !__eliscript_truthy8(block_start_QMARK_(trimmed)))(item_of_kind_QMARK_(trimmed, ordered));
-      })(trim(nth(lines, index))) : __eliscript_value_14)(index < total))) {
+      })(trim(nth(lines, index))) : __eliscript_value_14)(__eliscript_numeric_relation7("<", index, total)))) {
         index = index + 1;
       }
       return index;
@@ -5722,7 +6347,7 @@ function quote_end(lines, start, total) {
     const __eliscript_value_16 = start;
     {
       let index = __eliscript_value_16;
-      while (__eliscript_truthy8(((__eliscript_value_17) => __eliscript_truthy8(__eliscript_value_17) ? starts_with_QMARK_("> ", trim(nth(lines, index))) : __eliscript_value_17)(index < total))) {
+      while (__eliscript_truthy8(((__eliscript_value_17) => __eliscript_truthy8(__eliscript_value_17) ? starts_with_QMARK_("> ", trim(nth(lines, index))) : __eliscript_value_17)(__eliscript_numeric_relation7("<", index, total)))) {
         index = index + 1;
       }
       return index;
@@ -5734,7 +6359,7 @@ function paragraph_end(lines, start, total) {
     const __eliscript_value_18 = start;
     {
       let index = __eliscript_value_18;
-      while (index < total && !__eliscript_truthy8(block_start_QMARK_(nth(lines, index)))) {
+      while (__eliscript_numeric_relation7("<", index, total) && !__eliscript_truthy8(block_start_QMARK_(nth(lines, index)))) {
         index = index + 1;
       }
       return index;
@@ -5748,7 +6373,7 @@ function paragraph_text(lines, start, end) {
     {
       let parts = __eliscript_value_19;
       let index = __eliscript_value_20;
-      while (index < end) {
+      while (__eliscript_numeric_relation7("<", index, end)) {
         parts = conj(parts, trim(nth(lines, index))), index = index + 1;
       }
       return join(" ", parts);
@@ -5772,7 +6397,7 @@ function render_fence(lines, start, close) {
                 const __eliscript_value_24 = start + 1;
                 {
                   let index = __eliscript_value_24;
-                  while (index < close) {
+                  while (__eliscript_numeric_relation7("<", index, close)) {
                     content = String(content) + String(nth(lines, index)) + String(`
 `), index = index + 1;
                   }
@@ -5798,7 +6423,7 @@ function render_list(lines, start, end) {
       let items = __eliscript_value_25;
       let current = __eliscript_value_26;
       let index = __eliscript_value_27;
-      while (index < end) {
+      while (__eliscript_numeric_relation7("<", index, end)) {
         {
           const __eliscript_value_28 = trim(nth(lines, index));
           {
@@ -5807,7 +6432,7 @@ function render_list(lines, start, end) {
               const __eliscript_value_29 = list_marker_width(trimmed);
               {
                 let width = __eliscript_value_29;
-                width > 0 ? (() => {
+                __eliscript_numeric_relation7(">", width, 0) ? (() => {
                   __eliscript_truthy8(current) && (items = String(items) + String("<li>") + String(render_inline(current)) + String("</li>"));
                   return current = trim(slice(width, text_length(trimmed), trimmed));
                 })() : current = String(current) + String(" ") + String(trimmed);
@@ -5829,7 +6454,7 @@ function render_quote(lines, start, end) {
     {
       let parts = __eliscript_value_30;
       let index = __eliscript_value_31;
-      while (index < end) {
+      while (__eliscript_numeric_relation7("<", index, end)) {
         parts = conj(parts, strip_prefix("> ", trim(nth(lines, index)))), index = index + 1;
       }
       return String("<blockquote><p>") + String(render_inline(join(" ", parts))) + String("</p></blockquote>");
@@ -5868,7 +6493,7 @@ function render_markdown(text) {
                 const __eliscript_value_37 = 0;
                 {
                   let index = __eliscript_value_37;
-                  while (index < total) {
+                  while (__eliscript_numeric_relation7("<", index, total)) {
                     {
                       const __eliscript_value_38 = trim(nth(lines, index));
                       {
@@ -5880,8 +6505,8 @@ function render_markdown(text) {
                             __eliscript_truthy8(blank_QMARK_(trimmed)) ? index = index + 1 : __eliscript_truthy8(starts_with_QMARK_("```", trimmed)) ? ((close) => {
                               return ((next) => {
                                 return blocks = conj(blocks, render_fence(lines, index, close)), index = next;
-                              })(close < total ? close + 1 : total);
-                            })(fence_close(lines, index, total)) : level > 0 ? (blocks = conj(blocks, render_heading(trimmed)), index = index + 1) : trimmed === "---" ? (blocks = conj(blocks, "<hr>"), index = index + 1) : __eliscript_truthy8(starts_with_QMARK_("> ", trimmed)) ? ((end) => {
+                              })(__eliscript_numeric_relation7("<", close, total) ? close + 1 : total);
+                            })(fence_close(lines, index, total)) : __eliscript_numeric_relation7(">", level, 0) ? (blocks = conj(blocks, render_heading(trimmed)), index = index + 1) : trimmed === "---" ? (blocks = conj(blocks, "<hr>"), index = index + 1) : __eliscript_truthy8(starts_with_QMARK_("> ", trimmed)) ? ((end) => {
                               return blocks = conj(blocks, render_quote(lines, index, end)), index = end;
                             })(quote_end(lines, index, total)) : __eliscript_truthy8(unordered_item_QMARK_(trimmed)) ? ((end) => {
                               return blocks = conj(blocks, render_list(lines, index, end)), index = end;
@@ -5917,23 +6542,23 @@ function render_inline(text) {
       let plain = __eliscript_value_41;
       let index = __eliscript_value_42;
       let size = __eliscript_value_43;
-      while (index < size) {
+      while (__eliscript_numeric_relation7("<", index, size)) {
         {
           const __eliscript_value_44 = slice(index, index + 1, text);
           {
             let character = __eliscript_value_44;
             character === "`" ? ((close) => {
-              return close < 0 ? (plain = String(plain) + String(character), index = index + 1) : (result = String(result) + String(escape_html(plain)) + String("<code>") + String(escape_html(slice(index + 1, close, text))) + String("</code>"), plain = "", index = close + 1);
-            })(index_of_from("`", text, index + 1)) : character === "*" && index + 1 < size && slice(index + 1, index + 2, text) === "*" ? ((close) => {
-              return close < 0 ? (plain = String(plain) + String(character), index = index + 1) : (result = String(result) + String(escape_html(plain)) + String("<strong>") + String(render_inline(slice(index + 2, close, text))) + String("</strong>"), plain = "", index = close + 2);
+              return __eliscript_numeric_relation7("<", close, 0) ? (plain = String(plain) + String(character), index = index + 1) : (result = String(result) + String(escape_html(plain)) + String("<code>") + String(escape_html(slice(index + 1, close, text))) + String("</code>"), plain = "", index = close + 1);
+            })(index_of_from("`", text, index + 1)) : character === "*" && __eliscript_numeric_relation7("<", index + 1, size) && slice(index + 1, index + 2, text) === "*" ? ((close) => {
+              return __eliscript_numeric_relation7("<", close, 0) ? (plain = String(plain) + String(character), index = index + 1) : (result = String(result) + String(escape_html(plain)) + String("<strong>") + String(render_inline(slice(index + 2, close, text))) + String("</strong>"), plain = "", index = close + 2);
             })(index_of_from("**", text, index + 2)) : character === "*" ? ((close) => {
-              return close < 0 ? (plain = String(plain) + String(character), index = index + 1) : (result = String(result) + String(escape_html(plain)) + String("<em>") + String(render_inline(slice(index + 1, close, text))) + String("</em>"), plain = "", index = close + 1);
+              return __eliscript_numeric_relation7("<", close, 0) ? (plain = String(plain) + String(character), index = index + 1) : (result = String(result) + String(escape_html(plain)) + String("<em>") + String(render_inline(slice(index + 1, close, text))) + String("</em>"), plain = "", index = close + 1);
             })(index_of_from("*", text, index + 1)) : character === "[" ? ((label_end) => {
               return ((url_end) => {
-                return label_end < 0 || url_end < 0 ? (plain = String(plain) + String(character), index = index + 1) : ((label, target) => {
+                return __eliscript_numeric_relation7("<", label_end, 0) || __eliscript_numeric_relation7("<", url_end, 0) ? (plain = String(plain) + String(character), index = index + 1) : ((label, target) => {
                   return result = String(result) + String(escape_html(plain)) + String(__eliscript_truthy8(safe_url_QMARK_(target)) ? String('<a href="') + String(escape_html(target)) + String('">') + String(render_inline(label)) + String("</a>") : render_inline(label)), plain = "", index = url_end + 1;
                 })(slice(index + 1, label_end, text), slice(label_end + 2, url_end, text));
-              })(label_end < 0 ? -1 : index_of_from(")", text, label_end + 2));
+              })(__eliscript_numeric_relation7("<", label_end, 0) ? -1 : index_of_from(")", text, label_end + 2));
             })(index_of_from("](", text, index + 1)) : (plain = String(plain) + String(character), index = index + 1);
           }
         }
@@ -5945,6 +6570,89 @@ function render_inline(text) {
 
 // examples/dogfood/dist/src/builder/content.mjs
 var __eliscript_truthy9 = (value) => value !== false && value != null;
+var __eliscript_number_intrinsic8 = globalThis.Number;
+var __eliscript_bigint_intrinsic8 = globalThis.BigInt;
+var __eliscript_numeric_apply8 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol8 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error8 = globalThis.TypeError;
+var __eliscript_numeric_trim8 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice8 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec8 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix8 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object8 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive8 = (value) => {
+  if (!__eliscript_numeric_object8(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol8];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply8(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object8(result))
+      return result;
+    throw new __eliscript_numeric_error8("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply8(method, value, []);
+      if (!__eliscript_numeric_object8(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error8("Cannot convert object to primitive value");
+};
+var __eliscript_to_number8 = (value) => {
+  const primitive = __eliscript_numeric_primitive8(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply8(__eliscript_numeric_trim8, primitive, []);
+    if (__eliscript_numeric_apply8(__eliscript_numeric_exec8, __eliscript_numeric_radix8, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply8(__eliscript_numeric_slice8, text, [0, 2]) + __eliscript_numeric_apply8(__eliscript_numeric_slice8, text, [first]);
+      return __eliscript_number_intrinsic8(__eliscript_bigint_intrinsic8(token));
+    }
+  }
+  return __eliscript_number_intrinsic8(primitive);
+};
+var __eliscript_numeric8 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive8(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number8(primitive) : +primitive;
+};
+var __eliscript_numeric_relation8 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive8(left);
+  let b = __eliscript_numeric_primitive8(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric8(a);
+    b = __eliscript_numeric8(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 var Post = define_record_type("Post", ["id", "slug", "title", "summary", "body", "published-at", "updated-at", "authors", "tags", "cover", "draft", "pinned-weight", "provenance", "aliases", "comment-channels"]);
 var __GT_Post = (id, slug, title, summary, body, published_at, updated_at, authors, tags, cover, draft, pinned_weight, provenance, aliases, comment_channels) => {
   return Post["create"](id, slug, title, summary, body, published_at, updated_at, authors, tags, cover, draft, pinned_weight, provenance, aliases, comment_channels);
@@ -5958,7 +6666,7 @@ function markdown_names(directory) {
       let names = __eliscript_value_1;
       let result = __eliscript_value_2;
       let index = __eliscript_value_3;
-      while (index < count(names)) {
+      while (__eliscript_numeric_relation8("<", index, count(names))) {
         {
           const __eliscript_value_4 = nth(names, index);
           {
@@ -5981,7 +6689,7 @@ function front_matter_close(lines) {
       let index = __eliscript_value_5;
       let close = __eliscript_value_6;
       let total = __eliscript_value_7;
-      while (index < total && close < 0) {
+      while (__eliscript_numeric_relation8("<", index, total) && __eliscript_numeric_relation8("<", close, 0)) {
         trim(nth(lines, index)) === "---" && (close = index);
         index = index + 1;
       }
@@ -6001,7 +6709,7 @@ function body_text(lines, start) {
       let parts = __eliscript_value_8;
       let index = __eliscript_value_9;
       let total = __eliscript_value_10;
-      while (index < total) {
+      while (__eliscript_numeric_relation8("<", index, total)) {
         parts = conj(parts, nth(lines, index)), index = index + 1;
       }
       return join(`
@@ -6054,7 +6762,7 @@ function build_post(path, relative, lines, close, fields) {
                                             const __eliscript_value_21 = render_markdown(body_text(lines, close + 1));
                                             {
                                               let body = __eliscript_value_21;
-                                              return __GT_Post(identifier, slug, title, field(fields, "description", ""), body, published, updated_field === null ? published : date_value(updated_field), count(authors) > 0 ? authors : vector("dogfood"), tags, field(fields, "cover", null), draft, parse_integer(field(fields, "pinned", "0"), 0), hashMap(keyword("provider"), "markdown", keyword("path"), relative), aliases, vector());
+                                              return __GT_Post(identifier, slug, title, field(fields, "description", ""), body, published, updated_field === null ? published : date_value(updated_field), __eliscript_numeric_relation8(">", count(authors), 0) ? authors : vector("dogfood"), tags, field(fields, "cover", null), draft, parse_integer(field(fields, "pinned", "0"), 0), hashMap(keyword("provider"), "markdown", keyword("path"), relative), aliases, vector());
                                             }
                                           }
                                         }
@@ -6095,7 +6803,7 @@ function read_posts(root, directory) {
                 const __eliscript_value_25 = 0;
                 {
                   let index = __eliscript_value_25;
-                  while (index < count(names)) {
+                  while (__eliscript_numeric_relation8("<", index, count(names))) {
                     {
                       const __eliscript_value_26 = nth(names, index);
                       {
@@ -6112,13 +6820,13 @@ function read_posts(root, directory) {
                                   const __eliscript_value_29 = split_lines(import_node_fs.readFileSync(path, "utf8"));
                                   {
                                     let lines = __eliscript_value_29;
-                                    count(lines) < 3 && fail2("DOGFOOD-CONTENT-002", String(relative) + String(": file is too short to contain front matter"));
+                                    __eliscript_numeric_relation8("<", count(lines), 3) && fail2("DOGFOOD-CONTENT-002", String(relative) + String(": file is too short to contain front matter"));
                                     !(trim(nth(lines, 0)) === "---") && fail2("DOGFOOD-CONTENT-002", String(relative) + String(": file must open with a --- front matter block"));
                                     {
                                       const __eliscript_value_30 = front_matter_close(lines);
                                       {
                                         let close = __eliscript_value_30;
-                                        close < 0 && fail2("DOGFOOD-CONTENT-002", String(relative) + String(": front matter block is not terminated"));
+                                        __eliscript_numeric_relation8("<", close, 0) && fail2("DOGFOOD-CONTENT-002", String(relative) + String(": front matter block is not terminated"));
                                         posts = conj(posts, build_post(path, relative, lines, close, parse_fields(lines, 1, close)));
                                       }
                                     }
@@ -6147,14 +6855,14 @@ function duplicate_in_QMARK_(posts, field2, label) {
     const __eliscript_value_31 = 0;
     {
       let index = __eliscript_value_31;
-      while (index < count(posts)) {
+      while (__eliscript_numeric_relation8("<", index, count(posts))) {
         {
           const __eliscript_value_32 = 0;
           const __eliscript_value_33 = get(nth(posts, index), field2);
           {
             let earlier = __eliscript_value_32;
             let value = __eliscript_value_33;
-            while (earlier < index) {
+            while (__eliscript_numeric_relation8("<", earlier, index)) {
               get(nth(posts, earlier), field2) === value && fail2("DOGFOOD-IDENTITY-001", String("duplicate ") + String(label) + String(' "') + String(value) + String('" in ') + String(get(nth(posts, index)["provenance"], keyword("path"), "")));
               earlier = earlier + 1;
             }
@@ -6175,19 +6883,19 @@ function check_aliases(posts) {
       let canonical = __eliscript_value_34;
       let seen = __eliscript_value_35;
       let index = __eliscript_value_36;
-      while (index < count(posts)) {
+      while (__eliscript_numeric_relation8("<", index, count(posts))) {
         canonical = assoc(assoc(canonical, nth(posts, index)["slug"], true), nth(posts, index)["id"], true);
         index = index + 1;
       }
       index = 0;
-      while (index < count(posts)) {
+      while (__eliscript_numeric_relation8("<", index, count(posts))) {
         {
           const __eliscript_value_37 = nth(posts, index)["aliases"];
           const __eliscript_value_38 = 0;
           {
             let aliases = __eliscript_value_37;
             let alias_index = __eliscript_value_38;
-            while (alias_index < count(aliases)) {
+            while (__eliscript_numeric_relation8("<", alias_index, count(aliases))) {
               {
                 const __eliscript_value_39 = nth(aliases, alias_index);
                 {
@@ -6214,6 +6922,89 @@ function check_identity(posts) {
 }
 
 // examples/dogfood/dist/src/support/github.mjs
+var __eliscript_number_intrinsic9 = globalThis.Number;
+var __eliscript_bigint_intrinsic9 = globalThis.BigInt;
+var __eliscript_numeric_apply9 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol9 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error9 = globalThis.TypeError;
+var __eliscript_numeric_trim9 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice9 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec9 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix9 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object9 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive9 = (value) => {
+  if (!__eliscript_numeric_object9(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol9];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply9(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object9(result))
+      return result;
+    throw new __eliscript_numeric_error9("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply9(method, value, []);
+      if (!__eliscript_numeric_object9(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error9("Cannot convert object to primitive value");
+};
+var __eliscript_to_number9 = (value) => {
+  const primitive = __eliscript_numeric_primitive9(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply9(__eliscript_numeric_trim9, primitive, []);
+    if (__eliscript_numeric_apply9(__eliscript_numeric_exec9, __eliscript_numeric_radix9, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply9(__eliscript_numeric_slice9, text, [0, 2]) + __eliscript_numeric_apply9(__eliscript_numeric_slice9, text, [first]);
+      return __eliscript_number_intrinsic9(__eliscript_bigint_intrinsic9(token));
+    }
+  }
+  return __eliscript_number_intrinsic9(primitive);
+};
+var __eliscript_numeric9 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive9(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number9(primitive) : +primitive;
+};
+var __eliscript_numeric_relation9 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive9(left);
+  let b = __eliscript_numeric_primitive9(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric9(a);
+    b = __eliscript_numeric9(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 var maximum_pages = 100;
 function append_all2(target, values) {
   return reduce(values, (accumulator, value) => {
@@ -6225,8 +7016,8 @@ function link_target(link) {
     const __eliscript_value_1 = index_of("<", link);
     {
       let start = __eliscript_value_1;
-      return start < 0 ? null : ((end) => {
-        return end < 0 ? null : slice(start + 1, end, link);
+      return __eliscript_numeric_relation9("<", start, 0) ? null : ((end) => {
+        return __eliscript_numeric_relation9("<", end, 0) ? null : slice(start + 1, end, link);
       })(index_of(">", link));
     }
   }
@@ -6248,12 +7039,12 @@ function next_link(headers) {
                 const __eliscript_value_5 = null;
                 {
                   let found = __eliscript_value_5;
-                  while (index < count(parts)) {
+                  while (__eliscript_numeric_relation9("<", index, count(parts))) {
                     {
                       const __eliscript_value_6 = nth(parts, index);
                       {
                         let part = __eliscript_value_6;
-                        found === null && index_of('rel="next"', part) >= 0 && (found = link_target(part));
+                        found === null && __eliscript_numeric_relation9(">=", index_of('rel="next"', part), 0) && (found = link_target(part));
                       }
                     }
                     index = index + 1;
@@ -6271,7 +7062,7 @@ function next_link(headers) {
 async function fetch_paginated(transport, url, label) {
   return await (async (records, pages, next) => {
     await (async () => {
-      while (!(next === null) && pages < maximum_pages) {
+      while (!(next === null) && __eliscript_numeric_relation9("<", pages, maximum_pages)) {
         ((response) => {
           !((response["status"] ?? 0) === 200) && fail2("DOGFOOD-GITHUB-001", String(label) + String(" failed with status ") + String(response["status"] ?? "unknown"));
           records = append_all2(records, response["body"] ?? vector());
@@ -6291,6 +7082,89 @@ function list_url(repository, resource, page_size, label) {
 
 // examples/dogfood/dist/src/builder/comments.mjs
 var __eliscript_truthy10 = (value) => value !== false && value != null;
+var __eliscript_number_intrinsic10 = globalThis.Number;
+var __eliscript_bigint_intrinsic10 = globalThis.BigInt;
+var __eliscript_numeric_apply10 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol10 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error10 = globalThis.TypeError;
+var __eliscript_numeric_trim10 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice10 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec10 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix10 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object10 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive10 = (value) => {
+  if (!__eliscript_numeric_object10(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol10];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply10(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object10(result))
+      return result;
+    throw new __eliscript_numeric_error10("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply10(method, value, []);
+      if (!__eliscript_numeric_object10(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error10("Cannot convert object to primitive value");
+};
+var __eliscript_to_number10 = (value) => {
+  const primitive = __eliscript_numeric_primitive10(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply10(__eliscript_numeric_trim10, primitive, []);
+    if (__eliscript_numeric_apply10(__eliscript_numeric_exec10, __eliscript_numeric_radix10, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply10(__eliscript_numeric_slice10, text, [0, 2]) + __eliscript_numeric_apply10(__eliscript_numeric_slice10, text, [first]);
+      return __eliscript_number_intrinsic10(__eliscript_bigint_intrinsic10(token));
+    }
+  }
+  return __eliscript_number_intrinsic10(primitive);
+};
+var __eliscript_numeric10 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive10(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number10(primitive) : +primitive;
+};
+var __eliscript_numeric_relation10 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive10(left);
+  let b = __eliscript_numeric_primitive10(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric10(a);
+    b = __eliscript_numeric10(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 var default_page_size = 100;
 function comment_list_url(repository, number, page_size) {
   return String("https://api.github.com/repos/") + String(repository) + String("/issues/") + String(number) + String("/comments?per_page=") + String(page_size);
@@ -6314,7 +7188,7 @@ function map_comments(records) {
     {
       let result = __eliscript_value_2;
       let index = __eliscript_value_3;
-      while (index < count(records)) {
+      while (__eliscript_numeric_relation10("<", index, count(records))) {
         result = conj(result, normalize_comment(nth(records, index)));
         index = index + 1;
       }
@@ -6329,12 +7203,12 @@ function freshness(items) {
     {
       let latest = __eliscript_value_4;
       let index = __eliscript_value_5;
-      while (index < count(items)) {
+      while (__eliscript_numeric_relation10("<", index, count(items))) {
         {
           const __eliscript_value_6 = get(nth(items, index), keyword("updated-at"), "");
           {
             let updated = __eliscript_value_6;
-            updated > latest && (latest = String(updated));
+            __eliscript_numeric_relation10(">", updated, latest) && (latest = String(updated));
           }
         }
         index = index + 1;
@@ -6352,7 +7226,7 @@ function channel_declaration(comments, kind) {
       let declarations = __eliscript_value_7;
       let index = __eliscript_value_8;
       let found = __eliscript_value_9;
-      while (index < count(declarations)) {
+      while (__eliscript_numeric_relation10("<", index, count(declarations))) {
         {
           const __eliscript_value_10 = nth(declarations, index);
           {
@@ -6396,6 +7270,89 @@ async function native_channel(options) {
 
 // examples/dogfood/dist/src/builder/issues.mjs
 var __eliscript_truthy11 = (value) => value !== false && value != null;
+var __eliscript_number_intrinsic11 = globalThis.Number;
+var __eliscript_bigint_intrinsic11 = globalThis.BigInt;
+var __eliscript_numeric_apply11 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol11 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error11 = globalThis.TypeError;
+var __eliscript_numeric_trim11 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice11 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec11 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix11 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object11 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive11 = (value) => {
+  if (!__eliscript_numeric_object11(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol11];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply11(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object11(result))
+      return result;
+    throw new __eliscript_numeric_error11("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply11(method, value, []);
+      if (!__eliscript_numeric_object11(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error11("Cannot convert object to primitive value");
+};
+var __eliscript_to_number11 = (value) => {
+  const primitive = __eliscript_numeric_primitive11(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply11(__eliscript_numeric_trim11, primitive, []);
+    if (__eliscript_numeric_apply11(__eliscript_numeric_exec11, __eliscript_numeric_radix11, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply11(__eliscript_numeric_slice11, text, [0, 2]) + __eliscript_numeric_apply11(__eliscript_numeric_slice11, text, [first]);
+      return __eliscript_number_intrinsic11(__eliscript_bigint_intrinsic11(token));
+    }
+  }
+  return __eliscript_number_intrinsic11(primitive);
+};
+var __eliscript_numeric11 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive11(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number11(primitive) : +primitive;
+};
+var __eliscript_numeric_relation11 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive11(left);
+  let b = __eliscript_numeric_primitive11(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric11(a);
+    b = __eliscript_numeric11(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 var default_page_size2 = 100;
 function normalize_login(login) {
   return to_lowercase(trim(String(login)));
@@ -6426,7 +7383,7 @@ function publisher_set(publishing) {
         const __eliscript_value_5 = 0;
         {
           let index = __eliscript_value_5;
-          while (index < count(coauthors)) {
+          while (__eliscript_numeric_relation11("<", index, count(coauthors))) {
             result = conj(result, nth(coauthors, index));
             index = index + 1;
           }
@@ -6438,7 +7395,7 @@ function publisher_set(publishing) {
 }
 function authorized_author_QMARK_(publishers, author) {
   return ((__eliscript_value_6) => __eliscript_truthy11(__eliscript_value_6) ? ((index, found) => {
-    while (index < count(publishers)) {
+    while (__eliscript_numeric_relation11("<", index, count(publishers))) {
       __eliscript_truthy11(publisher_matches_QMARK_(nth(publishers, index), author)) && (found = true);
       index = index + 1;
     }
@@ -6458,7 +7415,7 @@ function identity_after(marker, body) {
             const __eliscript_value_9 = null;
             {
               let found = __eliscript_value_9;
-              while (index < count(lines) && found === null) {
+              while (__eliscript_numeric_relation11("<", index, count(lines)) && found === null) {
                 {
                   const __eliscript_value_10 = trim(nth(lines, index));
                   {
@@ -6483,7 +7440,7 @@ function known_identity_QMARK_(identities, value) {
     {
       let index = __eliscript_value_11;
       let found = __eliscript_value_12;
-      while (index < count(identities) && !__eliscript_truthy11(found)) {
+      while (__eliscript_numeric_relation11("<", index, count(identities)) && !__eliscript_truthy11(found)) {
         nth(identities, index) === value && (found = true);
         index = index + 1;
       }
@@ -6498,7 +7455,7 @@ function carrier_adapter(adapters, author, body, identities) {
     {
       let index = __eliscript_value_13;
       let found = __eliscript_value_14;
-      while (index < count(adapters) && found === null) {
+      while (__eliscript_numeric_relation11("<", index, count(adapters)) && found === null) {
         {
           const __eliscript_value_15 = nth(adapters, index);
           {
@@ -6537,17 +7494,17 @@ function metadata_block(lines) {
       let start = __eliscript_value_20;
       let end = __eliscript_value_21;
       let total = __eliscript_value_22;
-      while (index < total && end < 0) {
+      while (__eliscript_numeric_relation11("<", index, total) && __eliscript_numeric_relation11("<", end, 0)) {
         {
           const __eliscript_value_23 = trim(nth(lines, index));
           {
             let trimmed = __eliscript_value_23;
-            start < 0 && trimmed === "```dogfood" ? start = index : start >= 0 && trimmed === "```" && (end = index);
+            __eliscript_numeric_relation11("<", start, 0) && trimmed === "```dogfood" ? start = index : __eliscript_numeric_relation11(">=", start, 0) && trimmed === "```" && (end = index);
           }
         }
         index = index + 1;
       }
-      return start < 0 || end < 0 ? null : vector(start, end);
+      return __eliscript_numeric_relation11("<", start, 0) || __eliscript_numeric_relation11("<", end, 0) ? null : vector(start, end);
     }
   }
 }
@@ -6591,7 +7548,7 @@ function issue_markdown(body) {
                         const __eliscript_value_31 = count(lines);
                         {
                           let total = __eliscript_value_31;
-                          while (index < total) {
+                          while (__eliscript_numeric_relation11("<", index, total)) {
                             parts = conj(parts, nth(lines, index));
                             index = index + 1;
                           }
@@ -6700,7 +7657,7 @@ async function collect_issues(options) {
                         return await (async (index) => {
                           return await (async () => {
                             await (async () => {
-                              while (index < count(records)) {
+                              while (__eliscript_numeric_relation11("<", index, count(records))) {
                                 await (async (record) => {
                                   return await (async (body) => {
                                     return await (async (author) => {
@@ -6732,6 +7689,98 @@ async function collect_issues(options) {
 
 // examples/dogfood/dist/src/builder/discussions.mjs
 var __eliscript_truthy12 = (value) => value !== false && value != null;
+var __eliscript_number_intrinsic12 = globalThis.Number;
+var __eliscript_bigint_intrinsic12 = globalThis.BigInt;
+var __eliscript_numeric_apply12 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol12 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error12 = globalThis.TypeError;
+var __eliscript_numeric_trim12 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice12 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec12 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix12 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object12 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive12 = (value) => {
+  if (!__eliscript_numeric_object12(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol12];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply12(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object12(result))
+      return result;
+    throw new __eliscript_numeric_error12("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply12(method, value, []);
+      if (!__eliscript_numeric_object12(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error12("Cannot convert object to primitive value");
+};
+var __eliscript_to_number12 = (value) => {
+  const primitive = __eliscript_numeric_primitive12(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply12(__eliscript_numeric_trim12, primitive, []);
+    if (__eliscript_numeric_apply12(__eliscript_numeric_exec12, __eliscript_numeric_radix12, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply12(__eliscript_numeric_slice12, text, [0, 2]) + __eliscript_numeric_apply12(__eliscript_numeric_slice12, text, [first]);
+      return __eliscript_number_intrinsic12(__eliscript_bigint_intrinsic12(token));
+    }
+  }
+  return __eliscript_number_intrinsic12(primitive);
+};
+var __eliscript_numeric12 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive12(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number12(primitive) : +primitive;
+};
+var __eliscript_implicit_number4 = (value) => {
+  if (typeof value === "number")
+    return value;
+  const primitive = __eliscript_numeric_primitive12(value);
+  if (typeof primitive === "bigint")
+    throw new __eliscript_numeric_error12("Cannot convert a BigInt value to a number");
+  return typeof primitive === "string" ? __eliscript_to_number12(primitive) : +primitive;
+};
+var __eliscript_numeric_decrement4 = (value) => __eliscript_implicit_number4(value) - 1;
+var __eliscript_numeric_relation12 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive12(left);
+  let b = __eliscript_numeric_primitive12(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric12(a);
+    b = __eliscript_numeric12(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 var default_page_size3 = 50;
 var comment_bound = 100;
 var maximum_pages2 = 100;
@@ -6740,13 +7789,13 @@ function repository_parts(repository) {
     const __eliscript_value_1 = index_of("/", repository);
     {
       let slash = __eliscript_value_1;
-      return slash < 1 ? fail2("DOGFOOD-DISCUSSIONS-001", String('discussion source repository must be "owner/name": ') + String(repository)) : vector(slice(0, slash, repository), slice(slash + 1, count(repository), repository));
+      return __eliscript_numeric_relation12("<", slash, 1) ? fail2("DOGFOOD-DISCUSSIONS-001", String('discussion source repository must be "owner/name": ') + String(repository)) : vector(slice(0, slash, repository), slice(slash + 1, count(repository), repository));
     }
   }
 }
 var author_selection = "author { login __typename ... on User { databaseId } }";
 function reply_selection(depth) {
-  return depth === 0 ? "" : String(" replies(first: 50) { nodes { id ") + String(author_selection) + String(" body createdAt updatedAt url") + String(reply_selection(depth - 1)) + String(" } }");
+  return depth === 0 ? "" : String(" replies(first: 50) { nodes { id ") + String(author_selection) + String(" body createdAt updatedAt url") + String(reply_selection(__eliscript_numeric_decrement4(depth))) + String(" } }");
 }
 function comment_selection() {
   return String(" comments(first: ") + String(comment_bound) + String(") { pageInfo { hasNextPage endCursor }") + String(" nodes { id ") + String(author_selection) + String(" body createdAt updatedAt url") + String(reply_selection(2)) + String(" } }");
@@ -6777,7 +7826,7 @@ async function fetch_discussions(transport, source, with_comments) {
               return await (async (more) => {
                 return await (async () => {
                   await (async () => {
-                    while (__eliscript_truthy12(((__eliscript_value_2) => __eliscript_truthy12(__eliscript_value_2) ? pages < maximum_pages2 : __eliscript_value_2)(more))) {
+                    while (__eliscript_truthy12(((__eliscript_value_2) => __eliscript_truthy12(__eliscript_value_2) ? __eliscript_numeric_relation12("<", pages, maximum_pages2) : __eliscript_value_2)(more))) {
                       ((data) => {
                         return ((connection) => {
                           return (() => {
@@ -6797,7 +7846,7 @@ async function fetch_discussions(transport, source, with_comments) {
                     }
                     return null;
                   })();
-                  __eliscript_truthy12(((__eliscript_value_4) => __eliscript_truthy12(__eliscript_value_4) ? pages >= maximum_pages2 : __eliscript_value_4)(more)) && fail2("DOGFOOD-DISCUSSIONS-005", String("discussion listing exceeded ") + String(maximum_pages2) + String(" pages"));
+                  __eliscript_truthy12(((__eliscript_value_4) => __eliscript_truthy12(__eliscript_value_4) ? __eliscript_numeric_relation12(">=", pages, maximum_pages2) : __eliscript_value_4)(more)) && fail2("DOGFOOD-DISCUSSIONS-005", String("discussion listing exceeded ") + String(maximum_pages2) + String(" pages"));
                   return nodes;
                 })();
               })(true);
@@ -6824,7 +7873,7 @@ function reply_tree(nodes) {
     {
       let replies = __eliscript_value_6;
       let index = __eliscript_value_7;
-      while (index < count(nodes)) {
+      while (__eliscript_numeric_relation12("<", index, count(nodes))) {
         {
           const __eliscript_value_8 = nth(nodes, index);
           {
@@ -6972,7 +8021,7 @@ async function collect_discussions(options) {
                           return ((unauthorized) => {
                             return ((index) => {
                               return (() => {
-                                while (index < count(records)) {
+                                while (__eliscript_numeric_relation12("<", index, count(records))) {
                                   {
                                     const __eliscript_value_27 = nth(records, index);
                                     {
@@ -7018,6 +8067,89 @@ async function collect_discussions(options) {
 
 // examples/dogfood/dist/src/builder/events.mjs
 var __eliscript_truthy13 = (value) => value !== false && value != null;
+var __eliscript_number_intrinsic13 = globalThis.Number;
+var __eliscript_bigint_intrinsic13 = globalThis.BigInt;
+var __eliscript_numeric_apply13 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol13 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error13 = globalThis.TypeError;
+var __eliscript_numeric_trim13 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice13 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec13 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix13 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object13 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive13 = (value) => {
+  if (!__eliscript_numeric_object13(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol13];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply13(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object13(result))
+      return result;
+    throw new __eliscript_numeric_error13("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply13(method, value, []);
+      if (!__eliscript_numeric_object13(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error13("Cannot convert object to primitive value");
+};
+var __eliscript_to_number13 = (value) => {
+  const primitive = __eliscript_numeric_primitive13(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply13(__eliscript_numeric_trim13, primitive, []);
+    if (__eliscript_numeric_apply13(__eliscript_numeric_exec13, __eliscript_numeric_radix13, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply13(__eliscript_numeric_slice13, text, [0, 2]) + __eliscript_numeric_apply13(__eliscript_numeric_slice13, text, [first]);
+      return __eliscript_number_intrinsic13(__eliscript_bigint_intrinsic13(token));
+    }
+  }
+  return __eliscript_number_intrinsic13(primitive);
+};
+var __eliscript_numeric13 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive13(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number13(primitive) : +primitive;
+};
+var __eliscript_numeric_relation13 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive13(left);
+  let b = __eliscript_numeric_primitive13(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric13(a);
+    b = __eliscript_numeric13(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 var article_events = vector("push", "schedule", "workflow_dispatch", "issues", "release");
 var comment_events = vector("issue_comment", "discussion_comment", "discussions");
 var content_events = vector("issues", "release");
@@ -7030,7 +8162,7 @@ function member_QMARK_(values, needle) {
     {
       let index = __eliscript_value_1;
       let found = __eliscript_value_2;
-      while (index < count(values) && !__eliscript_truthy13(found)) {
+      while (__eliscript_numeric_relation13("<", index, count(values)) && !__eliscript_truthy13(found)) {
         nth(values, index) === needle && (found = true);
         index = index + 1;
       }
@@ -7083,6 +8215,89 @@ function requested_event() {
 
 // examples/dogfood/dist/src/builder/channels.mjs
 var __eliscript_truthy14 = (value) => value !== false && value != null;
+var __eliscript_number_intrinsic14 = globalThis.Number;
+var __eliscript_bigint_intrinsic14 = globalThis.BigInt;
+var __eliscript_numeric_apply14 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol14 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error14 = globalThis.TypeError;
+var __eliscript_numeric_trim14 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice14 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec14 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix14 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object14 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive14 = (value) => {
+  if (!__eliscript_numeric_object14(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol14];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply14(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object14(result))
+      return result;
+    throw new __eliscript_numeric_error14("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply14(method, value, []);
+      if (!__eliscript_numeric_object14(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error14("Cannot convert object to primitive value");
+};
+var __eliscript_to_number14 = (value) => {
+  const primitive = __eliscript_numeric_primitive14(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply14(__eliscript_numeric_trim14, primitive, []);
+    if (__eliscript_numeric_apply14(__eliscript_numeric_exec14, __eliscript_numeric_radix14, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply14(__eliscript_numeric_slice14, text, [0, 2]) + __eliscript_numeric_apply14(__eliscript_numeric_slice14, text, [first]);
+      return __eliscript_number_intrinsic14(__eliscript_bigint_intrinsic14(token));
+    }
+  }
+  return __eliscript_number_intrinsic14(primitive);
+};
+var __eliscript_numeric14 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive14(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number14(primitive) : +primitive;
+};
+var __eliscript_numeric_relation14 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive14(left);
+  let b = __eliscript_numeric_primitive14(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric14(a);
+    b = __eliscript_numeric14(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 var browser_only_kinds = vector(keyword("external"), keyword("none"));
 function member_keyword_QMARK_(values, needle) {
   {
@@ -7091,7 +8306,7 @@ function member_keyword_QMARK_(values, needle) {
     {
       let index = __eliscript_value_1;
       let found = __eliscript_value_2;
-      while (index < count(values) && !__eliscript_truthy14(found)) {
+      while (__eliscript_numeric_relation14("<", index, count(values)) && !__eliscript_truthy14(found)) {
         nth(values, index) === needle && (found = true);
         index = index + 1;
       }
@@ -7106,7 +8321,7 @@ function find_adapter(adapters, id) {
     {
       let index = __eliscript_value_3;
       let found = __eliscript_value_4;
-      while (index < count(adapters)) {
+      while (__eliscript_numeric_relation14("<", index, count(adapters))) {
         {
           const __eliscript_value_5 = nth(adapters, index);
           {
@@ -7152,7 +8367,7 @@ function channel_present_QMARK_(post, id) {
       let channels = __eliscript_value_8;
       let index = __eliscript_value_9;
       let found = __eliscript_value_10;
-      while (index < count(channels) && !__eliscript_truthy14(found)) {
+      while (__eliscript_numeric_relation14("<", index, count(channels)) && !__eliscript_truthy14(found)) {
         get(nth(channels, index), keyword("id"), null) === id && (found = true);
         index = index + 1;
       }
@@ -7177,7 +8392,7 @@ function attach_to_post(post, channels, adapters) {
         const __eliscript_value_12 = 0;
         {
           let index = __eliscript_value_12;
-          while (index < count(channels)) {
+          while (__eliscript_numeric_relation14("<", index, count(channels))) {
             {
               const __eliscript_value_13 = nth(channels, index);
               {
@@ -7200,7 +8415,7 @@ function append_all3(left, right) {
     {
       let result = __eliscript_value_14;
       let index = __eliscript_value_15;
-      while (index < count(right)) {
+      while (__eliscript_numeric_relation14("<", index, count(right))) {
         result = conj(result, nth(right, index));
         index = index + 1;
       }
@@ -7223,7 +8438,7 @@ function attach_configured_channels(config, posts) {
         {
           let channels = __eliscript_value_17;
           return count(channels) === 0 ? posts : ((result, index) => {
-            while (index < count(posts)) {
+            while (__eliscript_numeric_relation14("<", index, count(posts))) {
               result = conj(result, attach_to_post(nth(posts, index), channels, adapters));
               index = index + 1;
             }
@@ -7241,7 +8456,7 @@ function snapshot_count(posts) {
     {
       let total = __eliscript_value_18;
       let index = __eliscript_value_19;
-      while (index < count(posts)) {
+      while (__eliscript_numeric_relation14("<", index, count(posts))) {
         {
           const __eliscript_value_20 = get(nth(posts, index), keyword("comment-channels"), vector());
           {
@@ -7250,7 +8465,7 @@ function snapshot_count(posts) {
               const __eliscript_value_21 = 0;
               {
                 let channel_index = __eliscript_value_21;
-                while (channel_index < count(channels)) {
+                while (__eliscript_numeric_relation14("<", channel_index, count(channels))) {
                   {
                     const __eliscript_value_22 = get(nth(channels, channel_index), keyword("mode"), keyword("snapshot"));
                     {
@@ -7273,6 +8488,89 @@ function snapshot_count(posts) {
 
 // examples/dogfood/dist/src/builder/identity.mjs
 var __eliscript_truthy15 = (value) => value !== false && value != null;
+var __eliscript_number_intrinsic15 = globalThis.Number;
+var __eliscript_bigint_intrinsic15 = globalThis.BigInt;
+var __eliscript_numeric_apply15 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol15 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error15 = globalThis.TypeError;
+var __eliscript_numeric_trim15 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice15 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec15 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix15 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object15 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive15 = (value) => {
+  if (!__eliscript_numeric_object15(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol15];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply15(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object15(result))
+      return result;
+    throw new __eliscript_numeric_error15("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply15(method, value, []);
+      if (!__eliscript_numeric_object15(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error15("Cannot convert object to primitive value");
+};
+var __eliscript_to_number15 = (value) => {
+  const primitive = __eliscript_numeric_primitive15(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply15(__eliscript_numeric_trim15, primitive, []);
+    if (__eliscript_numeric_apply15(__eliscript_numeric_exec15, __eliscript_numeric_radix15, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply15(__eliscript_numeric_slice15, text, [0, 2]) + __eliscript_numeric_apply15(__eliscript_numeric_slice15, text, [first]);
+      return __eliscript_number_intrinsic15(__eliscript_bigint_intrinsic15(token));
+    }
+  }
+  return __eliscript_number_intrinsic15(primitive);
+};
+var __eliscript_numeric15 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive15(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number15(primitive) : +primitive;
+};
+var __eliscript_numeric_relation15 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive15(left);
+  let b = __eliscript_numeric_primitive15(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric15(a);
+    b = __eliscript_numeric15(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 var authority_only = vector(keyword("slug"), keyword("body"));
 var comparable_fields = vector(keyword("title"), keyword("summary"), keyword("published-at"), keyword("updated-at"), keyword("authors"), keyword("tags"), keyword("cover"), keyword("draft"), keyword("pinned-weight"));
 function merged_field(post, overrides, key) {
@@ -7328,7 +8626,7 @@ function group_by_id(posts) {
     {
       let groups = __eliscript_value_7;
       let index = __eliscript_value_8;
-      while (index < count(posts)) {
+      while (__eliscript_numeric_relation15("<", index, count(posts))) {
         {
           const __eliscript_value_9 = nth(posts, index);
           {
@@ -7376,7 +8674,7 @@ function declared_QMARK_(fields, key) {
     {
       let index = __eliscript_value_13;
       let found = __eliscript_value_14;
-      while (index < count(fields)) {
+      while (__eliscript_numeric_relation15("<", index, count(fields))) {
         nth(fields, index) === key && (found = true);
         index = index + 1;
       }
@@ -7389,7 +8687,7 @@ function check_agreement(authority, projected, projection, fields) {
     const __eliscript_value_15 = 0;
     {
       let index = __eliscript_value_15;
-      while (index < count(comparable_fields)) {
+      while (__eliscript_numeric_relation15("<", index, count(comparable_fields))) {
         {
           const __eliscript_value_16 = nth(comparable_fields, index);
           {
@@ -7408,7 +8706,7 @@ function check_authority_only(authority, projected, projection, fields) {
     const __eliscript_value_17 = 0;
     {
       let index = __eliscript_value_17;
-      while (index < count(authority_only)) {
+      while (__eliscript_numeric_relation15("<", index, count(authority_only))) {
         {
           const __eliscript_value_18 = nth(authority_only, index);
           {
@@ -7435,7 +8733,7 @@ function contains_value_QMARK_(values, needle) {
     {
       let index = __eliscript_value_21;
       let found = __eliscript_value_22;
-      while (index < count(values) && !__eliscript_truthy15(found)) {
+      while (__eliscript_numeric_relation15("<", index, count(values)) && !__eliscript_truthy15(found)) {
         nth(values, index) === needle && (found = true);
         index = index + 1;
       }
@@ -7452,7 +8750,7 @@ function merged_overrides(authority, projected, fields) {
         const __eliscript_value_24 = 0;
         {
           let index = __eliscript_value_24;
-          while (index < count(fields)) {
+          while (__eliscript_numeric_relation15("<", index, count(fields))) {
             {
               const __eliscript_value_25 = nth(fields, index);
               {
@@ -7477,7 +8775,7 @@ function dedupe(values) {
     {
       let result = __eliscript_value_26;
       let index = __eliscript_value_27;
-      while (index < count(values)) {
+      while (__eliscript_numeric_relation15("<", index, count(values))) {
         {
           const __eliscript_value_28 = nth(values, index);
           {
@@ -7520,7 +8818,7 @@ function resolve_projection(declaration, group) {
                             const __eliscript_value_35 = 0;
                             {
                               let index = __eliscript_value_35;
-                              while (index < count(group)) {
+                              while (__eliscript_numeric_relation15("<", index, count(group))) {
                                 {
                                   const __eliscript_value_36 = nth(group, index);
                                   {
@@ -7545,7 +8843,7 @@ function resolve_projection(declaration, group) {
                             }
                           }
                           authority === null && fail2("DOGFOOD-IDENTITY-006", String('projection for "') + String(id) + String('" names authority ') + String(String(authority_source)) + String(" but no record from that source carries the id"));
-                          while (projection_index < count(projections)) {
+                          while (__eliscript_numeric_relation15("<", projection_index, count(projections))) {
                             {
                               const __eliscript_value_39 = nth(projections, projection_index);
                               {
@@ -7558,7 +8856,7 @@ function resolve_projection(declaration, group) {
                                       const __eliscript_value_41 = 0;
                                       {
                                         let index = __eliscript_value_41;
-                                        while (index < count(group)) {
+                                        while (__eliscript_numeric_relation15("<", index, count(group))) {
                                           {
                                             const __eliscript_value_42 = nth(group, index);
                                             {
@@ -7625,7 +8923,7 @@ function resolve_identity(config, posts) {
                         const __eliscript_value_49 = 0;
                         {
                           let index = __eliscript_value_49;
-                          while (index < count(ids)) {
+                          while (__eliscript_numeric_relation15("<", index, count(ids))) {
                             {
                               const __eliscript_value_50 = nth(ids, index);
                               {
@@ -7668,7 +8966,7 @@ function distinct_ids(posts) {
     {
       let ids = __eliscript_value_53;
       let index = __eliscript_value_54;
-      while (index < count(posts)) {
+      while (__eliscript_numeric_relation15("<", index, count(posts))) {
         {
           const __eliscript_value_55 = nth(posts, index)["id"];
           {
@@ -7689,7 +8987,7 @@ function find_declaration(declarations, id) {
     {
       let index = __eliscript_value_56;
       let found = __eliscript_value_57;
-      while (index < count(declarations)) {
+      while (__eliscript_numeric_relation15("<", index, count(declarations))) {
         get(nth(declarations, index), keyword("id"), "") === id && (found = nth(declarations, index));
         index = index + 1;
       }
@@ -7704,7 +9002,7 @@ function map_provenance(posts) {
     {
       let result = __eliscript_value_58;
       let index = __eliscript_value_59;
-      while (index < count(posts)) {
+      while (__eliscript_numeric_relation15("<", index, count(posts))) {
         result = conj(result, provenance_text(nth(posts, index)));
         index = index + 1;
       }
@@ -7715,6 +9013,89 @@ function map_provenance(posts) {
 
 // examples/dogfood/dist/src/builder/preflight.mjs
 var __eliscript_truthy16 = (value) => value !== false && value != null;
+var __eliscript_number_intrinsic16 = globalThis.Number;
+var __eliscript_bigint_intrinsic16 = globalThis.BigInt;
+var __eliscript_numeric_apply16 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol16 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error16 = globalThis.TypeError;
+var __eliscript_numeric_trim16 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice16 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec16 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix16 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object16 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive16 = (value) => {
+  if (!__eliscript_numeric_object16(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol16];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply16(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object16(result))
+      return result;
+    throw new __eliscript_numeric_error16("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply16(method, value, []);
+      if (!__eliscript_numeric_object16(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error16("Cannot convert object to primitive value");
+};
+var __eliscript_to_number16 = (value) => {
+  const primitive = __eliscript_numeric_primitive16(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply16(__eliscript_numeric_trim16, primitive, []);
+    if (__eliscript_numeric_apply16(__eliscript_numeric_exec16, __eliscript_numeric_radix16, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply16(__eliscript_numeric_slice16, text, [0, 2]) + __eliscript_numeric_apply16(__eliscript_numeric_slice16, text, [first]);
+      return __eliscript_number_intrinsic16(__eliscript_bigint_intrinsic16(token));
+    }
+  }
+  return __eliscript_number_intrinsic16(primitive);
+};
+var __eliscript_numeric16 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive16(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number16(primitive) : +primitive;
+};
+var __eliscript_numeric_relation16 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive16(left);
+  let b = __eliscript_numeric_primitive16(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric16(a);
+    b = __eliscript_numeric16(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 function repository_name(payload) {
   {
     const __eliscript_value_1 = payload["repository"] ?? null;
@@ -7748,7 +9129,7 @@ function matching_source(config, kind, repository) {
       let sources = __eliscript_value_3;
       let index = __eliscript_value_4;
       let found = __eliscript_value_5;
-      while (index < count(sources)) {
+      while (__eliscript_numeric_relation16("<", index, count(sources))) {
         {
           const __eliscript_value_6 = nth(sources, index);
           {
@@ -7773,7 +9154,7 @@ function labelled_for_publication_QMARK_(source, issue) {
       let labels = __eliscript_value_8;
       let index = __eliscript_value_9;
       let found = __eliscript_value_10;
-      while (index < (labels ?? []).length) {
+      while (__eliscript_numeric_relation16("<", index, (labels ?? []).length)) {
         (((labels ?? [])[index] ?? null)["name"] ?? "") === required && (found = true);
         index = index + 1;
       }
@@ -7790,7 +9171,7 @@ function carrier_shaped_QMARK_(config, author, body) {
       let adapters = __eliscript_value_11;
       let index = __eliscript_value_12;
       let found = __eliscript_value_13;
-      while (index < count(adapters)) {
+      while (__eliscript_numeric_relation16("<", index, count(adapters))) {
         {
           const __eliscript_value_14 = nth(adapters, index);
           {
@@ -7896,6 +9277,89 @@ function name_of(kind) {
 }
 
 // examples/dogfood/dist/src/builder/sources.mjs
+var __eliscript_number_intrinsic17 = globalThis.Number;
+var __eliscript_bigint_intrinsic17 = globalThis.BigInt;
+var __eliscript_numeric_apply17 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol17 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error17 = globalThis.TypeError;
+var __eliscript_numeric_trim17 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice17 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec17 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix17 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object17 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive17 = (value) => {
+  if (!__eliscript_numeric_object17(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol17];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply17(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object17(result))
+      return result;
+    throw new __eliscript_numeric_error17("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply17(method, value, []);
+      if (!__eliscript_numeric_object17(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error17("Cannot convert object to primitive value");
+};
+var __eliscript_to_number17 = (value) => {
+  const primitive = __eliscript_numeric_primitive17(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply17(__eliscript_numeric_trim17, primitive, []);
+    if (__eliscript_numeric_apply17(__eliscript_numeric_exec17, __eliscript_numeric_radix17, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply17(__eliscript_numeric_slice17, text, [0, 2]) + __eliscript_numeric_apply17(__eliscript_numeric_slice17, text, [first]);
+      return __eliscript_number_intrinsic17(__eliscript_bigint_intrinsic17(token));
+    }
+  }
+  return __eliscript_number_intrinsic17(primitive);
+};
+var __eliscript_numeric17 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive17(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number17(primitive) : +primitive;
+};
+var __eliscript_numeric_relation17 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive17(left);
+  let b = __eliscript_numeric_primitive17(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric17(a);
+    b = __eliscript_numeric17(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 function enabled_sources(config) {
   return filter((source) => {
     return get(source, keyword("enabled"), false);
@@ -7908,7 +9372,7 @@ function identity_list(posts) {
     {
       let result = __eliscript_value_1;
       let index = __eliscript_value_2;
-      while (index < count(posts)) {
+      while (__eliscript_numeric_relation17("<", index, count(posts))) {
         {
           const __eliscript_value_3 = nth(posts, index);
           {
@@ -7922,7 +9386,7 @@ function identity_list(posts) {
                   {
                     let alias_index = __eliscript_value_5;
                     result = conj(result, post["id"]);
-                    while (alias_index < count(aliases)) {
+                    while (__eliscript_numeric_relation17("<", alias_index, count(aliases))) {
                       result = conj(result, nth(aliases, alias_index));
                       alias_index = alias_index + 1;
                     }
@@ -7947,13 +9411,93 @@ async function source_posts(root, config, source, transport, identities) {
 // examples/dogfood/dist/src/support/config.mjs
 var import_node_fs2 = require("node:fs");
 var __eliscript_truthy17 = (value) => value !== false && value != null;
-var __eliscript_to_number2 = (value) => {
-  if (typeof value === "string") {
-    const text = value.trim();
-    if (/^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/.test(text))
-      return Number(BigInt(text));
+var __eliscript_number_intrinsic18 = globalThis.Number;
+var __eliscript_bigint_intrinsic18 = globalThis.BigInt;
+var __eliscript_numeric_apply18 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol18 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error18 = globalThis.TypeError;
+var __eliscript_numeric_trim18 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice18 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec18 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix18 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object18 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive18 = (value) => {
+  if (!__eliscript_numeric_object18(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol18];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply18(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object18(result))
+      return result;
+    throw new __eliscript_numeric_error18("Cannot convert object to primitive value");
   }
-  return Number(value);
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply18(method, value, []);
+      if (!__eliscript_numeric_object18(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error18("Cannot convert object to primitive value");
+};
+var __eliscript_to_number18 = (value) => {
+  const primitive = __eliscript_numeric_primitive18(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply18(__eliscript_numeric_trim18, primitive, []);
+    if (__eliscript_numeric_apply18(__eliscript_numeric_exec18, __eliscript_numeric_radix18, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply18(__eliscript_numeric_slice18, text, [0, 2]) + __eliscript_numeric_apply18(__eliscript_numeric_slice18, text, [first]);
+      return __eliscript_number_intrinsic18(__eliscript_bigint_intrinsic18(token));
+    }
+  }
+  return __eliscript_number_intrinsic18(primitive);
+};
+var __eliscript_numeric18 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive18(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number18(primitive) : +primitive;
+};
+var __eliscript_numeric_rem = (a, b) => {
+  if (typeof a === "number" && typeof b === "number")
+    return a % b;
+  return __eliscript_numeric18(a) % __eliscript_numeric18(b);
+};
+var __eliscript_numeric_relation18 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive18(left);
+  let b = __eliscript_numeric_primitive18(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric18(a);
+    b = __eliscript_numeric18(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
 };
 var open_paren = 40;
 var close_paren = 41;
@@ -7978,7 +9522,7 @@ function reader_code(reader) {
     const __eliscript_value_1 = reader["index"];
     {
       let index = __eliscript_value_1;
-      return index < reader["length"] ? char_code(reader["source"], index) : null;
+      return __eliscript_numeric_relation18("<", index, reader["length"]) ? char_code(reader["source"], index) : null;
     }
   }
 }
@@ -8051,14 +9595,14 @@ function read_map_value(reader) {
         const __eliscript_value_10 = count(items);
         {
           let total = __eliscript_value_10;
-          total % 2 === 1 && read_failure(reader, "map literal needs an even number of forms");
+          __eliscript_numeric_rem(total, 2) === 1 && read_failure(reader, "map literal needs an even number of forms");
           {
             const __eliscript_value_11 = hashMap();
             const __eliscript_value_12 = 0;
             {
               let result = __eliscript_value_11;
               let index = __eliscript_value_12;
-              while (index < total) {
+              while (__eliscript_numeric_relation18("<", index, total)) {
                 result = assoc(result, nth(items, index), nth(items, index + 1)), index = index + 2;
               }
               return result;
@@ -8156,17 +9700,17 @@ function numeric_token_QMARK_(text) {
   {
     const __eliscript_value_21 = 0;
     const __eliscript_value_22 = 0;
-    const __eliscript_value_23 = text_length(text) > 0;
+    const __eliscript_value_23 = __eliscript_numeric_relation18(">", text_length(text), 0);
     {
       let start = __eliscript_value_21;
       let index = __eliscript_value_22;
       let ok = __eliscript_value_23;
       __eliscript_truthy17(((__eliscript_value_24) => __eliscript_truthy17(__eliscript_value_24) ? char_code(text, 0) === minus_sign : __eliscript_value_24)(ok)) && (start = 1, index = 1);
-      while (index < text_length(text)) {
+      while (__eliscript_numeric_relation18("<", index, text_length(text))) {
         !__eliscript_truthy17(digit_code_QMARK_(char_code(text, index))) && (ok = false);
         index = index + 1;
       }
-      return ((__eliscript_value_25) => __eliscript_truthy17(__eliscript_value_25) ? text_length(text) > start : __eliscript_value_25)(ok);
+      return ((__eliscript_value_25) => __eliscript_truthy17(__eliscript_value_25) ? __eliscript_numeric_relation18(">", text_length(text), start) : __eliscript_value_25)(ok);
     }
   }
 }
@@ -8175,7 +9719,7 @@ function read_atom(reader) {
     const __eliscript_value_26 = read_token(reader);
     {
       let token = __eliscript_value_26;
-      return token === "t" ? true : token === "false" ? false : token === "nil" ? null : __eliscript_truthy17(numeric_token_QMARK_(token)) ? __eliscript_to_number2(token) : __eliscript_truthy17(blank_QMARK_(token)) ? read_failure(reader, "unexpected character") : { "config-symbol": token };
+      return token === "t" ? true : token === "false" ? false : token === "nil" ? null : __eliscript_truthy17(numeric_token_QMARK_(token)) ? __eliscript_to_number18(token) : __eliscript_truthy17(blank_QMARK_(token)) ? read_failure(reader, "unexpected character") : { "config-symbol": token };
     }
   }
 }
@@ -8207,7 +9751,7 @@ function symbol_named_QMARK_(value, name) {
   return !(value === null) && !__eliscript_truthy17(isMap(value)) && !__eliscript_truthy17(isVector(value)) && (value["config-symbol"] ?? null) === name;
 }
 function list_starting_with_QMARK_(value, name) {
-  return ((__eliscript_value_29) => __eliscript_truthy17(__eliscript_value_29) ? ((__eliscript_value_30) => __eliscript_truthy17(__eliscript_value_30) ? ((__eliscript_value_31) => __eliscript_truthy17(__eliscript_value_31) ? symbol_named_QMARK_(nth(value, 0), name) : __eliscript_value_31)(count(value) > 1) : __eliscript_value_30)(isVector(value)) : __eliscript_value_29)(!(value === null));
+  return ((__eliscript_value_29) => __eliscript_truthy17(__eliscript_value_29) ? ((__eliscript_value_30) => __eliscript_truthy17(__eliscript_value_30) ? ((__eliscript_value_31) => __eliscript_truthy17(__eliscript_value_31) ? symbol_named_QMARK_(nth(value, 0), name) : __eliscript_value_31)(__eliscript_numeric_relation18(">", count(value), 1)) : __eliscript_value_30)(isVector(value)) : __eliscript_value_29)(!(value === null));
 }
 function find_child_declaration(children, name) {
   {
@@ -8216,7 +9760,7 @@ function find_child_declaration(children, name) {
     {
       let index = __eliscript_value_32;
       let found = __eliscript_value_33;
-      while (index < count(children)) {
+      while (__eliscript_numeric_relation18("<", index, count(children))) {
         {
           const __eliscript_value_34 = nth(children, index);
           {
@@ -8237,7 +9781,7 @@ function find_declaration2(forms, name) {
     {
       let index = __eliscript_value_36;
       let found = __eliscript_value_37;
-      while (index < count(forms)) {
+      while (__eliscript_numeric_relation18("<", index, count(forms))) {
         {
           const __eliscript_value_38 = nth(forms, index);
           {
@@ -8269,7 +9813,7 @@ function load_config_value(path) {
                 {
                   let declaration = __eliscript_value_42;
                   declaration === null && fail2("DOGFOOD-CONFIG-002", String(path) + String(": no (defconst config ...) declaration found"));
-                  count(declaration) < 3 && fail2("DOGFOOD-CONFIG-002", String(path) + String(": defconst must bind a value"));
+                  __eliscript_numeric_relation18("<", count(declaration), 3) && fail2("DOGFOOD-CONFIG-002", String(path) + String(": defconst must bind a value"));
                   return nth(declaration, 2);
                 }
               }
@@ -8369,13 +9913,13 @@ function scalar_value_QMARK_(value) {
 }
 function data_only_QMARK_(value) {
   return value === null ? true : __eliscript_truthy17(((__eliscript_value_43) => __eliscript_truthy17(__eliscript_value_43) ? __eliscript_value_43 : scalar_value_QMARK_(value))(value === undefined)) ? !(value === undefined) : __eliscript_truthy17(isVector(value)) ? ((index, ok) => {
-    while (index < count(value)) {
+    while (__eliscript_numeric_relation18("<", index, count(value))) {
       !__eliscript_truthy17(data_only_QMARK_(nth(value, index))) && (ok = false);
       index = index + 1;
     }
     return ok;
   })(0, true) : __eliscript_truthy17(isMap(value)) ? ((keys, index, ok) => {
-    while (index < count(keys)) {
+    while (__eliscript_numeric_relation18("<", index, count(keys))) {
       !__eliscript_truthy17(((__eliscript_value_44) => __eliscript_truthy17(__eliscript_value_44) ? data_only_QMARK_(get(value, nth(keys, index))) : __eliscript_value_44)(((__eliscript_value) => {
         if (__eliscript_value === null)
           return "null";
@@ -8460,7 +10004,7 @@ function known_key_QMARK_(key) {
     {
       let index = __eliscript_value_46;
       let found = __eliscript_value_47;
-      while (index < count(known_keys) && !__eliscript_truthy17(found)) {
+      while (__eliscript_numeric_relation18("<", index, count(known_keys)) && !__eliscript_truthy17(found)) {
         nth(known_keys, index) === key && (found = true);
         index = index + 1;
       }
@@ -8556,7 +10100,7 @@ function check_sources(sources) {
     {
       let index = __eliscript_value_53;
       let enabled = __eliscript_value_54;
-      while (index < count(sources)) {
+      while (__eliscript_numeric_relation18("<", index, count(sources))) {
         {
           const __eliscript_value_55 = nth(sources, index);
           {
@@ -8579,7 +10123,7 @@ function check_unique_field(values, key, label) {
     {
       let collected = __eliscript_value_56;
       let index = __eliscript_value_57;
-      while (index < count(values)) {
+      while (__eliscript_numeric_relation18("<", index, count(values))) {
         {
           const __eliscript_value_58 = get(nth(values, index), key, null);
           {
@@ -8600,7 +10144,7 @@ function check_unique_values(values, label) {
     {
       let seen = __eliscript_value_59;
       let index = __eliscript_value_60;
-      while (index < count(values)) {
+      while (__eliscript_numeric_relation18("<", index, count(values))) {
         {
           const __eliscript_value_61 = nth(values, index);
           {
@@ -8622,7 +10166,7 @@ function member_of_QMARK_(values, needle) {
     {
       let index = __eliscript_value_62;
       let found = __eliscript_value_63;
-      while (index < count(values) && !__eliscript_truthy17(found)) {
+      while (__eliscript_numeric_relation18("<", index, count(values)) && !__eliscript_truthy17(found)) {
         nth(values, index) === needle && (found = true);
         index = index + 1;
       }
@@ -8646,7 +10190,7 @@ function check_comments(config) {
               const __eliscript_value_66 = 0;
               {
                 let index = __eliscript_value_66;
-                while (index < count(channels)) {
+                while (__eliscript_numeric_relation18("<", index, count(channels))) {
                   require_map(nth(channels, index), String("comments.channels[") + String(index) + String("]"));
                   require_key(nth(channels, index), keyword("id"), String("comments.channels[") + String(index) + String("]"));
                   require_key(nth(channels, index), keyword("kind"), String("comments.channels[") + String(index) + String("]"));
@@ -8671,7 +10215,7 @@ function check_private_input(config) {
       let private_sources = __eliscript_value_67;
       let sources = __eliscript_value_68;
       let index = __eliscript_value_69;
-      while (index < count(sources)) {
+      while (__eliscript_numeric_relation18("<", index, count(sources))) {
         {
           const __eliscript_value_70 = nth(sources, index);
           {
@@ -8681,7 +10225,7 @@ function check_private_input(config) {
           }
         }
       }
-      return count(private_sources) > 0 ? (() => {
+      return __eliscript_numeric_relation18(">", count(private_sources), 0) ? (() => {
         {
           const __eliscript_value_72 = get(config, keyword("publishing"), hashMap());
           {
@@ -8695,7 +10239,7 @@ function check_private_input(config) {
           {
             let channels = __eliscript_value_73;
             let channel_index = __eliscript_value_74;
-            while (channel_index < count(channels)) {
+            while (__eliscript_numeric_relation18("<", channel_index, count(channels))) {
               {
                 const __eliscript_value_75 = nth(channels, channel_index);
                 {
@@ -8754,7 +10298,7 @@ function join_keywords(values) {
     {
       let parts = __eliscript_value_81;
       let index = __eliscript_value_82;
-      while (index < count(values)) {
+      while (__eliscript_numeric_relation18("<", index, count(values))) {
         parts = conj(parts, collection_name(nth(values, index)));
         index = index + 1;
       }
@@ -8767,7 +10311,7 @@ function collection_name(value) {
     const __eliscript_value_83 = String(value);
     {
       let text = __eliscript_value_83;
-      return text_length(text) > 0 && char_code(text, 0) === 58 ? slice(1, text_length(text), text) : text;
+      return __eliscript_numeric_relation18(">", text_length(text), 0) && char_code(text, 0) === 58 ? slice(1, text_length(text), text) : text;
     }
   }
 }
@@ -8781,7 +10325,7 @@ function check_adapters(config) {
         const __eliscript_value_85 = 0;
         {
           let index = __eliscript_value_85;
-          while (index < count(adapters)) {
+          while (__eliscript_numeric_relation18("<", index, count(adapters))) {
             {
               const __eliscript_value_86 = String("adapters[") + String(index) + String("]");
               {
@@ -8861,7 +10405,7 @@ function check_publishing(config) {
                       {
                         let index = __eliscript_value_95;
                         !__eliscript_truthy17(isVector(coauthors)) && fail2("DOGFOOD-CONFIG-003", "publishing.coauthors must be a vector");
-                        while (index < count(coauthors)) {
+                        while (__eliscript_numeric_relation18("<", index, count(coauthors))) {
                           {
                             const __eliscript_value_96 = require_map(nth(coauthors, index), String("publishing.coauthors[") + String(index) + String("]"));
                             {
@@ -8897,7 +10441,7 @@ function validate_config(config, path) {
     {
       let keys = __eliscript_value_97;
       let index = __eliscript_value_98;
-      while (index < count(keys)) {
+      while (__eliscript_numeric_relation18("<", index, count(keys))) {
         !__eliscript_truthy17(known_key_QMARK_(nth(keys, index))) && fail2("DOGFOOD-CONFIG-006", String(path) + String(": unknown configuration key ") + String(nth(keys, index)));
         index = index + 1;
       }
@@ -8951,6 +10495,89 @@ function load_config(path) {
 
 // examples/dogfood/dist/src/builder/main.mjs
 var __eliscript_truthy18 = (value) => value !== false && value != null;
+var __eliscript_number_intrinsic19 = globalThis.Number;
+var __eliscript_bigint_intrinsic19 = globalThis.BigInt;
+var __eliscript_numeric_apply19 = globalThis.Reflect.apply;
+var __eliscript_numeric_symbol19 = globalThis.Symbol.toPrimitive;
+var __eliscript_numeric_error19 = globalThis.TypeError;
+var __eliscript_numeric_trim19 = globalThis.String.prototype.trim;
+var __eliscript_numeric_slice19 = globalThis.String.prototype.slice;
+var __eliscript_numeric_exec19 = globalThis.RegExp.prototype.exec;
+var __eliscript_numeric_radix19 = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+var __eliscript_numeric_object19 = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+var __eliscript_numeric_primitive19 = (value) => {
+  if (!__eliscript_numeric_object19(value))
+    return value;
+  const exotic = value[__eliscript_numeric_symbol19];
+  if (exotic !== undefined && exotic !== null) {
+    const result = __eliscript_numeric_apply19(exotic, value, ["number"]);
+    if (!__eliscript_numeric_object19(result))
+      return result;
+    throw new __eliscript_numeric_error19("Cannot convert object to primitive value");
+  }
+  for (let index = 0;index < 2; index++) {
+    const method = value[index === 0 ? "valueOf" : "toString"];
+    if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+      const result = __eliscript_numeric_apply19(method, value, []);
+      if (!__eliscript_numeric_object19(result))
+        return result;
+    }
+  }
+  throw new __eliscript_numeric_error19("Cannot convert object to primitive value");
+};
+var __eliscript_to_number19 = (value) => {
+  const primitive = __eliscript_numeric_primitive19(value);
+  if (typeof primitive === "string") {
+    const text = __eliscript_numeric_apply19(__eliscript_numeric_trim19, primitive, []);
+    if (__eliscript_numeric_apply19(__eliscript_numeric_exec19, __eliscript_numeric_radix19, [text]) !== null) {
+      let first = 2;
+      while (first < text.length && text[first] === "0")
+        first++;
+      if (first === text.length)
+        return 0;
+      const prefix = text[1];
+      const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+      if (text.length - first > limit)
+        return 1 / 0;
+      const token = __eliscript_numeric_apply19(__eliscript_numeric_slice19, text, [0, 2]) + __eliscript_numeric_apply19(__eliscript_numeric_slice19, text, [first]);
+      return __eliscript_number_intrinsic19(__eliscript_bigint_intrinsic19(token));
+    }
+  }
+  return __eliscript_number_intrinsic19(primitive);
+};
+var __eliscript_numeric19 = (value) => {
+  if (typeof value === "number" || typeof value === "bigint")
+    return value;
+  const primitive = __eliscript_numeric_primitive19(value);
+  if (typeof primitive === "number" || typeof primitive === "bigint")
+    return primitive;
+  return typeof primitive === "string" ? __eliscript_to_number19(primitive) : +primitive;
+};
+var __eliscript_numeric_relation19 = (operator, left, right) => {
+  if (typeof left === "number" && typeof right === "number") {
+    if (operator === "<")
+      return left < right;
+    if (operator === "<=")
+      return left <= right;
+    if (operator === ">")
+      return left > right;
+    return left >= right;
+  }
+  let a = __eliscript_numeric_primitive19(left);
+  let b = __eliscript_numeric_primitive19(right);
+  const x = typeof a, y = typeof b;
+  if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+    a = __eliscript_numeric19(a);
+    b = __eliscript_numeric19(b);
+  }
+  if (operator === "<")
+    return a < b;
+  if (operator === "<=")
+    return a <= b;
+  if (operator === ">")
+    return a > b;
+  return a >= b;
+};
 var program_arguments = process.argv;
 var environment = process.env;
 var fetch_implementation = globalThis.fetch;
@@ -8985,7 +10612,7 @@ function flag_present_QMARK_(arguments$, name) {
       let index = __eliscript_value_2;
       let found = __eliscript_value_3;
       let total = __eliscript_value_4;
-      while (index < total) {
+      while (__eliscript_numeric_relation19("<", index, total)) {
         nth(arguments$, index) === name && (found = true);
         index = index + 1;
       }
@@ -9002,8 +10629,8 @@ function option_value(arguments$, name, fallback) {
       let index = __eliscript_value_5;
       let found = __eliscript_value_6;
       let total = __eliscript_value_7;
-      while (index < total) {
-        nth(arguments$, index) === name && index + 1 < total && (found = nth(arguments$, index + 1));
+      while (__eliscript_numeric_relation19("<", index, total)) {
+        nth(arguments$, index) === name && __eliscript_numeric_relation19("<", index + 1, total) && (found = nth(arguments$, index + 1));
         index = index + 1;
       }
       return found;
@@ -9052,7 +10679,7 @@ function canonical_items(items) {
     {
       let result = __eliscript_value_11;
       let index = __eliscript_value_12;
-      while (index < count(items)) {
+      while (__eliscript_numeric_relation19("<", index, count(items))) {
         {
           const __eliscript_value_13 = nth(items, index);
           {
@@ -9076,7 +10703,7 @@ function channels__GT_array(channels) {
     {
       let result = __eliscript_value_14;
       let index = __eliscript_value_15;
-      while (index < count(channels)) {
+      while (__eliscript_numeric_relation19("<", index, count(channels))) {
         result["push"](canonical_channel(nth(channels, index)));
         index = index + 1;
       }
@@ -9091,7 +10718,7 @@ function values__GT_array(values) {
     {
       let result = __eliscript_value_16;
       let index = __eliscript_value_17;
-      while (index < count(values)) {
+      while (__eliscript_numeric_relation19("<", index, count(values))) {
         result["push"](nth(values, index));
         index = index + 1;
       }
@@ -9109,7 +10736,7 @@ function posts__GT_array(posts) {
     {
       let result = __eliscript_value_18;
       let index = __eliscript_value_19;
-      while (index < count(posts)) {
+      while (__eliscript_numeric_relation19("<", index, count(posts))) {
         result["push"](canonical_post(nth(posts, index)));
         index = index + 1;
       }
@@ -9185,7 +10812,7 @@ function fingerprint(documents) {
     {
       let hash = __eliscript_value_25;
       let index = __eliscript_value_26;
-      while (index < count(documents)) {
+      while (__eliscript_numeric_relation19("<", index, count(documents))) {
         {
           const __eliscript_value_27 = nth(documents, index);
           {
@@ -9265,7 +10892,7 @@ function defined_values(values) {
     {
       let result = __eliscript_value_31;
       let index = __eliscript_value_32;
-      while (index < count(values)) {
+      while (__eliscript_numeric_relation19("<", index, count(values))) {
         {
           const __eliscript_value_33 = nth(values, index);
           {
@@ -9297,7 +10924,7 @@ function browser_bundle(root, override) {
       let candidates = __eliscript_value_35;
       let index = __eliscript_value_36;
       let found = __eliscript_value_37;
-      while (index < count(candidates) && found === null) {
+      while (__eliscript_numeric_relation19("<", index, count(candidates)) && found === null) {
         {
           const __eliscript_value_38 = nth(candidates, index);
           {
@@ -9401,7 +11028,7 @@ async function build_site(root, config_path, output_override, browser_override, 
 async function collect_sources(root, config, sources) {
   return await (async (collected, carriers, unauthorized, index) => {
     await (async () => {
-      while (index < count(sources)) {
+      while (__eliscript_numeric_relation19("<", index, count(sources))) {
         await (async (source) => {
           return ((result) => {
             return collected = append_all4(collected, get(result, keyword("posts"), vector())), carriers = carriers + get(result, keyword("carriers"), 0), unauthorized = unauthorized + get(result, keyword("unauthorized"), 0);
@@ -9473,7 +11100,7 @@ function render_and_publish(output, staging, config, site, posts, bundle, inputs
             {
               let index = __eliscript_value_50;
               prepare_staging(staging);
-              while (index < count(documents)) {
+              while (__eliscript_numeric_relation19("<", index, count(documents))) {
                 write_document(staging, nth(documents, index));
                 index = index + 1;
               }
@@ -9497,7 +11124,7 @@ function keyword_name(value) {
         const __eliscript_value_52 = text_length(text);
         {
           let size = __eliscript_value_52;
-          return size > 0 && text.charCodeAt(0) === 58 ? slice(1, size, text) : text;
+          return __eliscript_numeric_relation19(">", size, 0) && text.charCodeAt(0) === 58 ? slice(1, size, text) : text;
         }
       }
     }
@@ -9576,4 +11203,4 @@ async function main() {
 }
 main();
 
-//# debugId=65367CB4E42A29D364756E2164756E21
+//# debugId=F1C1F436C4B7215164756E2164756E21

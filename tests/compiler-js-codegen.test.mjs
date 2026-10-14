@@ -94,7 +94,7 @@ test("JS context lowering preserves scopes, effects, captures, truth values, and
     await run([resolve(root, "bin/eliscript-seed"), "--output", output, input]);
     const emitted = compiler.compile_string(source, input);
     expect(emitted).toBe(await readFile(output, "utf8"));
-    expect(emitted).toContain("while ((i < 3)) {");
+    expect(emitted).toContain('while (__eliscript_numeric_relation("<", i, 3)) {');
     expect(emitted).not.toContain("((snapshot) =>");
     expect(emitted).toContain("return (await (async (v) =>");
     for (const host of [process.env.NODE ?? "node", process.env.BUN ?? "bun"]) {
@@ -104,7 +104,12 @@ test("JS context lowering preserves scopes, effects, captures, truth values, and
     const kernels = await readFile(resolve(root, "tools/experiments/native-wasm/kernels.eli"), "utf8");
     const numeric = compiler.compile_string(kernels, "kernels.eli");
     // These pure scalar kernels need no generated closures or truth conversions.
-    expect(numeric.match(/=>/gu)).toHaveLength(1); // module truth helper only
+    // Shared primitive helpers are defined once at module scope. The actual
+    // kernels still allocate no per-call closures or expression IIFEs.
+    const kernelsOnly = numeric.slice(numeric.indexOf("\nfunction recurrence("));
+    expect(kernelsOnly).toContain("function escape_grid(");
+    expect(kernelsOnly).not.toContain("=>");
+    expect(kernelsOnly).not.toContain("function (");
     expect(numeric).not.toContain("__eliscript_truthy(");
     expect(numeric).toContain(" && ");
   } finally {

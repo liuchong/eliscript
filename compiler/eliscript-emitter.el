@@ -14,9 +14,24 @@
 (require 'eliscript-diagnostic)
 (require 'eliscript-parameters)
 
-(defconst eliscript-emitter--number-conversion-helper
-  "const __eliscript_to_number = (value) => { if (typeof value === \"string\") { const text = value.trim(); if (/^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/.test(text)) return Number(BigInt(text)); } return Number(value); };\n"
+(defconst eliscript-emitter--number-conversion-intrinsics
+    "const __eliscript_number_intrinsic = globalThis.Number;\nconst __eliscript_bigint_intrinsic = globalThis.BigInt;\nconst __eliscript_numeric_apply = globalThis.Reflect.apply;\nconst __eliscript_numeric_symbol = globalThis.Symbol.toPrimitive;\nconst __eliscript_numeric_error = globalThis.TypeError;\nconst __eliscript_numeric_trim = globalThis.String.prototype.trim;\nconst __eliscript_numeric_slice = globalThis.String.prototype.slice;\nconst __eliscript_numeric_exec = globalThis.RegExp.prototype.exec;\n")
+  (defconst eliscript-emitter--number-conversion-capsule
+    "import { __eliscript_number_intrinsic, __eliscript_bigint_intrinsic, __eliscript_numeric_apply, __eliscript_numeric_symbol, __eliscript_numeric_error, __eliscript_numeric_trim, __eliscript_numeric_slice, __eliscript_numeric_exec } from \"data:text/javascript;base64,ZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X251bWJlcl9pbnRyaW5zaWMgPSBnbG9iYWxUaGlzLk51bWJlcjsKZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X2JpZ2ludF9pbnRyaW5zaWMgPSBnbG9iYWxUaGlzLkJpZ0ludDsKZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X251bWVyaWNfYXBwbHkgPSBnbG9iYWxUaGlzLlJlZmxlY3QuYXBwbHk7CmV4cG9ydCBjb25zdCBfX2VsaXNjcmlwdF9udW1lcmljX3N5bWJvbCA9IGdsb2JhbFRoaXMuU3ltYm9sLnRvUHJpbWl0aXZlOwpleHBvcnQgY29uc3QgX19lbGlzY3JpcHRfbnVtZXJpY19lcnJvciA9IGdsb2JhbFRoaXMuVHlwZUVycm9yOwpleHBvcnQgY29uc3QgX19lbGlzY3JpcHRfbnVtZXJpY190cmltID0gZ2xvYmFsVGhpcy5TdHJpbmcucHJvdG90eXBlLnRyaW07CmV4cG9ydCBjb25zdCBfX2VsaXNjcmlwdF9udW1lcmljX3NsaWNlID0gZ2xvYmFsVGhpcy5TdHJpbmcucHJvdG90eXBlLnNsaWNlOwpleHBvcnQgY29uc3QgX19lbGlzY3JpcHRfbnVtZXJpY19leGVjID0gZ2xvYmFsVGhpcy5SZWdFeHAucHJvdG90eXBlLmV4ZWM7Cg==\";\n")
+  (defconst eliscript-emitter--number-conversion-body
+    "const __eliscript_numeric_radix = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;\nconst __eliscript_numeric_object = (value) => value !== null && (typeof value === \"object\" || typeof value === \"function\" || (typeof value === \"undefined\" && value !== void 0));\nconst __eliscript_numeric_primitive = (value) => {\n  if (!__eliscript_numeric_object(value)) return value;\n  const exotic = value[__eliscript_numeric_symbol];\n  if (exotic !== void 0 && exotic !== null) {\n    const result = __eliscript_numeric_apply(exotic, value, [\"number\"]);\n    if (!__eliscript_numeric_object(result)) return result;\n    throw new __eliscript_numeric_error(\"Cannot convert object to primitive value\");\n  }\n  for (let index = 0; index < 2; index++) {\n    const method = value[index === 0 ? \"valueOf\" : \"toString\"];\n    if (typeof method === \"function\" || (typeof method === \"undefined\" && method !== void 0)) {\n      const result = __eliscript_numeric_apply(method, value, []);\n      if (!__eliscript_numeric_object(result)) return result;\n    }\n  }\n  throw new __eliscript_numeric_error(\"Cannot convert object to primitive value\");\n};\nconst __eliscript_to_number = (value) => {\n  const primitive = __eliscript_numeric_primitive(value);\n  if (typeof primitive === \"string\") {\n    const text = __eliscript_numeric_apply(__eliscript_numeric_trim, primitive, []);\n    if (__eliscript_numeric_apply(__eliscript_numeric_exec, __eliscript_numeric_radix, [text]) !== null) {\n      let first = 2;\n      while (first < text.length && text[first] === \"0\") first++;\n      if (first === text.length) return 0;\n      const prefix = text[1];\n      const limit = prefix === \"x\" || prefix === \"X\" ? 256 : prefix === \"b\" || prefix === \"B\" ? 1024 : 342;\n      if (text.length - first > limit) return 1 / 0;\n      const token = __eliscript_numeric_apply(__eliscript_numeric_slice, text, [0, 2]) + __eliscript_numeric_apply(__eliscript_numeric_slice, text, [first]);\n      return __eliscript_number_intrinsic(__eliscript_bigint_intrinsic(token));\n    }\n  }\n  return __eliscript_number_intrinsic(primitive);\n};\n")
+  (defconst eliscript-emitter--number-conversion-helper
+    (concat eliscript-emitter--number-conversion-intrinsics eliscript-emitter--number-conversion-body)
   "Generated helper for exact nondecimal Number conversion across JS hosts.")
+(defconst eliscript-emitter--numeric-operator-helper
+  "const __eliscript_numeric = (value) => {\n  if (typeof value === \"number\" || typeof value === \"bigint\") return value;\n  const primitive = __eliscript_numeric_primitive(value);\n  if (typeof primitive === \"number\" || typeof primitive === \"bigint\") return primitive;\n  return typeof primitive === \"string\" ? __eliscript_to_number(primitive) : +primitive;\n};\nconst __eliscript_implicit_number = (value) => {\n  if (typeof value === \"number\") return value;\n  const primitive = __eliscript_numeric_primitive(value);\n  if (typeof primitive === \"bigint\") throw new __eliscript_numeric_error(\"Cannot convert a BigInt value to a number\");\n  return typeof primitive === \"string\" ? __eliscript_to_number(primitive) : +primitive;\n};\nconst __eliscript_numeric_decrement = (value) => __eliscript_implicit_number(value) - 1;\nconst __eliscript_numeric_sub = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a - b; return __eliscript_numeric(a) - __eliscript_numeric(b); };\nconst __eliscript_numeric_mul = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a * b; return __eliscript_numeric(a) * __eliscript_numeric(b); };\nconst __eliscript_numeric_div = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a / b; return __eliscript_numeric(a) / __eliscript_numeric(b); };\nconst __eliscript_numeric_rem = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a % b; return __eliscript_numeric(a) % __eliscript_numeric(b); };\nconst __eliscript_numeric_and = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a & b; return __eliscript_numeric(a) & __eliscript_numeric(b); };\nconst __eliscript_numeric_or = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a | b; return __eliscript_numeric(a) | __eliscript_numeric(b); };\nconst __eliscript_numeric_xor = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a ^ b; return __eliscript_numeric(a) ^ __eliscript_numeric(b); };\nconst __eliscript_numeric_shl = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a << b; return __eliscript_numeric(a) << __eliscript_numeric(b); };\nconst __eliscript_numeric_shr = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a >> b; return __eliscript_numeric(a) >> __eliscript_numeric(b); };\nconst __eliscript_numeric_ushr = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a >>> b; return __eliscript_numeric(a) >>> __eliscript_numeric(b); };\nconst __eliscript_numeric_neg = (a) => typeof a === \"number\" ? -a : -__eliscript_numeric(a);\nconst __eliscript_numeric_int32 = (a) => typeof a === \"number\" ? a | 0 : __eliscript_numeric(a) | 0;\nconst __eliscript_numeric_uint32 = (a) => typeof a === \"number\" ? a >>> 0 : __eliscript_numeric(a) >>> 0;\nconst __eliscript_numeric_not = (a) => typeof a === \"number\" ? ~a : ~__eliscript_numeric(a);\nconst __eliscript_numeric_relation = (operator, left, right) => {\n  if (typeof left === \"number\" && typeof right === \"number\") {\n    if (operator === \"<\") return left < right;\n    if (operator === \"<=\") return left <= right;\n    if (operator === \">\") return left > right;\n    return left >= right;\n  }\n  let a = __eliscript_numeric_primitive(left);\n  let b = __eliscript_numeric_primitive(right);\n  const x = typeof a, y = typeof b;\n  if (!((x === \"string\" && y === \"string\") || (x === \"bigint\" && y === \"string\") || (x === \"string\" && y === \"bigint\"))) {\n    a = __eliscript_numeric(a);\n    b = __eliscript_numeric(b);\n  }\n  if (operator === \"<\") return a < b;\n  if (operator === \"<=\") return a <= b;\n  if (operator === \">\") return a > b;\n  return a >= b;\n};\n"
+  "Generated primitive numeric operators with exact coercion ordering.")
+  (defconst eliscript-emitter--imul-intrinsic
+    "const __eliscript_numeric_imul_intrinsic = globalThis.Math.imul;\n")
+  (defconst eliscript-emitter--imul-capsule
+    "import { __eliscript_numeric_imul_intrinsic } from \"data:text/javascript;base64,ZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X251bWVyaWNfaW11bF9pbnRyaW5zaWMgPSBnbG9iYWxUaGlzLk1hdGguaW11bDsK\";\n")
+  (defconst eliscript-emitter--imul-operator-helper
+    "const __eliscript_numeric_imul = (a, b) => __eliscript_numeric_imul_intrinsic(__eliscript_implicit_number(a), __eliscript_implicit_number(b));\n")
 (defconst eliscript-emitter--host-identity-token-helper
   "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n"
   "Generated module helper for process-local opaque host identities.")
@@ -499,7 +514,64 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
         (_ (format "return %s;"
                    (eliscript-emitter-emit-expression form)))))))
 
+(defvar eliscript-emitter--numeric-profile nil)
+
+(defun eliscript-emitter--closed-scalar-loop-p (names body)
+  "Prove BODY only reads/writes scalar locals under Number parameter NAMES.
+No calls, host access, strings, free bindings or destructuring enter this proof."
+  (let (loop-found)
+    (cl-labels
+        ((walk (form scope)
+           (cond
+            ((or (numberp form) (memq form '(nil t false undefined))) t)
+            ((symbolp form) (memq form scope))
+            ((consp form)
+             (let ((op (car form)) (args (cdr form)))
+               (cond
+                ((memq op '(let let*))
+                 (let ((inner scope) (valid t))
+                   (dolist (binding (car args))
+                     (let ((target (if (consp binding) (car binding) binding))
+                           (initializer (and (consp binding) (cadr binding))))
+                       (unless (and (symbolp target)
+                                    (or (symbolp binding)
+                                        (and (proper-list-p binding) (<= 1 (length binding) 2)))
+                                    (walk initializer (if (eq op 'let*) inner scope)))
+                         (setq valid nil))
+                       (push target inner)))
+                   (and valid (cl-every (lambda (x) (walk x inner)) (cdr args)))))
+                ((memq op '(setq set!))
+                 (let ((valid t))
+                   (while args
+                     (unless (and (memq (car args) scope) (walk (cadr args) scope))
+                       (setq valid nil))
+                     (setq args (cddr args))) valid))
+                ((memq op '(+ - * / % mod 1+ 1- = eq < <= > >= /= not= not
+                              and or if when unless progn do while))
+                 (when (eq op 'while) (setq loop-found t))
+                 (and (or (not (memq op '(< <= > >=))) (= (length args) 2))
+                      (cl-every (lambda (x) (walk x scope)) args)))
+                (t nil))))
+            (t nil))))
+      (and names (cl-every (lambda (x) (walk x names)) body) loop-found))))
+
 (defun eliscript-emitter--emit-function-body (parameters body)
+  "Version closed scalar loops behind one Number guard per parameter."
+  (let ((names (mapcar #'eliscript-parameter-form parameters)))
+    (if (and (not eliscript-emitter--numeric-profile)
+             (cl-every (lambda (p) (eq (eliscript-parameter-kind p) 'required)) parameters)
+             (cl-every #'symbolp names)
+             (eliscript-emitter--closed-scalar-loop-p names body))
+        (let ((fast (let ((eliscript-emitter--numeric-profile t))
+                      (eliscript-emitter--emit-function-body-unversioned parameters body)))
+              (slow (eliscript-emitter--emit-function-body-unversioned parameters body)))
+          (format "if (%s) {\n%s\n} else {\n%s\n}"
+                  (mapconcat (lambda (name) (format "typeof %s === \"number\""
+                                                    (eliscript-emitter--binding-name name))) names " && ")
+                  (eliscript-emitter--indent fast) (eliscript-emitter--indent slow)))
+      (eliscript-emitter--emit-function-body-unversioned parameters body))))
+
+(defun eliscript-emitter--emit-function-body-unversioned (parameters body)
   "Emit function BODY with recur-aware PARAMETER rebinding when required."
   (if (not (eliscript-emitter--contains-function-recur-p body))
       (eliscript-emitter--emit-returning-body body)
@@ -712,37 +784,64 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
                 (if (eq kind 'and) temporary rest)
                 first))))))
 
+(defun eliscript-emitter--numeric-tag (operator)
+  "Return the primitive helper tag for OPERATOR."
+  (cdr (assoc operator '(("-" . "sub") ("*" . "mul") ("/" . "div")
+                        ("%" . "rem") ("&" . "and") ("|" . "or")
+                        ("^" . "xor") ("<<" . "shl") (">>" . "shr")
+                        (">>>" . "ushr") ("imul" . "imul")))))
+(defun eliscript-emitter--relational-p (operator)
+  "Return non-nil for a relational OPERATOR."
+  (member operator '("<" "<=" ">" ">=")))
+(defun eliscript-emitter--numeric-coercion-p (name)
+  "Return non-nil when intrinsic NAME needs numeric conversion."
+  (memq name '(- * / % mod < <= > >= 1- int32 uint32 imul32 bit-not bit-and
+              bit-or bit-xor bit-shift-left bit-shift-right unsigned-bit-shift-right)))
+(defun eliscript-emitter--numeric-binary (operator left right)
+  "Emit OPERATOR over already emitted LEFT and RIGHT, preserving conversions."
+  (cond (eliscript-emitter--numeric-profile (format "(%s %s %s)" left operator right))
+        ((and (equal operator "-") (equal right "1"))
+         (format "__eliscript_numeric_decrement(%s)" left))
+        ((eliscript-emitter--relational-p operator)
+         (format "__eliscript_numeric_relation(\"%s\", %s, %s)" operator left right))
+        ((eliscript-emitter--numeric-tag operator)
+         (format "__eliscript_numeric_%s(%s, %s)"
+                 (eliscript-emitter--numeric-tag operator) left right))
+        (t (format "(%s %s %s)" left operator right))))
+(defun eliscript-emitter--numeric-fold (operator expressions)
+  "Left-fold emitted EXPRESSIONS with OPERATOR."
+  (if (and (not eliscript-emitter--numeric-profile)
+           (eliscript-emitter--numeric-tag operator) (cdr expressions))
+      (let ((result (car expressions)))
+        (dolist (right (cdr expressions))
+          (setq result (eliscript-emitter--numeric-binary operator result right))) result)
+    (format "(%s)" (string-join expressions (format " %s " operator)))))
 (defun eliscript-emitter--emit-infix (name arguments operator &optional minimum)
   "Emit ARGUMENTS joined by OPERATOR for Lisp function NAME."
   (eliscript-emitter--require-arity name arguments (or minimum 2))
-  (format "(%s)"
-          (mapconcat #'eliscript-emitter-emit-expression
-                     arguments
-                     (format " %s " operator))))
+  (eliscript-emitter--numeric-fold operator (mapcar #'eliscript-emitter-emit-expression arguments)))
 
 (defun eliscript-emitter--emit-binary-infix (name arguments operator)
   "Emit exact binary NAME over ARGUMENTS using JavaScript OPERATOR."
   (eliscript-emitter--require-arity name arguments 2 2)
-  (format "(%s %s %s)"
-          (eliscript-emitter-emit-expression (nth 0 arguments))
-          operator
-          (eliscript-emitter-emit-expression (nth 1 arguments))))
+  (eliscript-emitter--numeric-binary operator
+    (eliscript-emitter-emit-expression (nth 0 arguments)) (eliscript-emitter-emit-expression (nth 1 arguments))))
 
 (defun eliscript-emitter--emit-comparison (name arguments operator)
   "Emit one-evaluation n-ary comparison NAME using OPERATOR."
   (eliscript-emitter--require-arity name arguments 2)
   (if (= (length arguments) 2)
-      (format "(%s %s %s)"
-              (eliscript-emitter-emit-expression (nth 0 arguments))
-              operator
-              (eliscript-emitter-emit-expression (nth 1 arguments)))
+      (eliscript-emitter--numeric-binary operator
+        (eliscript-emitter-emit-expression (nth 0 arguments)) (eliscript-emitter-emit-expression (nth 1 arguments)))
     (let ((parameters (mapcar (lambda (_argument)
                                 (eliscript-emitter--fresh-name))
                               arguments))
           comparisons)
       (cl-loop for left on parameters
                while (cdr left)
-               do (push (format "%s %s %s" (car left) operator (cadr left))
+               do (push (if (eliscript-emitter--relational-p operator)
+                            (eliscript-emitter--numeric-binary operator (car left) (cadr left))
+                          (format "%s %s %s" (car left) operator (cadr left)))
                         comparisons))
       (format "((%s) => (%s))(%s)"
               (string-join parameters ", ")
@@ -913,32 +1012,31 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
                                          arguments " + "))
             "0"))
       ('* (if arguments
-              (format "(%s)" (mapconcat #'eliscript-emitter-emit-expression
-                                         arguments " * "))
+              (eliscript-emitter--emit-infix "*" arguments "*" 1)
             "1"))
       ('-
        (eliscript-emitter--require-arity "-" arguments 1)
        (if (= (length arguments) 1)
-           (format "(-%s)" (eliscript-emitter-emit-expression (car arguments)))
+           (format (if eliscript-emitter--numeric-profile "(-%s)" "__eliscript_numeric_neg(%s)") (eliscript-emitter-emit-expression (car arguments)))
          (eliscript-emitter--emit-infix "-" arguments "-")))
       ('/
        (eliscript-emitter--require-arity "/" arguments 1)
        (if (= (length arguments) 1)
-           (format "(1 / %s)" (eliscript-emitter-emit-expression (car arguments)))
+           (eliscript-emitter--numeric-binary "/" "1" (eliscript-emitter-emit-expression (car arguments)))
          (eliscript-emitter--emit-infix "/" arguments "/")))
       ((or '% 'mod) (eliscript-emitter--emit-infix (symbol-name operator)
                                                     arguments "%"))
       ('int32
        (eliscript-emitter--require-arity "int32" arguments 1 1)
-       (format "(%s | 0)"
+       (format "__eliscript_numeric_int32(%s)"
                (eliscript-emitter-emit-expression (car arguments))))
       ('uint32
        (eliscript-emitter--require-arity "uint32" arguments 1 1)
-       (format "(%s >>> 0)"
+       (format "__eliscript_numeric_uint32(%s)"
                (eliscript-emitter-emit-expression (car arguments))))
       ('imul32
        (eliscript-emitter--require-arity "imul32" arguments 2 2)
-       (format "Math.imul(%s, %s)"
+       (format "__eliscript_numeric_imul(%s, %s)"
                (eliscript-emitter-emit-expression (nth 0 arguments))
                (eliscript-emitter-emit-expression (nth 1 arguments))))
       ('bit-and
@@ -949,7 +1047,7 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
        (eliscript-emitter--emit-binary-infix "bit-xor" arguments "^"))
       ('bit-not
        (eliscript-emitter--require-arity "bit-not" arguments 1 1)
-       (format "(~%s)"
+       (format "__eliscript_numeric_not(%s)"
                (eliscript-emitter-emit-expression (car arguments))))
       ('bit-shift-left
        (eliscript-emitter--emit-binary-infix
@@ -1008,7 +1106,7 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
        (format "(%s + 1)" (eliscript-emitter-emit-expression (car arguments))))
       ('1-
        (eliscript-emitter--require-arity "1-" arguments 1 1)
-       (format "(%s - 1)" (eliscript-emitter-emit-expression (car arguments))))
+       (eliscript-emitter--numeric-binary "-" (eliscript-emitter-emit-expression (car arguments)) "1"))
       ('eq
        (eliscript-emitter--require-arity (symbol-name operator) arguments 2 2)
        (format "(%s === %s)"
@@ -1297,6 +1395,17 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
          (t nil))))
     (cl-some #'walk forms)))
 
+(defun eliscript-emitter--uses-numeric-coercion-p (forms)
+  "Return non-nil when FORMS need dynamic numeric helpers."
+  (cl-labels ((walk (form)
+              (cond ((vectorp form) (cl-some #'walk (append form nil)))
+                    ((consp form)
+                     (and (not (eq (car form) 'quote))
+                          (or (and (eliscript-emitter--numeric-coercion-p (car form))
+                                   (or (not (eq (car form) '*)) (> (length (cdr form)) 1)))
+                              (cl-some #'walk form)))) (t nil))))
+    (cl-some #'walk forms)))
+
 (defun eliscript-emitter--uses-host-identity-token-p (forms)
   "Return non-nil when FORMS contain a host identity token call."
   (cl-labels
@@ -1400,6 +1509,35 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
          (t nil))))
     (cl-some #'walk forms)))
 
+(defun eliscript-emitter--forms-name-global-root-p (forms)
+  "Return non-nil when unquoted FORMS name the global root binding."
+  (cl-labels ((walk (form)
+               (cond ((eq form 'globalThis) t)
+                     ((vectorp form) (cl-some #'walk (append form nil)))
+                     ((consp form) (unless (eq (car form) 'quote)
+                                     (cl-some #'walk form))))))
+    (cl-some #'walk forms)))
+
+(defun eliscript-emitter--number-conversion-prologue (shadowed)
+  "Capture intrinsics independently of a SHADOWED global root binding."
+  (if shadowed
+      (concat eliscript-emitter--number-conversion-capsule
+              eliscript-emitter--number-conversion-body)
+    eliscript-emitter--number-conversion-helper))
+
+(defun eliscript-emitter--uses-imul-p (forms)
+  "Return non-nil when unquoted FORMS require imul32."
+  (cl-labels ((walk (form)
+               (cond ((vectorp form) (cl-some #'walk (append form nil)))
+                     ((consp form) (and (not (eq (car form) 'quote))
+                                        (or (eq (car form) 'imul32) (cl-some #'walk form)))))))
+    (cl-some #'walk forms)))
+
+(defun eliscript-emitter--imul-prologue (shadowed)
+  "Capture Math.imul only when required, outside SHADOWED global bindings."
+  (concat (if shadowed eliscript-emitter--imul-capsule eliscript-emitter--imul-intrinsic)
+          eliscript-emitter--imul-operator-helper))
+
 (defun eliscript-emit-module (forms)
   "Emit FORMS as one ECMAScript module."
   (let ((eliscript-emitter--temporary-counter 0))
@@ -1418,9 +1556,16 @@ Prefix the function with `async' when ASYNCHRONOUS is non-nil."
          eliscript-emitter--value-runtime-import
        "")
      "const __eliscript_truthy = (value) => value !== false && value != null;\n"
-     (if (eliscript-emitter--uses-number-conversion-p forms)
-         eliscript-emitter--number-conversion-helper
+     (if (or (eliscript-emitter--uses-number-conversion-p forms)
+             (eliscript-emitter--uses-numeric-coercion-p forms))
+         (eliscript-emitter--number-conversion-prologue
+          (eliscript-emitter--forms-name-global-root-p forms))
        "")
+     (if (eliscript-emitter--uses-numeric-coercion-p forms)
+         eliscript-emitter--numeric-operator-helper "")
+     (if (eliscript-emitter--uses-imul-p forms)
+         (eliscript-emitter--imul-prologue
+          (eliscript-emitter--forms-name-global-root-p forms)) "")
      (if (eliscript-emitter--uses-host-identity-token-p forms)
          eliscript-emitter--host-identity-token-helper
        "")

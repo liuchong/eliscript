@@ -100,6 +100,8 @@ test("optimized compiler runtime scan matches its readable reference", async () 
       body: [
         expression(irNode("persistent-vector-literal", null, [literal(1)])),
         expression(irNode("intrinsic", "string-to-number", [literal("0xff")])),
+        expression(irNode("intrinsic", "-", [literal("0xff"), literal(1)])),
+        expression(irNode("intrinsic", "imul32", [literal(1), literal(2)])),
         expression(irNode("intrinsic", "host-identity-token", [
           irNode("object-literal", null),
         ])),
@@ -131,6 +133,8 @@ test("optimized compiler runtime scan matches its readable reference", async () 
       );
     }
     expect(emitter.runtime_requirements(allRequirements)).toEqual({
+      numericCoercion: true,
+      imul: true,
       numberConversion: true,
       hostIdentityToken: true,
       literal: true,
@@ -140,6 +144,8 @@ test("optimized compiler runtime scan matches its readable reference", async () 
       binding: false,
     });
     expect(emitter.runtime_requirements(staticKeywordProperty)).toEqual({
+      numericCoercion: false,
+      imul: false,
       numberConversion: false,
       hostIdentityToken: false,
       literal: false,

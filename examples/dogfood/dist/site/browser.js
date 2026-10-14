@@ -112,6 +112,89 @@
 
   // examples/dogfood/dist/dogfood-browser/src/renderer/browser.mjs
   var __eliscript_truthy = (value) => value !== false && value != null;
+  var __eliscript_number_intrinsic = globalThis.Number;
+  var __eliscript_bigint_intrinsic = globalThis.BigInt;
+  var __eliscript_numeric_apply = globalThis.Reflect.apply;
+  var __eliscript_numeric_symbol = globalThis.Symbol.toPrimitive;
+  var __eliscript_numeric_error = globalThis.TypeError;
+  var __eliscript_numeric_trim = globalThis.String.prototype.trim;
+  var __eliscript_numeric_slice = globalThis.String.prototype.slice;
+  var __eliscript_numeric_exec = globalThis.RegExp.prototype.exec;
+  var __eliscript_numeric_radix = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;
+  var __eliscript_numeric_object = (value) => value !== null && (typeof value === "object" || typeof value === "function" || typeof value === "undefined" && value !== undefined);
+  var __eliscript_numeric_primitive = (value) => {
+    if (!__eliscript_numeric_object(value))
+      return value;
+    const exotic = value[__eliscript_numeric_symbol];
+    if (exotic !== undefined && exotic !== null) {
+      const result = __eliscript_numeric_apply(exotic, value, ["number"]);
+      if (!__eliscript_numeric_object(result))
+        return result;
+      throw new __eliscript_numeric_error("Cannot convert object to primitive value");
+    }
+    for (let index = 0;index < 2; index++) {
+      const method = value[index === 0 ? "valueOf" : "toString"];
+      if (typeof method === "function" || typeof method === "undefined" && method !== undefined) {
+        const result = __eliscript_numeric_apply(method, value, []);
+        if (!__eliscript_numeric_object(result))
+          return result;
+      }
+    }
+    throw new __eliscript_numeric_error("Cannot convert object to primitive value");
+  };
+  var __eliscript_to_number = (value) => {
+    const primitive = __eliscript_numeric_primitive(value);
+    if (typeof primitive === "string") {
+      const text = __eliscript_numeric_apply(__eliscript_numeric_trim, primitive, []);
+      if (__eliscript_numeric_apply(__eliscript_numeric_exec, __eliscript_numeric_radix, [text]) !== null) {
+        let first = 2;
+        while (first < text.length && text[first] === "0")
+          first++;
+        if (first === text.length)
+          return 0;
+        const prefix = text[1];
+        const limit = prefix === "x" || prefix === "X" ? 256 : prefix === "b" || prefix === "B" ? 1024 : 342;
+        if (text.length - first > limit)
+          return 1 / 0;
+        const token = __eliscript_numeric_apply(__eliscript_numeric_slice, text, [0, 2]) + __eliscript_numeric_apply(__eliscript_numeric_slice, text, [first]);
+        return __eliscript_number_intrinsic(__eliscript_bigint_intrinsic(token));
+      }
+    }
+    return __eliscript_number_intrinsic(primitive);
+  };
+  var __eliscript_numeric = (value) => {
+    if (typeof value === "number" || typeof value === "bigint")
+      return value;
+    const primitive = __eliscript_numeric_primitive(value);
+    if (typeof primitive === "number" || typeof primitive === "bigint")
+      return primitive;
+    return typeof primitive === "string" ? __eliscript_to_number(primitive) : +primitive;
+  };
+  var __eliscript_numeric_relation = (operator, left, right) => {
+    if (typeof left === "number" && typeof right === "number") {
+      if (operator === "<")
+        return left < right;
+      if (operator === "<=")
+        return left <= right;
+      if (operator === ">")
+        return left > right;
+      return left >= right;
+    }
+    let a = __eliscript_numeric_primitive(left);
+    let b = __eliscript_numeric_primitive(right);
+    const x = typeof a, y = typeof b;
+    if (!(x === "string" && y === "string" || x === "bigint" && y === "string" || x === "string" && y === "bigint")) {
+      a = __eliscript_numeric(a);
+      b = __eliscript_numeric(b);
+    }
+    if (operator === "<")
+      return a < b;
+    if (operator === "<=")
+      return a <= b;
+    if (operator === ">")
+      return a > b;
+    return a >= b;
+  };
   function to_lowercase(text) {
     return text["toLowerCase"]();
   }
@@ -213,7 +296,7 @@
         let terms = __eliscript_value_6;
         let index = __eliscript_value_7;
         let found = __eliscript_value_8;
-        while (index < (terms ?? []).length) {
+        while (__eliscript_numeric_relation("<", index, (terms ?? []).length)) {
           {
             const __eliscript_value_9 = trim_text((terms ?? [])[index] ?? null);
             {
@@ -234,7 +317,7 @@
       {
         let results = __eliscript_value_10;
         let index = __eliscript_value_11;
-        while (index < (entries ?? []).length && (results ?? []).length < result_limit) {
+        while (__eliscript_numeric_relation("<", index, (entries ?? []).length) && __eliscript_numeric_relation("<", (results ?? []).length, result_limit)) {
           {
             const __eliscript_value_12 = (entries ?? [])[index] ?? null;
             {
@@ -268,7 +351,7 @@
         let container = __eliscript_value_14;
         return !(container === null) ? __eliscript_truthy(blank_QMARK_(query)) ? container["innerHTML"] = "" : ((count_value) => {
           return container["innerHTML"] = String('<p class="comment-note">') + String(count_value) + String(count_value === 1 ? " result" : " results") + String(' for "') + String(escape_text(query)) + String('"</p>') + String(count_value === 0 ? '<p class="empty">No article matches.</p>' : ((markup, index) => {
-            while (index < count_value) {
+            while (__eliscript_numeric_relation("<", index, count_value)) {
               markup = String(markup) + String(render_entry((entries ?? [])[index] ?? null));
               index = index + 1;
             }
@@ -336,7 +419,7 @@
     document.documentElement.removeAttribute("data-menu");
   };
   function narrow_QMARK_() {
-    return !(globalThis.innerWidth > menu_breakpoint);
+    return !__eliscript_numeric_relation(">", globalThis.innerWidth, menu_breakpoint);
   }
   function mark_menu_state() {
     return __eliscript_truthy(narrow_QMARK_()) ? set_menu_marker("collapsed") : clear_menu_marker();
@@ -379,7 +462,7 @@
           return await (async (response) => {
             return ((payload) => {
               return __eliscript_truthy(Array["isArray"](payload)) ? ((before, now) => {
-                return set_text(verdict, now > parse_count(before) ? String(" ") + String(now) + String(" comments now; ") + String(before) + String(" when this snapshot was taken.") : String(" ") + String(now) + String(" comments; this snapshot is current."));
+                return set_text(verdict, __eliscript_numeric_relation(">", now, parse_count(before)) ? String(" ") + String(now) + String(" comments now; ") + String(before) + String(" when this snapshot was taken.") : String(" ") + String(now) + String(" comments; this snapshot is current."));
               })(note["getAttribute"]("data-comment-count"), (payload ?? []).length) : set_text(verdict, " Newer comments could not be checked.");
             })(__eliscript_truthy(response["ok"]) ? await response["json"]() : []);
           })(await globalThis["fetch"](url, { headers: { accept: "application/vnd.github+json" } }));
@@ -402,7 +485,7 @@
     return await (async (notes) => {
       return await (async (index) => {
         return await (async () => {
-          while (index < (notes ?? []).length) {
+          while (__eliscript_numeric_relation("<", index, (notes ?? []).length)) {
             await (async (note) => {
               return await (async (binding) => {
                 return await (async (kind) => {

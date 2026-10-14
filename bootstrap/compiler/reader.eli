@@ -143,7 +143,7 @@
     (js* "(state, whitespace) => { const source = state.source; let index = state.index; let offset = state.offset; let line = state.line; let column = state.column; while (index < source.length) { const code = source.codePointAt(index); if (whitespace(code)) { index += 1; offset += 1; if (code === 10) { line += 1; column = 1; } else { column += 1; } } else if (code === 59) { while (index < source.length && source.charCodeAt(index) !== 10) { index += source.codePointAt(index) > 65535 ? 2 : 1; offset += 1; column += 1; } } else break; } state.index = index; state.offset = offset; state.line = line; state.column = column; return null; }"))
   (defun skip-space-and-comments
     (state)
-    (funcall native-skip-space-and-comments state whitespace-code-p))
+    (funcall native-skip-space-and-comments state native-whitespace-code-p))
   (defun reference-read-token (state start)
     (while (not (delimiter-code-p (peek-code state)))
       (advance state))
@@ -157,7 +157,7 @@
     (js* "(state, start, delimiter) => { const source = state.source; let index = state.index; let consumed = 0; while (true) { const code = source.codePointAt(index); if (delimiter(code)) break; index += code > 65535 ? 2 : 1; consumed += 1; } state.index = index; state.offset += consumed; state.column += consumed; return source.slice(start.index, index); }"))
   (defun read-token
     (state start)
-    (funcall native-read-token state start delimiter-code-p))
+    (funcall native-read-token state start native-delimiter-code-p))
   (defun queue-opening-index
     (state)
     (let*

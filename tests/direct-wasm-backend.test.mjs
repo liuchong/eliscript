@@ -747,6 +747,15 @@ test("primitive Number and text conversions have Seed and three-generation IR, d
   const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
   for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const source=a.string('-0'),parsed=a.invoke('parse',[source]);assert(Object.is(a.readNumber(parsed),-0));const number=a.number(1000000000000000100),text=a.invoke('text',[number]);assert.equal(a.readString(text),'1000000000000000100');for(const value of[source,parsed,number,text])a.release(value);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
 });
+test("mixed primitive operators have three-generation canonical IR, numeric JS, descriptor and WASM fixed points",async()=>{
+ const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-primitive-operators.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
+ const programs=generations.map(g=>g.compiler.compile_ir_string(source,'primitive-operators.eli')),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtime,'runtime.eli'));
+ const lowered=generations.map((g,i)=>g.managed.lower_managed_program(programs[i],runtimes[i])),bytes=generations.map((g,i)=>g.managed.emit_managed_wasm(programs[i],runtimes[i],{maximumPages:16}));
+ for(let i=1;i<3;i++){assert.deepEqual(programs[0],programs[i]);assert.equal(generations[0].compiler.serialize_ir_program(programs[0]),generations[i].compiler.serialize_ir_program(programs[i]));assert.deepEqual(lowered[0],lowered[i]);assert.deepEqual(bytes[0],bytes[i]);assert.equal(generations[0].compiler.emit_ir_string(programs[0]),generations[i].compiler.emit_ir_string(programs[i]));}
+ const numericSource='(defun f (x y) (* (- x y) (/ x y))) (export f)',numeric=generations.map(g=>g.numeric.emit_numeric_javascript(g.compiler.compile_ir_string(numericSource,'typed-js.eli')));assert.equal(numeric[0],numeric[1]);assert.equal(numeric[1],numeric[2]);
+ const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
+ for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const s=a.string('1.5'),n=a.number(2),sum=a.invoke('add',[s,n]),product=a.invoke('multiply',[s,n]);assert.equal(a.readString(sum),'1.52');assert.equal(a.readNumber(product),3);for(const x of[s,n,sum,product])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
+});
 describe("browser compiler backends", () => {
   beforeAll(async () => {
     // Compiler bundling and browser process startup are fixture preparation.
@@ -1226,6 +1235,28 @@ describe("browser compiler backends", () => {
       }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
     },{source,runtime});
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-number-conversion.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
+  });
+  test("browser mixed primitive operators agree across WASM and JS including exact radix rounding and observable coercion order",async()=>{
+    const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-primitive-operators.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
+    const result=await evaluateBrowser(async({bundle,source,runtime})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));let jsUrl;
+      try{
+        const c=await import(url),p=c.compile_ir_string(source,'browser-primitive-operators.eli'),rt=c.compile_ir_string(runtime,'runtime.eli'),bytes=Uint8Array.from(c.emit_managed_wasm(p,rt,{maximumPages:16}));
+        const check=(value,message)=>{if(!value)throw Error(message);};check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'imports');jsUrl=URL.createObjectURL(new Blob([c.emit_ir_string(p)],{type:'text/javascript'}));const js=await import(jsUrl),a=c.instantiateManagedRuntime(bytes,{maxSlots:256,initialBytes:16384,maxBytes:1048576});a.auto(1);
+        const box=x=>typeof x==='number'?a.number(x):typeof x==='string'?a.string(x):x,read=x=>x&&typeof x==='object'?x.kind===4?a.readNumber(x):a.readString(x):x;
+        const verify=(name,inputs,expected)=>{const args=inputs.map(box),out=a.invoke(name,args);check(Object.is(read(out),expected),name+' WASM');check(Object.is(js[name.replaceAll('-','_')](...inputs),expected),name+' JS');a.release(out);args.forEach(x=>a.release(x));a.collect();check(a.live()===0&&a.stats().frameDepth===0,'roots');};
+        const values=[null,false,true,undefined,-0,1,NaN,Infinity,'','-0','1.5','0x10','invalid','中😀\ud800'];
+        for(const x of values){verify('negate',[x],-Number(x));verify('signed',[x],Number(x)|0);for(const y of values){verify('add',[x,y],x+y);verify('multiply',[x,y],Number(x)*Number(y));verify('less',[x,y],x<y);verify('product-word',[x,y],Math.imul(Number(x),Number(y)));}}
+        const hex='0xbcf8f9bdba22840724d028768a8a77b3e6b0f283670085477910eccc4e9d6b278a11db79c280d4e9c237774812029ac7ce82daaafca38',n=Number(BigInt(hex));verify('subtract',[hex,n],0);verify('less-equal',[hex,n],true);verify('negate',[hex],-n);
+        for(const limit of[0,1,3,'3'])for(const seed of[-0,.123,'0.123',hex]){let x=seed,total=0;for(let i=0;i<limit;i++){x=(3.8*(typeof x==='string'&&x.startsWith('0x')?Number(BigInt(x)):Number(x)))*(1-(typeof x==='string'&&x.startsWith('0x')?Number(BigInt(x)):Number(x)));total+=x;}verify('scalar-loop',[limit,seed],total);}
+        let called=0;const right={valueOf(){called++;return 2;}};try{js.less(Symbol('left'),right);}catch(error){check(error instanceof TypeError,'relational Symbol');}check(called===1,'both relational primitives before numeric error');called=0;try{js.subtract(Symbol('left'),right);}catch(error){check(error instanceof TypeError,'arithmetic Symbol');}check(called===0,'arithmetic left numeric error');
+        check(js.subtract({[Symbol.toPrimitive](hint){check(hint==='number','hint');return hex;}},n)===0,'object exact radix');check(js.subtract(5n,2n)===3n,'BigInt');check(js.less('10','2')===true&&js.less('10',2n)===false,'relational categories');
+        const shadow=c.emit_ir_string(c.compile_ir_string('(defvar globalThis 7) (defun raw () (js* "globalThis")) (defun change (x) (setq globalThis x)) (defun subtract (x y) (- x y)) (defun word (x y) (imul32 x y)) (export globalThis raw change subtract word)','browser-global-root.eli'));
+        const shadowUrl=URL.createObjectURL(new Blob([shadow],{type:'text/javascript'}));try{const m=await import(shadowUrl);check(m.globalThis===7&&m.raw()===7,'lexical globalThis');check(m.subtract(hex,n)===0&&m.word(3,5)===15,'independent intrinsic scope');m.change(9);check(m.globalThis===9&&m.raw()===9,'live globalThis');}finally{URL.revokeObjectURL(shadowUrl);}
+        return [...bytes];
+      }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
+    },{source,runtime});
+    assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-primitive-operators.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
   });
   test("browser ordinary managed word operations preserve exact remainder, conversions and bit semantics",async()=>{
     const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-word.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');

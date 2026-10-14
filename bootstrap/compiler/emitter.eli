@@ -21,8 +21,23 @@
     "import { equalValues as __eliscript_equal } from \"eliscript/runtime/core/value.mjs\";\n")
   (defconst binding-runtime
     "import { get as __eliscript_get } from \"eliscript/runtime/core/collection.mjs\";\nconst __eliscript_binding_missing = Symbol(\"eliscript.binding.missing\");\nconst __eliscript_binding_get = (value, key, notFound) => { if (value == null) return notFound; const prototype = typeof value === \"object\" ? Object.getPrototypeOf(value) : undefined; if (prototype === Object.prototype || prototype === null) { const type = key && Object.getOwnPropertyDescriptor(key, Symbol.for(\"eliscript.value.type\")); if (type?.value === \"keyword\" || type?.value === \"symbol\") key = key.qualifiedName; } return __eliscript_get(value, key, notFound); };\n")
+  (defconst number-conversion-intrinsics
+    "const __eliscript_number_intrinsic = globalThis.Number;\nconst __eliscript_bigint_intrinsic = globalThis.BigInt;\nconst __eliscript_numeric_apply = globalThis.Reflect.apply;\nconst __eliscript_numeric_symbol = globalThis.Symbol.toPrimitive;\nconst __eliscript_numeric_error = globalThis.TypeError;\nconst __eliscript_numeric_trim = globalThis.String.prototype.trim;\nconst __eliscript_numeric_slice = globalThis.String.prototype.slice;\nconst __eliscript_numeric_exec = globalThis.RegExp.prototype.exec;\n")
+  (defconst number-conversion-capsule
+    "import { __eliscript_number_intrinsic, __eliscript_bigint_intrinsic, __eliscript_numeric_apply, __eliscript_numeric_symbol, __eliscript_numeric_error, __eliscript_numeric_trim, __eliscript_numeric_slice, __eliscript_numeric_exec } from \"data:text/javascript;base64,ZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X251bWJlcl9pbnRyaW5zaWMgPSBnbG9iYWxUaGlzLk51bWJlcjsKZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X2JpZ2ludF9pbnRyaW5zaWMgPSBnbG9iYWxUaGlzLkJpZ0ludDsKZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X251bWVyaWNfYXBwbHkgPSBnbG9iYWxUaGlzLlJlZmxlY3QuYXBwbHk7CmV4cG9ydCBjb25zdCBfX2VsaXNjcmlwdF9udW1lcmljX3N5bWJvbCA9IGdsb2JhbFRoaXMuU3ltYm9sLnRvUHJpbWl0aXZlOwpleHBvcnQgY29uc3QgX19lbGlzY3JpcHRfbnVtZXJpY19lcnJvciA9IGdsb2JhbFRoaXMuVHlwZUVycm9yOwpleHBvcnQgY29uc3QgX19lbGlzY3JpcHRfbnVtZXJpY190cmltID0gZ2xvYmFsVGhpcy5TdHJpbmcucHJvdG90eXBlLnRyaW07CmV4cG9ydCBjb25zdCBfX2VsaXNjcmlwdF9udW1lcmljX3NsaWNlID0gZ2xvYmFsVGhpcy5TdHJpbmcucHJvdG90eXBlLnNsaWNlOwpleHBvcnQgY29uc3QgX19lbGlzY3JpcHRfbnVtZXJpY19leGVjID0gZ2xvYmFsVGhpcy5SZWdFeHAucHJvdG90eXBlLmV4ZWM7Cg==\";\n")
+  (defconst number-conversion-body
+    "const __eliscript_numeric_radix = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/;\nconst __eliscript_numeric_object = (value) => value !== null && (typeof value === \"object\" || typeof value === \"function\" || (typeof value === \"undefined\" && value !== void 0));\nconst __eliscript_numeric_primitive = (value) => {\n  if (!__eliscript_numeric_object(value)) return value;\n  const exotic = value[__eliscript_numeric_symbol];\n  if (exotic !== void 0 && exotic !== null) {\n    const result = __eliscript_numeric_apply(exotic, value, [\"number\"]);\n    if (!__eliscript_numeric_object(result)) return result;\n    throw new __eliscript_numeric_error(\"Cannot convert object to primitive value\");\n  }\n  for (let index = 0; index < 2; index++) {\n    const method = value[index === 0 ? \"valueOf\" : \"toString\"];\n    if (typeof method === \"function\" || (typeof method === \"undefined\" && method !== void 0)) {\n      const result = __eliscript_numeric_apply(method, value, []);\n      if (!__eliscript_numeric_object(result)) return result;\n    }\n  }\n  throw new __eliscript_numeric_error(\"Cannot convert object to primitive value\");\n};\nconst __eliscript_to_number = (value) => {\n  const primitive = __eliscript_numeric_primitive(value);\n  if (typeof primitive === \"string\") {\n    const text = __eliscript_numeric_apply(__eliscript_numeric_trim, primitive, []);\n    if (__eliscript_numeric_apply(__eliscript_numeric_exec, __eliscript_numeric_radix, [text]) !== null) {\n      let first = 2;\n      while (first < text.length && text[first] === \"0\") first++;\n      if (first === text.length) return 0;\n      const prefix = text[1];\n      const limit = prefix === \"x\" || prefix === \"X\" ? 256 : prefix === \"b\" || prefix === \"B\" ? 1024 : 342;\n      if (text.length - first > limit) return 1 / 0;\n      const token = __eliscript_numeric_apply(__eliscript_numeric_slice, text, [0, 2]) + __eliscript_numeric_apply(__eliscript_numeric_slice, text, [first]);\n      return __eliscript_number_intrinsic(__eliscript_bigint_intrinsic(token));\n    }\n  }\n  return __eliscript_number_intrinsic(primitive);\n};\n")
   (defconst number-conversion-helper
-    "const __eliscript_to_number = (value) => { if (typeof value === \"string\") { const text = value.trim(); if (/^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+)$/.test(text)) return Number(BigInt(text)); } return Number(value); };\n")
+    (str number-conversion-intrinsics number-conversion-body))
+  (defconst numeric-operator-helper
+    "const __eliscript_numeric = (value) => {\n  if (typeof value === \"number\" || typeof value === \"bigint\") return value;\n  const primitive = __eliscript_numeric_primitive(value);\n  if (typeof primitive === \"number\" || typeof primitive === \"bigint\") return primitive;\n  return typeof primitive === \"string\" ? __eliscript_to_number(primitive) : +primitive;\n};\nconst __eliscript_implicit_number = (value) => {\n  if (typeof value === \"number\") return value;\n  const primitive = __eliscript_numeric_primitive(value);\n  if (typeof primitive === \"bigint\") throw new __eliscript_numeric_error(\"Cannot convert a BigInt value to a number\");\n  return typeof primitive === \"string\" ? __eliscript_to_number(primitive) : +primitive;\n};\nconst __eliscript_numeric_decrement = (value) => __eliscript_implicit_number(value) - 1;\nconst __eliscript_numeric_sub = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a - b; return __eliscript_numeric(a) - __eliscript_numeric(b); };\nconst __eliscript_numeric_mul = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a * b; return __eliscript_numeric(a) * __eliscript_numeric(b); };\nconst __eliscript_numeric_div = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a / b; return __eliscript_numeric(a) / __eliscript_numeric(b); };\nconst __eliscript_numeric_rem = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a % b; return __eliscript_numeric(a) % __eliscript_numeric(b); };\nconst __eliscript_numeric_and = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a & b; return __eliscript_numeric(a) & __eliscript_numeric(b); };\nconst __eliscript_numeric_or = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a | b; return __eliscript_numeric(a) | __eliscript_numeric(b); };\nconst __eliscript_numeric_xor = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a ^ b; return __eliscript_numeric(a) ^ __eliscript_numeric(b); };\nconst __eliscript_numeric_shl = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a << b; return __eliscript_numeric(a) << __eliscript_numeric(b); };\nconst __eliscript_numeric_shr = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a >> b; return __eliscript_numeric(a) >> __eliscript_numeric(b); };\nconst __eliscript_numeric_ushr = (a, b) => { if (typeof a === \"number\" && typeof b === \"number\") return a >>> b; return __eliscript_numeric(a) >>> __eliscript_numeric(b); };\nconst __eliscript_numeric_neg = (a) => typeof a === \"number\" ? -a : -__eliscript_numeric(a);\nconst __eliscript_numeric_int32 = (a) => typeof a === \"number\" ? a | 0 : __eliscript_numeric(a) | 0;\nconst __eliscript_numeric_uint32 = (a) => typeof a === \"number\" ? a >>> 0 : __eliscript_numeric(a) >>> 0;\nconst __eliscript_numeric_not = (a) => typeof a === \"number\" ? ~a : ~__eliscript_numeric(a);\nconst __eliscript_numeric_relation = (operator, left, right) => {\n  if (typeof left === \"number\" && typeof right === \"number\") {\n    if (operator === \"<\") return left < right;\n    if (operator === \"<=\") return left <= right;\n    if (operator === \">\") return left > right;\n    return left >= right;\n  }\n  let a = __eliscript_numeric_primitive(left);\n  let b = __eliscript_numeric_primitive(right);\n  const x = typeof a, y = typeof b;\n  if (!((x === \"string\" && y === \"string\") || (x === \"bigint\" && y === \"string\") || (x === \"string\" && y === \"bigint\"))) {\n    a = __eliscript_numeric(a);\n    b = __eliscript_numeric(b);\n  }\n  if (operator === \"<\") return a < b;\n  if (operator === \"<=\") return a <= b;\n  if (operator === \">\") return a > b;\n  return a >= b;\n};\n")
+  (defconst imul-intrinsic
+    "const __eliscript_numeric_imul_intrinsic = globalThis.Math.imul;\n")
+  (defconst imul-capsule
+    "import { __eliscript_numeric_imul_intrinsic } from \"data:text/javascript;base64,ZXhwb3J0IGNvbnN0IF9fZWxpc2NyaXB0X251bWVyaWNfaW11bF9pbnRyaW5zaWMgPSBnbG9iYWxUaGlzLk1hdGguaW11bDsK\";\n")
+  (defconst imul-operator-helper
+    "const __eliscript_numeric_imul = (a, b) => __eliscript_numeric_imul_intrinsic(__eliscript_implicit_number(a), __eliscript_implicit_number(b));\n")
+  (defvar numeric-emission-profile false)
   (defconst host-identity-token-helper
     "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n")
   (defconst fail
@@ -662,7 +677,71 @@
          (emit-tail-short-circuit nodes (ir-value node) target))
         (t (combine (js-array "return " (emit-expression node) ";"))))))
 
+  (defconst closed-scalar-operators
+    (js-array "+" "-" "*" "/" "%" "mod" "1+" "1-" "=" "eq" "<" "<=" ">" ">=" "/=" "not=" "not"))
+
+  (defun closed-scalar-node-p (node scope state)
+    (if (nullish? node) t
+      (let ((kind (ir-kind node)) (nodes (children node)))
+      (cond
+        ((= kind "literal")
+         (or (= (ir-value node) nil) (= (js* "typeof node.value") "number")
+             (= (js* "typeof node.value") "boolean") (= (js* "typeof node.value") "undefined")))
+        ((= kind "reference") (>= (js-call scope :indexOf (ir-value node)) 0))
+        ((= kind "lexical-bindings")
+         (let* ((parts (split-counted-children node "bindingCount"))
+                (bindings (js-nth 0 parts)) (inner (js-call scope :slice)) (valid t))
+           (js-call bindings :forEach
+             (lambda (binding)
+               (when (or (not (= (ir-kind binding) "lexical-binding"))
+                         (ir-property binding "pattern")
+                         (not (closed-scalar-node-p (binding-initializer binding)
+                                (if (ir-property node "sequential") inner scope) state)))
+                 (setq valid false))
+               (js-call inner :push (ir-value binding))))
+           (and valid (js-call (js-nth 1 parts) :every
+                        (lambda (child) (closed-scalar-node-p child inner state))))))
+        ((= kind "assignment")
+         (js-call nodes :every
+           (lambda (pair)
+             (and (= (ir-kind pair) "assignment-pair")
+                  (>= (js-call scope :indexOf (ir-value pair)) 0)
+                  (closed-scalar-node-p (js-nth 0 (children pair)) scope state)))))
+        ((or (and (= kind "intrinsic") (>= (js-call closed-scalar-operators :indexOf (ir-value node)) 0))
+             (= kind "conditional") (= kind "conditional-sugar") (= kind "short-circuit")
+             (= kind "sequence") (= kind "loop"))
+         (when (= kind "loop") (put state :loop t))
+         (and (or (not (= kind "intrinsic")) (not (relational-operator-p (ir-value node)))
+                  (= (js-length nodes) 2))
+              (js-call nodes :every (lambda (child) (closed-scalar-node-p child scope state)))))
+        (t false)))))
+
+  (defun closed-scalar-loop-p (parameters body)
+    (let ((state (js-object :loop false))
+          (scope (js-call parameters :map (lambda (parameter) (ir-value parameter)))))
+      (and (> (js-length parameters) 0)
+           (js-call parameters :every
+             (lambda (parameter)
+               (and (= (ir-property parameter "parameterKind") "required")
+                    (not (ir-property parameter "pattern")))))
+           (js-call body :every (lambda (node) (closed-scalar-node-p node scope state)))
+           (get state :loop))))
+
   (defun emit-function-body (parameters body)
+    (if (and (not numeric-emission-profile) (closed-scalar-loop-p parameters body))
+        (let ((fast nil) (slow nil) (previous numeric-emission-profile))
+          (setq numeric-emission-profile t)
+          (try (setq fast (emit-function-body-unversioned parameters body))
+            (finally (setq numeric-emission-profile previous)))
+          (setq slow (emit-function-body-unversioned parameters body))
+          (combine
+            (js-array "if ("
+             (js-call (js-call parameters :map
+                        (lambda (parameter) (str "typeof " (binding-name (ir-value parameter)) " === \"number\""))) :join " && ")
+             ") {\n" (indent fast) "\n} else {\n" (indent slow) "\n}")))
+      (emit-function-body-unversioned parameters body)))
+
+  (defun emit-function-body-unversioned (parameters body)
     (let ((setups (emit-binding-setups parameters)))
       (if (not (contains-recur-target-p body "function"))
           (if (= (get (get setups :text) :length) 0)
@@ -916,20 +995,49 @@
                  (js-array "(await (async (" temporary ") => " body ")(" first "))"))
              (combine (js-array "((" temporary ") => " body ")(" first ")"))))))))
 
+  (defun numeric-operator-tag (operator)
+    (cond ((= operator "-") "sub") ((= operator "*") "mul") ((= operator "/") "div")
+      ((= operator "%") "rem") ((= operator "&") "and") ((= operator "|") "or")
+      ((= operator "^") "xor") ((= operator "<<") "shl") ((= operator ">>") "shr")
+      ((= operator ">>>") "ushr") ((= operator "imul") "imul") (t nil)))
+  (defun relational-operator-p (operator)
+    (or (= operator "<") (= operator "<=") (= operator ">") (= operator ">=")))
+  (defun emit-numeric-binary (operator left right)
+    (if numeric-emission-profile
+      (combine (js-array "(" left " " operator " " right ")"))
+      ;; A Number literal one has no evaluation effects and subtraction cannot
+      ;; return BigInt. A unary helper saves recursive-call argument registers.
+      (if (and (= operator "-") (= (get (as-fragment right) :text) "1"))
+        (combine (js-array "__eliscript_numeric_decrement(" left ")"))
+        (if (relational-operator-p operator)
+        (combine (js-array "__eliscript_numeric_relation(" (json-string operator) ", " left ", " right ")"))
+        (let ((tag (numeric-operator-tag operator)))
+          (if tag (combine (js-array "__eliscript_numeric_" tag "(" left ", " right ")"))
+            (combine (js-array "(" left " " operator " " right ")"))))))))
+  (defun emit-numeric-unary (tag operand)
+    (combine (js-array "__eliscript_numeric_" tag "(" (emit-expression operand) ")")))
+  (defun numeric-coercion-intrinsic-p (name)
+    (or (numeric-operator-tag name) (relational-operator-p name)
+      (= name "mod") (= name "1-") (= name "int32") (= name "uint32") (= name "imul32")
+      (= name "bit-not") (= name "bit-and") (= name "bit-or") (= name "bit-xor")
+      (= name "bit-shift-left") (= name "bit-shift-right") (= name "unsigned-bit-shift-right")))
   (defun emit-infix (name nodes operator minimum)
     (require-arity name nodes minimum nil)
-    (combine
-      (js-array "("
-       (join-fragments
-         (js-call nodes :map (lambda (node) (emit-expression node)))
-         (str " " operator " "))
-       ")")))
+    (if (and (not numeric-emission-profile) (numeric-operator-tag operator) (> (js-length nodes) 1))
+      (let ((result (emit-expression (js-nth 0 nodes))) (index 1))
+        (while (< index (js-length nodes))
+          (setq result (emit-numeric-binary operator result (emit-expression (js-nth index nodes))))
+          (setq index (1+ index))) result)
+      (combine
+        (js-array "("
+         (join-fragments
+           (js-call nodes :map (lambda (node) (emit-expression node)))
+           (str " " operator " "))
+         ")"))))
 
   (defun emit-binary-infix (name nodes operator)
     (require-arity name nodes 2 2)
-    (combine
-      (js-array "(" (emit-expression (js-nth 0 nodes)) " " operator " "
-       (emit-expression (js-nth 1 nodes)) ")")))
+    (emit-numeric-binary operator (emit-expression (js-nth 0 nodes)) (emit-expression (js-nth 1 nodes))))
 
   (defun temporary-names (nodes)
     (let ((result (js-array)))
@@ -940,16 +1048,15 @@
   (defun emit-comparison (name nodes operator)
     (require-arity name nodes 2 nil)
     (if (= (get nodes :length) 2)
-        (combine
-          (js-array "(" (emit-expression (js-nth 0 nodes)) " " operator " "
-           (emit-expression (js-nth 1 nodes)) ")"))
+        (emit-numeric-binary operator (emit-expression (js-nth 0 nodes)) (emit-expression (js-nth 1 nodes)))
       (let ((parameters (temporary-names nodes))
             (comparisons (js-array))
             (index 0))
         (while (< index (1- (get parameters :length)))
           (js-call comparisons :push
-            (str (js-nth index parameters) " " operator " "
-                 (js-nth (1+ index) parameters)))
+            (if (and (not numeric-emission-profile) (relational-operator-p operator))
+              (str "__eliscript_numeric_relation(" (json-string operator) ", " (js-nth index parameters) ", " (js-nth (1+ index) parameters) ")")
+              (str (js-nth index parameters) " " operator " " (js-nth (1+ index) parameters))))
           (setq index (1+ index)))
         (combine
           (js-array "(("
@@ -1000,40 +1107,40 @@
         ((= name "*")
          (if (= (get nodes :length) 0)
              (text-fragment "1")
-           (combine
-             (js-array "("
-              (join-fragments
-                (js-call nodes :map (lambda (node) (emit-expression node)))
-                " * ")
-              ")"))))
+           (emit-infix name nodes "*" 1)))
         ((= name "-")
          (require-node-arity node 1 nil)
          (if (= (get nodes :length) 1)
-             (combine (js-array "(-" (emit-expression (js-nth 0 nodes)) ")"))
+             (if numeric-emission-profile
+               (combine (js-array "(-" (emit-expression (js-nth 0 nodes)) ")"))
+               (emit-numeric-unary "neg" (js-nth 0 nodes)))
            (emit-infix "-" nodes "-" 2)))
         ((= name "/")
          (require-node-arity node 1 nil)
          (if (= (get nodes :length) 1)
-             (combine (js-array "(1 / " (emit-expression (js-nth 0 nodes)) ")"))
+             (emit-numeric-binary "/" (text-fragment "1") (emit-expression (js-nth 0 nodes)))
            (emit-infix "/" nodes "/" 2)))
         ((or (= name "%") (= name "mod")) (emit-infix name nodes "%" 2))
         ((= name "int32")
          (require-node-arity node 1 1)
-         (combine (js-array "(" (emit-expression (js-nth 0 nodes)) " | 0)")))
+         (if numeric-emission-profile (combine (js-array "(" (emit-expression (js-nth 0 nodes)) " | 0)"))
+           (emit-numeric-unary "int32" (js-nth 0 nodes))))
         ((= name "uint32")
          (require-node-arity node 1 1)
-         (combine (js-array "(" (emit-expression (js-nth 0 nodes)) " >>> 0)")))
+         (if numeric-emission-profile (combine (js-array "(" (emit-expression (js-nth 0 nodes)) " >>> 0)"))
+           (emit-numeric-unary "uint32" (js-nth 0 nodes))))
         ((= name "imul32")
          (require-node-arity node 2 2)
-         (combine
-           (js-array "Math.imul(" (emit-expression (js-nth 0 nodes)) ", "
-            (emit-expression (js-nth 1 nodes)) ")")))
+         (if numeric-emission-profile
+           (combine (js-array "Math.imul(" (emit-expression (js-nth 0 nodes)) ", " (emit-expression (js-nth 1 nodes)) ")"))
+           (emit-numeric-binary "imul" (emit-expression (js-nth 0 nodes)) (emit-expression (js-nth 1 nodes)))))
         ((= name "bit-and") (emit-binary-infix name nodes "&"))
         ((= name "bit-or") (emit-binary-infix name nodes "|"))
         ((= name "bit-xor") (emit-binary-infix name nodes "^"))
         ((= name "bit-not")
          (require-node-arity node 1 1)
-         (combine (js-array "(~" (emit-expression (js-nth 0 nodes)) ")")))
+         (if numeric-emission-profile (combine (js-array "(~" (emit-expression (js-nth 0 nodes)) ")"))
+           (emit-numeric-unary "not" (js-nth 0 nodes))))
         ((= name "bit-shift-left") (emit-binary-infix name nodes "<<"))
         ((= name "bit-shift-right") (emit-binary-infix name nodes ">>"))
         ((= name "unsigned-bit-shift-right")
@@ -1081,7 +1188,7 @@
          (combine (js-array "(" (emit-expression (js-nth 0 nodes)) " + 1)")))
         ((= name "1-")
          (require-node-arity node 1 1)
-         (combine (js-array "(" (emit-expression (js-nth 0 nodes)) " - 1)")))
+         (emit-numeric-binary "-" (emit-expression (js-nth 0 nodes)) (text-fragment "1")))
         ((= name "eq")
          (require-node-arity node 2 2)
          (combine
@@ -1611,6 +1718,8 @@
 
   (defun reference-runtime-requirements (program)
     (js-object
+      :numericCoercion (program-uses-numeric-coercion-p program)
+      :imul (js-call (program-body program) :some node-uses-imul-p)
       :numberConversion (program-uses-number-conversion-p program)
       :hostIdentityToken (program-uses-host-identity-token-p program)
       :literal (program-uses-literal-runtime-p program)
@@ -1618,6 +1727,19 @@
       :binding (program-uses-binding-runtime-p program)
       :list (program-uses-list-runtime-p program)
       :value (program-uses-value-runtime-p program)))
+
+  (defun node-uses-imul-p (node)
+    (or (and (= (ir-kind node) "intrinsic") (= (ir-value node) "imul32"))
+        (js-call (children node) :some node-uses-imul-p)))
+
+  (defun node-uses-numeric-coercion-p (node)
+    (or (and (= (ir-kind node) "intrinsic") (numeric-coercion-intrinsic-p (ir-value node))
+             (or (/= (ir-value node) "*") (> (js-length (children node)) 1)))
+      (let ((found false))
+        (js-call (children node) :forEach (lambda (child) (when (node-uses-numeric-coercion-p child) (setq found t)))) found)))
+  (defun program-uses-numeric-coercion-p (program)
+    (let ((found false))
+      (js-call (program-body program) :forEach (lambda (node) (when (node-uses-numeric-coercion-p node) (setq found t)))) found))
 
   (defun static-literal-key-p (node index static-key-index)
     (and static-key-index
@@ -1652,6 +1774,10 @@
               (= (literal-kind node) "keyword"))
          (put requirements :literal t))
         ((= kind "intrinsic")
+         (when (= value "imul32") (put requirements :imul t))
+         (when (and (numeric-coercion-intrinsic-p value)
+                    (or (/= value "*") (> (js-length nodes) 1)))
+           (put requirements :numericCoercion t))
          (cond
            ((= value "string-to-number") (put requirements :numberConversion t))
            ((= value "host-identity-token")
@@ -1675,6 +1801,8 @@
   (defun runtime-requirements (program)
     (let ((requirements
            (js-object
+             :numericCoercion false
+             :imul false
              :numberConversion false
              :hostIdentityToken false
              :literal false
@@ -1731,7 +1859,24 @@
                ", ")
              "]));"))))))
 
-  (defun emit-module-artifact (program)
+  ;; An embedded module gives captured intrinsics their own lexical scope when
+  ;; user source binds globalThis. It requires no host package or dynamic eval.
+  (defun node-names-global-root-p (node)
+    (or (and (= (ir-value node) "globalThis")
+             (not (= (ir-kind node) "literal"))
+             (not (= (ir-kind node) "raw-javascript")))
+        (js-call (children node) :some node-names-global-root-p)))
+
+  (defun number-conversion-prologue (program)
+    (if (js-call (program-body program) :some node-names-global-root-p)
+        (str number-conversion-capsule number-conversion-body)
+      number-conversion-helper))
+
+  (defun imul-prologue (program)
+    (str (if (js-call (program-body program) :some node-names-global-root-p)
+             imul-capsule imul-intrinsic) imul-operator-helper))
+
+  (defun emit-module-artifact-in-profile (program)
     (setq temporary-counter 0)
     (setq binding-temporaries (new globalThis.Map))
     (let ((requirements (runtime-requirements program))
@@ -1758,7 +1903,10 @@
              value-runtime-import
            "")
          "const __eliscript_truthy = (value) => value !== false && value != null;\n"
-         (if (get requirements :numberConversion) number-conversion-helper "")
+         (if (or (get requirements :numberConversion)
+                 (and (not numeric-emission-profile) (get requirements :numericCoercion))) (number-conversion-prologue program) "")
+         (if (and (not numeric-emission-profile) (get requirements :numericCoercion)) numeric-operator-helper "")
+         (if (and (not numeric-emission-profile) (get requirements :imul)) (imul-prologue program) "")
          (if (get requirements :hostIdentityToken)
              host-identity-token-helper
            "")
@@ -1766,6 +1914,19 @@
          body
          (emit-portable-manifest program)
          "\n"))))
+
+  (defun emit-module-artifact (program)
+    (let ((previous numeric-emission-profile))
+      (setq numeric-emission-profile false)
+      (try (emit-module-artifact-in-profile program)
+        (finally (setq numeric-emission-profile previous)))))
+  ;; Internal code generation entry. The numeric backend must validate the
+  ;; complete original program before optimization and before calling this.
+  (defun emit-module-numeric (program)
+    (let ((previous numeric-emission-profile))
+      (setq numeric-emission-profile t)
+      (try (get (emit-module-artifact-in-profile program) :text)
+        (finally (setq numeric-emission-profile previous)))))
 
   (defun emit-module (program)
     (get (emit-module-artifact program) :text))
@@ -1795,6 +1956,7 @@
     emit-top-level
     emit-module-artifact
     emit-module
+    emit-module-numeric
     emit-module-with-source-map
     runtime-requirements
     reference-runtime-requirements))

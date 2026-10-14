@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { resolve, dirname, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -12,9 +12,17 @@ export async function buildBackends({ outputRoot = resolve(root, "dist"), seed =
   const compilerDirectory = resolve(outputRoot, "bootstrap");
   const directory = resolve(outputRoot, "backends");
   if (!frontend) {
-    const result = spawnSync(resolve(root, "bin/eliscript-bootstrap"), [], {
+    const modules = (await readdir(resolve(root, "bootstrap/compiler")))
+      .filter(name => /^[a-z][a-z-]*[.]eli$/.test(name)).sort()
+      .map(name => name.slice(0, -4));
+    if (!modules.includes("compiler")) throw new Error("bootstrap compiler module is missing");
+    await mkdir(compilerDirectory, { recursive: true });
+    const result = spawnSync(process.env.EMACS ?? "emacs", [
+      "--batch", "-Q", "--script", resolve(root, "tools/bootstrap-seed.el"),
+      "--", root, compilerDirectory, ...modules,
+    ], {
       cwd: root, encoding: "utf8", timeout: 120_000,
-      env: { ...process.env, ELISCRIPT_BOOTSTRAP_OUT_DIR: compilerDirectory },
+      env: { ...process.env },
     });
     if (result.status !== 0) throw new Error(result.stderr || String(result.error));
   }

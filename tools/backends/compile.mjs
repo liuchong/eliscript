@@ -39,7 +39,7 @@ try {
   } else if (platform !== undefined || nativeFormat !== undefined || entry !== undefined) {
     throw new Error("native options require --target native");
   }
-  const { compiler, optimizer, numeric, wasm, native, managed } = await buildBackends();
+  const { compiler, numeric, wasm, native, managed } = await buildBackends();
   const filename = resolve(input);
   const program = compiler.compile_ir_string(await readFile(filename, "utf8"), filename);
   // Validate the same ABI for all three targets, before any optimization removes
@@ -51,13 +51,12 @@ try {
     bytes=Uint8Array.from(managed.emit_managed_wasm(program,runtimeProgram));
   } else {
     numeric.lower_numeric_program(program);
-    const optimized = optimizer.optimize_program(program);
     bytes = target === "wasm"
       ? Uint8Array.from(wasm.emit_numeric_wasm(program))
       : target === "native"
         ? Uint8Array.from(nativeFormat === "executable" ? native.emit_native_numeric_executable(program, platform, entry)
           : nativeFormat === "library" ? native.emit_native_numeric_library(program, platform) : native.emit_native_numeric_object(program, platform))
-        : compiler.emit_ir_string(optimized);
+        : numeric.emit_numeric_javascript(program);
   }
   await writeFile(resolve(output), bytes);
   if (target === "native" && nativeFormat === "executable") await chmod(resolve(output), 0o755);

@@ -181,7 +181,9 @@ export function validateCompilerReaderCharacterReport(report) {
       report.decision?.passed !== true ||
       report.measurements.completeCompilerSpeedup <
         report.decision.minimumCompleteCompilerSpeedup) {
-    throw new TypeError(`compiler reader character speedup decision failed: ${report.measurements.completeCompilerSpeedup} < ${report.decision.minimumCompleteCompilerSpeedup}`);
+    const error=new TypeError(`compiler reader character speedup decision failed: ${report.measurements.completeCompilerSpeedup} < ${report.decision.minimumCompleteCompilerSpeedup}`);
+    error.report=report;
+    throw error;
   }
   return report;
 }
@@ -380,7 +382,16 @@ export async function runCompilerReaderCharacterBenchmark(options) {
 
 if (import.meta.main) {
   const options = parseArguments(process.argv.slice(2));
-  const report = await runCompilerReaderCharacterBenchmark(options);
+  let report;
+  try { report = await runCompilerReaderCharacterBenchmark(options); }
+  catch(error) {
+    if(error.report) {
+      const failed=`${JSON.stringify(error.report,null,2)}\n`;
+      if(options.output) await writeFile(path.resolve(options.output),failed);
+      else process.stdout.write(failed);
+    }
+    throw error;
+  }
   const json = `${JSON.stringify(report, null, 2)}\n`;
   if (options.output) await writeFile(path.resolve(options.output), json);
   else process.stdout.write(json);

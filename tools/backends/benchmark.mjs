@@ -21,7 +21,7 @@ const sourceFiles = [
   ...backendModules.map(name => `bootstrap/backends/${name}.eli`),
   ...(await readdir(resolve(root, "bootstrap/compiler"))).filter(f => f.endsWith(".eli")).sort().map(f => `bootstrap/compiler/${f}`),
   "tools/experiments/native-wasm/kernels.eli", "tools/backends/batches.eli",
-  "tools/backends/build.mjs", "tools/backends/benchmark.mjs",
+  "tools/backends/build.mjs", "tools/backends/benchmark.mjs", "tools/bootstrap-seed.el",
 ];
 const hash = bytes => createHash("sha256").update(bytes).digest("hex");
 const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
@@ -105,10 +105,10 @@ export async function runDirectWasmBenchmark() {
   const directory = await mkdtemp(resolve(tmpdir(), "eliscript-direct-wasm-perf-"));
   let server;
   try {
-    const { compiler, optimizer, wasm } = await buildBackends({ outputRoot: directory });
+    const { compiler, numeric, wasm } = await buildBackends({ outputRoot: directory });
     const source = await readFile(resolve(root, "tools/experiments/native-wasm/kernels.eli"), "utf8") + "\n" + await readFile(resolve(root, "tools/backends/batches.eli"), "utf8");
     const program = compiler.compile_ir_string(source, "direct-batches.eli");
-    const javascript = compiler.emit_ir_string(optimizer.optimize_program(program));
+    const javascript = numeric.emit_numeric_javascript(program);
     const bytes = Uint8Array.from(wasm.emit_numeric_wasm(program));
     const jsPath = resolve(directory, "batches.mjs"), wasmPath = resolve(directory, "batches.wasm");
     await writeFile(jsPath, javascript); await writeFile(wasmPath, bytes);

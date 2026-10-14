@@ -1,4 +1,6 @@
 (module eliscript.backend.numeric
+  (import "../bootstrap/emitter.mjs" emit-module-numeric)
+  (import "./optimize.mjs" optimize-program)
   ;; Explicit numeric-f64 ABI: required Number arguments and Number results.
   ;; This is a typed vertical slice, not a replacement for the dynamic runtime.
   (defun backend-fail (node message)
@@ -1246,4 +1248,10 @@
                 copy))
           copy))))
 
-  (export lower-scalar-program lower-numeric-program optimize-numeric-program numeric-pure tree-size backend-fail find-function))
+  (defun emit-numeric-javascript (program)
+    ;; Validate unreachable code in the original IR before optimization can
+    ;; remove it. Required Number arguments/results justify raw JS operators.
+    (lower-numeric-program program)
+    (emit-module-numeric (optimize-program program)))
+
+  (export emit-numeric-javascript lower-scalar-program lower-numeric-program optimize-numeric-program numeric-pure tree-size backend-fail find-function))

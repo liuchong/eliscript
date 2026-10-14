@@ -58,8 +58,8 @@ test('arithmetic type or capacity failures unwind their frames without evaluatin
  const runtimeSource=await readFile('bootstrap/runtime/memory.eli','utf8'),start=runtimeSource.indexOf('  (defun value-truth (heap value)'),end=runtimeSource.indexOf('  (defun value-data',start);assert(start>=0&&end>start);
  const injected=backend.compiler.compile_ir_string(runtimeSource.slice(0,start)+'  (defun value-truth (heap value) (load-u32 4294967295))\n'+runtimeSource.slice(end),'later-trap.eli');
  const original=backend.compiler.compile_ir_string('(defun first-error (x y) (+ (+ x y) (if x 1 2))) (export first-error)','first-error.eli');
- const a=instantiateManagedRuntime(Uint8Array.from(backend.managed.emit_managed_wasm(original,injected)));const text=a.string('x'),n=a.number(2),frame=a.frame(1);a.frameSet(frame,0,n);
- assert.throws(()=>a.invoke('first-error',[text,n]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');assert.equal(a.stats().frameDepth,1);
+ const a=instantiateManagedRuntime(Uint8Array.from(backend.managed.emit_managed_wasm(original,injected)));const text=a.sourceObject({}),n=a.number(2),frame=a.frame(1);a.frameSet(frame,0,n);
+ assert.throws(()=>a.invoke('first-error',[text,n]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.equal(a.stats().frameDepth,1);
  assert.throws(()=>a.invoke('first-error',[n,n]),e=>e instanceof WebAssembly.RuntimeError);assert.equal(a.stats().frameDepth,1);
  const saved=a.frameGet(frame,0);assert.equal(a.readNumber(saved),2);a.release(saved);a.leaveFrame(frame);a.release(text);a.release(n);a.collect();assert.equal(a.live(),0);
  const small=instantiateManagedRuntime(bytes,{maxSlots:8,initialBytes:512,maxBytes:512});small.auto(1);const input=small.number(-0),caller=small.frame(1);small.frameSet(caller,0,input);const padding=[small.array(),small.array()];
@@ -72,13 +72,16 @@ test('independent random float64 bit patterns preserve exact arithmetic results 
  const a=instantiateManagedRuntime(bytes);a.auto(1);
  for(let i=0;i<512;i++){const pair=[random(),random()];for(const name of['add','subtract','multiply','divide','equal','distinct','less','less-equal','greater','greater-equal'])check(a,name,pair);}
 });
-test('mixed coercion, invalid arithmetic types and foreign or stale operands fail explicitly without losing caller roots',()=>{
- const a=instantiateManagedRuntime(bytes),b=instantiateManagedRuntime(bytes),n=a.number(1),s=a.string('1'),foreign=b.number(1);
- for(const [name,args,code]of[['add',[s,n],'ELI-RT0001'],['negate',[null],'ELI-RT0001'],['less',[s,n],'ELI-RT0003'],['greater',[true,n],'ELI-RT0003'],['equal',[foreign,n],'ELI-RT0001']]){
+test('primitive coercion agrees with JS while unsupported objects and foreign or stale operands preserve caller roots',()=>{
+ const a=instantiateManagedRuntime(bytes),b=instantiateManagedRuntime(bytes);
+ check(a,'add',['1',1]);check(a,'negate',[null]);check(a,'less',['1',1]);check(a,'greater',[true,1]);
+ const n=a.number(1),s=a.string('1'),opaque=a.sourceObject({}),foreign=b.number(1);
+ assert.throws(()=>a.binary(s,n,0),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');
+ for(const [name,args,code]of[['add',[opaque,n],'ELI-RT0003'],['negate',[opaque],'ELI-RT0003'],['less',[opaque,n],'ELI-RT0003'],['greater',[true,opaque],'ELI-RT0003'],['equal',[foreign,n],'ELI-RT0001']]){
   assert.throws(()=>a.invoke(name,args),e=>e.eliscriptDiagnostic?.code===code);assert.equal(a.stats().frameDepth,0);assert.equal(a.readNumber(n),1);
  }
  const stale=a.number(3);a.release(stale);a.collect();assert.throws(()=>a.invoke('equal',[stale,n]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');
- b.release(foreign);b.collect();a.release(n);a.release(s);a.collect();assert.equal(a.live(),0);
+ b.release(foreign);b.collect();a.release(n);a.release(s);a.release(opaque);a.collect();assert.equal(a.live(),0);
 });
 test('Node independently executes the ordinary numeric artifact with exact signed zeros and strict NaN equality',async()=>{
  const path=resolve(directory,'arithmetic.wasm');await writeFile(path,bytes);

@@ -174,6 +174,46 @@ test("persistent hash map promotes and demotes measured branch thresholds", () =
   }
 });
 
+test("dense map leaf updates retain structural equality, original keys and snapshots", () => {
+  const branches=new Map();
+  for(let candidate=0;branches.size<32;candidate++){
+    const key=persistentVector(candidate),branch=hashValue(key)&31;
+    if(!branches.has(branch))branches.set(branch,key);
+  }
+  const keys=[...branches.values()];let original=EMPTY_MAP;
+  for(const key of keys)original=original.assoc(key,persistentVector(key.nth(0),1));
+  expect(inspectPersistentMap(original).arrayNodes).toBe(1);
+  const equivalent=persistentVector(keys[0].nth(0));
+  expect(original.assoc(equivalent,persistentVector(keys[0].nth(0),1))).toBe(original);
+  resetPersistentMapMetrics();
+  const updated=original.assoc(equivalent,persistentVector(keys[0].nth(0),2));
+  expect(updated.count).toBe(32);expect(updated.get(equivalent).nth(1)).toBe(2);
+  expect(original.get(equivalent).nth(1)).toBe(1);
+  expect([...updated.keys()].find(key=>equalValues(key,equivalent))).toBe(keys[0]);
+  expect(persistentMapMetrics().nodeAllocations).toBe(1);
+  expect(persistentMapMetrics().entryAllocations).toBe(1);
+  let extra;
+  for(let candidate=10000;extra===undefined;candidate++){
+    const key=persistentVector(candidate);
+    if((hashValue(key)&31)===(hashValue(keys[0])&31)&&!original.has(key))extra=key;
+  }
+  const branched=updated.assoc(extra,99);
+  expect(branched.count).toBe(33);expect(branched.get(extra)).toBe(99);
+  expect(updated.has(extra)).toBe(false);expect(equalValues(branched.dissoc(extra),updated)).toBe(true);
+});
+
+test("array map demotion allocates the final bitmap node without a temporary array node", () => {
+  const keys=distinctRootKeys(32);let map=EMPTY_MAP;
+  for(const key of keys)map=map.assoc(key,key);
+  for(const key of keys.slice(0,7))map=map.dissoc(key);
+  const before=map;resetPersistentMapMetrics();map=map.dissoc(keys[7]);
+  expect(persistentMapMetrics().nodeAllocations).toBe(1);
+  expect(persistentMapMetrics().demotions).toBe(1);
+  expect(map.count).toBe(24);expect(inspectPersistentMap(map).arrayNodes).toBe(0);
+  expect(before.count).toBe(25);expect(before.has(keys[7])).toBe(true);
+  for(const key of keys.slice(8))expect(map.get(key)).toBe(key);
+});
+
 test("persistent hash map equality and hash ignore insertion order", () => {
   const left = persistentHashMap(
     ["alpha", persistentVector(1, 2)],

@@ -91,6 +91,19 @@ test("reader character predicates match their Eliscript references", async () =>
   }
 }, 30_000);
 
+test("a failed original Reader performance gate retains every raw sample and the failed decision", async () => {
+  const report=JSON.parse(await readFile(reportPath,"utf8"));
+  report.measurements.completeCompilerSpeedup=1.079;
+  report.decision.passed=false;
+  let failure;
+  try { validateCompilerReaderCharacterReport(report); } catch (error) { failure=error; }
+  expect(failure).toBeInstanceOf(TypeError);
+  expect(failure.report).toBe(report);
+  expect(failure.report.decision.passed).toBe(false);
+  for(const name of["referencePredicates","optimizedPredicates","baselineCompiler","optimizedCompiler"])
+    expect(failure.report.measurements[name].samplesMs).toHaveLength(report.parameters.timingSamples);
+});
+
 test("committed reader character report matches measured sources", async () => {
   const report = validateCompilerReaderCharacterReport(
     JSON.parse(await readFile(reportPath, "utf8")),

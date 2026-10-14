@@ -594,7 +594,62 @@ Sequential bindings each have their own scope, including duplicate names."
                (eliscript-ir-emitter-emit-expression node)
                ";")))))
 
+(defun eliscript-ir-emitter--closed-scalar-loop-p (names body)
+  "Prove a scalar loop directly over IR, without a reader-form bridge."
+  (let (loop-found)
+    (cl-labels
+        ((walk (node scope)
+           (if (null node) t
+             (let ((kind (eliscript-ir-node-kind node))
+                 (value (eliscript-ir-node-value node))
+                 (children (eliscript-ir-emitter--children node)))
+             (pcase kind
+               ('literal (or (numberp value) (memq value '(nil t false undefined))))
+               ('reference (memq value scope))
+               ('lexical-bindings
+                (pcase-let ((`(,bindings ,forms)
+                             (eliscript-ir-emitter--split-counted-children node :binding-count)))
+                  (let ((inner scope) (valid t))
+                    (dolist (binding bindings)
+                      (unless (and (eq (eliscript-ir-node-kind binding) 'lexical-binding)
+                                   (not (eliscript-ir-property binding :pattern))
+                                   (walk (eliscript-ir-emitter--binding-initializer binding)
+                                         (if (eliscript-ir-property node :sequential) inner scope)))
+                        (setq valid nil))
+                      (push (eliscript-ir-node-value binding) inner))
+                    (and valid (cl-every (lambda (child) (walk child inner)) forms)))))
+               ('assignment
+                (cl-every (lambda (pair)
+                            (and (eq (eliscript-ir-node-kind pair) 'assignment-pair)
+                                 (memq (eliscript-ir-node-value pair) scope)
+                                 (walk (car (eliscript-ir-emitter--children pair)) scope))) children))
+               ((or 'intrinsic 'conditional 'conditional-sugar 'short-circuit 'sequence 'loop)
+                (when (eq kind 'loop) (setq loop-found t))
+                (and (or (not (eq kind 'intrinsic))
+                         (memq value '(+ - * / % mod 1+ 1- = eq < <= > >= /= not= not)))
+                     (or (not (and (eq kind 'intrinsic) (memq value '(< <= > >=))))
+                         (= (length children) 2))
+                     (cl-every (lambda (child) (walk child scope)) children)))
+               (_ nil))))))
+      (and names (cl-every (lambda (node) (walk node names)) body) loop-found))))
+
 (defun eliscript-ir-emitter--emit-function-body (parameters body)
+  "Emit a guarded Number version only for proved closed scalar loops."
+  (let ((names (mapcar #'eliscript-ir-node-value parameters)))
+    (if (and (not eliscript-emitter--numeric-profile)
+             (cl-every (lambda (p) (and (eq (eliscript-ir-property p :parameter-kind) 'required)
+                                       (not (eliscript-ir-property p :pattern)))) parameters)
+             (eliscript-ir-emitter--closed-scalar-loop-p names body))
+        (let ((fast (let ((eliscript-emitter--numeric-profile t))
+                      (eliscript-ir-emitter--emit-function-body-unversioned parameters body)))
+              (slow (eliscript-ir-emitter--emit-function-body-unversioned parameters body)))
+          (format "if (%s) {\n%s\n} else {\n%s\n}"
+                  (mapconcat (lambda (name) (format "typeof %s === \"number\""
+                                                    (eliscript-emitter--binding-name name))) names " && ")
+                  (eliscript-emitter--indent fast) (eliscript-emitter--indent slow)))
+      (eliscript-ir-emitter--emit-function-body-unversioned parameters body))))
+
+(defun eliscript-ir-emitter--emit-function-body-unversioned (parameters body)
   "Emit function BODY with recur-aware PARAMETER rebinding when required."
   (let ((setups (eliscript-ir-emitter--emit-binding-setups parameters)))
     (if (not (eliscript-ir-emitter--contains-recur-target-p body 'function))
@@ -875,33 +930,29 @@ Sequential bindings each have their own scope, including duplicate names."
 (defun eliscript-ir-emitter--emit-infix (name nodes operator &optional minimum)
   "Emit NODES joined by OPERATOR for intrinsic NAME."
   (eliscript-emitter--require-arity name nodes (or minimum 2))
-  (format "(%s)"
-          (mapconcat #'eliscript-ir-emitter-emit-expression
-                     nodes (format " %s " operator))))
+  (eliscript-emitter--numeric-fold operator (mapcar #'eliscript-ir-emitter-emit-expression nodes)))
 
 (defun eliscript-ir-emitter--emit-binary-infix (node operator)
   "Emit exact binary intrinsic NODE using JavaScript OPERATOR."
   (eliscript-ir-emitter--require-arity node 2 2)
   (let ((nodes (eliscript-ir-emitter--children node)))
-    (format "(%s %s %s)"
-            (eliscript-ir-emitter-emit-expression (nth 0 nodes))
-            operator
-            (eliscript-ir-emitter-emit-expression (nth 1 nodes)))))
+    (eliscript-emitter--numeric-binary operator
+      (eliscript-ir-emitter-emit-expression (nth 0 nodes)) (eliscript-ir-emitter-emit-expression (nth 1 nodes)))))
 
 (defun eliscript-ir-emitter--emit-comparison (name nodes operator)
   "Emit one-evaluation n-ary comparison NAME over NODES using OPERATOR."
   (eliscript-emitter--require-arity name nodes 2)
   (if (= (length nodes) 2)
-      (format "(%s %s %s)"
-              (eliscript-ir-emitter-emit-expression (nth 0 nodes))
-              operator
-              (eliscript-ir-emitter-emit-expression (nth 1 nodes)))
+      (eliscript-emitter--numeric-binary operator
+        (eliscript-ir-emitter-emit-expression (nth 0 nodes)) (eliscript-ir-emitter-emit-expression (nth 1 nodes)))
     (let ((parameters
            (mapcar (lambda (_node) (eliscript-emitter--fresh-name)) nodes))
           comparisons)
       (cl-loop for left on parameters
                while (cdr left)
-               do (push (format "%s %s %s" (car left) operator (cadr left))
+               do (push (if (eliscript-emitter--relational-p operator)
+                            (eliscript-emitter--numeric-binary operator (car left) (cadr left))
+                          (format "%s %s %s" (car left) operator (cadr left)))
                         comparisons))
       (format "((%s) => (%s))(%s)"
               (string-join parameters ", ")
@@ -942,35 +993,32 @@ Sequential bindings each have their own scope, including duplicate names."
                                  nodes " + "))
             "0"))
       ('* (if nodes
-              (format "(%s)"
-                      (mapconcat #'eliscript-ir-emitter-emit-expression
-                                 nodes " * "))
+              (eliscript-ir-emitter--emit-infix "*" nodes "*" 1)
             "1"))
       ('-
        (eliscript-ir-emitter--require-arity node 1)
        (if (null (cdr nodes))
-           (format "(-%s)"
+           (format (if eliscript-emitter--numeric-profile "(-%s)" "__eliscript_numeric_neg(%s)")
                    (eliscript-ir-emitter-emit-expression (car nodes)))
          (eliscript-ir-emitter--emit-infix "-" nodes "-")))
       ('/
        (eliscript-ir-emitter--require-arity node 1)
        (if (null (cdr nodes))
-           (format "(1 / %s)"
-                   (eliscript-ir-emitter-emit-expression (car nodes)))
+           (eliscript-emitter--numeric-binary "/" "1" (eliscript-ir-emitter-emit-expression (car nodes)))
          (eliscript-ir-emitter--emit-infix "/" nodes "/")))
       ((or '% 'mod)
        (eliscript-ir-emitter--emit-infix (symbol-name name) nodes "%"))
       ('int32
        (eliscript-ir-emitter--require-arity node 1 1)
-       (format "(%s | 0)"
+       (format "__eliscript_numeric_int32(%s)"
                (eliscript-ir-emitter-emit-expression (car nodes))))
       ('uint32
        (eliscript-ir-emitter--require-arity node 1 1)
-       (format "(%s >>> 0)"
+       (format "__eliscript_numeric_uint32(%s)"
                (eliscript-ir-emitter-emit-expression (car nodes))))
       ('imul32
        (eliscript-ir-emitter--require-arity node 2 2)
-       (format "Math.imul(%s, %s)"
+       (format "__eliscript_numeric_imul(%s, %s)"
                (eliscript-ir-emitter-emit-expression (nth 0 nodes))
                (eliscript-ir-emitter-emit-expression (nth 1 nodes))))
       ('bit-and (eliscript-ir-emitter--emit-binary-infix node "&"))
@@ -978,7 +1026,7 @@ Sequential bindings each have their own scope, including duplicate names."
       ('bit-xor (eliscript-ir-emitter--emit-binary-infix node "^"))
       ('bit-not
        (eliscript-ir-emitter--require-arity node 1 1)
-       (format "(~%s)"
+       (format "__eliscript_numeric_not(%s)"
                (eliscript-ir-emitter-emit-expression (car nodes))))
       ('bit-shift-left
        (eliscript-ir-emitter--emit-binary-infix node "<<"))
@@ -1031,8 +1079,7 @@ Sequential bindings each have their own scope, including duplicate names."
                (eliscript-ir-emitter-emit-expression (car nodes))))
       ('1-
        (eliscript-ir-emitter--require-arity node 1 1)
-       (format "(%s - 1)"
-               (eliscript-ir-emitter-emit-expression (car nodes))))
+       (eliscript-emitter--numeric-binary "-" (eliscript-ir-emitter-emit-expression (car nodes)) "1"))
       ('eq
        (eliscript-ir-emitter--require-arity node 2 2)
        (format "(%s === %s)"
@@ -1429,11 +1476,21 @@ JavaScript property or tag string rather than an Eliscript value."
         uses-value-runtime
         uses-host-identity-token
         uses-number-conversion
+        uses-numeric-coercion
+        uses-imul
+        names-global-root
         portable-functions
         exported-bindings)
     (eliscript-ir-walk
      program
      (lambda (node)
+       (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
+                  (eq (eliscript-ir-node-value node) 'imul32))
+         (setq uses-imul t))
+       (when (and (eq (eliscript-ir-node-value node) 'globalThis)
+                  (not (memq (eliscript-ir-node-kind node)
+                             '(literal raw-javascript))))
+         (setq names-global-root t))
        (when (eq (eliscript-ir-node-kind node) 'map-binding-pattern)
          (setq uses-binding-runtime t))
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
@@ -1445,6 +1502,11 @@ JavaScript property or tag string rather than an Eliscript value."
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (eq (eliscript-ir-node-value node) 'equal))
          (setq uses-value-runtime t))
+       (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
+                  (eliscript-emitter--numeric-coercion-p (eliscript-ir-node-value node))
+                  (or (not (eq (eliscript-ir-node-value node) '*))
+                      (> (length (eliscript-ir-node-children node)) 1)))
+         (setq uses-numeric-coercion t))
        (when (and (eq (eliscript-ir-node-kind node) 'intrinsic)
                   (eq (eliscript-ir-node-value node) 'string-to-number))
          (setq uses-number-conversion t))
@@ -1479,9 +1541,11 @@ JavaScript property or tag string rather than an Eliscript value."
          eliscript-ir-emitter--value-runtime-import
        "")
      "const __eliscript_truthy = (value) => value !== false && value != null;\n"
-     (if uses-number-conversion
-         eliscript-emitter--number-conversion-helper
+     (if (or uses-number-conversion uses-numeric-coercion)
+         (eliscript-emitter--number-conversion-prologue names-global-root)
        "")
+     (if uses-numeric-coercion eliscript-emitter--numeric-operator-helper "")
+     (if uses-imul (eliscript-emitter--imul-prologue names-global-root) "")
      (if uses-host-identity-token
          eliscript-emitter--host-identity-token-helper
        "")

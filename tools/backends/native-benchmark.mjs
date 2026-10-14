@@ -15,7 +15,7 @@ const inputs=[
   {name:"recurrence-tiny-batch",fn:"recurrence_batch",nativeFn:"recurrence-batch",args:[1,.123,2_000_000]},
 ];
 const parameters={sessions:3,warmups:5,samples:9,minimumSpeedup:1};
-const files=[...backendModules.map(n=>`bootstrap/backends/${n}.eli`),...(await readdir(resolve(root,"bootstrap/compiler"))).filter(n=>n.endsWith(".eli")).sort().map(n=>`bootstrap/compiler/${n}`),"tools/backends/build.mjs","tools/backends/native-benchmark.mjs","tools/backends/batches.eli","tools/experiments/native-wasm/kernels.eli"];
+const files=[...backendModules.map(n=>`bootstrap/backends/${n}.eli`),...(await readdir(resolve(root,"bootstrap/compiler"))).filter(n=>n.endsWith(".eli")).sort().map(n=>`bootstrap/compiler/${n}`),"tools/backends/build.mjs","tools/backends/native-benchmark.mjs","tools/bootstrap-seed.el","tools/backends/batches.eli","tools/experiments/native-wasm/kernels.eli"];
 const hash=bytes=>createHash("sha256").update(bytes).digest("hex");
 const median=values=>[...values].sort((a,b)=>a-b)[Math.floor(values.length/2)];
 const sources=async()=>Object.fromEntries(await Promise.all(files.map(async f=>[f,hash(await readFile(resolve(root,f)))])));
@@ -57,10 +57,10 @@ export async function runNativeBenchmark({baseline=false}={}) {
   const sourceHashes=await sources();
   const directory=await mkdtemp(resolve(tmpdir(),"eliscript-native-perf-"));
   try {
-    const {compiler,optimizer,native}=await buildBackends({outputRoot:directory});
+    const {compiler,numeric,native}=await buildBackends({outputRoot:directory});
     const source=await readFile(resolve(root,"tools/experiments/native-wasm/kernels.eli"),"utf8")+"\n"+await readFile(resolve(root,"tools/backends/batches.eli"),"utf8");
     const program=compiler.compile_ir_string(source,"direct-batches.eli");
-    const javascript=compiler.emit_ir_string(optimizer.optimize_program(program));
+    const javascript=numeric.emit_numeric_javascript(program);
     const bytes=Uint8Array.from(native.emit_native_numeric_library(program,"arm64-macos",{registerAllocation:!baseline}));
     const jsPath=resolve(directory,"batches.mjs"),library=resolve(directory,"batches.dylib"),runner=resolve(directory,"runner.mjs");
     await writeFile(jsPath,javascript);await writeFile(library,bytes);

@@ -376,8 +376,47 @@ WASM traps retain the caller's roots and exact input values.
 
 Generated JS uses a shared primitive helper for nondecimal Number conversion:
 it parses valid radix integers exactly before converting to binary64, avoiding
-host differences in direct Number(string) conversion. Modules that do not use
-`string-to-number` receive no helper. Seed and self-hosted emitters retain the
+host differences in direct Number(string) conversion. Modules with neither
+numeric conversion nor dynamic numeric operators receive no helper. Seed and self-hosted emitters retain the
 same bytes and source marks. Object/Symbol/BigInt coercion in the managed
-profile, complete ToPrimitive, mixed-type arithmetic and full compiler hosts
+profile, complete ToPrimitive and full compiler hosts
 remain open and explicitly refused; these primitive slices do not close them.
+
+## Primitive source operators and typed JS
+
+Ordinary managed arithmetic, remainder, word operations and relations now accept
+nil, booleans, undefined, Number and String inputs. Addition concatenates if
+either primitive is a String; two Strings compare by UTF-16 units. Other
+relational inputs use exact Number conversion. Strict equality stays distinct
+from table-key equality, and single-operand `+` and `*` retain the original value.
+Both operands and intermediate conversions are rooted across allocation;
+conversion failure suppresses later effects and retains caller frames. The raw
+Number-only API keeps its original strict argument checks.
+
+Dynamic JS operators use shared helpers for exact radix parsing and observable
+ToPrimitive/ToNumeric ordering. They retain BigInt and object-hook semantics,
+snapshot built-in conversion operations before user callbacks can replace them,
+and bound integer parsing only after validating the complete radix grammar.
+Modules emit these helpers conditionally. Ordinary Number pairs avoid extra
+primitive conversion; no per-call closure is introduced.
+
+Closed scalar loops also receive a Number entry version: required parameters
+are checked once, then the loop uses direct operators. A lexical proof excludes
+free reads/writes, strings, objects, calls, host access and destructuring. Other
+inputs execute the complete coercion path, with identical operand and exception
+order. This keeps numerical loop intermediates unboxed without trusting an IR
+annotation or relaxing the dynamic language.
+
+The numeric backend's `emit-numeric-javascript` validates the complete original
+numeric-f64 IR before shared optimization and Number-only JS emission. The
+explicit numeric CLI and benchmark generators use that checked entry. It rejects
+unsupported dead code, leaves input IR unchanged, restores emission state after
+failure and preserves the accepted optimized JS control bytes. It is not a
+user-supplied unchecked annotation or a full dynamic backend.
+
+Backend fixture preparation compiles all frontend modules in one Emacs seed
+process with the same normal file compiler. Independent CLI comparisons verify
+all JS and source-map bytes; no compiler module, generation or test is omitted.
+This reduces repeated startup work within the original CI budget. Complete
+compiler hosts, managed Object/Symbol/BigInt coercion, production acceptance and
+the full nine-cell bootstrap matrix remain open.

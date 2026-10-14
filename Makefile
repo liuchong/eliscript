@@ -41,6 +41,8 @@ test-core: check-contracts
 		tests/repeated-determinism.test.mjs \
 		tests/final-acceptance.test.mjs \
 		tests/retained-soak-refresh.test.mjs \
+		tests/retained-transient-refresh.test.mjs \
+		tests/bootstrap-seed-batch.test.mjs \
 		tests/esm-imports.test.mjs \
 		tests/ci-contract.test.mjs \
 		tests/local-compatibility-matrix.test.mjs \
@@ -68,6 +70,7 @@ test-core: check-contracts
 		tests/wasm-managed-objects.test.mjs \
 		tests/wasm-managed-strings.test.mjs \
 		tests/wasm-managed-number-conversion.test.mjs \
+		tests/wasm-managed-primitive-operators.test.mjs \
 		tests/native-backend.test.mjs \
 		tests/compiler-reader-character.test.mjs \
 		tests/compiler-source-map-cursor.test.mjs \

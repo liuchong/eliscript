@@ -158,9 +158,8 @@
   (defun managed-number-constant (value state)
     (lower-managed-literal (js-object :kind "literal" :value value :children (js-array)) state))
   (defun managed-number-binary (left right operation state)
-    (managed-result state (runtime-call state (if (= operation 4) "value-number-remainder" "value-number-binary")
-      (runtime-arguments state (if (= operation 4) (js-array left right)
-        (js-array left right (word-constant operation))))) t))
+    (managed-result state (runtime-call state "value-primitive-binary"
+      (runtime-arguments state (js-array left right (word-constant operation)))) t))
   (defun lower-managed-arithmetic (node scope state functions)
     (let* ((children (get node :children)) (operator (get node :value)) (count (js-length children))
            (steps (js-array)) (result nil) (index 1)
@@ -184,7 +183,7 @@
             (setq index (1+ index)))
           (when (and (= count 1) (or (= operator "-") (= operator "/") (= operator "1+") (= operator "1-")))
             (if (= operator "-")
-              (setq result (managed-result state (runtime-call state "value-number-negate" (runtime-arguments state
+              (setq result (managed-result state (runtime-call state "value-primitive-negate" (runtime-arguments state
                 (js-array (get result :result)))) t))
               (let ((one (managed-number-constant 1 state)))
                 (js-call steps :push (get one :steps))
@@ -207,7 +206,7 @@
           (js-call steps :push (get operand :steps)) (js-call operands :push (get operand :result)))
         (setq index (1+ index)))
       (js-call operands :push (word-constant operation))
-      (let ((result (managed-result state (runtime-call state (if unary "value-number-word" "value-number-bitwise")
+      (let ((result (managed-result state (runtime-call state (if unary "value-primitive-word" "value-primitive-bitwise")
                       (runtime-arguments state operands)) t)))
         (js-call steps :push (get result :steps)) (put result :steps (word-sequence steps)) result)))
   (defun lower-managed-comparison (node scope state functions)
@@ -230,7 +229,7 @@
           (while (< right count)
             (let* ((compared (new-managed-local state "comparison-word" nil))
                    (evaluate (word-sequence (js-array
-                     (managed-guard state (word-set compared (runtime-call state "value-compare" (runtime-arguments state
+                     (managed-guard state (word-set compared (runtime-call state "value-primitive-compare" (runtime-arguments state
                        (js-array (js-nth left operands) (js-nth right operands) (word-constant operation))))))
                      (managed-guard state (capture-error state))
                      (managed-guard state (word-set local (word-if

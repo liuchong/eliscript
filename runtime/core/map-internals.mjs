@@ -198,11 +198,11 @@ function promoteBitmapNode(node, shift, hash, key, value) {
   return new ArrayNode(node.items.length + 1, children);
 }
 
-function packArrayNode(node) {
+function packArrayNode(children) {
   let bitmap = 0;
   const items = [];
   for (let index = 0; index < 32; index += 1) {
-    const child = node.children[index];
+    const child = children[index];
     if (child !== undefined) {
       bitmap = (bitmap | (1 << index)) >>> 0;
       items.push(child);
@@ -226,11 +226,9 @@ function findInNode(node, shift, hash, key, notFound) {
   }
   if (node instanceof ArrayNode) {
     const item = node.children[branchIndex(hash, shift)];
-    if (item === undefined) {
-      return notFound;
-    }
-    return item instanceof MapEntry
-      ? findEntry(item, hash, key, notFound)
+    if (item instanceof MapEntry) return findEntry(item, hash, key, notFound);
+    return item === undefined
+      ? notFound
       : findInNode(item, shift + 5, hash, key, notFound);
   }
   if (node.hash !== hash) {
@@ -285,6 +283,25 @@ function assocNode(node, shift, hash, key, value) {
   if (node instanceof ArrayNode) {
     const index = branchIndex(hash, shift);
     const existing = node.children[index];
+    // Saturated branches contain no holes. Keep their common leaf update in
+    // this frame instead of allocating an intermediate assocEntry result.
+    if (node.count === BRANCH_MASK + 1 && existing instanceof MapEntry) {
+      let replacement;
+      let added;
+      if (sameEntry(existing, hash, key)) {
+        if (equalValues(existing.value, value)) {
+          return { item: node, added: false, changed: false };
+        }
+        replacement = new MapEntry(existing.key, value, existing.hash);
+        added = false;
+      } else {
+        replacement = mergeEntries(shift + 5, existing, new MapEntry(key, value, hash));
+        added = true;
+      }
+      const children = node.children.slice();
+      children[index] = replacement;
+      return { item: new ArrayNode(node.count, children), added, changed: true };
+    }
     if (existing === undefined) {
       const children = node.children.slice();
       children[index] = new MapEntry(key, value, hash);
@@ -409,9 +426,10 @@ function dissocNode(node, shift, hash, key) {
     const children = node.children.slice();
     children[index] = result.item;
     const count = result.item === undefined ? node.count - 1 : node.count;
-    const updated = new ArrayNode(count, children);
     return {
-      item: count <= BITMAP_NODE_THRESHOLD ? packArrayNode(updated) : updated,
+      item: count <= BITMAP_NODE_THRESHOLD
+        ? packArrayNode(children)
+        : new ArrayNode(count, children),
       removed: true,
     };
   }

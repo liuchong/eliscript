@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { verifyAcceptanceRun } from "./check.mjs";
 import { validateRefreshedWorkerSoak } from "./retained-soak.mjs";
+import { validateRefreshedTransientBuilder } from "./retained-transient.mjs";
 
 const TOOL_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_ROOT = path.resolve(TOOL_DIRECTORY, "../..");
@@ -140,6 +141,9 @@ export async function validateFinalAcceptanceContract(contract, run, options = {
       if (digest !== runArtifacts.get(file)) {
         if (file === "benchmarks/worker-lifecycle-soak-macos-arm64.json") {
           try { await validateRefreshedWorkerSoak(root, file, currentBytes, run); }
+          catch (error) { errors.push(`${label} artifact changed after the source run: ${file}: ${error.message}`); }
+        } else if (file === "benchmarks/transient-builder-macos-arm64.json") {
+          try { await validateRefreshedTransientBuilder(root, file, currentBytes, run); }
           catch (error) { errors.push(`${label} artifact changed after the source run: ${file}: ${error.message}`); }
         } else {
           errors.push(`${label} artifact changed after the source run: ${file}`);
