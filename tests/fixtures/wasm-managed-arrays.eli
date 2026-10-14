@@ -24,5 +24,13 @@
   (defun null-write (a marker) (put a 0 (put marker 0 9)))
   (defun error-then-truth (a length marker)
     (put a :length length) (put marker 0 9) (if a 1 2))
-  (export append-order pop-extra slice-extra null-write error-then-truth make empty size nth-value at get-value write truncate append append-none
+  (defun has (a k) (object-has? a k))
+  (defun keys (a) (object-keys a))
+  (defun assoc (a k v) (object-assoc a k v))
+  (defun append-shadow (a marker) (js-call a :push (put marker 0 9)))
+  (defun pop-shadow (a marker) (js-call a :pop (put marker 0 9)))
+  (defun slice-shadow (a marker) (js-call a :slice (put marker 0 9)))
+  (defun append-replace (a) (js-call a :push (put a :push 9)))
+  (export has keys assoc append-shadow pop-shadow slice-shadow append-replace
+    append-order pop-extra slice-extra null-write error-then-truth make empty size nth-value at get-value write truncate append append-none
     remove-last copy interval nested key-order fallback-order write-order grow-loop))

@@ -37,6 +37,19 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
  function refs(input,kind) {
   if(!Array.isArray(input))fail(3);const borrowed=[];
   try {
+   if(kind===14){
+    // Snapshot own slots and names, preserving holes. An overridden iterator
+    // cannot replace this shape or discard operands protected before getters.
+    const length=word(input.length),values=[];
+    for(const key of Object.keys(input)){const v=id(input[key]);call('heap-pin',heap,v);borrowed.push(v);values.push([key,v]);}
+    const value=call('value-array-new',heap,length);call('heap-pin',heap,value);
+    try{
+     const offset=call('value-data',heap,value,14),target=view(),names=[];
+     for(const[key,v]of values){const index=Number(key);if(Number.isInteger(index)&&index>=0&&index<length&&String(index)===key)target.setUint32(offset+index*4,v,true);else names.push([key,v]);}
+     for(const[key,v]of names){const name=api.string(key);try{objectCall('value-array-define',value,id(name),v);}finally{api.release(name);}}
+     return wrap(value);
+    }finally{call('heap-release',heap,value);}
+   }
    // Protect operands before later getters or result allocation can collect them.
    const values=Array.from(input,x=>{const v=id(x);call('heap-pin',heap,v);borrowed.push(v);return v;});
    const value=kind===14?call('value-array-new',heap,word(values.length)):call('value-refs',heap,kind,word(values.length)),offset=call('value-data',heap,value,kind),target=view();

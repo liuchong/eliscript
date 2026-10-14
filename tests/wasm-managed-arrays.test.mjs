@@ -68,7 +68,9 @@ test('exact index boundaries, absent numeric keys and primitive length semantics
  const a=instantiateManagedRuntime(bytes);a.auto(1);const arr=a.invoke('make',[true,false,undefined]),ref=js.make(true,false,undefined);
  for(const i of[Number.MIN_VALUE,-Number.MIN_VALUE,2**31,2**32-2,2**32-1,2**32,Number.MAX_VALUE,-1,.9999999999999999,1.0000000000000002,'','00','00000000000','4294967294','4294967295','99999999999999']){const key=box(a,i);assert.deepEqual(invoke(a,'at',[arr,key]),js.at(ref,i));assert.deepEqual(invoke(a,'nth-value',[key,arr]),js.nth_value(i,ref));a.release(key);}
  for(const value of[null,undefined,false,true,0,-0,NaN,'中😀\ud800']){const v=box(a,value);assert.deepEqual(invoke(a,'size',[v]),js.size(value));a.release(v);}
- for(const key of['push','toLocaleString','constructor','__proto__','foo']){const k=a.string(key);assert.throws(()=>a.invoke('at',[arr,k]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.throws(()=>a.invoke('write',[arr,k,true]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');a.release(k);}
+ for(const key of['push','toLocaleString','constructor','__proto__']){const k=a.string(key);assert.throws(()=>a.invoke('at',[arr,k]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');
+  if(key==='__proto__')assert.throws(()=>a.invoke('write',[arr,k,true]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');else{assert.equal(invoke(a,'write',[arr,k,true]),true);assert.equal(invoke(a,'at',[arr,k]),true);}a.release(k);}
+ const absent=a.string('foo');assert.equal(invoke(a,'at',[arr,absent]),js.at(ref,'foo'));assert.equal(invoke(a,'write',[arr,absent,true]),js.write(ref,'foo',true));a.release(absent);
  const raw=a.array([true]);a.resize(raw,3);assert.equal(a.get(raw,1),null);assert.throws(()=>a.get(raw,3),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');a.release(raw);a.release(arr);a.collect();assert.equal(a.live(),0);
 });
 test('capacity failure and original errors leave arrays unchanged, suppress later traps and unwind only owned frames',async()=>{
@@ -83,7 +85,7 @@ test('capacity failure and original errors leave arrays unchanged, suppress late
 test('Node executes the identical zero-import source-array artifact with growth, Unicode and exact cleanup',async()=>{
  const path=resolve(directory,'arrays.wasm');await writeFile(path,bytes);const child=spawnSync('node',['--input-type=module','-e',`
  import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {instantiateManagedRuntime} from ${JSON.stringify(resolve('tools/backends/managed-runtime.mjs'))};
- const a=instantiateManagedRuntime(readFileSync(${JSON.stringify(path)}));a.auto(1);const x=a.number(-0),y=a.string('中😀'),arr=a.invoke('make',[x,null,y]);const first=a.get(arr,0);assert(Object.is(a.readNumber(first),-0));a.release(first);const i=a.number(9),assigned=a.invoke('write',[arr,i,y]);assert(a.keyEqual(assigned,y));a.release(assigned);assert.equal(a.length(arr),10);assert.equal(a.get(arr,5),undefined);const pop=a.invoke('remove-last',[arr]);assert.equal(a.readString(pop),'中😀');a.release(pop);const count=a.number(128),grown=a.invoke('grow-loop',[count]);assert.equal(a.length(grown),128);for(const v of[x,y,arr,i,count,grown])a.release(v);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+ const a=instantiateManagedRuntime(readFileSync(${JSON.stringify(path)}));a.auto(1);const x=a.number(-0),y=a.string('中😀'),arr=a.invoke('make',[x,null,y]);const first=a.get(arr,0);assert(Object.is(a.readNumber(first),-0));a.release(first);const i=a.number(9),assigned=a.invoke('write',[arr,i,y]);assert(a.keyEqual(assigned,y));a.release(assigned);assert.equal(a.length(arr),10);assert.equal(a.get(arr,5),undefined);const pop=a.invoke('remove-last',[arr]);assert.equal(a.readString(pop),'中😀');a.release(pop);const count=a.number(128),grown=a.invoke('grow-loop',[count]);assert.equal(a.length(grown),128);const key=a.string('01'),set=a.invoke('write',[grown,key,y]);a.release(set);assert.equal(a.invoke('has',[grown,key]),true);const names=a.invoke('keys',[grown]),last=a.get(names,128);assert.equal(a.readString(last),'01');a.release(last);const copied=a.invoke('copy',[grown]);assert.equal(a.invoke('has',[copied,key]),false);for(const v of[x,y,arr,i,count,grown,key,names,copied])a.release(v);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
  `],{encoding:'utf8',timeout:30000});assert.equal(child.status,0,child.stderr);
 });
 
@@ -105,4 +107,104 @@ test('nullish nth receivers preserve empty-array length and reject unsupported o
  const a=instantiateManagedRuntime(bytes);a.auto(1);const length=a.string('length'),zero=a.number(0),arrayKey=a.sourceArray([length]),mapKey=a.map();
  for(const receiver of[null,undefined]){assert.equal(invoke(a,'nth-value',[length,receiver]),js.nth_value('length',receiver));assert.equal(invoke(a,'nth-value',[zero,receiver]),js.nth_value(0,receiver));for(const key of[arrayKey,mapKey])assert.throws(()=>a.invoke('nth-value',[key,receiver]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');}
  for(const x of[length,zero,arrayKey,mapKey])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+});
+
+const keysOf=(a,value)=>invoke(a,'keys',[value]);
+const hasOwn=(a,value,key)=>{const k=box(a,key);try{return invoke(a,'has',[value,k]);}finally{a.release(k);}};
+test('sparse array presence distinguishes holes from undefined and survives slices, truncation, regrowth and pop',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);const arr=a.invoke('empty',[]),ref=[];
+ const resize=n=>{const v=a.number(n);try{invoke(a,'truncate',[arr,v]);js.truncate(ref,n);}finally{a.release(v);}};
+ resize(6);const key=a.number(3);invoke(a,'write',[arr,key,undefined]);js.write(ref,3,undefined);a.release(key);
+ assert.deepEqual(keysOf(a,arr),Object.keys(ref));
+ for(let i=0;i<8;i++)assert.equal(hasOwn(a,arr,i),Object.hasOwn(ref,i));
+ assert.equal(hasOwn(a,arr,'length'),true);
+ const copy=a.invoke('copy',[arr]);assert.deepEqual(keysOf(a,copy),Object.keys(ref.slice()));assert.equal(a.length(copy),6);a.release(copy);
+ const start=a.number(2),end=a.number(6),slice=a.invoke('interval',[arr,start,end]);assert.deepEqual(keysOf(a,slice),Object.keys(ref.slice(2,6)));a.release(start);a.release(end);a.release(slice);
+ assert.equal(invoke(a,'remove-last',[arr]),ref.pop());resize(2);resize(6);assert.deepEqual(keysOf(a,arr),Object.keys(ref));
+ const again=a.number(3);invoke(a,'write',[arr,again,undefined]);ref[3]=undefined;a.release(again);assert.deepEqual(keysOf(a,arr),Object.keys(ref));
+ a.release(arr);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+});
+test('array named properties use exact primitive property keys, preserve insertion order and remain separate from length',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);const arr=a.invoke('empty',[]),ref=[];
+ const pairs=[['z','中😀'],['01',undefined],[-1,true],[1.5,false],[NaN,'nan'],[Infinity,'inf'],[null,'nil'],[false,'bool'],[undefined,'missing'],['4294967295','named'],[2,'two'],[-0,'zero'],['a','last'],['z','updated']];
+ for(const[k,v]of pairs){const key=box(a,k),value=box(a,v);assert.deepEqual(invoke(a,'write',[arr,key,value]),js.write(ref,k,v));assert.deepEqual(invoke(a,'at',[arr,key]),js.at(ref,k));assert.equal(hasOwn(a,arr,k),Object.hasOwn(ref,k));assert.deepEqual(keysOf(a,arr),Object.keys(ref));a.release(key);a.release(value);a.collect();}
+ assert.equal(a.length(arr),ref.length);const n=a.number(1);invoke(a,'truncate',[arr,n]);ref.length=1;a.release(n);assert.deepEqual(keysOf(a,arr),Object.keys(ref));
+ const sparseCopy=a.invoke('copy',[arr]);assert.deepEqual(keysOf(a,sparseCopy),Object.keys(ref.slice()));a.release(sparseCopy);
+ for(const k of['not-present','00',Number.MAX_VALUE,Number.MIN_VALUE]){const key=box(a,k);assert.deepEqual(invoke(a,'at',[arr,key]),js.at(ref,k));a.release(key);}
+ const grow=a.number(128);invoke(a,'truncate',[arr,grow]);ref.length=128;a.release(grow);assert.deepEqual(keysOf(a,arr),Object.keys(ref));a.collect();assert.deepEqual(keysOf(a,arr),Object.keys(ref));
+ a.release(arr);a.collect();assert.equal(a.live(),0);
+});
+test('array object-assoc copies enumerable present slots and names into an ordinary object in JS order',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);const arr=a.invoke('empty',[]),ref=[];
+ for(const[k,v]of[[4,undefined],['name','😀'],[1,true]]){const key=box(a,k),value=box(a,v);invoke(a,'write',[arr,key,value]);ref[k]=v;a.release(key);a.release(value);}
+ const key=a.string('__proto__'),value=a.number(-0),copy=a.invoke('assoc',[arr,key,value]),expected=js.assoc(ref,'__proto__',-0);
+ assert.equal(copy.kind,13);assert.deepEqual(keysOf(a,copy),Object.keys(expected));
+ for(const k of Object.keys(expected)){const name=a.string(k);assert.deepEqual(invoke(a,'at',[copy,name]),expected[k]);a.release(name);}
+ assert.deepEqual(keysOf(a,arr),Object.keys(ref));assert.equal(hasOwn(a,copy,'length'),false);a.release(copy);a.release(key);a.release(value);a.release(arr);a.collect();assert.equal(a.live(),0);
+});
+test('primitive array length conversion matches exact JS values and rejects invalid lengths without mutation',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);const arr=a.invoke('make',[true,false,undefined]),ref=[true,false,undefined];
+ for(const n of['6','0x4',true,false,null,undefined,'1.5','4294967296',-1,NaN,Infinity]){const v=box(a,n);let error;try{js.truncate(ref,n);}catch(e){error=e;}
+  if(error)assert.throws(()=>a.invoke('truncate',[arr,v]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');else assert.deepEqual(invoke(a,'truncate',[arr,v]),n);
+  assert.equal(a.length(arr),ref.length);assert.deepEqual(keysOf(a,arr),Object.keys(ref));a.release(v);
+ }
+ a.release(arr);a.collect();assert.equal(a.live(),0);
+});
+test('shadowed array methods evaluate arguments before noncallable failure and capture the original builtin before mutation',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);
+ for(const method of['push','pop','slice']){const arr=a.invoke('empty',[]),marker=a.invoke('make',[false,null,undefined]),ref=[],refMarker=[false,null,undefined],key=a.string(method);invoke(a,'write',[arr,key,false]);ref[method]=false;
+  const entry=method==='push'?'append':method;assert.equal(invoke(a,'at',[arr,key]),false);assert.throws(()=>js[entry+'_shadow'](ref,refMarker));assert.throws(()=>a.invoke(entry+'-shadow',[arr,marker]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.deepEqual(read(a,marker),refMarker);assert.equal(a.stats().frameDepth,0);for(const x of[arr,marker,key])a.release(x);a.collect();assert.equal(a.live(),0);
+ }
+ const arr=a.invoke('empty',[]),ref=[];assert.equal(invoke(a,'append-replace',[arr]),js.append_replace(ref));assert.deepEqual(read(a,arr),Array.from(ref));assert.deepEqual(keysOf(a,arr),Object.keys(ref));a.release(arr);a.collect();assert.equal(a.live(),0);
+});
+test('bulk source-array bridging preserves own holes, named values and getter roots without invoking an overridden iterator',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);const input=[];input.length=5;const x=a.string('x'),y=a.string('中😀');input[1]=x;
+ Object.defineProperty(input,3,{get(){a.release(x);a.collect();return y;},enumerable:true});input.label=y;Object.defineProperty(input,'__proto__',{value:false,writable:true,enumerable:true});input[Symbol.iterator]=()=>{throw Error('iterator must not control a source array snapshot');};
+ const arr=a.sourceArray(input);assert.deepEqual(keysOf(a,arr),Object.keys(input));assert.equal(a.length(arr),5);assert.equal(hasOwn(a,arr,0),false);assert.equal(hasOwn(a,arr,1),true);const first=a.get(arr,1);assert.equal(a.readString(first),'x');a.release(first);const key=a.string('label');assert.equal(invoke(a,'at',[arr,key]),'中😀');a.release(key);a.release(y);a.release(arr);a.collect();assert.equal(a.live(),0);
+});
+test('random sparse and named array edits preserve exact own keys, independent slices and shallow objects through GC',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);const arr=a.invoke('empty',[]),ref=[];let seed=0x71b32a9;
+ const next=()=>{seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;return seed>>>0;},keys=['a','z','00','-0','4294967295',null,false,undefined,NaN,-1,.5],values=[undefined,null,true,false,-0,NaN,Infinity,'中😀\ud800'];
+ for(let i=0;i<512;i++){
+  const op=next()%5;
+  if(op<2){const key=op===0?next()%80:keys[next()%keys.length],value=values[next()%values.length],k=box(a,key),v=box(a,value);assert.deepEqual(invoke(a,'write',[arr,k,v]),js.write(ref,key,value));a.release(k);a.release(v);}
+  else if(op===2){const n=next()%96,v=a.number(n);invoke(a,'truncate',[arr,v]);ref.length=n;a.release(v);}
+  else if(op===3)assert.deepEqual(invoke(a,'remove-last',[arr]),ref.pop());
+  else {const start=(next()%160)-80,end=(next()%160)-80,s=a.number(start),e=a.number(end),copy=a.invoke('interval',[arr,s,e]),expected=ref.slice(start,end);assert.deepEqual(keysOf(a,copy),Object.keys(expected));assert.deepEqual(read(a,copy),Array.from(expected));a.release(copy);a.release(s);a.release(e);}
+  assert.deepEqual(keysOf(a,arr),Object.keys(ref));assert.deepEqual(read(a,arr),Array.from(ref));for(const k of[0,1,79,'length','00','a','not-present'])assert.equal(hasOwn(a,arr,k),Object.hasOwn(ref,k));a.collect();assert.equal(a.stats().frameDepth,0);
+ }
+ a.release(arr);a.collect();assert.equal(a.live(),0);
+});
+test('named array references survive resize and cycles while holes never retain an unrelated heap slot',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);const arr=a.invoke('empty',[]),key=a.string('saved'),value=a.string('retained');invoke(a,'write',[arr,key,value]);a.release(value);const n=a.number(256);invoke(a,'truncate',[arr,n]);a.release(n);a.collect();assert.equal(invoke(a,'at',[arr,key]),'retained');
+ const self=a.string('self');const returned=a.invoke('write',[arr,self,arr]);assert(a.keyEqual(returned,arr));a.release(returned);a.release(self);a.release(key);a.release(arr);a.collect();assert.equal(a.live(),0);
+ const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports,h=e['heap-new'](32,4096,16384),sparse=e['value-array-new'](h,16);e['heap-pin'](h,sparse);
+ for(let i=0;i<5;i++)e['value-number'](h,0,0x3ff00000+i);assert.equal(e['heap-live'](h),6);e['heap-collect'](h);assert.equal(e['heap-live'](h),1);assert.equal(e['value-get'](h,sparse,0),3);assert.equal(e['heap-pin'](h,4),0);assert.equal(e['last-error'](),1);e['heap-release'](h,sparse);e['heap-collect'](h);assert.equal(e['heap-live'](h),0);
+});
+test('array named-property capacity failure is atomic and raw allocating setters protect all borrowed operands',()=>{
+ const a=instantiateManagedRuntime(bytes,{maxSlots:64,initialBytes:4096,maxBytes:4096});const arr=a.sourceArray(new Array(550)),key=a.string('new'),value=a.number(7);
+ assert.throws(()=>a.invoke('write',[arr,key,value]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0002');assert.equal(invoke(a,'has',[arr,key]),false);assert.equal(a.length(arr),550);assert.equal(a.get(arr,0),undefined);assert.equal(a.stats().frameDepth,0);for(const x of[arr,key,value])a.release(x);a.collect();assert.equal(a.live(),0);
+ const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports,h=e['heap-new'](64,4096,65536),target=e['value-array-new'](h,0),name=e['value-string'](h,1);e['value-unit-set'](h,name,0,120);e['value-seal'](h,name);const child=e['value-number'](h,0,0x40450000);e['heap-auto'](h,1);
+ assert.equal(e['value-array-put'](h,target,name,child),1);assert.equal(e['last-error'](),0);e['heap-pin'](h,target);e['heap-pin'](h,name);e['heap-collect'](h);assert.equal(e['value-array-get'](h,target,name,0),child);for(const v of[target,name])e['heap-release'](h,v);e['heap-collect'](h);assert.equal(e['heap-live'](h),0);
+});
+test('source-array slice converts primitive positions before exact clamping and preserves holes',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);const arr=a.sourceArray([true,,undefined,false,,true]),ref=[true,,undefined,false,,true];
+ for(const[start,end]of[['1','5'],['0x2','Infinity'],['-2',undefined],['not-number','4'],[true,false],[null,'3.5'],['0xbcf8f9bdba22840724d028768a8a77b3e6b0f283670085477910eccc4e9d6b278a11db79c280d4e9c237774812029ac7ce82daaafca38',undefined]]){
+  const s=box(a,start),e=box(a,end),copy=a.invoke('interval',[arr,s,e]),expected=ref.slice(start,end);assert.deepEqual(keysOf(a,copy),Object.keys(expected));assert.deepEqual(read(a,copy),Array.from(expected));a.release(copy);a.release(s);a.release(e);
+ }
+ a.release(arr);a.collect();assert.equal(a.live(),0);
+});
+test('indexed source-array reads and existing string-key presence queries allocate no frames, text or collections',()=>{
+ const a=instantiateManagedRuntime(bytes);const arr=a.sourceArray([true,,undefined]),number=a.number(0),text=a.string('0'),missing=a.string('absent'),length=a.string('length');a.auto(1);const before=a.stats();
+ for(let i=0;i<128;i++){assert.equal(invoke(a,'at',[arr,number]),true);assert.equal(invoke(a,'at',[arr,text]),true);assert.equal(invoke(a,'at',[arr,missing]),undefined);assert.equal(invoke(a,'has',[arr,number]),true);assert.equal(invoke(a,'has',[arr,length]),true);assert.equal(invoke(a,'has',[arr,missing]),false);}
+ const after=a.stats();assert.equal(after.usedBytes,before.usedBytes);assert.equal(after.collections,before.collections);assert.equal(after.frameDepth,0);for(const v of[arr,number,text,missing,length])a.release(v);a.collect();assert.equal(a.live(),0);
+});
+test('real array lookup and argument traps retain caller frames and precede shadowed-method callability failure',async()=>{
+ const source=await readFile('bootstrap/runtime/memory.eli','utf8');
+ for(const[name,parameters]of[['value-array-method-check','heap value method'],['value-property-put','heap object key child']]){
+  const start=source.indexOf('  (defun '+name+' '),end=source.indexOf('  (defun ',start+3);assert(start>=0&&end>start);
+  const injected=backend.compiler.compile_ir_string(source.slice(0,start)+`  (defun ${name} (${parameters}) (load-u32 4294967295))\n`+source.slice(end),'array-trap-runtime.eli');
+  const a=instantiateManagedRuntime(Uint8Array.from(backend.managed.emit_managed_wasm(program,injected)));a.auto(1);const input=[];input.push=false;const target=a.sourceArray(input),marker=a.sourceArray([false]),frame=a.frame(1);a.frameSet(frame,0,target);
+  assert.throws(()=>a.invoke('append-shadow',[target,marker]),e=>e instanceof WebAssembly.RuntimeError);assert.equal(a.stats().frameDepth,1);assert.equal(a.get(marker,0),false);a.leaveFrame(frame);a.release(target);a.release(marker);a.collect();assert.equal(a.live(),0);
+ }
 });

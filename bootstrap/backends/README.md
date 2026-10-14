@@ -420,3 +420,29 @@ all JS and source-map bytes; no compiler module, generation or test is omitted.
 This reduces repeated startup work within the original CI budget. Complete
 compiler hosts, managed Object/Symbol/BigInt coercion, production acceptance and
 the full nine-cell bootstrap matrix remain open.
+
+## Source-array properties and sparse slots
+
+Source arrays distinguish absent indexed slots from own slots containing
+undefined. Length growth creates holes; shrink removes truncated slots; slice
+preserves holes, converts primitive positions and excludes named properties.
+Primitive property keys use exact Number/text conversion. Indices enumerate in
+ascending order, followed by named properties in insertion order; length is an
+own nonenumerable property. `object-has?`, `object-keys` and `object-assoc` accept
+arrays, with assoc producing an ordinary shallow object containing enumerable
+own properties. The raw reference-array layout and nil-filled ABI are unchanged.
+
+Named-property tables are owned by the source array, traced by GC and preserved
+across indexed storage growth. Private hole words never become handles or roots.
+Allocating setters protect receiver, key and child; failed property allocation
+does not publish a partial entry. Indexed reads and existing string-key queries
+need no temporary frames, conversion strings or collection.
+
+Static push/pop/slice calls capture lookup before evaluating arguments. A
+shadowing data property causes noncallable failure after argument evaluation;
+an argument replacing a builtin does not change the already captured call.
+Bulk source-array bridging snapshots enumerable own string-keyed properties,
+retains holes at other indices, protects earlier getter values and ignores the
+input's iterator override.
+Own proto data is copied as data; changing Array prototypes, general descriptors,
+Symbol/BigInt keys and object ToPrimitive remain explicitly unsupported.

@@ -347,12 +347,19 @@
       (unless (and (>= count 2) (or (= method "push") (= method "pop") (= method "slice")))
         (managed-fail node "managed arrays require a supported static method"))
       (let* ((receiver (snapshot-managed (lower-managed-expression (js-nth 0 children) scope state functions) state))
-             (steps (js-array (get receiver :steps) (checked-control state (if (= method "slice") "value-text-method-check" "value-array-check")
-               (runtime-arguments state (if (= method "slice") (js-array (get receiver :result) (word-constant 1))
-                                        (js-array (get receiver :result))))))) (arguments (js-array)) (i 2))
+             (available (new-managed-local state "array-method" nil))
+             (steps (js-array (get receiver :steps) (managed-guard state (word-set available
+               (runtime-call state "value-array-method-check" (runtime-arguments state
+                 (js-array (get receiver :result) (word-constant (if (= method "push") 0 (if (= method "pop") 1 2))))))))
+               (managed-guard state (capture-error state)))) (arguments (js-array)) (i 2))
         (while (< i count)
           (let ((argument (snapshot-managed (lower-managed-expression (js-nth i children) scope state functions) state)))
             (js-call steps :push (get argument :steps)) (js-call arguments :push (get argument :result))) (setq i (1+ i)))
+        ;; Lookup precedes argument evaluation; noncallable data fails afterward.
+        ;; Keep the captured result when an argument replaces the method itself.
+        (js-call steps :push (managed-guard state (word-if
+          (word-compare (word-local available) (word-constant 0) "=")
+          (word-sequence (js-array (runtime-call state "fail" (js-array (word-constant 3))) (capture-error state))) (word-constant 0))))
         (if (= method "slice")
           (let ((result (managed-result state (runtime-call state "value-source-slice" (runtime-arguments state
                           (js-array (get receiver :result) (if (> count 2) (js-nth 0 arguments) (word-constant 3))
@@ -523,15 +530,19 @@
       (when (= (js-length children) (1+ arity))
         (let* ((node (js-nth arity children)) (kind (get node :kind)) (value (get node :value))
                (operands (get node :children))
-               (nth (and (= kind "intrinsic") (= value "js-nth"))))
+               (nth (and (= kind "intrinsic") (= value "js-nth")))
+               (has (and (= kind "intrinsic") (= value "object-has?"))))
           (when (and (= (js-length operands) 2)
-                     (or (= kind "property-read") (and (= kind "intrinsic") (or nth (= value "aref"))))
+                     (or (= kind "property-read") (and (= kind "intrinsic") (or nth has (= value "aref"))))
                      (= (get (js-nth 0 operands) :kind) "reference") (= (get (js-nth 1 operands) :kind) "reference"))
             (let ((receiver (find-local scope (get (js-nth (if nth 1 0) operands) :value)))
                   (key (find-local scope (get (js-nth (if nth 0 1) operands) :value))))
               (when (and receiver key)
-                (setq result (runtime-call state "value-property-get" (runtime-arguments state
-                  (js-array (word-local receiver) (word-local key) (word-constant (if nth 1 0))))))))))) result))
+                (setq result (if has
+                  (word-if (word-compare (runtime-call state "value-object-has" (runtime-arguments state
+                    (js-array (word-local receiver) (word-local key)))) (word-constant 0) "/=") (word-constant 2) (word-constant 1))
+                  (runtime-call state "value-property-get" (runtime-arguments state
+                    (js-array (word-local receiver) (word-local key) (word-constant (if nth 1 0)))))))))))) result))
   (defun lower-managed-function (function functions runtime)
     (let* ((node (get function :source)) (children (get node :children))
            (arity (get function :publicArity)) (state (js-object :locals (js-array) :roots 0 :runtime runtime))
