@@ -103,9 +103,9 @@ test('a true WASM runtime trap restores the caller frame and does not leak trans
 });
 test('managed lowering refuses every unsupported node including unreachable code and preserves source locations and IR',()=>{
  const before=JSON.stringify(program),runtimeBefore=JSON.stringify(runtimeProgram);backend.managed.emit_managed_wasm(program,runtimeProgram);assert.equal(JSON.stringify(program),before);assert.equal(JSON.stringify(runtimeProgram),runtimeBefore);
- for(const text of['(defun f (x) (string-to-bigint x)) (export f)','(defun f (x) (if false (lambda () x) x)) (export f)','(defun f () [1 2]) (export f)',
+ for(const text of['(defun f (x) (string-to-bigint x)) (export f)','(defun f (x) (if false (async () x) x)) (export f)','(defun f () [1 2]) (export f)',
   '(defasync f () 1) (export f)','(defun f (&optional x) x) (export f)','(import "host" f) (export f)','(defun f () (js* "1")) (export f)',
-  '(defun f (g) (g)) (export f)','(defun memory () 1) (export memory)','(defun heap-new () 1) (export heap-new)']) {
+  '(defun f (g) (lambda (&rest values) (g))) (export f)','(defun memory () 1) (export memory)','(defun heap-new () 1) (export heap-new)']) {
   const ir=backend.compiler.compile_ir_string(text,'unsupported.eli');assert.throws(()=>backend.managed.emit_managed_wasm(ir,runtimeProgram),e=>e.eliscriptDiagnostic?.code==='ELI-B0001'&&e.eliscriptDiagnostic.phase==='managed-backend'&&e.eliscriptDiagnostic.location.file==='unsupported.eli');
  }
 });

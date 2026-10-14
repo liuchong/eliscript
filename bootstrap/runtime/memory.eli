@@ -373,7 +373,7 @@
             (when (= kind 12)
               (heap-mark heap (load-u32 (+ p 32)))
               (heap-mark heap (load-u32 (+ p 52))) (heap-mark heap (load-u32 (+ p 56))))
-            (when (or (= kind 7) (= kind 8) (= kind 9) (= kind 13) (= kind 14) (= kind 15) (= kind 16) (= kind 17))
+            (when (or (= kind 7) (= kind 8) (= kind 9) (= kind 13) (= kind 14) (= kind 15) (= kind 16) (= kind 17) (= kind 18) (= kind 19))
               (while (< index (load-u32 (+ p 4)))
                 (let ((child (load-u32 (+ (+ p 32) (* index 4)))))
                   (unless (and (= kind 14) (= child 4)) (heap-mark heap child))) (setq index (1+ index))))))
@@ -2703,6 +2703,62 @@
       (= (heap-key-is heap key 4 6881382 6553710 0 0 0 0 0 0 0 0) 1)
     ))
     ) 1 0))
+  ;; Function values carry a code-table index and references to mutable cells.
+  ;; Cell and capture words are stable handles, never addresses into a moving pool.
+  (defun value-cell-new (heap value)
+    (begin-operation)
+    (if (= (heap-check heap) 0) 0
+      (if (= (heap-reference-check heap value) 0) 0
+        (let ((borrowed (if (> value 3) (heap-borrow-root heap value) 1)) (result 0))
+          (if (= borrowed 0) (fail 2)
+            (progn
+              (setq result (heap-object heap 19 1 4))
+              (when (/= result 0) (store-u32 (+ (heap-block heap result) 32) value))
+              (when (> value 3) (heap-return-root heap value)) result))))))
+  (defun value-cell-get (heap cell)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-kind-check heap cell 19) 0) 0 (load-u32 (+ (heap-block heap cell) 32)))))
+  (defun value-cell-set (heap cell value)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= (heap-kind-check heap cell 19) 0) (= (heap-reference-check heap value) 0)) 0
+        (progn (store-u32 (+ (heap-block heap cell) 32) value) 1))))
+  (defun value-function-new (heap code count)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (let ((result (heap-object heap 18 count 4)))
+        (when (/= result 0) (store-u32 (+ (heap-block heap result) 12) code)) result)))
+  (defun value-function-named (heap code)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (let ((slot 1) (result 0))
+        ;; This is a weak identity lookup: it neither pins values nor adds a GC
+        ;; root. A dead named function may be recreated with a new generation.
+        (while (and (<= slot (heap-control heap 3)) (= result 0))
+          (let ((entry (heap-entry heap slot)))
+            (when (= (load-u32 (+ entry 4)) 1)
+              (let ((p (+ (heap-base heap) (load-u32 (+ entry 8)))))
+                (when (and (= (load-u32 p) 18) (= (load-u32 (+ p 16)) 1) (= (load-u32 (+ p 12)) code))
+                  (setq result (word-or (word-shl (load-u32 entry) 20) slot))))))
+          (setq slot (1+ slot)))
+        (when (= result 0)
+          (setq result (value-function-new heap code 0))
+          (when (/= result 0) (store-u32 (+ (heap-block heap result) 16) 1))) result)))
+  (defun value-function-code (heap function)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (<= function 3) (fail 3)
+        (if (= (heap-value-check heap function) 0) 0
+          (if (/= (load-u32 (heap-block heap function)) 18) (fail 3)
+            (load-u32 (+ (heap-block heap function) 12)))))))
+  (defun value-function-capture-get (heap function index)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-kind-check heap function 18) 0) 0
+        (let ((p (heap-block heap function)))
+          (if (>= index (load-u32 (+ p 4))) (fail 3)
+            (load-u32 (+ (+ p 32) (* index 4))))))))
+  (defun value-function-capture-set (heap function index cell)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= (heap-kind-check heap function 18) 0) (= (heap-kind-check heap cell 19) 0)) 0
+        (let ((p (heap-block heap function)))
+          (if (>= index (load-u32 (+ p 4))) (fail 3)
+            (progn (store-u32 (+ (+ p 32) (* index 4)) cell) 1))))))
   (export value-source-collection-new value-source-method-check value-source-method
     value-source-collection-get value-source-collection-put value-source-collection-has value-source-collection-own
     value-source-iterator-new value-source-iterator-advance value-source-iterator-next

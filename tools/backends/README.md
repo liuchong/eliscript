@@ -184,11 +184,40 @@ runtime.collect();
 
 The profile accepts primitive literals, references, `let`/`let*`, assignments,
 sequences, `if`/`cond`/`when`/`unless`, `while`, `and`/`or`/`not`, required synchronous
-parameters and direct named calls. Lisp truth preserves Number zero, NaN and
-empty strings as true; short-circuit returns preserve actual operand values.
-Every unsupported node is rejected even in an unselected branch. Mixed coercion,
-persistent literals, closures, imports, interop, async and exception expressions
-remain open; this profile does not represent the complete dynamic backend.
+parameters, direct named calls, named/lambda function values, dynamic calls and
+`funcall`. Lisp truth preserves Number zero, NaN and empty strings as true;
+short-circuit returns preserve actual operand values. Every unsupported node is
+rejected even in an unselected branch. Persistent literals, imports, arbitrary
+host interop, optional/rest/async functions, `apply`/spread and exception
+expressions remain open; this profile does not represent the complete dynamic
+backend.
+
+Function values execute through an owned WASM table and `call_indirect`, with
+zero JS imports or callbacks. Named references share identity while live;
+evaluating the same lambda creation site again produces a distinct value.
+Captured mutable bindings use GC-traced cells, including transitive outer
+captures, recursive cycles and separate bindings for each loop iteration.
+Uncaptured source locals retain their ordinary representation. Source calls
+snapshot the callee before arguments, evaluate all arguments once in order,
+evaluate extras even when ignored, and supply undefined for missing required
+arguments. A noncallable fails after its arguments have executed. Host
+`invoke(name, args)` retains the explicit descriptor's exact entry arity and
+owned-handle requirements.
+
+```lisp
+(defun make-counter (n)
+  (lambda (delta) (setq n (+ n delta)) n))
+(defun call-counter (counter delta) (funcall counter delta))
+(export make-counter call-counter)
+```
+
+Private kinds 18/19 hold function environments and capture cells. Tracing follows
+stable handles through heap growth and cycles; named identity lookup adds no
+permanent roots. Errors retain their first code and actual WASM traps unwind
+only frames created by the call. Parameter counts, duplicate names and hidden
+parameter IR are checked before emission, without modifying canonical input IR.
+Function-valued builtin members, callback collection methods and general
+function properties/conversions remain unsupported.
 
 Number operands now support `+`, `-`, `*`, `/`, `1+` and `1-`, including zero-argument
 addition/multiplication, unary negation/reciprocal and left-associated variadic
@@ -203,8 +232,10 @@ This is separate from the SameValueZero equality used by Map/Set keys. `eq`
 requires two operands. Variadic `=` compares adjacent pairs; `/=` and `not=`
 compare every pair. All operands are evaluated once in source order before the
 comparisons, even if the first pair is false. `<`, `<=`, `>` and `>=` support
-Number pairs and String pairs (UTF-16 code-unit order); mixed-type coercion is
-explicitly refused. Unsupported coercion never runs JS on behalf of WASM.
+Number pairs and String pairs (UTF-16 code-unit order), with the admitted
+nil/boolean/undefined/Number/String coercions for mixed primitives. Object,
+Symbol and BigInt ToPrimitive paths remain explicitly refused; no coercion
+runs JS on behalf of WASM.
 
 Number operands additionally support `%`/`mod`, `int32`/`uint32`, `imul32`,
 `bit-not`, `bit-and`/`bit-or`/`bit-xor`, `bit-shift-left`/`bit-shift-right` and
@@ -219,13 +250,14 @@ Integer conversions truncate toward zero and retain the low 32 bits; NaN,
 infinities and either zero become positive zero. Shift counts retain the low
 five bits after unsigned conversion, arithmetic and logical right shifts remain
 distinct, and `imul32` wraps multiplication exactly in 32 bits. Results are boxed
-Numbers; these explicit operations do not narrow other Numbers. String/object
-coercion remains unsupported and is refused before subsequent evaluation.
+Numbers; these explicit operations do not narrow other Numbers. Primitive
+String/nil/boolean/undefined operands use the shared exact Number conversion.
+General object coercion remains unsupported.
 
 Ordinary `js-array` values now use kind 14 with geometric capacity, logical
 length and GC-scanned reference cells. This is distinct from the raw kind-7
 reference-array ABI, which remains nil-filled and strictly bounded. Source
-arrays support `js-length`, `js-nth`, `aref`/`get`/`put`, Number length assignment
+arrays support `js-length`, `js-nth`, `aref`/`get`/`put`, primitive length conversion
 and static `push`/`pop`/`slice` calls. Reads retain actual undefined values;
 `js-nth` converts null/undefined to nil and has the same receiver-before-index
 order as the current JS emitter. Its nullish receiver uses empty-array semantics,
@@ -237,19 +269,18 @@ arguments are evaluated even when the method ignores them.
 
 Index keys support exact nonnegative integral Numbers (including negative zero)
 and canonical decimal strings through 2^32-2. Absent numeric keys return
-undefined without truncating or wrapping. Length assignment currently requires
-a Number that is an exact uint32; valid lengths beyond configured allocation
-capacity fail with ELI-RT0002. New/grown cells read as undefined; shrinking clears
-references, and slices preserve shallow aliases. Slice offsets support Numbers,
-nil, booleans and undefined with truncation/clamping, including NaN/infinities.
+undefined without truncating or wrapping. Length assignment converts supported
+primitives and requires an exact uint32 result; valid lengths beyond configured
+allocation capacity fail with ELI-RT0002. New/grown cells are holes, shrinking
+clears references, and slices preserve holes and shallow aliases. Slice offsets
+use primitive conversion and truncation/clamping, including NaN/infinities.
 
-This array slice does not yet implement named properties, prototypes, property
-presence/enumeration, hole-presence metadata, overridden methods or generic
-ToPrimitive/ToNumber conversions. Non-numeric property names other than length,
-non-index writes, dynamic methods and unsupported values are explicitly refused;
-none silently invoke JS. Heap inspection reads dense cells, not JS hole-presence
-metadata. Persistent vector literals remain a separate, unimplemented source
-capability. The bulk `sourceArray(input = [])` constructor creates kind-14 arrays, protects
+Source arrays distinguish holes from own undefined values, support named
+primitive keys, own-property checks/enumeration and shallow object copies, and
+retain method-shadow failures after argument evaluation. Host `sourceArray`
+keeps the same own-slot shape even if its input overrides iteration. General
+prototype/descriptor/accessor and dynamic method capabilities remain open.
+Persistent vector literals remain a separate, unimplemented source capability. The bulk `sourceArray(input = [])` constructor creates kind-14 arrays, protects
 earlier operands across later getters and rejects foreign handles. The existing
 `array()` constructor retains raw kind 7. The exported setter protects a borrowed child
 across allocation even when called without a generated frame.
@@ -266,13 +297,12 @@ before evaluating its key and RHS, retains shallow aliases and defines an own
 keys define own data. Prototype chains support source objects and null, with
 shadowing and cycle rejection. Ordinary length reads can return any field value.
 
-Keys support sealed UTF-16 strings, nil/booleans/undefined, NaN/infinities and
-exact signed integer Numbers with magnitude through 2^32-1; negative zero becomes
-`"0"`. Other numeric formatting, Symbols and general ToPrimitive are explicitly
-refused. Inherited standard Object prototype functions and an opaque default
-prototype result remain unsupported; array or other container prototypes,
-accessors/descriptors, named array properties and hole/presence semantics remain
-open. Unsupported values fail rather than silently invoke a JS helper.
+Keys support sealed UTF-16 strings, nil/booleans/undefined and all Numbers
+through exact primitive text conversion; negative zero becomes `"0"`. Symbols
+and general Object ToPrimitive are explicitly refused. Inherited standard
+Object prototype functions and an opaque default prototype result remain
+unsupported; array or other container prototypes and accessors/descriptors
+remain open. Unsupported values fail rather than silently invoke a JS helper.
 
 The bulk `sourceObject(input)` copies own enumerable string fields into kind 13,
 protecting values across subsequent host getters and defining own proto data.
@@ -297,9 +327,8 @@ Positions/counts currently accept Number, nil, booleans and undefined. Full
 binary64 positions use truncation and the method's own relative/clamp rules;
 lastIndexOf treats NaN as the final possible position. String-to-Number and
 object/Symbol conversions remain explicit refusals. Search needles and concat
-arguments accept String, nil/booleans/undefined, NaN/infinities and exact signed
-integer Numbers through magnitude 2^32-1; general finite-number formatting is
-still open. Dynamic methods, function-valued property access, String prototype
+arguments accept String, nil/booleans/undefined and all Numbers through exact
+binary64 parsing/formatting and primitive conversions. Dynamic methods, function-valued property access, String prototype
 overrides, general named properties/writes, regex, split/replace, case mapping
 and normalization remain unimplemented and explicitly refused.
 
@@ -313,6 +342,15 @@ Raw exported text operations protect borrowed inputs during allocating GC;
 unfinished String keys fail rather than expose mutable builder data. Failure and
 actual WASM traps preserve caller frames and original errors. These operations
 execute in zero-import WASM; this slice is not a complete compiler runtime.
+
+Ordinary source Map/Set values use kinds 15/16, with kind-17 live source
+iterators. Static unshadowed constructors admit source arrays, strings by code
+point, Map/Set values and source iterators. `get`/`set`/`add`/`has`/`delete`/
+`clear`, `size`, `entries`/`keys`/`values` and `next` preserve SameValueZero keys,
+insertion order and live iteration across mutation and collection. Source
+function values are identity keys; source own fields remain distinct from table
+entries. Callback methods and function-valued builtin member reads remain
+explicitly unsupported.
 
 The bulk entry protects earlier arguments across later getters. Generated frames
 retain parameters, lexical variables and temporaries; each argument is captured
@@ -332,7 +370,7 @@ peak-memory and throughput acceptance remain separate, open gates.
 ## Verification
 
 ```sh
-bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs tests/wasm-managed-tables.test.mjs tests/wasm-managed-control.test.mjs tests/wasm-managed-arithmetic.test.mjs tests/wasm-managed-word.test.mjs tests/wasm-managed-arrays.test.mjs tests/wasm-managed-objects.test.mjs tests/wasm-managed-strings.test.mjs
+bun test tests/wasm-managed-callables.test.mjs tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs tests/wasm-managed-tables.test.mjs tests/wasm-managed-control.test.mjs tests/wasm-managed-arithmetic.test.mjs tests/wasm-managed-word.test.mjs tests/wasm-managed-arrays.test.mjs tests/wasm-managed-objects.test.mjs tests/wasm-managed-strings.test.mjs
 bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=firefox bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=webkit bun test tests/direct-wasm-backend.test.mjs

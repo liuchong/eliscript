@@ -147,13 +147,17 @@ beforeAll(async () => {
     await readFile(resolve(root, "tests/fixtures/wasm-managed-tables.eli"), "utf8");
   const managedInput = resolve(directory, "managed-runtime.eli");
   await writeFile(managedInput, managedSource);
-  const [memorySeed, managedSeed] = await Promise.all([
+  const callableInput = resolve(root, "tests/fixtures/wasm-managed-callables.eli");
+  const callableSource = await readFile(callableInput, "utf8");
+  const [memorySeed, managedSeed, callableSeed] = await Promise.all([
     seedJavascript(resolve(root, "bootstrap/runtime/memory.eli"), resolve(directory, "memory-seed.mjs")),
     seedJavascript(managedInput, resolve(directory, "managed-seed.mjs")),
+    seedJavascript(callableInput, resolve(directory, "callables-seed.mjs")),
   ]);
   runtimeSeeds = {
     memory: { source, javascript: memorySeed },
     managed: { source: managedSource, javascript: managedSeed },
+    callables: { source: callableSource, javascript: callableSeed, filename: callableInput },
   };
 }, 120_000);
 afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
@@ -845,6 +849,31 @@ test("mixed primitive operators have three-generation canonical IR, numeric JS, 
  const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
  for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const s=a.string('1.5'),n=a.number(2),sum=a.invoke('add',[s,n]),product=a.invoke('multiply',[s,n]);assert.equal(a.readString(sum),'1.52');assert.equal(a.readNumber(product),3);for(const x of[s,n,sum,product])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
 });
+test("source callables preserve Seed semantics and three-generation IR, descriptor and WASM fixed points", async () => {
+  const {source,javascript:seed,filename}=runtimeSeeds.callables, runtime=runtimeSeeds.memory.source;
+  const programs=generations.map(g=>g.compiler.compile_ir_string(source,filename)), runtimes=generations.map(g=>g.compiler.compile_ir_string(runtime,"runtime.eli"));
+  const saved=programs.map(p=>JSON.stringify(p)), runtimeSaved=runtimes.map(p=>JSON.stringify(p));
+  const lowered=generations.map((g,i)=>g.managed.lower_managed_program(programs[i],runtimes[i]));
+  const bytes=generations.map((g,i)=>g.managed.emit_managed_wasm(programs[i],runtimes[i],{maximumPages:16}));
+  for(let i=0;i<3;i++){
+    assert.deepEqual(programs[0],programs[i]);assert.equal(generations[0].compiler.serialize_ir_program(programs[0]),generations[i].compiler.serialize_ir_program(programs[i]));
+    assert.equal(generations[i].compiler.emit_ir_string(programs[i]),seed);assert.deepEqual(lowered[0],lowered[i]);assert.deepEqual(bytes[0],bytes[i]);
+    assert.equal(JSON.stringify(programs[i]),saved[i]);assert.equal(JSON.stringify(runtimes[i]),runtimeSaved[i]);
+  }
+  const reference=await import('data:text/javascript;base64,'+Buffer.from(seed).toString('base64'));
+  const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
+  for(const artifact of bytes){
+    assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(Uint8Array.from(artifact))),[]);
+    const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);
+    const num=(name,args=[])=>{const r=a.invoke(name,args);try{return a.readNumber(r);}finally{a.release(r);}};
+    const x=a.number(4),y=a.number(5),f=a.invoke('make-adder',[x]);assert.equal(num('apply-one',[f,y]),reference.make_adder(4)(5));
+    const pair=a.invoke('make-box',[x]),write=a.get(pair,0),read=a.get(pair,1),box=reference.make_box(4);
+    for(const value of[-0,NaN,Infinity,Number.MIN_VALUE]){const n=a.number(value),out=a.invoke('apply-one',[write,n]);assert(Object.is(a.readNumber(out),box[0](value)));a.release(n);a.release(out);a.collect();assert(Object.is(num('apply-zero',[read]),box[1]()));}
+    assert.equal(a.invoke('named-same'),true);assert.equal(a.invoke('fresh-same'),false);assert.equal(num('callee-order'),reference.callee_order());
+    for(const value of[x,y,f,pair,write,read])a.release(value);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+  }
+});
+
 describe("browser compiler backends", () => {
   beforeAll(async () => {
     // Compiler bundling and browser process startup are fixture preparation.
@@ -1417,6 +1446,48 @@ describe("browser compiler backends", () => {
       }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
     },{source,runtime});
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-source-collections.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
+  });
+  test("browser source closures share mutable captures, preserve dynamic effects and reclaim complete graphs",async()=>{
+    const source=runtimeSeeds.callables.source,runtime=runtimeSeeds.memory.source;
+    const result=await evaluateBrowser(async({bundle,source,runtime})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));let jsUrl;
+      try{
+        const c=await import(url),p=c.compile_ir_string(source,'browser-callables.eli'),rt=c.compile_ir_string(runtime,'runtime.eli');
+        const bytes=Uint8Array.from(c.emit_managed_wasm(p,rt,{maximumPages:16})),check=(value,label)=>{if(!value)throw Error(label);};
+        check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'zero imports');
+        jsUrl=URL.createObjectURL(new Blob([c.emit_ir_string(p)],{type:'text/javascript'}));const ref=await import(jsUrl),a=c.instantiateManagedRuntime(bytes);a.auto(1);
+        const num=(name,args=[])=>{const v=a.invoke(name,args);try{return a.readNumber(v);}finally{a.release(v);}};
+        const four=a.number(4),five=a.number(5),adder=a.invoke('make-adder',[four]);check(num('apply-one',[adder,five])===ref.make_adder(4)(5),'escape');check(num('funcall-one',[adder,five])===9,'funcall');
+        const pair=a.invoke('make-box',[four]),write=a.get(pair,0),read=a.get(pair,1),reference=ref.make_box(4);
+        for(const value of[-0,NaN,Infinity,-Infinity,Number.MIN_VALUE,-Number.MIN_VALUE,Number.MAX_VALUE]){const n=a.number(value),out=a.invoke('apply-one',[write,n]);check(Object.is(a.readNumber(out),reference[0](value)),'write');a.release(out);a.release(n);a.collect();check(Object.is(num('apply-zero',[read]),reference[1]()),'shared read');}
+        const first=a.invoke('nested',[four]),second=a.invoke('apply-one',[first,five]);check(num('apply-one',[second,four])===ref.nested(4)(5)(4),'transitive captures');
+        const recursive=a.invoke('recursive'),count=a.number(24);check(num('apply-one',[recursive,count])===ref.recursive()(24),'recursive closure');
+        const items=a.invoke('capture-each',[four]);for(let i=0;i<4;i++){const f=a.get(items,i);check(num('apply-zero',[f])===i,'iteration cell');a.release(f);}
+        check(a.invoke('named-same')===true&&a.invoke('fresh-same')===false&&a.invoke('repeated-same')===false,'identity');check(num('callee-order')===1,'callee snapshot');
+        const marker=a.sourceArray([false]),identity=a.invoke('named-value'),frame=a.frame(1);a.frameSet(frame,0,marker);let refused=false;
+        try{a.invoke('invoke-order',[false,marker]);}catch(e){refused=e.eliscriptDiagnostic?.code==='ELI-RT0003';}check(refused,'noncallable error');
+        const effect=a.get(marker,0);check(a.readNumber(effect)===2,'argument order');a.release(effect);check(a.stats().frameDepth===1,'caller frame');
+        check(a.invoke('apply-zero',[identity])===undefined,'omitted required');a.leaveFrame(frame);
+        check(a.invoke('direct-missing')===undefined,'direct omission');check(num('direct-extra',[marker])===7,'direct extra');
+        const emptyMap=a.invoke('ignored-constructor',[marker]);a.release(emptyMap);const ignored=a.get(marker,0);check(num('apply-zero',[ignored])===7,'ignored operand evaluation');a.release(ignored);
+        const many=a.invoke('many-value'),manyLambda=a.invoke('many-lambda');for(const f of[many,manyLambda]){check(num('many-extra',[f,marker])===ref.many_extra(ref.many,[false]),'uniform many arguments');check(Number.isNaN(num('apply-zero',[f])),'omitted many');}
+        const parity=a.invoke('parity-functions'),even=a.get(parity,0),odd=a.get(parity,1),parityRef=ref.parity_functions();for(let i=0;i<17;i++){const n=a.number(i);check(a.invoke('apply-one',[even,n])===parityRef[0](i),'even');check(a.invoke('apply-one',[odd,n])===parityRef[1](i),'odd');a.release(n);a.collect();}
+        const parallel=a.invoke('parallel-capture',[four]),sequential=a.invoke('sequential-captures',[four]),old=a.get(sequential,0),next=a.get(sequential,1),hygienic=a.invoke('hygienic-capture',[four,five,four,five,four]);
+        check(num('apply-zero',[parallel])===4&&num('apply-zero',[old])===4&&num('apply-zero',[next])===9,'capture shadowing');check(num('apply-zero',[hygienic])===22,'ABI hygiene');
+        const keys=a.invoke('function-keys'),seven=a.get(keys,0);check(a.readNumber(seven)===7&&a.get(keys,1)===false&&a.get(keys,2)===true,'function keys');a.release(seven);
+        const guarded=a.invoke('guarded-box',[four]),badWrite=a.get(guarded,0),goodRead=a.get(guarded,1);refused=false;try{a.invoke('apply-two',[badWrite,false,marker]);}catch(e){refused=e.eliscriptDiagnostic?.code==='ELI-RT0003';}check(refused&&num('apply-zero',[goodRead])===4,'failed assignment retains cell');
+        const untouched=a.sourceArray([false]);refused=false;try{a.invoke('earlier-failure',[identity,untouched]);}catch(e){refused=e.eliscriptDiagnostic?.code==='ELI-RT0003';}check(refused&&a.get(untouched,0)===false,'first error order');
+        const box=a.invoke('make-box',[false]),setter=a.get(box,0),getter=a.get(box,1),self=a.invoke('apply-one',[setter,box]);a.release(self);a.collect();const alias=a.invoke('apply-zero',[getter]);check(a.keyEqual(alias,box),'capture cycle');a.release(alias);
+        for(const value of[four,five,adder,pair,write,read,first,second,recursive,count,items,marker,identity,many,manyLambda,parity,even,odd,parallel,sequential,old,next,hygienic,keys,guarded,badWrite,goodRead,untouched,box,setter,getter])a.release(value);
+        a.collect();check(a.live()===0&&a.stats().frameDepth===0,'complete cleanup');
+        const small=c.instantiateManagedRuntime(bytes,{maxSlots:128,initialBytes:4096,maxBytes:16384});small.auto(1);const pressure=small.sourceArray([false]),limit=small.number(10000),caller=small.frame(1);small.frameSet(caller,0,pressure);refused=false;
+        try{small.invoke('retain-closures',[pressure,limit]);}catch(e){refused=e.eliscriptDiagnostic?.code==='ELI-RT0002';}check(refused&&small.stats().frameDepth===1,'capacity error and caller frame');small.collect();const last=small.get(pressure,0);check(Number.isInteger(small.readNumber(last))&&small.readNumber(last)<10000,'capacity effects');small.release(last);small.leaveFrame(caller);small.release(pressure);small.release(limit);small.collect();check(small.live()===0,'partial environments reclaimed');
+        const start=runtime.indexOf('  (defun value-cell-get (heap cell)'),end=runtime.indexOf('  (defun value-cell-set',start);check(start>=0&&end>start,'fault location');const faulty=runtime.slice(0,start)+'  (defun value-cell-get (heap cell) (load-u32 4294967295))'+String.fromCharCode(10)+runtime.slice(end);
+        const broken=c.instantiateManagedRuntime(Uint8Array.from(c.emit_managed_wasm(p,c.compile_ir_string(faulty,'browser-cell-trap.eli'),{maximumPages:16})));broken.auto(1);const bx=broken.number(4),by=broken.number(5),bf=broken.invoke('make-adder',[bx]),bfFrame=broken.frame(1);broken.frameSet(bfFrame,0,bx);let trapped=false;
+        try{broken.invoke('apply-one',[bf,by]);}catch(e){trapped=e instanceof WebAssembly.RuntimeError;}check(trapped&&broken.stats().frameDepth===1,'actual indirect trap cleanup');const saved=broken.frameGet(bfFrame,0);check(broken.readNumber(saved)===4,'caller root');broken.release(saved);broken.leaveFrame(bfFrame);for(const v of[bx,by,bf])broken.release(v);broken.collect();check(broken.live()===0,'trap graph cleanup');return [...bytes];
+      }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
+    },{source,runtime});
+    assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-callables.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
   });
   test("browser ordinary managed control executes boxed values with automatic roots and source-equivalent semantics",async()=>{
     const source=await readFile(resolve(root,"tests/fixtures/wasm-managed-control.eli"),"utf8"),runtime=await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8");
