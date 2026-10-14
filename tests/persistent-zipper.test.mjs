@@ -135,3 +135,36 @@ test("persistent zippers navigate edit and rebuild stack-safe trees", async () =
     await rm(directory, { recursive: true, force: true });
   }
 }, 30_000);
+
+test("deep zipper ascent reads indexed ancestor slots without reducing wide parent vectors", async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), "eliscript-zipper-indexed-"));
+  const seedDirectory = resolve(directory, "seed");
+  try {
+    await compileFamily(seedCompiler, seedDirectory);
+    const script = `
+      import assert from 'node:assert/strict';
+      import {PersistentVector,persistentVector} from ${JSON.stringify(resolve(root,"runtime/core/vector.mjs"))};
+      import {COLLECTION_REDUCE} from ${JSON.stringify(resolve(root,"runtime/core/collection-internals.mjs"))};
+      import {persistentList} from ${JSON.stringify(resolve(root,"runtime/core/list.mjs"))};
+      import {meta,withMeta} from ${JSON.stringify(resolve(root,"runtime/core/metadata.mjs"))};
+      const zipper=await import(${JSON.stringify(resolve(seedDirectory,"stdlib/core/zipper.eli"))});
+      const original=PersistentVector.prototype[COLLECTION_REDUCE];let visits=0;
+      PersistentVector.prototype[COLLECTION_REDUCE]=function(reducer,...initial){
+        return original.call(this,(...args)=>{if(this.count>32)visits++;return reducer(...args);},...initial);
+      };
+      try {
+        let value=null;for(let i=0;i<512;i++)value=persistentVector(value);
+        let location=zipper.vector_zipper(value);for(let i=0;i<512;i++)location=zipper.down(location);
+        assert.equal(zipper.node(location),null);assert.equal(zipper.root(location),value);
+        let edited=zipper.root(zipper.replace(location,undefined));for(let i=0;i<512;i++)edited=edited.nth(0);assert.equal(edited,undefined);
+        assert.equal(visits,0,'one ancestor lookup must not scan wide parent vectors');
+        const source=persistentVector(7),base=zipper.vector_zipper(source),configuration=meta(base);
+        const listPath=persistentList(persistentVector(),persistentList(),null,persistentVector(source),false);
+        for(const child of[undefined,null,false,0]){const loc=withMeta(persistentVector(child,listPath),configuration);assert.equal(zipper.node(loc),child);assert.equal(zipper.node(zipper.up(loc)),source);}
+        const malformed=withMeta(persistentVector(undefined,persistentVector()),configuration);assert.throws(()=>zipper.up(malformed),/invalid zipper internal slot/);
+
+      }finally{PersistentVector.prototype[COLLECTION_REDUCE]=original;}
+    `;
+    await runSuccessful(["bun","--preload",bunPreload,"--eval",script]);
+  } finally {await rm(directory,{recursive:true,force:true});}
+}, 30_000);

@@ -1311,3 +1311,30 @@ zipper-slot 用 reduce 遍历整个父节点向量取尾元素，深树回溯出
 完整 Chromium（默认全量）、Firefox 与 WebKit 后端套件均 41/41 通过，
 包含普通字符串在浏览器内编译后实际执行、零 imports 和同目标字节对照。
 冻结后的受影响契约检查通过，签名交付保留数值及语义实验范围。
+
+
+### zipper 的 indexed slot 修复与 CI 验收
+
+字符串批次已独立签名交付。继续修复 macOS Emacs 30.2 的既有 zipper CI：
+原源码以 reduce 取父节点向量的尾项，深度 12000 的两次回溯重复扫描前缀；
+原 CI bootstrap 约 15.363 秒，四个宿主随后并行，Node 两格虽退出 0，Bun
+两格仍在执行时总测试达到原 30 秒预算而被终止。保留原日志，不加大预算。
+
+新增真实 Red 用实际 Collection reduce protocol 计数；深度 512 的两次回溯
+扫描 261600 个 wide parent-vector 元素。Green 对 concrete persistent Vector
+使用既有 nth capability，非 Vector 的 reducible 内部路径保留原实现与诊断。
+验收同时检查 nil/false/undefined/0 节点、unchanged root identity、changed root
+重建、List path fallback 和 malformed path 的原错误。旧深度 12000、四个
+seed/self-hosted × Bun/Node 组合、输出/Source Map 字节对照及 30 秒 deadline
+均保持不变；本地完整原 zipper 验收约 7.407 秒，新增计数断言为零扫描。
+本批原始 make test 退出 0：核心 Emacs 167/167、Bun 705/705（130 文件），
+应用 Emacs 3/3、Bun 216/216（23 文件）与 CLI 通过；严格字节编译退出 0。
+本次完整运行的原 zipper 用例约 7.348 秒，新增计数断言约 0.922 秒。
+三个真实浏览器各执行 seed/self-hosted 两种产物，六个组合实际完成原深度
+12000、全部报告对照与零扫描断言；编译出的 JS/Source Map 同目标字节一致。
+浏览器临时探针首次在 favicon 请求上退出失败，所有语义断言已通过；仅修复
+临时服务器的空响应与缺失文件处理后重测退出 0，首份失败日志保留。
+原生成器刷新受影响 stable corpus 身份；fixture、证据库存、原门槛及版本不变。
+远端 CI 须在本修复签名提交并推送后继续核对，不能以本地通过宣称完成。
+下一功能增量仍为完整精确的 Number/文本转换，随后推进完整动态运行时及
+编译器宿主；本次标准库性能修复不关闭完整九格或 WASM 网格稳定化。

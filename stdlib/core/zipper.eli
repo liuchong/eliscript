@@ -21,18 +21,25 @@
       (throw (new globalThis/TypeError (str label " must be a function")))))
   (defun zipper-slot
     (values target-index)
-    (let ((index 0) (box zipper-missing))
-      (Collection/reduce
-        values
-        (lambda
-          (state value)
-          (if (= index target-index)
-            (progn (setq box (js-object :value value)) (Collection/reduced state))
-            (progn (setq index (1+ index)) state)))
-        nil)
-      (if (eq box zipper-missing)
-        (throw (new globalThis/TypeError "invalid zipper internal slot"))
-        (get box :value))))
+    ;; Ancestor stacks and locations are persistent vectors. Use their indexed
+    ;; capability instead of reducing every prefix during a deep ascent.
+    (if (Collection/isVector values)
+      (let ((value (Collection/nth values target-index zipper-missing)))
+        (if (eq value zipper-missing)
+          (throw (new globalThis/TypeError "invalid zipper internal slot"))
+          value))
+      (let ((index 0) (box zipper-missing))
+        (Collection/reduce
+          values
+          (lambda
+            (state value)
+            (if (= index target-index)
+              (progn (setq box (js-object :value value)) (Collection/reduced state))
+              (progn (setq index (1+ index)) state)))
+          nil)
+        (if (eq box zipper-missing)
+          (throw (new globalThis/TypeError "invalid zipper internal slot"))
+          (get box :value)))))
   (defun zipper-path-value (location) (zipper-slot location 1))
   (defun zipper-config-value (location key) (Collection/get (meta location) key))
   (defun zipper-location

@@ -66,6 +66,10 @@ an end location fail with stable `TypeError` diagnostics.
 Navigation, upward reconstruction, depth-first enumeration, and removal use
 explicit loops rather than the JavaScript call stack. Working state is bounded
 by the persistent path and immediate sibling collections.
+Ancestor-stack and other persistent Vector slots use indexed access; retrieving
+one ancestor must not reduce its whole prefix. Non-Vector reducible internal
+paths retain the existing traversal and missing-slot diagnostic. This preserves
+node values including undefined and the identity of unchanged roots.
 
 ## Acceptance Criteria
 
