@@ -39,7 +39,7 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
   try {
    // Protect operands before later getters or result allocation can collect them.
    const values=Array.from(input,x=>{const v=id(x);call('heap-pin',heap,v);borrowed.push(v);return v;});
-   const value=call('value-refs',heap,kind,word(values.length)),offset=call('value-data',heap,value,kind),target=view();
+   const value=kind===14?call('value-array-new',heap,word(values.length)):call('value-refs',heap,kind,word(values.length)),offset=call('value-data',heap,value,kind),target=view();
    values.forEach((v,i)=>target.setUint32(offset+i*4,v,true));return wrap(value);
   } finally {for(const value of borrowed)call('heap-release',heap,value);}
  }
@@ -105,12 +105,12 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
    new Uint8Array(e.memory.buffer,offset,values.length).set(values);return wrap(value);
   },
   readBytes(value) {const {length,offset}=data(value,6);return new Uint8Array(e.memory.buffer,offset,length).slice();},
-  array(input=[]) {return refs(input,7);},record(input=[]) {return refs(input,8);},
+  array(input=[]) {return refs(input,7);},sourceArray(input=[]) {return refs(input,14);},record(input=[]) {return refs(input,8);},
   get(value,index) {return wrap(call('value-get',heap,id(value),word(index)));},
   set(value,index,child) {call('value-set',heap,id(value),word(index),id(child));},
   length(value) {return call('value-length',heap,id(value));},
-  resize(value,length) {const v=id(value),kind=call('value-kind',heap,v);if(kind!==6&&kind!==7)fail(1);
-   call(kind===6?'value-bytes-resize':'value-refs-resize',heap,v,word(length));},
+  resize(value,length) {const v=id(value),kind=call('value-kind',heap,v);if(kind!==6&&kind!==7&&kind!==14)fail(1);
+   call(kind===6?'value-bytes-resize':kind===14?'value-array-resize':'value-refs-resize',heap,v,word(length));},
   pin(value) {const v=id(value);call('heap-pin',heap,v);if(v>3)handles.get(value).roots++;},
   release(value) {
    if(value===null||typeof value==='boolean'||value===undefined)return;

@@ -241,10 +241,112 @@
         (setq left (1+ left)))
       (js-call steps :push (root-local state local))
       (js-object :steps (word-sequence steps) :result (word-local local))))
+  (defun lower-managed-key (node scope state functions)
+    ;; Property contexts interpret literal keywords as strings, as the JS emitter
+    ;; does. This does not enable ordinary persistent keyword literals.
+    (if (and (= (get node :kind) "literal") (get node :properties nil) (= (get (get node :properties) :literalKind nil) "keyword"))
+      (lower-managed-literal (js-object :kind "literal" :value (get node :value) :children (js-array)) state)
+      (lower-managed-expression node scope state functions)))
+  (defun lower-managed-array (node scope state functions)
+    (let ((children (get node :children)) (steps (js-array)) (values (js-array)) (i 0))
+      (while (< i (js-length children))
+        (let ((value (snapshot-managed (lower-managed-expression (js-nth i children) scope state functions) state)))
+          (js-call steps :push (get value :steps)) (js-call values :push (get value :result))) (setq i (1+ i)))
+      (let ((result (managed-result state (runtime-call state "value-array-new" (runtime-arguments state
+                      (js-array (word-constant (js-length children))))) t)))
+        (js-call steps :push (get result :steps)) (setq i 0)
+        (while (< i (js-length values))
+          (js-call steps :push (checked-control state "value-set" (runtime-arguments state
+            (js-array (get result :result) (word-constant i) (js-nth i values))))) (setq i (1+ i)))
+        (put result :steps (word-sequence steps)) result)))
+  (defun lower-managed-access (node scope state functions)
+    (let* ((children (get node :children)) (kind (get node :kind))
+           (nth (and (= kind "intrinsic") (= (get node :value) "js-nth")))
+           (write (= kind "property-write")) (count (js-length children)))
+      (unless (if write (= count 3) (if (= kind "property-read") (or (= count 2) (= count 3)) (= count 2)))
+        (managed-fail node "invalid managed array access arity"))
+      (let* ((receiver (snapshot-managed (lower-managed-expression (js-nth (if nth 1 0) children) scope state functions) state))
+             (key (snapshot-managed (if nth (lower-managed-expression (js-nth 0 children) scope state functions)
+                                     (lower-managed-key (js-nth 1 children) scope state functions)) state))
+             (steps (js-array (get receiver :steps) (get key :steps))))
+        (if write
+          (let ((value (snapshot-managed (lower-managed-expression (js-nth 2 children) scope state functions) state)))
+            ;; Capture the assignment reference before evaluating the RHS.
+            (js-call steps :push (checked-control state "value-array-key-check" (runtime-arguments state
+              (js-array (get receiver :result) (get key :result)))) (get value :steps)
+              (checked-control state "value-array-put" (runtime-arguments state
+                (js-array (get receiver :result) (get key :result) (get value :result)))))
+            (js-object :steps (word-sequence steps) :result (get value :result)))
+          (let ((result (managed-result state (runtime-call state "value-array-get" (runtime-arguments state
+                         (js-array (get receiver :result) (get key :result) (word-constant (if nth 1 0))))) t)))
+            (js-call steps :push (get result :steps))
+            (when (= count 3)
+              (let* ((fallback (lower-managed-expression (js-nth 2 children) scope state functions))
+                     (local (new-managed-local state "default" t)))
+                (js-call steps :push (managed-guard state (word-if
+                  (js-object :kind "or" :type "i32" :value "or" :children
+                    (js-array (word-compare (get result :result) (word-constant 0) "=")
+                              (word-compare (get result :result) (word-constant 3) "=")))
+                  (word-sequence (js-array (get fallback :steps) (managed-guard state (word-set local (get fallback :result)))))
+                  (managed-guard state (word-set local (get result :result))))) (root-local state local))
+                (put result :result (word-local local))))
+            (put result :steps (word-sequence steps)) result)))))
+  (defun lower-managed-array-method (node scope state functions)
+    (let* ((children (get node :children)) (count (js-length children)) (key (js-nth 1 children))
+           (method (and key (= (get key :kind) "literal") (get key :value))))
+      (unless (and (>= count 2) (or (= method "push") (= method "pop") (= method "slice")))
+        (managed-fail node "managed arrays require a supported static method"))
+      (let* ((receiver (snapshot-managed (lower-managed-expression (js-nth 0 children) scope state functions) state))
+             (steps (js-array (get receiver :steps) (checked-control state "value-array-check" (runtime-arguments state
+                            (js-array (get receiver :result)))))) (arguments (js-array)) (i 2))
+        (while (< i count)
+          (let ((argument (snapshot-managed (lower-managed-expression (js-nth i children) scope state functions) state)))
+            (js-call steps :push (get argument :steps)) (js-call arguments :push (get argument :result))) (setq i (1+ i)))
+        (if (= method "slice")
+          (let ((result (managed-result state (runtime-call state "value-array-slice" (runtime-arguments state
+                          (js-array (get receiver :result) (if (> count 2) (js-nth 0 arguments) (word-constant 3))
+                            (if (> count 3) (js-nth 1 arguments) (word-constant 3))))) t)))
+            (js-call steps :push (get result :steps)) (put result :steps (word-sequence steps)) result)
+          (let ((length (new-managed-local state "array-length" nil)) (next (new-managed-local state "array-next-length" nil)))
+            (js-call steps :push (managed-guard state (word-set length (runtime-call state "value-length" (runtime-arguments state
+              (js-array (get receiver :result)))))) (managed-guard state (capture-error state)))
+            (if (= method "push")
+              (let ((result (managed-result state (runtime-call state "heap-number-from-word" (runtime-arguments state
+                             (js-array (word-local next) (word-constant 0)))) t)))
+                (js-call steps :push (managed-guard state (word-set next (word-node "word-arithmetic"
+                  (js-array (word-local length) (word-constant (js-length arguments))) "+")))
+                  (managed-guard state (word-if (word-compare (word-local next) (word-local length) "<")
+                    (word-sequence (js-array (runtime-call state "fail" (js-array (word-constant 2))) (capture-error state))) (word-constant 0)))
+                  ;; Allocate and root the return value before any visible mutation.
+                  (get result :steps) (checked-control state "value-array-resize" (runtime-arguments state
+                    (js-array (get receiver :result) (word-local next))))) (setq i 0)
+                (while (< i (js-length arguments))
+                  (js-call steps :push (checked-control state "value-set" (runtime-arguments state
+                    (js-array (get receiver :result) (word-node "word-arithmetic" (js-array (word-local length) (word-constant i)) "+")
+                      (js-nth i arguments))))) (setq i (1+ i)))
+                (put result :steps (word-sequence steps)) result)
+              (let ((result (managed-result state (word-if (word-compare (word-local length) (word-constant 0) "=")
+                              (word-constant 3) (runtime-call state "value-get" (runtime-arguments state
+                                (js-array (get receiver :result) (word-node "word-arithmetic" (js-array (word-local length) (word-constant 1)) "-"))))) t)))
+                (js-call steps :push (get result :steps)
+                  (checked-control state "value-array-resize" (runtime-arguments state
+                    (js-array (get receiver :result) (word-if (word-compare (word-local length) (word-constant 0) "=")
+                      (word-constant 0) (word-node "word-arithmetic" (js-array (word-local length) (word-constant 1)) "-"))))))
+                (put result :steps (word-sequence steps)) result)))))))
   (defun lower-managed-expression (node scope state functions)
     (let ((kind (get node :kind)) (value (get node :value)) (children (get node :children)))
       (cond
         ((= kind "literal") (lower-managed-literal node state))
+        ((= kind "array-literal") (lower-managed-array node scope state functions))
+        ((or (= kind "property-read") (= kind "property-write")
+             (and (= kind "intrinsic") (or (= value "aref") (= value "js-nth"))))
+         (lower-managed-access node scope state functions))
+        ((= kind "method-call") (lower-managed-array-method node scope state functions))
+        ((and (= kind "intrinsic") (= value "js-length"))
+         (unless (= (js-length children) 1) (managed-fail node "invalid managed length arity"))
+         (let* ((operand (lower-managed-expression (js-nth 0 children) scope state functions))
+                (result (managed-result state (runtime-call state "value-source-length" (runtime-arguments state (js-array (get operand :result)))) t)))
+           (put result :steps (word-sequence (js-array (get operand :steps) (get result :steps)))) result))
         ((= kind "reference")
          (let ((local (find-local scope value)))
            (unless local (managed-fail node (str "unknown managed local: " value)))

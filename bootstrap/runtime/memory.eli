@@ -372,7 +372,7 @@
             (when (= kind 12)
               (heap-mark heap (load-u32 (+ p 32)))
               (heap-mark heap (load-u32 (+ p 52))) (heap-mark heap (load-u32 (+ p 56))))
-            (when (or (or (= kind 7) (= kind 8)) (= kind 9))
+            (when (or (= kind 7) (= kind 8) (= kind 9) (= kind 14))
               (while (< index (load-u32 (+ p 4)))
                 (heap-mark heap (load-u32 (+ (+ p 32) (* index 4)))) (setq index (1+ index))))))
         (setq slot 1)
@@ -510,7 +510,7 @@
   (defun heap-refs-check (heap value)
     (if (= (heap-value-check heap value) 0) 0
       (let ((kind (load-u32 (heap-block heap value))))
-        (if (or (= kind 7) (= kind 8)) 1 (fail 1)))))
+        (if (or (= kind 7) (= kind 8) (= kind 14)) 1 (fail 1)))))
   (defun value-get (heap value index)
     (begin-operation) (if (= (heap-check heap) 0) 0
       (if (= (heap-refs-check heap value) 0) 0
@@ -550,6 +550,140 @@
     (begin-operation) (if (= (heap-check heap) 0) 0 (heap-value-resize heap value count 7 4)))
   (defun value-bytes-resize (heap value count)
     (begin-operation) (if (= (heap-check heap) 0) 0 (heap-value-resize heap value count 6 1)))
+  ;; Source arrays (14) have a logical length separate from capacity. The raw
+  ;; reference array (7) keeps its existing nil-filled, strictly bounded ABI.
+  (defun value-array-new (heap count)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (let ((value (heap-object heap 14 count 4)) (i 0))
+        (when (/= value 0)
+          (while (< i count) (store-u32 (+ (+ (heap-block heap value) 32) (* i 4)) 3) (setq i (1+ i)))) value)))
+  (defun value-array-check (heap value)
+    (begin-operation) (if (= (heap-check heap) 0) 0 (heap-kind-check heap value 14)))
+  (defun value-array-resize (heap value count)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-kind-check heap value 14) 0) 0
+        (if (> count 67108854) (fail 2)
+          (let* ((p (heap-block heap value)) (old (load-u32 (+ p 4)))
+                 (capacity (load-u32 (+ p 8))) (result 1) (i (if (< count old) count old)))
+            (when (> count capacity)
+              (setq capacity (if (> count (* capacity 2)) count (* capacity 2)))
+              (when (> capacity 67108854) (setq capacity 67108854))
+              (setq result (heap-value-resize heap value capacity 14 4)))
+            (when (= result 1)
+              ;; Reacquire the pointer after allocation/collection may grow memory.
+              (setq p (heap-block heap value))
+              (while (< i (if (< count old) old count))
+                (store-u32 (+ (+ p 32) (* i 4)) 3) (setq i (1+ i)))
+              (store-u32 (+ p 4) count)) result)))))
+  ;; Exact uint32 predicate without rounded float-to-int conversion or allocation.
+  (defun heap-number-uint (heap value)
+    (let* ((p (+ (heap-block heap value) 32)) (low (load-u32 p)) (high (load-u32 (+ p 4)))
+           (exponent (word-and (word-shr high 20) 2047)) (e (- exponent 1023)))
+      (if (and (= low 0) (= (word-and high 2147483647) 0)) 1
+        (if (or (/= (word-and high 2147483648) 0) (< exponent 1023) (> exponent 1054)) 0
+          (if (< e 20)
+            (if (and (= low 0) (= (word-and high (1- (word-shl 1 (- 20 e)))) 0)) 1 0)
+            (if (= e 20) (if (= low 0) 1 0)
+              (if (= (word-and low (1- (word-shl 1 (- 52 e)))) 0) 1 0)))))))
+  (defun heap-array-length-key (heap key)
+    (if (<= key 3) 0
+      (if (/= (load-u32 (heap-block heap key)) 5) 0
+        (let ((p (heap-block heap key)))
+          (if (and (= (load-u32 (+ p 4)) 6) (= (load-u16 (+ p 32)) 108)
+                   (= (load-u16 (+ p 34)) 101) (= (load-u16 (+ p 36)) 110)
+                   (= (load-u16 (+ p 38)) 103) (= (load-u16 (+ p 40)) 116) (= (load-u16 (+ p 42)) 104)) 1 0)))))
+  (defun heap-array-index (heap key)
+    (if (<= key 3) 4294967295
+      (let* ((p (heap-block heap key)) (kind (load-u32 p)) (result 4294967295))
+        (if (= kind 4)
+          (progn (when (= (heap-number-uint heap key) 1) (setq result (heap-number-word heap key))) 0)
+          (if (= kind 5)
+            (let ((length (load-u32 (+ p 4))) (i 0) (valid 1) (number 0))
+              ;; Named properties/prototypes are not enabled by numeric indexing.
+              (when (or (= length 0) (> length 10)) (setq valid 0))
+              (while (< i length)
+                (let ((unit (load-u16 (+ (+ p 32) (* i 2)))))
+                  (if (or (< unit 48) (> unit 57)) (progn (fail 3) (setq valid 0))
+                    (if (or (> number 429496729) (and (= number 429496729) (> unit 52)))
+                      (setq valid 0) (setq number (+ (* number 10) (- unit 48))))))
+                (setq i (1+ i)))
+              (when (and (> length 1) (= (load-u16 (+ p 32)) 48)) (setq valid 0))
+              (when (= valid 1) (setq result number)) 0)
+            (fail 1))) result)))
+  (defun value-source-length (heap value)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= value 0) (= value 3)) (heap-number-from-word heap 0 0)
+        (if (<= value 3) 3
+          (if (= (heap-value-check heap value) 0) 0
+            (let ((p (heap-block heap value)))
+              (if (or (= (load-u32 p) 14) (= (load-u32 p) 5))
+                (heap-number-from-word heap (load-u32 (+ p 4)) 0) 3)))))))
+  (defun value-array-get (heap value key nullish)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-reference-check heap key) 0) 0
+        (if (and (= nullish 1) (or (= value 0) (= value 3)))
+          ;; The JS fallback is an empty array, whose length is still Number 0.
+          ;; Validate every other key instead of hiding unsupported conversions.
+          (if (= (heap-array-length-key heap key) 1) (heap-number-from-word heap 0 0)
+            (progn (heap-array-index heap key) 0))
+          (if (= (heap-kind-check heap value 14) 0) 0
+            (if (= (heap-array-length-key heap key) 1)
+              (heap-number-from-word heap (load-u32 (+ (heap-block heap value) 4)) 0)
+              (let ((index (heap-array-index heap key)) (result 3) (p (heap-block heap value)))
+                (when (< index (load-u32 (+ p 4))) (setq result (load-u32 (+ (+ p 32) (* index 4)))))
+                (if (and (= nullish 1) (or (= result 0) (= result 3))) 0 result))))))))
+  (defun value-array-key-check (heap value key)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= (heap-kind-check heap value 14) 0) (= (heap-reference-check heap key) 0)) 0
+        (if (= (heap-array-length-key heap key) 1) 1
+          (if (= (heap-array-index heap key) 4294967295) (fail 3) 1)))))
+  (defun heap-array-put (heap value key child)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= (heap-kind-check heap value 14) 0) (= (heap-reference-check heap key) 0)
+              (= (heap-reference-check heap child) 0)) 0
+        (if (= (heap-array-length-key heap key) 1)
+          (if (= (heap-kind-check heap child 4) 0) 0
+            (if (= (heap-number-uint heap child) 0) (fail 3)
+              (value-array-resize heap value (heap-number-word heap child))))
+          (let ((index (heap-array-index heap key)))
+            (if (= index 4294967295) (fail 3)
+              (if (>= index (load-u32 (+ (heap-block heap value) 4)))
+                (if (= (value-array-resize heap value (1+ index)) 0) 0 (value-set heap value index child))
+                (value-set heap value index child))))))))
+  (defun value-array-put (heap value key child)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-reference-check heap child) 0) 0
+        (let* ((borrowed (if (> child 3) (heap-borrow-root heap child) 0))
+               (result (heap-array-put heap value key child)))
+          (when (= borrowed 1) (heap-return-root heap child)) result))))
+  (defun heap-array-relative (heap value length default)
+    (if (= value 3) default
+      (if (<= value 2) (if (and (= value 2) (> length 0)) 1 0)
+        (if (= (heap-kind-check heap value 4) 0) 0
+          (let* ((p (+ (heap-block heap value) 32)) (high (load-u32 (+ p 4)))
+                 (exponent (word-and (word-shr high 20) 2047)) (negative (word-shr high 31)) (number 0))
+            (if (and (= exponent 2047) (or (/= (load-u32 p) 0) (/= (word-and high 1048575) 0))) 0
+              (if (< exponent 1023) 0
+                (if (>= exponent 1055) (if (= negative 1) 0 length)
+                  (progn (setq number (heap-number-word heap value))
+                    (when (= negative 1) (setq number (- 0 number)))
+                    (if (= negative 1) (if (>= number length) 0 (- length number))
+                      (if (> number length) length number)))))))))))
+  (defun value-array-slice (heap value start end)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= (heap-kind-check heap value 14) 0) (= (heap-reference-check heap start) 0)
+              (= (heap-reference-check heap end) 0)) 0
+        (let* ((length (load-u32 (+ (heap-block heap value) 4)))
+               (first (heap-array-relative heap start length 0)) (error (last-error))
+               (last (if (= error 0) (heap-array-relative heap end length length) 0)) (result 0))
+          (when (and (= error 0) (= (last-error) 0))
+            (let* ((borrowed (heap-borrow-root heap value)) (count (if (> last first) (- last first) 0)) (i 0))
+              (setq result (value-array-new heap count))
+              (when (/= result 0)
+                (while (< i count)
+                  (store-u32 (+ (+ (heap-block heap result) 32) (* i 4))
+                    (load-u32 (+ (+ (heap-block heap value) 32) (* (+ first i) 4)))) (setq i (1+ i))))
+              (when (= borrowed 1) (heap-return-root heap value)))) result))))
   (defun value-number-negate (heap input)
     (begin-operation) (if (= (heap-check heap) 0) 0
       (if (= (heap-kind-check heap input 4) 0) 0
@@ -1210,6 +1344,8 @@
     record-new record-length record-get record-set string-new string-length string-get string-set string-seal utf8-encode utf8-decode heap-new heap-capacity heap-used heap-live heap-pin heap-release heap-collect
     value-kind value-truth value-data value-length value-number value-number-binary
     value-number-word value-number-bitwise value-number-remainder
+    value-array-new value-array-check value-array-resize value-source-length
+    value-array-get value-array-key-check value-array-put value-array-slice
     value-refs value-get value-set value-refs-resize value-string value-bytes value-seal
     value-unit-get value-unit-set value-byte-get value-byte-set value-bytes-resize
     value-number-negate value-number-compare value-compare heap-auto heap-collections

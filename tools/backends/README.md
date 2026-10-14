@@ -222,6 +222,38 @@ distinct, and `imul32` wraps multiplication exactly in 32 bits. Results are boxe
 Numbers; these explicit operations do not narrow other Numbers. String/object
 coercion remains unsupported and is refused before subsequent evaluation.
 
+Ordinary `js-array` values now use kind 14 with geometric capacity, logical
+length and GC-scanned reference cells. This is distinct from the raw kind-7
+reference-array ABI, which remains nil-filled and strictly bounded. Source
+arrays support `js-length`, `js-nth`, `aref`/`get`/`put`, Number length assignment
+and static `push`/`pop`/`slice` calls. Reads retain actual undefined values;
+`js-nth` converts null/undefined to nil and has the same receiver-before-index
+order as the current JS emitter. Its nullish receiver uses empty-array semantics,
+including Number-zero length, and still refuses unsupported key conversions.
+`get` evaluates its default only for nullish
+results. Assignment captures receiver/key before its RHS; calls capture receiver
+before arguments and compute length after argument effects. Extra pop/slice
+arguments are evaluated even when the method ignores them.
+
+Index keys support exact nonnegative integral Numbers (including negative zero)
+and canonical decimal strings through 2^32-2. Absent numeric keys return
+undefined without truncating or wrapping. Length assignment currently requires
+a Number that is an exact uint32; valid lengths beyond configured allocation
+capacity fail with ELI-RT0002. New/grown cells read as undefined; shrinking clears
+references, and slices preserve shallow aliases. Slice offsets support Numbers,
+nil, booleans and undefined with truncation/clamping, including NaN/infinities.
+
+This array slice does not yet implement named properties, prototypes, property
+presence/enumeration, hole-presence metadata, overridden methods or generic
+ToPrimitive/ToNumber conversions. Non-numeric property names other than length,
+non-index writes, dynamic methods and unsupported values are explicitly refused;
+none silently invoke JS. Heap inspection reads dense cells, not JS hole-presence
+metadata. Named object records and persistent vector literals remain separate,
+unimplemented source capabilities. The bulk `sourceArray(input = [])` constructor creates kind-14 arrays, protects
+earlier operands across later getters and rejects foreign handles. The existing
+`array()` constructor retains raw kind 7. The exported setter protects a borrowed child
+across allocation even when called without a generated frame.
+
 The bulk entry protects earlier arguments across later getters. Generated frames
 retain parameters, lexical variables and temporaries; each argument is captured
 before later argument effects. Internal calls return borrowed values and install
@@ -236,7 +268,7 @@ peak-memory and throughput acceptance remain separate, open gates.
 ## Verification
 
 ```sh
-bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs tests/wasm-managed-tables.test.mjs tests/wasm-managed-control.test.mjs tests/wasm-managed-arithmetic.test.mjs tests/wasm-managed-word.test.mjs
+bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs tests/wasm-managed-tables.test.mjs tests/wasm-managed-control.test.mjs tests/wasm-managed-arithmetic.test.mjs tests/wasm-managed-word.test.mjs tests/wasm-managed-arrays.test.mjs
 bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=firefox bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=webkit bun test tests/direct-wasm-backend.test.mjs

@@ -1052,6 +1052,62 @@ runtime 依赖；同时跟踪低余量并研究通用调度/布局改进。完�
 仍须迁移采样前冻结，当前数值热计算/JS 三代产物不关闭任何完整宿主格
 或全部九格验收。
 
+### 普通源数组的运行时与 lowering 契约
+
+本批在实验 managed-control-v1 内增加 source array kind 14，接通 js-array、
+js-length、js-nth、aref/get/put、Number length 赋值及静态 push/pop/slice。
+逻辑长度与几何容量分离，增长槽读取 undefined，缩短清除引用；GC 标记实际
+数组边，循环与浅拷贝别名保持身份。原 raw kind 7 的 nil 填充及严格边界、
+kind 8 的位置记录、persistent-vector-literal 保持各自语义。
+
+求值顺序按现行 JS 发射器：js-nth 接收者先于索引；赋值先捕获接收者/键，
+RHS 修改局部变量不改变已捕获引用；get 默认值仅 nullish 时求值；方法
+接收者先于参数，push/pop 在参数副作用完成后读取长度。所有参数只求值
+一次，pop/slice 多余参数依然求值。push 先分配并保根返回长度再改变数组，
+容量失败保留原数组；slice 是浅拷贝，Number 偏移采用截断和夹取，覆盖
+NaN、无穷、负零、分数及巨大范围，nil/bool/undefined 使用既定转换。
+
+索引接受精确非负整数 Number（含负零）及规范十进制字符串到 2^32-2；
+非索引 Number 和不规范数字字符串读作缺失，不能截断/回绕为其他索引。
+length 目前只接收精确 uint32 Number，合法但超过容量的长度是 RT0002，
+非法长度为 RT0003。命名属性、原型、方法覆写、presence/枚举和 hole 位图、
+通用 ToPrimitive/ToNumber、动态方法及普通命名对象记录继续开放，并有
+明确拒绝路径；当前仅密集单元读取与支持的源操作得到验收，不宣称一般
+JS 对象/数组语义完成，更不关闭 RT-COMMON 或任何完整宿主/九格。
+
+TDD 初始 Red 为 arrays.eli 第 2 行第 23 列 array-literal 发射拒绝。
+另一个真实 Red 防止把 js-nth 的普通 keyword 值误作属性上下文字符串；
+仅 aref/get/put 和静态方法键采用现行属性键转换，js-nth 保持普通表达式
+的能力边界。追加真实 Red 揭示直接导出的 setter 在自动 GC 扩容时丢失无帧 borrowed
+子值，Green 用运行时临时保根修复。新增独立 Red/Green 接通 bulk sourceArray 构造器，跨后续 getter 保留早期
+参数，拒绝外堆句柄，原 array() 仍创建 raw kind 7。nullish nth 的追加 Red 揭示空接收者 fallback
+仍必须有 Number 0 的 length，且不能跳过对象键转换的能力拒绝；Green
+保持空数组属性语义与同一能力边界。十二项数组测试覆盖
+1024 轮确定性随机
+编辑与独立 JS 差分、IEEE/Unicode、求值顺序/额外参数、循环/别名、增长/
+缩短、固定容量失败保留原状态、原错误压过真实 WASM 陷阱、外层帧保留、
+跨实例/失效句柄和独立 Node。Seed/三代 IR/descriptor/WASM 字节固定点与
+三个真实浏览器纳入原后端测试，全量门禁和源码绑定在本批冻结后验收。
+
+本批最终全量门禁通过：核心 Emacs 167/167、Bun 670/670（128 文件），
+应用 Emacs 3/3、Bun 216/216（23 文件）及 CLI；严格字节编译和受影响
+契约通过。Seed/三代 canonical IR、typed IR/descriptor、WASM 字节固定点
+与 Chromium/Firefox/WebKit 各 37 项后端检查通过，包含 nullish fallback
+修复后的实际执行。新增语料由原生成器纳入 109 fixtures/418 源码绑定，
+没有修改成熟度库存或版本。
+
+源码冻结后按原 3×5×9/交替顺序、原输入与至少 1.0× 门槛重测，WASM
+九项、native 三项全部通过。native 递推/网格/微小批量分别约为
+1.9887×/1.1102×/1.2268×；原栈基线 0.5564×/0.2248×/0.1108× 仍失败。
+WASM Node/Chromium 网格约 1.0220×/1.0325×；数值 JS/WASM/native
+产物与上一批相同，不能据不同轮测量推导本批数组 lowering 的性能收益，
+低余量稳定化仍开放。两份既有失败报告原样保留，当前报告保存真实样本、
+校验和和新的源码身份。完整编译器及数组运行时的生产性能预算/验收仍独立，
+本批保持实验 ABI，不宣称完整宿主或九格完成。
+
+下一步补齐命名记录、hole/presence 与普通属性协议、完整转换及集合/
+闭包等依赖，按原性能门槛跟踪低余量；完整宿主与完整 3×3 自举仍未完成。
+
 ### 持续执行 Goal 文本
 
 以下正文使用本文件作为唯一施工状态入口；提交 `/goal` 后才创建运行中的
@@ -1061,10 +1117,10 @@ runtime 依赖；同时跟踪低余量并研究通用调度/布局改进。完�
 ```text
 /goal 在 /Users/liu/projects/src/github.com/liuchong/eliscript 持续完成纯 Eliscript 独立后端与完整 3×3 自举，直到下面全部必要验收和签名推送条件真实满足。
 
-开始及恢复时读取当前规则、仓库 AGENTS.md 和唯一施工计划 docs/native-wasm-feasibility.md；核对分支、git status、已有进程/日志、最新代码及原始报告，保留无关修改，避免重复启动仍在运行的测试。当前已有共享优化层、numeric-f64 WASM 直接发射器和 ARM64 macOS native 对象/库/可执行文件发射器；编译器目前仍由 JS 宿主运行。WASM 数值九项与 native 三项已有通过报告，owned-memory、受管理值堆、根帧/自动回收及托管文本/编码局部门禁已通过；按最新证据接续完整动态 lowering、集合、自动根插桩及完整宿主，不能把数值发射、局部 GC 或 JS 三代固定点当作完整自举。
+开始及恢复时读取当前规则、仓库 AGENTS.md 和唯一施工计划 docs/native-wasm-feasibility.md；核对分支、git status、已有进程/日志、最新代码及原始报告，保留无关修改，避免重复启动仍在运行的测试。当前已有共享优化层、numeric-f64 WASM 直接发射器和 ARM64 macOS native 对象/库/可执行文件发射器；编译器目前仍由 JS 宿主运行。WASM 数值九项与 native 三项已有通过报告，owned-memory、受管理值堆、根帧/自动回收、托管文本/编码、Map/Set、普通托管控制流/Number/Word 运算及源数组子集已通过各自局部门禁；按最新证据接续命名对象、hole/presence、完整属性/转换、集合、闭包及完整宿主，不能把数值发射、局部运行时或 JS 三代固定点当作完整自举。
 
 按依赖顺序核实并继续本计划中的 N-PERF → RT-COMMON/WASM-CAP → HOST-WASM → HOST-NATIVE → MATRIX-3X3，并落实 AI-TOOLS 验收：
-1. 先用失败语义/代码生成用例与反汇编定位 native 网格和微小批量开销，实现通用、可证明且保序的优化；按原报告输入、3 会话×5 预热×9 样本、交替顺序和每项至少 1.0× 当前优化 JS 的门槛，让 native 三负载全部达标，并保持 WASM 九项和既有历史性能门禁。
+1. 保持当前 native 三负载及 WASM 九项的通过状态和原报告输入、3 会话×5 预热×9 样本、交替顺序、每项至少 1.0× 当前优化 JS 的门槛。跟踪 WASM 网格低余量与后续回归；用真实失败语义/代码生成用例、原始样本与反汇编定位开销，实施通用、可证明且保序的优化，并保持既有历史性能门禁。
 2. 完成字符串与 UTF-16/UTF-8、字节数组、记录、动态值、持久集合、Map/Set、JSON、正则、闭包、内存管理、异常/async、宏及宿主能力的共同运行时和 lowering；先用实际 WASM 内存执行首个纵向切片，明确线性内存/GC 能力、寿命和边界，避免逐字符或逐节点 JS imports。
 3. 将完整编译器分别运行于 WASM 与 native，保持 JS/WASM/native 编译器宿主与 JS/WASM/native 输出目标独立选择；浏览器使用现有 Worker/虚拟项目协议，native 使用明确的平台与系统能力适配，正常独立编译不依赖外部编译器、优化器或在线服务。
 4. 逐格实际编译并执行完整语言、stdlib、宏、项目和编译器源码；同宿主/同目标固定构建输入，同目标的 IR、产物、诊断和调试信息一致，不同目标的实际语义一致，三代自举达到固定点。不得用 Bun 打包、JS 包装、数值内核或任一格代替缺失宿主或其余八格。
