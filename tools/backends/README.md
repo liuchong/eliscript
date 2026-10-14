@@ -282,6 +282,38 @@ constructors/setters protect borrowed prototypes/operands across allocating GC.
 Private frames unwind to the caller on runtime failures and actual WASM traps.
 All object semantics, sorting and collection execute in zero-import WASM.
 
+Ordinary sealed String values now support numeric/canonical-digit indexed reads,
+`length`, `get`/`aref`/`js-nth`, and static `at`, `charAt`, `charCodeAt`,
+`codePointAt`, `slice`, `substring`, `substr`, `indexOf`, `lastIndexOf`,
+`includes`, `startsWith`, `endsWith`, `concat`, `repeat`, `trim`, `trimStart`,
+`trimEnd`, `isWellFormed`, `toWellFormed`, `toString` and `valueOf` calls.
+Indices are UTF-16 code units; codePointAt combines a valid surrogate pair,
+while interval operations can retain lone surrogates. Missing property reads,
+character/code-point reads, and js-nth retain their distinct undefined/empty/NaN/
+nil results. Slice dispatch is shared with source arrays without changing array
+copy, capacity or alias semantics.
+
+Positions/counts currently accept Number, nil, booleans and undefined. Full
+binary64 positions use truncation and the method's own relative/clamp rules;
+lastIndexOf treats NaN as the final possible position. String-to-Number and
+object/Symbol conversions remain explicit refusals. Search needles and concat
+arguments accept String, nil/booleans/undefined, NaN/infinities and exact signed
+integer Numbers through magnitude 2^32-1; general finite-number formatting is
+still open. Dynamic methods, function-valued property access, String prototype
+overrides, general named properties/writes, regex, split/replace, case mapping
+and normalization remain unimplemented and explicitly refused.
+
+Receiver and every argument are captured before method conversions; unused extra
+arguments still run. Zero-argument concat and omitted arguments have their own
+actual source lowering cases. Forward and reverse searches share nonallocating
+Two-Way critical factorization over original UTF-16 memory, without reversing or
+copying the haystack. Repeat performs capacity/overflow preflight; trim uses the
+complete admitted whitespace set, and repair replaces only unpaired surrogates.
+Raw exported text operations protect borrowed inputs during allocating GC;
+unfinished String keys fail rather than expose mutable builder data. Failure and
+actual WASM traps preserve caller frames and original errors. These operations
+execute in zero-import WASM; this slice is not a complete compiler runtime.
+
 The bulk entry protects earlier arguments across later getters. Generated frames
 retain parameters, lexical variables and temporaries; each argument is captured
 before later argument effects. Internal calls return borrowed values and install
@@ -300,7 +332,7 @@ peak-memory and throughput acceptance remain separate, open gates.
 ## Verification
 
 ```sh
-bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs tests/wasm-managed-tables.test.mjs tests/wasm-managed-control.test.mjs tests/wasm-managed-arithmetic.test.mjs tests/wasm-managed-word.test.mjs tests/wasm-managed-arrays.test.mjs tests/wasm-managed-objects.test.mjs
+bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs tests/wasm-managed-tables.test.mjs tests/wasm-managed-control.test.mjs tests/wasm-managed-arithmetic.test.mjs tests/wasm-managed-word.test.mjs tests/wasm-managed-arrays.test.mjs tests/wasm-managed-objects.test.mjs tests/wasm-managed-strings.test.mjs
 bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=firefox bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=webkit bun test tests/direct-wasm-backend.test.mjs

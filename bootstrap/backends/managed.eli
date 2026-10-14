@@ -348,13 +348,14 @@
       (unless (and (>= count 2) (or (= method "push") (= method "pop") (= method "slice")))
         (managed-fail node "managed arrays require a supported static method"))
       (let* ((receiver (snapshot-managed (lower-managed-expression (js-nth 0 children) scope state functions) state))
-             (steps (js-array (get receiver :steps) (checked-control state "value-array-check" (runtime-arguments state
-                            (js-array (get receiver :result)))))) (arguments (js-array)) (i 2))
+             (steps (js-array (get receiver :steps) (checked-control state (if (= method "slice") "value-text-method-check" "value-array-check")
+               (runtime-arguments state (if (= method "slice") (js-array (get receiver :result) (word-constant 1))
+                                        (js-array (get receiver :result))))))) (arguments (js-array)) (i 2))
         (while (< i count)
           (let ((argument (snapshot-managed (lower-managed-expression (js-nth i children) scope state functions) state)))
             (js-call steps :push (get argument :steps)) (js-call arguments :push (get argument :result))) (setq i (1+ i)))
         (if (= method "slice")
-          (let ((result (managed-result state (runtime-call state "value-array-slice" (runtime-arguments state
+          (let ((result (managed-result state (runtime-call state "value-source-slice" (runtime-arguments state
                           (js-array (get receiver :result) (if (> count 2) (js-nth 0 arguments) (word-constant 3))
                             (if (> count 3) (js-nth 1 arguments) (word-constant 3))))) t)))
             (js-call steps :push (get result :steps)) (put result :steps (word-sequence steps)) result)
@@ -384,6 +385,31 @@
                     (js-array (get receiver :result) (word-if (word-compare (word-local length) (word-constant 0) "=")
                       (word-constant 0) (word-node "word-arithmetic" (js-array (word-local length) (word-constant 1)) "-"))))))
                 (put result :steps (word-sequence steps)) result)))))))
+  (defun lower-managed-text-method (node scope state functions method)
+    (let* ((children (get node :children)) (count (js-length children))
+           (methods (js-array "at" "charAt" "charCodeAt" "codePointAt" "substring" "indexOf" "lastIndexOf" "includes" "startsWith" "endsWith" "repeat" "trim" "trimStart" "trimEnd" "isWellFormed" "toWellFormed" "toString" "valueOf" "substr"))
+           (mode (js-call methods :indexOf method))
+           (concat (= method "concat")))
+      (unless (and (>= count 2) (or concat (>= mode 0))) (managed-fail node "managed text requires a supported static method"))
+      (let* ((receiver (snapshot-managed (lower-managed-expression (js-nth 0 children) scope state functions) state))
+             (steps (js-array (get receiver :steps) (checked-control state "value-text-method-check" (runtime-arguments state
+                            (js-array (get receiver :result) (word-constant 0)))))) (arguments (js-array)) (i 2))
+        ;; Snapshot every argument before conversions or the method body. Extra
+        ;; arguments still run, even when the static method ignores them.
+        (while (< i count)
+          (let ((argument (snapshot-managed (lower-managed-expression (js-nth i children) scope state functions) state)))
+            (js-call steps :push (get argument :steps)) (js-call arguments :push (get argument :result))) (setq i (1+ i)))
+        (if concat
+          (let ((result receiver))
+            (setq i 0) (while (< i (js-length arguments))
+              (setq result (managed-result state (runtime-call state "value-source-text-concat" (runtime-arguments state
+                (js-array (get result :result) (js-nth i arguments)))) t))
+              (js-call steps :push (get result :steps)) (setq i (1+ i)))
+            (put result :steps (word-sequence steps)) result)
+          (let ((result (managed-result state (runtime-call state "value-source-text-method" (runtime-arguments state
+                          (js-array (get receiver :result) (if (> count 2) (js-nth 0 arguments) (word-constant 3))
+                            (if (> count 3) (js-nth 1 arguments) (word-constant 3)) (word-constant mode)))) t)))
+            (js-call steps :push (get result :steps)) (put result :steps (word-sequence steps)) result)))))
   (defun lower-managed-expression (node scope state functions)
     (let ((kind (get node :kind)) (value (get node :value)) (children (get node :children)))
       (cond
@@ -395,7 +421,11 @@
         ((or (= kind "property-read") (= kind "property-write")
              (and (= kind "intrinsic") (or (= value "aref") (= value "js-nth"))))
          (lower-managed-access node scope state functions))
-        ((= kind "method-call") (lower-managed-array-method node scope state functions))
+        ((= kind "method-call")
+         (let* ((key (js-nth 1 children)) (method (and key (= (get key :kind) "literal") (get key :value))))
+           (if (or (= method "push") (= method "pop") (= method "slice"))
+             (lower-managed-array-method node scope state functions)
+             (lower-managed-text-method node scope state functions method))))
         ((and (= kind "intrinsic") (= value "js-length"))
          (unless (= (js-length children) 1) (managed-fail node "invalid managed length arity"))
          (let* ((operand (lower-managed-expression (js-nth 0 children) scope state functions))

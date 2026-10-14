@@ -1,0 +1,72 @@
+import {beforeAll,afterAll,test} from 'bun:test';import assert from 'node:assert/strict';
+import {readFile,mkdtemp,rm,writeFile} from 'node:fs/promises';import {resolve} from 'node:path';import {tmpdir} from 'node:os';import {spawnSync} from 'node:child_process';
+import {buildBackends} from '../tools/backends/build.mjs';import {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';
+let directory,backend,runtimeProgram,program,bytes,js;
+beforeAll(async()=>{directory=await mkdtemp(resolve(tmpdir(),'eliscript-managed-strings-'));backend=await buildBackends({outputRoot:directory});runtimeProgram=backend.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli','utf8'),'runtime.eli');program=backend.compiler.compile_ir_string(await readFile('tests/fixtures/wasm-managed-strings.eli','utf8'),'strings.eli');bytes=Uint8Array.from(backend.managed.emit_managed_wasm(program,runtimeProgram));assert(WebAssembly.validate(bytes));assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);js=await import('data:text/javascript;base64,'+Buffer.from(backend.compiler.emit_ir_string(program)).toString('base64'));},120000);
+afterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});
+const box=(a,x)=>typeof x==='number'?a.number(x):typeof x==='string'?a.string(x):x;
+const read=(a,x)=>x&&typeof x==='object'?x.kind===4?a.readNumber(x):x.kind===5?a.readString(x):x:x;
+function invoke(a,name,args){const v=a.invoke(name,args);try{return read(a,v);}finally{a.release(v);}}
+function check(a,name,inputs){const args=inputs.map(x=>box(a,x));try{assert.deepEqual(invoke(a,name,args),js[name.replaceAll('-','_')](...inputs),name);}finally{args.forEach(x=>a.release(x));}a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
+const positions=[null,false,true,undefined,NaN,Infinity,-Infinity,0,-0,.5,-.5,1,-1,3.5,-3.5,Number.MIN_VALUE,-Number.MIN_VALUE,Number.MAX_VALUE,-Number.MAX_VALUE,2**32-1,2**32];
+const texts=['','x','a\0b','中😀\ud800x\udfff','ababa','\ud83d\ude00','\ud83dx\ude00'];
+test('ordinary UTF16 property and character access keeps code units, code points, signed positions and exact missing results under GC',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);for(const text of texts){check(a,'size',[text]);for(const key of[0,-0,1,2,99,-1,.5,NaN,Infinity,'0','1','01','','length'])for(const name of['read-value','default-value'])check(a,name,name==='default-value'?[text,key,'fallback']:[text,key]);
+  for(const position of positions)for(const name of['at','char-at','char-code','code-point'])check(a,name,[text,position]);for(const key of['0','1','length'])check(a,'nth-value',[key,text]);check(a,'scan',[text]);}
+});
+test('source slice, substring and substr preserve each conversion rule and endpoints without code-point normalization',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);for(const text of texts)for(const lo of positions)for(const hi of positions)for(const name of['slice','substring','substr'])check(a,name,[text,lo,hi]);
+});
+test('forward and reverse source searches preserve empty needles, overlapping matches, NaN defaults and primitive string conversions',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);for(const text of texts)for(const needle of['','x','a','aba','\0','😀','\ud800',null,false,true,undefined,0,-0,-1,NaN,Infinity,-Infinity])for(const p of positions)for(const name of['find','last','includes','starts','ends'])check(a,name,[text,needle,p]);
+});
+test('String repeat, trim, well-formed repair, identities and variadic concat retain exact primitive text and lone surrogates',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);for(const text of texts){for(const name of['identity','value','well-formed','repair','trim','trim-start','trim-end'])check(a,name,[text]);for(const count of[null,false,true,undefined,NaN,-0,-.5,0,.5,1,3.5])check(a,'repeat',[text,count]);for(const value of[null,false,true,undefined,0,-0,2**32-1,-1,NaN,Infinity,-Infinity,'中😀'])check(a,'concat',[text,value,'!',value]);}
+ const whitespace='\u0009\u000a\u000b\u000c\u000d \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';for(const text of[whitespace,whitespace+'x'+whitespace,'\u0085x\u0085','\u180ex\u180e','😀'])for(const name of['trim','trim-start','trim-end'])check(a,name,[text]);for(const count of[-1,-1.5,-Infinity,Infinity]){const s=a.string('x'),n=a.number(count);assert.throws(()=>a.invoke('repeat',[s,n]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');a.release(s);a.release(n);}check(a,'repeat',['',Number.MAX_VALUE]);
+});
+test('raw text queries reject unfinished string keys and protect borrowed receiver, positions and results across allocating GC',()=>{
+ const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports,heap=e['heap-new'](64,4096,65536),call=(name,...args)=>{const out=e[name](heap,...args)>>>0;assert.equal(e['last-error'](),0,name);return out;};
+ const string=(text,sealed=true)=>{const h=call('value-string',text.length),view=new DataView(e.memory.buffer),p=call('value-data',h,5);for(let i=0;i<text.length;i++)view.setUint16(p+i*2,text.charCodeAt(i),true);if(sealed)call('value-seal',h);return h;};
+ const s=string('中😀'),key=string('0',false);e['value-text-get'](heap,s,key,0);assert.equal(e['last-error'](),6);call('value-seal',key);call('heap-auto',1);const first=call('value-text-get',s,key,0);call('heap-pin',s);call('heap-pin',key);call('heap-pin',first);assert.equal(new DataView(e.memory.buffer).getUint16(call('value-data',first,5),true),'中'.charCodeAt(0));
+ const p=call('value-number',0,0x3ff00000),out=call('value-source-text-method',s,p,3,3);call('heap-pin',out);assert.equal(new DataView(e.memory.buffer).getFloat64(call('value-data',out,4),true),0x1f600);for(const h of[s,key,first,out])call('heap-release',h);call('heap-collect');assert.equal(call('heap-live'),0);assert.equal(call('frame-depth'),0);
+});
+test('text calls capture receiver and earlier arguments, evaluate ignored extras and preserve lazy defaults before method conversions',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);check(a,'capture',['abcdef',1,'xy']);check(a,'concat-capture',['base','old','new']);
+ const s=a.string('中😀'),trace=a.sourceObject({});assert.equal(invoke(a,'ignored',[s,trace]),'中');for(const [name,expected]of[['first',1],['second',2]]){const key=a.string(name),value=a.objectGet(trace,key);assert.equal(a.readNumber(value),expected);a.release(value);a.release(key);}a.release(trace);a.release(s);a.collect();assert.equal(a.live(),0);
+ for(const text of texts)for(const key of[0,1,99,'0','length'])check(a,'default-order',[text,key]);
+});
+test('source text boundaries are immutable, source-bound unsupported calls and malformed arity are refused, and invalid handles stay branded',()=>{
+ const before=JSON.stringify(program);backend.managed.emit_managed_wasm(program,runtimeProgram);assert.equal(JSON.stringify(program),before);
+ for(const expression of['(js-call s method)','(js-call s :replace "x" "y")','(js-call s :toLowerCase)','(js-call s :normalize)','(js-call s :split "x")','(js-call s :match "x")']){const ir=backend.compiler.compile_ir_string(`(defun f (s method) (if false ${expression} s)) (export f)`,'unsupported-text.eli');assert.throws(()=>backend.managed.emit_managed_wasm(ir,runtimeProgram),e=>e.eliscriptDiagnostic?.code==='ELI-B0001'&&e.eliscriptDiagnostic.location.file==='unsupported-text.eli');}
+ const a=instantiateManagedRuntime(bytes),b=instantiateManagedRuntime(bytes),s=a.string('abc'),foreign=b.string('x');assert.throws(()=>a.invoke('concat',[s,foreign,true,false]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');b.release(foreign);b.collect();
+ const opaque=a.sourceObject({}),fraction=a.number(.5),position=a.string('1');for(const [name,args]of[['char-at',[s,opaque]],['char-at',[s,position]],['concat',[s,fraction,true,false]],['read-value',[s,opaque]],['read-value',[s,position]],['read-value',[s,a.string('constructor')]]]){if(name==='read-value'&&args[1]===position){assert.equal(invoke(a,name,args),'b');continue;}assert.throws(()=>a.invoke(name,args));if(name==='read-value'&&args[1]!==opaque)a.release(args[1]);}
+ for(const x of[s,opaque,fraction,position])a.release(x);a.collect();assert.equal(a.live(),0);assert.throws(()=>a.invoke('trim',[s]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');
+});
+test('deterministic random UTF16 methods and full f64 position words agree with independent JS during automatic collection',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);let seed=0x84fbd9a;const next=()=>{seed^=seed<<13;seed^=seed>>>17;seed^=seed<<5;return seed>>>0;};const bits=new DataView(new ArrayBuffer(8));
+ for(let i=0;i<1024;i++){const units=Array.from({length:next()%64},()=>next()%65536),text=String.fromCharCode(...units),needle=i%3?text.slice(next()%(text.length+1),next()%(text.length+1)):String.fromCharCode(next()%65536);bits.setUint32(0,next(),true);bits.setUint32(4,next(),true);const position=bits.getFloat64(0,true);for(const name of['at','char-at','char-code','code-point'])check(a,name,[text,position]);for(const name of['find','last','includes','starts','ends'])check(a,name,[text,needle,position]);for(const name of['slice','substring','substr'])check(a,name,[text,position,(next()%65)-32]);for(const name of['well-formed','repair'])check(a,name,[text]);}
+});
+test('source searches retain bounded Two-Way behavior on long periodic and overlapping text in both directions',()=>{
+ const a=instantiateManagedRuntime(bytes,{maxSlots:256,initialBytes:65536,maxBytes:4194304});a.auto(1);
+ for(const [text,needle]of[['a'.repeat(262144)+'b','a'.repeat(32768)+'c'],['ab'.repeat(65536)+'z','ab'.repeat(8192)+'z'],['a'.repeat(65536),'a'.repeat(8192)],['\ud800'.repeat(65536)+'中','\ud800'.repeat(8192)+'中']])for(const position of[undefined,NaN,0,99,Infinity,-Infinity])for(const name of['find','last','includes','starts','ends'])check(a,name,[text,needle,position]);
+});
+test('text capacity failures preserve input bits and caller frames; real search traps unwind only private roots and retain earlier errors',async()=>{
+ const source=await readFile('bootstrap/runtime/memory.eli','utf8'),start=source.indexOf('  (defun heap-text-search-unit '),end=source.indexOf('  (defun heap-text-find-direction ',start);assert(start>=0&&end>start);
+ const injected=backend.compiler.compile_ir_string(source.slice(0,start)+'  (defun heap-text-search-unit (data length index reverse) (load-u16 4294967295))\n'+source.slice(end),'trap-runtime.eli'),a=instantiateManagedRuntime(Uint8Array.from(backend.managed.emit_managed_wasm(program,injected)));a.auto(1);
+ const s=a.string('xxx'),bad=a.sourceObject({}),good=a.number(0),frame=a.frame(1);a.frameSet(frame,0,s);assert.throws(()=>a.invoke('fault',[s,bad]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.equal(a.stats().frameDepth,1);assert.throws(()=>a.invoke('fault',[s,good]),e=>e instanceof WebAssembly.RuntimeError);assert.equal(a.stats().frameDepth,1);assert.equal(a.readString(s),'xxx');const retained=a.frameGet(frame,0);assert(a.keyEqual(retained,s));a.release(retained);a.leaveFrame(frame);for(const x of[s,bad,good])a.release(x);a.collect();assert.equal(a.live(),0);
+ const bounded=instantiateManagedRuntime(bytes,{maxSlots:64,initialBytes:4096,maxBytes:4096});bounded.auto(1);const original=bounded.string('中😀\ud800'),n=bounded.number(10000),outer=bounded.frame(1);bounded.frameSet(outer,0,original);assert.throws(()=>bounded.invoke('repeat',[original,n]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0002');assert.equal(bounded.readString(original),'中😀\ud800');assert.equal(bounded.stats().frameDepth,1);bounded.leaveFrame(outer);bounded.release(n);bounded.release(original);bounded.collect();assert.equal(bounded.live(),0);
+});
+test('text literal emission refuses malformed method IR before lowering absent children and preserves the original source schema',()=>{
+ const copy=structuredClone(program);let method;const visit=v=>{if(!v||typeof v!=='object'||method)return;if(v.kind==='method-call')method=v;else for(const x of Object.values(v))visit(x);};visit(copy);assert(method);method.children=method.children.slice(0,1);const before=JSON.stringify(copy);assert.throws(()=>backend.managed.emit_managed_wasm(copy,runtimeProgram),e=>e.eliscriptDiagnostic?.code==='ELI-B0001'&&e.eliscriptDiagnostic.location.file==='strings.eli');assert.equal(JSON.stringify(copy),before);
+});
+test('Node executes identical zero-import source text bytes with code-point, reverse-search, trim and repair semantics and complete root cleanup',async()=>{
+ const path=resolve(directory,'text.wasm');await writeFile(path,bytes);const result=spawnSync('node',['--input-type=module','-e',`
+ import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {instantiateManagedRuntime} from ${JSON.stringify(resolve('tools/backends/managed-runtime.mjs'))};
+ const a=instantiateManagedRuntime(readFileSync(${JSON.stringify(path)}));a.auto(1);const s=a.string('中😀\\ud800'),p=a.number(1),point=a.invoke('code-point',[s,p]);assert.equal(a.readNumber(point),0x1f600);a.release(point);const fixed=a.invoke('repair',[s]);assert.equal(a.readString(fixed),'中😀�');a.release(fixed);const needle=a.string('😀'),nan=a.number(NaN),last=a.invoke('last',[s,needle,nan]);assert.equal(a.readNumber(last),1);a.release(last);const spaced=a.string('\\ufeff x \\u2000'),trimmed=a.invoke('trim',[spaced]);assert.equal(a.readString(trimmed),'x');for(const v of[s,p,needle,nan,spaced,trimmed])a.release(v);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+ `],{encoding:'utf8',timeout:30000});assert.equal(result.status,0,result.stderr);
+});
+
+test('omitted method arguments, zero-argument concat and ignored identity arguments preserve source defaults and borrowed value lifetime',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);for(const text of texts)for(const name of['concat-empty','char-empty','at-empty','slice-empty','substring-empty','substr-empty','find-empty','repeat-empty'])check(a,name,[text]);
+ for(const extra of[.5,Number.MIN_VALUE,NaN,undefined,true,'x'])check(a,'ignored-identity',['中😀',extra]);const s=a.string('held'),object=a.sourceObject({}),alias=a.invoke('ignored-identity',[s,object]);assert(a.keyEqual(alias,s));a.release(s);a.collect();assert.equal(a.readString(alias),'held');a.release(alias);a.release(object);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+});

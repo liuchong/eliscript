@@ -422,7 +422,7 @@ JS 对照。接续复测 numeric-f64 九项均通过，但 Node/Chromium 网格�
 - [x] **N-PERF 数值 native 原门槛验收**：热执行含整批一次 Bun FFI 调用，
   固定同样三负载、3×5×9 采样及每项至少 1.0× 优化 JS。当前
   [保留报告](../tools/backends/results/native-macos-arm64.json)分别为递推
-  1.9622×、网格 1.1144×、微小批量 1.2161×；三项精确校验和通过，
+  1.9919×、网格 1.1123×、微小批量 1.2444×；三项精确校验和通过，
   数值门禁判定通过。旧优化路径 1.9147×/0.6221×/0.3023× 的失败报告
   保留在历史提交中，初始栈基线按原参数重新采样，产物仍为相同哈希，
   JS 对照字节也未变。通用优化包括循环常量寄存器、活跃存储与有序表达式
@@ -504,6 +504,11 @@ JS 对照。接续复测 numeric-f64 九项均通过，但 Node/Chromium 网格�
     原型。十四项专项覆盖随机差分、求值顺序、容量/陷阱、bulk getters 和 raw
     borrowed 参数；Seed/三代、三浏览器与全量门禁通过。默认原型函数、通用
     key 转换、accessor/descriptor 等仍开放，不关闭完整动态运行时/宿主。
+  - [x] **普通源字符串属性与方法的局部验收**：接通 UTF-16 索引与 21 个静态
+    字符/区间/双向搜索/拼接/重复/trim/代理对方法，分离每种省略参数、转换与
+    越界结果。十三项专项含 1024 轮随机、长周期、容量/实际 trap、borrowed
+    参数/返回、独立 Node；Seed/三代、三浏览器及原全量门禁通过。通用转换、
+    regex/case/normalization 等仍开放，不关闭完整字符串或编译器宿主。
 - [ ] **WASM-CAP 运行时布局与能力验收**：先给线性内存/GC 路径及 imports
   明确目标能力与内存 ABI；TDD 覆盖循环引用、逃逸闭包、跨界句柄、拒绝缺失
   特性和回收后访问，浏览器三引擎与 CLI 实际执行，不改变九格或语义门槛。
@@ -1124,9 +1129,9 @@ WASM Node/Chromium 网格约 1.0220×/1.0325×；数值 JS/WASM/native
 验收状态接续，已验收且未受影响的项无需重复开发。
 
 ```text
-/goal 在 /Users/liu/projects/src/github.com/liuchong/eliscript 持续完成纯 Eliscript 独立后端与完整 3×3 自举，直到下面全部必要验收和签名推送条件真实满足。
+/goal 在当前 Eliscript 仓库持续完成纯 Eliscript 独立后端与完整 3×3 自举，直到下面全部必要验收和签名推送条件真实满足。
 
-开始及恢复时读取当前规则、仓库 AGENTS.md 和唯一施工计划 docs/native-wasm-feasibility.md；核对分支、git status、已有进程/日志、最新代码及原始报告，保留无关修改，避免重复启动仍在运行的测试。当前已有共享优化层、numeric-f64 WASM 直接发射器和 ARM64 macOS native 对象/库/可执行文件发射器；编译器目前仍由 JS 宿主运行。WASM 数值九项与 native 三项已有通过报告，owned-memory、受管理值堆、根帧/自动回收、托管文本/编码、Map/Set、普通托管控制流/Number/Word 运算及源数组/命名对象子集已通过各自局部门禁；按最新证据接续 hole/presence、完整属性/转换、集合、闭包及完整宿主，不能把数值发射、局部运行时或 JS 三代固定点当作完整自举。
+开始及恢复时读取当前规则、仓库 AGENTS.md 和唯一施工计划 docs/native-wasm-feasibility.md；核对分支、git status、已有进程/日志、最新代码及原始报告，保留无关修改，避免重复启动仍在运行的测试。当前已有共享优化层、numeric-f64 WASM 直接发射器和 ARM64 macOS native 对象/库/可执行文件发射器；编译器目前仍由 JS 宿主运行。WASM 数值九项与 native 三项已有通过报告，owned-memory、受管理值堆、根帧/自动回收、托管文本/编码、Map/Set、普通托管控制流/Number/Word 运算及源数组/命名对象/普通字符串方法子集已通过各自局部门禁；按最新证据接续 hole/presence、完整属性/转换、集合、闭包及完整宿主，不能把数值发射、局部运行时或 JS 三代固定点当作完整自举。
 
 按依赖顺序核实并继续本计划中的 N-PERF → RT-COMMON/WASM-CAP → HOST-WASM → HOST-NATIVE → MATRIX-3X3，并落实 AI-TOOLS 验收：
 1. 保持当前 native 三负载及 WASM 九项的通过状态和原报告输入、3 会话×5 预热×9 样本、交替顺序、每项至少 1.0× 当前优化 JS 的门槛。跟踪 WASM 网格低余量与后续回归；用真实失败语义/代码生成用例、原始样本与反汇编定位开销，实施通用、可证明且保序的优化，并保持既有历史性能门禁。
@@ -1243,3 +1248,66 @@ Chromium（默认全量）、Firefox 与 WebKit 的完整后端套件均 39/39 �
 包含原型继承 getter 的零分配/零额外 GC 与同目标字节对照；受影响契约
 检查通过。此批仅关闭原 CI 超时的实现与本地验收，远端结果须在新签名
 提交后确认；完整 3×3、后端生产稳定化与字符串能力批次继续推进。
+
+
+### 普通字符串属性与方法的运行时及 lowering 契约
+
+本批接通 sealed String 的 UTF-16 索引/length、get/aref/js-nth 与 21 个静态
+方法：at/charAt/charCodeAt/codePointAt，slice/substring/substr，indexOf/
+lastIndexOf/includes/startsWith/endsWith，concat/repeat，trim/trimStart/trimEnd，
+isWellFormed/toWellFormed/toString/valueOf。UTF-16 单元与 code point、越界的
+undefined/空串/NaN/nil、相对位置/截断/夹取、substring 交换端点、lastIndexOf
+的 NaN 默认值分别保留现行 JS 语义；slice 与源数组共享分派，数组复制/别名/
+容量契约保持不变。接受完整 f64 Number 位置及 nil/bool/undefined；通用
+String-to-Number 与 Object/Symbol 强制转换仍显式拒绝。
+
+搜索 needle/concat 的 String 转换复用纯运行时 property-key 文本基础：
+sealed UTF-16、nil/bool/undefined、NaN/正负无穷及绝对值到 2^32-1 的精确
+整数 Number。一般有限浮点的十进制格式化仍开放，不返回近似文本。动态
+方法、函数值属性、原型覆写、一般命名属性/写入、正则/split/replace、Unicode
+大小写/规范化继续拒绝。此批保持实验 ABI，不关闭完整语言/运行时/宿主/九格。
+
+所有参数先依次求值并保根，再进行方法内转换；多余参数仍求值，省略参数与
+零参数 concat 有实际 source lowering 验收。前/后向搜索共用 Two-Way 非分配
+critical factorization，通过方向化 code-unit 读取使用原内存，不反转/复制原串。
+repeat 在溢出/容量失败前预检，trim 保留所有已支持的 whitespace，repair 仅
+替换未配对代理。raw 调用保护 borrowed receiver/key/position，String key 未封存
+时拒绝读取；错误与真实 WASM trap 保留外层帧与输入数据。
+
+TDD 保留 strings.eli 第 6 行第 19 列静态 at 拒绝的初始 Red；实际差分另发现
+搜索未命中的 signed word 转换错误（+1 应为 -1），及未封存 key 被读取的
+真实 Red。Green 包含十三项专项：1024 轮随机 UTF-16/完整 f64 位模式、全部
+位置边界、Unicode/代理对、长周期/重叠双向搜索、效果/默认/忽略参数、原始
+容量预算、原错误压过真实 trap、caller frame 与 GC 根清理、独立 Node。
+Seed/三代 IR/descriptor/WASM 字节和三浏览器验收在本批冻结后接续。
+
+下一可测量增量为共享完整 ToNumber/Number 文本转换及 str/string-to-number
+lowering，保留精确 IEEE/Unicode、错误与效果顺序，并纳入同样的多代与真实
+浏览器验收；随后继续持久集合、闭包、JSON/正则/异常等依赖。完整 WASM/native
+编译器宿主与完整 3×3 仍未完成，数值低余量稳定化继续开放。
+
+
+源码冻结后按原 3×5×9/交替顺序、原输入及每项至少 1.0× 当前优化 JS
+门槛重测，WASM 九项与 native 三项均通过。native 递推/网格/微小批量约
+1.9919×/1.1123×/1.2444×，WASM Node/Chromium 网格约 1.0023×/1.0386×。
+原 native 栈基线仍失败；JS、WASM、native 数值产物哈希与上一批相同，
+测量差异不能解释为普通字符串的数值性能收益。尤其 Node 网格仍近门槛，
+低余量稳定化不关闭；完整字符串负载与完整编译器生产性能须另行冻结预算。
+
+
+本批原始本地全量门禁通过：核心 Emacs 167/167、Bun 704/704（130 文件），
+应用 Emacs 3/3、Bun 216/216（23 文件）与 CLI；严格字节编译通过。
+Seed/三代 canonical/typed IR、descriptor、WASM 字节固定点和三个浏览器
+专项执行通过，原生成器纳入 111 fixtures/420 绑定文件，stable 173/
+provisional 1、证据库存与版本保持不变。计划的可复用 goal 使用当前仓库
+定位，移除旧本机绝对路径；不改写已发布历史。
+
+上一批读取帧优化的远端验收为三格通过、一格失败。剩余 macOS Emacs 30.2
+失败是既有 zipper 深度 12000 用例在原 30 秒预算内超时；已定位
+zipper-slot 用 reduce 遍历整个父节点向量取尾元素，深树回溯出现重复扫描。
+这是独立语义/性能修复，保持四个编译器/宿主组合、原深度、断言与预算，
+接续修复真实 indexed access，不能加大 timeout 或减少深度来关闭 CI。
+
+完整 Chromium（默认全量）、Firefox 与 WebKit 后端套件均 41/41 通过，
+包含普通字符串在浏览器内编译后实际执行、零 imports 和同目标字节对照。
+冻结后的受影响契约检查通过，签名交付保留数值及语义实验范围。
