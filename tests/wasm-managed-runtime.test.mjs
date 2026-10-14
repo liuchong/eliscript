@@ -37,6 +37,15 @@ function managedBytes(r,h,input) {
 function readManagedBytes(r,h,value) {
  const length=r.value_length(h,value),p=r.value_data(h,value,6);assert(p>0);return new Uint8Array(r.memory.buffer,p,length).slice();
 }
+test('Number word operations reject invalid arguments and keep original inputs and capacity transactional',()=>{
+ const {r,h}=runtime(2,384,384),x=number(r,h,-0),y=number(r,h,3);r.heap_pin(h,x);r.heap_pin(h,y);r.heap_auto(h,1);
+ const used=r.heap_used(h);
+ for(const run of[()=>r.value_number_word(h,x,0),()=>r.value_number_bitwise(h,x,y,6),()=>r.value_number_remainder(h,x,y)]){assert.equal(run(),0);assert.equal(r.last_error(),2);assert.equal(r.heap_live(h),2);assert.equal(r.heap_used(h),used);assert(Object.is(unbox(r,h,x),-0));assert.equal(unbox(r,h,y),3);}
+ for(const [run,code]of[[()=>r.value_number_word(h,x,3),3],[()=>r.value_number_bitwise(h,x,y,7),3],[()=>r.value_number_remainder(h,x,0),1],[()=>r.value_number_word(h,0xffffffff,0),1]]){assert.equal(run(),0);assert.equal(r.last_error(),code);assert.equal(r.heap_live(h),2);}
+ r.heap_release(h,x);r.heap_release(h,y);assert.equal(r.heap_collect(h),2);assert.equal(r.value_number_word(h,x,0),0);assert.equal(r.last_error(),1);
+ const grown=runtime(16,512,65536),a=number(grown.r,grown.h,Number.MAX_VALUE),b=number(grown.r,grown.h,3);grown.r.heap_pin(grown.h,a);grown.r.heap_pin(grown.h,b);
+ const block=grown.r.value_bytes(grown.h,30000);assert(block>0);const result=grown.r.value_number_remainder(grown.h,a,b);assert(Object.is(unbox(grown.r,grown.h,result),Number.MAX_VALUE%3));assert(Object.is(unbox(grown.r,grown.h,a),Number.MAX_VALUE));
+});
 test('ordinary comparison rejects private frames, unfinished strings and stale values and keeps NaN non-reflexive',()=>{
  const {r,h}=runtime();const nan=number(r,h,NaN),zero=number(r,h,-0),positive=number(r,h,0),text=managedString(r,h,'中\ud800'),same=managedString(r,h,'中\ud800');
  const object=r.value_refs(h,7,0),other=r.value_refs(h,7,0),frame=r.frame_new(h,0),builder=r.value_string(h,0);

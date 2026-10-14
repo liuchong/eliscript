@@ -90,5 +90,5 @@ test('Node independently executes the ordinary numeric artifact with exact signe
 });
 test('unsupported numeric operations remain rejected in dead branches and input IR stays immutable',()=>{
  const before=JSON.stringify(program);backend.managed.emit_managed_wasm(program,runtimeProgram);assert.equal(JSON.stringify(program),before);
- for(const expression of['(% x 2)','(mod x 2)','(int32 x)','(bit-and x 1)']){const ir=backend.compiler.compile_ir_string(`(defun f (x) (if false ${expression} x)) (export f)`,'unsupported-number.eli');assert.throws(()=>backend.managed.emit_managed_wasm(ir,runtimeProgram),e=>e.eliscriptDiagnostic?.code==='ELI-B0001'&&e.eliscriptDiagnostic.location.file==='unsupported-number.eli');}
+ for(const expression of['(string-to-number x)','(string-to-bigint x)','(int32 x 1)','(bit-and x 1 2)']){const ir=backend.compiler.compile_ir_string(`(defun f (x) (if false ${expression} x)) (export f)`,'unsupported-number.eli');assert.throws(()=>backend.managed.emit_managed_wasm(ir,runtimeProgram),e=>e.eliscriptDiagnostic?.code==='ELI-B0001'&&e.eliscriptDiagnostic.location.file==='unsupported-number.eli');}
 });

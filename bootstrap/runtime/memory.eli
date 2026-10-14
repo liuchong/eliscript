@@ -421,6 +421,89 @@
               (store-f64 (+ (heap-block heap value) 32)
                 (if (= operation 0) (+ a b) (if (= operation 1) (- a b)
                   (if (= operation 2) (* a b) (/ a b)))))) value)))))
+  ;; Truncate a validated Number and retain its low 32 integer bits. Finite
+  ;; values at exponent >= 84 are multiples of 2^32; nonfinite values map to 0.
+  (defun heap-number-word (heap input)
+    (let* ((p (+ (heap-block heap input) 32)) (low (load-u32 p)) (high (load-u32 (+ p 4)))
+           (exponent (word-and (word-shr high 20) 2047)) (result 0))
+      (when (and (>= exponent 1023) (< exponent 1107))
+        (let ((e (- exponent 1023)) (fraction (word-or (word-and high 1048575) 1048576)))
+          (setq result (if (>= e 52) (word-shl low (- e 52))
+            (if (< e 20) (word-shr fraction (- 20 e))
+              (if (= e 20) fraction
+                (word-or (word-shr low (- 52 e)) (word-shl fraction (- e 20))))))))
+        (when (/= (word-and high 2147483648) 0) (setq result (- 0 result)))) result))
+  (defun heap-number-from-word (heap input signed)
+    (let ((magnitude input) (sign 0) (e 0) (low 0) (high 0))
+      (when (and (= signed 1) (>= input 2147483648)) (setq sign 2147483648) (setq magnitude (- 0 input)))
+      (unless (= magnitude 0)
+        (let ((scan magnitude)) (while (> scan 1) (setq scan (word-shr scan 1)) (setq e (1+ e))))
+        (if (<= e 20) (setq high (word-shl magnitude (- 20 e)))
+          (progn (setq high (word-shr magnitude (- e 20))) (setq low (word-shl magnitude (- 52 e))) 0))
+        (setq high (word-or (word-shl (+ e 1023) 20) (word-and high 1048575))))
+      (value-number heap low (word-or high sign))))
+  (defun value-number-word (heap input operation)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-kind-check heap input 4) 0) 0
+        (if (> operation 2) (fail 3)
+          (let ((word (heap-number-word heap input)))
+            (heap-number-from-word heap (if (= operation 2) (word-xor word 4294967295) word)
+              (if (= operation 1) 0 1)))))))
+  (defun value-number-bitwise (heap left right operation)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= (heap-kind-check heap left 4) 0) (= (heap-kind-check heap right 4) 0)) 0
+        (if (> operation 6) (fail 3)
+          (let* ((a (heap-number-word heap left)) (b (heap-number-word heap right))
+                 (shift (word-and b 31)) (result 0))
+            (setq result (if (= operation 0) (word-and a b)
+              (if (= operation 1) (word-or a b) (if (= operation 2) (word-xor a b)
+                (if (= operation 3) (word-shl a shift)
+                  (if (= operation 6) (* a b) (word-shr a shift)))))))
+            (when (and (= operation 4) (> shift 0) (>= a 2147483648))
+              (setq result (word-or result (word-shl 4294967295 (- 32 shift)))))
+            (heap-number-from-word heap result (if (= operation 5) 0 1)))))))
+  ;; Exact truncating remainder uses two-word significands. Exponents carry a
+  ;; +2048 offset so even normalized subnormals stay in the unsigned word ABI.
+  ;; Each subtraction/shift is exact; there is no rounded quotient or FP product.
+  (defun value-number-remainder (heap left right)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= (heap-kind-check heap left 4) 0) (= (heap-kind-check heap right 4) 0)) 0
+        (let* ((xp (+ (heap-block heap left) 32)) (yp (+ (heap-block heap right) 32))
+               (xl (load-u32 xp)) (xh (load-u32 (+ xp 4))) (yl (load-u32 yp)) (yh (load-u32 (+ yp 4)))
+               (sign (word-and xh 2147483648)) (ax (word-and xh 2147483647)) (ay (word-and yh 2147483647)))
+          (if (or (>= ax 2146435072) (> ay 2146435072)
+                  (and (= ay 2146435072) (/= yl 0)) (and (= ay 0) (= yl 0)))
+            (value-number heap 0 2146959360)
+            (if (or (< ax ay) (and (= ax ay) (< xl yl))) (value-number heap xl xh)
+              (if (and (= ax ay) (= xl yl)) (value-number heap 0 sign)
+                (let ((ex (+ (word-shr ax 20) 2048)) (ey (+ (word-shr ay 20) 2048)))
+                  (setq xh (word-and ax 1048575)) (setq yh (word-and ay 1048575))
+                  (if (> ex 2048) (setq xh (word-or xh 1048576))
+                    (progn (setq ex 2049)
+                      (while (< xh 1048576) (setq xh (+ (* xh 2) (word-shr xl 31)))
+                        (setq xl (word-shl xl 1)) (setq ex (1- ex))) 0))
+                  (if (> ey 2048) (setq yh (word-or yh 1048576))
+                    (progn (setq ey 2049)
+                      (while (< yh 1048576) (setq yh (+ (* yh 2) (word-shr yl 31)))
+                        (setq yl (word-shl yl 1)) (setq ey (1- ey))) 0))
+                  (while (and (> ex ey) (or (/= xh 0) (/= xl 0)))
+                    (when (or (> xh yh) (and (= xh yh) (>= xl yl)))
+                      (let ((borrow (if (< xl yl) 1 0)))
+                        (setq xh (- (- xh yh) borrow)) (setq xl (- xl yl))))
+                    (setq xh (+ (* xh 2) (word-shr xl 31))) (setq xl (word-shl xl 1)) (setq ex (1- ex)))
+                  (when (or (> xh yh) (and (= xh yh) (>= xl yl)))
+                    (let ((borrow (if (< xl yl) 1 0)))
+                      (setq xh (- (- xh yh) borrow)) (setq xl (- xl yl))))
+                  (if (and (= xh 0) (= xl 0)) (value-number heap 0 sign)
+                    (progn
+                      (while (< xh 1048576) (setq xh (+ (* xh 2) (word-shr xl 31)))
+                        (setq xl (word-shl xl 1)) (setq ex (1- ex)))
+                      (if (> ex 2048) (setq xh (word-or (- xh 1048576) (word-shl (- ex 2048) 20)))
+                        (let ((shift (- 2049 ex)))
+                          (if (< shift 32)
+                            (progn (setq xl (word-or (word-shr xl shift) (word-shl xh (- 32 shift)))) (setq xh (word-shr xh shift)) 0)
+                            (progn (setq xl (if (= shift 32) xh (word-shr xh (- shift 32)))) (setq xh 0) 0))))
+                      (value-number heap xl (word-or xh sign))))))))))))
   (defun value-refs (heap kind count)
     (begin-operation) (if (= (heap-check heap) 0) 0
       (if (or (= kind 7) (= kind 8)) (heap-object heap kind count 4) (fail 3))))
@@ -1126,6 +1209,7 @@
   (export last-error retire buffer-new buffer-length buffer-reserve buffer-push buffer-get
     record-new record-length record-get record-set string-new string-length string-get string-set string-seal utf8-encode utf8-decode heap-new heap-capacity heap-used heap-live heap-pin heap-release heap-collect
     value-kind value-truth value-data value-length value-number value-number-binary
+    value-number-word value-number-bitwise value-number-remainder
     value-refs value-get value-set value-refs-resize value-string value-bytes value-seal
     value-unit-get value-unit-set value-byte-get value-byte-set value-bytes-resize
     value-number-negate value-number-compare value-compare heap-auto heap-collections

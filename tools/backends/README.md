@@ -187,7 +187,7 @@ sequences, `if`/`cond`/`when`/`unless`, `while`, `and`/`or`/`not`, required sync
 parameters and direct named calls. Lisp truth preserves Number zero, NaN and
 empty strings as true; short-circuit returns preserve actual operand values.
 Every unsupported node is rejected even in an unselected branch. Mixed coercion,
-remainder/bitwise operations, persistent literals, closures, imports, interop, async and exception expressions
+persistent literals, closures, imports, interop, async and exception expressions
 remain open; this profile does not represent the complete dynamic backend.
 
 Number operands now support `+`, `-`, `*`, `/`, `1+` and `1-`, including zero-argument
@@ -206,6 +206,22 @@ comparisons, even if the first pair is false. `<`, `<=`, `>` and `>=` support
 Number pairs and String pairs (UTF-16 code-unit order); mixed-type coercion is
 explicitly refused. Unsupported coercion never runs JS on behalf of WASM.
 
+Number operands additionally support `%`/`mod`, `int32`/`uint32`, `imul32`,
+`bit-not`, `bit-and`/`bit-or`/`bit-xor`, `bit-shift-left`/`bit-shift-right` and
+`unsigned-bit-shift-right`. `%` and `mod` retain the existing truncating remainder
+semantics, including the dividend's zero sign, nonfinite cases and exact
+subnormal results; variadic remainder stays left-associated. The independent
+runtime reduces full binary64 significands with exact two-word subtraction and
+shifts, bounded by the binary64 exponent range. It never uses a rounded quotient
+or delegates floating remainder to a host import.
+
+Integer conversions truncate toward zero and retain the low 32 bits; NaN,
+infinities and either zero become positive zero. Shift counts retain the low
+five bits after unsigned conversion, arithmetic and logical right shifts remain
+distinct, and `imul32` wraps multiplication exactly in 32 bits. Results are boxed
+Numbers; these explicit operations do not narrow other Numbers. String/object
+coercion remains unsupported and is refused before subsequent evaluation.
+
 The bulk entry protects earlier arguments across later getters. Generated frames
 retain parameters, lexical variables and temporaries; each argument is captured
 before later argument effects. Internal calls return borrowed values and install
@@ -220,7 +236,7 @@ peak-memory and throughput acceptance remain separate, open gates.
 ## Verification
 
 ```sh
-bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs tests/wasm-managed-tables.test.mjs tests/wasm-managed-control.test.mjs tests/wasm-managed-arithmetic.test.mjs
+bun test tests/wasm-memory-runtime.test.mjs tests/wasm-managed-runtime.test.mjs tests/wasm-managed-tables.test.mjs tests/wasm-managed-control.test.mjs tests/wasm-managed-arithmetic.test.mjs tests/wasm-managed-word.test.mjs
 bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=firefox bun test tests/direct-wasm-backend.test.mjs
 ELISCRIPT_TEST_BROWSER=webkit bun test tests/direct-wasm-backend.test.mjs
