@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm, writeFile, mkdir } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { resolve, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -13,6 +14,15 @@ const browserName = process.env.ELISCRIPT_TEST_BROWSER ?? "chromium";
 const browsers = { chromium, firefox, webkit };
 assert(Object.hasOwn(browsers, browserName), `unknown ELISCRIPT_TEST_BROWSER: ${browserName}`);
 let directory, generations, browserBundle, browserProcess;
+const execFileAsync = promisify(execFile);
+async function seedJavascript(input, output) {
+  // Seed and self-hosted compilation are independent. Start the owned child
+  // before the in-process fixed-point work, within the same test deadline.
+  await execFileAsync(resolve(root, "bin/eliscript-seed"), ["--output", output, input], {
+    encoding: "utf8", timeout: 30_000,
+  });
+  return readFile(output, "utf8");
+}
 const sameNumber = (actual, expected, label) => assert(Object.is(actual, expected), `${label}: ${actual} != ${expected}`);
 function scalarFunctionInstructions(bytes) {
  let cursor=8;const leb=()=>{let value=0,shift=0,byte;do{byte=bytes[cursor++];value+=(byte&127)*2**shift;shift+=7;}while(byte&128);return value;};
@@ -621,18 +631,24 @@ test("direct WASM performance report preserves budgets and blocks failed promoti
   assert.equal(promotion.status, report.decision.productionPassed ? 0 : 1, promotion.stderr);
 });
 
+test("runtime fixed-point Seed failures cannot become successful comparisons", async () => {
+  const input = resolve(directory, "invalid-runtime.eli");
+  await writeFile(input, "(defun broken (");
+  await assert.rejects(seedJavascript(input, resolve(directory, "invalid-runtime.mjs")), error =>
+    Number.isInteger(error.code) && error.code !== 0 && error.stderr.includes("eliscript"));
+});
+
 test("memory runtime emits identical IR and WASM through three compiler generations", async () => {
   const filename = "memory-runtime.eli", source = await readFile(resolve(root, "bootstrap/runtime/memory.eli"), "utf8");
+  const input = resolve(root, "bootstrap/runtime/memory.eli");
+  const seed = seedJavascript(input, resolve(directory, "memory-seed.mjs"));
   const programs = generations.map(g => g.compiler.compile_ir_string(source, filename));
   assert.deepEqual(programs[0], programs[1]); assert.deepEqual(programs[1], programs[2]);
   const bytes = generations.map((g, i) => Uint8Array.from(g.wasm.emit_memory_wasm(programs[i])));
   assert.deepEqual(bytes[0], bytes[1]); assert.deepEqual(bytes[1], bytes[2]);
   const saved = JSON.stringify(programs[2]); generations[2].wasm.emit_memory_wasm(programs[2]);
   assert.equal(JSON.stringify(programs[2]), saved);
-  const seed = resolve(directory, "memory-seed.mjs"), input = resolve(root, "bootstrap/runtime/memory.eli");
-  const child = spawnSync(resolve(root, "bin/eliscript-seed"), ["--output", seed, input], {encoding: "utf8", timeout: 30000});
-  assert.equal(child.status, 0, child.stderr);
-  assert.equal(await readFile(seed, "utf8"), generations[2].compiler.compile_string(source, input));
+  assert.equal(await seed, generations[2].compiler.compile_string(source, input));
 });
 
 const rootPressureSource = `
@@ -662,6 +678,8 @@ const rootPressureSource = `
 (export root-pressure root-pressure-trap root-recursive)`;
 test("managed runtime has seed and three-generation IR and WASM fixed points", async () => {
   const source=(await readFile(resolve(root,"bootstrap/runtime/memory.eli"),"utf8"))+rootPressureSource+await readFile(resolve(root,"tests/fixtures/wasm-managed-text.eli"),"utf8")+await readFile(resolve(root,"tests/fixtures/wasm-managed-tables.eli"),"utf8");
+  const input=resolve(directory,"managed-runtime.eli");await writeFile(input,source);
+  const seed=seedJavascript(input,resolve(directory,"managed-seed.mjs"));
   const filename="managed-runtime.eli",programs=generations.map(g=>g.compiler.compile_ir_string(source,filename));
   assert.deepEqual(programs[0],programs[1]);assert.deepEqual(programs[1],programs[2]);
   const bytes=generations.map((g,i)=>g.wasm.emit_memory_wasm(programs[i]));
@@ -690,9 +708,7 @@ test("managed runtime has seed and three-generation IR and WASM fixed points", a
   }
   assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(Uint8Array.from(bytes[2]))),[]);
   const saved=JSON.stringify(programs[2]);generations[2].wasm.emit_memory_wasm(programs[2]);assert.equal(JSON.stringify(programs[2]),saved);
-  const input=resolve(directory,filename),output=resolve(directory,"managed-seed.mjs");await writeFile(input,source);
-  const child=spawnSync(resolve(root,"bin/eliscript-seed"),["--output",output,input],{encoding:"utf8",timeout:30000});
-  assert.equal(child.status,0,child.stderr);assert.equal(await readFile(output,"utf8"),generations[2].compiler.compile_string(source,input));
+  assert.equal(await seed,generations[2].compiler.compile_string(source,input));
 });
 
 test("ordinary managed control has Seed and three-generation IR, descriptor and WASM fixed points",async()=>{
