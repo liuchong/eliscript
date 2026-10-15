@@ -153,12 +153,15 @@ beforeAll(async () => {
   const variadicSource = await readFile(variadicInput, "utf8");
   const callbackInput = resolve(root, "tests/fixtures/wasm-managed-array-callbacks.eli");
   const callbackSource = await readFile(callbackInput, "utf8");
-  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed] = await Promise.all([
+  const moduleInput = resolve(root, "tests/fixtures/wasm-managed-module-bindings.eli");
+  const moduleSource = await readFile(moduleInput, "utf8");
+  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed, moduleSeed] = await Promise.all([
     seedJavascript(resolve(root, "bootstrap/runtime/memory.eli"), resolve(directory, "memory-seed.mjs")),
     seedJavascript(managedInput, resolve(directory, "managed-seed.mjs")),
     seedJavascript(callableInput, resolve(directory, "callables-seed.mjs")),
     seedJavascript(variadicInput, resolve(directory, "variadic-seed.mjs")),
     seedJavascript(callbackInput, resolve(directory, "callback-seed.mjs")),
+    seedJavascript(moduleInput, resolve(directory, "module-seed.mjs")),
   ]);
   runtimeSeeds = {
     memory: { source, javascript: memorySeed },
@@ -166,6 +169,7 @@ beforeAll(async () => {
     callables: { source: callableSource, javascript: callableSeed, filename: callableInput },
     variadic: { source: variadicSource, javascript: variadicSeed, filename: variadicInput },
     callbacks: { source: callbackSource, javascript: callbackSeed, filename: callbackInput },
+    moduleBindings: { source: moduleSource, javascript: moduleSeed, filename: moduleInput },
   };
 }, 120_000);
 afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
@@ -873,6 +877,28 @@ test("array callback families retain Seed and three-generation IR, descriptors a
  }
 });
 
+test("module bindings preserve public Seed and three-generation IR, descriptor and executable fixed points",async()=>{
+ const {source,javascript:seed,filename}=runtimeSeeds.moduleBindings;
+ const programs=generations.map(g=>g.compiler.compile_ir_string(source,filename)),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtimeSeeds.memory.source,'runtime.eli'));
+ const saved=programs.map(JSON.stringify),savedRuntime=runtimes.map(JSON.stringify),lowered=generations.map((g,i)=>g.managed.lower_managed_program(programs[i],runtimes[i]));
+ const artifacts=generations.map((g,i)=>g.managed.emit_managed_wasm(programs[i],runtimes[i],{maximumPages:16}));
+ const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
+ for(let i=0;i<3;i++){
+  assert.deepEqual(programs[i],programs[0]);assert.equal(generations[i].compiler.serialize_ir_program(programs[i]),generations[0].compiler.serialize_ir_program(programs[0]));
+  assert.deepEqual(lowered[i],lowered[0]);assert.deepEqual(artifacts[i],artifacts[0]);assert.equal(generations[i].compiler.emit_ir_string(programs[i]),seed);
+  assert.equal(JSON.stringify(programs[i]),saved[i]);assert.equal(JSON.stringify(runtimes[i]),savedRuntime[i]);
+  const bytes=Uint8Array.from(artifacts[i]),module=new WebAssembly.Module(bytes);assert.deepEqual(WebAssembly.Module.imports(module),[]);
+  assert.deepEqual(WebAssembly.Module.customSections(module,'eliscript-managed-control'),WebAssembly.Module.customSections(new WebAssembly.Module(Uint8Array.from(artifacts[0])),'eliscript-managed-control'));
+  const reference=await import('data:text/javascript;base64,'+Buffer.from(seed+'\n// fresh module '+i).toString('base64')),a=instantiateManagedRuntime(bytes);a.auto(1);
+  const num=(name,args=[])=>{const out=a.invoke(name,args);try{return a.readNumber(out)}finally{a.release(out)}};
+  assert.equal(num('tick'),reference.tick());assert.equal(num('tick'),reference.tick());a.initializeModule();assert.equal(num('read-counter'),reference.read_counter());
+  const state=a.getExport('state'),alias=a.invoke('read-state'),key=a.string('label'),label=a.objectGet(state,key);assert(a.keyEqual(state,alias));assert.equal(a.readString(label),reference.state.label);
+  const capture=a.invoke('captured-global'),one=a.number(1),assigned=a.invoke('set-current',[capture]);a.release(assigned);const result=a.invoke('call-current',[one]);assert.equal(a.readNumber(result),reference.captured_global()(1));
+  const zero=a.getExport('negative-zero');assert(Object.is(a.readNumber(zero),reference.negative_zero));assert.equal(a.getExport('missing'),null);
+  for(const value of[state,alias,key,label,capture,one,result,zero])a.release(value);a.collect();assert(a.live()>0);a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+ }
+});
+
 test("variadic calls preserve Seed and three-generation IR, descriptors and executable WASM bytes",async()=>{
  const {source,javascript:seed,filename}=runtimeSeeds.variadic;
  const programs=generations.map(g=>g.compiler.compile_ir_string(source,filename)),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtimeSeeds.memory.source,'runtime.eli'));
@@ -1487,6 +1513,40 @@ describe("browser compiler backends", () => {
     },{source,runtime});
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-source-collections.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
   });
+  test("browser module initialization preserves live exports, isolation, TDZ, GC and failure ownership",async()=>{
+    const source=runtimeSeeds.moduleBindings.source,runtime=runtimeSeeds.memory.source;
+    const result=await evaluateBrowser(async({bundle,source,runtime})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));let jsUrl;
+      try{
+        const c=await import(url),p=c.compile_ir_string(source,'browser-module.eli'),rt=c.compile_ir_string(runtime,'runtime.eli'),bytes=Uint8Array.from(c.emit_managed_wasm(p,rt,{maximumPages:16}));
+        const check=(ok,label)=>{if(!ok)throw Error(label)},error=(action,code)=>{let actual;try{action()}catch(e){actual=e.eliscriptDiagnostic?.code}check(actual===code,code)};
+        check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'zero imports');
+        jsUrl=URL.createObjectURL(new Blob([c.emit_ir_string(p)],{type:'text/javascript'}));const reference=await import(jsUrl);
+        const a=c.instantiateManagedRuntime(bytes,{initializeModule:false});a.auto(1);const keep=a.number(-0),frame=a.frame(1);a.frameSet(frame,0,keep);
+        error(()=>a.getExport('counter'),'ELI-RT0008');error(()=>a.invoke('tick'),'ELI-RT0008');check(a.stats().frameDepth===1,'caller frame before initialization');a.initializeModule();a.initializeModule();
+        const num=(name,args=[])=>{const x=a.invoke(name,args);try{return a.readNumber(x)}finally{a.release(x)}};
+        check(num('tick')===reference.tick(),'tick');a.initializeModule();check(num('read-counter')===reference.read_counter(),'once');
+        const log=a.getExport('initialization-log');check(a.length(log)===3,'source order length');for(let i=0;i<3;i++){const x=a.get(log,i);check(a.readNumber(x)===reference.initialization_log[i],'source order');a.release(x)}
+        const state=a.getExport('state'),alias=a.invoke('read-state'),labelKey=a.string('label'),label=a.objectGet(state,labelKey),selfKey=a.string('self'),self=a.objectGet(state,selfKey),valuesKey=a.string('values'),values=a.objectGet(state,valuesKey);
+        check(a.keyEqual(state,alias)&&a.keyEqual(state,self),'identity and cycle');check(a.readString(label)===reference.state.label,'UTF16');for(let i=0;i<3;i++){const x=a.get(values,i);check(Object.is(a.readNumber(x),reference.state.values[i]),'binary64');a.release(x)}
+        const capture=a.invoke('captured-global'),delta=a.number(7),assigned=a.invoke('set-current',[capture]);a.release(assigned);const changed=a.invoke('call-current',[delta]);check(a.readNumber(changed)===reference.captured_global()(7),'capture');
+        for(let i=0;i<32;i++){const x=a.invoke('allocate');a.release(x);a.collect()}check(num('read-counter')===reference.counter,'global GC root');
+        const other=c.instantiateManagedRuntime(bytes),first=other.invoke('tick');check(other.readNumber(first)===1,'heap isolation');other.release(first);other.closeModule();other.collect();check(other.live()===0,'second heap cleanup');
+        for(const x of[log,alias,labelKey,label,selfKey,self,valuesKey,values,capture,delta,changed])a.release(x);a.closeModule();a.collect();check(a.stats().frameDepth===1,'close keeps caller frame');const held=a.frameGet(frame,0);check(Object.is(a.readNumber(held),-0),'caller bits');a.release(held);check(state.kind===13,'caller-owned state');a.release(state);a.leaveFrame(frame);a.release(keep);a.collect();check(a.live()===0,'closed module graph reclaimed');error(()=>a.getExport('state'),'ELI-RT0003');
+        const tdz='(defconst first (read-later)) (defconst later 7) (defun read-later () later) (export first read-later)',tdzIR=c.compile_ir_string(tdz,'browser-module-tdz.eli');
+        const tdzUrl=URL.createObjectURL(new Blob([c.emit_ir_string(tdzIR)],{type:'text/javascript'}));try{let refused=false;try{await import(tdzUrl)}catch(e){refused=e instanceof ReferenceError}check(refused,'independent JS TDZ')}finally{URL.revokeObjectURL(tdzUrl)}
+        error(()=>c.instantiateManagedRuntime(Uint8Array.from(c.emit_managed_wasm(tdzIR,rt))),'ELI-RT0008');
+        const small=c.instantiateManagedRuntime(bytes,{maxSlots:8,initialBytes:4096,maxBytes:8192,initializeModule:false});small.auto(1);const kept=small.number(7),sf=small.frame(1);small.frameSet(sf,0,kept);
+        for(let i=0;i<2;i++){error(()=>small.initializeModule(),'ELI-RT0002');small.collect();check(small.stats().frameDepth===1&&small.live()===2,'failed declaration cleanup')}small.leaveFrame(sf);small.release(kept);small.collect();check(small.live()===0,'capacity caller release');
+        const start=runtime.indexOf('  (defun value-module-init (heap index value)'),end=runtime.indexOf('  (defun ',start+10);check(start>=0&&end>start,'trap injection location');
+        const faulty=runtime.slice(0,start)+'  (defun value-module-init (heap index value) (load-u32 4294967295))'+String.fromCharCode(10)+runtime.slice(end),broken=c.instantiateManagedRuntime(Uint8Array.from(c.emit_managed_wasm(p,c.compile_ir_string(faulty,'browser-module-trap.eli'))),{initializeModule:false});broken.auto(1);
+        const bk=broken.number(9),bf=broken.frame(1);broken.frameSet(bf,0,bk);let trapped=false;try{broken.initializeModule()}catch(e){trapped=e instanceof WebAssembly.RuntimeError}check(trapped&&broken.stats().frameDepth===1,'actual initialization trap');broken.collect();const saved=broken.frameGet(bf,0);check(broken.readNumber(saved)===9&&broken.live()===2,'trap preserves caller');broken.release(saved);broken.leaveFrame(bf);broken.release(bk);broken.collect();check(broken.live()===0,'trap graph cleanup');
+        return [...bytes];
+      }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl)}
+    },{source,runtime});
+    assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-module.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
+  });
+
   test("browser array callbacks preserve JS truth, holes, reductions, mutation and actual trap cleanup",async()=>{
     const source=runtimeSeeds.callbacks.source,runtime=runtimeSeeds.memory.source;
     const result=await evaluateBrowser(async({bundle,source,runtime})=>{

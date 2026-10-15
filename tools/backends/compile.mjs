@@ -8,7 +8,7 @@ import { buildBackends } from "./build.mjs";
 // optimization path.
 const args = process.argv.slice(2);
 if (args.includes("--help")) {
-  console.log("Usage: bun tools/backends/compile.mjs --abi numeric-f64 --target js|wasm|native -o OUTPUT INPUT\nManaged control: --abi managed-control-v1 --target wasm -o OUTPUT INPUT\nNative: --platform arm64-macos --native-format object|library|executable [--entry FUNCTION]");
+  console.log("Usage: bun tools/backends/compile.mjs --abi numeric-f64 --target js|wasm|native -o OUTPUT INPUT\nManaged control: --abi managed-control-v1|managed-module-v1 --target wasm -o OUTPUT INPUT\nNative: --platform arm64-macos --native-format object|library|executable [--entry FUNCTION]");
   process.exit(0);
 }
 let abi, target, output, input, platform, nativeFormat, entry;
@@ -27,10 +27,10 @@ try {
     } else if (argument.startsWith("-") || input) throw new Error(`unexpected argument: ${argument}`);
     else input = argument;
   }
-  if (!["numeric-f64", "managed-control-v1"].includes(abi) || !["js", "wasm", "native"].includes(target) || !input || !output) {
+  if (!["numeric-f64", "managed-control-v1", "managed-module-v1"].includes(abi) || !["js", "wasm", "native"].includes(target) || !input || !output) {
     throw new Error("require --abi numeric-f64 --target js|wasm|native -o OUTPUT INPUT");
   }
-  if (abi === "managed-control-v1" && target !== "wasm") throw new Error("managed-control-v1 currently requires --target wasm");
+  if (abi !== "numeric-f64" && target !== "wasm") throw new Error(`${abi} currently requires --target wasm`);
   if (target === "native") {
     if (platform !== "arm64-macos" || !["object", "library", "executable"].includes(nativeFormat) ||
         (nativeFormat === "executable" ? !entry : entry !== undefined)) {
@@ -45,10 +45,10 @@ try {
   // Validate the same ABI for all three targets, before any optimization removes
   // unreachable code or unsupported constructs.
   let bytes;
-  if (abi === "managed-control-v1") {
+  if (abi !== "numeric-f64") {
     const runtimePath=fileURLToPath(new URL("../../bootstrap/runtime/memory.eli",import.meta.url));
     const runtimeProgram=compiler.compile_ir_string(await readFile(runtimePath,"utf8"),runtimePath);
-    bytes=Uint8Array.from(managed.emit_managed_wasm(program,runtimeProgram));
+    bytes=Uint8Array.from(managed.emit_managed_wasm(program,runtimeProgram,{abi}));
   } else {
     numeric.lower_numeric_program(program);
     bytes = target === "wasm"

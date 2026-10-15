@@ -1,39 +1,61 @@
 // Bulk host boundary for the .eli managed heap. GC, value operations and allocation
 // execute inside WASM, with zero imports. Handles own explicit roots until release.
 function fail(code) {
- const error=new Error(code===1?'invalid managed value handle':code===2?'managed capacity exhausted':code===4?'invalid UTF-8 input':code===5?'invalid UTF-16 surrogate':code===6?'managed string sealing error':'managed argument or bounds error');
+ const error=new Error(code===1?'invalid managed value handle':code===2?'managed capacity exhausted':code===4?'invalid UTF-8 input':code===5?'invalid UTF-16 surrogate':code===6?'managed string sealing error':code===8?'uninitialized managed module binding':'managed argument or bounds error');
  error.eliscriptDiagnostic={format:'eliscript-diagnostic',version:1,code:`ELI-RT${String(code).padStart(4,'0')}`,severity:'error',phase:'runtime',message:error.message};throw error;
 }
 function word(x,max=0xffffffff) {if(typeof x!=='number'||!Number.isInteger(x)||x<0||x>max||Object.is(x,-0))fail(3);return x;}
 function flag(value) {if(typeof value!=='boolean')fail(3);return Number(value);}
-export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=65536,maxBytes=16777216}={}) {
+export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=65536,maxBytes=16777216,initializeModule:initialize=true}={}) {
+ if(typeof initialize!=='boolean')fail(3);
  const module=new WebAssembly.Module(bytes);if(WebAssembly.Module.imports(module).length)throw Error('managed runtime requires zero imports');
  const e=new WebAssembly.Instance(module).exports;if(!(e.memory instanceof WebAssembly.Memory))throw Error('managed runtime requires owned memory');
- const sections=WebAssembly.Module.customSections(module,'eliscript-managed-control'),entries=new Map();
+ const sections=WebAssembly.Module.customSections(module,'eliscript-managed-control'),entries=new Map(),moduleExports=new Map();let moduleInfo=null;
  if(sections.length>1)fail(3);
  if(sections.length) {
   const payload=new Uint8Array(sections[0]);let length=0,index=0,shift=0,ended=false;
   while(index<payload.length&&index<5){const byte=payload[index++];if(index===5&&(byte&0xf0))fail(3);length+=(byte&127)*2**shift;if(!(byte&128)){ended=true;break;}shift+=7;}
   if(!ended||index+length!==payload.length)fail(3);let descriptor;
   try{descriptor=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(payload.subarray(index)));}catch{fail(3);}
-  if(descriptor?.format!=='eliscript-managed-control'||descriptor.version!==1||descriptor.abi!=='managed-control-v1'||!Array.isArray(descriptor.functions))fail(3);
-  for(const item of descriptor.functions){
-   if(typeof item?.name!=='string'||entries.has(item.name)||typeof e[item.name]!=='function')fail(3);
-   const uniform=item.callingConvention==='argument-list';
-   if(item.callingConvention!==undefined&&!uniform)fail(3);
+  if(descriptor?.format!=='eliscript-managed-control'||descriptor.version!==1||!['managed-control-v1','managed-module-v1'].includes(descriptor.abi)||!Array.isArray(descriptor.functions))fail(3);
+  if(descriptor.abi==='managed-module-v1'){
+   moduleInfo=descriptor.module;
+   if(!moduleInfo||typeof moduleInfo!=='object'||Array.isArray(moduleInfo)||!Number.isInteger(moduleInfo.bindingCount)||moduleInfo.bindingCount<0||moduleInfo.bindingCount>1048574||!Number.isInteger(moduleInfo.functionCount)||moduleInfo.functionCount<0||moduleInfo.functionCount>1048575||!Array.isArray(moduleInfo.exports)||moduleInfo.exports.length!==descriptor.functions.length)fail(3);
+   for(const[field,suffix,arity]of[['initialize','init',1],['get','get',3],['status','status',1],['close','close',1],['abort','abort',2]]){
+    const name='__eliscript_module_'+suffix;if(moduleInfo[field]!==name||typeof e[name]!=='function'||e[name].length!==arity)fail(3);
+   }
+  }else if(descriptor.module!==undefined)fail(3);
+  for(const[position,item]of descriptor.functions.entries()){
+   const wireName=moduleInfo?item?.wireName:item?.name;
+   if(typeof item?.name!=='string'||entries.has(item.name)||typeof e[wireName]!=='function')fail(3);
+   if(moduleInfo?wireName!=='__eliscript_export_'+position:item.wireName!==undefined)fail(3);
+   const binding=item.callingConvention==='module-binding',uniform=item.callingConvention==='argument-list';
+   if(item.callingConvention!==undefined&&!uniform&&!binding)fail(3);
+   if(binding){
+    if(!moduleInfo||item.arity!==null||item.parameterKinds!==undefined||!Number.isInteger(item.bindingIndex)||item.bindingIndex<0||item.bindingIndex>=moduleInfo.bindingCount||e[wireName].length!==4)fail(3);
+   }else if(item.bindingIndex!==undefined)fail(3);
    if(uniform){
     // Legacy fixed-arity readers reject null instead of miscalling this ABI.
-    if(item.arity!==null||!Array.isArray(item.parameterKinds)||item.parameterKinds.length===0||item.parameterKinds.length>65535||!item.parameterKinds.some(k=>k!=='required')||e[item.name].length!==4)fail(3);
+    if(item.arity!==null||!Array.isArray(item.parameterKinds)||item.parameterKinds.length===0||item.parameterKinds.length>65535||!item.parameterKinds.some(k=>k!=='required')||e[wireName].length!==4)fail(3);
     let mode='required';
     for(let i=0;i<item.parameterKinds.length;i++){
      const kind=item.parameterKinds[i];
      if(!((kind==='required'&&mode==='required')||(kind==='optional'&&mode!=='rest')||(kind==='rest'&&i===item.parameterKinds.length-1&&mode!=='rest')))fail(3);
      mode=kind;
     }
-   }else if(!Number.isInteger(item.arity)||item.arity<0||item.arity>65535||item.parameterKinds!==undefined||e[item.name].length!==item.arity+1)fail(3);
-   entries.set(item.name,{arity:item.arity,uniform});
+   }else if(!binding&&(!Number.isInteger(item.arity)||item.arity<0||item.arity>65535||item.parameterKinds!==undefined||e[wireName].length!==item.arity+1))fail(3);
+   entries.set(item.name,{arity:item.arity,uniform:uniform||binding,binding,index:item.bindingIndex,wireName});
+  }
+  if(moduleInfo){
+   for(const item of moduleInfo.exports){
+    const entry=entries.get(item?.name);if(!entry||moduleExports.has(item.name)||!Number.isInteger(item.index)||item.index<0||item.name.startsWith('__eliscript_'))fail(3);
+    if(item.kind===0){if(!entry.binding||item.index!==entry.index||item.index>=moduleInfo.bindingCount)fail(3);}
+    else if(item.kind===1){if(entry.binding||item.index>=moduleInfo.functionCount)fail(3);}else fail(3);
+    moduleExports.set(item.name,item);
+   }
   }
  }
+ if(!moduleInfo&&['init','get','status','close','abort'].some(name=>Object.hasOwn(e,'__eliscript_module_'+name)))fail(3);
  const handles=new WeakMap(),frames=new WeakMap(),view=()=>new DataView(e.memory.buffer);
  const call=(name,...args)=>{const result=e[name](...args)>>>0;const code=e['last-error']();if(code)fail(code);return result;};
  const heap=call('heap-new',word(maxSlots),word(initialBytes),word(maxBytes));
@@ -85,21 +107,37 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
    return wrap(object);
   }finally{if(object)call('heap-release',heap,object);for(const value of borrowed)call('heap-release',heap,value);}
  }
+ function initializeModuleInstance(){
+  if(!moduleInfo)fail(3);const status=call(moduleInfo.status,heap),target=call('frame-current',heap);
+  try{call(moduleInfo.initialize,heap);return true;}
+  catch(error){
+   call('frame-unwind',heap,target);
+   if(status===0){const match=/^ELI-RT([0-9]+)$/.exec(error.eliscriptDiagnostic?.code??'');e[moduleInfo.abort](heap,match?Number(match[1]):3);}
+   throw error;
+  }
+ }
  const api=Object.freeze({
+  initializeModule:initializeModuleInstance,
+  getExport(name){if(!moduleInfo||typeof name!=='string'||!moduleExports.has(name))fail(3);const item=moduleExports.get(name);return wrap(call(moduleInfo.get,heap,item.kind,item.index));},
+  closeModule(){if(!moduleInfo)fail(3);call(moduleInfo.close,heap);return true;},
   invoke(name,args=[]) {
    if(typeof name!=='string'||!entries.has(name)||!Array.isArray(args))fail(3);
    const entry=entries.get(name);if(!entry.uniform&&args.length!==entry.arity)fail(3);
-   const borrowed=[];let entered=false,target=0,argumentsList=0;
+   const borrowed=[];let entered=false,target=0,argumentsList=0,callee=0;
    try {
+    if(entry.binding){
+     // Resolve and borrow the live callee before argument getters can replace it.
+     const item=moduleExports.get(name);callee=call(moduleInfo.get,heap,item.kind,item.index);call('heap-pin',heap,callee);borrowed.push(callee);
+    }
     const values=Array.from(args,value=>{const v=id(value);call('heap-pin',heap,v);borrowed.push(v);return v;});
     target=call('frame-current',heap);entered=true;
     if(entry.uniform){
      argumentsList=call('value-refs',heap,7,word(values.length));call('heap-pin',heap,argumentsList);
      const offset=call('value-data',heap,argumentsList,7),targetView=view();
      values.forEach((v,i)=>targetView.setUint32(offset+i*4,v,true));
-     return wrap(call(name,heap,0,argumentsList,values.length));
+     return wrap(call(entry.wireName,heap,entry.binding?callee:0,argumentsList,values.length));
     }
-    return wrap(call(name,heap,...values));
+    return wrap(call(entry.wireName,heap,...values));
    } catch(error){if(entered)call('frame-unwind',heap,target);throw error;}
    finally{if(argumentsList)call('heap-release',heap,argumentsList);for(const value of borrowed)call('heap-release',heap,value);}
   },
@@ -182,5 +220,6 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
   collect() {return call('heap-collect',heap);},live() {return call('heap-live',heap);},
   stats() {return Object.freeze({usedBytes:call('heap-used',heap),capacityBytes:call('heap-capacity',heap),liveValues:call('heap-live',heap),frameDepth:call('frame-depth',heap),collections:call('heap-collections',heap)});},
  });
+ if(moduleInfo&&initialize)initializeModuleInstance();
  return api;
 }

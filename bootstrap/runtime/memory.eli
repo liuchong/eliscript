@@ -352,6 +352,7 @@
     (if (= (heap-check heap) 0) 0
       (let ((slot 1) (reclaimed 0))
         (heap-mark heap (heap-meta heap 0))
+        (heap-mark heap (heap-meta heap 16))
         (while (<= slot (heap-control heap 3))
           (let ((entry (heap-entry heap slot)))
             (when (and (= (load-u32 (+ entry 4)) 1) (/= (load-u32 (+ entry 16)) 0))
@@ -373,7 +374,7 @@
             (when (= kind 12)
               (heap-mark heap (load-u32 (+ p 32)))
               (heap-mark heap (load-u32 (+ p 52))) (heap-mark heap (load-u32 (+ p 56))))
-            (when (or (= kind 7) (= kind 8) (= kind 9) (= kind 13) (= kind 14) (= kind 15) (= kind 16) (= kind 17) (= kind 18) (= kind 19))
+            (when (or (= kind 7) (= kind 8) (= kind 9) (= kind 13) (= kind 14) (= kind 15) (= kind 16) (= kind 17) (= kind 18) (= kind 19) (= kind 20))
               (while (< index (load-u32 (+ p 4)))
                 (let ((child (load-u32 (+ (+ p 32) (* index 4)))))
                   (unless (and (= kind 14) (= child 4)) (heap-mark heap child))) (setq index (1+ index))))))
@@ -942,6 +943,90 @@
   ;; saturating collection counter. Automatic collection is opt-in.
   (defun heap-meta (heap offset) (load-u32 (+ (heap-base heap) offset)))
   (defun heap-meta-set (heap offset value) (store-u32 (+ (heap-base heap) offset) value))
+  ;; Reserved pool metadata 16/20 owns module bindings and evaluation status.
+  ;; Module cells are private kind 20, separate from mutable lexical captures.
+  (defun value-module-status (heap)
+    (begin-operation) (if (= (heap-check heap) 0) 0 (word-and (heap-meta heap 20) 3)))
+  (defun value-module-check (heap)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (let ((status (heap-meta heap 20)))
+        (if (or (= status 1) (= status 2)) 1
+          (if (= (word-and status 3) 3) (fail (word-shr status 2)) (fail 8))))))
+  (defun value-module-abort (heap code)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= code 0) (> code 255)) (fail 3)
+        (let ((status (heap-meta heap 20)))
+          (if (= status 1)
+            (progn (heap-meta-set heap 16 0) (heap-meta-set heap 20 (word-or (word-shl code 2) 3)) (fail code))
+            (if (= (word-and status 3) 3) (fail (word-shr status 2)) (fail 3)))))))
+  (defun value-module-begin (heap count)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (let ((status (heap-meta heap 20)))
+        (if (/= status 0)
+          (if (= (word-and status 3) 3) (fail (word-shr status 2)) (fail 3))
+          (progn
+            (heap-meta-set heap 20 1)
+            (let ((bindings (value-refs heap 8 count)))
+              (if (= (last-error) 0) (progn (heap-meta-set heap 16 bindings) 1)
+                (value-module-abort heap (last-error)))))))))
+  (defun value-module-declare (heap index mutable)
+    (begin-operation) (if (= (value-module-check heap) 0) 0
+      (if (or (/= (heap-meta heap 20) 1) (> mutable 1)) (fail 3)
+        (let ((bindings (heap-meta heap 16)))
+          (if (>= index (load-u32 (+ (heap-block heap bindings) 4))) (fail 3)
+            (if (/= (value-get heap bindings index) 0) (fail 3)
+              (let ((cell (heap-object heap 20 1 4)))
+                (when (/= cell 0)
+                  (store-u32 (+ (heap-block heap cell) 12) mutable)
+                  (store-u32 (+ (heap-block heap cell) 16) 0)
+                  (store-u32 (+ (heap-block heap cell) 32) 3)
+                  (value-set heap bindings index cell)) (if (/= cell 0) 1 0))))))))
+  (defun heap-module-cell (heap index)
+    (if (= (value-module-check heap) 0) 0
+      (let ((bindings (heap-meta heap 16)))
+        (if (= bindings 0) (fail 8)
+          (if (= (heap-kind-check heap bindings 8) 0) 0
+            (if (>= index (load-u32 (+ (heap-block heap bindings) 4))) (fail 3)
+              (let ((cell (value-get heap bindings index)))
+                (if (= cell 0) (fail 8) (if (= (heap-kind-check heap cell 20) 0) 0 cell)))))))))
+  (defun value-module-get (heap index)
+    (begin-operation)
+    (let ((cell (heap-module-cell heap index)))
+      (if (= cell 0) 0
+        (if (= (load-u32 (+ (heap-block heap cell) 16)) 0) (fail 8)
+          (load-u32 (+ (heap-block heap cell) 32))))))
+  (defun value-module-init (heap index value)
+    (begin-operation)
+    (let ((cell (heap-module-cell heap index)))
+      (if (= cell 0) 0
+        (if (or (/= (heap-meta heap 20) 1) (/= (load-u32 (+ (heap-block heap cell) 16)) 0)) (fail 3)
+          (if (= (heap-reference-check heap value) 0) 0
+            (progn (store-u32 (+ (heap-block heap cell) 32) value)
+              (store-u32 (+ (heap-block heap cell) 16) 1) value))))))
+  (defun value-module-set (heap index value)
+    (begin-operation)
+    (let ((cell (heap-module-cell heap index)))
+      (if (= cell 0) 0
+        (if (= (load-u32 (+ (heap-block heap cell) 16)) 0) (fail 8)
+          (if (= (load-u32 (+ (heap-block heap cell) 12)) 0) (fail 3)
+            (if (= (heap-reference-check heap value) 0) 0
+              (progn (store-u32 (+ (heap-block heap cell) 32) value) value)))))))
+  (defun value-module-complete (heap)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (/= (heap-meta heap 20) 1) (fail 3)
+        (let ((bindings (heap-meta heap 16)) (index 0) (ready 1))
+          (if (= bindings 0) (fail 8)
+            (if (= (heap-kind-check heap bindings 8) 0) 0
+              (progn
+                (while (and (= ready 1) (< index (load-u32 (+ (heap-block heap bindings) 4))))
+                  (let ((cell (heap-module-cell heap index)))
+                    (if (= cell 0) (setq ready 0)
+                      (if (= (load-u32 (+ (heap-block heap cell) 16)) 0) (progn (fail 8) (setq ready 0)) 0)))
+                  (setq index (1+ index)))
+                (if (= ready 1) (progn (heap-meta-set heap 20 2) 1) 0))))))))
+  (defun value-module-close (heap)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (progn (heap-meta-set heap 16 0) (heap-meta-set heap 20 15) 1)))
   (defun heap-auto (heap threshold)
     (begin-operation) (if (= (heap-check heap) 0) 0
       (progn (heap-meta-set heap 4 threshold) (heap-meta-set heap 8 0) 1)))

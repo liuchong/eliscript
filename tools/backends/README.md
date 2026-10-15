@@ -248,8 +248,41 @@ stable handles through heap growth and cycles; named identity lookup adds no
 permanent roots. Errors retain their first code and actual WASM traps unwind
 only frames created by the call. Parameter counts, duplicate names and hidden
 parameter IR are checked before emission, without modifying canonical input IR.
-Function-valued builtin members, callback collection methods and general
-function properties/conversions remain unsupported.
+Function-valued builtin members and general function properties/conversions
+remain unsupported.
+
+Single-module top-level `defvar`/`defconst`, expression statements and value
+exports use the experimental `managed-module-v1` profile:
+
+```sh
+bun tools/backends/compile.mjs --abi managed-module-v1 --target wasm -o module.wasm module.eli
+```
+
+Initializers execute once per owned heap, in source order, with hoisted named
+functions and the existing lexical shadowing rules. Mutable exports retain live
+binding identity; const assignments are refused. Reading a binding before its
+initializer completes raises `ELI-RT0008`. Declaration evaluation, binding reads,
+closures and function dispatch execute inside WASM with zero imports. Project
+imports, linking and the remaining full-compiler dependencies are still open.
+
+The bridge initializes eagerly by default. `{initializeModule:false}` defers
+evaluation until `initializeModule()`, which is idempotent after success.
+`getExport(name)` returns the current value with an owned root; release returned
+handles after use. `invoke(name,args)` snapshots a dynamic function binding before
+reading host argument getters. `closeModule()` releases module roots and refuses
+future module calls; caller-owned handles and frames retain their lifetimes.
+Failed initialization caches its first error, drops partially initialized roots
+and preserves existing caller frames, including after actual WASM traps.
+
+The metadata envelope remains version 1, with a distinct module ABI. Logical
+UTF-16 export names map to ordinal ASCII `wireName` aliases, including names
+containing lone surrogates. Private kind-20 cells and a heap-rooted environment
+hold binding identity and initialization state. Old readers explicitly refuse
+this profile. Function-only sources keep their original `managed-control-v1`
+ABI and physical export names unless the module profile is explicitly requested;
+requesting the old profile for module bindings is rejected. Module output is
+currently available only for WASM. This capability is not a full WASM compiler
+host or completion of the nine-cell bootstrap matrix.
 
 Number operands now support `+`, `-`, `*`, `/`, `1+` and `1-`, including zero-argument
 addition/multiplication, unary negation/reciprocal and left-associated variadic
