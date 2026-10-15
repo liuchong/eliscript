@@ -2,6 +2,7 @@
   (import "./optimize.mjs" optimize-program)
   (import "./numeric.mjs" lower-numeric-program optimize-numeric-program numeric-pure backend-fail find-function)
   (import "./sha256.mjs" sha256-bytes)
+  (import "./memory.mjs" lower-memory-program)
 
   ;; ARM64 numeric-f64 instruction and Mach-O image emission. Selection,
   ;; encoding, linking metadata and ad-hoc page signatures are independent.
@@ -518,11 +519,11 @@
 
   (defun condition (state node)
     (expression state node)
-    (when (= (get node :type) "f64") (integer-register state 0 1 0)))
+    (when (or (= (get node :type) "f64") (= (get node :type) "u32")) (integer-register state 0 1 0)))
 
   (defun comparison-code (operator integer)
     ;; Ordered f64 '<' uses MI: signed LT would accept unordered NaN.
-    (cond ((= operator "=") 0) ((= operator "<") (if integer 11 4))
+    (cond ((= operator "=") 0) ((= operator "/=") 1) ((= operator "<") (if integer 11 4))
           ((= operator ">") 12) ((= operator "<=") (if integer 13 9)) (t 10)))
 
   (defun compare-result (state operator integer)
@@ -669,6 +670,9 @@
   (defun expression (state node)
     (let ((kind (get node :kind)) (value (get node :value)) (children (get node :children)))
       (cond
+        ((and (get state :memory nil) (= kind "memory-op")) (memory-operation state node))
+        ((and (get state :memory nil) (= kind "call")) (memory-call state node))
+        ((or (= kind "word-arithmetic") (= kind "word-compare")) (memory-word state node))
         ((= kind "literal")
          (if (= (get node :type) "f64")
              (float-literal state value)
@@ -731,7 +735,7 @@
            (while (< i (js-length children))
              (expression state (js-nth i children))
              (when (< i (1- (js-length children)))
-               (if (= (get node :type) "f64")
+               (if (or (= (get node :type) "f64") (= (get node :type) "u32"))
                    (when (= kind "or") (setq i (js-length children)))
                  (js-call jumps :push (jump state (if (= kind "and") "zero" "nonzero")))))
              (setq i (1+ i)))
@@ -1075,4 +1079,179 @@
           (word state 3556773889))
         (macho-library typed-program code start))))
 
-  (export emit-native-numeric-object emit-native-numeric-library emit-native-numeric-executable))
+
+  ;; memory-u32 native ABI: x0 is a caller-owned, nonmoving 32-byte context:
+  ;; [0] byte pointer, [8] current byte length, [16] capacity, [24] error u32.
+  ;; Explicit u32 arguments use w1..w7, then packed 4-byte Darwin stack slots.
+  ;; Every nested call receives the same context. Generated images have no
+  ;; imports; growth uses the reserved mapping and zeroes every exposed byte.
+  (defun memory-error (state code)
+    (integer-register state 9 code 0)
+    (word state 3103791721) ;; str w9, [x19, #24]
+    (js-call (get state :memoryErrors) :push (jump state "jump")))
+
+  (defun memory-conditional-error (state opcode code)
+    (let ((safe (js-length (get state :words))))
+      (word state opcode)
+      (memory-error state code)
+      (patch-jump state safe (js-length (get state :words)))))
+
+  (defun memory-width (name)
+    (cond ((or (= name "load-u8") (= name "store-u8")) 1)
+      ((or (= name "load-u16") (= name "store-u16")) 2)
+      ((or (= name "load-u32") (= name "store-u32")) 4)
+      ((or (= name "load-f64") (= name "store-f64")) 8) (t 0)))
+
+  (defun memory-word (state node)
+    (let* ((children (get node :children)) (count (js-length children)) (name (get node :value)))
+      (if (= count 0) (integer-register state 0 (if (= name "*") 1 0) 0)
+        (progn
+          (expression state (js-nth 0 children))
+          (cond
+            ((= count 2)
+             (push-value state "u32") (expression state (js-nth 1 children)) (pop-value state "u32")
+             (if (= (get node :kind) "word-compare")
+                 (let ((code (cond ((= name "=") 0) ((= name "/=") 1) ((= name "<") 3)
+                             ((= name "<=") 9) ((= name ">") 8) (t 2))))
+                   (word state 1795162175)
+                   (word state (+ 446629856 (* (bit-xor code 1) 4096))))
+               (word state (cond ((= name "+") 184549408) ((= name "-") 1258291232) (t 453016608)))))
+            ((= name "-") (word state 1258292192))
+            ((= name "1+") (word state 285213696))
+            ((= name "1-") (word state 1358955520)))))))
+
+  (defun memory-grow (state node)
+    (expression state (js-nth 0 (get node :children)))
+    (word state 4181722731) ;; ldr x11, [x19, #8]
+    (word state 4181723756) ;; ldr x12, [x19, #16]
+    (word state 2332049770) ;; add x10, x11, x0, lsl #16
+    (word state 3943432543) ;; cmp x10, x12
+    (let ((failed (js-length (get state :words))))
+      (word state 1409286152) ;; b.hi failure
+      (word state 3545300320) ;; lsr x0, x11, #16 (old page count)
+      (word state 4181721705) ;; ldr x9, [x19]
+      (word state 2332754217) ;; add x9, x9, x11
+      (word state 3406496076) ;; sub x12, x10, x11
+      (let ((done (js-length (get state :words))))
+        (word state 3019898892) ;; cbz x12, done
+        (let ((loop (js-length (get state :words))))
+          (word state 939529535) ;; strb wzr, [x9], #1
+          (word state 4043310476) ;; subs x12, x12, #1
+          (let ((back (js-length (get state :words))))
+            (word state 1409286145) (patch-jump state back loop)))
+        (patch-jump state done (js-length (get state :words))))
+      (word state 4177528426) ;; str x10, [x19, #8]
+      (let ((end (jump state "jump")))
+        (patch-jump state failed (js-length (get state :words)))
+        (integer-register state 0 4294967295 0)
+        (patch-jump state end (js-length (get state :words))))))
+
+  (defun memory-operation (state node)
+    (let* ((name (get node :value)) (children (get node :children)) (width (memory-width name))
+           (store (= (js-length children) 2)))
+      (cond
+        ((> width 0)
+         (expression state (js-nth 0 children))
+         (when store
+           (push-value state "u32")
+           (expression state (js-nth 1 children))
+           (push-value state (if (= name "store-f64") "f64" "u32"))
+           (pop-value state (if (= name "store-f64") "f64" "u32"))
+           (word state (if (= name "store-f64") 509624354 704709602)) ;; mov d2,d1 / w2,w1
+           (pop-value state "u32") (word state 704709600))
+         ;; w0 zero-extends address; compare address+width in 64 bits before
+         ;; adding the host pointer, including near-4GiB wrapping addresses.
+         (word state (+ 2432696330 (* width 1024))) ;; add x10,x0,#width
+         (word state 4181722731) (word state 3943367007)
+         (memory-conditional-error state 1409286153 1) ;; b.ls safe
+         (word state 4181721705) (word state 2332033321)
+         (word state (cond ((= name "load-u8") 960495904) ((= name "load-u16") 2034237728)
+           ((= name "load-u32") 3107979552) ((= name "load-f64") 4248830240)
+           ((= name "store-u8") 956301602) ((= name "store-u16") 2030043426)
+           ((= name "store-u32") 3103785250) (t 4244635938)))
+         (when store (integer-register state 0 0 0)))
+        ((= name "memory-size") (word state 4181722720) (word state 3545299968))
+        ((= name "memory-grow") (memory-grow state node))
+        (t
+         (expression state (js-nth 0 children)) (push-value state "u32")
+         (expression state (js-nth 1 children)) (pop-value state "u32")
+         (when (= name "word-div") (memory-conditional-error state 889192448 2))
+         (word state (cond ((= name "word-div") 448792608) ((= name "word-shr") 448799776)
+           ((= name "word-shl") 448798752) ((= name "word-and") 167772192)
+           ((= name "word-or") 704643104) ((= name "word-xor") 1241514016)
+           (t (backend-fail node "unsupported native memory32 opcode"))))))))
+
+  (defun memory-call (state node)
+    (let* ((args (get node :children)) (count (js-length args)) (i 0)
+           (extra (* (js-call globalThis.Math :ceil (/ (if (> count 7) (* (- count 7) 4) 0) 16)) 16)))
+      (while (< i count) (expression state (js-nth i args)) (push-value state "u32") (setq i (1+ i)))
+      (stack-adjust state extra t)
+      (setq i 0)
+      (while (< i count)
+        (word state 2432697321) ;; mov x9, sp
+        (let ((offset (+ extra (* (- count i 1) 16))))
+          (while (> offset 0)
+            (let ((part (if (< offset 4095) offset 4095)))
+              (word state (+ 2432696617 (* part 1024))) (setq offset (- offset part)))))
+        (word state (+ 3107979552 (if (< i 7) (1+ i) 10)))
+        (when (>= i 7)
+          (word state 2432697321)
+          (let ((offset (* (- i 7) 4)))
+            (while (> offset 0)
+              (let ((part (if (< offset 4095) offset 4095)))
+                (word state (+ 2432696617 (* part 1024))) (setq offset (- offset part)))))
+          (word state 3103785258))
+        (setq i (1+ i)))
+      (word state 2853372896) ;; mov x0, x19
+      (let ((at (js-length (get state :words))))
+        (word state 2483027968) (js-call (get state :calls) :push (js-object :at at :function (get node :value))))
+      (stack-adjust state (+ extra (* count 16)) nil)
+      (put state :depth (- (get state :depth) count))
+      (word state 3107986025)
+      (let ((at (js-length (get state :words))))
+        (word state 889192457) (js-call (get state :memoryErrors) :push at))))
+
+  (defun memory-code (program)
+    (let* ((state (js-object :words (js-array) :calls (js-array) :constants (js-array)
+                    :compact nil :leaf nil :memory t :registers (js-array)))
+           (functions (get program :functions)) (offsets (js-array)) (i 0))
+      (while (< i (js-length functions))
+        (let* ((function (js-nth i functions)) (locals (get function :locals)) (arity (get function :arity))
+               (frame (* (js-call globalThis.Math :ceil (/ (1+ (js-length locals)) 2)) 16)) (j 0))
+          (js-call offsets :push (* (js-length (get state :words)) 4))
+          (put state :depth 0) (put state :memoryErrors (js-array))
+          (word state 2847898621) (word state 2432697341)
+          (stack-adjust state frame t) (word state 4177527795) ;; save caller x19
+          (word state 2852127731) ;; mov x19,x0
+          (while (< j arity)
+            (if (< j 7) (word state (+ 704644064 (* (1+ j) 65536)))
+              (progn (integer-register state 9 (+ 16 (* (- j 7) 4)) 0)
+                (word state 2332623785) (word state 3107979552)))
+            (local-access state j "u32" t) (setq j (1+ j)))
+          (expression state (get function :body))
+          (let ((normal (jump state "jump")))
+            (patch-conditions state (get state :memoryErrors) (js-length (get state :words)))
+            (integer-register state 0 0 0)
+            (patch-jump state normal (js-length (get state :words))))
+          (integer-register state 9 frame 0) (word state 3406365609) ;; sub x9,fp,x9
+          (word state 4181721395) ;; restore x19 independently of temporary stack depth
+          (word state 2432697279) (word state 2831252477) (word state 3596551104))
+        (setq i (1+ i)))
+      (setq i 0)
+      (while (< i (js-length (get state :calls)))
+        (let ((call (js-nth i (get state :calls))))
+          (patch-jump state (get call :at) (/ (js-nth (get call :function) offsets) 4)))
+        (setq i (1+ i)))
+      (js-object :words (get state :words) :offsets offsets)))
+
+  (defun emit-native-memory-object (program target)
+    (unless (= target "arm64-macos") (backend-fail program "native target must be explicit arm64-macos"))
+    (let ((typed-program (lower-memory-program program)))
+      (macho-object typed-program (memory-code typed-program))))
+
+  (defun emit-native-memory-library (program target)
+    (unless (= target "arm64-macos") (backend-fail program "native target must be explicit arm64-macos"))
+    (let ((typed-program (lower-memory-program program)))
+      (macho-library typed-program (memory-code typed-program))))
+
+  (export emit-native-memory-object emit-native-memory-library emit-native-numeric-object emit-native-numeric-library emit-native-numeric-executable))

@@ -56,13 +56,15 @@
     (js*
       "(message, filename) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-E0001', severity: 'error', phase: 'evaluation-request', message, ...(filename ? { location: { file: filename } } : {}) }; throw error; }"))
   (defconst evaluation-object-p
-    (js*
-      "(value) => value !== null && typeof value === 'object' && !Array.isArray(value)"))
+    (lambda (value)
+      (and (not (nil? value)) (= (js* "typeof value") "object") (not (Array/isArray value)))))
   (defconst evaluation-id-p
-    (js*
-      "(value) => value === null || (typeof value === 'string' && value.length > 0) || (Number.isSafeInteger(value) && value >= 0)"))
+    (lambda (value)
+      (or (nil? value) (and (= (js* "typeof value") "string") (> (js-length value) 0))
+          (and (Number/isSafeInteger value) (>= value 0)))))
   (defconst evaluation-positive-integer-p
-    (js* "(value) => Number.isSafeInteger(value) && value >= 1"))
+    (lambda (value)
+      (and (Number/isSafeInteger value) (>= value 1))))
   (defun compile-ir-string
     (source filename &optional macro-context)
     (let*

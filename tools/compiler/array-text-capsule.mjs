@@ -10,7 +10,7 @@ export async function renderArrayTextImport() {
   if (!result.success || result.outputs.length !== 1) throw new Error('array text capsule build failed', {cause: result.logs});
   const source = (await result.outputs[0].text()).trim();
   const url = 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
-  return `import { c as __eliscript_at } from ${JSON.stringify(url)};\n`;
+  return `import { c as __eliscript_at, d as __eliscript_at_direct } from ${JSON.stringify(url)};\n`;
 }
 
 export async function checkArrayTextCapsule({write = false} = {}) {

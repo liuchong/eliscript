@@ -16,7 +16,7 @@
 
 ;; Identical capsules share cycle guards without global mutation.
 (defconst eliscript-emitter--array-text-import
-  "import { c as __eliscript_at } from \"data:text/javascript;base64,dmFyIGU9UmVmbGVjdC5hcHBseSxhPUFycmF5LmlzQXJyYXksbT1BcnJheS5wcm90b3R5cGUuam9pbixsPUFycmF5LnByb3RvdHlwZS50b1N0cmluZyxiPU9iamVjdC5wcm90b3R5cGUudG9TdHJpbmcsaj1TdHJpbmcscz1UeXBlRXJyb3IsdT1TeW1ib2wudG9QcmltaXRpdmUsaz1XZWFrU2V0LnByb3RvdHlwZS5oYXMseD1XZWFrU2V0LnByb3RvdHlwZS5hZGQsQT1XZWFrU2V0LnByb3RvdHlwZS5kZWxldGUscD1uZXcgV2Vha1NldCxkPSh0KT0+dCE9PW51bGwmJih0eXBlb2YgdD09PSJvYmplY3QifHx0eXBlb2YgdD09PSJmdW5jdGlvbiJ8fHR5cGVvZiB0PiJ1IiYmdCE9PXZvaWQgMCksUz0odCk9PnR5cGVvZiB0PT09ImZ1bmN0aW9uInx8dHlwZW9mIHQ+InUiJiZ0IT09dm9pZCAwO2Z1bmN0aW9uIEMoKXtsZXQgbz1uZXcgcygiY3ljbGljIGFycmF5IHRleHQgY29udmVyc2lvbiIpO3Rocm93IG8uZWxpc2NyaXB0RGlhZ25vc3RpYz17Zm9ybWF0OiJlbGlzY3JpcHQtZGlhZ25vc3RpYyIsdmVyc2lvbjoxLGNvZGU6IkVMSS1SVDAwMDkiLHNldmVyaXR5OiJlcnJvciIscGhhc2U6InJ1bnRpbWUiLG1lc3NhZ2U6ImN5Y2xpYyBhcnJheSB0ZXh0IGNvbnZlcnNpb24ifSxvfWZ1bmN0aW9uIFQodCl7aWYoIWQodCkpcmV0dXJuIHQ7bGV0IG89dFt1XTtpZihvIT09dm9pZCAwJiZvIT09bnVsbCl7bGV0IG49ZShvLHQsWyJzdHJpbmciXSk7aWYoIWQobikpcmV0dXJuIG47dGhyb3cgbmV3IHMoIkNhbm5vdCBjb252ZXJ0IG9iamVjdCB0byBwcmltaXRpdmUgdmFsdWUiKX1mb3IobGV0IG49MDtuPDI7bisrKXtsZXQgcj10W249PT0wPyJ0b1N0cmluZyI6InZhbHVlT2YiXTtpZihTKHIpKXtsZXQgaT1yPT09bCYmYSh0KT93KHQpOmUocix0LFtdKTtpZighZChpKSlyZXR1cm4gaX19dGhyb3cgbmV3IHMoIkNhbm5vdCBjb252ZXJ0IG9iamVjdCB0byBwcmltaXRpdmUgdmFsdWUiKX1mdW5jdGlvbiBnKHQpe2xldCBvPVQodCk7aWYodHlwZW9mIG89PT0ic3ltYm9sIil0aHJvdyBuZXcgcygiQ2Fubm90IGNvbnZlcnQgYSBTeW1ib2wgdmFsdWUgdG8gYSBzdHJpbmciKTtyZXR1cm4gaihvKX1mdW5jdGlvbiBoKHQsbyl7bGV0IG49K3QubGVuZ3RoLHI9biE9PW58fG48PTA/MDpuPj05MDA3MTk5MjU0NzQwOTkxPzkwMDcxOTkyNTQ3NDA5OTE6bi1uJTEsaT1vPT09dm9pZCAwPyIsIjpnKG8pO2lmKGUoayxwLFt0XSkpQygpO2UoeCxwLFt0XSk7dHJ5e2xldCB5PSIiO2ZvcihsZXQgYz0wO2M8cjtjKyspe2lmKGMpeSs9aTtsZXQgZj10W2NdO2lmKGYhPT1udWxsJiZmIT09dm9pZCAwKXkrPWcoZil9cmV0dXJuIHl9ZmluYWxseXtlKEEscCxbdF0pfX1mdW5jdGlvbiB3KHQpe2xldCBvPXQuam9pbjtyZXR1cm4gUyhvKT9vPT09bT9oKHQsdm9pZCAwKTplKG8sdCxbXSk6ZShiLHQsW10pfWZ1bmN0aW9uIFcodCxvKXtsZXQgbj10W29dO3JldHVybiguLi5yKT0+e2lmKG49PT1tJiZhKHQpKXJldHVybiBoKHQsclswXSk7aWYobj09PWwmJmEodCkpcmV0dXJuIHcodCk7cmV0dXJuIGUobix0LHIpfX1leHBvcnR7VyBhcyBjfTs=\";\n")
+  "import { c as __eliscript_at, d as __eliscript_at_direct } from \"data:text/javascript;base64,dmFyIGU9UmVmbGVjdC5hcHBseSxpPUFycmF5LmlzQXJyYXksbD1BcnJheS5wcm90b3R5cGUuam9pbixhPUFycmF5LnByb3RvdHlwZS50b1N0cmluZyxrPU9iamVjdC5wcm90b3R5cGUudG9TdHJpbmcsdT1TdHJpbmcseT1UeXBlRXJyb3IseD1TeW1ib2wudG9QcmltaXRpdmUsQT1XZWFrU2V0LnByb3RvdHlwZS5oYXMsVD1XZWFrU2V0LnByb3RvdHlwZS5hZGQsQz1XZWFrU2V0LnByb3RvdHlwZS5kZWxldGUsbT1uZXcgV2Vha1NldCxmPW51bGwsZz0odCk9PnQhPT1udWxsJiYodHlwZW9mIHQ9PT0ib2JqZWN0Inx8dHlwZW9mIHQ9PT0iZnVuY3Rpb24ifHx0eXBlb2YgdD4idSImJnQhPT12b2lkIDApLGo9KHQpPT50eXBlb2YgdD09PSJmdW5jdGlvbiJ8fHR5cGVvZiB0PiJ1IiYmdCE9PXZvaWQgMDtmdW5jdGlvbiBXKCl7bGV0IG49bmV3IHkoImN5Y2xpYyBhcnJheSB0ZXh0IGNvbnZlcnNpb24iKTt0aHJvdyBuLmVsaXNjcmlwdERpYWdub3N0aWM9e2Zvcm1hdDoiZWxpc2NyaXB0LWRpYWdub3N0aWMiLHZlcnNpb246MSxjb2RlOiJFTEktUlQwMDA5IixzZXZlcml0eToiZXJyb3IiLHBoYXNlOiJydW50aW1lIixtZXNzYWdlOiJjeWNsaWMgYXJyYXkgdGV4dCBjb252ZXJzaW9uIn0sbn1mdW5jdGlvbiBFKHQpe2lmKCFnKHQpKXJldHVybiB0O2xldCBuPXRbeF07aWYobiE9PXZvaWQgMCYmbiE9PW51bGwpe2xldCBvPWUobix0LFsic3RyaW5nIl0pO2lmKCFnKG8pKXJldHVybiBvO3Rocm93IG5ldyB5KCJDYW5ub3QgY29udmVydCBvYmplY3QgdG8gcHJpbWl0aXZlIHZhbHVlIil9Zm9yKGxldCBvPTA7bzwyO28rKyl7bGV0IHI9dFtvPT09MD8idG9TdHJpbmciOiJ2YWx1ZU9mIl07aWYoaihyKSl7bGV0IGM9cj09PWEmJmkodCk/Uyh0KTplKHIsdCxbXSk7aWYoIWcoYykpcmV0dXJuIGN9fXRocm93IG5ldyB5KCJDYW5ub3QgY29udmVydCBvYmplY3QgdG8gcHJpbWl0aXZlIHZhbHVlIil9ZnVuY3Rpb24gYih0KXtsZXQgbj1FKHQpO2lmKHR5cGVvZiBuPT09InN5bWJvbCIpdGhyb3cgbmV3IHkoIkNhbm5vdCBjb252ZXJ0IGEgU3ltYm9sIHZhbHVlIHRvIGEgc3RyaW5nIik7cmV0dXJuIHUobil9ZnVuY3Rpb24gaCh0LG4pe2xldCBvPSt0Lmxlbmd0aCxyPW8hPT1vfHxvPD0wPzA6bz49OTAwNzE5OTI1NDc0MDk5MT85MDA3MTk5MjU0NzQwOTkxOm8tbyUxLGM9bj09PXZvaWQgMD8iLCI6YihuKSx3PWY9PT1udWxsO2lmKHcpZj10O2Vsc2V7aWYodD09PWZ8fGUoQSxtLFt0XSkpVygpO2UoVCxtLFt0XSl9dHJ5e2xldCBwPSIiO2ZvcihsZXQgcz0wO3M8cjtzKyspe2lmKHMpcCs9YztsZXQgZD10W3NdO2lmKGQhPT1udWxsJiZkIT09dm9pZCAwKXArPWIoZCl9cmV0dXJuIHB9ZmluYWxseXtpZih3KWY9bnVsbDtlbHNlIGUoQyxtLFt0XSl9fWZ1bmN0aW9uIFModCl7bGV0IG49dC5qb2luO3JldHVybiBqKG4pP249PT1sP2godCx2b2lkIDApOmUobix0LFtdKTplKGssdCxbXSl9ZnVuY3Rpb24gUih0LG4pe2xldCBvPXRbbl07cmV0dXJuKC4uLnIpPT57aWYobz09PWwmJmkodCkpcmV0dXJuIGgodCxyWzBdKTtpZihvPT09YSYmaSh0KSlyZXR1cm4gUyh0KTtyZXR1cm4gZShvLHQscil9fWZ1bmN0aW9uIEQodCxuLC4uLm8pe2xldCByPXRbbl07aWYocj09PWwmJmkodCkpcmV0dXJuIGgodCxvWzBdKTtpZihyPT09YSYmaSh0KSlyZXR1cm4gUyh0KTtyZXR1cm4gZShyLHQsbyl9ZXhwb3J0e1IgYXMgYyxEIGFzIGR9Ow==\";\n")
 
 (defconst eliscript-emitter--number-conversion-intrinsics
     "const __eliscript_number_intrinsic = globalThis.Number;\nconst __eliscript_bigint_intrinsic = globalThis.BigInt;\nconst __eliscript_numeric_apply = globalThis.Reflect.apply;\nconst __eliscript_numeric_symbol = globalThis.Symbol.toPrimitive;\nconst __eliscript_numeric_error = globalThis.TypeError;\nconst __eliscript_numeric_trim = globalThis.String.prototype.trim;\nconst __eliscript_numeric_slice = globalThis.String.prototype.slice;\nconst __eliscript_numeric_exec = globalThis.RegExp.prototype.exec;\n")
@@ -153,7 +153,10 @@
   "Whether FORM is proven to return a JavaScript boolean."
   (or (memq form '(t false))
       (and (consp form)
-           (or (memq (car form)
+           (or (and (eq (car form) 'js*) (= (length form) 2)
+                    (stringp (cadr form))
+                    (string-match-p "\\`!![A-Za-z_$][A-Za-z0-9_$]*\\'" (string-trim (cadr form))))
+               (memq (car form)
                      '(not = /= not= < <= > >= eq equal nil? undefined? null nullish?))
                (and (memq (car form) '(and or)) (cdr form)
                     (cl-every #'eliscript-emitter--boolean-p (cdr form)))))))
@@ -164,12 +167,114 @@
     (if (eliscript-emitter--boolean-p form) output
       (format "__eliscript_truthy(%s)" output))))
 
+(defun eliscript-emitter--context-sequential-safe-p (bindings)
+  "Whether parsed BINDINGS can share a scope without observing a TDZ."
+  (when (> (length bindings) 1)
+    (let ((names (make-hash-table :test #'equal)) (index 0) (safe t))
+      (dolist (binding bindings)
+        (let ((name (eliscript-emitter--binding-name (car binding))))
+          (if (gethash name names) (setq safe nil)
+            (puthash name (1+ index) names)))
+        (setq index (1+ index)))
+      (cl-labels
+          ((walk-pattern (pattern)
+             (cond
+              ((vectorp pattern)
+               (mapc #'walk-pattern (append pattern nil)))
+              ((eliscript-binding-map-pattern-p pattern)
+               (let ((spec (eliscript-binding-map-spec
+                            pattern (lambda (_form message)
+                                      (eliscript-emitter--fail "%s" message)))))
+                 (dolist (entry (plist-get spec :entries))
+                   (walk-pattern (plist-get entry :target))
+                   (unless (memq (plist-get entry :key-kind) '(keys strs syms))
+                     (walk (plist-get entry :key)))
+                   (when (plist-member entry :default)
+                     (walk (plist-get entry :default))))))))
+           (walk-bindings (nested)
+             (dolist (binding nested)
+               (if (or (symbolp binding) (vectorp binding)
+                       (eliscript-binding-map-pattern-p binding))
+                   (walk-pattern binding)
+                 (walk-pattern (car binding))
+                 (walk (cadr binding)))))
+           (walk (form)
+             ;; Match references and assignment targets, not syntax names.
+             ;; References inside a shadowing function remain conservative, as
+             ;; in the independent IR proof; declaration names do not count.
+             (when safe
+               (cond
+                ((and (symbolp form) form (not (keywordp form))
+                      (not (memq form '(t false undefined))))
+                 (let* ((name (eliscript-emitter--reference-name form))
+                        (position (gethash (car (split-string name "\\.")) names)))
+                   (when (and position (> position index)) (setq safe nil))))
+                ((vectorp form) (mapc #'walk (append form nil)))
+                ((consp form)
+                 (let ((operator (car form)) (arguments (cdr form)))
+                   (cond
+                    ((eq operator 'js*) (setq safe nil))
+                    ((eq operator 'quote) nil)
+                    ((memq operator '(lambda fn async))
+                     (dolist (parameter
+                              (eliscript-parameters-parse
+                               (car arguments)
+                               (lambda (_form message)
+                                 (eliscript-emitter--fail "%s" message))))
+                       (walk-pattern (eliscript-parameter-form parameter)))
+                     (mapc #'walk (cdr arguments)))
+                    ((memq operator '(let let* loop))
+                     (walk-bindings (car arguments))
+                     (mapc #'walk (cdr arguments)))
+                    ((eq operator 'try)
+                     (dolist (clause arguments)
+                       (pcase (car-safe clause)
+                         ('catch (walk-pattern (cadr clause))
+                                 (mapc #'walk (cddr clause)))
+                         ('finally (mapc #'walk (cdr clause)))
+                         (_ (walk clause)))))
+                    ((eq operator 'cond)
+                     (dolist (clause arguments) (mapc #'walk clause)))
+                    ((eq operator 'js-object)
+                     (while arguments
+                       (let ((key (pop arguments)) (value (pop arguments)))
+                         (unless (or (keywordp key) (stringp key) (symbolp key))
+                           (walk key))
+                         (walk value))))
+                    ((memq operator
+                           '(await throw if when unless progn do recur setq set!
+                             while and or vector hash-map hash-set queue list js-array
+                             not + * - / % mod = /= not= < <= > >= 1+ 1-
+                             int32 uint32 imul32 bit-and bit-or bit-xor bit-not
+                             bit-shift-left bit-shift-right unsigned-bit-shift-right
+                             value-type host-identity-token string-code-unit-at
+                             string-from-code-unit string-to-number string-to-bigint
+                             number-float64-words eq equal null nil? undefined? nullish?
+                             car cdr cons js-cons nth js-nth aref length js-length
+                             object-keys object-has? object-assoc __eliscript_arity_error
+                             get put js-call new print str funcall apply))
+                     (mapc #'walk arguments))
+                    (t (mapc #'walk form)))))))))
+        (setq index 0)
+        (dolist (binding bindings)
+          (walk (cadr binding))
+          (setq index (1+ index))))
+      safe)))
+
 (defun eliscript-emitter--emit-context-let (bindings body sequential returning)
   "Emit parsed simple BINDINGS and BODY without a closure.
 Keep initializer and binding scopes separate, including sequential shadowing."
   (if (null bindings)
       (if returning (eliscript-emitter--emit-returning-body body)
         (eliscript-emitter--emit-statement-body body))
+    (if (and sequential (eliscript-emitter--context-sequential-safe-p bindings))
+        (concat "{\n" (eliscript-emitter--indent
+         (string-join
+          (append (mapcar (lambda (binding)
+                            (concat "let " (eliscript-emitter--emit-binding-target (car binding))
+                                    " = " (eliscript-emitter-emit-expression (cadr binding)) ";")) bindings)
+                  (list (if returning (eliscript-emitter--emit-returning-body body)
+                          (eliscript-emitter--emit-statement-body body)))) "\n")) "\n}")
     (let* ((group (if sequential (list (car bindings)) bindings))
            (temporaries (mapcar (lambda (_) (eliscript-emitter--fresh-name)) group))
            initializers declarations)
@@ -193,7 +298,23 @@ Keep initializer and binding scopes separate, including sequential shadowing."
                                       (eliscript-emitter--indent
                                        (string-join (nreverse declarations) "\n"))
                                       "\n}"))) "\n"))
-              "\n}"))))
+              "\n}")))))
+
+(defun eliscript-emitter--emit-context-cond (clauses returning)
+  "Emit CLAUSES as statements or RETURNING values."
+  (if (null clauses) (if returning "return null;" "")
+    (let* ((clause (car clauses)) (test (car clause)) (body (cdr clause)))
+      (if (eq test t)
+          (if returning (eliscript-emitter--emit-returning-body body)
+            (eliscript-emitter--emit-statement-body body))
+        (concat "if (" (eliscript-emitter--emit-test test) ") {\n"
+                (eliscript-emitter--indent
+                 (if returning (eliscript-emitter--emit-returning-body body)
+                   (eliscript-emitter--emit-statement-body body)))
+                "\n} else {\n"
+                (eliscript-emitter--indent
+                 (eliscript-emitter--emit-context-cond (cdr clauses) returning))
+                "\n}")))))
 
 (defun eliscript-emitter--emit-context (form returning)
   "Emit FORM as a statement or a RETURNING body value."
@@ -205,6 +326,27 @@ Keep initializer and binding scopes separate, including sequential shadowing."
      ((memq operator '(progn do))
       (if returning (eliscript-emitter--emit-returning-body arguments)
         (eliscript-emitter--emit-statement-body arguments)))
+     ((eq operator 'if)
+      (concat "if (" (eliscript-emitter--emit-test (car arguments)) ") {\n"
+              (eliscript-emitter--indent
+               (eliscript-emitter--emit-context (nth 1 arguments) returning))
+              "\n}"
+              (if (or returning (nthcdr 2 arguments))
+                  (concat " else {\n" (eliscript-emitter--indent
+                   (if (nthcdr 2 arguments)
+                       (eliscript-emitter--emit-context (nth 2 arguments) returning)
+                     "return null;")) "\n}") "")))
+     ((memq operator '(when unless))
+      (concat "if ("
+              (if (eq operator 'when) (eliscript-emitter--emit-test (car arguments))
+                (concat "(!" (eliscript-emitter--emit-test (car arguments)) ")"))
+              ") {\n"
+              (eliscript-emitter--indent
+               (if returning (eliscript-emitter--emit-returning-body (cdr arguments))
+                 (eliscript-emitter--emit-statement-body (cdr arguments))))
+              "\n}" (if returning " else {\n  return null;\n}" "")))
+     ((eq operator 'cond)
+      (eliscript-emitter--emit-context-cond arguments returning))
      ((eq operator 'while)
       (eliscript-emitter--require-arity "while" arguments 1)
       (concat "while (" (eliscript-emitter--emit-test (car arguments)) ") {\n"
@@ -922,11 +1064,19 @@ No calls, host access, strings, free bindings or destructuring enter this proof.
               '("join" "toString"))
     t))
 
+(defun eliscript-emitter--primitive-literal-p (form)
+  "Return non-nil for primitive literal FORM, excluding allocated tagged values."
+  (or (numberp form) (stringp form) (memq form '(nil t false undefined))))
+
 (defun eliscript-emitter--emit-js-call (arguments)
   "Emit a receiver-preserving JavaScript method call from ARGUMENTS."
   (eliscript-emitter--require-arity "js-call" arguments 2)
   (format (if (eliscript-emitter--array-text-key-p (nth 1 arguments))
-              "__eliscript_at(%s, %s)(%s)" "(%s)[%s](%s)")
+              (if (cl-every #'eliscript-emitter--primitive-literal-p (nthcdr 2 arguments))
+                  (if (nthcdr 2 arguments) "__eliscript_at_direct(%s, %s, %s)"
+                    "__eliscript_at_direct(%s, %s%s)")
+                "__eliscript_at(%s, %s)(%s)")
+            "(%s)[%s](%s)")
           (eliscript-emitter-emit-expression (nth 0 arguments))
           (eliscript-emitter--emit-property-key (nth 1 arguments))
           (eliscript-emitter--emit-arguments (nthcdr 2 arguments))))

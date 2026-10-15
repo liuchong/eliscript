@@ -78,6 +78,10 @@ export function validateCompatibilityMatrix(matrix) {
   if (matrix.workflow !== ".github/workflows/compatibility.yml") {
     errors.push("workflow must be .github/workflows/compatibility.yml");
   }
+  if (matrix.performanceAcceptance !== undefined &&
+      !["strict", "deferred"].includes(matrix.performanceAcceptance)) {
+    errors.push("performanceAcceptance must be strict or deferred");
+  }
 
   const systems = Array.isArray(matrix.operatingSystems)
     ? matrix.operatingSystems
@@ -259,7 +263,9 @@ export function renderWorkflow(matrix) {
       "bun run test": "Run complete test suite",
       "make byte-compile": "Strict byte compilation",
     };
-    const step = `      - name: ${names[command]}\n        run: ${command}`;
+    const label = command === "bun run test" && matrix.performanceAcceptance === "deferred"
+      ? `${names[command]} (performance reacceptance deferred)` : names[command];
+    const step = `      - name: ${label}\n        run: ${command}`;
     // Browser execution is mandatory in the core WASM differential tests.
     // Use the locked CLI so its browser revision matches playwright-core.
     return command === "bun install --frozen-lockfile"
@@ -287,6 +293,8 @@ export function renderWorkflow(matrix) {
 `    timeout-minutes: 30\n` +
 `    env:\n` +
 `      BUN_TEST_RUNNER: tools/testing/file-workers.mjs\n` +
+(matrix.performanceAcceptance === "deferred"
+  ? `      ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: "1"\n` : "") +
 `    strategy:\n` +
 `      fail-fast: false\n` +
 `      matrix:\n` +

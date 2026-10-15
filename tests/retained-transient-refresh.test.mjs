@@ -8,7 +8,7 @@ const root=resolve(import.meta.dir,'..');
 const read=async file=>JSON.parse(await readFile(resolve(root,file),'utf8'));
 test('a remeasured transient benchmark preserves the original accepted run and final manifest',async()=>{
  const run=await read('acceptance/runs/m13-01.json'),before=JSON.stringify(run);
- await validateFinalAcceptanceContract(await read('contracts/final-acceptance.json'),run,{root});
+ await validateFinalAcceptanceContract(await read('contracts/final-acceptance.json'),run,{root,deferPerformanceAcceptance:process.env.ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE==='1'});
  assert.equal(JSON.stringify(run),before);
 });
 test('fresh transient replacement rejects weaker policy, forged derived data, incomplete work and stale source identities',async()=>{

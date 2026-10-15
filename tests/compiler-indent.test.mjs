@@ -1,3 +1,4 @@
+import { currentPerformanceTest } from "./helpers/performance-acceptance.mjs";
 import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -147,11 +148,11 @@ test("chunked compiler indentation matches its character reference", async () =>
   }
 }, 30_000);
 
-test("committed compiler indentation report matches measured sources", async () => {
+test("committed compiler indentation report preserves historical measurements and decisions", async () => {
   const report = validateCompilerIndentReport(
     JSON.parse(await readFile(reportPath, "utf8")),
   );
-  expect(report.sourceDigest).toEqual(await compilerIndentSourceDigest());
+
   expect(report.corpus.files).toHaveLength(compilerSources.length);
   expect(report.corpus.sourceBytes).toBeGreaterThan(200_000);
   expect(report.corpus.generatedBytes).toBeGreaterThan(300_000);
@@ -168,4 +169,9 @@ test("indentation reacceptance rejects a weaker decision threshold", async () =>
   const report = JSON.parse(await readFile(reportPath, "utf8"));
   report.decision.minimumSpeedup = 9;
   expect(() => validateCompilerIndentReport(report)).toThrow("speedup decision did not pass");
+});
+
+currentPerformanceTest(test)("committed compiler indentation report matches measured sources", async () => {
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  expect(report.sourceDigest).toEqual(await compilerIndentSourceDigest());
 });

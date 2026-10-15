@@ -13,7 +13,7 @@
 
   ;; Identical capsules share cycle guards without global mutation.
   (defconst array-text-import
-    "import { c as __eliscript_at } from \"data:text/javascript;base64,dmFyIGU9UmVmbGVjdC5hcHBseSxhPUFycmF5LmlzQXJyYXksbT1BcnJheS5wcm90b3R5cGUuam9pbixsPUFycmF5LnByb3RvdHlwZS50b1N0cmluZyxiPU9iamVjdC5wcm90b3R5cGUudG9TdHJpbmcsaj1TdHJpbmcscz1UeXBlRXJyb3IsdT1TeW1ib2wudG9QcmltaXRpdmUsaz1XZWFrU2V0LnByb3RvdHlwZS5oYXMseD1XZWFrU2V0LnByb3RvdHlwZS5hZGQsQT1XZWFrU2V0LnByb3RvdHlwZS5kZWxldGUscD1uZXcgV2Vha1NldCxkPSh0KT0+dCE9PW51bGwmJih0eXBlb2YgdD09PSJvYmplY3QifHx0eXBlb2YgdD09PSJmdW5jdGlvbiJ8fHR5cGVvZiB0PiJ1IiYmdCE9PXZvaWQgMCksUz0odCk9PnR5cGVvZiB0PT09ImZ1bmN0aW9uInx8dHlwZW9mIHQ+InUiJiZ0IT09dm9pZCAwO2Z1bmN0aW9uIEMoKXtsZXQgbz1uZXcgcygiY3ljbGljIGFycmF5IHRleHQgY29udmVyc2lvbiIpO3Rocm93IG8uZWxpc2NyaXB0RGlhZ25vc3RpYz17Zm9ybWF0OiJlbGlzY3JpcHQtZGlhZ25vc3RpYyIsdmVyc2lvbjoxLGNvZGU6IkVMSS1SVDAwMDkiLHNldmVyaXR5OiJlcnJvciIscGhhc2U6InJ1bnRpbWUiLG1lc3NhZ2U6ImN5Y2xpYyBhcnJheSB0ZXh0IGNvbnZlcnNpb24ifSxvfWZ1bmN0aW9uIFQodCl7aWYoIWQodCkpcmV0dXJuIHQ7bGV0IG89dFt1XTtpZihvIT09dm9pZCAwJiZvIT09bnVsbCl7bGV0IG49ZShvLHQsWyJzdHJpbmciXSk7aWYoIWQobikpcmV0dXJuIG47dGhyb3cgbmV3IHMoIkNhbm5vdCBjb252ZXJ0IG9iamVjdCB0byBwcmltaXRpdmUgdmFsdWUiKX1mb3IobGV0IG49MDtuPDI7bisrKXtsZXQgcj10W249PT0wPyJ0b1N0cmluZyI6InZhbHVlT2YiXTtpZihTKHIpKXtsZXQgaT1yPT09bCYmYSh0KT93KHQpOmUocix0LFtdKTtpZighZChpKSlyZXR1cm4gaX19dGhyb3cgbmV3IHMoIkNhbm5vdCBjb252ZXJ0IG9iamVjdCB0byBwcmltaXRpdmUgdmFsdWUiKX1mdW5jdGlvbiBnKHQpe2xldCBvPVQodCk7aWYodHlwZW9mIG89PT0ic3ltYm9sIil0aHJvdyBuZXcgcygiQ2Fubm90IGNvbnZlcnQgYSBTeW1ib2wgdmFsdWUgdG8gYSBzdHJpbmciKTtyZXR1cm4gaihvKX1mdW5jdGlvbiBoKHQsbyl7bGV0IG49K3QubGVuZ3RoLHI9biE9PW58fG48PTA/MDpuPj05MDA3MTk5MjU0NzQwOTkxPzkwMDcxOTkyNTQ3NDA5OTE6bi1uJTEsaT1vPT09dm9pZCAwPyIsIjpnKG8pO2lmKGUoayxwLFt0XSkpQygpO2UoeCxwLFt0XSk7dHJ5e2xldCB5PSIiO2ZvcihsZXQgYz0wO2M8cjtjKyspe2lmKGMpeSs9aTtsZXQgZj10W2NdO2lmKGYhPT1udWxsJiZmIT09dm9pZCAwKXkrPWcoZil9cmV0dXJuIHl9ZmluYWxseXtlKEEscCxbdF0pfX1mdW5jdGlvbiB3KHQpe2xldCBvPXQuam9pbjtyZXR1cm4gUyhvKT9vPT09bT9oKHQsdm9pZCAwKTplKG8sdCxbXSk6ZShiLHQsW10pfWZ1bmN0aW9uIFcodCxvKXtsZXQgbj10W29dO3JldHVybiguLi5yKT0+e2lmKG49PT1tJiZhKHQpKXJldHVybiBoKHQsclswXSk7aWYobj09PWwmJmEodCkpcmV0dXJuIHcodCk7cmV0dXJuIGUobix0LHIpfX1leHBvcnR7VyBhcyBjfTs=\";\n")
+    "import { c as __eliscript_at, d as __eliscript_at_direct } from \"data:text/javascript;base64,dmFyIGU9UmVmbGVjdC5hcHBseSxpPUFycmF5LmlzQXJyYXksbD1BcnJheS5wcm90b3R5cGUuam9pbixhPUFycmF5LnByb3RvdHlwZS50b1N0cmluZyxrPU9iamVjdC5wcm90b3R5cGUudG9TdHJpbmcsdT1TdHJpbmcseT1UeXBlRXJyb3IseD1TeW1ib2wudG9QcmltaXRpdmUsQT1XZWFrU2V0LnByb3RvdHlwZS5oYXMsVD1XZWFrU2V0LnByb3RvdHlwZS5hZGQsQz1XZWFrU2V0LnByb3RvdHlwZS5kZWxldGUsbT1uZXcgV2Vha1NldCxmPW51bGwsZz0odCk9PnQhPT1udWxsJiYodHlwZW9mIHQ9PT0ib2JqZWN0Inx8dHlwZW9mIHQ9PT0iZnVuY3Rpb24ifHx0eXBlb2YgdD4idSImJnQhPT12b2lkIDApLGo9KHQpPT50eXBlb2YgdD09PSJmdW5jdGlvbiJ8fHR5cGVvZiB0PiJ1IiYmdCE9PXZvaWQgMDtmdW5jdGlvbiBXKCl7bGV0IG49bmV3IHkoImN5Y2xpYyBhcnJheSB0ZXh0IGNvbnZlcnNpb24iKTt0aHJvdyBuLmVsaXNjcmlwdERpYWdub3N0aWM9e2Zvcm1hdDoiZWxpc2NyaXB0LWRpYWdub3N0aWMiLHZlcnNpb246MSxjb2RlOiJFTEktUlQwMDA5IixzZXZlcml0eToiZXJyb3IiLHBoYXNlOiJydW50aW1lIixtZXNzYWdlOiJjeWNsaWMgYXJyYXkgdGV4dCBjb252ZXJzaW9uIn0sbn1mdW5jdGlvbiBFKHQpe2lmKCFnKHQpKXJldHVybiB0O2xldCBuPXRbeF07aWYobiE9PXZvaWQgMCYmbiE9PW51bGwpe2xldCBvPWUobix0LFsic3RyaW5nIl0pO2lmKCFnKG8pKXJldHVybiBvO3Rocm93IG5ldyB5KCJDYW5ub3QgY29udmVydCBvYmplY3QgdG8gcHJpbWl0aXZlIHZhbHVlIil9Zm9yKGxldCBvPTA7bzwyO28rKyl7bGV0IHI9dFtvPT09MD8idG9TdHJpbmciOiJ2YWx1ZU9mIl07aWYoaihyKSl7bGV0IGM9cj09PWEmJmkodCk/Uyh0KTplKHIsdCxbXSk7aWYoIWcoYykpcmV0dXJuIGN9fXRocm93IG5ldyB5KCJDYW5ub3QgY29udmVydCBvYmplY3QgdG8gcHJpbWl0aXZlIHZhbHVlIil9ZnVuY3Rpb24gYih0KXtsZXQgbj1FKHQpO2lmKHR5cGVvZiBuPT09InN5bWJvbCIpdGhyb3cgbmV3IHkoIkNhbm5vdCBjb252ZXJ0IGEgU3ltYm9sIHZhbHVlIHRvIGEgc3RyaW5nIik7cmV0dXJuIHUobil9ZnVuY3Rpb24gaCh0LG4pe2xldCBvPSt0Lmxlbmd0aCxyPW8hPT1vfHxvPD0wPzA6bz49OTAwNzE5OTI1NDc0MDk5MT85MDA3MTk5MjU0NzQwOTkxOm8tbyUxLGM9bj09PXZvaWQgMD8iLCI6YihuKSx3PWY9PT1udWxsO2lmKHcpZj10O2Vsc2V7aWYodD09PWZ8fGUoQSxtLFt0XSkpVygpO2UoVCxtLFt0XSl9dHJ5e2xldCBwPSIiO2ZvcihsZXQgcz0wO3M8cjtzKyspe2lmKHMpcCs9YztsZXQgZD10W3NdO2lmKGQhPT1udWxsJiZkIT09dm9pZCAwKXArPWIoZCl9cmV0dXJuIHB9ZmluYWxseXtpZih3KWY9bnVsbDtlbHNlIGUoQyxtLFt0XSl9fWZ1bmN0aW9uIFModCl7bGV0IG49dC5qb2luO3JldHVybiBqKG4pP249PT1sP2godCx2b2lkIDApOmUobix0LFtdKTplKGssdCxbXSl9ZnVuY3Rpb24gUih0LG4pe2xldCBvPXRbbl07cmV0dXJuKC4uLnIpPT57aWYobz09PWwmJmkodCkpcmV0dXJuIGgodCxyWzBdKTtpZihvPT09YSYmaSh0KSlyZXR1cm4gUyh0KTtyZXR1cm4gZShvLHQscil9fWZ1bmN0aW9uIEQodCxuLC4uLm8pe2xldCByPXRbbl07aWYocj09PWwmJmkodCkpcmV0dXJuIGgodCxvWzBdKTtpZihyPT09YSYmaSh0KSlyZXR1cm4gUyh0KTtyZXR1cm4gZShyLHQsbyl9ZXhwb3J0e1IgYXMgYyxEIGFzIGR9Ow==\";\n")
 
   (defconst literal-runtime-import
     "import { hashMap as __eliscript_hash_map, hashSet as __eliscript_hash_set, keyword as __eliscript_keyword, list as __eliscript_list, queue as __eliscript_queue, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n")
@@ -45,7 +45,8 @@
   (defconst host-identity-token-helper
     "const __eliscript_host_identity_token = (() => { const objects = new WeakMap(); const symbols = new Map(); let next = 1; return (value) => { const type = typeof value; if ((type !== \"object\" || value === null) && type !== \"function\" && type !== \"symbol\") throw new TypeError(\"host-identity-token expects an object, function, or symbol\"); const identities = type === \"symbol\" ? symbols : objects; const cached = identities.get(value); if (cached !== undefined) return cached; if (next > Number.MAX_SAFE_INTEGER) throw new RangeError(\"host identity token space exhausted\"); const token = next; next += 1; identities.set(value, token); return token; }; })();\n")
   (defconst fail
-    (js* "(message) => { throw new Error(message); }"))
+    (lambda (message)
+      (throw (new (js* "Error") message))))
   (defconst native-locate
     (js* "(span, output) => { const fragment = typeof output === \"string\" ? { text: output, marks: [] } : output; const marks = fragment.marks; if (fragment.text.length === 0 || span == null || span === false || (marks.length > 0 && marks[0].offset === 0)) return fragment; return { text: fragment.text, marks: [{ offset: 0, span }, ...marks] }; }"))
   (defvar temporary-counter 0)
@@ -123,7 +124,34 @@
       (make-fragment text marks)))
 
   (defconst native-indent
-    (js* "(input) => { const source = input.text; const sourceMarks = input.marks; const parts = source.split('\\n'); const marks = []; let start = 0; let added = 0; let markIndex = 0; let mark = sourceMarks[0]; for (let index = 0; index < parts.length; index += 1) { const line = parts[index]; const end = start + line.length + (index + 1 < parts.length ? 1 : 0); if (line.length > 0) { parts[index] = '  ' + line; added += 2; } while (mark !== undefined && mark.offset >= start && mark.offset < end) { marks.push({ offset: mark.offset + added, span: mark.span }); markIndex += 1; mark = sourceMarks[markIndex]; } start = end; } return { text: parts.join('\\n'), marks }; }"))
+    (lambda (input)
+      (let* ((source (aref input "text"))
+             (source-marks (aref input "marks"))
+             (parts (js-call source :split "\n"))
+             (marks (js-array))
+             (start 0)
+             (added 0)
+             (mark-index 0)
+             (mark (aref source-marks 0))
+             (index 0))
+        (while (< index (aref parts "length"))
+          (let* ((line (aref parts index))
+                 (end (+ (+ start (aref line "length"))
+                         (if (< (+ index 1) (aref parts "length")) 1 0))))
+            (when (> (aref line "length") 0)
+              (put parts index (+ "  " line))
+              (setq added (+ added 2)))
+            (while (and (not (eq mark undefined))
+                        (>= (aref mark "offset") start)
+                        (< (aref mark "offset") end))
+              (js-call marks :push
+                (js-object :offset (+ (aref mark "offset") added)
+                           :span (aref mark "span")))
+              (setq mark-index (+ mark-index 1))
+              (setq mark (aref source-marks mark-index)))
+            (setq start end))
+          (setq index (+ index 1)))
+        (js-object :text (js-call parts :join "\n") :marks marks))))
 
   (defun indent (fragment)
     (funcall native-indent (as-fragment fragment)))
@@ -333,6 +361,12 @@
     (let ((kind (ir-kind node)) (value (ir-value node)))
       (cond
         ((= kind "literal") (or (eq value t) (eq value false)))
+        ((= kind "raw-javascript")
+         (let ((nodes (children node)))
+           (and (= (js-length nodes) 1) (= (ir-kind (js-nth 0 nodes)) "literal")
+                (= (value-type (ir-value (js-nth 0 nodes))) "string")
+                (js-call (js* "/^!![A-Za-z_$][A-Za-z0-9_$]*$/") :test
+                  (js-call (ir-value (js-nth 0 nodes)) :trim)))))
         ((= kind "intrinsic")
          (not (= (js-call
                    (js-array "not" "=" "/=" "not=" "<" "<=" ">" ">="
@@ -349,11 +383,45 @@
       (if (boolean-p node) output
         (combine (js-array "__eliscript_truthy(" output ")")))))
 
-  ;; Evaluate initializers outside the new binding scope to avoid TDZ.
-  ;; Each sequential binding has its own scope, including duplicate names.
+  ;; Share a sequential scope only when no initializer can observe its TDZ.
+  ;; Other initializers retain their original individual binding scopes.
+  (defun context-sequential-safe-p (bindings)
+    (if (<= (js-length bindings) 1) false
+    (let ((names (new globalThis.Map)) (index 0) (safe t))
+      (while (and safe (< index (js-length bindings)))
+        (let ((name (binding-name (ir-value (js-nth index bindings)))))
+          (if (js-call names :has name) (setq safe false) (js-call names :set name index)))
+        (setq index (1+ index)))
+      (setq index 0)
+      (while (and safe (< index (js-length bindings)))
+        (let* ((initializer (binding-initializer (js-nth index bindings)))
+               (pending (if initializer (js-array initializer) (js-array))))
+          (while (and safe (> (js-length pending) 0))
+            (let* ((node (js-call pending :pop)) (kind (ir-kind node)))
+              (if (= kind "raw-javascript") (setq safe false)
+                (progn
+                  ;; Include reads inside closures and assignment targets. A
+                  ;; conservative extra scope is preferable to a new TDZ or
+                  ;; capturing a binding declared later in the same block.
+                  (when (or (= kind "reference") (= kind "assignment-pair"))
+                    (let* ((name (reference-name (ir-value node)))
+                           (root (js-nth 0 (js-call name :split "."))))
+                      (when (and (js-call names :has root) (>= (js-call names :get root) index))
+                        (setq safe false))))
+                  (js-call (children node) :forEach (lambda (child) (js-call pending :push child))))))))
+        (setq index (1+ index))) safe)))
+
   (defun emit-context-let (bindings body sequential returning)
     (if (= (get bindings :length) 0)
         (if returning (emit-returning-body body) (emit-statement-body body))
+      (if (and sequential (context-sequential-safe-p bindings))
+          (let ((declarations (js-array)))
+            (js-call bindings :forEach (lambda (binding)
+              (let ((initializer (binding-initializer binding)))
+                (js-call declarations :push (combine (js-array "let " (emit-binding-target binding) " = "
+                  (if initializer (emit-expression initializer) "null") ";"))))))
+            (js-call declarations :push (if returning (emit-returning-body body) (emit-statement-body body)))
+            (combine (js-array "{\n" (indent (join-fragments declarations "\n")) "\n}")))
       (let* ((group (if sequential (js-array (js-nth 0 bindings)) bindings))
              (temporaries (temporary-names group))
              (initializers (js-array))
@@ -380,7 +448,23 @@
             body sequential returning))
         (js-call initializers :push
           (combine (js-array "{\n" (indent (join-fragments declarations "\n")) "\n}")))
-        (combine (js-array "{\n" (indent (join-fragments initializers "\n")) "\n}")))))
+        (combine (js-array "{\n" (indent (join-fragments initializers "\n")) "\n}"))))))
+
+  (defun emit-context-cond (clauses returning)
+    (if (= (get clauses :length) 0)
+        (text-fragment (if returning "return null;" ""))
+      (let* ((clause (js-nth 0 clauses))
+             (nodes (children clause))
+             (test (js-nth 0 nodes))
+             (body (js-call nodes :slice 1)))
+        (native-locate (ir-span clause)
+          (if (and (= (ir-kind test) "literal") (= (ir-value test) t))
+              (if returning (emit-returning-body body) (emit-statement-body body))
+            (combine
+              (js-array "if (" (emit-test test) ") {\n"
+                (indent (if returning (emit-returning-body body) (emit-statement-body body)))
+                "\n} else {\n"
+                (indent (emit-context-cond (js-call clauses :slice 1) returning)) "\n}")))))))
 
   (defun emit-context (node returning)
     (let ((kind (ir-kind node)) (nodes (children node)))
@@ -391,6 +475,25 @@
            (combine (js-array (if returning "return " "") (emit-expression node) ";")))
           ((= kind "sequence")
            (if returning (emit-returning-body nodes) (emit-statement-body nodes)))
+          ((= kind "conditional")
+           (combine
+             (js-array "if (" (emit-test (js-nth 0 nodes)) ") {\n"
+               (indent (emit-context (js-nth 1 nodes) returning)) "\n}"
+               (if (or returning (> (get nodes :length) 2))
+                   (combine (js-array " else {\n"
+                     (indent (if (> (get nodes :length) 2)
+                                 (emit-context (js-nth 2 nodes) returning)
+                               (text-fragment "return null;"))) "\n}")) ""))))
+          ((= kind "conditional-sugar")
+           (combine
+             (js-array "if ("
+               (if (= (ir-value node) "when") (emit-test (js-nth 0 nodes))
+                 (combine (js-array "(!" (emit-test (js-nth 0 nodes)) ")")))
+               ") {\n"
+               (indent (if returning (emit-returning-body (js-call nodes :slice 1))
+                         (emit-statement-body (js-call nodes :slice 1)))) "\n}"
+               (if returning " else {\n  return null;\n}" ""))))
+          ((= kind "conditional-chain") (emit-context-cond nodes returning))
           ((= kind "loop")
            (combine
              (js-array "while (" (emit-test (js-nth 0 nodes)) ") {\n"
@@ -1382,6 +1485,12 @@
     (or (not (= (ir-kind node) "literal"))
         (= (ir-value node) "join") (= (ir-value node) "toString")))
 
+  (defun primitive-literal-arguments-p (nodes)
+    (js-call nodes :every
+      (lambda (node)
+        (and (= (ir-kind node) "literal")
+             (not (= (literal-kind node) "keyword"))))))
+
   (defun emit-expression (node)
     (unless (node-p node)
       (fail "expected an IR expression node"))
@@ -1436,11 +1545,15 @@
               (emit-property-key (js-nth 1 nodes)) "] = "
               (emit-expression (js-nth 2 nodes)) ")")))
           ((= kind "method-call")
-          (combine
-            (js-array (if (array-text-key-p (js-nth 1 nodes)) "__eliscript_at(" "(")
-              (emit-expression (js-nth 0 nodes)) (if (array-text-key-p (js-nth 1 nodes)) ", " ")[")
-              (emit-property-key (js-nth 1 nodes)) (if (array-text-key-p (js-nth 1 nodes)) ")(" "](")
-              (emit-arguments (js-call nodes :slice 2)) ")")))
+           (let* ((arguments (js-call nodes :slice 2))
+                  (array-text (array-text-key-p (js-nth 1 nodes)))
+                  (direct (and array-text (primitive-literal-arguments-p arguments))))
+             (combine
+               (js-array (if direct "__eliscript_at_direct(" (if array-text "__eliscript_at(" "("))
+                 (emit-expression (js-nth 0 nodes)) (if array-text ", " ")[")
+                 (emit-property-key (js-nth 1 nodes))
+                 (if direct (if (> (get arguments :length) 0) ", " "") (if array-text ")(" "]("))
+                 (emit-arguments arguments) ")"))))
           ((= kind "constructor-call")
            (combine
              (js-array "new " (emit-expression (js-nth 0 nodes)) "("

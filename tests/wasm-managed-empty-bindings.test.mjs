@@ -92,7 +92,7 @@ test('a true captured-cell allocation trap unwinds only private binding frames a
   const source = await readFile('bootstrap/runtime/memory.eli', 'utf8'), start = source.indexOf('  (defun value-cell-new '), end = source.indexOf('  (defun ', start + 3); assert(start >= 0 && end > start);
   const injected = b.compiler.compile_ir_string(source.slice(0, start) + '  (defun value-cell-new (heap value) (load-u32 4294967295))\n' + source.slice(end), 'binding-trap.eli');
   const p = b.compiler.compile_ir_string('(defun f (x) (+ x 1) (let* (next (read (lambda () next))) (setq next x) (funcall read))) (export f)', 'captured-bindings.eli'), a = instantiateManagedRuntime(bytes(p, injected)); a.auto(1);
-  const held = a.number(-0), bad = a.sourceObject({}), outer = a.frame(1); a.frameSet(outer, 0, held);
+  const held = a.number(-0), bad = a.sourceObject({valueOf: false, toString: false}), outer = a.frame(1); a.frameSet(outer, 0, held);
   assert.throws(() => a.invoke('f', [bad]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003'); assert.equal(a.stats().frameDepth, 1);
   assert.throws(() => a.invoke('f', [held]), WebAssembly.RuntimeError); assert.equal(a.stats().frameDepth, 1); assert(Object.is(a.readNumber(held), -0)); a.leaveFrame(outer); a.release(held); a.release(bad); a.collect(); assert.equal(a.live(), 0);
 });

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -79,14 +80,15 @@ const validationOptions = {
 };
 
 test("matrix command environment breaks retained-evidence recursion", () => {
+  const binaries = Object.fromEntries(["bun", "node", "emacs"].map(name => [name, path.resolve(ROOT, "test-binaries", name)]));
   expect(commandEnvironment({
-    bun: "/opt/tools/bun",
-    node: "/opt/tools/node",
-    emacs: "/opt/tools/emacs",
+    bun: binaries.bun,
+    node: binaries.node,
+    emacs: binaries.emacs,
   })).toMatchObject({
-    BUN: "/opt/tools/bun",
-    NODE: "/opt/tools/node",
-    EMACS: "/opt/tools/emacs",
+    BUN: binaries.bun,
+    NODE: binaries.node,
+    EMACS: binaries.emacs,
     ELISCRIPT_SKIP_RETAINED_ACCEPTANCE: "1",
   });
   expect(makefile).toContain(
@@ -252,4 +254,117 @@ test("local matrix aggregation rejects mixed source content", async () => {
     resolveCodeIdentity: async (commit) =>
       commit === first.source.commit ? "5".repeat(64) : "6".repeat(64),
   })).rejects.toThrow(/one identical source content identity/u);
+});
+
+
+// Use real retained Git objects without creating or rewriting any commits.
+async function historicalFixture(run) {
+  const directory = await mkdtemp(path.join(tmpdir(), "eliscript-matrix-history-"));
+  const git = (...args) => {
+    const child = Bun.spawnSync(["git", ...args], {cwd: ROOT, stdout: "pipe", stderr: "pipe"});
+    expect(child.exitCode).toBe(0);
+    return Buffer.from(child.stdout);
+  };
+  try {
+    await writeFile(path.join(directory, ".git"), "gitdir: " + git("rev-parse", "--absolute-git-dir").toString().trim() + "\n");
+    const filename = "acceptance/matrix/macos-arm64-emacs-29.4.json";
+    const bytes = await readFile(path.join(ROOT, filename));
+    const value = JSON.parse(bytes);
+    const oldBytes = git("show", value.source.commit + ":contracts/compatibility-matrix.json");
+    const measured = JSON.parse(oldBytes);
+    expect(createHash("sha256").update(oldBytes).digest("hex")).toBe(value.matrixSha256);
+    const current = {...measured, performanceAcceptance: "deferred"};
+    const save = async (contract = current, reportBytes = bytes) => {
+      await mkdir(path.join(directory, "contracts"), {recursive: true});
+      await mkdir(path.join(directory, "acceptance/matrix"), {recursive: true});
+      await writeFile(path.join(directory, "contracts/compatibility-matrix.json"), JSON.stringify(contract));
+      await writeFile(path.join(directory, filename), reportBytes);
+    };
+    await save();
+    await run({directory, filename, bytes, value, measured, current, save, git});
+    expect(await readFile(path.join(ROOT, filename))).toEqual(bytes);
+  } finally {await rm(directory, {recursive: true, force: true});}
+}
+const deferredEnvironment = {ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: "1"};
+
+test("matrix historical policy mismatch stays strict without the exact explicit environment value", async () => {
+  await historicalFixture(async ({directory, value}) => {
+    for (const setting of [undefined, "0", "true", "01"]) {
+      await expect(validateLocalMatrixReport(value, {root: directory, env: {ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: setting}}))
+        .rejects.toThrow(/matrixSha256 must bind the current compatibility contract/u);
+    }
+  });
+});
+
+test("explicit deferral authenticates the original report bytes, measured contract and prior passing judgement", async () => {
+  await historicalFixture(async ({directory, value}) => {
+    const result = await validateLocalMatrixReport(value, {root: directory, env: deferredEnvironment});
+    expect(result.cell).toEqual(value.cell);
+    expect(result.historicalContract).toMatchObject({
+      matrixSha256: value.matrixSha256, sourceCommit: value.source.commit, sourceTree: value.source.tree,
+      historicalResult: "pass", currentPerformanceAcceptance: "deferred", performanceAccepted: false,
+    });
+    const aggregate = await checkLocalMatrixEvidence({root: directory, env: deferredEnvironment, sourceMatches: async () => false});
+    expect(aggregate).toMatchObject({retained: 1, completed: 0, currentSource: false, complete: false});
+    expect(aggregate.historicalContracts).toHaveLength(1);
+  });
+});
+
+test("historical matrix acceptance rejects every non-policy contract change", async () => {
+  await historicalFixture(async ({directory, current, value, save}) => {
+    const mutations = [
+      m => {m.localEvidence.timeoutsMs["bun run test"] += 1;},
+      m => {m.javascriptHost.version = "9.9.9";},
+      m => {m.operatingSystems[0].runner = "ubuntu-22.04";},
+      m => {m.actions[0].revision = "f".repeat(40);},
+      m => {m.acceptanceOperatingSystems = ["linux", "macos"];},
+      m => {m.extraPolicy = "invented";},
+      m => {delete m.performanceAcceptance;},
+    ];
+    for (const mutate of mutations) {
+      const changed = structuredClone(current); mutate(changed); await save(changed);
+      await expect(validateLocalMatrixReport(value, {root: directory, env: deferredEnvironment}))
+        .rejects.toThrow(/historical matrix contract differs beyond performanceAcceptance|matrixSha256 must bind the current compatibility contract/u);
+    }
+  });
+});
+
+test("historical matrix acceptance rejects replaced report bytes and fabricated measured source", async () => {
+  await historicalFixture(async ({directory, value, bytes, current, save}) => {
+    const forged = structuredClone(value); forged.generatedAt = "2026-01-01T00:00:00.000Z";
+    await save(current, JSON.stringify(forged));
+    await expect(validateLocalMatrixReport(forged, {root: directory, env: deferredEnvironment}))
+      .rejects.toThrow(/report bytes differ from their retained Git snapshot/u);
+    await save(current, Buffer.concat([bytes, Buffer.from("\n")]));
+    await expect(validateLocalMatrixReport(value, {root: directory, env: deferredEnvironment}))
+      .rejects.toThrow(/report bytes differ from their retained Git snapshot/u);
+    await save();
+    const changed = structuredClone(value); changed.source.commit = "0".repeat(40);
+    await expect(validateLocalMatrixReport(changed, {root: directory, env: deferredEnvironment}))
+      .rejects.toThrow(/report value differs from retained file|source commit cannot be resolved/u);
+  });
+});
+
+test("both real Emacs cells authenticate while retaining stale-source and incomplete-current acceptance", async () => {
+  await historicalFixture(async ({directory, filename, bytes}) => {
+    const secondFile = "acceptance/matrix/macos-arm64-emacs-30.2.json";
+    const secondBytes = await readFile(path.join(ROOT, secondFile));
+    await writeFile(path.join(directory, secondFile), secondBytes);
+    const result = await checkLocalMatrixEvidence({root: directory, env: deferredEnvironment, sourceMatches: async () => false});
+    expect(result).toMatchObject({retained: 2, completed: 0, missing: [], currentSource: false, complete: false});
+    expect(result.historicalContracts.map(item => item.report)).toEqual([filename, secondFile]);
+    expect(result.historicalContracts.every(item => item.historicalResult === "pass" && item.performanceAccepted === false)).toBe(true);
+    expect(await readFile(path.join(directory, filename))).toEqual(bytes);
+    expect(await readFile(path.join(ROOT, secondFile))).toEqual(secondBytes);
+  });
+});
+
+test("explicit matrix deferral fails closed when retained Git history is absent", async () => {
+  await historicalFixture(async ({directory, value}) => {
+    await rm(path.join(directory, ".git"));
+    const initialized = Bun.spawnSync(["git", "init", "--quiet", directory], {stdout: "pipe", stderr: "pipe"});
+    expect(initialized.exitCode).toBe(0);
+    await expect(validateLocalMatrixReport(value, {root: directory, env: deferredEnvironment}))
+      .rejects.toThrow(/measured Git snapshot is unavailable|source commit cannot be resolved/u);
+  });
 });

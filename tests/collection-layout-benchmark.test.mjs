@@ -1,3 +1,4 @@
+import { currentPerformanceTest } from "./helpers/performance-acceptance.mjs";
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -117,7 +118,7 @@ test("committed HAMT layout baseline proves the 32/24 threshold decision", async
   const baseline = JSON.parse(await readFile(baselineFile, "utf8"));
 
   expect(validateLayoutSuiteReport(baseline)).toBe(baseline);
-  expect(baseline.sourceDigest).toEqual(await benchmarkSourceDigest());
+
   expect(baseline.runtimeThresholds).toEqual({ promotion: 32, demotion: 24 });
   expect(baseline.analysis).toEqual(analyzeLayoutSuite(baseline.hosts));
   expect(baseline.analysis).toMatchObject({
@@ -144,4 +145,9 @@ test("committed HAMT layout baseline proves the 32/24 threshold decision", async
     expect(host.measurements.every((measurement) =>
       measurement.ratios.arrayToBitmapBytes > 0)).toBe(true);
   }
+});
+
+currentPerformanceTest(test)("current-source performance acceptance: HAMT layout", async () => {
+  const report = JSON.parse(await readFile(new URL("../benchmarks/hamt-layout-macos-arm64.json", import.meta.url), "utf8"));
+  expect(report.sourceDigest).toEqual(await benchmarkSourceDigest());
 });

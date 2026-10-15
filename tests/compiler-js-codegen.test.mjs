@@ -1,3 +1,4 @@
+import { currentPerformanceTest } from "./helpers/performance-acceptance.mjs";
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -76,12 +77,6 @@ test("JS context lowering preserves scopes, effects, captures, truth values, and
     const compiler = await import(pathToFileURL(resolve(directory, "compiler/compiler.mjs")).href);
     const report = JSON.parse(await readFile(resolve(root, "tools/experiments/native-wasm/results/js-codegen-probe-macos-arm64.json"), "utf8"));
     const hash = bytes => createHash("sha256").update(bytes).digest("hex");
-    for (const [file, digest] of Object.entries(report.sourceHashes)) {
-      const current = file.startsWith("generated-compiler/")
-        ? resolve(directory, "compiler", file.slice("generated-compiler/".length))
-        : resolve(root, file);
-      expect(hash(await readFile(current))).toBe(digest);
-    }
     const original = await readFile(resolve(root, "tools/experiments/native-wasm/results/native-wasm-probe-macos-arm64.json"));
     expect(report.baseline.reportSha256).toBe(hash(original));
     expect(report.baseline.artifactSha256).toBe(JSON.parse(original).artifactHashes["kernels.mjs"]);
@@ -112,6 +107,23 @@ test("JS context lowering preserves scopes, effects, captures, truth values, and
     expect(kernelsOnly).not.toContain("function (");
     expect(numeric).not.toContain("__eliscript_truthy(");
     expect(numeric).toContain(" && ");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}, 30_000);
+
+currentPerformanceTest(test)("current-source performance acceptance: JS codegen report and generated compiler", async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), "eliscript-js-codegen-freshness-"));
+  try {
+    await run([resolve(root, "bin/eliscript-bootstrap")], { ELISCRIPT_BOOTSTRAP_OUT_DIR: resolve(directory, "compiler") });
+    const report = JSON.parse(await readFile(resolve(root, "tools/experiments/native-wasm/results/js-codegen-probe-macos-arm64.json"), "utf8"));
+    const hash = bytes => createHash("sha256").update(bytes).digest("hex");
+    for (const [file, digest] of Object.entries(report.sourceHashes)) {
+      const current = file.startsWith("generated-compiler/")
+        ? resolve(directory, "compiler", file.slice("generated-compiler/".length))
+        : resolve(root, file);
+      expect(hash(await readFile(current))).toBe(digest);
+    }
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

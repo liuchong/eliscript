@@ -1,3 +1,4 @@
+import { currentPerformanceTest } from "./helpers/performance-acceptance.mjs";
 import { afterAll, beforeAll, test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -519,13 +520,27 @@ test("native retained performance evidence rejects altered budgets, samples, ide
   const {validateNativeReport}=await import("../tools/backends/native-benchmark.mjs");
   for(const name of ["native-baseline-macos-arm64.json","native-macos-arm64.json"]) {
     const report=JSON.parse(await readFile(resolve(import.meta.dir,"../tools/backends/results",name),"utf8"));
-    await validateNativeReport(report);
-    for(const mutate of [r=>{r.parameters.minimumSpeedup=.5},r=>{r.sessions[0].results[0].measurements.native.checksums[0]+=1},r=>{r.summary[0].speedup=999},r=>{r.sourceHashes["bootstrap/compiler/emitter.eli"]="0".repeat(64)},r=>{r.environment.arch="x64"},r=>{r.sessions[0].results.push(r.sessions[0].results[0])},r=>{r.baseline="false"}]) {
-      const changed=structuredClone(report);mutate(changed);await assert.rejects(validateNativeReport(changed));
+    await validateNativeReport(report,{verifySources:false});
+    for(const mutate of [r=>{r.parameters.minimumSpeedup=.5},r=>{r.sessions[0].results[0].measurements.native.checksums[0]+=1},r=>{r.summary[0].speedup=999},r=>{r.environment.arch="x64"},r=>{r.sessions[0].results.push(r.sessions[0].results[0])},r=>{r.baseline="false"}]) {
+      const changed=structuredClone(report);mutate(changed);await assert.rejects(validateNativeReport(changed,{verifySources:false}));
     }
+    // Current-source verification stays strict even when its acceptance test
+    // is deferred; this validator itself never reads the deferral flag.
+    const forgedIdentity=structuredClone(report);
+    forgedIdentity.sourceHashes["bootstrap/compiler/emitter.eli"]="0".repeat(64);
+    await assert.rejects(validateNativeReport(forgedIdentity));
     if(!report.decision.productionPassed) {
-      const forged=structuredClone(report);forged.decision.productionPassed=true;await assert.rejects(validateNativeReport(forged));
+      const forged=structuredClone(report);forged.decision.productionPassed=true;await assert.rejects(validateNativeReport(forged,{verifySources:false}));
     }
+
+  }
+});
+
+currentPerformanceTest(test)("current-source performance acceptance: native reports and promotion", async () => {
+  const {validateNativeReport}=await import("../tools/backends/native-benchmark.mjs");
+  for(const name of ["native-baseline-macos-arm64.json","native-macos-arm64.json"]) {
+    const report=JSON.parse(await readFile(resolve(import.meta.dir,"../tools/backends/results",name),"utf8"));
+    await validateNativeReport(report);
     const child=spawnSync(process.execPath,[resolve(import.meta.dir,"../tools/backends/native-benchmark.mjs"),"--require-production",...(report.baseline?["--baseline"]:[])],{encoding:"utf8",timeout:10000});
     assert.equal(child.status,report.decision.productionPassed?0:1,child.stderr);
   }

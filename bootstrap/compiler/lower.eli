@@ -15,7 +15,8 @@
      "object-keys" "object-has?" "object-assoc" "__eliscript_arity_error"))
 
   (defconst fail
-    (js* "(message) => { throw new Error(message); }"))
+    (lambda (message)
+      (throw (new (js* "Error") message))))
   (defvar recur-targets (js-array))
 
   (defun symbol-node-p (node)

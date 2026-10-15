@@ -23,13 +23,21 @@ function assoc(object, key, value, ...key_values) {
 }
 function key_in_QMARK_(key, key_list) {
   return Collection.reduce(key_list, ((matched, current) => {
-    return (__eliscript_truthy(equalValues(key, current)) ? Collection.reduced(true) : matched);
+    if (__eliscript_truthy(equalValues(key, current))) {
+      return Collection.reduced(true);
+    } else {
+      return matched;
+    }
   }), false);
 }
 function dissoc(object, key) {
-  return ((!__eliscript_truthy(has_QMARK_(object, key))) ? object : Transducer.into(object, Transducer.filtering(((entry) => {
-    return (!__eliscript_truthy(equalValues(key, entry_key(entry))));
-  })), object));
+  if ((!__eliscript_truthy(has_QMARK_(object, key)))) {
+    return object;
+  } else {
+    return Transducer.into(object, Transducer.filtering(((entry) => {
+      return (!__eliscript_truthy(equalValues(key, entry_key(entry))));
+    })), object);
+  }
 }
 function merge(left, right) {
   return Collection.reduce(right, ((result, entry) => {

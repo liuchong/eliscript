@@ -1,3 +1,4 @@
+import { currentPerformanceTest } from "./helpers/performance-acceptance.mjs";
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -16,9 +17,9 @@ async function readReport() {
   return JSON.parse(await readFile(reportPath, "utf8"));
 }
 
-test("committed transient builder report matches core runtime sources", async () => {
+test("retained transient builder report preserves measured runtime evidence", async () => {
   const report = validateTransientBuilderReport(await readReport());
-  expect(report.sourceDigest).toEqual(await transientBuilderSourceDigest());
+
   expect(report.parameters).toMatchObject({
     vectorSize: 200_000,
     mapSize: 100_000,
@@ -42,4 +43,8 @@ test("transient builder report validator rejects incomplete evidence", async () 
   expect(() => validateTransientBuilderReport(report)).toThrow(
     "transient vector builder evidence failed",
   );
+});
+
+currentPerformanceTest(test)("committed transient builder report matches core runtime sources", async () => {
+  expect((await readReport()).sourceDigest).toEqual(await transientBuilderSourceDigest());
 });

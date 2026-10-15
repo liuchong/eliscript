@@ -2,8 +2,8 @@ import {hostUnicodeCaseVersion} from '../runtime/unicode-case-profiles.mjs';
 // Bulk host boundary for the .eli managed heap. GC, value operations and allocation
 // execute inside WASM, with zero imports. Handles own explicit roots until release.
 function fail(code) {
- const message=code===1?'invalid managed value handle':code===2?'managed capacity exhausted':code===4?'invalid UTF-8 input':code===5?'invalid UTF-16 surrogate':code===6?'managed string sealing error':code===8?'uninitialized managed module binding':code===9?'cyclic array text conversion':code===10?'invalid Number.toString radix':'managed argument or bounds error';
- const error=code===9?new TypeError(message):code===10?new RangeError(message):new Error(message);
+ const message=code===1?'invalid managed value handle':code===2?'managed capacity exhausted':code===4?'invalid UTF-8 input':code===5?'invalid UTF-16 surrogate':code===6?'managed string sealing error':code===8?'uninitialized managed module binding':code===12?'uninitialized managed lexical binding':code===9?'cyclic array text conversion':code===10?'invalid Number.toString radix':'managed argument or bounds error';
+ const error=(code===8||code===12)?new ReferenceError(message):code===9?new TypeError(message):code===10?new RangeError(message):new Error(message);
  error.eliscriptDiagnostic={format:'eliscript-diagnostic',version:1,code:`ELI-RT${String(code).padStart(4,'0')}`,severity:'error',phase:'runtime',message:error.message};throw error;
 }
 function word(x,max=0xffffffff) {if(typeof x!=='number'||!Number.isInteger(x)||x<0||x>max||Object.is(x,-0))fail(3);return x;}
@@ -59,12 +59,17 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
  }
  if(!moduleInfo&&['init','get','status','close','abort'].some(name=>Object.hasOwn(e,'__eliscript_module_'+name)))fail(3);
  const handles=new WeakMap(),frames=new WeakMap(),view=()=>new DataView(e.memory.buffer);
- const call=(name,...args)=>{const result=e[name](...args)>>>0;const code=e['last-error']();if(code)fail(code);return result;};
+ let exceptionHeap=0;
+ const call=(name,...args)=>{const result=e[name](...args)>>>0;const code=e['last-error']();
+  if(code===11&&exceptionHeap&&typeof e['value-exception-take']==='function'){
+   const value=e['value-exception-take'](exceptionHeap)>>>0,failed=e['last-error']();if(failed)fail(failed);throw wrap(value);
+  }
+  if(code)fail(code);return result;};
  const caseConfigurable=typeof e['runtime-case-version']==='function';
  const caseVersion=caseConfigurable?(unicodeVersion==='host'?hostUnicodeCaseVersion():unicodeVersion===15.1?151:unicodeVersion*10):170;
  if(caseConfigurable)call('runtime-case-version',caseVersion);
  else if(unicodeVersion!=='host')fail(3);
- const heap=call('heap-new',word(maxSlots),word(initialBytes),word(maxBytes));
+ const heap=call('heap-new',word(maxSlots),word(initialBytes),word(maxBytes));exceptionHeap=heap;
  function id(value) {
   if(value===null)return 0;if(value===false)return 1;if(value===true)return 2;if(value===undefined)return 3;
   const entry=handles.get(value);if(!entry)fail(typeof value==='number'?3:1);
@@ -118,7 +123,7 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
   try{call(moduleInfo.initialize,heap);return true;}
   catch(error){
    call('frame-unwind',heap,target);
-   if(status===0){const match=/^ELI-RT([0-9]+)$/.exec(error.eliscriptDiagnostic?.code??'');e[moduleInfo.abort](heap,match?Number(match[1]):3);}
+   if(status===0&&call(moduleInfo.status,heap)===1){const match=/^ELI-RT([0-9]+)$/.exec(error?.eliscriptDiagnostic?.code??'');e[moduleInfo.abort](heap,match?Number(match[1]):3);}
    throw error;
   }
  }
@@ -145,7 +150,7 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
      return wrap(call(entry.wireName,heap,entry.binding?callee:0,argumentsList,values.length));
     }
     return wrap(call(entry.wireName,heap,...values));
-   } catch(error){if(entered)call('frame-unwind',heap,target);throw error;}
+   } catch(error){if(entered)call('frame-unwind',heap,target);if(typeof e['value-exception-clear']==='function')call('value-exception-clear',heap);throw error;}
    finally{if(argumentsList)call('heap-release',heap,argumentsList);for(const value of borrowed)call('heap-release',heap,value);}
   },
   number(input) {

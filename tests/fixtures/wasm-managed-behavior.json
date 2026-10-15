@@ -22,8 +22,8 @@
           "given": "negative zero, NaN, infinity, the smallest subnormal and Unicode text",
           "when": "the values are joined with a vertical bar",
           "then": "their exact existing JS text is retained",
-          "source": "(defun run () (js-call (js-array -0.0 (/ 0 0) (/ 1 0) 5e-324 \"中😀\") :join \"|\"))",
-          "expected": "0|NaN|Infinity|5e-324|中😀"
+          "source": "(defun run () (js-call (js-array -0.0 (/ 0 0) (/ 1 0) 5e-324 \"\u4e2d\ud83d\ude00\") :join \"|\"))",
+          "expected": "0|NaN|Infinity|5e-324|\u4e2d\ud83d\ude00"
         },
         {
           "id": "shared-arrays",
@@ -92,12 +92,12 @@
           "given": "an array item points to the containing array",
           "when": "join is attempted and the item is then replaced",
           "then": "both targets report ELI-RT0009 and the same array can be joined afterwards",
-          "source": "(defvar values (js-array \"苹果\" nil \"香蕉\")) (defun run () (put values 1 values) (js-call values :join \"、\")) (defun recover () (put values 1 \"梨\") (js-call values :join \"、\"))",
+          "source": "(defvar values (js-array \"\u82f9\u679c\" nil \"\u9999\u8549\")) (defun run () (put values 1 values) (js-call values :join \"\u3001\")) (defun recover () (put values 1 \"\u68a8\") (js-call values :join \"\u3001\"))",
           "expected": null,
           "runtimeError": "ELI-RT0009",
           "jsError": "TypeError",
           "wasmError": "TypeError",
-          "recover": "苹果、梨、香蕉"
+          "recover": "\u82f9\u679c\u3001\u68a8\u3001\u9999\u8549"
         },
         {
           "id": "mutual-cycle-and-recovery",
@@ -122,7 +122,7 @@
           "given": "values include nil, undefined, Boolean, Number, String, Array and a function",
           "when": "typeof queries run inside the compiled module",
           "then": "the exact seven JS labels are returned",
-          "source": "(defun label (value) (js* \"typeof value\")) (defun run () (js-array (label nil) (label undefined) (label false) (label -0.0) (label \"中😀\") (label (js-array)) (label label)))",
+          "source": "(defun label (value) (js* \"typeof value\")) (defun run () (js-array (label nil) (label undefined) (label false) (label -0.0) (label \"\u4e2d\ud83d\ude00\") (label (js-array)) (label label)))",
           "expected": [
             "object",
             "undefined",
@@ -204,7 +204,7 @@
           "given": "an array contains an object with an own dotted property name",
           "when": "numeric, quoted and negative zero member paths are queried",
           "then": "all three paths report the exact value type",
-          "source": "(defun run () (let ((value (js-array (js-object :item 7 :a.b \"中😀\")))) (js-array (js* \"typeof value [ -0 ] . item\") (js* \"typeof value[0][\\\"a.b\\\"]\") (js* \"typeof value[1]\"))))",
+          "source": "(defun run () (let ((value (js-array (js-object :item 7 :a.b \"\u4e2d\ud83d\ude00\")))) (js-array (js* \"typeof value [ -0 ] . item\") (js* \"typeof value[0][\\\"a.b\\\"]\") (js* \"typeof value[1]\"))))",
           "expected": [
             "number",
             "string",
@@ -273,10 +273,10 @@
           "given": "mixed scripts, a contextual sigma and a lone UTF16 surrogate",
           "when": "upper and lower casing run",
           "then": "full Unicode mappings preserve expansion, context and lone code units",
-          "source": "(defun run () (js-array (js-call \"ßﬃ😀\" :toUpperCase) (js-call \"AΣ́\" :toLowerCase) (js-call \"\\ud800A\" :toLowerCase)))",
+          "source": "(defun run () (js-array (js-call \"\u00df\ufb03\ud83d\ude00\" :toUpperCase) (js-call \"A\u03a3\u0301\" :toLowerCase) (js-call \"\\ud800A\" :toLowerCase)))",
           "expected": [
-            "SSFFI😀",
-            "aς́",
+            "SSFFI\ud83d\ude00",
+            "a\u03c2\u0301",
             "\ud800a"
           ]
         },
@@ -285,10 +285,10 @@
           "given": "astral fillers and fractional target lengths",
           "when": "start and end padding run",
           "then": "padding truncates by UTF16 code unit and converts the target length",
-          "source": "(defun run () (js-array (js-call \"x\" :padStart 4.9 \"😀\") (js-call \"x\" :padEnd 4.9 \"😀\")))",
+          "source": "(defun run () (js-array (js-call \"x\" :padStart 4.9 \"\ud83d\ude00\") (js-call \"x\" :padEnd 4.9 \"\ud83d\ude00\")))",
           "expected": [
-            "😀\ud83dx",
-            "x😀\ud83d"
+            "\ud83d\ude00\ud83dx",
+            "x\ud83d\ude00\ud83d"
           ]
         },
         {
@@ -304,8 +304,8 @@
           "given": "two matches and a callback using offsets and the original string",
           "when": "every match is replaced",
           "then": "both callbacks receive original UTF16 offsets and input",
-          "source": "(defun run () (js-call \"a😀a\" :replaceAll \"a\" (lambda (match index original) (str match \":\" index \":\" original))))",
-          "expected": "a:0:a😀a😀a:3:a😀a"
+          "source": "(defun run () (js-call \"a\ud83d\ude00a\" :replaceAll \"a\" (lambda (match index original) (str match \":\" index \":\" original))))",
+          "expected": "a:0:a\ud83d\ude00a\ud83d\ude00a:3:a\ud83d\ude00a"
         },
         {
           "id": "literal-split-zero-effects",
@@ -661,7 +661,7 @@
           "given": "objects, arrays and primitive strings with identical contents",
           "when": "Object.is compares shared and distinct values",
           "then": "objects retain identity and strings compare by exact UTF-16 contents",
-          "source": "(defun run () (let ((a (js-object)) (b (js-object))) (js-array (Object/is a a) (Object/is a b) (Object/is (js-array) (js-array)) (Object/is \"中😀\" \"中😀\") (Object/is 1 \"1\"))))",
+          "source": "(defun run () (let ((a (js-object)) (b (js-object))) (js-array (Object/is a a) (Object/is a b) (Object/is (js-array) (js-array)) (Object/is \"\u4e2d\ud83d\ude00\" \"\u4e2d\ud83d\ude00\") (Object/is 1 \"1\"))))",
           "expected": [
             true,
             false,
@@ -837,7 +837,7 @@
           "given": "a supplementary Unicode character and an isolated high surrogate",
           "when": "Array.from iterates the string",
           "then": "the supplementary pair stays together and the isolated code unit survives",
-          "source": "(defun run () (let ((x (Array/from (str \"A😀\" (String/fromCharCode 55296))))) (js-array (js-length x) (js-length (aref x 1)) (js-call (aref x 2) :charCodeAt 0))))",
+          "source": "(defun run () (let ((x (Array/from (str \"A\ud83d\ude00\" (String/fromCharCode 55296))))) (js-array (js-length x) (js-length (aref x 1)) (js-call (aref x 2) :charCodeAt 0))))",
           "expected": [
             3,
             2,
@@ -921,7 +921,7 @@
           "given": "a string containing a supplementary Unicode character",
           "when": "keys and own properties are queried",
           "then": "indices count UTF16 units and length is own but non-enumerable",
-          "source": "(defun run () (js-array (Object/keys \"A😀\") (Object/hasOwn \"A😀\" \"length\") (Object/hasOwn \"A😀\" \"2\") (Object/hasOwn \"A😀\" \"3\")))",
+          "source": "(defun run () (js-array (Object/keys \"A\ud83d\ude00\") (Object/hasOwn \"A\ud83d\ude00\" \"length\") (Object/hasOwn \"A\ud83d\ude00\" \"2\") (Object/hasOwn \"A\ud83d\ude00\" \"3\")))",
           "expected": [
             [
               "0",
@@ -983,6 +983,393 @@
           "runtimeError": "ELI-RT0003",
           "jsError": "TypeError",
           "recover": 7
+        }
+      ]
+    },
+    {
+      "name": "Ordinary operand conversion",
+      "description": "Ordinary valueOf and toString hooks preserve primitive conversion hints, ordering, fallback and error suppression in JS and collecting zero-import WASM.",
+      "scenarios": [
+        {
+          "id": "operand-default-string-addition",
+          "given": "two ordinary values whose valueOf callbacks return a string and a number",
+          "when": "addition converts them from left to right",
+          "then": "the result uses string concatenation and each hook runs once",
+          "source": "(defun run () (let* ((trace (js-array)) (a (js-object :valueOf (lambda () (js-call trace :push \"left\") \"4\"))) (b (js-object :valueOf (lambda () (js-call trace :push \"right\") 2)))) (js-array (+ a b) trace)))",
+          "expected": [
+            "42",
+            [
+              "left",
+              "right"
+            ]
+          ]
+        },
+        {
+          "id": "operand-fallback-before-right",
+          "given": "a left valueOf that returns an object and a string-returning toString fallback",
+          "when": "subtraction then converts an ordinary right operand",
+          "then": "the fallback completes before the right hook and numeric subtraction is exact",
+          "source": "(defun run () (let* ((trace (js-array)) (a (js-object :valueOf (lambda () (js-call trace :push \"left\") (js-object)) :toString (lambda () (js-call trace :push \"text\") \"12\"))) (b (js-object :valueOf (lambda () (js-call trace :push \"right\") 3)))) (js-array (- a b) trace)))",
+          "expected": [
+            9,
+            [
+              "left",
+              "text",
+              "right"
+            ]
+          ]
+        },
+        {
+          "id": "operand-relational-string-primitives",
+          "given": "ordinary operands whose inherited valueOf returns string primitives",
+          "when": "less-than compares the converted operands",
+          "then": "string ordering is retained without converting both strings to numbers",
+          "source": "(defun run () (let* ((p (js-object :valueOf (lambda () \"20\"))) (a (js-object :__proto__ p)) (b (js-object :valueOf (lambda () \"3\")))) (< a b)))",
+          "expected": true
+        },
+        {
+          "id": "operand-left-failure-suppresses-right",
+          "given": "a left operand that cannot produce any primitive and a right hook with a visible effect",
+          "when": "numeric conversion of the left operand fails",
+          "then": "the original TypeError is reported before the right hook and later calls recover",
+          "source": "(defconst trace (js-object :visited false)) (defun run () (- (js-object :valueOf (lambda () (js-object)) :toString (lambda () (js-object))) (js-object :valueOf (lambda () (put trace :visited t) 1)))) (defun recover () (get trace :visited))",
+          "runtimeError": "ELI-RT0003",
+          "jsError": "TypeError",
+          "recover": false
+        }
+      ]
+    },
+    {
+      "name": "Ordinary text method dispatch",
+      "description": "Own and inherited ordinary text-named methods retain capture before arguments, ignored actual arguments and noncallable error effects across JS and zero-import WASM.",
+      "scenarios": [
+        {
+          "id": "ordinary-split-method-capture",
+          "given": "an ordinary object with a custom split method",
+          "when": "argument evaluation replaces that method and supplies an extra value",
+          "then": "the original method receives both actual values exactly once",
+          "source": "(defun run () (let ((x (js-object :split (lambda (first second) (js-array first second))))) (js-call x :split (progn (put x :split false) \"captured\") \"extra\")))",
+          "expected": [
+            "captured",
+            "extra"
+          ]
+        },
+        {
+          "id": "ordinary-text-noncallable-effects",
+          "given": "an ordinary object with a noncallable charAt property",
+          "when": "its argument writes a visible value",
+          "then": "the argument runs before TypeError and recovery retains that write",
+          "source": "(defconst trace (js-object :n 0)) (defun run () (js-call (js-object :charAt false) :charAt (put trace :n 7))) (defun recover () (get trace :n))",
+          "runtimeError": "ELI-RT0003",
+          "jsError": "TypeError",
+          "recover": 7
+        }
+      ]
+    },
+    {
+      "name": "Source exceptions",
+      "description": "Existing throw, named catch and finally execute inside collecting zero-import WASM, preserving exact source values, lexical bindings and completion order.",
+      "scenarios": [
+        {
+          "id": "throw-exact-primitives",
+          "given": "null, undefined, false, negative zero and NaN source throws",
+          "when": "each throw enters a named catch",
+          "then": "the original value survives without being confused with ABI failure",
+          "source": "(defun run () (js-array (try (throw nil) (catch error (eq error nil))) (try (throw undefined) (catch error (eq error undefined))) (try (throw false) (catch error (eq error false))) (try (throw -0.0) (catch error (Object/is error -0.0))) (try (throw (/ 0 0)) (catch error (Number/isNaN error)))))",
+          "expected": [
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "id": "throw-cross-call-identity",
+          "given": "an ordinary object and a callee that throws its argument",
+          "when": "the caller catches it and executes a finalizer",
+          "then": "the caught object retains identity and the finalizer runs once",
+          "source": "(defun raise (value) (throw value)) (defun run () (let ((value (js-object)) (trace (js-array))) (let ((same (try (raise value) (catch error (eq error value)) (finally (js-call trace :push \"finally\"))))) (js-array same trace))))",
+          "expected": [
+            true,
+            [
+              "finally"
+            ]
+          ]
+        },
+        {
+          "id": "finally-completion-priority",
+          "given": "successful and throwing bodies with successful and throwing finalizers",
+          "when": "nested try expressions finish",
+          "then": "successful finalizers preserve the original value while throwing finalizers replace it",
+          "source": "(defun run () (js-array (try 7 (finally 8)) (try (try (throw 7) (finally (throw 8))) (catch error error)) (try (try 7 (finally (throw 9))) (catch error error))))",
+          "expected": [
+            7,
+            8,
+            9
+          ]
+        },
+        {
+          "id": "catch-lexical-closure",
+          "given": "an outer binding and a shadowing named catch binding",
+          "when": "the catch mutates its local binding and returns a closure",
+          "then": "the closure retains the catch binding while the outer binding is unchanged",
+          "source": "(defun run () (let ((error \"outer\")) (let ((saved (try (throw \"initial\") (catch error (setq error \"changed\") (lambda () error))))) (js-array error (funcall saved)))))",
+          "expected": [
+            "outer",
+            "changed"
+          ]
+        },
+        {
+          "id": "runtime-exception-families",
+          "given": "a null property access, an invalid repeat count and malformed JSON",
+          "when": "source catches handle the failures",
+          "then": "their original TypeError, RangeError and SyntaxError families remain distinct",
+          "source": "(defun run () (js-array (try (aref nil \"x\") (catch error (get error :name))) (try (js-call \"x\" :repeat -1) (catch error (get error :name))) (try (JSON/parse \"{\") (catch error (get error :name)))))",
+          "expected": [
+            "TypeError",
+            "RangeError",
+            "SyntaxError"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Source Error construction",
+      "description": "Error families keep inherited names, own nonenumerable message and cause, and string-hint conversion across JS and collecting zero-import WASM.",
+      "scenarios": [
+        {
+          "id": "error-family-own-properties",
+          "given": "each supported Error family with an explicit message",
+          "when": "the source inspects names and enumerable own properties",
+          "then": "names are inherited and message remains own but nonenumerable",
+          "source": "(defun summary (error) (js-array (get error :name) (get error :message) (Object/keys error) (Object/hasOwn error \"message\") (Object/hasOwn error \"name\"))) (defun run () (js-array (summary (new (js* \"Error\") \"x\")) (summary (new (js* \"TypeError\") \"x\")) (summary (new (js* \"RangeError\") \"x\")) (summary (new (js* \"SyntaxError\") \"x\"))))",
+          "expected": [
+            [
+              "Error",
+              "x",
+              [],
+              true,
+              false
+            ],
+            [
+              "TypeError",
+              "x",
+              [],
+              true,
+              false
+            ],
+            [
+              "RangeError",
+              "x",
+              [],
+              true,
+              false
+            ],
+            [
+              "SyntaxError",
+              "x",
+              [],
+              true,
+              false
+            ]
+          ]
+        },
+        {
+          "id": "error-inherited-cause-identity",
+          "given": "an options object with an inherited cause object",
+          "when": "an Error constructor reads its cause option",
+          "then": "the same cause becomes an own nonenumerable property",
+          "source": "(defun run () (let* ((cause (js-object)) (options (js-object :__proto__ (js-object :cause cause))) (error (new (js* \"Error\") undefined options))) (js-array (eq (get error :cause) cause) (Object/hasOwn error \"cause\") (Object/keys error) (Object/hasOwn error \"message\"))))",
+          "expected": [
+            true,
+            true,
+            [],
+            false
+          ]
+        },
+        {
+          "id": "error-message-string-hint",
+          "given": "an ordinary message object with toString and valueOf callbacks",
+          "when": "Error converts the message",
+          "then": "toString runs first and its primitive result suppresses valueOf",
+          "source": "(defun run () (let* ((trace (js-array)) (message (js-object :toString (lambda () (js-call trace :push \"string\") \"text\") :valueOf (lambda () (js-call trace :push \"number\") 9))) (error (new (js* \"Error\") message))) (js-array (get error :message) trace)))",
+          "expected": [
+            "text",
+            [
+              "string"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Symbol identity and iteration protocols",
+      "description": "Symbols retain primitive identity and real property keys; conversion and iteration hooks run stepwise inside collecting zero-import WASM.",
+      "scenarios": [
+        {
+          "id": "symbol-primitive-identities",
+          "given": "independent symbols, a registered name and both represented well-known values",
+          "when": "identity, typeof and descriptions are observed",
+          "then": "plain identities differ while registered and well-known identities remain stable",
+          "source": "(defun run () (let ((a (funcall (js* \"Symbol\") \"x\"))) (js-array (Object/is a (funcall (js* \"Symbol\") \"x\")) (Object/is (funcall (js* \"Symbol.for\") \"x\") (funcall (js* \"Symbol.for\") \"x\")) (Object/is (js* \"Symbol.iterator\") (js* \"globalThis.Symbol.iterator\")) (js* \"typeof a\") (get a :description) (funcall (js* \"String\") a))))",
+          "expected": [
+            false,
+            true,
+            true,
+            "symbol",
+            "x",
+            "Symbol(x)"
+          ]
+        },
+        {
+          "id": "symbol-own-keys-and-json",
+          "given": "an object with a string property and two independent symbol properties",
+          "when": "keys, own symbols, assignment and JSON are evaluated",
+          "then": "string enumeration and JSON exclude symbols while assignment retains both identities",
+          "source": "(defun run () (let* ((a (funcall (js* \"Symbol\") \"x\")) (b (funcall (js* \"Symbol\") \"x\")) (source (js-object :x 1)) (copy (js-object))) (put source a 2) (put source b 3) (Object/assign copy source) (js-array (Object/keys copy) (js-length (Object/getOwnPropertySymbols copy)) (get copy a) (get copy b) (JSON/stringify copy))))",
+          "expected": [
+            [
+              "x"
+            ],
+            2,
+            2,
+            3,
+            "{\"x\":1}"
+          ]
+        },
+        {
+          "id": "symbol-primitive-key-hint",
+          "given": "an object whose Symbol.toPrimitive returns a symbol and records the hint",
+          "when": "it is used as a computed assignment key",
+          "then": "the key is captured before the RHS and the conversion hook runs once afterwards",
+          "source": "(defun run () (let* ((trace (js-array)) (symbol (funcall (js* \"Symbol\"))) (key (js-object)) (target (js-object))) (put key (js* \"Symbol.toPrimitive\") (lambda (hint) (js-call trace :push hint) symbol)) (put target key (progn (js-call trace :push \"rhs\") 7)) (js-array (get target symbol) trace)))",
+          "expected": [
+            7,
+            [
+              "rhs",
+              "string"
+            ]
+          ]
+        },
+        {
+          "id": "symbol-iterator-live-next",
+          "given": "a custom iterable whose original next replaces its own next property",
+          "when": "Array.from consumes its three values",
+          "then": "the captured next keeps advancing and the factory runs once",
+          "source": "(defun run () (let* ((state (js-object :n 0)) (iterator (js-object)) (source (js-object)) (trace (js-array))) (put iterator :next (lambda () (let ((n (get state :n))) (put state :n (1+ n)) (put iterator :next false) (js-object :done (>= n 3) :value n)))) (put source (js* \"Symbol.iterator\") (lambda () (js-call trace :push \"factory\") iterator)) (js-array (Array/from source) trace)))",
+          "expected": [
+            [
+              0,
+              1,
+              2
+            ],
+            [
+              "factory"
+            ]
+          ]
+        },
+        {
+          "id": "symbol-nullish-iterator-fallback",
+          "given": "an array-like object with a null Symbol.iterator and missing positions",
+          "when": "Array.from converts it",
+          "then": "the array-like length and present values are used with dense undefined positions",
+          "source": "(defun run () (let ((source (js-object :length 3 :0 \"a\" :2 \"c\"))) (put source (js* \"Symbol.iterator\") nil) (let ((result (Array/from source))) (js-array (js-length result) (get result 0) (undefined? (get result 1)) (Object/hasOwn result \"1\") (get result 2)))))",
+          "expected": [
+            3,
+            "a",
+            true,
+            true,
+            "c"
+          ]
+        },
+        {
+          "id": "symbol-invalid-hook-recovery",
+          "given": "an ordinary object with a non-callable Symbol.toPrimitive",
+          "when": "String requests primitive conversion",
+          "then": "a TypeError is raised and a later independent call succeeds",
+          "source": "(defun run () (let ((object (js-object))) (put object (js* \"Symbol.toPrimitive\") false) (funcall (js* \"String\") object))) (defun recover () (funcall (js* \"String\") (funcall (js* \"Symbol\") \"ok\")))",
+          "runtimeError": "ELI-RT0003",
+          "jsError": "TypeError",
+          "recover": "Symbol(ok)"
+        }
+      ]
+    },
+    {
+      "name": "Catch destructuring",
+      "description": "Existing vector and map catch bindings preserve iteration, missing defaults, lexical initialization, protocol errors and closing in collecting zero-import WASM.",
+      "scenarios": [
+        {
+          "id": "catch-vector-unicode-rest",
+          "given": "a thrown Unicode string containing a surrogate pair",
+          "when": "a vector catch consumes one hole then binds its remaining tail",
+          "then": "the pair is one iterator item and rest contains only the remaining values",
+          "source": "(defun run () (try (throw \"A\ud83d\ude00B\u4e2d\") (catch [a nil b &rest tail] (js-array a b tail))))",
+          "expected": [
+            "A",
+            "B",
+            [
+              "\u4e2d"
+            ]
+          ]
+        },
+        {
+          "id": "catch-map-missing-and-as",
+          "given": "a thrown plain object with present undefined and a missing name",
+          "when": "map defaults and the as binding initialize",
+          "then": "present undefined bypasses its default and as retains the thrown object identity",
+          "source": "(defun run () (let ((value (js-object :a undefined))) (try (throw value) (catch {:strs [a b] :or {a 7 b 8} :as original} (js-array (undefined? a) b (Object/is value original))))))",
+          "expected": [
+            true,
+            8,
+            true
+          ]
+        },
+        {
+          "id": "catch-captured-later-binding",
+          "given": "a default closure that refers to a later binding",
+          "when": "the later default initializes before the closure runs",
+          "then": "the closure observes the new catch binding rather than an outer value",
+          "source": "(defun run () (let ((f false) (x 99)) (try (throw (js-object)) (catch {:strs [f x] :or {f (lambda () x) x 7}} (funcall f)))))",
+          "expected": 7
+        },
+        {
+          "id": "catch-default-tdz",
+          "given": "an outer name shadowed by an uninitialized catch binding",
+          "when": "the missing binding default attempts to read itself",
+          "then": "the outer handler receives a ReferenceError",
+          "source": "(defun run () (let ((x 99)) (try (try (throw (js-object)) (catch {:strs [x] :or {x x}} x)) (catch error (aref error \"name\")))))",
+          "expected": "ReferenceError"
+        },
+        {
+          "id": "catch-close-before-body",
+          "given": "a shared native iterator with an own return callback",
+          "when": "a fixed vector catch stops before exhaustion",
+          "then": "return executes before the catch body",
+          "source": "(defun run () (let ((trace (js-array)) (iterator (js-call (js-array 1 2) :values))) (put iterator \"return\" (lambda () (js-call trace :push \"return\") (js-object))) (let ((value (try (throw iterator) (catch [first] (js-call trace :push \"body\") first)))) (js-array value trace))))",
+          "expected": [
+            1,
+            [
+              "return",
+              "body"
+            ]
+          ]
+        },
+        {
+          "id": "catch-missing-lookup-protocol",
+          "given": "a null-prototype source object with no lookup protocol implementation",
+          "when": "a map catch attempts a field lookup",
+          "then": "the original ProtocolDispatchError fields and descriptor ownership remain observable",
+          "source": "(defun run () (try (try (throw (js-object :__proto__ nil :a 7)) (catch {:strs [a]} a)) (catch error (js-array (aref error \"name\") (aref error \"code\") (aref error \"protocol\") (aref error \"operation\") (aref error \"observedType\") (aref error \"reason\") (Object/hasOwn error \"name\")))))",
+          "expected": [
+            "ProtocolDispatchError",
+            "ELI-RUNTIME-PROTOCOL",
+            "ILookup",
+            "get",
+            "object:anonymous",
+            "missing",
+            true
+          ]
         }
       ]
     }

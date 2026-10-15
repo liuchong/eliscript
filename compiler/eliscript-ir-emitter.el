@@ -237,6 +237,14 @@
   "Whether NODE is proven to produce a JavaScript boolean."
   (pcase (eliscript-ir-node-kind node)
     ('literal (memq (eliscript-ir-node-value node) '(t false)))
+    ('raw-javascript
+     (let* ((nodes (eliscript-ir-emitter--children node))
+            (source (and (= (length nodes) 1)
+                         (eq (eliscript-ir-node-kind (car nodes)) 'literal)
+                         (eliscript-ir-node-value (car nodes)))))
+       (and (stringp source)
+            (string-match-p "\\`!![A-Za-z_$][A-Za-z0-9_$]*\\'"
+                            (string-trim source)))))
     ('intrinsic
      (memq (eliscript-ir-node-value node)
            '(not = /= not= < <= > >= eq equal nil? undefined? null nullish?)))
@@ -250,13 +258,50 @@
     (if (eliscript-ir-emitter--boolean-p node) output
       (format "__eliscript_truthy(%s)" output))))
 
+(defun eliscript-ir-emitter--context-sequential-safe-p (bindings)
+  "Whether BINDINGS can share one scope without TDZ or capture changes."
+  (if (<= (length bindings) 1) nil
+  (let ((names (make-hash-table :test #'equal)) (index 0)
+        (safe t))
+    (dolist (binding bindings)
+      (let ((name (eliscript-symbol-binding-name (eliscript-ir-node-value binding))))
+        (if (gethash name names) (setq safe nil)
+          (puthash name (1+ index) names)))
+      (setq index (1+ index)))
+    (setq index 0)
+    (while (and safe (< index (length bindings)))
+      (let* ((initializer (eliscript-ir-emitter--binding-initializer (nth index bindings)))
+             (pending (and initializer (list initializer))))
+        (while (and safe pending)
+          (let* ((node (pop pending)) (kind (eliscript-ir-node-kind node)))
+            (if (eq kind 'raw-javascript) (setq safe nil)
+              (when (memq kind '(reference assignment-pair))
+                (let* ((name (eliscript-symbol-reference-name (eliscript-ir-node-value node)))
+                       (root (car (split-string name "\\.")))
+                       (position (gethash root names)))
+                  (when (and position (> position index)) (setq safe nil))))
+              (dolist (child (eliscript-ir-emitter--children node)) (push child pending))))))
+      (setq index (1+ index)))
+    safe)))
+
 (defun eliscript-ir-emitter--emit-context-let (bindings body sequential returning)
   "Emit simple BINDINGS and BODY in statement or RETURNING context.
 Initializers live outside the new binding scope, avoiding lexical TDZ.
-Sequential bindings each have their own scope, including duplicate names."
+Independent sequential bindings share a scope; uncertain groups stay nested."
   (if (null bindings)
       (if returning (eliscript-ir-emitter--emit-returning-body body)
         (eliscript-ir-emitter--emit-statement-body body))
+    (if (and sequential (eliscript-ir-emitter--context-sequential-safe-p bindings))
+        (let ((declarations
+               (mapcar (lambda (binding)
+                         (let ((initializer (eliscript-ir-emitter--binding-initializer binding)))
+                           (concat "let " (eliscript-ir-emitter--emit-binding-target binding) " = "
+                                   (if initializer (eliscript-ir-emitter-emit-expression initializer) "null") ";")))
+                       bindings)))
+          (concat "{\n" (eliscript-emitter--indent
+                         (string-join (append declarations
+                                              (list (if returning (eliscript-ir-emitter--emit-returning-body body)
+                                                      (eliscript-ir-emitter--emit-statement-body body)))) "\n")) "\n}"))
     (let* ((group (if sequential (list (car bindings)) bindings))
            (temporaries (mapcar (lambda (_) (eliscript-emitter--fresh-name)) group))
            initializers declarations)
@@ -285,7 +330,30 @@ Sequential bindings each have their own scope, including duplicate names."
                                       (eliscript-emitter--indent
                                        (string-join (nreverse declarations) "\n"))
                                       "\n}"))) "\n"))
-              "\n}"))))
+              "\n}")))))
+
+(defun eliscript-ir-emitter--emit-context-cond (clauses returning)
+  "Emit conditional CLAUSES with discarded or RETURNING values."
+  (if (null clauses)
+      (if returning "return null;" "")
+    (let* ((clause (car clauses))
+           (nodes (eliscript-ir-emitter--children clause))
+           (test (car nodes))
+           (body (cdr nodes)))
+      (eliscript-ir-emitter--locate
+       clause
+       (if (and (eq (eliscript-ir-node-kind test) 'literal)
+                (eq (eliscript-ir-node-value test) t))
+           (if returning (eliscript-ir-emitter--emit-returning-body body)
+             (eliscript-ir-emitter--emit-statement-body body))
+         (concat "if (" (eliscript-ir-emitter--emit-test test) ") {\n"
+                 (eliscript-emitter--indent
+                  (if returning (eliscript-ir-emitter--emit-returning-body body)
+                    (eliscript-ir-emitter--emit-statement-body body)))
+                 "\n} else {\n"
+                 (eliscript-emitter--indent
+                  (eliscript-ir-emitter--emit-context-cond (cdr clauses) returning))
+                 "\n}"))))))
 
 (defun eliscript-ir-emitter--emit-context (node returning)
   "Emit NODE with its value discarded or RETURNING from the current function."
@@ -301,6 +369,29 @@ Sequential bindings each have their own scope, including duplicate names."
       ((eq kind 'sequence)
        (if returning (eliscript-ir-emitter--emit-returning-body nodes)
          (eliscript-ir-emitter--emit-statement-body nodes)))
+      ((eq kind 'conditional)
+       (concat "if (" (eliscript-ir-emitter--emit-test (car nodes)) ") {\n"
+               (eliscript-emitter--indent
+                (eliscript-ir-emitter--emit-context (nth 1 nodes) returning))
+               "\n}"
+               (if (or returning (nth 2 nodes))
+                   (concat " else {\n"
+                           (eliscript-emitter--indent
+                            (if (nth 2 nodes)
+                                (eliscript-ir-emitter--emit-context (nth 2 nodes) returning)
+                              "return null;")) "\n}") "")))
+      ((eq kind 'conditional-sugar)
+       (concat "if ("
+               (if (eq (eliscript-ir-node-value node) 'when)
+                   (eliscript-ir-emitter--emit-test (car nodes))
+                 (concat "(!" (eliscript-ir-emitter--emit-test (car nodes)) ")"))
+               ") {\n"
+               (eliscript-emitter--indent
+                (if returning (eliscript-ir-emitter--emit-returning-body (cdr nodes))
+                  (eliscript-ir-emitter--emit-statement-body (cdr nodes))))
+               "\n}" (if returning " else {\n  return null;\n}" "")))
+      ((eq kind 'conditional-chain)
+       (eliscript-ir-emitter--emit-context-cond nodes returning))
       ((eq kind 'loop)
        (concat "while (" (eliscript-ir-emitter--emit-test (car nodes)) ") {\n"
                (eliscript-emitter--indent
@@ -1308,7 +1399,15 @@ Sequential bindings each have their own scope, including duplicate names."
       ('method-call
        (format (if (or (not (eq (eliscript-ir-node-kind (nth 1 children)) 'literal))
                        (eliscript-emitter--array-text-key-p (eliscript-ir-node-value (nth 1 children))))
-                   "__eliscript_at(%s, %s)(%s)" "(%s)[%s](%s)")
+                   (if (cl-every
+                        (lambda (child)
+                          (and (eq (eliscript-ir-node-kind child) 'literal)
+                               (eliscript-emitter--primitive-literal-p (eliscript-ir-node-value child))))
+                        (nthcdr 2 children))
+                       (if (nthcdr 2 children) "__eliscript_at_direct(%s, %s, %s)"
+                         "__eliscript_at_direct(%s, %s%s)")
+                     "__eliscript_at(%s, %s)(%s)")
+                 "(%s)[%s](%s)")
                (eliscript-ir-emitter-emit-expression (nth 0 children))
                (eliscript-ir-emitter--emit-property-key (nth 1 children))
                (eliscript-ir-emitter--emit-arguments (nthcdr 2 children))))

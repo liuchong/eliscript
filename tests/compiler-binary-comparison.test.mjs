@@ -1,3 +1,4 @@
+import { currentPerformanceTest } from "./helpers/performance-acceptance.mjs";
 import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -82,13 +83,11 @@ test("binary comparison emission preserves strict argument evaluation", async ()
   }
 }, 30_000);
 
-test("committed binary comparison report matches measured sources", async () => {
+test("committed binary comparison report preserves historical measurements and decisions", async () => {
   const report = validateCompilerBinaryComparisonReport(
     JSON.parse(await readFile(reportPath, "utf8")),
   );
-  expect(report.sourceDigest).toEqual(
-    await compilerBinaryComparisonSourceDigest(),
-  );
+
   expect(report.corpus.files).toHaveLength(compilerModuleCount);
   expect(report.corpus.files).toContain("bootstrap/compiler/project.eli");
   expect(report.corpus.sourceBytes).toBeGreaterThan(200_000);
@@ -114,4 +113,9 @@ test("binary-comparison size failures retain every measured sample and artifact 
   expect(failure).toBeInstanceOf(TypeError);expect(failure.report).toBe(report);
   expect(failure.report.measurements.optimized.samplesMs).toHaveLength(report.parameters.timingSamples);
   expect(failure.report.validation.optimizedChecksum).toBeGreaterThan(0);
+});
+
+currentPerformanceTest(test)("committed binary comparison report matches measured sources", async () => {
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  expect(report.sourceDigest).toEqual(await compilerBinaryComparisonSourceDigest());
 });

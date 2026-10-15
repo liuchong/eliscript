@@ -8,7 +8,7 @@ const root=resolve(import.meta.dir,'..');
 const read=async path=>JSON.parse(await readFile(resolve(root,path),'utf8'));
 test('a fully remeasured current soak retains the original accepted snapshot and final source-run hashes',async()=>{
  const contract=await read('contracts/final-acceptance.json'),run=await read('acceptance/runs/m13-01.json'),before=JSON.stringify(run);
- await validateFinalAcceptanceContract(contract,run,{root});
+ await validateFinalAcceptanceContract(contract,run,{root,deferPerformanceAcceptance:process.env.ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE==='1'});
  assert.equal(JSON.stringify(run),before);
 });
 

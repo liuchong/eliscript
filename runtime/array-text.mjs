@@ -10,6 +10,7 @@ const TypeErrorClass = TypeError;
 const primitiveKey = Symbol.toPrimitive;
 const weakHas = WeakSet.prototype.has, weakAdd = WeakSet.prototype.add, weakDelete = WeakSet.prototype.delete;
 const active = new WeakSet();
+let activeRoot = null;
 const object = value => value !== null && (typeof value === 'object' || typeof value === 'function' || (typeof value === 'undefined' && value !== void 0));
 const callable = value => typeof value === 'function' || (typeof value === 'undefined' && value !== void 0);
 function cycle() {
@@ -44,8 +45,14 @@ function join(value, separator) {
   const size = +value.length;
   const length = size !== size || size <= 0 ? 0 : size >= 9007199254740991 ? 9007199254740991 : size - size % 1;
   const sep = separator === void 0 ? ',' : text(separator);
-  if (apply(weakHas, active, [value])) cycle();
-  apply(weakAdd, active, [value]);
+  // The common outermost conversion needs only one private root reference.
+  // Descendants retain weak membership and check that root before entering.
+  const root = activeRoot === null;
+  if (root) activeRoot = value;
+  else {
+    if (value === activeRoot || apply(weakHas, active, [value])) cycle();
+    apply(weakAdd, active, [value]);
+  }
   try {
     let result = '';
     for (let index = 0; index < length; index++) {
@@ -54,7 +61,10 @@ function join(value, separator) {
       if (child !== null && child !== void 0) result += text(child);
     }
     return result;
-  } finally {apply(weakDelete, active, [value]);}
+  } finally {
+    if (root) activeRoot = null;
+    else apply(weakDelete, active, [value]);
+  }
 }
 function arrayString(value) {
   const method = value.join;
@@ -69,4 +79,12 @@ function captureArrayText(value, key) {
     return apply(method, value, args);
   };
 }
-export {captureArrayText as c};
+// Literal actual arguments have no observable evaluation before this lookup.
+// Other calls must retain captureArrayText's lookup-before-arguments boundary.
+function invokeArrayText(value, key, ...args) {
+  const method = value[key];
+  if (method === intrinsicJoin && array(value)) return join(value, args[0]);
+  if (method === intrinsicArrayString && array(value)) return arrayString(value);
+  return apply(method, value, args);
+}
+export {captureArrayText as c, invokeArrayText as d};

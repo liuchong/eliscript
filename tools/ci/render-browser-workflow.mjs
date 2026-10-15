@@ -18,7 +18,7 @@ export function validateBrowserCompatibility(contract, matrix) {
   if (JSON.stringify(contract.browserEngines) !== JSON.stringify(["chromium", "firefox", "webkit"])) {
     throw new BrowserCompatibilityError("browserEngines must be chromium, firefox, webkit in that order");
   }
-  if (contract.testCommand !== "bun test tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs") {
+  if (contract.testCommand !== "bun test tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs tests/wasm-managed-exceptions-browser.test.mjs tests/wasm-managed-symbols.test.mjs") {
     throw new BrowserCompatibilityError("testCommand must run the complete direct WASM backend suite");
   }
   const action = contract.artifactAction;
@@ -48,8 +48,9 @@ export function renderBrowserWorkflow(contract, matrix) {
     `    steps:\n` + renderToolchainSteps(matrix) +
     `      - name: Install locked dependencies\n        run: bun install --frozen-lockfile\n` +
     `      - name: Install selected browser\n        run: bun node_modules/playwright-core/cli.js install --with-deps "\${{ matrix.browser }}"\n` +
-    `      - name: Run complete backend differential suite\n        shell: bash\n` +
+    `      - name: Run complete backend differential suite${matrix.performanceAcceptance === "deferred" ? " (performance reacceptance deferred)" : ""}\n        shell: bash\n` +
     `        env:\n          ELISCRIPT_TEST_BROWSER: \${{ matrix.browser }}\n          DEBUG: pw:browser\n` +
+    (matrix.performanceAcceptance === "deferred" ? `          ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: "1"\n` : "") +
     `        run: |\n          set -o pipefail\n          mkdir -p "$RUNNER_TEMP/eliscript-browser-ci"\n` +
     `          ${contract.testCommand} 2>&1 | tee "$RUNNER_TEMP/eliscript-browser-ci/tests.log"\n` +
     `      - name: Preserve browser test evidence\n        if: always()\n` +

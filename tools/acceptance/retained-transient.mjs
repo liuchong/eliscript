@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import {readFile,readdir} from 'node:fs/promises';
 import path from 'node:path';
 import {validateTransientBuilderReport} from '../collections/transient-builder-benchmark.mjs';
+import {retainedPerformanceSnapshot,deferredPerformanceAcceptance,retainedGitSnapshotBytes} from './retained-performance-snapshot.mjs';
 
 const FILE='benchmarks/transient-builder-macos-arm64.json';
 const PARAMETERS={vectorSize:200000,mapSize:100000,setSize:100000,warmupRounds:2,timingSamples:11};
@@ -10,7 +11,7 @@ const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 function require(condition,message){if(!condition)throw Error(`retained transient refresh: ${message}`);}
 function relative(file){return typeof file==='string'&&file.length>0&&!path.isAbsolute(file)&&!file.split('/').includes('..')&&path.posix.normalize(file)===file;}
-function git(root,args){const r=Bun.spawnSync(['git',...args],{cwd:root,stdout:'pipe',stderr:'pipe'});require(r.exitCode===0,'accepted Git snapshot is unavailable');return r.stdout;}
+function git(root,args){try{return retainedGitSnapshotBytes(root,args);}catch{require(false,'accepted Git snapshot is unavailable');}}
 const median=values=>[...values].sort((a,b)=>a-b)[Math.floor(values.length/2)];
 
 async function sourceDigest(root,files,revision){
@@ -25,7 +26,7 @@ async function sourceDigest(root,files,revision){
 
 // The historical report remains in its accepted Git tree. A replacement must
 // independently pass the original workload and policy against all current code.
-export async function validateRefreshedTransientBuilder(root,filename,currentBytes,run){
+export async function validateRefreshedTransientBuilder(root,filename,currentBytes,run,options={}){
  require(filename===FILE,'only the source-bound transient benchmark can be refreshed');
  const revision=run.source?.commit,tree=run.source?.tree;
  require(/^[0-9a-f]{40}$/.test(revision??'')&&/^[0-9a-f]{40}$/.test(tree??''),'invalid accepted source identity');
@@ -59,6 +60,14 @@ export async function validateRefreshedTransientBuilder(root,filename,currentByt
  }
  require(accepted.sourceDigest?.algorithm==='sha256'&&current.sourceDigest?.algorithm==='sha256','source digest algorithm changed');
  require(await sourceDigest(root,accepted.sourceDigest.files,revision)===accepted.sourceDigest.value,'accepted source aggregate differs from its Git snapshot');
+ if(options.deferPerformanceAcceptance===true){
+  const measured=retainedPerformanceSnapshot(root,filename,currentBytes);
+  const core=new TextDecoder().decode(git(root,['ls-tree','--name-only',`${measured.commit}:runtime/core`])).trim().split('\n').filter(file=>file.endsWith('.mjs')).sort().map(file=>`runtime/core/${file}`);
+  const inventory=[...core,'runtime/testing/map.mjs','runtime/testing/set.mjs','runtime/testing/vector.mjs','tools/collections/transient-builder-benchmark.mjs'];
+  require(same(current.sourceDigest.files,inventory),'measured source inventory is incomplete');
+  require(await sourceDigest(root,inventory,measured.commit)===current.sourceDigest.value,'measured source aggregate differs from its Git snapshot');
+  return deferredPerformanceAcceptance(filename,measured);
+ }
  const core=(await readdir(path.join(root,'runtime/core'))).filter(name=>name.endsWith('.mjs')).sort().map(name=>`runtime/core/${name}`);
  const inventory=[...core,'runtime/testing/map.mjs','runtime/testing/set.mjs','runtime/testing/vector.mjs','tools/collections/transient-builder-benchmark.mjs'];
  require(same(current.sourceDigest.files,inventory),'fresh source inventory is incomplete');

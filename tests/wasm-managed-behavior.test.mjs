@@ -8,7 +8,7 @@ import {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';
 
 const catalog = JSON.parse(await readFile(new URL('./fixtures/wasm-managed-behavior.json', import.meta.url), 'utf8'));
 assert.equal(catalog.format, 'eliscript-managed-bdd');assert.equal(catalog.version, 1);
-assert.deepEqual(catalog.features.map(feature => feature.name), ['Array text conversion', 'Represented type and null queries', 'Text formatting and decomposition', 'Stable array sorting', 'Integer rounding', 'Live collection callbacks', 'Sequence concatenation', 'Value identity', 'Shallow source object integrity', 'Array searching', 'Array construction', 'Object own properties']);
+assert.deepEqual(catalog.features.map(feature => feature.name), ['Array text conversion', 'Represented type and null queries', 'Text formatting and decomposition', 'Stable array sorting', 'Integer rounding', 'Live collection callbacks', 'Sequence concatenation', 'Value identity', 'Shallow source object integrity', 'Array searching', 'Array construction', 'Object own properties', 'Ordinary operand conversion', 'Ordinary text method dispatch', 'Source exceptions', 'Source Error construction', 'Symbol identity and iteration protocols', 'Catch destructuring']);
 assert.deepEqual(catalog.features.flatMap(feature => feature.scenarios.map(scenario => scenario.id)), [
   'empty-and-holes', 'exact-primitive-text', 'shared-arrays', 'length-before-separator', 'live-element-reads', 'conversion-fallback',
   'capture-before-arguments', 'toString-late-join-lookup', 'custom-result-identity', 'self-cycle-and-recovery', 'mutual-cycle-and-recovery',
@@ -24,6 +24,12 @@ assert.deepEqual(catalog.features.flatMap(feature => feature.scenarios.map(scena
   'search-equality-and-zero', 'search-holes-and-undefined', 'search-last-omitted-versus-undefined', 'search-length-before-conversion', 'search-empty-skips-conversion', 'search-method-capture',
   'array-of-dense-identity', 'array-from-unicode-points', 'array-from-arraylike-snapshot', 'array-from-live-collection', 'array-from-captured-next', 'array-from-abrupt-close',
   'object-keys-integer-order', 'object-string-own-units', 'object-key-string-hint', 'object-assign-sparse-identity', 'object-assign-proto-data', 'object-assign-partial-error',
+  'operand-default-string-addition', 'operand-fallback-before-right', 'operand-relational-string-primitives', 'operand-left-failure-suppresses-right',
+  'ordinary-split-method-capture', 'ordinary-text-noncallable-effects',
+  'throw-exact-primitives', 'throw-cross-call-identity', 'finally-completion-priority', 'catch-lexical-closure', 'runtime-exception-families',
+  'error-family-own-properties', 'error-inherited-cause-identity', 'error-message-string-hint',
+  "symbol-primitive-identities", "symbol-own-keys-and-json", "symbol-primitive-key-hint", "symbol-iterator-live-next", "symbol-nullish-iterator-fallback", "symbol-invalid-hook-recovery",
+  'catch-vector-unicode-rest', 'catch-map-missing-and-as', 'catch-captured-later-binding', 'catch-default-tdz', 'catch-close-before-body', 'catch-missing-lookup-protocol',
 ]);
 let directory, b, runtime;
 beforeAll(async () => {
@@ -47,7 +53,8 @@ for (const feature of catalog.features) describe('Feature: ' + feature.name + ' 
     test('Scenario: ' + scenario.id + '\nGiven ' + scenario.given + '\nWhen ' + scenario.when + '\nThen ' + scenario.then, async () => {
       const filename = 'bdd-' + scenario.id + '.eli', source = ';中😀\n(defconst marker 1)\n' + scenario.source + '\n(export run' + (Object.hasOwn(scenario, 'recover') ? ' recover' : '') + ')';
       const program = b.compiler.compile_ir_string(source, filename), before = JSON.stringify(program);
-      const js = await import('data:text/javascript;base64,' + Buffer.from(b.compiler.emit_ir_string(program)).toString('base64'));
+      const javascript = b.compiler.emit_ir_string(program).replace(/from "eliscript\/([^"]+)"/g, (_, path) => 'from ' + JSON.stringify(new URL('../' + path, import.meta.url).href));
+      const js = await import('data:text/javascript;base64,' + Buffer.from(javascript).toString('base64'));
       if (scenario.compileError) {
         assert.deepEqual(js.run(), scenario.expected);
         assert.throws(() => b.managed.emit_managed_wasm(program, runtime), error => error.eliscriptDiagnostic?.code === scenario.compileError && error.eliscriptDiagnostic.location.file === filename && error.eliscriptDiagnostic.location.start.line >= 2);

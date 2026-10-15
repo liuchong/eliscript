@@ -1,3 +1,4 @@
+import { currentPerformanceTest } from "./helpers/performance-acceptance.mjs";
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -225,10 +226,15 @@ test("rejected worker runs verify failure-path cleanup", async () => {
   expect(result.stderr).not.toContain("remained after cleanup");
 });
 
-test("committed worker lifecycle soak report matches its measured sources", async () => {
+test("retained worker lifecycle soak report preserves measured workload, recovery and budgets", async () => {
   const report = JSON.parse(
     await readFile(resolve(root, "benchmarks/worker-lifecycle-soak-macos-arm64.json")),
   );
+  verifyReport(report);
+});
+
+currentPerformanceTest(test)("committed worker lifecycle soak report matches its measured sources", async () => {
+  const report = JSON.parse(await readFile(resolve(root, "benchmarks/worker-lifecycle-soak-macos-arm64.json")));
   verifyReport(report);
   await verifySourceContract(report.source);
 });

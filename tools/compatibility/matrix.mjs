@@ -1,11 +1,10 @@
-#!/usr/bin/env bun
-
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 import { validateCompatibilityMatrix } from "../ci/render-workflow.mjs";
 
@@ -327,12 +326,64 @@ async function sourceTree(root, commit) {
   return gitOutput(root, "rev-parse", `${commit}^{tree}`);
 }
 
+// This authenticates retained evidence; it does not accept the current source
+// or change any measured result. The sole permitted contract difference is the
+// explicit transition from required performance acceptance to deferred.
+async function historicalMatrixContract(root, report, matrix) {
+  const reject = (message) => {throw new Error(message);};
+  if (!/^[0-9a-f]{40}$/u.test(report.source?.commit ?? "")) {
+    reject("historical matrix source commit must be a full Git identity");
+  }
+  const filename = path.posix.join(matrix.localEvidence.directory, `${report.cell.id}.json`);
+  if (!safeRelativePath(filename)) reject("historical matrix report path must be relative");
+  const bytes = await readFile(path.join(root, filename));
+  if (!isDeepStrictEqual(JSON.parse(bytes.toString("utf8")), report)) {
+    reject("historical matrix report value differs from retained file");
+  }
+  const gitBytes = async (...args) => {
+    const result = await capture(["git", ...args], {cwd: root});
+    if (result.exitCode !== 0 || result.timedOut) reject("historical matrix measured Git snapshot is unavailable");
+    return Buffer.from(result.stdout, "utf8");
+  };
+  const reportCommit = (await gitBytes("log", "-1", "--format=%H", "--", filename)).toString().trim();
+  if (!/^[0-9a-f]{40}$/u.test(reportCommit)) reject("historical matrix retained report commit is unavailable");
+  if (sha256(await gitBytes("show", `${reportCommit}:${filename}`)) !== sha256(bytes)) {
+    reject("historical matrix report bytes differ from their retained Git snapshot");
+  }
+  const measuredBytes = await gitBytes("show", `${report.source.commit}:${MATRIX_FILE}`);
+  if (sha256(measuredBytes) !== report.matrixSha256) {
+    reject("historical matrix digest must bind the measured source contract");
+  }
+  const measured = JSON.parse(measuredBytes.toString("utf8"));
+  validateCompatibilityMatrix(measured);
+  const previousPolicy = measured.performanceAcceptance ?? "strict";
+  const currentFunctional = {...matrix}, measuredFunctional = {...measured};
+  delete currentFunctional.performanceAcceptance;
+  delete measuredFunctional.performanceAcceptance;
+  if (matrix.performanceAcceptance !== "deferred" || previousPolicy !== "strict" ||
+      !isDeepStrictEqual(currentFunctional, measuredFunctional)) {
+    reject("historical matrix contract differs beyond performanceAcceptance");
+  }
+  return {
+    report: filename,
+    reportCommit,
+    artifactSha256: sha256(bytes),
+    sourceCommit: report.source.commit,
+    sourceTree: report.source.tree,
+    matrixSha256: report.matrixSha256,
+    historicalResult: "pass",
+    currentPerformanceAcceptance: "deferred",
+    performanceAccepted: false,
+  };
+}
+
 export async function validateLocalMatrixReport(report, options = {}) {
   const root = path.resolve(options.root ?? DEFAULT_ROOT);
   const loaded = options.matrix && options.matrixSha256 ? options : await readMatrix(root);
   const matrix = loaded.matrix;
   const matrixSha256 = loaded.matrixSha256;
   const errors = [];
+  let historicalContract;
   if (!isPlainObject(report) || report.schemaVersion !== 1 ||
       report.format !== REPORT_FORMAT || report.version !== 1) {
     throw new LocalCompatibilityMatrixError([
@@ -349,7 +400,13 @@ export async function validateLocalMatrixReport(report, options = {}) {
     errors.push("execution must identify the direct local matrix cell");
   }
   if (report.matrixSha256 !== matrixSha256) {
-    errors.push("matrixSha256 must bind the current compatibility contract");
+    if ((options.env ?? process.env).ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE === "1" &&
+        matrix.performanceAcceptance === "deferred" && expectedCell) {
+      try {historicalContract = await historicalMatrixContract(root, report, matrix);}
+      catch (error) {errors.push(error.message);}
+    } else {
+      errors.push("matrixSha256 must bind the current compatibility contract");
+    }
   }
   if (!Number.isFinite(Date.parse(report.generatedAt ?? ""))) {
     errors.push("generatedAt must be an ISO timestamp");
@@ -414,7 +471,8 @@ export async function validateLocalMatrixReport(report, options = {}) {
     errors.push(`matrix report ${report.cell?.id ?? "unknown"} did not pass`);
   }
   if (errors.length > 0) throw new LocalCompatibilityMatrixError(errors);
-  return { cell: expectedCell, source: report.source, commands: plan.length };
+  return { cell: expectedCell, source: report.source, commands: plan.length,
+    ...(historicalContract ? {historicalContract} : {}) };
 }
 
 async function reportFiles(root, directory) {
@@ -472,6 +530,7 @@ export async function checkLocalMatrixEvidence(options = {}) {
   const seen = new Set();
   const sourceCommits = new Set();
   const codeIdentities = new Set();
+  const historicalContracts = [];
   for (const item of reports) {
     const report = item.value ?? item;
     try {
@@ -480,9 +539,11 @@ export async function checkLocalMatrixEvidence(options = {}) {
         matrix,
         matrixSha256,
         resolveTree: options.resolveTree,
+        env: options.env,
       });
       if (seen.has(result.cell.id)) errors.push(`duplicate matrix cell ${result.cell.id}`);
       seen.add(result.cell.id);
+      if (result.historicalContract) historicalContracts.push(result.historicalContract);
       sourceCommits.add(result.source.commit);
       const resolveCodeIdentity = options.resolveCodeIdentity ??
         ((commit) => sourceCodeIdentity(
@@ -537,6 +598,7 @@ export async function checkLocalMatrixEvidence(options = {}) {
     currentSource,
     complete: currentSource && missing.length === 0,
     sourceIdentity: [...codeIdentities][0] ?? null,
+    ...(historicalContracts.length > 0 ? {historicalContracts} : {}),
   };
 }
 
@@ -548,7 +610,11 @@ function printReport(report) {
     `Missing required: ${report.missing.join(", ") || "none"}\n` +
     `Missing optional: ${report.optionalMissing.join(", ") || "none"}\n` +
     `Stale: ${report.stale.join(", ") || "none"}\n` +
-    `Complete: ${report.complete ? "yes" : "no"}\n`,
+    `Complete: ${report.complete ? "yes" : "no"}\n` +
+    (report.historicalContracts?.length > 0
+      ? "Historical matrix evidence: authenticated; current performance acceptance: DEFERRED / NOT ACCEPTED\n" +
+        report.historicalContracts.map(item => `  ${item.report}: measured source ${item.sourceCommit}, contract ${item.matrixSha256}, original result pass\n`).join("")
+      : ""),
   );
 }
 

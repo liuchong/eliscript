@@ -25,7 +25,8 @@
        "string-concat" "invoke" "apply-call" "call")))
 
   (defconst fail
-    (js* "(message) => { throw new Error(message); }"))
+    (lambda (message)
+      (throw (new (js* "Error") message))))
 
   (defconst schema-fail
     (js* "(message) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-I0001', severity: 'error', phase: 'ir-schema', message }; throw error; }"))
@@ -38,9 +39,11 @@
   (defconst has-own (js* "Object.hasOwn"))
   (defconst finite-number-p (js* "Number.isFinite"))
   (defconst non-negative-integer-p
-    (js* "(value) => Number.isSafeInteger(value) && value >= 0"))
+    (lambda (value)
+      (and (Number/isSafeInteger value) (>= value 0))))
   (defconst positive-integer-p
-    (js* "(value) => Number.isSafeInteger(value) && value >= 1"))
+    (lambda (value)
+      (and (Number/isSafeInteger value) (>= value 1))))
   (defconst parse-json
     (js* "(source, reject) => { try { return JSON.parse(source); } catch (error) { return reject(`invalid canonical IR JSON: ${error.message}`); } }"))
 

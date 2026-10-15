@@ -1,3 +1,4 @@
+import { currentPerformanceTest } from "./helpers/performance-acceptance.mjs";
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { definition } from "../tools/compiler/controlled-baseline.mjs";
@@ -104,13 +105,11 @@ test("a failed original Reader performance gate retains every raw sample and the
     expect(failure.report.measurements[name].samplesMs).toHaveLength(report.parameters.timingSamples);
 });
 
-test("committed reader character report matches measured sources", async () => {
+test("committed reader character report preserves historical measurements and decisions", async () => {
   const report = validateCompilerReaderCharacterReport(
     JSON.parse(await readFile(reportPath, "utf8")),
   );
-  expect(report.sourceDigest).toEqual(
-    await compilerReaderCharacterSourceDigest(),
-  );
+
   expect(report.corpus.files).toHaveLength(compilerModuleCount);
   expect(report.corpus.files).toContain("bootstrap/compiler/project.eli");
   expect(report.corpus.sourceBytes).toBeGreaterThan(200_000);
@@ -131,10 +130,6 @@ test("reader reacceptance rejects weakened thresholds and altered controls", asy
   expect(failure?.report).toBe(failed);
   const forged = structuredClone(failed); forged.decision.passed = true;
   expect(() => validateCompilerReaderCharacterReport(forged)).toThrow("speedup decision failed");
-  const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
-  for (const entry of report.baseline.control.inputs) {
-    expect(entry.sha256).toBe(hash(await readFile(path.join(projectDirectory, entry.path))));
-  }
   const weakened = structuredClone(report);
   weakened.decision.minimumCompleteCompilerSpeedup = 1.01;
   expect(() => validateCompilerReaderCharacterReport(weakened)).toThrow("speedup decision failed");
@@ -147,4 +142,29 @@ test("reader reacceptance rejects weakened thresholds and altered controls", asy
   const form = '(defun sample () ; ) ignored\n (js* "(nested)") (list 1 (list 2)))';
   expect(definition(`${form}\n(defun next () nil)`, "sample")).toBe(form);
   expect(() => definition("(defun unfinished ()", "unfinished")).toThrow("unterminated");
+});
+
+
+test("the first portable Reader report retains its original failed performance decision", async () => {
+  const report = JSON.parse(await readFile(path.join(projectDirectory,
+    "tools/compiler/results/reader-portable-first-macos-arm64.json"), "utf8"));
+  expect(report.parameters).toEqual({warmupRounds: 2, predicateIterations: 20,
+    compilerRounds: 8, timingSamples: 15});
+  expect(report.validation.identicalCompilerOutputs).toBe(compilerModuleCount);
+  expect(report.decision.minimumCompleteCompilerSpeedup).toBe(1.08);
+  expect(report.decision.passed).toBe(false);
+  expect(report.measurements.completeCompilerSpeedup).toBeLessThan(1.08);
+  expect(() => validateCompilerReaderCharacterReport(report)).toThrow("speedup decision failed");
+  expect(() => validateCompilerReaderCharacterReport({...report,
+    decision: {...report.decision, passed: true}})).toThrow("speedup decision failed");
+});
+
+currentPerformanceTest(test)("committed reader character report matches measured sources", async () => {
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  expect(report.sourceDigest).toEqual(await compilerReaderCharacterSourceDigest());
+  const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+  for (const entry of report.baseline.control.inputs) {
+    expect(entry.sha256).toBe(hash(await readFile(path.join(projectDirectory, entry.path))));
+  }
+
 });

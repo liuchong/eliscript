@@ -82,7 +82,7 @@ test('arithmetic type or capacity failures unwind their frames without evaluatin
  const runtimeSource=await readFile('bootstrap/runtime/memory.eli','utf8'),start=runtimeSource.indexOf('  (defun value-truth (heap value)'),end=runtimeSource.indexOf('  (defun ',start+3);assert(start>=0&&end>start);
  const injected=backend.compiler.compile_ir_string(runtimeSource.slice(0,start)+'  (defun value-truth (heap value) (load-u32 4294967295))\n'+runtimeSource.slice(end),'later-trap.eli');
  const original=backend.compiler.compile_ir_string('(defun first-error (x y) (+ (+ x y) (if x 1 2))) (export first-error)','first-error.eli');
- const a=instantiateManagedRuntime(Uint8Array.from(backend.managed.emit_managed_wasm(original,injected)));const text=a.sourceObject({}),n=a.number(2),frame=a.frame(1);a.frameSet(frame,0,n);
+ const a=instantiateManagedRuntime(Uint8Array.from(backend.managed.emit_managed_wasm(original,injected)));const text=a.sourceObject({valueOf:true,toString:true}),n=a.number(2),frame=a.frame(1);a.frameSet(frame,0,n);
  assert.throws(()=>a.invoke('first-error',[text,n]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.equal(a.stats().frameDepth,1);
  assert.throws(()=>a.invoke('first-error',[n,n]),e=>e instanceof WebAssembly.RuntimeError);assert.equal(a.stats().frameDepth,1);
  const saved=a.frameGet(frame,0);assert.equal(a.readNumber(saved),2);a.release(saved);a.leaveFrame(frame);a.release(text);a.release(n);a.collect();assert.equal(a.live(),0);
@@ -96,12 +96,13 @@ test('independent random float64 bit patterns preserve exact arithmetic results 
  const a=instantiateManagedRuntime(bytes);a.auto(1);
  for(let i=0;i<512;i++){const pair=[random(),random()];for(const name of['add','subtract','multiply','divide','equal','distinct','less','less-equal','greater','greater-equal'])check(a,name,pair);}
 });
-test('primitive coercion agrees with JS while unsupported objects and foreign or stale operands preserve caller roots',()=>{
+test('ordinary object conversion agrees with JS while raw Number APIs and foreign or stale operands preserve caller roots',()=>{
  const a=instantiateManagedRuntime(bytes),b=instantiateManagedRuntime(bytes);
  check(a,'add',['1',1]);check(a,'negate',[null]);check(a,'less',['1',1]);check(a,'greater',[true,1]);
  const n=a.number(1),s=a.string('1'),opaque=a.sourceObject({}),foreign=b.number(1);
  assert.throws(()=>a.binary(s,n,0),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');
- for(const [name,args,code]of[['add',[opaque,n],'ELI-RT0003'],['negate',[opaque],'ELI-RT0003'],['less',[opaque,n],'ELI-RT0003'],['greater',[true,opaque],'ELI-RT0003'],['equal',[foreign,n],'ELI-RT0001']]){
+ for(const[name,args,reference]of[['add',[opaque,n],[{},1]],['negate',[opaque],[{}]],['less',[opaque,n],[{},1]],['greater',[true,opaque],[true,{}]]]){const out=a.invoke(name,args);try{assert(Object.is(read(a,out),js[name](...reference)),name);}finally{a.release(out);}assert.equal(a.stats().frameDepth,0);}
+ for(const [name,args,code]of[['equal',[foreign,n],'ELI-RT0001']]){
   assert.throws(()=>a.invoke(name,args),e=>e.eliscriptDiagnostic?.code===code);assert.equal(a.stats().frameDepth,0);assert.equal(a.readNumber(n),1);
  }
  const stale=a.number(3);a.release(stale);a.collect();assert.throws(()=>a.invoke('equal',[stale,n]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');

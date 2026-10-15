@@ -1568,7 +1568,7 @@
              (regexp-quote "let item = __eliscript_value_1;") output))
     (should (string-match-p "thread\\$G[0-9]+" output))
     (should (string-match-p
-             (regexp-quote "__eliscript_truthy(item) ? item") output))
+             (regexp-quote "if (__eliscript_truthy(item)) {\n        return item;") output))
     (should (string-match-p
              (regexp-quote "item === null") output))
     (should (string-match-p
@@ -2277,6 +2277,49 @@
       (should (gethash name names)))
     (should-not (gethash "ignored" names))
     (should (equal before (prin1-to-string forms)))))
+
+(ert-deftest eliscript-legacy-context-proof-skips-declarations-and-literal-keys ()
+  (dolist (initializer '("(lambda (b) 1)" "(fn (b) 1)"
+                         "(let ((b 1)) 3)" "(let* ((b 1)) 3)"
+                         "(loop ((b 1)) 3)" "(js-object b 1)"
+                         "(js-object :b 1)" "(quote b)"
+                         "(try 1 (catch b 3))" "(cond (t 1))"))
+    (let ((source (format "(defun f () (let* ((a %s) (b 2)) a))" initializer)))
+      (should (equal (eliscript-compile-string source "context-proof.eli")
+                     (eliscript-tests--legacy-compile-string source "context-proof.eli")))))
+  (let ((source "(defun f () (let* ((a (js-object :b 1)) (js-object 2)) a))"))
+    (should (equal (eliscript-compile-string source "context-proof.eli")
+                   (eliscript-tests--legacy-compile-string source "context-proof.eli")))))
+
+(ert-deftest eliscript-legacy-context-proof-retains-reference-assignment-and-raw-guards ()
+  (dolist (initializer '("b" "(lambda (b) b)" "(let ((b 1)) b)"
+                         "(js-object (+ b 1) 1)" "(b 1)" "b/value"
+                         "(progn (setq b 1) 3)" "(try 1 (catch b b))"
+                         "(js* \"1\")"))
+    (let* ((source (format "(defun f (b) (let* ((a %s) (b 2)) a))" initializer))
+           (legacy (eliscript-tests--legacy-compile-string source "context-guard.eli")))
+      (should-not (eliscript-emitter--context-sequential-safe-p
+                   (list (list 'a (car (eliscript-read-string initializer))) '(b 2))))
+      (should (equal (eliscript-compile-string source "context-guard.eli") legacy)))))
+
+(ert-deftest eliscript-legacy-context-proof-matches-ir-for-binding-pattern-metadata ()
+  (dolist (case '(("(lambda ([b]) 1)" t)
+                  ("(lambda ({:strs [b]}) 1)" t)
+                  ("(lambda ({:strs [b] :or {b 1}}) 1)" t)
+                  ("(lambda ({:strs [x] :or {x b}}) 1)" nil)
+                  ("(try 1 (catch {:strs [b]} 3))" t)
+                  ("(try 1 (catch {:strs [x] :or {x b}} 3))" nil)))
+    (let* ((initializer (car case))
+           (source (format "(defun f (b) (let* ((a %s) (b 2)) a))" initializer))
+           (program (eliscript-compile-ir-string source "context-pattern-proof.eli"))
+           (function (car (eliscript-ir-program-body program)))
+           (lexical (nth 1 (eliscript-ir-node-children function)))
+           (bindings (cl-subseq (eliscript-ir-node-children lexical) 0 2))
+           (legacy (eliscript-emitter--context-sequential-safe-p
+                    (list (list 'a (car (eliscript-read-string initializer))) '(b 2))))
+           (ir (eliscript-ir-emitter--context-sequential-safe-p bindings)))
+      (should (eq (not (null legacy)) (cadr case)))
+      (should (eq (not (null legacy)) (not (null ir)))))))
 
 (provide 'eliscript-tests)
 

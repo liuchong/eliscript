@@ -1,18 +1,19 @@
 import {createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
+import {retainedPerformanceSnapshot,deferredPerformanceAcceptance,retainedGitSnapshotBytes} from './retained-performance-snapshot.mjs';
 
 const SOAK='benchmarks/worker-lifecycle-soak-macos-arm64.json';
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 function require(condition,message){if(!condition)throw Error(`retained soak refresh: ${message}`);}
 function relative(file){return typeof file==='string'&&file.length>0&&!path.isAbsolute(file)&&!file.split('/').includes('..')&&path.posix.normalize(file)===file;}
-function git(root,args){const result=Bun.spawnSync(['git',...args],{cwd:root,stdout:'pipe',stderr:'pipe'});require(result.exitCode===0,'accepted Git snapshot is unavailable');return result.stdout;}
+function git(root,args){try{return retainedGitSnapshotBytes(root,args);}catch{require(false,'accepted Git snapshot is unavailable');}}
 const median=values=>{const sorted=[...values].sort((a,b)=>a-b);return (sorted[0]+sorted[1])/2;};
 
 // This is an additional gate for a newly measured report. It never edits the
 // accepted source run, its artifact hash, or the old artifact in Git history.
-export async function validateRefreshedWorkerSoak(root,filename,currentBytes,run){
+export async function validateRefreshedWorkerSoak(root,filename,currentBytes,run,options={}){
  require(filename===SOAK,'only the source-bound worker soak can be refreshed');
  const revision=run.source?.commit,tree=run.source?.tree;
  require(/^[0-9a-f]{40}$/.test(revision??'')&&/^[0-9a-f]{40}$/.test(tree??''),'invalid accepted source identity');
@@ -61,14 +62,16 @@ export async function validateRefreshedWorkerSoak(root,filename,currentBytes,run
  for(const key of ['emacs','worker'])require(trend.initialMedianKiB[key]===medians[0][key]&&trend.finalMedianKiB[key]===medians[4][key]&&trend.deltaKiB[key]===medians[4][key]-medians[0][key]&&trend.deltaKiB[key]<=16384,`total ${key} trend failed`);
  const files=current.source?.files,oldFiles=accepted.source?.files;
  require(Array.isArray(files)&&Array.isArray(oldFiles)&&files.length>0&&same(files.map(x=>x.file),oldFiles.map(x=>x.file))&&new Set(files.map(x=>x.file)).size===files.length,'source inventory changed');
+ const measured=options.deferPerformanceAcceptance===true?retainedPerformanceSnapshot(root,filename,currentBytes):null;
  const freshManifest=createHash('sha256'),oldManifest=createHash('sha256');
  for(let i=0;i<files.length;i++){
   const entry=files[i],old=oldFiles[i];require(relative(entry.file)&&/^[0-9a-f]{64}$/.test(entry.sha256??''),'unsafe source entry');
-  const fresh=digest(await readFile(path.join(root,entry.file))),historical=digest(git(root,['show',`${revision}:${entry.file}`]));
-  require(fresh===entry.sha256,'fresh source entry is stale');require(historical===old.sha256,'accepted source entry differs from its snapshot');
+  const fresh=digest(measured?git(root,['show',`${measured.commit}:${entry.file}`]):await readFile(path.join(root,entry.file))),historical=digest(git(root,['show',`${revision}:${entry.file}`]));
+  require(fresh===entry.sha256,measured?'measured source entry differs from its Git snapshot':'fresh source entry is stale');require(historical===old.sha256,'accepted source entry differs from its snapshot');
   freshManifest.update(`${entry.file}:${fresh}\n`);oldManifest.update(`${old.file}:${historical}\n`);
  }
  require(freshManifest.digest('hex')===current.source.digest,'fresh source aggregate is stale');
  require(oldManifest.digest('hex')===accepted.source.digest,'accepted source aggregate differs from its snapshot');
+ if(measured)return deferredPerformanceAcceptance(filename,measured);
  return true;
 }

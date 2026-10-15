@@ -637,7 +637,8 @@ export async function checkGeneratedArtifacts(options = {}) {
 
   const benchmarkFiles = validateBenchmarkInventory(trackedFiles, contract);
   let benchmarkSources = 0;
-  for (const file of benchmarkFiles) {
+  const deferPerformanceAcceptance = options.deferPerformanceAcceptance === true;
+  for (const file of deferPerformanceAcceptance ? [] : benchmarkFiles) {
     const report = JSON.parse(await readFile(path.join(root, file), "utf8"));
     benchmarkSources += await validateBenchmarkSource(
       root,
@@ -655,6 +656,7 @@ export async function checkGeneratedArtifacts(options = {}) {
     derivedArtifacts,
     benchmarkArtifacts: benchmarkFiles.length,
     benchmarkSources,
+    ...(deferPerformanceAcceptance ? { deferredBenchmarkSources: benchmarkFiles } : {}),
   };
 }
 
@@ -708,6 +710,9 @@ export function humanIntegrityReport(report) {
       `  Benchmarks    ${report.artifacts.benchmarkArtifacts} reports, ` +
         `${report.artifacts.benchmarkSources} source bindings`,
     );
+    if (report.artifacts.deferredBenchmarkSources) lines.push(
+      `  Performance   DEFERRED / NOT ACCEPTED: ${report.artifacts.deferredBenchmarkSources.length} current-source bindings`,
+    );
   }
   return lines.join("\n");
 }
@@ -729,6 +734,7 @@ if (invokedFilename === fileURLToPath(import.meta.url)) {
       const report = await checkRepositoryIntegrity({
         dependenciesOnly,
         artifactsOnly,
+        deferPerformanceAcceptance: process.env.ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE === "1",
       });
       console.log(humanIntegrityReport(report));
     } catch (error) {

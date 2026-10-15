@@ -228,41 +228,75 @@
       const __eliscript_value_1 = page["querySelector"](String('meta[name="') + String(name) + String('"]'));
       {
         let element = __eliscript_value_1;
-        return element === null ? "" : element["content"] ?? "";
+        if (element === null) {
+          return "";
+        } else {
+          return element["content"] ?? "";
+        }
       }
     }
   }
   function stored_theme() {
-    return storage === null ? "system" : ((value) => {
-      return value === null || value === "" ? "system" : value;
-    })(storage["getItem"](theme_key));
+    if (storage === null) {
+      return "system";
+    } else {
+      {
+        const __eliscript_value_2 = storage["getItem"](theme_key);
+        {
+          let value = __eliscript_value_2;
+          if (value === null || value === "") {
+            return "system";
+          } else {
+            return value;
+          }
+        }
+      }
+    }
   }
   function apply_theme(name) {
-    return name === "system" ? root()["removeAttribute"]("data-theme") : root()["setAttribute"]("data-theme", name);
+    if (name === "system") {
+      return root()["removeAttribute"]("data-theme");
+    } else {
+      return root()["setAttribute"]("data-theme", name);
+    }
   }
   function next_theme(name) {
-    return name === "system" ? "light" : name === "light" ? "dark" : "system";
+    if (name === "system") {
+      return "light";
+    } else {
+      if (name === "light") {
+        return "dark";
+      } else {
+        return "system";
+      }
+    }
   }
   function remember_theme(name) {
-    return !(storage === null) ? storage["setItem"](theme_key, name) : null;
+    if (!(storage === null)) {
+      return storage["setItem"](theme_key, name);
+    } else {
+      return null;
+    }
   }
   function label_theme(name) {
     {
-      const __eliscript_value_2 = node("theme-toggle");
+      const __eliscript_value_3 = node("theme-toggle");
       {
-        let button = __eliscript_value_2;
-        return !(button === null) ? (() => {
+        let button = __eliscript_value_3;
+        if (!(button === null)) {
           button["textContent"] = String("Theme: ") + String(name);
           return button["setAttribute"]("aria-label", String("Theme ") + String(name) + String(", switch to ") + String(next_theme(name)));
-        })() : null;
+        } else {
+          return null;
+        }
       }
     }
   }
   function toggle_theme() {
     {
-      const __eliscript_value_3 = next_theme(stored_theme());
+      const __eliscript_value_4 = next_theme(stored_theme());
       {
-        let next = __eliscript_value_3;
+        let next = __eliscript_value_4;
         remember_theme(next);
         apply_theme(next);
         return label_theme(next);
@@ -273,9 +307,11 @@
     index_value === null && await (async (url) => {
       return await (async (response) => {
         return await (async () => {
-          !__eliscript_truthy(response["ok"] ?? false) && ((__eliscript_value_4) => {
-            throw __eliscript_value_4;
-          })(new globalThis.Error(String("search index unavailable: ") + String(url)));
+          if (!__eliscript_truthy(response["ok"] ?? false)) {
+            ((__eliscript_value_5) => {
+              throw __eliscript_value_5;
+            })(new globalThis.Error(String("search index unavailable: ") + String(url)));
+          }
           return index_value = await response["json"]();
         })();
       })(await globalThis["fetch"](url));
@@ -287,21 +323,23 @@
   }
   function matches_QMARK_(entry, query) {
     {
-      const __eliscript_value_5 = entry_haystack(entry);
-      const __eliscript_value_6 = split_on(" ", query);
-      const __eliscript_value_7 = 0;
-      const __eliscript_value_8 = true;
+      const __eliscript_value_6 = entry_haystack(entry);
+      const __eliscript_value_7 = split_on(" ", query);
+      const __eliscript_value_8 = 0;
+      const __eliscript_value_9 = true;
       {
-        let haystack = __eliscript_value_5;
-        let terms = __eliscript_value_6;
-        let index = __eliscript_value_7;
-        let found = __eliscript_value_8;
+        let haystack = __eliscript_value_6;
+        let terms = __eliscript_value_7;
+        let index = __eliscript_value_8;
+        let found = __eliscript_value_9;
         while (__eliscript_numeric_relation("<", index, (terms ?? []).length)) {
           {
-            const __eliscript_value_9 = trim_text((terms ?? [])[index] ?? null);
+            const __eliscript_value_10 = trim_text((terms ?? [])[index] ?? null);
             {
-              let term = __eliscript_value_9;
-              !__eliscript_truthy(blank_QMARK_(term)) && !__eliscript_truthy(contains_QMARK_(term, haystack)) && (found = false);
+              let term = __eliscript_value_10;
+              if (!__eliscript_truthy(blank_QMARK_(term)) && !__eliscript_truthy(contains_QMARK_(term, haystack))) {
+                found = false;
+              }
             }
           }
           index = index + 1;
@@ -312,17 +350,19 @@
   }
   function matching_entries(entries, query) {
     {
-      const __eliscript_value_10 = [];
-      const __eliscript_value_11 = 0;
+      const __eliscript_value_11 = [];
+      const __eliscript_value_12 = 0;
       {
-        let results = __eliscript_value_10;
-        let index = __eliscript_value_11;
+        let results = __eliscript_value_11;
+        let index = __eliscript_value_12;
         while (__eliscript_numeric_relation("<", index, (entries ?? []).length) && __eliscript_numeric_relation("<", (results ?? []).length, result_limit)) {
           {
-            const __eliscript_value_12 = (entries ?? [])[index] ?? null;
+            const __eliscript_value_13 = (entries ?? [])[index] ?? null;
             {
-              let entry = __eliscript_value_12;
-              __eliscript_truthy(matches_QMARK_(entry, query)) && results["push"](entry);
+              let entry = __eliscript_value_13;
+              if (__eliscript_truthy(matches_QMARK_(entry, query))) {
+                results["push"](entry);
+              }
             }
           }
           index = index + 1;
@@ -333,9 +373,9 @@
   }
   function escape_text(text) {
     {
-      const __eliscript_value_13 = page["createElement"]("span");
+      const __eliscript_value_14 = page["createElement"]("span");
       {
-        let element = __eliscript_value_13;
+        let element = __eliscript_value_14;
         element["textContent"] = text;
         return element["innerHTML"] ?? "";
       }
@@ -346,48 +386,76 @@
   }
   function render_results(entries, query) {
     {
-      const __eliscript_value_14 = node("search-results");
+      const __eliscript_value_15 = node("search-results");
       {
-        let container = __eliscript_value_14;
-        return !(container === null) ? __eliscript_truthy(blank_QMARK_(query)) ? container["innerHTML"] = "" : ((count_value) => {
-          return container["innerHTML"] = String('<p class="comment-note">') + String(count_value) + String(count_value === 1 ? " result" : " results") + String(' for "') + String(escape_text(query)) + String('"</p>') + String(count_value === 0 ? '<p class="empty">No article matches.</p>' : ((markup, index) => {
-            while (__eliscript_numeric_relation("<", index, count_value)) {
-              markup = String(markup) + String(render_entry((entries ?? [])[index] ?? null));
-              index = index + 1;
+        let container = __eliscript_value_15;
+        if (!(container === null)) {
+          if (__eliscript_truthy(blank_QMARK_(query))) {
+            return container["innerHTML"] = "";
+          } else {
+            {
+              const __eliscript_value_16 = (entries ?? []).length;
+              {
+                let count_value = __eliscript_value_16;
+                return container["innerHTML"] = String('<p class="comment-note">') + String(count_value) + String(count_value === 1 ? " result" : " results") + String(' for "') + String(escape_text(query)) + String('"</p>') + String(count_value === 0 ? '<p class="empty">No article matches.</p>' : ((markup, index) => {
+                  while (__eliscript_numeric_relation("<", index, count_value)) {
+                    markup = String(markup) + String(render_entry((entries ?? [])[index] ?? null));
+                    index = index + 1;
+                  }
+                  return String(markup) + String("</ul>");
+                })('<ul class="list">', 0));
+              }
             }
-            return String(markup) + String("</ul>");
-          })('<ul class="list">', 0));
-        })((entries ?? []).length) : null;
+          }
+        } else {
+          return null;
+        }
       }
     }
   }
   function read_query() {
     {
-      const __eliscript_value_15 = new globalThis.URLSearchParams(globalThis.location["search"]);
+      const __eliscript_value_17 = new globalThis.URLSearchParams(globalThis.location["search"]);
       {
-        let parameters = __eliscript_value_15;
+        let parameters = __eliscript_value_17;
         return parameters["get"]("q");
       }
     }
   }
   function query_value() {
     {
-      const __eliscript_value_16 = node("search-input");
+      const __eliscript_value_18 = node("search-input");
       {
-        let element = __eliscript_value_16;
-        return element === null ? "" : ((value) => {
-          return value === null ? ((__eliscript_value_17) => __eliscript_truthy(__eliscript_value_17) ? __eliscript_value_17 : "")(read_query()) : value;
-        })(element["value"] ?? null);
+        let element = __eliscript_value_18;
+        if (element === null) {
+          return "";
+        } else {
+          {
+            const __eliscript_value_19 = element["value"] ?? null;
+            {
+              let value = __eliscript_value_19;
+              if (value === null) {
+                return ((__eliscript_value_20) => __eliscript_truthy(__eliscript_value_20) ? __eliscript_value_20 : "")(read_query());
+              } else {
+                return value;
+              }
+            }
+          }
+        }
       }
     }
   }
   function search_once() {
     return run_search()["catch"]((error) => {
       {
-        const __eliscript_value_18 = node("search-results");
+        const __eliscript_value_21 = node("search-results");
         {
-          let container = __eliscript_value_18;
-          return !(container === null) ? container["innerHTML"] = String('<p class="empty">') + String(escape_text(error["message"] ?? "")) + String("</p>") : null;
+          let container = __eliscript_value_21;
+          if (!(container === null)) {
+            return container["innerHTML"] = String('<p class="empty">') + String(escape_text(error["message"] ?? "")) + String("</p>");
+          } else {
+            return null;
+          }
         }
       }
     });
@@ -422,22 +490,32 @@
     return !__eliscript_numeric_relation(">", globalThis.innerWidth, menu_breakpoint);
   }
   function mark_menu_state() {
-    return __eliscript_truthy(narrow_QMARK_()) ? set_menu_marker("collapsed") : clear_menu_marker();
+    if (__eliscript_truthy(narrow_QMARK_())) {
+      return set_menu_marker("collapsed");
+    } else {
+      return clear_menu_marker();
+    }
   }
   var set_open = (element, value) => {
     element.open = value;
   };
   function bind_menu() {
     {
-      const __eliscript_value_19 = document.querySelector(".menu");
+      const __eliscript_value_22 = document.querySelector(".menu");
       {
-        let menu = __eliscript_value_19;
-        return !(menu === null) ? (() => {
+        let menu = __eliscript_value_22;
+        if (!(menu === null)) {
           set_open(menu, !__eliscript_truthy(narrow_QMARK_()));
           return menu["addEventListener"]("toggle", (event) => {
-            return __eliscript_truthy(((__eliscript_value_20) => __eliscript_truthy(__eliscript_value_20) ? !__eliscript_truthy(menu["open"]) : __eliscript_value_20)(narrow_QMARK_())) ? set_menu_marker("collapsed") : clear_menu_marker();
+            if (__eliscript_truthy(((__eliscript_value_23) => __eliscript_truthy(__eliscript_value_23) ? !__eliscript_truthy(menu["open"]) : __eliscript_value_23)(narrow_QMARK_()))) {
+              return set_menu_marker("collapsed");
+            } else {
+              return clear_menu_marker();
+            }
           });
-        })() : null;
+        } else {
+          return null;
+        }
       }
     }
   }
@@ -474,10 +552,14 @@
   }
   function parse_count(value) {
     {
-      const __eliscript_value_21 = Number.parseInt;
+      const __eliscript_value_24 = Number.parseInt;
       {
-        let parsed = __eliscript_value_21;
-        return value === null ? 0 : parsed(value, 10);
+        let parsed = __eliscript_value_24;
+        if (value === null) {
+          return 0;
+        } else {
+          return parsed(value, 10);
+        }
       }
     }
   }
@@ -504,16 +586,16 @@
   mark_menu_state();
   function on_ready() {
     {
-      const __eliscript_value_22 = node("theme-toggle");
+      const __eliscript_value_25 = node("theme-toggle");
       {
-        let button = __eliscript_value_22;
-        !(button === null) && (() => {
+        let button = __eliscript_value_25;
+        if (!(button === null)) {
           label_theme(stored_theme());
-          return button["addEventListener"]("click", (event) => {
+          button["addEventListener"]("click", (event) => {
             event["preventDefault"]();
             return toggle_theme();
           });
-        })();
+        }
       }
     }
     bind_menu();

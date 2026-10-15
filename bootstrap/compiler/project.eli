@@ -25,15 +25,22 @@
     (js* "(message) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-B0003', severity: 'error', phase: 'project-plan', message }; throw error; }"))
   (defconst array-p (js* "Array.isArray"))
   (defconst object-p
-    (js* "(value) => value !== null && typeof value === 'object' && !Array.isArray(value)"))
+    (lambda (value)
+      (and (not (nil? value)) (= (js* "typeof value") "object") (not (Array/isArray value)))))
   (defconst sorted-set-values
-    (js* "(values) => Array.from(values).sort()"))
+    (lambda (values)
+      (js-call (Array/from values) :sort)))
   (defconst nonnegative-number-p
-    (js* "(value) => typeof value === 'number' && Number.isFinite(value) && value >= 0"))
+    (lambda (value)
+      (and (= (js* "typeof value") "number") (Number/isFinite value) (>= value 0))))
   (defconst boolean-p
-    (js* "(value) => typeof value === 'boolean'"))
+    (lambda (value)
+      (= (js* "typeof value") "boolean")))
   (defconst safe-relative-path-p
-    (js* "(value) => typeof value === 'string' && value.length > 0 && !/^(?:[\\\\/]|[A-Za-z]:[\\\\/])/.test(value) && !value.split(/[\\\\/]+/u).includes('..')"))
+    (lambda (value)
+      (and (= (js* "typeof value") "string") (> (js-length value) 0)
+        (not (js-call (js* "/^(?:[\\\\/]|[A-Za-z]:[\\\\/])/") :test value))
+        (not (js-call (js-call value :split (js* "/[\\\\/]+/u")) :some (lambda (part) (= part "..")))))))
   (defconst project-request-fail
     (js* "(message) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-B0001', severity: 'error', phase: 'project-build', message }; throw error; }"))
   (defconst project-configuration-fail

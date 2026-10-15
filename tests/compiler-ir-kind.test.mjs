@@ -1,3 +1,4 @@
+import { currentPerformanceTest } from "./helpers/performance-acceptance.mjs";
 import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -126,11 +127,11 @@ test("optimized IR node-kind decisions match the linear reference", async () => 
   }
 }, 30_000);
 
-test("committed compiler IR kind report matches measured sources", async () => {
+test("committed compiler IR kind report preserves historical measurements and decisions", async () => {
   const report = validateCompilerIrKindReport(
     JSON.parse(await readFile(reportPath, "utf8")),
   );
-  expect(report.sourceDigest).toEqual(await compilerIrKindSourceDigest());
+
   expect(report.corpus.files).toHaveLength(compilerSources.length);
   expect(report.corpus.sourceBytes).toBeGreaterThan(200_000);
   expect(report.corpus.irNodes).toBeGreaterThan(20_000);
@@ -150,4 +151,9 @@ test("failed ir-kind gates retain complete measurement evidence", async () => {
   try { validateCompilerIrKindReport(report); } catch (error) { failure = error; }
   expect(failure).toBeInstanceOf(TypeError);
   expect(failure.report).toBe(report);
+});
+
+currentPerformanceTest(test)("committed compiler IR kind report matches measured sources", async () => {
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  expect(report.sourceDigest).toEqual(await compilerIrKindSourceDigest());
 });

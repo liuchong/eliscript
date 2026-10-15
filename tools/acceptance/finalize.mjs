@@ -139,11 +139,20 @@ export async function validateFinalAcceptanceContract(contract, run, options = {
       const currentBytes = await readFile(path.join(root, file));
       const digest = sha256(currentBytes);
       if (digest !== runArtifacts.get(file)) {
+        const refreshOptions = {
+          deferPerformanceAcceptance: options.deferPerformanceAcceptance === true,
+        };
+        const recordRefresh = (result) => {
+          if (result !== true && Array.isArray(options.deferredPerformanceAcceptance) &&
+              !options.deferredPerformanceAcceptance.some((item) => item.report === result.report)) {
+            options.deferredPerformanceAcceptance.push(result);
+          }
+        };
         if (file === "benchmarks/worker-lifecycle-soak-macos-arm64.json") {
-          try { await validateRefreshedWorkerSoak(root, file, currentBytes, run); }
+          try { recordRefresh(await validateRefreshedWorkerSoak(root, file, currentBytes, run, refreshOptions)); }
           catch (error) { errors.push(`${label} artifact changed after the source run: ${file}: ${error.message}`); }
         } else if (file === "benchmarks/transient-builder-macos-arm64.json") {
-          try { await validateRefreshedTransientBuilder(root, file, currentBytes, run); }
+          try { recordRefresh(await validateRefreshedTransientBuilder(root, file, currentBytes, run, refreshOptions)); }
           catch (error) { errors.push(`${label} artifact changed after the source run: ${file}: ${error.message}`); }
         } else {
           errors.push(`${label} artifact changed after the source run: ${file}`);
@@ -227,7 +236,11 @@ export async function buildFinalAcceptance(options = {}) {
     root,
     markdownFile: contract.source.report,
   });
-  await validateFinalAcceptanceContract(contract, run, { root });
+  await validateFinalAcceptanceContract(contract, run, {
+    root,
+    deferPerformanceAcceptance: options.deferPerformanceAcceptance === true,
+    deferredPerformanceAcceptance: options.deferredPerformanceAcceptance,
+  });
   const defects = await validateDefectRegister(
     options.defects ?? await readJson(root, contract.defects),
     { root },
@@ -376,6 +389,11 @@ export function validateFinalManifest(manifest, expected) {
 }
 
 export async function generateFinalAcceptance(options = {}) {
+  if (options.deferPerformanceAcceptance === true) {
+    throw new FinalAcceptanceError([
+      "cannot generate acceptance artifacts while current performance acceptance is deferred",
+    ]);
+  }
   const root = path.resolve(options.root ?? DEFAULT_ROOT);
   const contract = options.contract ?? await readJson(root, CONTRACT_FILE);
   const manifest = await buildFinalAcceptance({ ...options, root, contract });
@@ -412,6 +430,11 @@ export async function verifyFinalAcceptance(options = {}) {
       "the canonical artifacts are valid, but final acceptance has not been reached",
     ]);
   }
+  if (options.requirePass && options.deferPerformanceAcceptance === true) {
+    throw new FinalAcceptanceError([
+      "current performance acceptance is deferred and has not passed",
+    ]);
+  }
   return manifest;
 }
 
@@ -443,10 +466,21 @@ function parseArguments(argv) {
 
 async function main() {
   const options = parseArguments(process.argv.slice(2));
+  options.deferPerformanceAcceptance = process.env.ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE === "1";
+  options.deferredPerformanceAcceptance = [];
   const manifest = options.generate
     ? await generateFinalAcceptance(options)
     : await verifyFinalAcceptance(options);
-  process.stdout.write(`${humanFinalAcceptanceSummary(manifest)}\n`);
+  const summary = humanFinalAcceptanceSummary(manifest);
+  process.stdout.write(`${options.deferPerformanceAcceptance
+    ? summary.replace(/^Final acceptance:/mu, "Historical final acceptance:")
+    : summary}\n`);
+  if (options.deferPerformanceAcceptance) {
+    process.stdout.write("Current performance acceptance: DEFERRED / NOT ACCEPTED\n");
+    for (const item of options.deferredPerformanceAcceptance) {
+      process.stdout.write(`  ${item.report}: measured Git snapshot ${item.measuredSource.commit} verified; current source comparison not performed\n`);
+    }
+  }
   if (options.requirePass && !manifest.summary.acceptancePass) {
     throw new FinalAcceptanceError([
       "the canonical artifacts are valid, but final acceptance has not been reached",

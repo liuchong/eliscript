@@ -1,3 +1,4 @@
+import { currentPerformanceTest } from "./helpers/performance-acceptance.mjs";
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -18,8 +19,8 @@ async function readReport() {
   return JSON.parse(await readFile(reportPath, "utf8"));
 }
 
-test("committed core performance report matches current sources and budgets", async () => {
-  const report = await validateCoreBenchmarkSource(await readReport());
+test("retained core performance report preserves measured evidence and budgets", async () => {
+  const report = validateCoreBenchmarkReport(await readReport());
 
   expect(report.host).toMatchObject({
     platform: "darwin",
@@ -106,4 +107,8 @@ test("failed core gates retain the complete measured report", async () => {
   expect(failure).toBeInstanceOf(TypeError);
   expect(Boolean(failure.report)).toBe(true);
   expect(failure.report).toBe(report);
+});
+
+currentPerformanceTest(test)("committed core performance report matches current sources and budgets", async () => {
+  await validateCoreBenchmarkSource(await readReport());
 });

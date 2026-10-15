@@ -94,10 +94,22 @@ const __eliscript_numeric_relation = (operator, left, right) => {
 
 const greeting = "hello";
 function factorial(n) {
-  return (__eliscript_numeric_relation("<=", n, 1) ? 1 : __eliscript_numeric_mul(n, factorial(__eliscript_numeric_decrement(n))));
+  if (__eliscript_numeric_relation("<=", n, 1)) {
+    return 1;
+  } else {
+    return __eliscript_numeric_mul(n, factorial(__eliscript_numeric_decrement(n)));
+  }
 }
 function classify(n) {
-  return (__eliscript_numeric_relation("<", n, 0) ? "negative" : ((n === 0) ? "zero" : "positive"));
+  if (__eliscript_numeric_relation("<", n, 0)) {
+    return "negative";
+  } else {
+    if ((n === 0)) {
+      return "zero";
+    } else {
+      return "positive";
+    }
+  }
 }
 function sum_to(n) {
   if (typeof n === "number") {

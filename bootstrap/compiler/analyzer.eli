@@ -25,7 +25,10 @@
   (defconst fail
     (js* "(diagnostic) => { const p = diagnostic.location.start; const error = new Error(`${diagnostic.location.file}:${p.line}:${p.column}: ${diagnostic.message}`); error.eliscriptDiagnostic = diagnostic; throw error; }"))
   (defconst guard
-    (js* "(operation, onError) => { try { return operation(); } catch (error) { return onError(error.message); } }"))
+    (lambda (operation onError)
+      (try (funcall operation)
+        (catch error
+          (funcall onError (get error :message))))))
 
   (defun compiler-fail (context span code phase message)
     (let ((file (or (get context :filename)

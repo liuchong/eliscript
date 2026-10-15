@@ -1,3 +1,4 @@
+import { currentPerformanceTest } from "./helpers/performance-acceptance.mjs";
 import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -162,15 +163,20 @@ test("optimized compiler runtime scan matches its readable reference", async () 
   }
 }, 30_000);
 
-test("committed compiler runtime scan report matches measured sources", async () => {
+test("committed compiler runtime scan report preserves historical measurements and decisions", async () => {
   const report = validateCompilerRuntimeScanReport(
     JSON.parse(await readFile(reportPath, "utf8")),
   );
-  expect(report.sourceDigest).toEqual(await compilerRuntimeScanSourceDigest());
+
   expect(report.corpus.files).toHaveLength(compilerSources.length);
   expect(report.corpus.sourceBytes).toBeGreaterThan(200_000);
   expect(report.corpus.irNodes).toBeGreaterThan(10_000);
   expect(report.measurements.speedup).toBeGreaterThanOrEqual(
     report.decision.minimumSpeedup,
   );
+});
+
+currentPerformanceTest(test)("committed compiler runtime scan report matches measured sources", async () => {
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  expect(report.sourceDigest).toEqual(await compilerRuntimeScanSourceDigest());
 });

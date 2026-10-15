@@ -12,6 +12,10 @@ import {
 } from "../tools/acceptance/finalize.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const verificationOptions = {
+  root: ROOT,
+  deferPerformanceAcceptance: process.env.ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE === "1",
+};
 const retainedFinalTest = process.env.ELISCRIPT_SKIP_RETAINED_ACCEPTANCE === "1"
   ? test.skip
   : test;
@@ -21,7 +25,7 @@ async function readJson(file) {
 }
 
 retainedFinalTest("canonical final artifacts derive every gate from the retained local run", async () => {
-  const manifest = await buildFinalAcceptance({ root: ROOT });
+  const manifest = await buildFinalAcceptance(verificationOptions);
   const run = await readJson("acceptance/runs/m13-01.json");
 
   // The manifest is a projection of the retained run, so its counts are the
@@ -77,7 +81,7 @@ retainedFinalTest("blocking defects cannot be hidden by otherwise valid artifact
     title: "Acceptance test defect",
     evidence: ["README.md"],
   });
-  const manifest = await buildFinalAcceptance({ root: ROOT, defects });
+  const manifest = await buildFinalAcceptance({ ...verificationOptions, defects });
 
   expect(manifest.defects.blockingCount).toBe(1);
   expect(manifest.summary.blockingDefects).toBe(1);
@@ -88,13 +92,13 @@ retainedFinalTest("final artifact contract rejects evidence absent from the sour
   const contract = await readJson("contracts/final-acceptance.json");
   contract.evidenceGroups[0].artifacts = ["README.md"];
 
-  await expect(buildFinalAcceptance({ root: ROOT, contract })).rejects.toMatchObject({
+  await expect(buildFinalAcceptance({ ...verificationOptions, contract })).rejects.toMatchObject({
     errors: ["benchmark artifact is not bound by the source run: README.md"],
   });
 });
 
 retainedFinalTest("final acceptance rejects a forged pass result", async () => {
-  const expected = await buildFinalAcceptance({ root: ROOT });
+  const expected = await buildFinalAcceptance(verificationOptions);
   const forged = structuredClone(expected);
   forged.summary.acceptancePass = !expected.summary.acceptancePass;
 
@@ -104,16 +108,20 @@ retainedFinalTest("final acceptance rejects a forged pass result", async () => {
 });
 
 retainedFinalTest("canonical final manifest and report remain byte exact", async () => {
-  const derived = await buildFinalAcceptance({ root: ROOT });
-  const manifest = await verifyFinalAcceptance({ root: ROOT });
+  const derived = await buildFinalAcceptance(verificationOptions);
+  const manifest = await verifyFinalAcceptance(verificationOptions);
 
   // Byte exact means the retained artifacts are exactly what the derivation
   // produces from the retained run.
   expect(manifest).toEqual(derived);
 
   // `--require-pass` is a gate on that derivation, not a second opinion.
-  const gate = verifyFinalAcceptance({ root: ROOT, requirePass: true });
-  if (derived.summary.acceptancePass) {
+  const gate = verifyFinalAcceptance({ ...verificationOptions, requirePass: true });
+  if (verificationOptions.deferPerformanceAcceptance && derived.summary.acceptancePass) {
+    await expect(gate).rejects.toMatchObject({
+      errors: ["current performance acceptance is deferred and has not passed"],
+    });
+  } else if (derived.summary.acceptancePass) {
     await expect(gate).resolves.toEqual(derived);
   } else {
     await expect(gate).rejects.toMatchObject({

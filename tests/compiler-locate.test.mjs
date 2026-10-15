@@ -1,3 +1,4 @@
+import { currentPerformanceTest } from "./helpers/performance-acceptance.mjs";
 import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -95,6 +96,7 @@ test("ordered compiler mark location matches its scan and copy reference", async
       const source = await readFile(path.join(projectDirectory, relative), "utf8");
       const program = compiler.compile_ir_string(source, relative);
       const node = program.body[0];
+      const previousCases = cases;
       for (const fragment of artifactFragments(
         emitter.emit_module_artifact(program),
       )) {
@@ -118,8 +120,11 @@ test("ordered compiler mark location matches its scan and copy reference", async
           cases += 1;
         }
       }
+      // Every compiler module keeps at least the original three comparisons;
+      // newly exposed blocks from direct emission receive the same full oracle.
+      expect(cases - previousCases).toBeGreaterThanOrEqual(3);
     }
-    expect(cases).toBe(compilerSources.length * 3);
+    expect(cases).toBeGreaterThanOrEqual(compilerSources.length * 3);
 
     const node = { span: "parent" };
     const empty = { text: "", marks: [] };
@@ -153,11 +158,11 @@ test("ordered compiler mark location matches its scan and copy reference", async
   }
 }, 30_000);
 
-test("committed compiler location report matches measured sources", async () => {
+test("committed compiler location report preserves historical measurements and decisions", async () => {
   const report = validateCompilerLocateReport(
     JSON.parse(await readFile(reportPath, "utf8")),
   );
-  expect(report.sourceDigest).toEqual(await compilerLocateSourceDigest());
+
   expect(report.corpus.files).toHaveLength(compilerSources.length);
   expect(report.corpus.sourceBytes).toBeGreaterThan(200_000);
   expect(report.corpus.artifactFragments).toBe(compilerSources.length * 2);
@@ -177,4 +182,9 @@ test("failed locate gates retain complete measurement evidence", async () => {
   try { validateCompilerLocateReport(report); } catch (error) { failure = error; }
   expect(failure).toBeInstanceOf(TypeError);
   expect(failure.report).toBe(report);
+});
+
+currentPerformanceTest(test)("committed compiler location report matches measured sources", async () => {
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  expect(report.sourceDigest).toEqual(await compilerLocateSourceDigest());
 });

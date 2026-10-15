@@ -35,6 +35,7 @@ test-core: check-contracts
 		tests/persistent-semantics.test.mjs \
 		tests/project-scale.test.mjs \
 		tests/core-performance-benchmark.test.mjs \
+		tests/performance-acceptance-mode.test.mjs \
 		tests/maturity-progress.test.mjs \
 		tests/diagnostic-corpus.test.mjs \
 		tests/source-debugging.test.mjs \
@@ -43,6 +44,7 @@ test-core: check-contracts
 		tests/final-acceptance.test.mjs \
 		tests/retained-soak-refresh.test.mjs \
 		tests/retained-transient-refresh.test.mjs \
+		tests/retained-performance-deferral.test.mjs \
 		tests/bootstrap-seed-batch.test.mjs \
 		tests/seed-symbol-reservation.test.mjs \
 		tests/esm-imports.test.mjs \
@@ -70,10 +72,20 @@ test-core: check-contracts
 		tests/wasm-managed-control.test.mjs \
 		tests/wasm-managed-empty-bindings.test.mjs \
 		tests/wasm-managed-callables.test.mjs \
+		tests/wasm-managed-exceptions.test.mjs \
+		tests/wasm-managed-catch-destructuring.test.mjs \
+		tests/wasm-managed-symbols.test.mjs \
+		tests/wasm-managed-exceptions-browser.test.mjs \
+		tests/wasm-compiler-modules.test.mjs \
+		tests/wasm-compiler-reader.test.mjs \
+		tests/wasm-compiler-formatter.test.mjs \
+		tests/wasm-managed-template-string.test.mjs \
 		tests/wasm-managed-variadic-calls.test.mjs \
 		tests/wasm-managed-array-callbacks.test.mjs \
 		tests/wasm-managed-array-sort.test.mjs \
 		tests/wasm-managed-array-text.test.mjs \
+		tests/js-array-text-fast-path.test.mjs \
+		tests/compiler-js-array-text-call.test.mjs \
 		tests/wasm-managed-concat.test.mjs \
 		tests/wasm-managed-typeof.test.mjs \
 		tests/wasm-managed-typeof-paths.test.mjs \
@@ -82,6 +94,7 @@ test-core: check-contracts
 		tests/wasm-managed-module-bindings.test.mjs \
 		tests/wasm-managed-project-linking.test.mjs \
 		tests/wasm-managed-arithmetic.test.mjs \
+		tests/wasm-managed-operand-conversion.test.mjs \
 		tests/wasm-managed-word.test.mjs \
 		tests/wasm-managed-arrays.test.mjs \
 		tests/wasm-managed-objects.test.mjs \
@@ -101,9 +114,19 @@ test-core: check-contracts
 		tests/wasm-managed-number-text.test.mjs \
 		tests/wasm-managed-text-format.test.mjs \
 		tests/wasm-managed-primitive-operators.test.mjs \
+		tests/wasm-managed-js-truth.test.mjs \
 		tests/native-backend.test.mjs \
+		tests/native-memory-backend.test.mjs \
 		tests/compiler-reader-character.test.mjs \
 		tests/compiler-source-map-cursor.test.mjs \
+		tests/compiler-portable-predicates.test.mjs \
+		tests/compiler-portable-reader.test.mjs \
+		tests/compiler-portable-emitter.test.mjs \
+		tests/compiler-fragment-combine.test.mjs \
+		tests/compiler-source-map-vlq.test.mjs \
+		tests/compiler-portable-errors.test.mjs \
+		tests/compiler-portable-guards.test.mjs \
+		tests/compiler-js-control-context.test.mjs \
 		tests/bootstrap-compiler.test.mjs tests/bootstrap-project.test.mjs \
 		tests/bootstrap-evaluation.test.mjs \
 		tests/watch.test.mjs \

@@ -1,4 +1,4 @@
-import {beforeAll,afterAll,test} from 'bun:test';import assert from 'node:assert/strict';
+import {beforeAll,afterAll,test} from 'bun:test';import assert from 'node:assert/strict';import {inspect} from 'node:util';
 import {readFile,mkdtemp,rm,writeFile} from 'node:fs/promises';import {resolve} from 'node:path';import {tmpdir} from 'node:os';import {spawnSync} from 'node:child_process';
 import {buildBackends} from '../tools/backends/build.mjs';import {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';
 let directory,backend,runtimeProgram,program,bytes,js;
@@ -7,7 +7,7 @@ afterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});
 const box=(a,x)=>typeof x==='number'?a.number(x):typeof x==='string'?a.string(x):x;
 const read=(a,x)=>x&&typeof x==='object'?x.kind===4?a.readNumber(x):x.kind===5?a.readString(x):x:x;
 function invoke(a,name,args){const v=a.invoke(name,args);try{return read(a,v);}finally{a.release(v);}}
-function check(a,name,inputs){const args=inputs.map(x=>box(a,x));try{assert.deepEqual(invoke(a,name,args),js[name.replaceAll('-','_')](...inputs),name);}finally{args.forEach(x=>a.release(x));}a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
+function check(a,name,inputs){const args=inputs.map(x=>box(a,x));try{assert.deepEqual(invoke(a,name,args),js[name.replaceAll('-','_')](...inputs),name);}catch(error){error.message+='\n'+name+' '+inspect(inputs);throw error;}finally{args.forEach(x=>a.release(x));}a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
 const positions=[null,false,true,undefined,NaN,Infinity,-Infinity,0,-0,.5,-.5,1,-1,3.5,-3.5,Number.MIN_VALUE,-Number.MIN_VALUE,Number.MAX_VALUE,-Number.MAX_VALUE,2**32-1,2**32];
 const texts=['','x','a\0b','中😀\ud800x\udfff','ababa','\ud83d\ude00','\ud83dx\ude00'];
 test('ordinary UTF16 property and character access keeps code units, code points, signed positions and exact missing results under GC',()=>{

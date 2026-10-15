@@ -39,6 +39,17 @@ function expectMatrixFailure(matrix, pattern) {
 }
 
 describe("compatibility matrix contract", () => {
+  test("performance deferral is explicit while full functional commands and strict defaults remain available", () => {
+    const strict = copyBaseline(); delete strict.performanceAcceptance;
+    expect(renderWorkflow(strict)).not.toContain('ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE');
+    const deferred = { ...strict, performanceAcceptance: 'deferred' };
+    expect(renderWorkflow(deferred)).toContain('ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: "1"');
+    expect(renderWorkflow(deferred)).toContain('performance reacceptance deferred');
+    expect(renderWorkflow(deferred)).toContain('run: bun run test');
+    expect(renderWorkflow(deferred)).toContain('run: make byte-compile');
+    expectMatrixFailure({ ...strict, performanceAcceptance: 'passed' }, /performanceAcceptance/);
+  });
+
   test("CI retains complete commands and original timeouts while isolating two test-file workers", async () => {
     const workflow = renderWorkflow(baseline), makefile = await readFile(path.join(root, 'Makefile'), 'utf8');
     expect(workflow).toContain('timeout-minutes: 30');
@@ -247,7 +258,7 @@ describe("browser compatibility matrix", () => {
     }
     expect(workflow).toContain('install --with-deps "${{ matrix.browser }}"');
     expect(workflow).toContain("ELISCRIPT_TEST_BROWSER: ${{ matrix.browser }}");
-    expect(workflow).toContain("bun test tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs 2>&1 | tee");
+    expect(workflow).toContain("bun test tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs tests/wasm-managed-exceptions-browser.test.mjs tests/wasm-managed-symbols.test.mjs 2>&1 | tee");
     expect(workflow).toContain("set -o pipefail");
     expect(workflow).toContain("if: always()");
     expect(workflow).toContain(`actions/upload-artifact@${browserContract.artifactAction.revision}`);
@@ -264,7 +275,9 @@ describe("browser compatibility matrix", () => {
       "bun test tests/direct-wasm-backend.test.mjs",
       browserContract.testCommand.replace(" tests/wasm-managed-array-search.test.mjs", ""),
       browserContract.testCommand.replace(" tests/wasm-managed-array-construction.test.mjs", ""),
-      browserContract.testCommand.replace(" tests/wasm-managed-object-properties.test.mjs", "")]) {
+      browserContract.testCommand.replace(" tests/wasm-managed-object-properties.test.mjs", ""),
+      browserContract.testCommand.replace(" tests/wasm-managed-exceptions-browser.test.mjs", ""),
+      browserContract.testCommand.replace(" tests/wasm-managed-symbols.test.mjs", "")]) {
       expect(() => validateBrowserCompatibility({ ...browserContract, testCommand }, baseline)).toThrow(/complete direct WASM/);
     }
     expect(() => validateBrowserCompatibility({ ...browserContract,

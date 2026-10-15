@@ -119,7 +119,9 @@ function starts_at_QMARK_(prefix, offset, text) {
       let matched = __eliscript_value_4;
       let index = __eliscript_value_5;
       while (__eliscript_truthy(((__eliscript_value_6) => (__eliscript_truthy(__eliscript_value_6) ? __eliscript_numeric_relation("<", index, Collection.count(prefix)) : __eliscript_value_6))(matched))) {
-        ((!(Collection.nth(prefix, index) === Collection.nth(text, (offset + index)))) ? ((matched = false)) : null);
+        if ((!(Collection.nth(prefix, index) === Collection.nth(text, (offset + index))))) {
+          ((matched = false));
+        }
         ((index = (index + 1)));
       }
       return matched;
@@ -142,7 +144,9 @@ function contains_QMARK_(needle, text) {
       let offset = __eliscript_value_8;
       let last_offset = __eliscript_value_9;
       while (((!__eliscript_truthy(found)) && __eliscript_numeric_relation("<=", offset, last_offset))) {
-        (__eliscript_truthy(starts_at_QMARK_(needle, offset, text)) ? ((found = true)) : null);
+        if (__eliscript_truthy(starts_at_QMARK_(needle, offset, text))) {
+          ((found = true));
+        }
         ((offset = (offset + 1)));
       }
       return found;
@@ -150,10 +154,18 @@ function contains_QMARK_(needle, text) {
   }
 }
 function strip_prefix(prefix, text) {
-  return (__eliscript_truthy(starts_with_QMARK_(prefix, text)) ? slice(Collection.count(prefix), Collection.count(text), text) : text);
+  if (__eliscript_truthy(starts_with_QMARK_(prefix, text))) {
+    return slice(Collection.count(prefix), Collection.count(text), text);
+  } else {
+    return text;
+  }
 }
 function strip_suffix(suffix, text) {
-  return (__eliscript_truthy(ends_with_QMARK_(suffix, text)) ? slice(0, __eliscript_numeric_sub(Collection.count(text), Collection.count(suffix)), text) : text);
+  if (__eliscript_truthy(ends_with_QMARK_(suffix, text))) {
+    return slice(0, __eliscript_numeric_sub(Collection.count(text), Collection.count(suffix)), text);
+  } else {
+    return text;
+  }
 }
 function whitespace_QMARK_(character) {
   return ((character === " ") || (character === "\t") || (character === "\n") || (character === "\r"));

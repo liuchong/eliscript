@@ -1,3 +1,4 @@
+import { currentPerformanceTest } from "./helpers/performance-acceptance.mjs";
 import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -124,13 +125,11 @@ test("ordered Source Map cursors match their complete scan references", async ()
   }
 }, 30_000);
 
-test("committed Source Map cursor report matches measured sources", async () => {
+test("committed Source Map cursor report preserves historical measurements and decisions", async () => {
   const report = validateCompilerSourceMapCursorReport(
     JSON.parse(await readFile(reportPath, "utf8")),
   );
-  expect(report.sourceDigest).toEqual(
-    await compilerSourceMapCursorSourceDigest(),
-  );
+
   expect(report.corpus.files).toHaveLength(compilerModuleCount);
   expect(report.corpus.files).toContain("bootstrap/compiler/project.eli");
   expect(report.corpus.artifactMarks).toBeGreaterThan(20_000);
@@ -162,4 +161,9 @@ test("Source Map reacceptance rejects weaker speed and provenance claims", async
   const altered = structuredClone(report);
   altered.baseline.control.artifacts[0].control = "0".repeat(64);
   expect(() => validateCompilerSourceMapCursorReport(altered)).toThrow("controlled compiler baseline");
+});
+
+currentPerformanceTest(test)("committed Source Map cursor report matches measured sources", async () => {
+  const report = JSON.parse(await readFile(reportPath, "utf8"));
+  expect(report.sourceDigest).toEqual(await compilerSourceMapCursorSourceDigest());
 });

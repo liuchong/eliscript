@@ -20,7 +20,8 @@ async function readJson(relativePath) {
 }
 
 test("repository dependencies and generated artifacts satisfy declared boundaries", async () => {
-  const report = await checkRepositoryIntegrity({ root: ROOT });
+  const deferred = process.env.ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE === "1";
+  const report = await checkRepositoryIntegrity({ root: ROOT, deferPerformanceAcceptance: deferred });
   // The count comes from the contract, so declaring a dependency updates the
   // contract rather than this expectation.
   const contract = await readJson("contracts/repository-integrity.json");
@@ -40,13 +41,27 @@ test("repository dependencies and generated artifacts satisfy declared boundarie
       deterministicOutputs: 7,
       derivedArtifacts: 4,
       benchmarkArtifacts: 14,
-      benchmarkSources: 291,
+      benchmarkSources: deferred ? 0 : 291,
     },
   });
   expect(report.dependency.scannedJavaScript).toBeGreaterThan(0);
   expect(report.dependency.scannedEliscript).toBeGreaterThan(0);
   expect(report.dependency.totalImports).toBeGreaterThan(0);
+  if (deferred) expect(report.artifacts.deferredBenchmarkSources).toEqual(contract.artifacts.benchmarkReports);
 }, 15_000);
+
+test("performance deferral is explicit and does not suppress dependency or artifact checks", async () => {
+  const contract = await readJson("contracts/repository-integrity.json");
+  const trackedFiles = await repositoryTrackedFiles(ROOT);
+  const broken = structuredClone(contract);
+  broken.artifacts.benchmarkReports = [];
+  await expect(checkRepositoryIntegrity({ root: ROOT, contract: broken,
+    trackedFiles, deferPerformanceAcceptance: true })).rejects.toThrow("benchmark");
+  const badWorkflow = structuredClone(contract);
+  badWorkflow.artifacts.derived.find(entry => entry.id === "browser-compatibility-workflow").outputs = ["wrong.yml"];
+  await expect(checkRepositoryIntegrity({ root: ROOT, contract: badWorkflow,
+    trackedFiles, deferPerformanceAcceptance: true })).rejects.toThrow("browser workflow");
+}, 15000);
 
 test("repository integrity rejects undeclared and boundary-crossing imports", async () => {
   const contract = await readJson("contracts/repository-integrity.json");

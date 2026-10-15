@@ -1,3 +1,4 @@
+import { currentPerformanceTest } from "./helpers/performance-acceptance.mjs";
 import { afterAll, beforeAll, describe, test } from "bun:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -701,7 +702,7 @@ test("explicit ABI CLI writes executable JS and directly encoded WASM", async ()
 
 test("direct WASM performance report preserves budgets and blocks failed promotion", async () => {
   const report = JSON.parse(await readFile(resolve(root, "tools/backends/results/direct-wasm-macos-arm64.json"), "utf8"));
-  await validateDirectWasmReport(report);
+  await validateDirectWasmReport(report, { verifySources: false });
   const collectionFirst = JSON.parse(await readFile(resolve(root, "tools/backends/results/direct-wasm-source-collections-first-macos-arm64.json"), "utf8"));
   await validateDirectWasmReport(collectionFirst, { verifySources: false });
   assert.equal(collectionFirst.decision.productionPassed, false);
@@ -712,16 +713,6 @@ test("direct WASM performance report preserves budgets and blocks failed promoti
     javascriptSha256: "399d92b0226bc62963bae146e3546a24879d2e4233e280d89d359b479f0ee8c8",
     wasmSha256: "9e3f41bc43dd60b1f98accac4e4d227868f3804350c0d9b79c12f750bcb8d5fd",
     wasmBytes: 5496, wasmImports: 0, externalBackend: false,
-  });
-  const source = await readFile(resolve(root, "tools/experiments/native-wasm/kernels.eli"), "utf8") + "\n" +
-    await readFile(resolve(root, "tools/backends/batches.eli"), "utf8");
-  const input = generations[0].compiler.compile_ir_string(source, "direct-batches.eli");
-  const javascript = generations[0].numeric.emit_numeric_javascript(input);
-  const wasm = Uint8Array.from(generations[0].wasm.emit_numeric_wasm(input));
-  const digest = value => createHash("sha256").update(value).digest("hex");
-  assert.deepEqual(report.artifacts, {
-    javascriptSha256: digest(javascript), wasmSha256: digest(wasm), wasmBytes: wasm.length,
-    wasmImports: WebAssembly.Module.imports(new WebAssembly.Module(wasm)).length, externalBackend: false,
   });
   assert.equal(report.artifacts.javascriptSha256, collectionFirst.artifacts.javascriptSha256);
   const sortFirst = JSON.parse(await readFile(resolve(root, "tools/backends/results/direct-wasm-array-sort-first-macos-arm64.json"), "utf8"));
@@ -753,21 +744,20 @@ test("direct WASM performance report preserves budgets and blocks failed promoti
   assert.deepEqual(wordFailures[0].artifacts,wordFailures[1].artifacts);
   const forgedBudget = structuredClone(report);
   forgedBudget.parameters.minimumSpeedup = .5;
-  await assert.rejects(validateDirectWasmReport(forgedBudget));
+  await assert.rejects(validateDirectWasmReport(forgedBudget, { verifySources: false }));
   const forgedSamples = structuredClone(report);
   forgedSamples.sessions[0].results[0].measurements.wasm.checksums[0] += 1;
-  await assert.rejects(validateDirectWasmReport(forgedSamples));
+  await assert.rejects(validateDirectWasmReport(forgedSamples, { verifySources: false }));
   const failed = structuredClone(report);
   for (const session of failed.sessions) for (const result of session.results) {
     result.measurements.wasm.samplesMs = result.measurements.js.samplesMs.map(ms => ms * 2);
   }
   failed.summary = failed.summary.map(item => ({ ...item, wasmMs: item.jsMs * 2, speedup: .5 }));
   failed.decision.productionPassed = false;
-  await validateDirectWasmReport(failed);
+  await validateDirectWasmReport(failed, { verifySources: false });
   failed.decision.productionPassed = true;
-  await assert.rejects(validateDirectWasmReport(failed));
-  const promotion = spawnSync("bun", [resolve(root, "tools/backends/benchmark.mjs"), "--require-production"], { encoding: "utf8" });
-  assert.equal(promotion.status, report.decision.productionPassed ? 0 : 1, promotion.stderr);
+  await assert.rejects(validateDirectWasmReport(failed, { verifySources: false }));
+
 });
 
 test("runtime fixed-point Seed failures cannot become successful comparisons", async () => {
@@ -2094,4 +2084,21 @@ describe("browser compiler backends", () => {
     },{source,runtime});
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,"browser-control.eli"),generations[2].compiler.compile_ir_string(runtime,"runtime.eli"),{maximumPages:16}));
   });
+});
+
+currentPerformanceTest(test)("current-source performance acceptance: direct WASM artifacts and promotion", async () => {
+  const report = JSON.parse(await readFile(resolve(root, "tools/backends/results/direct-wasm-macos-arm64.json"), "utf8"));
+  await validateDirectWasmReport(report);
+  const source = await readFile(resolve(root, "tools/experiments/native-wasm/kernels.eli"), "utf8") + "\n" +
+    await readFile(resolve(root, "tools/backends/batches.eli"), "utf8");
+  const input = generations[0].compiler.compile_ir_string(source, "direct-batches.eli");
+  const javascript = generations[0].numeric.emit_numeric_javascript(input);
+  const wasm = Uint8Array.from(generations[0].wasm.emit_numeric_wasm(input));
+  const digest = value => createHash("sha256").update(value).digest("hex");
+  assert.deepEqual(report.artifacts, {
+    javascriptSha256: digest(javascript), wasmSha256: digest(wasm), wasmBytes: wasm.length,
+    wasmImports: WebAssembly.Module.imports(new WebAssembly.Module(wasm)).length, externalBackend: false,
+  });
+  const promotion = spawnSync("bun", [resolve(root, "tools/backends/benchmark.mjs"), "--require-production"], { encoding: "utf8" });
+  assert.equal(promotion.status, report.decision.productionPassed ? 0 : 1, promotion.stderr);
 });

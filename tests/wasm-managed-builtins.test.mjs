@@ -145,8 +145,13 @@ test('boxed primitive tests do not confuse source arrays, objects, functions and
 });
 
 test('unsupported object conversion and actual builtin traps preserve effects, caller roots and original failures', async () => {
-  const {a} = instance(), object = a.sourceObject({}), trace = a.sourceObject({}), held = a.number(-0), frame = a.frame(1);
+  const {a} = instance(), object = a.sourceObject({toString:false,valueOf:false}), trace = a.sourceObject({}), held = a.number(-0), frame = a.frame(1);
   a.frameSet(frame, 0, held);
+  const plain = a.sourceObject({}), plainTrace = a.sourceObject({}), ordinary = a.invoke('number-extra', [plain, plainTrace]), control = {};
+  assert(Object.is(a.readNumber(ordinary), js.number_extra({}, control)));assert.equal(control.visited, 7);
+  const ordinaryKey = a.string('visited'), ordinarySeen = a.objectGet(plainTrace, ordinaryKey);assert.equal(a.readNumber(ordinarySeen), control.visited);
+  for (const value of [ordinary, plain, plainTrace, ordinaryKey, ordinarySeen]) a.release(value);
+  assert.throws(() => js.number_extra({toString:false,valueOf:false}, {}), TypeError);
   assert.throws(() => a.invoke('number-extra', [object, trace]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003');
   assert.equal(a.stats().frameDepth, 1); assert(Object.is(a.readNumber(held), -0));
   const key = a.string('visited'), seen = a.objectGet(trace, key); assert.equal(a.readNumber(seen), 7);

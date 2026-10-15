@@ -12,7 +12,8 @@
   (defconst strict-binding-names (js-array "arguments" "eval"))
   (defconst internal-prefix "__eliscript_")
   (defconst fail
-    (js* "(message) => { throw new Error(message); }"))
+    (lambda (message)
+      (throw (new (js* "Error") message))))
 
   (defun ascii-identifier-code-p (code)
     (or (and (>= code 65) (<= code 90))

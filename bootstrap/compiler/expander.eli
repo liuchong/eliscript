@@ -15,11 +15,15 @@
   (defconst gensym-prefix-pattern
     (js* "/^[A-Za-z_$][A-Za-z0-9_$?!*+=<>-]*$/"))
   (defconst raise-error
-    (js* "(message) => { throw new Error(message); }"))
+    (lambda (message)
+      (throw (new (js* "Error") message))))
   (defconst raise-diagnostic
     (js* "(diagnostic) => { const p = diagnostic.location.start; const error = new Error(`${diagnostic.location.file}:${p.line}:${p.column}: ${diagnostic.message}`); error.eliscriptDiagnostic = diagnostic; throw error; }"))
   (defconst guard
-    (js* "(operation, onError) => { try { return operation(); } catch (error) { return onError(error.message); } }"))
+    (lambda (operation onError)
+      (try (funcall operation)
+        (catch error
+          (funcall onError (get error :message))))))
 
   (defun expander-fail (context span message)
     (let ((file (or (get context :filename)
