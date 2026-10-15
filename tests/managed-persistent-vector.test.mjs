@@ -1,0 +1,33 @@
+import {beforeAll,afterAll,test} from 'bun:test';import assert from 'node:assert/strict';
+import {readFile,mkdtemp,rm,writeFile} from 'node:fs/promises';import {resolve} from 'node:path';import {tmpdir} from 'node:os';import {pathToFileURL} from 'node:url';import {spawnSync} from 'node:child_process';
+import {buildBackends} from '../tools/backends/build.mjs';import {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';import {instantiateNativeManagedRuntime} from '../tools/backends/native-managed-runtime.mjs';
+let b,rt,modules,lowered,bytes,js,directory;
+const vectorCounts=Object.freeze([0,1,31,32,33,63,64,65,1023,1024,1025,1056,1057]);
+const options={maxSlots:8192,initialBytes:262144,maxBytes:16777216},memory={initialPages:4,maximumPages:1024};
+beforeAll(async()=>{
+ directory=await mkdtemp(resolve(tmpdir(),'eliscript-managed-vector-'));b=await buildBackends({outputRoot:directory});rt=b.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli','utf8'),'runtime.eli');
+ const source=await readFile('stdlib/persistent-vector.eli','utf8'),entry=await readFile('tests/fixtures/wasm-managed-persistent-vector.eli','utf8');
+ modules=[{id:'persistent-vector.mjs',program:b.compiler.compile_ir_string(source,'persistent-vector.eli')},{id:'entry.mjs',program:b.compiler.compile_ir_string(entry,'vector-entry.eli')}];
+ await writeFile(resolve(directory,'persistent-vector.mjs'),b.compiler.compile_string(source,'persistent-vector.eli'));await writeFile(resolve(directory,'entry.mjs'),b.compiler.compile_string(entry,'vector-entry.eli'));// The independent reference executes the unchanged generated JavaScript in
+ // Node; cache only its observations, never a reconstructed input or algorithm.
+ const oracle=spawnSync('node',['--input-type=module','-e','const reference=await import(process.argv[1]);console.log(JSON.stringify('+JSON.stringify(vectorCounts)+'.map(n=>[n,reference.vector_case(n)])));',pathToFileURL(resolve(directory,'entry.mjs')).href],{encoding:'utf8',timeout:30000});assert.equal(oracle.status,0,oracle.stderr);
+ const observations=new Map(JSON.parse(oracle.stdout));js={vector_case(n){assert(observations.has(n));return observations.get(n);}};
+ const saved=JSON.stringify(modules);lowered=b.managed.lower_managed_project(modules,'entry.mjs',rt);bytes=Uint8Array.from(b.managed.emit_managed_project_wasm(modules,'entry.mjs',rt,memory));assert.equal(JSON.stringify(modules),saved);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);
+},120000);
+afterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});
+function read(a,v){if(v?.kind===4)return a.readNumber(v);if(v?.kind===5)return a.readString(v);if(v?.kind===14){const values=[];for(let i=0;i<a.length(v);i++){const child=a.get(v,i);try{values.push(read(a,child));}finally{a.release(child);}}return values;}return v;}
+function finish(a){try{a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}finally{a.close?.();}}
+function check(a,count){const n=a.number(count);try{const out=a.invoke('vector_case',[n]);try{assert.deepEqual(read(a,out),js.vector_case(count),'count '+count);}finally{a.release(out);}}finally{a.release(n);}a.collect();assert.equal(a.stats().frameDepth,0);}
+test('Given the entire original persistent Vector module when WASM crosses tail and root boundaries then versions metadata and reductions match JS',()=>{
+ const a=instantiateManagedRuntime(bytes,options);a.auto(65536);try{for(const n of vectorCounts)check(a,n);}finally{finish(a);}
+},120000);
+test('Given each allocation collects when real persistent Vector callbacks run then original versions and opaque roots stay valid',()=>{
+ const a=instantiateManagedRuntime(bytes,options);a.auto(1);try{check(a,33);}finally{finish(a);}
+},30000);
+test.skipIf(process.platform!=='darwin'||process.arch!=='arm64')('Given a true native library of the complete Vector module when the same cases run then persistent behavior matches the same JS reference',async()=>{
+ const path=resolve(directory,'vector.dylib');await writeFile(path,Uint8Array.from(b.native.emit_typed_native_memory_library(lowered.typed,'arm64-macos')));const a=await instantiateNativeManagedRuntime(path,lowered,{...options,...memory});a.auto(65536);try{for(const n of vectorCounts)check(a,n);}finally{finish(a);}
+},120000);
+test('Given the same zero-import Vector bytes when Node executes them then the original independent JS module remains the oracle',async()=>{
+ const path=resolve(directory,'vector.wasm');await writeFile(path,bytes);const script=["import assert from 'node:assert/strict';import{readFileSync}from'node:fs';",'const{instantiateManagedRuntime}=await import(process.argv[1]),js=await import(process.argv[3]);',read.toString(),finish.toString(),check.toString(),'const bytes=readFileSync(process.argv[2]);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);const a=instantiateManagedRuntime(bytes,'+JSON.stringify(options)+');a.auto(65536);try{for(const n of '+JSON.stringify(vectorCounts)+')check(a,n);}finally{finish(a);}'].join('\n');
+ const child=spawnSync('node',['--input-type=module','-e',script,pathToFileURL(resolve('tools/backends/managed-runtime.mjs')).href,path,pathToFileURL(resolve(directory,'entry.mjs')).href],{encoding:'utf8',timeout:120000});assert.equal(child.status,0,child.stderr);
+},130000);

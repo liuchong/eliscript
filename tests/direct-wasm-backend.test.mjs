@@ -170,7 +170,12 @@ beforeAll(async () => {
   const projectStateSource = await readFile(projectStateInput, "utf8");
   const projectEntrySource = await readFile(projectEntryInput, "utf8");
   // Keep the public seed CLI and its per-child deadline. Avoid launching
-  // twelve Emacs instances at once while another test file is also running.
+  // multiple Emacs instances at once while another test file is also running.
+  const consInput = resolve(root, "tests/fixtures/wasm-managed-js-cons.eli");
+  const vectorInput = resolve(root, "stdlib/persistent-vector.eli");
+  const vectorEntryInput = resolve(root, "tests/fixtures/wasm-managed-persistent-vector.eli");
+  const [consSource, vectorSource, vectorEntrySource] = await Promise.all(
+    [consInput, vectorInput, vectorEntryInput].map(file => readFile(file, "utf8")));
   const seedOutputs = [];
   for (const [input, output] of [
     [resolve(root, "bootstrap/runtime/memory.eli"), "memory-seed.mjs"],
@@ -185,10 +190,18 @@ beforeAll(async () => {
     [regexpInput, "regexp-seed.mjs"],
     [builtinsInput, "builtins-seed.mjs"],
     [jsonInput, "json-seed.mjs"],
+    [consInput, "cons-seed.mjs"],
+    [vectorInput, "vector-seed.mjs"],
+    [vectorEntryInput, "vector-entry-seed.mjs"],
   ]) seedOutputs.push(await seedJavascript(input, resolve(directory, output)));
-  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed, moduleSeed, projectStateSeed, projectEntrySeed, stringsSeed, regexpSeed, builtinsSeed, jsonSeed] = seedOutputs;
+  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed, moduleSeed, projectStateSeed, projectEntrySeed, stringsSeed, regexpSeed, builtinsSeed, jsonSeed, consSeed, vectorSeed, vectorEntrySeed] = seedOutputs;
   runtimeSeeds = {
     memory: { source, javascript: memorySeed },
+    cons: { source: consSource, javascript: consSeed, filename: consInput },
+    vector: { entry: "entry.mjs", modules: [
+      {id:"persistent-vector.mjs",source:vectorSource,javascript:vectorSeed,filename:"persistent-vector.eli"},
+      {id:"entry.mjs",source:vectorEntrySource,javascript:vectorEntrySeed,filename:"vector-entry.eli"},
+    ]},
     strings: { source: stringsSource, javascript: stringsSeed, filename: stringsInput },
     regexp: { source: regexpSource, javascript: regexpSeed, filename: regexpInput },
     builtins: { source: builtinsSource, javascript: builtinsSeed, filename: builtinsInput },
@@ -1906,6 +1919,66 @@ describe("browser compiler backends", () => {
     },{source,runtime});
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-source-collections.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
   });
+  test("browser js-cons preserves nullish normalization, argument order and iterable protocols",async()=>{
+    const fixture=runtimeSeeds.cons,runtime=runtimeSeeds.memory.source;
+    for(const g of generations){const p=g.compiler.compile_ir_string(fixture.source,fixture.filename);assert.equal(g.compiler.emit_ir_string(p),fixture.javascript);}
+    const result=await evaluateBrowser(async({bundle,fixture,runtime})=>{
+      const urls=[],url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));urls.push(url);
+      try{
+        const c=await import(url),p=c.compile_ir_string(fixture.source,fixture.filename),rt=c.compile_ir_string(runtime,'runtime.eli');
+        const bytes=Uint8Array.from(c.emit_managed_wasm(p,rt,{maximumPages:16}));
+        const check=(value,label)=>{if(!value)throw Error(label);};
+        check(c.emit_ir_string(p)===fixture.javascript,'Seed JS parity');
+        check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'zero imports');
+        const oracleURL=URL.createObjectURL(new Blob([fixture.javascript],{type:'text/javascript'}));urls.push(oracleURL);const js=await import(oracleURL);
+        const fresh=()=>{const a=c.instantiateManagedRuntime(bytes);a.auto(1);return a;};
+        const finish=a=>{a.closeModule();a.collect();check(a.live()===0&&a.stats().frameDepth===0,'cleanup');};
+        const a=fresh();
+        for(const tail of[null,undefined,'','中😀\ud800',false,1]){
+          const input=typeof tail==='number'?a.number(tail):typeof tail==='string'?a.string(tail):tail,out=a.invoke('safe',[true,input]);
+          check(a.readString(out)===js.safe(true,tail),'tail '+String(tail));a.release(input);a.release(out);
+        }
+        for(const name of['effects','protocol'])for(let mode=0;mode<8;mode++){
+          const n=a.number(mode),out=a.invoke(name,[n]);check(a.readString(out)===js[name](mode),name+'/'+mode);a.release(n);a.release(out);
+        }
+        const tail=a.sourceArray([]);a.resize(tail,3);const dense=a.invoke('prepend',[undefined,tail]);check(a.length(dense)===4&&a.length(tail)===3,'dense length');
+        for(let i=0;i<4;i++){const n=a.number(i);check(a.invoke('own',[dense,n])===true&&a.get(dense,i)===undefined,'own undefined');a.release(n);}a.release(tail);a.release(dense);finish(a);
+        for(const mode of[0,1]){
+          const a=fresh(),n=a.number(mode),saved=Object.getOwnPropertyDescriptor(Array.prototype,Symbol.iterator);let expected;
+          try{expected=js.nullish_protocol(mode);}finally{Object.defineProperty(Array.prototype,Symbol.iterator,saved);}
+          const out=a.invoke('nullish-protocol',[n]);check(a.readString(out)===expected,'canonical Array iterator');a.release(n);a.release(out);finish(a);
+        }
+        return [...bytes];
+      }finally{for(const url of urls)URL.revokeObjectURL(url);}
+    },{fixture,runtime});
+    assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(fixture.source,fixture.filename),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
+  },60000);
+
+  test("browser full persistent Vector preserves versions metadata and tree boundaries",async()=>{
+    const fixture=runtimeSeeds.vector,runtime=runtimeSeeds.memory.source;
+    for(const g of generations)for(const m of fixture.modules)assert.equal(g.compiler.compile_string(m.source,m.filename),m.javascript);
+    const result=await evaluateBrowser(async({bundle,fixture,runtime})=>{
+      const urls=[],url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));urls.push(url);
+      try{
+        const c=await import(url),rt=c.compile_ir_string(runtime,'runtime.eli'),modules=fixture.modules.map(m=>({id:m.id,program:c.compile_ir_string(m.source,m.filename)}));
+        const frozen=JSON.stringify(modules),bytes=Uint8Array.from(c.emit_managed_project_wasm(modules,fixture.entry,rt,{initialPages:4,maximumPages:1024}));
+        const check=(value,label)=>{if(!value)throw Error(label);};check(JSON.stringify(modules)===frozen,'immutable input');check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'zero imports');
+        for(let i=0;i<modules.length;i++)check(c.emit_ir_string(modules[i].program)===fixture.modules[i].javascript,'Seed JS parity');
+        const dependencyURL=URL.createObjectURL(new Blob([fixture.modules[0].javascript],{type:'text/javascript'}));urls.push(dependencyURL);
+        const oracleIR=structuredClone(modules[1].program),rewrite=node=>{if(node.kind==='import-declaration')node.value=dependencyURL;for(const child of node.children??[])rewrite(child);};for(const node of oracleIR.body)rewrite(node);
+        const oracleURL=URL.createObjectURL(new Blob([c.emit_ir_string(oracleIR)],{type:'text/javascript'}));urls.push(oracleURL);const js=await import(oracleURL);
+        const read=(a,value)=>{if(value?.kind===4)return a.readNumber(value);if(value?.kind===5)return a.readString(value);if(value?.kind===14){const out=[];for(let i=0;i<a.length(value);i++){const child=a.get(value,i);try{out.push(read(a,child));}finally{a.release(child);}}return out;}return value;};
+        const run=(threshold,counts)=>{
+          const a=c.instantiateManagedRuntime(bytes,{maxSlots:8192,initialBytes:262144,maxBytes:16777216});a.auto(threshold);
+          for(const n of counts){const input=a.number(n),out=a.invoke('vector_case',[input]);try{check(JSON.stringify(read(a,out))===JSON.stringify(js.vector_case(n)),'Vector '+n);}finally{a.release(input);a.release(out);}a.collect();check(a.stats().frameDepth===0,'frames');}
+          a.closeModule();a.collect();check(a.live()===0&&a.stats().frameDepth===0,'all module roots reclaimed');
+        };
+        run(65536,[0,1,31,32,33,63,64,65,1023,1024,1025,1056,1057]);run(1,[33]);return [...bytes];
+      }finally{for(const url of urls)URL.revokeObjectURL(url);}
+    },{fixture,runtime});
+    assert.deepEqual(result,generations[2].managed.emit_managed_project_wasm(fixture.modules.map(m=>({id:m.id,program:generations[2].compiler.compile_ir_string(m.source,m.filename)})),fixture.entry,generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{initialPages:4,maximumPages:1024}));
+  },120000);
+
   test("browser linked projects preserve namespaces, default identity, live imports, cycles and failure ownership",async()=>{
     const fixture=runtimeSeeds.project,runtime=runtimeSeeds.memory.source;
     const result=await evaluateBrowser(async({bundle,fixture,runtime})=>{

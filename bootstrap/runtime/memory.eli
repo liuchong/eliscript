@@ -5303,6 +5303,24 @@
                                 (value-source-iterator-close heap iterator (last-error))) 0))))
                       (when (= (last-error) 0) (setq next (value-source-iterator-advance heap iterator))))))))
             (setq result (heap-frame-result heap frame result))) result))))
+  ;; js-cons uses a real empty Array for a nullish tail, so the canonical
+  ;; Array prototype's current iterator still runs. Raw prefix keeps rejecting it.
+  (defun value-source-js-cons (heap head tail)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= (heap-key-check heap head) 0) (= (heap-key-check heap tail) 0)) 0
+        (let ((frame (heap-argument-frame heap head tail 0 4)) (result 0))
+          (when (/= frame 0)
+            (when (or (= tail 0) (= tail 3))
+              (setq tail (value-array-new heap 0))
+              (when (/= tail 0) (frame-set heap frame 2 tail)))
+            (when (= (last-error) 0)
+              (let ((arguments (value-refs heap 7 2)))
+                (when (/= arguments 0)
+                  (frame-set heap frame 3 arguments)
+                  (value-set heap arguments 0 head) (value-set heap arguments 1 tail)
+                  (setq result (value-iterate-intrinsic heap arguments 2 2)))))
+            (setq result (heap-frame-result heap frame result))) result))))
+  (export value-source-js-cons)
   (defun value-source-access-key (heap receiver key)
     (begin-operation)
     (if (= (heap-check heap) 0) 0

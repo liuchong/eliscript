@@ -1509,6 +1509,13 @@
                (if (or (= method "push") (= method "pop") (= method "slice"))
                  (lower-managed-array-method node scope state functions)
                  (lower-managed-text-method node scope state functions method)))))))))
+        ((and (= kind "intrinsic") (= value "js-cons"))
+         (unless (= (js-length children) 2) (managed-fail node "invalid managed js-cons arity"))
+         (let* ((head (snapshot-managed (lower-managed-expression (js-nth 0 children) scope state functions) state))
+                (tail (snapshot-managed (lower-managed-expression (js-nth 1 children) scope state functions) state))
+                (result (managed-result state (runtime-call state "value-source-js-cons"
+                  (runtime-arguments state (js-array (get head :result) (get tail :result)))) t)))
+           (put result :steps (word-sequence (js-array (get head :steps) (get tail :steps) (get result :steps)))) result))
         ((and (= kind "intrinsic") (= value "js-length"))
          (unless (= (js-length children) 1) (managed-fail node "invalid managed length arity"))
          (let* ((operand (lower-managed-expression (js-nth 0 children) scope state functions))

@@ -345,7 +345,18 @@ primitive keys, own-property checks/enumeration and shallow object copies, and
 retain method-shadow failures after argument evaluation. Host `sourceArray`
 keeps the same own-slot shape even if its input overrides iteration. General
 prototype/descriptor/accessor and dynamic method capabilities remain open.
-Persistent vector literals remain a separate, unimplemented source capability. The bulk `sourceArray(input = [])` constructor creates kind-14 arrays, protects
+`js-cons` evaluates its head and tail once, in that order, and prepends the
+head to the tail iterator. Null and undefined tails become a fresh empty source
+array, including its canonical iterator behavior; other invalid iterables throw
+source TypeError. Result indices are own data slots, even with frozen inherited
+indices. The existing raw spread helper continues to reject nullish tails.
+
+The complete existing `stdlib/persistent-vector.eli` module can now be linked
+with a managed entry and executed as zero-import WASM or a native library.
+Acceptance covers persistent versions, metadata, append/assoc/pop, reductions,
+and tail/tree boundaries through 1057 elements against the original JS module.
+Persistent vector literal syntax remains a separate, unimplemented source
+capability. The bulk `sourceArray(input = [])` constructor creates kind-14 arrays, protects
 earlier operands across later getters and rejects foreign handles. The existing
 `array()` constructor retains raw kind 7. The exported setter protects a borrowed child
 across allocation even when called without a generated frame.

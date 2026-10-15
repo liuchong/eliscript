@@ -130,6 +130,8 @@ test-core: check-contracts
 		tests/wasm-managed-object-integrity.test.mjs \
 		tests/wasm-managed-array-search.test.mjs \
 		tests/wasm-managed-array-construction.test.mjs \
+		tests/wasm-managed-js-cons.test.mjs \
+		tests/managed-persistent-vector.test.mjs \
 		tests/wasm-managed-object-properties.test.mjs \
 		tests/wasm-managed-reflection-descriptor.test.mjs \
 		tests/wasm-managed-math.test.mjs \
