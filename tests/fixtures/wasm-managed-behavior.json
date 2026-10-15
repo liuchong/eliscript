@@ -263,6 +263,85 @@
           ]
         }
       ]
+    },
+    {
+      "name": "Text formatting and decomposition",
+      "description": "Pure WASM mappings, exact numeric text, UTF16 padding, replacement and splitting retain source conversions and failures",
+      "scenarios": [
+        {
+          "id": "unicode-case-expansion",
+          "given": "mixed scripts, a contextual sigma and a lone UTF16 surrogate",
+          "when": "upper and lower casing run",
+          "then": "full Unicode mappings preserve expansion, context and lone code units",
+          "source": "(defun run () (js-array (js-call \"ßﬃ😀\" :toUpperCase) (js-call \"AΣ́\" :toLowerCase) (js-call \"\\ud800A\" :toLowerCase)))",
+          "expected": [
+            "SSFFI😀",
+            "aς́",
+            "\ud800a"
+          ]
+        },
+        {
+          "id": "padding-code-units",
+          "given": "astral fillers and fractional target lengths",
+          "when": "start and end padding run",
+          "then": "padding truncates by UTF16 code unit and converts the target length",
+          "source": "(defun run () (js-array (js-call \"x\" :padStart 4.9 \"😀\") (js-call \"x\" :padEnd 4.9 \"😀\")))",
+          "expected": [
+            "😀\ud83dx",
+            "x😀\ud83d"
+          ]
+        },
+        {
+          "id": "number-radix-text",
+          "given": "an exact fractional Number and radix 16",
+          "when": "the Number is converted then cased and padded",
+          "then": "the full ordinary method chain yields the exact text",
+          "source": "(defun run () (js-call (js-call (js-call 255.5 :toString 16) :toUpperCase) :padStart 6 \"0\"))",
+          "expected": "00FF.8"
+        },
+        {
+          "id": "replace-all-original-text",
+          "given": "two matches and a callback using offsets and the original string",
+          "when": "every match is replaced",
+          "then": "both callbacks receive original UTF16 offsets and input",
+          "source": "(defun run () (js-call \"a😀a\" :replaceAll \"a\" (lambda (match index original) (str match \":\" index \":\" original))))",
+          "expected": "a:0:a😀a😀a:3:a😀a"
+        },
+        {
+          "id": "literal-split-zero-effects",
+          "given": "effectful numeric and separator conversion hooks with a zero limit",
+          "when": "literal split runs",
+          "then": "numeric conversion precedes text conversion even for an empty result",
+          "source": "(defun run () (let* ((trace (js-array)) (n (js-object :valueOf (lambda () (js-call trace :push \"limit\") 0))) (s (js-object :toString (lambda () (js-call trace :push \"separator\") \"/\")))) (js-array (js-call \"a/b\" :split s n) (js-call trace :join \">\"))))",
+          "expected": [
+            [],
+            "limit>separator"
+          ]
+        },
+        {
+          "id": "regexp-split-captures",
+          "given": "a separator with an optional capture",
+          "when": "the capture does not participate in a split match",
+          "then": "undefined is an owned element and is distinct from a hole",
+          "source": "(defun run () (let ((parts (js-call \"b\" :split (js* \"/(a)?b/\")))) (js-array (js-length parts) (object-has? parts 1) (js* \"typeof parts[1]\"))))",
+          "expected": [
+            3,
+            true,
+            "undefined"
+          ]
+        },
+        {
+          "id": "invalid-number-radix-recovery",
+          "given": "a radix below two and a subsequent valid conversion",
+          "when": "Number.toString validates its radix",
+          "then": "a RangeError is raised without contaminating later calls",
+          "source": "(defun run () (js-call 7 :toString 1)) (defun recover () (js-call 255 :toString 16))",
+          "runtimeError": "ELI-RT0010",
+          "jsError": "RangeError",
+          "wasmError": "RangeError",
+          "recover": "ff"
+        }
+      ]
     }
   ]
 }

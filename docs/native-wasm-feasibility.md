@@ -2728,8 +2728,8 @@ JS 标签。实现直接检查共同内存中的自有数据，既不调用转�
 - [x] 受影响原参数性能、契约、原始全量门禁与严格字节编译。
 - [ ] 检查实际 diff 与测试证据，签名提交、立即推送并核验完整 CI。
 
-原始编译器 IR 未改写；本批的下一处拒绝已推进到 symbol.eli:26:19 的
-Number.toString 基数转换。此时仍没有完整编译器 WASM 产物，HOST-WASM、
+原始编译器 IR 未改写；当时下一处编译拒绝为 symbol.eli:26:19 的
+String.toUpperCase，前一行 Number.toString(16) 则可编译但尚不能执行。此时仍没有完整编译器 WASM 产物，HOST-WASM、
 HOST-NATIVE、AI-TOOLS 和完整九格全部保持开放。下一批按原语言的数值文本
 转换语义继续 TDD，不能用固定数字或只支持十六进制的样例替代通用实现。
 
@@ -2760,3 +2760,61 @@ Node/Chromium 网格 1.0322×/1.0105×，native 三项为
 ERT 3 项、Bun 217 项/23 文件及全部 CLI。严格字节编译退出 0，三种真实
 浏览器各 73 项通过。额外给完整 Seed 编译加入 6 秒准备延迟后，两项行为
 测试仍在原准备、子进程及默认测试超时内通过；没有缩减源码或一致性断言。
+
+
+### 编译器所需的数值文本、大小写、补齐与拆分批次
+
+沿用原语言和 JS 互操作语义，新增的执行均在零 imports WASM 中完成：
+
+| 能力 | 实现与验收边界 |
+| --- | --- |
+| Number.toString | 2–36 进制，精确整数与 binary64 分数、次正规数、负零、NaN/Infinity；无效基数报告 RangeError/ELI-RT0010；转换与参数副作用保留 |
+| toUpperCase/toLowerCase | 固定 Unicode 17.0.0，完整展开、Final_Sigma 上下文、astral 与孤立 UTF-16 单元；数据及许可证随源码发布，普通编译不访问网络或外部后端 |
+| padStart/padEnd | 原 ToLength 与填充转换顺序、默认空格、按 UTF-16 截断、空填充及容量失败恢复 |
+| replaceAll | 字面量非重叠匹配、空搜索、原文替换模板、源闭包回调及其返回值转换；当前表示的 RegExp 不含 g，故按原规则拒绝 nonglobal RegExp |
+| split | 字面量及当前表示的 RegExp、uint32 上限、空匹配的 Unicode 推进、捕获项与自有 undefined 位置；上限为零时仍保留普通分隔符转换副作用 |
+
+普通对象/数组的数值转换复用源函数调用 ABI，按 valueOf、toString 顺序读取
+并调用可用方法；字符串转换保留相反的提示顺序。Symbol 转换钩子、访问器、
+Proxy、完整内建对象转换与有状态正则继续开放，不能用本批关闭完整运行时。
+Unicode 数据生成器只用于维护，固定三个官方输入的 SHA-256；生成结果已经
+逐标量与 Bun、独立 Node 的实际 JS 对照，普通构建直接编译 `.eli` 数据函数。
+
+非十进制 Number 文本的完整跨 JS 引擎一致性仍开放：相同输入的 Node/V8
+和 Bun 已观察到不同尾数文本，尤其是大整数和非二次幂基数分数。本批固定随机
+binary64 与 35 个基数逐项严格对照现有 Bun JS，不采用近似比较；相同 WASM
+产物在各宿主执行的一致性和各 JS 引擎自身的差异须分开验收。编译器当前所需
+的字符整数十六进制转换不涉及该差异，不能据此宣称完整九格已通过。
+
+完整原始 13 模块重新编译后，已越过 symbol 模块的大小写、padStart、replaceAll
+与 split，当前真实拒绝推进到 transient-analysis.eli:489:7 的 Array.sort。
+输入 canonical IR 未修改；还没有完整编译器 WASM 产物，HOST-WASM、
+HOST-NATIVE 和正式九格仍保持开放。下一批先补普通数组排序及比较闭包，
+保留稳定性、稀疏数组、undefined、求值与错误顺序，而非替换编译器源码。
+
+- [x] 先有数值、大小写、补齐、替换和拆分的真实失败，再实现对应执行。
+- [x] 全部 Unicode 标量、固定随机 binary64/UTF-16、转换副作用、容量/错误
+  恢复、不可变 IR 及零 imports 专项；扩展现有 Given/When/Then 行为语料。
+- [x] 公开 Seed、三代 IR/描述/产物固定点与 Chromium 的组合文本流水线。
+- [x] 仅对受影响的三份数值报告按原 3×5×9 参数重新采样：WASM 九项和
+  native 三项继续达标，旧 stack baseline 仍失败；原输入/产物/对照不变。
+- [x] 原始全量门禁、严格字节编译、Firefox/WebKit 与实际暂存检查。
+- [ ] 签名推送并核验本批完整 CI。
+
+提交 b3a2954 的六组浏览器及 Pages 已通过；兼容性三组通过，Linux/Emacs
+30.2 暴露 integrity 检查与打包任务共写 bootstrap 缓存的真实文件锁冲突。
+本批让 integrity 与独立 CLI 一样使用自己的构建目录并在成功/失败后释放，
+保持原准备时限和所有检查。已有 checkout 缓存保留测试先真实失败，修复后
+包括两个并发 CLI、错误源码、Seed 不可用及 integrity 的五项回归全部通过。
+
+
+本批最终原始全量通过：核心 ERT 170 项、Bun 1114 项/155 文件；应用 ERT
+3 项、Bun 217 项/23 文件及全部 CLI。严格字节编译退出 0，Chromium、
+Firefox、WebKit 各 73 项通过；浏览器组合文本断言改为逐项精确比较后，
+Firefox 对应测试另行通过。31 项正式 BDD、6 项数值文本及 20 项字符串
+格式化/拆分测试均纳入完整门禁，不以专项替代全量。
+
+首次全量完整跑完 155 个核心文件，唯一失败为旧测试仍要求拒绝新增能力
+中的 toLowerCase/split；已增加这两项的成功和不可变 IR 断言，并以仍未支持
+的 toLocaleLowerCase/matchAll 保持五项拒绝控制。该失败保留为真实失败，
+修复后重新执行整个原始门禁，未跳过测试、删减断言或放宽超时。

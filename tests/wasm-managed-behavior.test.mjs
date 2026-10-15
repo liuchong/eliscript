@@ -8,12 +8,13 @@ import {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';
 
 const catalog = JSON.parse(await readFile(new URL('./fixtures/wasm-managed-behavior.json', import.meta.url), 'utf8'));
 assert.equal(catalog.format, 'eliscript-managed-bdd');assert.equal(catalog.version, 1);
-assert.deepEqual(catalog.features.map(feature => feature.name), ['Array text conversion', 'Represented type and null queries']);
+assert.deepEqual(catalog.features.map(feature => feature.name), ['Array text conversion', 'Represented type and null queries', 'Text formatting and decomposition']);
 assert.deepEqual(catalog.features.flatMap(feature => feature.scenarios.map(scenario => scenario.id)), [
   'empty-and-holes', 'exact-primitive-text', 'shared-arrays', 'length-before-separator', 'live-element-reads', 'conversion-fallback',
   'capture-before-arguments', 'toString-late-join-lookup', 'custom-result-identity', 'self-cycle-and-recovery', 'mutual-cycle-and-recovery',
   'primitive-labels', 'capture-and-live-member', 'missing-member', 'null-predicate-family', 'nil-is-distinct', 'null-member-fails', 'unrepresented-global-refusal',
   'indexed-member-path', 'indexed-capture-live-write', 'indexed-intermediate-fails', 'computed-index-refusal', 'intrinsic-type-evaluates-once', 'intrinsic-own-brands',
+  'unicode-case-expansion', 'padding-code-units', 'number-radix-text', 'replace-all-original-text', 'literal-split-zero-effects', 'regexp-split-captures', 'invalid-number-radix-recovery',
 ]);
 let directory, b, runtime;
 beforeAll(async () => {

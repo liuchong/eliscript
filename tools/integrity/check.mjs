@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -179,9 +180,10 @@ export function validateIntegrityContract(contract) {
   return contract;
 }
 
-async function capture(command, root, timeoutMs = 120_000) {
+async function capture(command, root, timeoutMs = 120_000, environment) {
   const child = Bun.spawn(command, {
     cwd: root,
+    ...(environment ? {env: {...process.env, ...environment}} : {}),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -219,9 +221,13 @@ export async function repositoryTrackedFiles(root = DEFAULT_ROOT) {
 }
 
 async function loadCompiler(root) {
-  await capture([path.join(root, "bin/eliscript-bootstrap")], root);
-  const url = pathToFileURL(path.join(root, "dist/bootstrap/compiler.mjs"));
-  return import(`${url.href}?integrity=${Date.now()}`);
+  const directory = await mkdtemp(path.join(tmpdir(), "eliscript-integrity-compiler-"));
+  try {
+    await capture([path.join(root, "bin/eliscript-bootstrap")], root, 120_000,
+      {ELISCRIPT_BOOTSTRAP_OUT_DIR: directory});
+    const url = pathToFileURL(path.join(directory, "compiler.mjs"));
+    return await import(url.href);
+  } finally {await rm(directory, {recursive: true, force: true});}
 }
 
 function walkImports(node, file, records) {

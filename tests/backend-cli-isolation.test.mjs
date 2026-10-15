@@ -5,7 +5,8 @@ import {resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {spawn} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
-let directory, root, scratch, input, outcomes;
+import {checkRepositoryIntegrity} from '../tools/integrity/check.mjs';
+let directory, root, scratch, input, outcomes, integrityFailure;
 function cli(target, output, source = input, environment = {}) {
   return new Promise((accept, reject) => {
     const child = spawn('bun', [resolve(root, 'tools/backends/compile.mjs'), '--abi', 'numeric-f64', '--target', target, '-o', output, source], {cwd: root, env: {...process.env, TMPDIR: scratch, ...environment}, stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000});
@@ -15,12 +16,15 @@ function cli(target, output, source = input, environment = {}) {
 beforeAll(async () => {
   directory = await mkdtemp(resolve(tmpdir(), 'eliscript-cli-isolation-'));root = resolve(directory, 'checkout');scratch = resolve(directory, 'scratch');
   await mkdir(resolve(root, 'tools/backends'), {recursive: true});await mkdir(resolve(root, 'dist/bootstrap'), {recursive: true});await mkdir(scratch);
+  await mkdir(resolve(root, 'bin'));await copyFile(resolve('bin/eliscript-bootstrap'), resolve(root, 'bin/eliscript-bootstrap'));
   for (const name of ['compile.mjs', 'build.mjs']) await copyFile(resolve('tools/backends', name), resolve(root, 'tools/backends', name));
   for (const name of ['compiler', 'bootstrap', 'runtime']) await symlink(resolve(name), resolve(root, name), 'dir');
   await symlink(resolve('tools/bootstrap-seed.el'), resolve(root, 'tools/bootstrap-seed.el'));
   await writeFile(resolve(root, 'dist/bootstrap/compiler.mjs'), '// unrelated existing build cache\n');
   input = resolve(directory, 'input.eli');await writeFile(input, '(defun f (value) (+ value 1)) (export f)');
   outcomes = await Promise.all([cli('js', resolve(directory, 'out.mjs')), cli('wasm', resolve(directory, 'out.wasm'))]);
+  const contract = JSON.parse(await readFile(resolve('contracts/repository-integrity.json'), 'utf8'));
+  try {await checkRepositoryIntegrity({root, contract, trackedFiles: [], dependenciesOnly: true});} catch (error) {integrityFailure = error;}
 }, 120000);
 afterAll(async () => {if (directory) await rm(directory, {recursive: true, force: true});});
 test('Given concurrent independent CLI requests, when JS and WASM compile, then both exact outputs execute', async () => {
@@ -38,4 +42,8 @@ test('Given rejected source, when the standalone CLI fails, then no output or pr
 test('Given an unavailable Seed executable, when preparation fails, then private build storage is still released', async () => {
   const output = resolve(directory, 'missing-seed.wasm'), result = await cli('wasm', output, input, {EMACS: 'eliscript-intentionally-missing-emacs'});
   assert.notEqual(result.code, 0);assert.equal(result.signal, null);assert.match(result.stderr, /ENOENT|Executable not found/);assert.match(result.stderr, /eliscript-intentionally-missing-emacs/);assert.equal(await Bun.file(output).exists(), false);assert.deepEqual(await readdir(scratch), []);
+});
+test('Given an existing checkout cache, when integrity inspection fails after loading its compiler, then the cache remains unchanged', async () => {
+  assert.equal(integrityFailure?.code, 'ENOENT');assert(integrityFailure.path?.endsWith('package.json'));
+  assert.equal(await readFile(resolve(root, 'dist/bootstrap/compiler.mjs'), 'utf8'), '// unrelated existing build cache\n', 'read-only integrity inspection must preserve unrelated build cache');
 });

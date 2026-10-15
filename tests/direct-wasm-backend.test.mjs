@@ -860,7 +860,11 @@ test("ordinary source text has Seed and three-generation IR, descriptor and WASM
  const bytes=generations.map((g,i)=>g.managed.emit_managed_wasm(programs[i],runtimes[i],{maximumPages:16}));assert.deepEqual(bytes[0],bytes[1]);assert.deepEqual(bytes[1],bytes[2]);
  for(let i=0;i<3;i++)assert.equal(generations[i].compiler.emit_ir_string(programs[i]),seed);
  const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
- for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const s=a.string('中😀\ud800'),p=a.number(1),point=a.invoke('code-point',[s,p]);assert.equal(a.readNumber(point),0x1f600);a.release(point);const fixed=a.invoke('repair',[s]);assert.equal(a.readString(fixed),'中😀�');const needle=a.string('😀'),last=a.invoke('last',[s,needle,undefined]);assert.equal(a.readNumber(last),1);const pointInput=a.number(0x1f600),constructed=a.invoke('from-point',[pointInput]);assert.equal(a.readString(constructed),'😀');const invalid=a.number(.5);assert.throws(()=>a.invoke('from-point',[invalid]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');for(const v of[s,p,fixed,needle,last,pointInput,constructed,invalid])a.release(v);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
+ const control=await import('data:text/javascript;base64,'+Buffer.from(seed).toString('base64'));
+ for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);
+   const read=v=>{if(!v||typeof v!=='object')return v;if(v.kind===4)return a.readNumber(v);if(v.kind===5)return a.readString(v);return Array.from({length:a.length(v)},(_,i)=>{const x=a.get(v,i);try{return read(x)}finally{a.release(x)}})};
+   for(const [name,args]of[['format-symbol',['ß-Σ😀',255.5]],['split-fields',['a, b;😀 a']],['replace-callback',['a😀a']]]){const input=args.map(x=>typeof x==='number'?a.number(x):a.string(x)),out=a.invoke(name,input);assert.deepEqual(read(out),control[name.replaceAll('-','_')](...args));input.forEach(x=>a.release(x));a.release(out);}
+   const s=a.string('中😀\ud800'),p=a.number(1),point=a.invoke('code-point',[s,p]);assert.equal(a.readNumber(point),0x1f600);a.release(point);const fixed=a.invoke('repair',[s]);assert.equal(a.readString(fixed),'中😀�');const needle=a.string('😀'),last=a.invoke('last',[s,needle,undefined]);assert.equal(a.readNumber(last),1);const pointInput=a.number(0x1f600),constructed=a.invoke('from-point',[pointInput]);assert.equal(a.readString(constructed),'😀');const invalid=a.number(.5);assert.throws(()=>a.invoke('from-point',[invalid]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');for(const v of[s,p,fixed,needle,last,pointInput,constructed,invalid])a.release(v);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
 });
 test("RegExp literals preserve public Seed and three-generation programs, typed IR, descriptors and executable bytes",async()=>{
  const {source,javascript:seed,filename}=runtimeSeeds.regexp;
@@ -1538,9 +1542,10 @@ describe("browser compiler backends", () => {
       try {
         const c=await import(url),p=c.compile_ir_string(source,filename),rt=c.compile_ir_string(runtime,'runtime.eli'),bytes=Uint8Array.from(c.emit_managed_wasm(p,rt,{maximumPages:16})),check=(v,m)=>{if(!v)throw Error(m);};
         check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'imports');check(c.emit_ir_string(p)===seed,'public Seed JS identity');jsUrl=URL.createObjectURL(new Blob([c.emit_ir_string(p)],{type:'text/javascript'}));const js=await import(jsUrl),a=c.instantiateManagedRuntime(bytes,{maxSlots:512,initialBytes:32768,maxBytes:1048576});a.auto(1);
-        const read=x=>x&&typeof x==='object'?x.kind===4?a.readNumber(x):a.readString(x):x;
+        const read=x=>{if(!x||typeof x!=='object')return x;if(x.kind===4)return a.readNumber(x);if(x.kind===5)return a.readString(x);return Array.from({length:a.length(x)},(_,i)=>{const v=a.get(x,i);try{return read(v)}finally{a.release(v)}})};
+        const same=(x,y)=>Array.isArray(x)&&Array.isArray(y)?x.length===y.length&&x.every((v,i)=>Object.hasOwn(y,i)&&same(v,y[i])):Object.is(x,y);
         const call=(name,args)=>{const r=a.invoke(name,args);try{return read(r);}finally{a.release(r);}};
-        const verify=(name,values)=>{const args=values.map(x=>typeof x==='number'?a.number(x):typeof x==='string'?a.string(x):x);try{check(Object.is(call(name,args),js[name.replaceAll('-','_')](...values)),name);}finally{args.forEach(x=>a.release(x));}a.collect();check(a.live()===0&&a.stats().frameDepth===0,'roots');};
+        const verify=(name,values)=>{const args=values.map(x=>typeof x==='number'?a.number(x):typeof x==='string'?a.string(x):x);try{const actual=call(name,args),expected=js[name.replaceAll('-','_')](...values);check(same(actual,expected),name);}finally{args.forEach(x=>a.release(x));}a.collect();check(a.live()===0&&a.stats().frameDepth===0,'roots');};
         for(const text of['','中😀\ud800x\udfff','ababa','\ufeff x \u2000']){
           for(const position of[undefined,null,false,true,-0,-1,.5,-.5,NaN,Infinity,-Infinity,Number.MIN_VALUE,Number.MAX_VALUE]){
             for(const name of['at','char-at','char-code','code-point'])verify(name,[text,position]);
@@ -1549,6 +1554,7 @@ describe("browser compiler backends", () => {
           }
           for(const name of['identity','value','trim','trim-start','trim-end','well-formed','repair'])verify(name,[text]);verify('concat',[text,true,undefined,-1]);verify('repeat',[text,3.5]);verify('size',[text]);for(const key of[0,'1','01','length'])verify('read-value',[text,key]);verify('scan',[text]);
         }
+        verify('format-symbol',['ß-Σ😀',255.5]);verify('split-fields',['a, b;😀 a']);verify('replace-callback',['a😀a']);
         for(const name of['empty-units','empty-points'])verify(name,[]);
         for(const x of[undefined,null,false,true,-0,-1,.5,NaN,Infinity,-Infinity,Number.MIN_VALUE,Number.MAX_VALUE,65535,65536,0x1f600,0x10ffff,2**32,'65'])for(const name of['from-unit','global-unit','constructor-capture'])verify(name,[x]);
         for(const x of[-0,0,65,0xd800,0xdfff,0x1f600,0x10ffff,'65'])for(const name of['from-point','global-point'])verify(name,[x]);verify('from-points',[65,0x1f600,0xd800]);verify('from-units',[NaN,-1,0x1f600]);
