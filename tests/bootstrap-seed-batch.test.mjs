@@ -1,6 +1,6 @@
 import {test} from 'bun:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,readFile,writeFile,readdir,rm,mkdir} from 'node:fs/promises';
+import {mkdtemp,readFile,writeFile,readdir,rm,mkdir,cp} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -12,7 +12,11 @@ test('backend fixtures seed all compiler modules in one Emacs process with byte-
  const modules=['symbol','syntax','reader','formatter','expander','transient-analysis','analyzer','ir','lower','source-map','emitter','project','compiler'];
  const keys=['EMACS','ELISCRIPT_BATCH_CALL_LOG','ELISCRIPT_BATCH_REAL_EMACS'],previous=process.env.EMACS,saved=Object.fromEntries(keys.map(key=>[key,process.env[key]]));
  try {
-  const baseline=spawnSync(resolve(root,'bin/eliscript-bootstrap'),[],{cwd:root,encoding:'utf8',timeout:120000,env:{...process.env,ELISCRIPT_BOOTSTRAP_OUT_DIR:output}});assert.equal(baseline.status,0,baseline.stderr);
+  // Keep thirteen independent public seed invocations as the reference even
+  // when the public bootstrap command batches its own process startup.
+  for(const name of modules){
+   const baseline=spawnSync(resolve(root,'bin/eliscript-seed'),['--source-map','--output',resolve(output,name+'.mjs'),resolve(root,'bootstrap/compiler',name+'.eli')],{cwd:root,encoding:'utf8',timeout:120000});assert.equal(baseline.status,0,baseline.stderr);
+  }
   const expected=new Map();for(const name of modules)for(const suffix of['.mjs','.mjs.map'])expected.set(name+suffix,await readFile(resolve(output,name+suffix)));
   await rm(output,{recursive:true,force:true});
   await writeFile(proxy,`#!${process.execPath}\nimport{appendFileSync}from'node:fs';appendFileSync(process.env.ELISCRIPT_BATCH_CALL_LOG,'call\\n');const result=Bun.spawnSync([process.env.ELISCRIPT_BATCH_REAL_EMACS,...process.argv.slice(2)],{stdin:'inherit',stdout:'inherit',stderr:'inherit'});process.exit(result.exitCode??1);\n`,{mode:0o700});
@@ -25,6 +29,11 @@ test('backend fixtures seed all compiler modules in one Emacs process with byte-
   assert.equal((await readFile(calls,'utf8')).trim().split('\n').length,1);
   assert.deepEqual((await readdir(semantic)).sort(),[...expected.keys()].sort());
   for(const[name,bytes]of expected)assert((await readFile(resolve(semantic,name))).equals(bytes),'semantic fixture '+name);
+  await rm(output,{recursive:true,force:true});await writeFile(calls,'');
+  const publicBatch=spawnSync(resolve(root,'bin/eliscript-bootstrap'),[],{cwd:root,encoding:'utf8',timeout:120000,env:{...process.env,ELISCRIPT_BOOTSTRAP_OUT_DIR:output}});assert.equal(publicBatch.status,0,publicBatch.stderr);
+  assert.equal((await readFile(calls,'utf8')).trim().split('\n').length,1,'public bootstrap must seed all modules in one fresh Emacs process');
+  assert.deepEqual((await readdir(output)).sort(),[...expected.keys()].sort());
+  for(const[name,bytes]of expected)assert((await readFile(resolve(output,name))).equals(bytes),'public bootstrap '+name);
  }finally{
   for(const key of keys)if(saved[key]===undefined)delete process.env[key];else process.env[key]=saved[key];
   await rm(directory,{recursive:true,force:true});
@@ -49,3 +58,30 @@ test('semantic compiler fixture setup rejects a failing seed process instead of 
   await assert.rejects(seedCompilerFixture(output,{emacs:proxy}),e=>e.exitCode===17&&/intentional semantic seed failure/.test(e.message));
  }finally{await rm(directory,{recursive:true,force:true});}
 });
+
+
+test('public bootstrap refuses a failed fresh seed even when stale compiler files exist',async()=>{
+ const root=resolve(import.meta.dir,'..'),directory=await mkdtemp(resolve(tmpdir(),'eliscript public seed failure '));
+ try{
+  const proxy=resolve(directory,'failing emacs.mjs'),output=resolve(directory,'old output');await mkdir(output);
+  await writeFile(proxy,`#!${process.execPath}\nprocess.stderr.write('intentional public bootstrap failure');process.exit(17);\n`,{mode:0o700});
+  await writeFile(resolve(output,'compiler.mjs'),'stale compiler must not bypass bootstrap');
+  const result=spawnSync(resolve(root,'bin/eliscript-bootstrap'),[],{cwd:root,encoding:'utf8',timeout:30000,env:{...process.env,EMACS:proxy,ELISCRIPT_BOOTSTRAP_OUT_DIR:output}});
+  assert.equal(result.status,17);assert.match(result.stderr,/intentional public bootstrap failure/);
+  assert.equal(await readFile(resolve(output,'compiler.mjs'),'utf8'),'stale compiler must not bypass bootstrap');
+ }finally{await rm(directory,{recursive:true,force:true});}
+});
+
+
+test('public bootstrap runs from the published compiler trees without development tools',async()=>{
+ const root=resolve(import.meta.dir,'..'),directory=await mkdtemp(resolve(tmpdir(),'eliscript packaged seed '));
+ try{
+  const packaged=resolve(directory,'package'),output=resolve(directory,'compiled output');
+  for(const tree of ['bin','compiler','bootstrap/compiler'])await cp(resolve(root,tree),resolve(packaged,tree),{recursive:true});
+  const child=spawnSync(resolve(packaged,'bin/eliscript-bootstrap'),[],{cwd:directory,encoding:'utf8',timeout:120000,env:{...process.env,ELISCRIPT_BOOTSTRAP_OUT_DIR:output}});
+  assert.equal(child.status,0,child.stderr);
+  assert.equal((await readdir(output)).length,26);
+  const probe=spawnSync('bun',['--eval',`const compiler=await import(${JSON.stringify(resolve(output,'compiler.mjs'))});const output=compiler.compile_string('(defun square (x) (* x x)) (export square)','packaged.eli');const module=await import('data:text/javascript;base64,'+Buffer.from(output).toString('base64'));if(module.square(7)!==49)throw Error('packaged compiler did not execute');`],{cwd:directory,encoding:'utf8',timeout:30000});
+  assert.equal(probe.status,0,probe.stderr);
+ }finally{await rm(directory,{recursive:true,force:true});}
+},120000);

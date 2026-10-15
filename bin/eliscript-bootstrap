@@ -7,9 +7,23 @@ OUTPUT_DIR=${ELISCRIPT_BOOTSTRAP_OUT_DIR:-"$PROJECT_DIR/dist/bootstrap"}
 
 mkdir -p "$OUTPUT_DIR"
 
-for module in symbol syntax reader formatter expander transient-analysis analyzer ir lower source-map emitter project compiler; do
-  "$PROJECT_DIR/bin/eliscript-seed" \
-    --source-map \
-    --output "$OUTPUT_DIR/$module.mjs" \
-    "$PROJECT_DIR/bootstrap/compiler/$module.eli"
-done
+# Compile the same source modules and maps in one fresh seed process.
+# exec preserves the actual seed exit status, including bootstrap failure.
+: "${EMACS:=emacs}"
+exec "$EMACS" --batch -Q -L "$PROJECT_DIR/compiler" -l eliscript \
+  --eval '(condition-case error-data
+      (let ((root (pop command-line-args-left))
+            (output (pop command-line-args-left))
+            (modules command-line-args-left))
+        (setq command-line-args-left nil)
+        (dolist (name modules)
+          (eliscript-compile-file-with-source-map
+           (expand-file-name (concat "bootstrap/compiler/" name ".eli") root)
+           (expand-file-name (concat name ".mjs") output))))
+    (error
+     (message "eliscript: %s"
+              (eliscript-diagnostic-condition-message error-data))
+     (kill-emacs 1)))' \
+  "$PROJECT_DIR" "$OUTPUT_DIR" \
+  symbol syntax reader formatter expander transient-analysis analyzer ir lower \
+  source-map emitter project compiler
