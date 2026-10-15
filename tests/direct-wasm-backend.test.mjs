@@ -1009,7 +1009,16 @@ test("array callback families retain Seed and three-generation IR, descriptors a
   const bytes=Uint8Array.from(artifacts[i]);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);const a=instantiateManagedRuntime(bytes);a.auto(1);
   const zero=a.number(-0),nan=a.number(NaN),tiny=a.number(Number.MIN_VALUE),f=a.invoke('identity'),values=a.sourceArray([zero,nan,tiny,true]),out=a.invoke('filter-with',[values,f]);
   assert.equal(a.length(out),2);const first=a.get(out,0);assert.equal(a.readNumber(first),Number.MIN_VALUE);assert.equal(a.get(out,1),true);
-  for(const x of[zero,nan,tiny,f,values,out,first])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+  for(const x of[zero,nan,tiny,f,values,out,first])a.release(x);
+  const read=x=>{if(x===null||typeof x!=='object')return x;if(x.kind===4)return a.readNumber(x);if(x.kind===5)return a.readString(x);const result=Array(a.length(x));for(let index=0;index<result.length;index++){const key=a.number(index),own=a.invoke('has-index',[x,key]);a.release(key);if(own){const child=a.get(x,index);try{result[index]=read(child)}finally{a.release(child)}}}return result;};
+  const reference=await import('data:text/javascript;base64,'+Buffer.from(seed).toString('base64'));
+  const sparse=Array(6);sparse[1]=undefined;sparse[3]=a.string('b');sparse[5]=a.string('a');const input=a.sourceArray(sparse),referenceInput=Array(6);referenceInput[1]=undefined;referenceInput[3]='b';referenceInput[5]='a';
+  const copy=a.invoke('sort-copy',[input]);assert(!a.keyEqual(copy,input));assert.deepEqual(read(copy),reference.sort_copy(referenceInput));assert.deepEqual(read(input),referenceInput);
+  const sorted=a.invoke('sort-default',[input]);assert(a.keyEqual(sorted,input));assert.equal(reference.sort_default(referenceInput),referenceInput);assert.deepEqual(read(sorted),referenceInput);
+  const stable=a.invoke('sort-stable');assert.deepEqual(read(stable),reference.sort_stable());
+  const numbers=[a.number(-0),a.number(0),a.number(Number.MIN_VALUE),a.number(-1),a.number(3)],numeric=a.sourceArray(numbers),numericOut=a.invoke('sort-numeric',[numeric,false]);assert(a.keyEqual(numericOut,numeric));assert.deepEqual(read(numericOut),reference.sort_numeric([-0,0,Number.MIN_VALUE,-1,3],false));
+  const mutationValues=[a.number(3),a.number(1),a.number(2)],mutationInput=a.sourceArray(mutationValues),mutationRef=[3,1,2],mutationOut=a.invoke('sort-copy-mutation',[mutationInput]);assert.deepEqual(read(mutationOut),reference.sort_copy_mutation(mutationRef));assert.deepEqual(read(mutationInput),mutationRef);
+  for(const x of[...sparse,input,copy,sorted,stable,...numbers,numeric,numericOut,...mutationValues,mutationInput,mutationOut])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
  }
 });
 
@@ -1881,12 +1890,13 @@ describe("browser compiler backends", () => {
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-module.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
   });
 
-  test("browser array callbacks preserve JS truth, holes, reductions, mutation and actual trap cleanup",async()=>{
-    const source=runtimeSeeds.callbacks.source,runtime=runtimeSeeds.memory.source;
-    const result=await evaluateBrowser(async({bundle,source,runtime})=>{
+  test("browser array callbacks preserve JS truth, stable sorting, holes, copying, mutation and actual trap cleanup",async()=>{
+    const {source,javascript:seed,filename}=runtimeSeeds.callbacks,runtime=runtimeSeeds.memory.source;
+    const result=await evaluateBrowser(async({bundle,source,runtime,seed,filename})=>{
       const url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));
       try{
-        const c=await import(url),p=c.compile_ir_string(source,'browser-callbacks.eli'),rt=c.compile_ir_string(runtime,'runtime.eli');
+        const c=await import(url),p=c.compile_ir_string(source,filename),rt=c.compile_ir_string(runtime,'runtime.eli');checkSeed(c.emit_ir_string(p),seed);
+        function checkSeed(actual,expected){if(actual!==expected)throw Error('callback public Seed JS identity')}
         const bytes=Uint8Array.from(c.emit_managed_wasm(p,rt,{maximumPages:16})),check=(ok,label)=>{if(!ok)throw Error(label);};check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'zero imports');
         const a=c.instantiateManagedRuntime(bytes);a.auto(1);
         const read=x=>{if(x===null||typeof x==='boolean'||x===undefined)return x;if(x.kind===4)return a.readNumber(x);if(x.kind===5)return a.readString(x);const out=[];for(let i=0;i<a.length(x);i++){const key=a.number(i);let own;try{own=a.invoke('has-index',[x,key])}finally{a.release(key)}if(own){const v=a.get(x,i);try{out[i]=read(v)}finally{a.release(v)}}}out.length=a.length(x);return out};
@@ -1898,13 +1908,21 @@ describe("browser compiler backends", () => {
         const sum=a.invoke('sum-callback'),numbers=a.sourceArray([tiny,zero]),initial=a.number(-0);check(Object.is(get('reduce-initial',[numbers,sum,initial]),Number.MIN_VALUE),'reduce bits');check(Object.is(get('reduce-right-initial',[numbers,sum,initial]),Number.MIN_VALUE),'reduceRight bits');
         const changing=a.sourceArray([true,false,true]),log=a.sourceArray([]),shrinker=a.invoke('shrink-callback',[log]);check(get('find-with',[changing,shrinker])===undefined,'find after shrink');check(same(read(log),[[true,0],[undefined,1],[undefined,2]]),'visit vanished indices');
         const object=a.sourceObject({}),own=a.invoke('shadow-value');check(get('map-shadow',[object,own])===15,'own callable method');let refused=false;try{a.invoke('map-constructor',[items,f,null])}catch(e){refused=e.eliscriptDiagnostic?.code==='ELI-RT0003'}check(refused,'species refusal');
+        const sortB=a.string('b'),sortA=a.string('a'),sortInput=a.sourceArray([sortB,undefined,sortA]),sortCopy=a.invoke('sort-copy',[sortInput]);check(!a.keyEqual(sortCopy,sortInput),'toSorted distinct identity');check(same(read(sortCopy),['a','b',undefined]),'copy order');check(same(read(sortInput),['b',undefined,'a']),'copy source unchanged');
+        const sortSparse=Array(6);sortSparse[1]=undefined;sortSparse[3]=tiny;sortSparse[5]=zero;const sortSparseInput=a.sourceArray(sortSparse),dense=a.invoke('sort-copy',[sortSparseInput]);check(same(read(dense),[-0,Number.MIN_VALUE,undefined,undefined,undefined,undefined]),'toSorted holes become owned undefined');check(same(read(sortSparseInput),Object.assign(Array(6),{1:undefined,3:Number.MIN_VALUE,5:-0})),'copy preserves source holes');
+        const sortOut=a.invoke('sort-default',[sortSparseInput]);check(a.keyEqual(sortOut,sortSparseInput),'sort receiver identity');const sparseSorted=Array(6);sparseSorted[0]=-0;sparseSorted[1]=Number.MIN_VALUE;sparseSorted[2]=undefined;check(same(read(sortOut),sparseSorted),'sort retains final holes');
+        const stable=a.invoke('sort-stable');check(same(read(stable),['b','d','a','c']),'stable object ties');const tieInput=a.sourceArray([true,false,true]),tieOut=a.invoke('sort-nan-ties',[tieInput]);check(a.keyEqual(tieInput,tieOut)&&same(read(tieOut),[true,false,true]),'NaN ties');
+        const numericInput=a.sourceArray([tiny,zero,positiveZero]),numericOut=a.invoke('sort-numeric',[numericInput,true]);check(same(read(numericOut),[Number.MIN_VALUE,-0,0]),'exact numeric values and stable signed zeros');
+        const mutationInput=a.sourceArray([positiveZero,tiny,zero]),mutationOut=a.invoke('sort-copy-mutation',[mutationInput]);check(same(read(mutationOut),[0,-0,Number.MIN_VALUE]),'copy snapshot despite comparator mutations');check(same(read(mutationInput),[99,Number.MIN_VALUE,-0]),'source mutation remains visible');
+        const emptySort=a.sourceArray([]);for(const name of['sort-with','sort-copy-with']){let failed=false;try{a.invoke(name,[emptySort,false])}catch(e){failed=e.eliscriptDiagnostic?.code==='ELI-RT0003'}check(failed&&a.stats().frameDepth===0,'invalid comparator cleanup');const recovered=a.invoke(name,[emptySort,undefined]);check(same(read(recovered),[]),'sort after comparator error');a.release(recovered);}
+        for(const x of[sortB,sortA,sortInput,sortCopy,sortSparseInput,dense,sortOut,stable,tieInput,tieOut,numericInput,numericOut,mutationInput,mutationOut,emptySort])a.release(x);
         for(const x of[f,zero,nan,tiny,empty,positiveZero,items,input,mapped,sum,numbers,initial,changing,log,shrinker,object,own])a.release(x);a.collect();check(a.live()===0&&a.stats().frameDepth===0,'all roots reclaimed');
         const start=runtime.indexOf('  (defun value-js-truth (heap value)'),end=runtime.indexOf('  (defun ',start+10);check(start>=0&&end>start,'fault location');const faulty=runtime.slice(0,start)+'  (defun value-js-truth (heap value) (load-u32 4294967295))'+String.fromCharCode(10)+runtime.slice(end);
         const broken=c.instantiateManagedRuntime(Uint8Array.from(c.emit_managed_wasm(p,c.compile_ir_string(faulty,'browser-callback-trap.eli'),{maximumPages:16}))),keep=broken.number(7),frame=broken.frame(1),callback=broken.invoke('identity'),target=broken.sourceArray([true]);broken.frameSet(frame,0,keep);let trapped=false;
         try{broken.invoke('some-with',[target,callback])}catch(e){trapped=e instanceof WebAssembly.RuntimeError}check(trapped&&broken.stats().frameDepth===1,'actual callback trap');const saved=broken.frameGet(frame,0);check(broken.readNumber(saved)===7,'caller root');broken.release(saved);broken.leaveFrame(frame);for(const x of[keep,callback,target])broken.release(x);broken.collect();check(broken.live()===0,'trap roots reclaimed');return [...bytes];
       }finally{URL.revokeObjectURL(url);}
-    },{source,runtime});
-    assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-callbacks.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
+    },{source,runtime,seed,filename});
+    assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,filename),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
   });
   test("browser variadic calls and apply preserve defaults, iterable order, captures and failure cleanup",async()=>{
     const source=runtimeSeeds.variadic.source,runtime=runtimeSeeds.memory.source;

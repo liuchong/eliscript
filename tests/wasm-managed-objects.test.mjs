@@ -108,7 +108,7 @@ test('direct property reader leaves perform no allocations or collections and tr
 test('direct readers retain allocating runtime operands and caller roots, while effectful key readers keep automatic frames',async()=>{
  const text='(defun direct (o k) (get o k)) (defun aref-direct (o k) (aref o k)) (defun nth-direct (o k) (js-nth k o)) (defun literal (o) (get o :x)) (defun assigned (o k p) (get o (progn (setq o p) k))) (defun caller (o k) (let ((v (direct o k))) (js-array v (js-object :saved v)))) (export direct aref-direct nth-direct literal assigned caller)';
  const ir=backend.compiler.compile_ir_string(text,'readers.eli'),artifact=Uint8Array.from(backend.managed.emit_managed_wasm(ir,runtimeProgram)),a=instantiateManagedRuntime(artifact);a.auto(1);const child=a.string('held'),object=a.sourceObject({0:child,x:child}),zero=a.number(0),x=a.string('x');
- for(const name of['direct','aref-direct','nth-direct']){const v=a.invoke(name,[object,zero]);assert(a.keyEqual(v,child));a.release(v);}const before=a.stats().collections,result=a.invoke('literal',[object]);assert(a.keyEqual(result,child));a.release(result);assert(a.stats().collections>before,'literal construction still allocates and requires a frame');
+ for(const name of['direct','aref-direct','nth-direct']){const v=a.invoke(name,[object,zero]);assert(a.keyEqual(v,child));a.release(v);}const before=a.stats().collections,result=a.invoke('literal',[object]);assert(a.keyEqual(result,child));a.release(result);assert(a.stats().collections>before,'literal access retains its entry frame for the allocating missing-key fallback');
  const other=a.sourceObject({x:false}),collections=a.stats().collections,assigned=a.invoke('assigned',[object,x,other]);assert(a.keyEqual(assigned,child));a.release(assigned);assert(a.stats().collections>collections);a.release(other);
  const array=a.invoke('caller',[object,x]),first=a.get(array,0),record=a.get(array,1),saved=a.string('saved'),nested=a.objectGet(record,saved);assert(a.keyEqual(first,child));assert(a.keyEqual(nested,child));for(const v of[first,record,saved,nested,array,child,object,zero,x])a.release(v);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
  const held=a.string('getter-held'),receiver=a.sourceObject({x:held}),getterKey=a.string('x');a.release(held);const args=[receiver];Object.defineProperty(args,1,{get(){a.release(receiver);a.collect();return getterKey;}});const transferred=a.invoke('direct',args);assert.equal(a.readString(transferred),'getter-held');a.release(transferred);a.release(getterKey);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
@@ -123,4 +123,44 @@ test('Node executes identical zero-import named-object bytes, preserves order an
  import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {instantiateManagedRuntime} from ${JSON.stringify(resolve('tools/backends/managed-runtime.mjs'))};
  const a=instantiateManagedRuntime(readFileSync(${JSON.stringify(path)}));a.auto(1);const x=a.number(-0),o=a.invoke('make',[x,true]),child=a.invoke('inherit',[o,false]),key=a.string('x'),read=a.invoke('read-value',[child,key]);assert(Object.is(a.readNumber(read),-0));a.release(read);const has=a.invoke('has',[child,key]);assert.equal(has,false);const n=a.number(128),grown=a.invoke('grow-loop',[n]),keys=a.invoke('keys',[grown]);assert.equal(a.length(keys),128);const first=a.get(keys,0),last=a.get(keys,127);assert.equal(a.readString(first),'0');assert.equal(a.readString(last),'127');for(const v of[first,last,keys,grown,n,key,child,o,x])a.release(v);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
  `],{encoding:'utf8',timeout:30000});assert.equal(result.status,0,result.stderr);
+});
+
+test('updating an existing sealed string property allocates nothing and succeeds with every heap slot occupied',()=>{
+ const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports,heap=e['heap-new'](32,8192,8192),object=e['value-object-new'](heap,0),key=e['value-string'](heap,1);e['value-unit-set'](heap,key,0,120);e['value-seal'](heap,key);e['heap-pin'](heap,object);e['heap-pin'](heap,key);assert.equal(e['value-object-put'](heap,object,key,1,0),1);e['heap-collect'](heap);
+ let full=false;for(let i=0;i<64;i++){const value=e['value-number'](heap,0,0);if(!value){assert.equal(e['last-error'](),2);full=true;break;}e['heap-pin'](heap,value);}assert(full);
+ const before=e['heap-used'](heap),live=e['heap-live'](heap),collections=e['heap-collections'](heap);assert.equal(e['value-object-put'](heap,object,key,2,0),1);assert.equal(e['last-error'](),0);assert.equal(e['value-object-get'](heap,object,key),2);assert.equal(e['heap-used'](heap),before);assert.equal(e['heap-live'](heap),live);assert.equal(e['heap-collections'](heap),collections);
+});
+
+test('nonallocating own property writes reject malformed handles, private frames and unsealed keys before changing data',()=>{
+ const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports,heap=e['heap-new'](32,8192,8192),call=(name,...args)=>{const value=e[name](heap,...args)>>>0;assert.equal(e['last-error'](),0,name);return value;};
+ const object=call('value-object-new',0),key=call('value-string',1),unsealed=call('value-string',1);call('value-unit-set',key,0,120);call('value-unit-set',unsealed,0,120);call('value-seal',key);call('value-object-put',object,key,2,0);const frame=call('frame-new',1);call('frame-set',frame,0,object);
+ for(const [name,child,mode,code] of [[0xffffffff,1,0,1],[key,0xffffffff,0,1],[key,frame,0,3],[unsealed,1,0,6],[key,1,3,3]]){const used=call('heap-used'),live=call('heap-live');assert.equal(e['value-object-put'](heap,object,name,child,mode),0);assert.equal(e['last-error'](),code);assert.equal(call('value-object-get',object,key),2);assert.equal(call('heap-used'),used);assert.equal(call('heap-live'),live);assert.equal(call('frame-depth'),1);}
+ call('frame-pop',frame);call('heap-collect');assert.equal(call('heap-live'),0);
+});
+
+test('repeated literal access reuses existing sealed keys and collects only for the invocation frame',async()=>{
+ const text='(defun read (o) (get o :x)) (defun write (o x) (put o :x x)) (export read write)',p=backend.compiler.compile_ir_string(text,'literal-keys.eli'),a=instantiateManagedRuntime(Uint8Array.from(backend.managed.emit_managed_wasm(p,runtimeProgram)));a.auto(1);const object=a.sourceObject({x:true});
+ for(const name of['read','write']){const before=a.stats().collections;for(let i=0;i<16;i++)assert.equal(a.invoke(name,name==='read'?[object]:[object,true]),true);assert.equal(a.stats().collections-before,16,name+' must allocate only its invocation frame');}
+ a.release(object);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+});
+
+test('literal key borrowing preserves empty and Unicode names, inherited shadows, fallback and RHS collection order',async()=>{
+ const keys=['','x','中😀\ud800','q'.repeat(20),'q'.repeat(21)],text=keys.map((key,i)=>`(defun r${i} (o) (get o ${JSON.stringify(key)}))`).join(' ')+' (defun inherit (p) (js-object :__proto__ p)) (defun shadow (o) (put o :x (progn (put o :__proto__ nil) (js-object :saved 19))) (get (get o :x) :saved)) (defun absent (o) (get o :missing 37)) (export '+keys.map((_,i)=>'r'+i).join(' ')+' inherit shadow absent)',p=backend.compiler.compile_ir_string(text,'literal-key-order.eli'),a=instantiateManagedRuntime(Uint8Array.from(backend.managed.emit_managed_wasm(p,runtimeProgram))),js=await import('data:text/javascript;base64,'+Buffer.from(backend.compiler.emit_ir_string(p)).toString('base64'));a.auto(1);
+ const values=Object.fromEntries(keys.map(key=>[key,true])),parent=a.sourceObject(values),child=a.invoke('inherit',[parent]);
+ for(let i=0;i<keys.length;i++){const before=a.stats().collections;assert.equal(a.invoke('r'+i,[child]),true);assert.equal(a.stats().collections-before,keys[i].length<=20?1:2);assert.equal(js['r'+i](Object.create(values)),true);}
+ const missing=a.invoke('absent',[child]);assert.equal(a.readNumber(missing),js.absent(Object.create(values)));a.release(missing);a.release(parent);const result=a.invoke('shadow',[child]);assert.equal(a.readNumber(result),js.shadow(Object.create(values)));a.release(result);
+ for(const receiver of[null,undefined]){assert.throws(()=>a.invoke('r0',[receiver]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0001');assert.throws(()=>js.r0(receiver),TypeError);assert.equal(a.stats().frameDepth,0);}
+ a.release(child);a.collect();assert.equal(a.live(),0);
+});
+
+test('raw literal key borrowing rejects invalid handles and overlong encodings without allocating or disturbing caller roots',()=>{
+ const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports,heap=e['heap-new'](32,8192,8192),object=e['value-object-new'](heap,0),frame=e['frame-new'](heap,1);e['frame-set'](heap,frame,0,object);const invoke=(receiver,length,...words)=>e['value-property-literal-key'](heap,receiver,length,...words,...Array(10-words.length).fill(0));
+ const used=e['heap-used'](heap),live=e['heap-live'](heap);for(const [receiver,length,code]of[[0xffffffff,0,1],[frame,0,3],[object,21,3]]){assert.equal(invoke(receiver,length),0);assert.equal(e['last-error'](),code);assert.equal(e['heap-used'](heap),used);assert.equal(e['heap-live'](heap),live);assert.equal(e['frame-depth'](heap),1);}for(const receiver of[0,1,2,3]){assert.equal(invoke(receiver,0),0);assert.equal(e['last-error'](),0);}assert.equal(invoke(object,0),0);assert.equal(e['last-error'](),0);e['frame-pop'](heap,frame);e['heap-collect'](heap);assert.equal(e['heap-live'](heap),0);
+});
+
+
+test('large property tables keep the ordinary hashed fallback for literal keys and preserve reads and writes under collection', async()=>{
+ const ir=backend.compiler.compile_ir_string('(defun read (o) (get o :x)) (defun write (o v) (put o :x v)) (export read write)','large-key.eli'),a=instantiateManagedRuntime(Uint8Array.from(backend.managed.emit_managed_wasm(ir,runtimeProgram)));a.auto(1);
+ const fields=Object.fromEntries(Array.from({length:32},(_,i)=>['k'+i,true]));fields.x=false;const object=a.sourceObject(fields),before=a.stats().collections;
+ assert.equal(a.invoke('read',[object]),false);assert(a.stats().collections-before>=2,'large tables fall back to constructing the lookup key');const updated=a.invoke('write',[object,true]);a.release(updated);assert.equal(a.invoke('read',[object]),true);a.release(object);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
 });

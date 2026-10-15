@@ -342,6 +342,132 @@
           "recover": "ff"
         }
       ]
+    },
+    {
+      "name": "Stable array sorting",
+      "description": "Stable in-place and copying sorts retain exact values, sparse ownership, source identity, callback evaluation order and recovery in collecting zero-import WASM",
+      "scenarios": [
+        {
+          "id": "sort-sparse-identity",
+          "given": "a sparse array containing text, undefined and holes",
+          "when": "default sort orders present entries",
+          "then": "the receiver identity is retained, defined text precedes owned undefined, and remaining holes stay absent",
+          "source": "(defun run () (let ((a (js-array))) (put a :length 6) (put a 1 \"b\") (put a 3 undefined) (put a 5 \"a\") (let ((out (js-call a :sort))) (js-array (eq out a) (get a 0) (get a 1) (object-has? a 2) (js* \"typeof a[2]\") (object-has? a 3) (js-length a)))))",
+          "expected": [
+            true,
+            "a",
+            "b",
+            true,
+            "undefined",
+            false,
+            6
+          ]
+        },
+        {
+          "id": "sort-stable-equal-keys",
+          "given": "four records with repeated comparison keys",
+          "when": "a source closure orders them by key",
+          "then": "records with equal keys retain their original relative order",
+          "source": "(defun run () (let ((a (js-array (js-object :key 2 :id \"a\") (js-object :key 1 :id \"b\") (js-object :key 2 :id \"c\") (js-object :key 1 :id \"d\")))) (js-call (js-call a :sort (lambda (a b) (- (get a :key) (get b :key)))) :map (lambda (item) (get item :id)))))",
+          "expected": [
+            "b",
+            "d",
+            "a",
+            "c"
+          ]
+        },
+        {
+          "id": "sort-nan-ties",
+          "given": "a source comparator returning NaN for every pair",
+          "when": "sort compares the array",
+          "then": "every comparison is a tie and the original order is preserved",
+          "source": "(defun run () (js-call (js-array \"c\" \"a\" \"b\") :sort (lambda (a b) (/ 0 0))))",
+          "expected": [
+            "c",
+            "a",
+            "b"
+          ]
+        },
+        {
+          "id": "sort-captured-method",
+          "given": "an own sort method and arguments with replacement side effects",
+          "when": "the method is captured before all arguments execute",
+          "then": "the captured method runs once and ignored extra arguments still execute",
+          "source": "(defun run () (let ((a (js-array)) (trace (js-object :calls 0))) (put a :sort (lambda (x &rest extras) (js-array x (js-length extras)))) (js-array (js-call a :sort (progn (put a :sort (lambda () \"wrong\")) \"first\") (progn (put trace :calls 1) \"extra\")) (get trace :calls))))",
+          "expected": [
+            [
+              "first",
+              1
+            ],
+            1
+          ]
+        },
+        {
+          "id": "to-sorted-dense-copy",
+          "given": "a sparse source with an owned undefined entry",
+          "when": "toSorted orders a copied snapshot",
+          "then": "the result is distinct and dense while source holes and original values remain unchanged",
+          "source": "(defun run () (let ((a (js-array))) (put a :length 5) (put a 1 \"b\") (put a 3 undefined) (put a 4 \"a\") (let ((out (js-call a :toSorted))) (js-array (eq a out) (get out 0) (get out 1) (object-has? out 2) (object-has? out 3) (object-has? out 4) (object-has? a 0) (get a 1) (js-length a)))))",
+          "expected": [
+            false,
+            "a",
+            "b",
+            true,
+            true,
+            true,
+            false,
+            "b",
+            5
+          ]
+        },
+        {
+          "id": "to-sorted-source-mutation",
+          "given": "a copying comparator that overwrites the original source",
+          "when": "toSorted finishes sorting its collected snapshot",
+          "then": "the sorted output and explicit source mutation are separately observable",
+          "source": "(defun run () (let* ((a (js-array 3 1 2)) (out (js-call a :toSorted (lambda (x y) (put a 0 99) (- x y))))) (js-array out a)))",
+          "expected": [
+            [
+              1,
+              2,
+              3
+            ],
+            [
+              99,
+              1,
+              2
+            ]
+          ]
+        },
+        {
+          "id": "sort-invalid-comparator-recovery",
+          "given": "an empty receiver and a noncallable comparator",
+          "when": "sort validates the comparator before sorting",
+          "then": "a TypeError is reported and a subsequent valid invocation succeeds",
+          "source": "(defun run () (js-call (js-array) :sort false)) (defun recover () (js-call (js-array 3 1 2) :sort (lambda (a b) (- a b))))",
+          "runtimeError": "ELI-RT0003",
+          "jsError": "TypeError",
+          "recover": [
+            1,
+            2,
+            3
+          ]
+        },
+        {
+          "id": "to-sorted-invalid-comparator-recovery",
+          "given": "an empty copying receiver and a noncallable comparator",
+          "when": "toSorted validates its comparator",
+          "then": "a TypeError is reported without leaking roots and the next copy succeeds",
+          "source": "(defun run () (js-call (js-array) :toSorted false)) (defun recover () (js-call (js-array 3 1 2) :toSorted (lambda (a b) (- a b))))",
+          "runtimeError": "ELI-RT0003",
+          "jsError": "TypeError",
+          "recover": [
+            1,
+            2,
+            3
+          ]
+        }
+      ]
     }
   ]
 }

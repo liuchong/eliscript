@@ -162,3 +162,48 @@ test('Given fixed random UTF16 strings, when literal split and replacement run u
   for (let i = 0; i < 256; i++) {let text = '';for (let j = 0; j < 24; j++) text += String.fromCharCode([97, 98, 0, 0xd800, 0xdc00, 0x4e2d][next() % 6]);const sep = text.slice(next() % 20, next() % 24), limit = next() % 12, insert = ['$&', '$`-$\'', '$$', '😀'][next() % 4], input = a.string(text), key = a.string(sep), count = a.number(limit), value = a.string(insert), parts = a.invoke('parts', [input, key, count]), out = a.invoke('replace', [input, key, value]);assert.deepEqual(strings(a, parts), js.parts(text, sep, limit));assert.equal(a.readString(out), js.replace(text, sep, insert));assert.equal(a.readString(input), text);for (const x of [input, key, count, value, parts, out]) a.release(x);}
   finish(a);
 });
+
+
+test('Given explicit Unicode data versions, when new case pairs and sigma context run, then each version is exact and remains immutable after heap creation', async () => {
+  const {a, bytes} = await compiled('(defun upper (value) (js-call value :toUpperCase)) (defun lower (value) (js-call value :toLowerCase)) (export upper lower)');finish(a);
+  for (const version of [15.1, 16, 17]) {
+    const instance = instantiateManagedRuntime(bytes, {unicodeVersion: version});assert.equal(instance.unicodeVersion, version);instance.auto(1);
+    const input = instance.string('\u1c89\ua7cb\ua7cf'), out = instance.invoke('lower', [input]), expected = version === 15.1 ? '\u1c89\ua7cb\ua7cf' : '\u1c8a\u0264\ua7cf';
+    assert.equal(instance.readString(out), expected);instance.release(out);instance.release(input);
+    const upperInput = instance.string('\ua7cf'), upper = instance.invoke('upper', [upperInput]);assert.equal(instance.readString(upper), version === 17 ? '\ua7ce' : '\ua7cf');instance.release(upper);instance.release(upperInput);finish(instance);
+  }
+  for (const version of [0, 15, 18, NaN, '17', null]) assert.throws(() => instantiateManagedRuntime(bytes, {unicodeVersion: version}), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003');
+});
+
+
+test('Given every Unicode scalar and version-dependent context, when each pinned profile executes, then normative data hashes and all exact sigma cases agree', async () => {
+  const {a, bytes} = await compiled('(defun upper (value) (js-call value :toUpperCase)) (defun lower (value) (js-call value :toLowerCase)) (export upper lower)');finish(a);
+  const reference = JSON.parse(await readFile('tests/fixtures/unicode-case-profiles.json', 'utf8'));assert.equal(reference.format, 'eliscript-unicode-case-reference');assert.deepEqual(reference.versions.map(v => v.version), [15.1, 16, 17]);
+  for (const profile of reference.versions) {
+    const instance = instantiateManagedRuntime(bytes, {unicodeVersion: profile.version});instance.auto(1);const hashes = {upper: createHash('sha256'), lower: createHash('sha256')};let checked = 0;
+    for (let start = 0; start < 0x110000; start += 512) {
+      const points = [];for (let p = start; p < Math.min(start + 512, 0x110000); p++) if (p < 0xd800 || p > 0xdfff) points.push(p);
+      checked += points.length;const input = instance.string(String.fromCodePoint(...points));
+      for (const name of ['upper', 'lower']) {const out = instance.invoke(name, [input]);hashes[name].update(instance.readString(out), 'utf16le');instance.release(out);}instance.release(input);
+    }
+    assert.equal(checked, 0x110000 - 0x800);for (const name of ['upper', 'lower']) assert.equal(hashes[name].digest('hex'), profile[name], profile.version + ' ' + name);
+    for (const [text, expected] of profile.sigma) {const input = instance.string(text), out = instance.invoke('lower', [input]);assert.equal(instance.readString(out), expected, profile.version + ' sigma ' + JSON.stringify(text));instance.release(out);instance.release(input);}finish(instance);
+  }
+});
+
+test('Given raw runtime configuration, when heaps exist or unsupported versions are selected, then case data cannot change and errors remain recoverable', async () => {
+  const {a, bytes} = await compiled('(defun f () 1) (export f)');finish(a);
+  const e = new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;
+  assert.equal(e['runtime-case-version'](0), 170);assert.equal(e['runtime-case-version'](150), 0);assert.equal(e['last-error'](), 3);assert.equal(e['runtime-case-version'](160), 160);
+  const heap = e['heap-new'](32, 1024, 65536);assert(heap);assert.equal(e['runtime-case-version'](170), 0);assert.equal(e['last-error'](), 3);assert.equal(e['runtime-case-version'](0), 160);assert.equal(e['last-error'](), 0);assert.equal(e['heap-live'](heap), 0);
+});
+
+
+test('Given a legacy WASM ABI without case configuration, when host case probing is unavailable, then existing numeric execution still works', async () => {
+  const source = await readFile('bootstrap/runtime/memory.eli', 'utf8'), start = source.indexOf('  (defun runtime-case-version '), end = source.indexOf('  (defun last-error ', start);assert(start >= 0 && end > start);
+  const legacy = b.compiler.compile_ir_string((source.slice(0, start) + source.slice(end)).replace('    runtime-case-version record-new', '    record-new'), 'legacy-runtime.eli');
+  const program = b.compiler.compile_ir_string('(defun f () 7) (export f)', 'legacy.eli'), bytes = Uint8Array.from(b.managed.emit_managed_wasm(program, legacy));assert.equal(WebAssembly.Module.exports(new WebAssembly.Module(bytes)).some(e => e.name === 'runtime-case-version'), false);
+  const file = resolve(directory, 'legacy-case.wasm');await writeFile(file, bytes);
+  const script = `import assert from'node:assert/strict';import{readFileSync}from'node:fs';const{instantiateManagedRuntime}=await import(process.argv[1]),{hostUnicodeCaseVersion}=await import(process.argv[2]);String.prototype.toUpperCase=()=>{throw Error('injected unavailable case data')};assert.throws(()=>hostUnicodeCaseVersion(),/injected unavailable case data/);const a=instantiateManagedRuntime(readFileSync(process.argv[3])),out=a.invoke('f');assert.equal(a.unicodeVersion,17);assert.equal(a.readNumber(out),7);a.release(out);a.collect();assert.equal(a.live(),0);assert.throws(()=>instantiateManagedRuntime(readFileSync(process.argv[3]),{unicodeVersion:16}),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');`;
+  const child = spawnSync('node', ['--input-type=module', '-e', script, pathToFileURL(resolve('tools/backends/managed-runtime.mjs')).href, pathToFileURL(resolve('tools/runtime/unicode-case-profiles.mjs')).href, file], {encoding:'utf8', timeout:30000});assert.equal(child.status, 0, child.stderr || child.error?.message);
+});

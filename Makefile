@@ -71,6 +71,7 @@ test-core: check-contracts
 		tests/wasm-managed-callables.test.mjs \
 		tests/wasm-managed-variadic-calls.test.mjs \
 		tests/wasm-managed-array-callbacks.test.mjs \
+		tests/wasm-managed-array-sort.test.mjs \
 		tests/wasm-managed-array-text.test.mjs \
 		tests/wasm-managed-typeof.test.mjs \
 		tests/wasm-managed-typeof-paths.test.mjs \

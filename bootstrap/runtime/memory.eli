@@ -3,12 +3,21 @@
     load-f64 store-f64 memory-size memory-grow word-div word-shr word-shl word-and word-or word-xor call-source)
 
   ;; Internal memory-u32 ABI; no dynamic Number semantics are changed.
-  ;; Control words: bump cursor, lifetime epoch, error, live-object head. Objects: 32-byte
+  ;; Control words: bump cursor, lifetime epoch, error, live-object head, case version. Objects: 32-byte
   ;; aligned header [kind, epoch, length, capacity, data, sealed, next, 0].
   ;; Error 1 handle, 2 capacity, 3 bounds, 4 UTF8, 5 UTF16, 6 sealed,
   ;; 7 epoch exhaustion. Public operations clear error before evaluating.
   (defun initialize ()
     (when (= (load-u32 0) 0) (store-u32 0 256) (store-u32 4 1)) 0)
+  ;; Instance-wide Unicode case data. Zero selects the standalone Unicode 17
+  ;; default; JS adapters can match their host before allocating any objects.
+  ;; The profile stays immutable throughout all heaps and module executions.
+  (defun runtime-case-version (version)
+    (begin-operation)
+    (if (= version 0) (if (= (load-u32 16) 0) 170 (load-u32 16))
+      (if (or (and (/= version 151) (and (/= version 160) (/= version 170)))
+              (/= (load-u32 12) 0)) (fail 3)
+        (progn (store-u32 16 version) version))))
   (defun last-error () (load-u32 8))
   (defun fail (code) (store-u32 8 code) 0)
   (defun begin-operation () (initialize) (store-u32 8 0) 0)
@@ -341,58 +350,67 @@
         (if (= (heap-reference-check heap value) 0) 0
           (let* ((entry (heap-entry heap (word-and value 1048575))) (count (load-u32 (+ entry 16))))
             (if (= count 0) (fail 3) (progn (store-u32 (+ entry 16) (1- count)) 1)))))))
-  (defun heap-mark (heap value)
+  ;; Collection never allocates or calls source code: its pool/control addresses
+  ;; and slot bound remain fixed throughout marking and sweeping.
+  (defun heap-mark-at (base control value)
     (when (> value 3)
-      (let* ((slot (word-and value 1048575)) (entry (heap-entry heap slot)))
+      (let* ((slot (word-and value 1048575)) (entry (+ base (* slot 24))))
         (when (= (load-u32 (+ entry 4)) 1)
-          (store-u32 (+ entry 4) 3) (store-u32 (+ entry 20) (heap-control heap 9))
-          (heap-control-set heap 9 slot)))) 0)
+          (store-u32 (+ entry 4) 3)
+          ;; Numbers, strings and byte buffers have no child handles. Mark them
+          ;; immediately without adding a useless graph traversal work item.
+          (when (>= (load-u32 (+ base (load-u32 (+ entry 8)))) 7)
+            (store-u32 (+ entry 20) (load-u32 (+ control 36)))
+            (store-u32 (+ control 36) slot))))) 0)
   (defun heap-collect (heap)
     (begin-operation)
     (if (= (heap-check heap) 0) 0
-      (let ((slot 1) (reclaimed 0))
-        (heap-mark heap (heap-meta heap 0))
-        (heap-mark heap (heap-meta heap 16))
-        (while (<= slot (heap-control heap 3))
-          (let ((entry (heap-entry heap slot)))
-            (when (and (= (load-u32 (+ entry 4)) 1) (/= (load-u32 (+ entry 16)) 0))
-              (heap-mark heap (word-or (word-shl (load-u32 entry) 20) slot))))
+      (let* ((base (heap-base heap)) (control (load-u32 (+ heap 16)))
+             (slots (load-u32 (+ control 12))) (slot 1) (reclaimed 0))
+        (heap-mark-at base control (load-u32 base))
+        (heap-mark-at base control (load-u32 (+ base 16)))
+        (while (<= slot slots)
+          (let ((entry (+ base (* slot 24))))
+            ;; Free/retired slots always have zero roots; live pinned slots are
+            ;; validated at pin time and cannot be reclaimed until released.
+            (when (/= (load-u32 (+ entry 16)) 0)
+              (heap-mark-at base control (word-or (word-shl (load-u32 entry) 20) slot))))
           (setq slot (1+ slot)))
-        (while (/= (heap-control heap 9) 0)
-          (let* ((current (heap-control heap 9)) (entry (heap-entry heap current))
-                 (p (+ (heap-base heap) (load-u32 (+ entry 8)))) (kind (load-u32 p)) (index 0))
-            (heap-control-set heap 9 (load-u32 (+ entry 20)))
-            (when (= kind 9) (heap-mark heap (load-u32 (+ p 12))))
-            (when (= kind 14) (heap-mark heap (load-u32 (+ p 12))))
+        (while (/= (load-u32 (+ control 36)) 0)
+          (let* ((current (load-u32 (+ control 36))) (entry (+ base (* current 24)))
+                 (p (+ base (load-u32 (+ entry 8)))) (kind (load-u32 p)) (index 0))
+            (store-u32 (+ control 36) (load-u32 (+ entry 20)))
+            (when (= kind 9) (heap-mark-at base control (load-u32 (+ p 12))))
+            (when (= kind 14) (heap-mark-at base control (load-u32 (+ p 12))))
             (when (or (= kind 10) (= kind 11))
               (let ((cells (+ (+ p 32) (* (load-u32 (+ p 8)) 8))))
                 (while (< index (load-u32 (+ p 12)))
                   (let ((cell (+ cells (* index 24))))
                     (when (= (load-u32 (+ cell 20)) 1)
-                      (heap-mark heap (load-u32 (+ cell 4))) (heap-mark heap (load-u32 (+ cell 8)))))
+                      (heap-mark-at base control (load-u32 (+ cell 4))) (heap-mark-at base control (load-u32 (+ cell 8)))))
                   (setq index (1+ index)))))
             (when (= kind 12)
-              (heap-mark heap (load-u32 (+ p 32)))
-              (heap-mark heap (load-u32 (+ p 52))) (heap-mark heap (load-u32 (+ p 56))))
+              (heap-mark-at base control (load-u32 (+ p 32)))
+              (heap-mark-at base control (load-u32 (+ p 52))) (heap-mark-at base control (load-u32 (+ p 56))))
             (when (or (= kind 7) (= kind 8) (= kind 9) (= kind 13) (= kind 14) (= kind 15) (= kind 16) (= kind 17) (= kind 18) (= kind 19) (= kind 20) (= kind 21))
               (while (< index (load-u32 (+ p 4)))
                 (let ((child (load-u32 (+ (+ p 32) (* index 4)))))
-                  (unless (and (= kind 14) (= child 4)) (heap-mark heap child))) (setq index (1+ index))))))
+                  (unless (and (= kind 14) (= child 4)) (heap-mark-at base control child))) (setq index (1+ index))))))
         (setq slot 1)
-        (while (<= slot (heap-control heap 3))
-          (let ((entry (heap-entry heap slot)))
+        (while (<= slot slots)
+          (let ((entry (+ base (* slot 24))))
             (if (= (load-u32 (+ entry 4)) 3) (store-u32 (+ entry 4) 1)
               (progn
                 (when (= (load-u32 (+ entry 4)) 1)
                   (heap-free-block heap (load-u32 (+ entry 8)) (load-u32 (+ entry 12)))
                   (store-u32 (+ entry 4) 0) (store-u32 (+ entry 8) 0)
                   (when (< (load-u32 entry) 4095)
-                    (store-u32 (+ entry 20) (heap-control heap 4)) (heap-control-set heap 4 slot))
+                    (store-u32 (+ entry 20) (load-u32 (+ control 16))) (store-u32 (+ control 16) slot))
                   (setq reclaimed (1+ reclaimed))) 0)))
           (setq slot (1+ slot)))
-        (heap-control-set heap 7 (- (heap-control heap 7) reclaimed))
-        (heap-meta-set heap 8 0)
-        (heap-meta-set heap 12 (if (= (heap-meta heap 12) 4294967295) 4294967295 (1+ (heap-meta heap 12)))) reclaimed)))
+        (store-u32 (+ control 28) (- (load-u32 (+ control 28)) reclaimed))
+        (store-u32 (+ base 8) 0)
+        (store-u32 (+ base 12) (if (= (load-u32 (+ base 12)) 4294967295) 4294967295 (1+ (load-u32 (+ base 12))))) reclaimed)))
   (defun value-kind (heap value)
     (begin-operation)
     (if (= (heap-check heap) 0) 0
@@ -1289,12 +1307,18 @@
                 (store-u32 (+ p 12) 1)))
             (when (= borrowed 1) (heap-return-root heap value)) output)))))
   ;; BEGIN GENERATED UNICODE CASE DATA
-  ;; Unicode 17.0.0, Unicode-3.0 data license: https://www.unicode.org/license.txt
-  ;; Reproduce with tools/runtime/unicode-case-data.mjs; no generator runs during compilation.
-  ;; UnicodeData.txt SHA-256 2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c
-  ;; SpecialCasing.txt SHA-256 efc25faf19de21b92c1194c111c932e03d2a5eaf18194e33f1156e96de4c9588
-  ;; DerivedCoreProperties.txt SHA-256 24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08
-  (defun heap-unicode-upper-0 (code)
+  ;; Unicode 15.1.0 / 16.0.0 / 17.0.0, Unicode-3.0: https://www.unicode.org/license.txt
+  ;; Reproduce with tools/runtime/unicode-case-data.mjs; normal builds never fetch data.
+  ;; 15.1.0/UnicodeData.txt SHA-256 2fc713e6a31a87c4850a37fe2caffa4218180fadb5de86b43a143ddb4581fb86
+  ;; 15.1.0/SpecialCasing.txt SHA-256 55a477efd933a52cd27e6a9bf70265bb2d8814af31aab07767abc8eb421f27ef
+  ;; 15.1.0/DerivedCoreProperties.txt SHA-256 f55d0db69123431a7317868725b1fcbf1eab6b265d756d1bd7f0f6d9f9ee108b
+  ;; 16.0.0/UnicodeData.txt SHA-256 ff58e5823bd095166564a006e47d111130813dcf8bf234ef79fa51a870edb48f
+  ;; 16.0.0/SpecialCasing.txt SHA-256 8d5de354eef79f2395a54c9c7dcebbaf3d30fc962d0f85611ea97aa973a0c451
+  ;; 16.0.0/DerivedCoreProperties.txt SHA-256 39d35161f2954497f69e08bdb9e701493f476a3d30222de20028feda36c1dabd
+  ;; 17.0.0/UnicodeData.txt SHA-256 2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c
+  ;; 17.0.0/SpecialCasing.txt SHA-256 efc25faf19de21b92c1194c111c932e03d2a5eaf18194e33f1156e96de4c9588
+  ;; 17.0.0/DerivedCoreProperties.txt SHA-256 24c7fed1195c482faaefd5c1e7eb821c5ee1fb6de07ecdbaa64b56a99da22c08
+  (defun heap-unicode-upper-0-17 (code)
     (if (< code 7302) (if (< code 614) (if (< code 453) (if (< code 392) (if (< code 307) (if (< code 248) (if (< code 223) (if (< code 181) (if (< code 97) code
     (if (<= code 122) (- code 32) code))
     (if (<= code 181) (+ code 743) code))
@@ -1556,7 +1580,24 @@
     (if (<= code 93823) (- code 32) code))
     (if (<= code 93907) (- code 27) (if (< code 125218) code
     (if (<= code 125251) (- code 34) code)))))))))))))))))
-  (defun heap-unicode-upper-1 (code)
+  (defun heap-unicode-upper-0-160 (code)
+    (if (< code 42963) (if (< code 42959) (heap-unicode-upper-0-17 code)
+    (if (<= code 42959) (+ code 0) (heap-unicode-upper-0-17 code)))
+    (if (<= code 42965) (if (= (word-and (- code 42963) 1) 0) (+ code 0) (heap-unicode-upper-0-17 code)) (if (< code 93883) (heap-unicode-upper-0-17 code)
+    (if (<= code 93907) (+ code 0) (heap-unicode-upper-0-17 code))))))
+  (defun heap-unicode-upper-0-151 (code)
+    (if (< code 42963) (if (< code 7306) (if (< code 612) (if (< code 411) (heap-unicode-upper-0-17 code)
+    (if (<= code 411) (+ code 0) (heap-unicode-upper-0-17 code)))
+    (if (<= code 612) (+ code 0) (heap-unicode-upper-0-17 code)))
+    (if (<= code 7306) (+ code 0) (if (< code 42957) (heap-unicode-upper-0-17 code)
+    (if (<= code 42959) (if (= (word-and (- code 42957) 1) 0) (+ code 0) (heap-unicode-upper-0-17 code)) (heap-unicode-upper-0-17 code)))))
+    (if (<= code 42965) (if (= (word-and (- code 42963) 1) 0) (+ code 0) (heap-unicode-upper-0-17 code)) (if (< code 68976) (if (< code 42971) (heap-unicode-upper-0-17 code)
+    (if (<= code 42971) (+ code 0) (heap-unicode-upper-0-17 code)))
+    (if (<= code 68997) (+ code 0) (if (< code 93883) (heap-unicode-upper-0-17 code)
+    (if (<= code 93907) (+ code 0) (heap-unicode-upper-0-17 code))))))))
+  (defun heap-unicode-upper-0 (code)
+    (if (= (load-u32 16) 151) (heap-unicode-upper-0-151 code) (if (= (load-u32 16) 160) (heap-unicode-upper-0-160 code) (heap-unicode-upper-0-17 code))))
+  (defun heap-unicode-upper-1-17 (code)
     (if (< code 8150) (if (< code 7834) (if (< code 944) (if (< code 496) (if (< code 329) (if (< code 223) 0
     (if (<= code 223) 83 0))
     (if (<= code 329) 78 0))
@@ -1596,7 +1637,13 @@
     (if (<= code 64277) 1339 0))
     (if (<= code 64278) 1350 (if (< code 64279) 0
     (if (<= code 64279) 1341 0)))))))))))
-  (defun heap-unicode-upper-2 (code)
+  (defun heap-unicode-upper-1-160 (code)
+    (heap-unicode-upper-1-17 code))
+  (defun heap-unicode-upper-1-151 (code)
+    (heap-unicode-upper-1-17 code))
+  (defun heap-unicode-upper-1 (code)
+    (if (= (load-u32 16) 151) (heap-unicode-upper-1-151 code) (if (= (load-u32 16) 160) (heap-unicode-upper-1-160 code) (heap-unicode-upper-1-17 code))))
+  (defun heap-unicode-upper-2-17 (code)
     (if (< code 8147) (if (< code 8022) (if (< code 8018) (if (< code 944) (if (< code 912) 0
     (if (<= code 912) 769 0))
     (if (<= code 944) 769 0))
@@ -1614,7 +1661,13 @@
     (if (<= code 8183) 921 0))
     (if (<= code 64259) 73 (if (< code 64260) 0
     (if (<= code 64260) 76 0)))))))))
-  (defun heap-unicode-lower-0 (code)
+  (defun heap-unicode-upper-2-160 (code)
+    (heap-unicode-upper-2-17 code))
+  (defun heap-unicode-upper-2-151 (code)
+    (heap-unicode-upper-2-17 code))
+  (defun heap-unicode-upper-2 (code)
+    (if (= (load-u32 16) 151) (heap-unicode-upper-2-151 code) (if (= (load-u32 16) 160) (heap-unicode-upper-2-160 code) (heap-unicode-upper-2-17 code))))
+  (defun heap-unicode-lower-0-17 (code)
     (if (< code 7312) (if (< code 478) (if (< code 407) (if (< code 386) (if (< code 306) (if (< code 216) (if (< code 192) (if (< code 65) code
     (if (<= code 90) (+ code 32) code))
     (if (<= code 214) (+ code 32) code))
@@ -1802,467 +1855,444 @@
     (if (<= code 93791) (+ code 32) code))
     (if (<= code 93880) (+ code 27) (if (< code 125184) code
     (if (<= code 125217) (+ code 34) code)))))))))))))))
-  (defun heap-unicode-lower-1 (code)
+  (defun heap-unicode-lower-0-160 (code)
+    (if (< code 42962) (if (< code 42958) (heap-unicode-lower-0-17 code)
+    (if (<= code 42958) (+ code 0) (heap-unicode-lower-0-17 code)))
+    (if (<= code 42964) (if (= (word-and (- code 42962) 1) 0) (+ code 0) (heap-unicode-lower-0-17 code)) (if (< code 93856) (heap-unicode-lower-0-17 code)
+    (if (<= code 93880) (+ code 0) (heap-unicode-lower-0-17 code))))))
+  (defun heap-unicode-lower-0-151 (code)
+    (if (< code 42962) (if (< code 42955) (if (< code 7305) (heap-unicode-lower-0-17 code)
+    (if (<= code 7305) (+ code 0) (heap-unicode-lower-0-17 code)))
+    (if (<= code 42956) (+ code 0) (if (< code 42958) (heap-unicode-lower-0-17 code)
+    (if (<= code 42958) (+ code 0) (heap-unicode-lower-0-17 code)))))
+    (if (<= code 42964) (if (= (word-and (- code 42962) 1) 0) (+ code 0) (heap-unicode-lower-0-17 code)) (if (< code 68944) (if (< code 42970) (heap-unicode-lower-0-17 code)
+    (if (<= code 42972) (if (= (word-and (- code 42970) 1) 0) (+ code 0) (heap-unicode-lower-0-17 code)) (heap-unicode-lower-0-17 code)))
+    (if (<= code 68965) (+ code 0) (if (< code 93856) (heap-unicode-lower-0-17 code)
+    (if (<= code 93880) (+ code 0) (heap-unicode-lower-0-17 code))))))))
+  (defun heap-unicode-lower-0 (code)
+    (if (= (load-u32 16) 151) (heap-unicode-lower-0-151 code) (if (= (load-u32 16) 160) (heap-unicode-lower-0-160 code) (heap-unicode-lower-0-17 code))))
+  (defun heap-unicode-lower-1-17 (code)
     (if (< code 304) 0
     (if (<= code 304) 775 0)))
-  (defun heap-unicode-lower-2 (code)
+  (defun heap-unicode-lower-1-160 (code)
+    (heap-unicode-lower-1-17 code))
+  (defun heap-unicode-lower-1-151 (code)
+    (heap-unicode-lower-1-17 code))
+  (defun heap-unicode-lower-1 (code)
+    (if (= (load-u32 16) 151) (heap-unicode-lower-1-151 code) (if (= (load-u32 16) 160) (heap-unicode-lower-1-160 code) (heap-unicode-lower-1-17 code))))
+  (defun heap-unicode-lower-2-17 (code)
     0)
-  (defun heap-unicode-cased (code)
-    (if (< code 11390) (if (< code 7544) (if (< code 904) (if (< code 662) (if (< code 192) (if (< code 170) (if (< code 97) (if (< code 65) 0
+  (defun heap-unicode-lower-2-160 (code)
+    (heap-unicode-lower-2-17 code))
+  (defun heap-unicode-lower-2-151 (code)
+    (heap-unicode-lower-2-17 code))
+  (defun heap-unicode-lower-2 (code)
+    (if (= (load-u32 16) 151) (heap-unicode-lower-2-151 code) (if (= (load-u32 16) 160) (heap-unicode-lower-2-160 code) (heap-unicode-lower-2-17 code))))
+  (defun heap-unicode-cased-17 (code)
+    (if (< code 11559) (if (< code 7680) (if (< code 905) (if (< code 452) (if (< code 186) (if (< code 170) (if (< code 97) (if (< code 65) 0
     (if (<= code 90) 1 0))
     (if (<= code 122) 1 0))
-    (if (<= code 170) 1 (if (< code 186) (if (< code 181) 0
-    (if (<= code 181) 1 0))
-    (if (<= code 186) 1 0))))
-    (if (<= code 214) 1 (if (< code 444) (if (< code 248) (if (< code 216) 0
+    (if (<= code 170) 1 (if (< code 181) 0
+    (if (<= code 181) 1 0))))
+    (if (<= code 186) 1 (if (< code 248) (if (< code 216) (if (< code 192) 0
+    (if (<= code 214) 1 0))
     (if (<= code 246) 1 0))
-    (if (<= code 442) 1 0))
-    (if (<= code 447) 1 (if (< code 452) 0
-    (if (<= code 659) 1 0))))))
-    (if (<= code 687) 1 (if (< code 886) (if (< code 736) (if (< code 704) (if (< code 688) 0
+    (if (<= code 442) 1 (if (< code 444) 0
+    (if (<= code 447) 1 0))))))
+    (if (<= code 659) 1 (if (< code 880) (if (< code 736) (if (< code 704) (if (< code 662) 0
     (if (<= code 696) 1 0))
     (if (<= code 705) 1 0))
-    (if (<= code 740) 1 (if (< code 880) (if (< code 837) 0
-    (if (<= code 837) 1 0))
-    (if (<= code 883) 1 0))))
-    (if (<= code 887) 1 (if (< code 895) (if (< code 891) (if (< code 890) 0
-    (if (<= code 890) 1 0))
+    (if (<= code 740) 1 (if (< code 837) 0
+    (if (<= code 837) 1 0))))
+    (if (<= code 883) 1 (if (< code 895) (if (< code 890) (if (< code 886) 0
+    (if (<= code 887) 1 0))
     (if (<= code 893) 1 0))
     (if (<= code 895) 1 (if (< code 902) 0
-    (if (<= code 902) 1 0))))))))
-    (if (<= code 906) 1 (if (< code 4304) (if (< code 1329) (if (< code 931) (if (< code 910) (if (< code 908) 0
-    (if (<= code 908) 1 0))
+    (if (<= code 904) (if (= (word-and (- code 902) 1) 0) 1 0) 0))))))))
+    (if (<= code 906) 1 (if (< code 4301) (if (< code 1162) (if (< code 931) (if (< code 911) (if (< code 908) 0
+    (if (<= code 910) (if (= (word-and (- code 908) 1) 0) 1 0) 0))
     (if (<= code 929) 1 0))
-    (if (<= code 1013) 1 (if (< code 1162) (if (< code 1015) 0
-    (if (<= code 1153) 1 0))
-    (if (<= code 1327) 1 0))))
-    (if (<= code 1366) 1 (if (< code 4295) (if (< code 4256) (if (< code 1376) 0
+    (if (<= code 1013) 1 (if (< code 1015) 0
+    (if (<= code 1153) 1 0))))
+    (if (<= code 1327) 1 (if (< code 4256) (if (< code 1376) (if (< code 1329) 0
+    (if (<= code 1366) 1 0))
     (if (<= code 1416) 1 0))
-    (if (<= code 4293) 1 0))
-    (if (<= code 4295) 1 (if (< code 4301) 0
-    (if (<= code 4301) 1 0))))))
-    (if (<= code 4346) 1 (if (< code 7312) (if (< code 5024) (if (< code 4349) (if (< code 4348) 0
-    (if (<= code 4348) 1 0))
+    (if (<= code 4293) 1 (if (< code 4295) 0
+    (if (<= code 4295) 1 0))))))
+    (if (<= code 4301) 1 (if (< code 7296) (if (< code 5024) (if (< code 4348) (if (< code 4304) 0
+    (if (<= code 4346) 1 0))
     (if (<= code 4351) 1 0))
-    (if (<= code 5109) 1 (if (< code 7296) (if (< code 5112) 0
-    (if (<= code 5117) 1 0))
-    (if (<= code 7306) 1 0))))
-    (if (<= code 7354) 1 (if (< code 7468) (if (< code 7424) (if (< code 7357) 0
-    (if (<= code 7359) 1 0))
-    (if (<= code 7467) 1 0))
-    (if (<= code 7530) 1 (if (< code 7531) 0
-    (if (<= code 7543) 1 0))))))))))
-    (if (<= code 7544) 1 (if (< code 8305) (if (< code 8031) (if (< code 8008) (if (< code 7680) (if (< code 7579) (if (< code 7545) 0
-    (if (<= code 7578) 1 0))
-    (if (<= code 7615) 1 0))
-    (if (<= code 7957) 1 (if (< code 7968) (if (< code 7960) 0
+    (if (<= code 5109) 1 (if (< code 5112) 0
+    (if (<= code 5117) 1 0))))
+    (if (<= code 7306) 1 (if (< code 7357) (if (< code 7312) 0
+    (if (<= code 7354) 1 0))
+    (if (<= code 7359) 1 (if (< code 7424) 0
+    (if (<= code 7615) 1 0))))))))))
+    (if (<= code 7957) 1 (if (< code 8450) (if (< code 8130) (if (< code 8025) (if (< code 8008) (if (< code 7968) (if (< code 7960) 0
     (if (<= code 7965) 1 0))
-    (if (<= code 8005) 1 0))))
-    (if (<= code 8013) 1 (if (< code 8027) (if (< code 8025) (if (< code 8016) 0
-    (if (<= code 8023) 1 0))
-    (if (<= code 8025) 1 0))
-    (if (<= code 8027) 1 (if (< code 8029) 0
-    (if (<= code 8029) 1 0))))))
-    (if (<= code 8061) 1 (if (< code 8144) (if (< code 8126) (if (< code 8118) (if (< code 8064) 0
+    (if (<= code 8005) 1 0))
+    (if (<= code 8013) 1 (if (< code 8016) 0
+    (if (<= code 8023) 1 0))))
+    (if (<= code 8031) (if (= (word-and (- code 8025) 1) 0) 1 0) (if (< code 8118) (if (< code 8064) (if (< code 8032) 0
+    (if (<= code 8061) 1 0))
     (if (<= code 8116) 1 0))
-    (if (<= code 8124) 1 0))
-    (if (<= code 8126) 1 (if (< code 8134) (if (< code 8130) 0
-    (if (<= code 8132) 1 0))
-    (if (<= code 8140) 1 0))))
-    (if (<= code 8147) 1 (if (< code 8178) (if (< code 8160) (if (< code 8150) 0
-    (if (<= code 8155) 1 0))
-    (if (<= code 8172) 1 0))
-    (if (<= code 8180) 1 (if (< code 8182) 0
-    (if (<= code 8188) 1 0))))))))
-    (if (<= code 8305) 1 (if (< code 8490) (if (< code 8469) (if (< code 8450) (if (< code 8336) (if (< code 8319) 0
-    (if (<= code 8319) 1 0))
-    (if (<= code 8348) 1 0))
-    (if (<= code 8450) 1 (if (< code 8458) (if (< code 8455) 0
+    (if (<= code 8124) 1 (if (< code 8126) 0
+    (if (<= code 8126) 1 0))))))
+    (if (<= code 8132) 1 (if (< code 8178) (if (< code 8150) (if (< code 8144) (if (< code 8134) 0
+    (if (<= code 8140) 1 0))
+    (if (<= code 8147) 1 0))
+    (if (<= code 8155) 1 (if (< code 8160) 0
+    (if (<= code 8172) 1 0))))
+    (if (<= code 8180) 1 (if (< code 8319) (if (< code 8305) (if (< code 8182) 0
+    (if (<= code 8188) 1 0))
+    (if (<= code 8305) 1 0))
+    (if (<= code 8319) 1 (if (< code 8336) 0
+    (if (<= code 8348) 1 0))))))))
+    (if (<= code 8450) 1 (if (< code 8517) (if (< code 8484) (if (< code 8469) (if (< code 8458) (if (< code 8455) 0
     (if (<= code 8455) 1 0))
-    (if (<= code 8467) 1 0))))
-    (if (<= code 8469) 1 (if (< code 8486) (if (< code 8484) (if (< code 8473) 0
-    (if (<= code 8477) 1 0))
-    (if (<= code 8484) 1 0))
-    (if (<= code 8486) 1 (if (< code 8488) 0
-    (if (<= code 8488) 1 0))))))
-    (if (<= code 8493) 1 (if (< code 8544) (if (< code 8508) (if (< code 8505) (if (< code 8495) 0
+    (if (<= code 8467) 1 0))
+    (if (<= code 8469) 1 (if (< code 8473) 0
+    (if (<= code 8477) 1 0))))
+    (if (<= code 8490) (if (= (word-and (- code 8484) 1) 0) 1 0) (if (< code 8505) (if (< code 8495) (if (< code 8491) 0
+    (if (<= code 8493) 1 0))
     (if (<= code 8500) 1 0))
-    (if (<= code 8505) 1 0))
-    (if (<= code 8511) 1 (if (< code 8526) (if (< code 8517) 0
-    (if (<= code 8521) 1 0))
-    (if (<= code 8526) 1 0))))
-    (if (<= code 8575) 1 (if (< code 11264) (if (< code 9398) (if (< code 8579) 0
-    (if (<= code 8580) 1 0))
-    (if (<= code 9449) 1 0))
-    (if (<= code 11387) 1 (if (< code 11388) 0
-    (if (<= code 11389) 1 0))))))))))))
-    (if (<= code 11492) 1 (if (< code 68944) (if (< code 43888) (if (< code 42865) (if (< code 42560) (if (< code 11520) (if (< code 11506) (if (< code 11499) 0
+    (if (<= code 8505) 1 (if (< code 8508) 0
+    (if (<= code 8511) 1 0))))))
+    (if (<= code 8521) 1 (if (< code 11264) (if (< code 8579) (if (< code 8544) (if (< code 8526) 0
+    (if (<= code 8526) 1 0))
+    (if (<= code 8575) 1 0))
+    (if (<= code 8580) 1 (if (< code 9398) 0
+    (if (<= code 9449) 1 0))))
+    (if (<= code 11492) 1 (if (< code 11506) (if (< code 11499) 0
     (if (<= code 11502) 1 0))
-    (if (<= code 11507) 1 0))
-    (if (<= code 11557) 1 (if (< code 11565) (if (< code 11559) 0
-    (if (<= code 11559) 1 0))
-    (if (<= code 11565) 1 0))))
-    (if (<= code 42605) 1 (if (< code 42786) (if (< code 42652) (if (< code 42624) 0
-    (if (<= code 42651) 1 0))
-    (if (<= code 42653) 1 0))
-    (if (<= code 42863) 1 (if (< code 42864) 0
-    (if (<= code 42864) 1 0))))))
-    (if (<= code 42887) 1 (if (< code 43002) (if (< code 42993) (if (< code 42896) (if (< code 42891) 0
-    (if (<= code 42894) 1 0))
+    (if (<= code 11507) 1 (if (< code 11520) 0
+    (if (<= code 11557) 1 0))))))))))))
+    (if (<= code 11559) 1 (if (< code 119808) (if (< code 66940) (if (< code 43868) (if (< code 42891) (if (< code 42624) (if (< code 42560) (if (< code 11565) 0
+    (if (<= code 11565) 1 0))
+    (if (<= code 42605) 1 0))
+    (if (<= code 42653) 1 (if (< code 42786) 0
+    (if (<= code 42887) 1 0))))
+    (if (<= code 42894) 1 (if (< code 43000) (if (< code 42993) (if (< code 42896) 0
     (if (<= code 42972) 1 0))
-    (if (<= code 42996) 1 (if (< code 43000) (if (< code 42997) 0
     (if (<= code 42998) 1 0))
-    (if (<= code 43001) 1 0))))
-    (if (<= code 43002) 1 (if (< code 43872) (if (< code 43868) (if (< code 43824) 0
-    (if (<= code 43866) 1 0))
-    (if (<= code 43871) 1 0))
-    (if (<= code 43880) 1 (if (< code 43881) 0
-    (if (<= code 43881) 1 0))))))))
-    (if (<= code 43967) 1 (if (< code 66964) (if (< code 66736) (if (< code 65313) (if (< code 64275) (if (< code 64256) 0
+    (if (<= code 43002) 1 (if (< code 43824) 0
+    (if (<= code 43866) 1 0))))))
+    (if (<= code 43881) 1 (if (< code 65345) (if (< code 64275) (if (< code 64256) (if (< code 43888) 0
+    (if (<= code 43967) 1 0))
     (if (<= code 64262) 1 0))
-    (if (<= code 64279) 1 0))
-    (if (<= code 65338) 1 (if (< code 66560) (if (< code 65345) 0
-    (if (<= code 65370) 1 0))
-    (if (<= code 66639) 1 0))))
-    (if (<= code 66771) 1 (if (< code 66940) (if (< code 66928) (if (< code 66776) 0
-    (if (<= code 66811) 1 0))
-    (if (<= code 66938) 1 0))
-    (if (<= code 66954) 1 (if (< code 66956) 0
-    (if (<= code 66962) 1 0))))))
-    (if (<= code 66965) 1 (if (< code 67459) (if (< code 66995) (if (< code 66979) (if (< code 66967) 0
-    (if (<= code 66977) 1 0))
-    (if (<= code 66993) 1 0))
-    (if (<= code 67001) 1 (if (< code 67456) (if (< code 67003) 0
+    (if (<= code 64279) 1 (if (< code 65313) 0
+    (if (<= code 65338) 1 0))))
+    (if (<= code 65370) 1 (if (< code 66776) (if (< code 66736) (if (< code 66560) 0
+    (if (<= code 66639) 1 0))
+    (if (<= code 66771) 1 0))
+    (if (<= code 66811) 1 (if (< code 66928) 0
+    (if (<= code 66938) 1 0))))))))
+    (if (<= code 66954) 1 (if (< code 67506) (if (< code 66995) (if (< code 66967) (if (< code 66964) (if (< code 66956) 0
+    (if (<= code 66962) 1 0))
+    (if (<= code 66965) 1 0))
+    (if (<= code 66977) 1 (if (< code 66979) 0
+    (if (<= code 66993) 1 0))))
+    (if (<= code 67001) 1 (if (< code 67459) (if (< code 67456) (if (< code 67003) 0
     (if (<= code 67004) 1 0))
-    (if (<= code 67456) 1 0))))
-    (if (<= code 67461) 1 (if (< code 68736) (if (< code 67506) (if (< code 67463) 0
-    (if (<= code 67504) 1 0))
-    (if (<= code 67514) 1 0))
-    (if (<= code 68786) 1 (if (< code 68800) 0
-    (if (<= code 68850) 1 0))))))))))
-    (if (<= code 68965) 1 (if (< code 120134) (if (< code 119977) (if (< code 119808) (if (< code 93760) (if (< code 71840) (if (< code 68976) 0
-    (if (<= code 68997) 1 0))
-    (if (<= code 71903) 1 0))
-    (if (<= code 93823) 1 (if (< code 93883) (if (< code 93856) 0
-    (if (<= code 93880) 1 0))
-    (if (<= code 93907) 1 0))))
-    (if (<= code 119892) 1 (if (< code 119970) (if (< code 119966) (if (< code 119894) 0
+    (if (<= code 67456) 1 0))
+    (if (<= code 67461) 1 (if (< code 67463) 0
+    (if (<= code 67504) 1 0))))))
+    (if (<= code 67514) 1 (if (< code 71840) (if (< code 68944) (if (< code 68800) (if (< code 68736) 0
+    (if (<= code 68786) 1 0))
+    (if (<= code 68850) 1 0))
+    (if (<= code 68965) 1 (if (< code 68976) 0
+    (if (<= code 68997) 1 0))))
+    (if (<= code 71903) 1 (if (< code 93856) (if (< code 93760) 0
+    (if (<= code 93823) 1 0))
+    (if (<= code 93880) 1 (if (< code 93883) 0
+    (if (<= code 93907) 1 0))))))))))
+    (if (<= code 119892) 1 (if (< code 120488) (if (< code 120071) (if (< code 119977) (if (< code 119970) (if (< code 119966) (if (< code 119894) 0
     (if (<= code 119964) 1 0))
     (if (<= code 119967) 1 0))
     (if (<= code 119970) 1 (if (< code 119973) 0
-    (if (<= code 119974) 1 0))))))
-    (if (<= code 119980) 1 (if (< code 120077) (if (< code 119997) (if (< code 119995) (if (< code 119982) 0
+    (if (<= code 119974) 1 0))))
+    (if (<= code 119980) 1 (if (< code 119998) (if (< code 119995) (if (< code 119982) 0
     (if (<= code 119993) 1 0))
-    (if (<= code 119995) 1 0))
-    (if (<= code 120003) 1 (if (< code 120071) (if (< code 120005) 0
-    (if (<= code 120069) 1 0))
-    (if (<= code 120074) 1 0))))
-    (if (<= code 120084) 1 (if (< code 120123) (if (< code 120094) (if (< code 120086) 0
+    (if (<= code 119997) (if (= (word-and (- code 119995) 1) 0) 1 0) 0))
+    (if (<= code 120003) 1 (if (< code 120005) 0
+    (if (<= code 120069) 1 0))))))
+    (if (<= code 120074) 1 (if (< code 120128) (if (< code 120094) (if (< code 120086) (if (< code 120077) 0
+    (if (<= code 120084) 1 0))
     (if (<= code 120092) 1 0))
-    (if (<= code 120121) 1 0))
-    (if (<= code 120126) 1 (if (< code 120128) 0
-    (if (<= code 120132) 1 0))))))))
-    (if (<= code 120134) 1 (if (< code 120714) (if (< code 120572) (if (< code 120488) (if (< code 120146) (if (< code 120138) 0
-    (if (<= code 120144) 1 0))
-    (if (<= code 120485) 1 0))
-    (if (<= code 120512) 1 (if (< code 120540) (if (< code 120514) 0
+    (if (<= code 120121) 1 (if (< code 120123) 0
+    (if (<= code 120126) 1 0))))
+    (if (<= code 120132) 1 (if (< code 120138) (if (< code 120134) 0
+    (if (<= code 120134) 1 0))
+    (if (<= code 120144) 1 (if (< code 120146) 0
+    (if (<= code 120485) 1 0))))))))
+    (if (<= code 120512) 1 (if (< code 120772) (if (< code 120630) (if (< code 120572) (if (< code 120540) (if (< code 120514) 0
     (if (<= code 120538) 1 0))
-    (if (<= code 120570) 1 0))))
-    (if (<= code 120596) 1 (if (< code 120656) (if (< code 120630) (if (< code 120598) 0
-    (if (<= code 120628) 1 0))
-    (if (<= code 120654) 1 0))
-    (if (<= code 120686) 1 (if (< code 120688) 0
-    (if (<= code 120712) 1 0))))))
-    (if (<= code 120744) 1 (if (< code 122928) (if (< code 122624) (if (< code 120772) (if (< code 120746) 0
-    (if (<= code 120770) 1 0))
-    (if (<= code 120779) 1 0))
-    (if (<= code 122633) 1 (if (< code 122661) (if (< code 122635) 0
+    (if (<= code 120570) 1 0))
+    (if (<= code 120596) 1 (if (< code 120598) 0
+    (if (<= code 120628) 1 0))))
+    (if (<= code 120654) 1 (if (< code 120714) (if (< code 120688) (if (< code 120656) 0
+    (if (<= code 120686) 1 0))
+    (if (<= code 120712) 1 0))
+    (if (<= code 120744) 1 (if (< code 120746) 0
+    (if (<= code 120770) 1 0))))))
+    (if (<= code 120779) 1 (if (< code 125184) (if (< code 122661) (if (< code 122635) (if (< code 122624) 0
+    (if (<= code 122633) 1 0))
     (if (<= code 122654) 1 0))
-    (if (<= code 122666) 1 0))))
-    (if (<= code 122989) 1 (if (< code 127312) (if (< code 127280) (if (< code 125184) 0
-    (if (<= code 125251) 1 0))
+    (if (<= code 122666) 1 (if (< code 122928) 0
+    (if (<= code 122989) 1 0))))
+    (if (<= code 125251) 1 (if (< code 127312) (if (< code 127280) 0
     (if (<= code 127305) 1 0))
     (if (<= code 127337) 1 (if (< code 127344) 0
     (if (<= code 127369) 1 0)))))))))))))))
-  (defun heap-unicode-case-ignorable (code)
-    (if (< code 12445) (if (< code 3457) (if (< code 2137) (if (< code 1471) (if (< code 741) (if (< code 180) (if (< code 96) (if (< code 58) (if (< code 46) (if (< code 39) 0
+  (defun heap-unicode-cased-160 (code)
+    (if (< code 42993) (if (< code 42958) (if (< code 661) (heap-unicode-cased-17 code)
+    (if (<= code 661) 1 (heap-unicode-cased-17 code)))
+    (if (<= code 42959) 0 (if (< code 42962) (heap-unicode-cased-17 code)
+    (if (<= code 42964) (if (= (word-and (- code 42962) 1) 0) 0 (heap-unicode-cased-17 code)) (heap-unicode-cased-17 code)))))
+    (if (<= code 42993) 0 (if (< code 93883) (if (< code 93856) (heap-unicode-cased-17 code)
+    (if (<= code 93880) 0 (heap-unicode-cased-17 code)))
+    (if (<= code 93907) 0 (heap-unicode-cased-17 code))))))
+  (defun heap-unicode-cased-151 (code)
+    (if (< code 42993) (if (< code 42955) (if (< code 7305) (if (< code 661) (heap-unicode-cased-17 code)
+    (if (<= code 661) 1 (heap-unicode-cased-17 code)))
+    (if (<= code 7306) 0 (heap-unicode-cased-17 code)))
+    (if (<= code 42959) 0 (if (< code 42970) (if (< code 42962) (heap-unicode-cased-17 code)
+    (if (<= code 42964) (if (= (word-and (- code 42962) 1) 0) 0 (heap-unicode-cased-17 code)) (heap-unicode-cased-17 code)))
+    (if (<= code 42972) 0 (heap-unicode-cased-17 code)))))
+    (if (<= code 42993) 0 (if (< code 93856) (if (< code 68976) (if (< code 68944) (heap-unicode-cased-17 code)
+    (if (<= code 68965) 0 (heap-unicode-cased-17 code)))
+    (if (<= code 68997) 0 (heap-unicode-cased-17 code)))
+    (if (<= code 93880) 0 (if (< code 93883) (heap-unicode-cased-17 code)
+    (if (<= code 93907) 0 (heap-unicode-cased-17 code))))))))
+  (defun heap-unicode-cased (code)
+    (if (= (load-u32 16) 151) (heap-unicode-cased-151 code) (if (= (load-u32 16) 160) (heap-unicode-cased-160 code) (heap-unicode-cased-17 code))))
+  (defun heap-unicode-case-ignorable-17 (code)
+    (if (< code 42888) (if (< code 3968) (if (< code 2625) (if (< code 1759) (if (< code 1369) (if (< code 183) (if (< code 94) (if (< code 46) (if (< code 39) 0
     (if (<= code 39) 1 0))
-    (if (<= code 46) 1 0))
-    (if (<= code 58) 1 (if (< code 94) 0
-    (if (<= code 94) 1 0))))
-    (if (<= code 96) 1 (if (< code 173) (if (< code 168) 0
+    (if (<= code 46) 1 (if (< code 58) 0
+    (if (<= code 58) 1 0))))
+    (if (<= code 96) (if (= (word-and (- code 94) 1) 0) 1 0) (if (< code 173) (if (< code 168) 0
     (if (<= code 168) 1 0))
-    (if (<= code 173) 1 (if (< code 175) 0
-    (if (<= code 175) 1 0))))))
-    (if (<= code 180) 1 (if (< code 706) (if (< code 184) (if (< code 183) 0
-    (if (<= code 183) 1 0))
-    (if (<= code 184) 1 (if (< code 688) 0
-    (if (<= code 705) 1 0))))
-    (if (<= code 709) 1 (if (< code 722) (if (< code 710) 0
-    (if (<= code 721) 1 0))
-    (if (<= code 735) 1 (if (< code 736) 0
-    (if (<= code 740) 1 0))))))))
-    (if (<= code 747) 1 (if (< code 890) (if (< code 751) (if (< code 749) (if (< code 748) 0
-    (if (<= code 748) 1 0))
-    (if (<= code 749) 1 (if (< code 750) 0
-    (if (<= code 750) 1 0))))
-    (if (<= code 767) 1 (if (< code 884) (if (< code 768) 0
+    (if (<= code 175) (if (= (word-and (- code 173) 1) 0) 1 0) (if (< code 180) 0
+    (if (<= code 180) 1 0))))))
+    (if (<= code 184) 1 (if (< code 900) (if (< code 884) (if (< code 688) 0
     (if (<= code 879) 1 0))
-    (if (<= code 884) 1 (if (< code 885) 0
-    (if (<= code 885) 1 0))))))
-    (if (<= code 890) 1 (if (< code 1160) (if (< code 903) (if (< code 900) 0
-    (if (<= code 901) 1 0))
-    (if (<= code 903) 1 (if (< code 1155) 0
-    (if (<= code 1159) 1 0))))
-    (if (<= code 1161) 1 (if (< code 1375) (if (< code 1369) 0
-    (if (<= code 1369) 1 0))
-    (if (<= code 1375) 1 (if (< code 1425) 0
-    (if (<= code 1469) 1 0))))))))))
-    (if (<= code 1471) 1 (if (< code 1770) (if (< code 1600) (if (< code 1524) (if (< code 1476) (if (< code 1473) 0
-    (if (<= code 1474) 1 0))
-    (if (<= code 1477) 1 (if (< code 1479) 0
-    (if (<= code 1479) 1 0))))
-    (if (<= code 1524) 1 (if (< code 1552) (if (< code 1536) 0
-    (if (<= code 1541) 1 0))
-    (if (<= code 1562) 1 (if (< code 1564) 0
-    (if (<= code 1564) 1 0))))))
-    (if (<= code 1600) 1 (if (< code 1757) (if (< code 1648) (if (< code 1611) 0
-    (if (<= code 1631) 1 0))
-    (if (<= code 1648) 1 (if (< code 1750) 0
-    (if (<= code 1756) 1 0))))
-    (if (<= code 1757) 1 (if (< code 1765) (if (< code 1759) 0
-    (if (<= code 1764) 1 0))
-    (if (<= code 1766) 1 (if (< code 1767) 0
-    (if (<= code 1768) 1 0))))))))
-    (if (<= code 1773) 1 (if (< code 2045) (if (< code 1958) (if (< code 1809) (if (< code 1807) 0
-    (if (<= code 1807) 1 0))
-    (if (<= code 1809) 1 (if (< code 1840) 0
+    (if (<= code 885) 1 (if (< code 890) 0
+    (if (<= code 890) 1 0))))
+    (if (<= code 901) 1 (if (< code 1155) (if (< code 903) 0
+    (if (<= code 903) 1 0))
+    (if (<= code 1161) 1 0))))))
+    (if (<= code 1369) 1 (if (< code 1536) (if (< code 1474) (if (< code 1425) (if (< code 1375) 0
+    (if (<= code 1375) 1 0))
+    (if (<= code 1469) 1 (if (< code 1471) 0
+    (if (<= code 1473) (if (= (word-and (- code 1471) 1) 0) 1 0) 0))))
+    (if (<= code 1476) (if (= (word-and (- code 1474) 1) 0) 1 0) (if (< code 1524) (if (< code 1477) 0
+    (if (<= code 1479) (if (= (word-and (- code 1477) 1) 0) 1 0) 0))
+    (if (<= code 1524) 1 0))))
+    (if (<= code 1541) 1 (if (< code 1611) (if (< code 1564) (if (< code 1552) 0
+    (if (<= code 1562) 1 0))
+    (if (<= code 1564) 1 (if (< code 1600) 0
+    (if (<= code 1600) 1 0))))
+    (if (<= code 1631) 1 (if (< code 1750) (if (< code 1648) 0
+    (if (<= code 1648) 1 0))
+    (if (<= code 1757) 1 0))))))))
+    (if (<= code 1768) 1 (if (< code 2362) (if (< code 2045) (if (< code 1958) (if (< code 1807) (if (< code 1770) 0
+    (if (<= code 1773) 1 0))
+    (if (<= code 1809) (if (= (word-and (- code 1807) 1) 0) 1 0) (if (< code 1840) 0
     (if (<= code 1866) 1 0))))
-    (if (<= code 1968) 1 (if (< code 2036) (if (< code 2027) 0
-    (if (<= code 2035) 1 0))
-    (if (<= code 2037) 1 (if (< code 2042) 0
-    (if (<= code 2042) 1 0))))))
-    (if (<= code 2045) 1 (if (< code 2084) (if (< code 2074) (if (< code 2070) 0
-    (if (<= code 2073) 1 0))
-    (if (<= code 2074) 1 (if (< code 2075) 0
-    (if (<= code 2083) 1 0))))
-    (if (<= code 2084) 1 (if (< code 2088) (if (< code 2085) 0
-    (if (<= code 2087) 1 0))
-    (if (<= code 2088) 1 (if (< code 2089) 0
-    (if (<= code 2093) 1 0))))))))))))
-    (if (<= code 2139) 1 (if (< code 2765) (if (< code 2497) (if (< code 2364) (if (< code 2250) (if (< code 2199) (if (< code 2192) (if (< code 2184) 0
-    (if (<= code 2184) 1 0))
-    (if (<= code 2193) 1 0))
-    (if (<= code 2207) 1 (if (< code 2249) 0
-    (if (<= code 2249) 1 0))))
-    (if (<= code 2273) 1 (if (< code 2275) (if (< code 2274) 0
-    (if (<= code 2274) 1 0))
-    (if (<= code 2306) 1 (if (< code 2362) 0
-    (if (<= code 2362) 1 0))))))
-    (if (<= code 2364) 1 (if (< code 2402) (if (< code 2381) (if (< code 2369) 0
+    (if (<= code 1968) 1 (if (< code 2042) (if (< code 2027) 0
+    (if (<= code 2037) 1 0))
+    (if (<= code 2042) 1 0))))
+    (if (<= code 2045) 1 (if (< code 2192) (if (< code 2137) (if (< code 2070) 0
+    (if (<= code 2093) 1 0))
+    (if (<= code 2139) 1 (if (< code 2184) 0
+    (if (<= code 2184) 1 0))))
+    (if (<= code 2193) 1 (if (< code 2249) (if (< code 2199) 0
+    (if (<= code 2207) 1 0))
+    (if (<= code 2306) 1 0))))))
+    (if (<= code 2364) (if (= (word-and (- code 2362) 1) 0) 1 0) (if (< code 2492) (if (< code 2402) (if (< code 2381) (if (< code 2369) 0
     (if (<= code 2376) 1 0))
     (if (<= code 2381) 1 (if (< code 2385) 0
     (if (<= code 2391) 1 0))))
     (if (<= code 2403) 1 (if (< code 2433) (if (< code 2417) 0
     (if (<= code 2417) 1 0))
-    (if (<= code 2433) 1 (if (< code 2492) 0
-    (if (<= code 2492) 1 0))))))))
-    (if (<= code 2500) 1 (if (< code 2635) (if (< code 2561) (if (< code 2530) (if (< code 2509) 0
-    (if (<= code 2509) 1 0))
-    (if (<= code 2531) 1 (if (< code 2558) 0
-    (if (<= code 2558) 1 0))))
-    (if (<= code 2562) 1 (if (< code 2625) (if (< code 2620) 0
-    (if (<= code 2620) 1 0))
-    (if (<= code 2626) 1 (if (< code 2631) 0
-    (if (<= code 2632) 1 0))))))
-    (if (<= code 2637) 1 (if (< code 2689) (if (< code 2672) (if (< code 2641) 0
-    (if (<= code 2641) 1 0))
-    (if (<= code 2673) 1 (if (< code 2677) 0
-    (if (<= code 2677) 1 0))))
-    (if (<= code 2690) 1 (if (< code 2753) (if (< code 2748) 0
-    (if (<= code 2748) 1 0))
-    (if (<= code 2757) 1 (if (< code 2759) 0
-    (if (<= code 2760) 1 0))))))))))
-    (if (<= code 2765) 1 (if (< code 3134) (if (< code 2901) (if (< code 2876) (if (< code 2810) (if (< code 2786) 0
-    (if (<= code 2787) 1 0))
-    (if (<= code 2815) 1 (if (< code 2817) 0
-    (if (<= code 2817) 1 0))))
-    (if (<= code 2876) 1 (if (< code 2881) (if (< code 2879) 0
-    (if (<= code 2879) 1 0))
+    (if (<= code 2433) 1 0))))
+    (if (<= code 2492) 1 (if (< code 2558) (if (< code 2509) (if (< code 2497) 0
+    (if (<= code 2500) 1 0))
+    (if (<= code 2509) 1 (if (< code 2530) 0
+    (if (<= code 2531) 1 0))))
+    (if (<= code 2558) 1 (if (< code 2620) (if (< code 2561) 0
+    (if (<= code 2562) 1 0))
+    (if (<= code 2620) 1 0))))))))))
+    (if (<= code 2626) 1 (if (< code 3146) (if (< code 2876) (if (< code 2748) (if (< code 2672) (if (< code 2635) (if (< code 2631) 0
+    (if (<= code 2632) 1 0))
+    (if (<= code 2637) 1 (if (< code 2641) 0
+    (if (<= code 2641) 1 0))))
+    (if (<= code 2673) 1 (if (< code 2689) (if (< code 2677) 0
+    (if (<= code 2677) 1 0))
+    (if (<= code 2690) 1 0))))
+    (if (<= code 2748) 1 (if (< code 2786) (if (< code 2759) (if (< code 2753) 0
+    (if (<= code 2757) 1 0))
+    (if (<= code 2760) 1 (if (< code 2765) 0
+    (if (<= code 2765) 1 0))))
+    (if (<= code 2787) 1 (if (< code 2817) (if (< code 2810) 0
+    (if (<= code 2815) 1 0))
+    (if (<= code 2817) 1 0))))))
+    (if (<= code 2876) 1 (if (< code 3008) (if (< code 2901) (if (< code 2882) (if (< code 2879) 0
+    (if (<= code 2881) (if (= (word-and (- code 2879) 1) 0) 1 0) 0))
     (if (<= code 2884) 1 (if (< code 2893) 0
-    (if (<= code 2893) 1 0))))))
-    (if (<= code 2902) 1 (if (< code 3021) (if (< code 2946) (if (< code 2914) 0
+    (if (<= code 2893) 1 0))))
+    (if (<= code 2902) 1 (if (< code 2946) (if (< code 2914) 0
     (if (<= code 2915) 1 0))
-    (if (<= code 2946) 1 (if (< code 3008) 0
-    (if (<= code 3008) 1 0))))
-    (if (<= code 3021) 1 (if (< code 3076) (if (< code 3072) 0
-    (if (<= code 3072) 1 0))
-    (if (<= code 3076) 1 (if (< code 3132) 0
-    (if (<= code 3132) 1 0))))))))
-    (if (<= code 3136) 1 (if (< code 3270) (if (< code 3170) (if (< code 3146) (if (< code 3142) 0
-    (if (<= code 3144) 1 0))
-    (if (<= code 3149) 1 (if (< code 3157) 0
-    (if (<= code 3158) 1 0))))
-    (if (<= code 3171) 1 (if (< code 3260) (if (< code 3201) 0
-    (if (<= code 3201) 1 0))
-    (if (<= code 3260) 1 (if (< code 3263) 0
-    (if (<= code 3263) 1 0))))))
-    (if (<= code 3270) 1 (if (< code 3387) (if (< code 3298) (if (< code 3276) 0
-    (if (<= code 3277) 1 0))
-    (if (<= code 3299) 1 (if (< code 3328) 0
-    (if (<= code 3329) 1 0))))
-    (if (<= code 3388) 1 (if (< code 3405) (if (< code 3393) 0
-    (if (<= code 3396) 1 0))
-    (if (<= code 3405) 1 (if (< code 3426) 0
-    (if (<= code 3427) 1 0))))))))))))))
-    (if (<= code 3457) 1 (if (< code 6832) (if (< code 4348) (if (< code 3968) (if (< code 3764) (if (< code 3636) (if (< code 3542) (if (< code 3538) (if (< code 3530) 0
+    (if (<= code 2946) 1 0))))
+    (if (<= code 3008) 1 (if (< code 3132) (if (< code 3072) (if (< code 3021) 0
+    (if (<= code 3021) 1 0))
+    (if (<= code 3072) 1 (if (< code 3076) 0
+    (if (<= code 3076) 1 0))))
+    (if (<= code 3134) (if (= (word-and (- code 3132) 1) 0) 1 0) (if (< code 3142) (if (< code 3135) 0
+    (if (<= code 3136) 1 0))
+    (if (<= code 3144) 1 0))))))))
+    (if (<= code 3149) 1 (if (< code 3457) (if (< code 3276) (if (< code 3260) (if (< code 3170) (if (< code 3157) 0
+    (if (<= code 3158) 1 0))
+    (if (<= code 3171) 1 (if (< code 3201) 0
+    (if (<= code 3201) 1 0))))
+    (if (<= code 3260) 1 (if (< code 3270) (if (< code 3263) 0
+    (if (<= code 3263) 1 0))
+    (if (<= code 3270) 1 0))))
+    (if (<= code 3277) 1 (if (< code 3393) (if (< code 3328) (if (< code 3298) 0
+    (if (<= code 3299) 1 0))
+    (if (<= code 3329) 1 (if (< code 3387) 0
+    (if (<= code 3388) 1 0))))
+    (if (<= code 3396) 1 (if (< code 3426) (if (< code 3405) 0
+    (if (<= code 3405) 1 0))
+    (if (<= code 3427) 1 0))))))
+    (if (<= code 3457) 1 (if (< code 3761) (if (< code 3633) (if (< code 3538) (if (< code 3530) 0
     (if (<= code 3530) 1 0))
-    (if (<= code 3540) 1 0))
-    (if (<= code 3542) 1 (if (< code 3633) 0
-    (if (<= code 3633) 1 0))))
-    (if (<= code 3642) 1 (if (< code 3655) (if (< code 3654) 0
-    (if (<= code 3654) 1 0))
-    (if (<= code 3662) 1 (if (< code 3761) 0
-    (if (<= code 3761) 1 0))))))
-    (if (<= code 3772) 1 (if (< code 3893) (if (< code 3784) (if (< code 3782) 0
-    (if (<= code 3782) 1 0))
-    (if (<= code 3790) 1 (if (< code 3864) 0
-    (if (<= code 3865) 1 0))))
-    (if (<= code 3893) 1 (if (< code 3897) (if (< code 3895) 0
-    (if (<= code 3895) 1 0))
-    (if (<= code 3897) 1 (if (< code 3953) 0
-    (if (<= code 3966) 1 0))))))))
-    (if (<= code 3972) 1 (if (< code 4157) (if (< code 4038) (if (< code 3981) (if (< code 3974) 0
+    (if (<= code 3540) 1 (if (< code 3542) 0
+    (if (<= code 3542) 1 0))))
+    (if (<= code 3633) 1 (if (< code 3654) (if (< code 3636) 0
+    (if (<= code 3642) 1 0))
+    (if (<= code 3662) 1 0))))
+    (if (<= code 3761) 1 (if (< code 3864) (if (< code 3782) (if (< code 3764) 0
+    (if (<= code 3772) 1 0))
+    (if (<= code 3784) (if (= (word-and (- code 3782) 1) 0) 1 0) (if (< code 3785) 0
+    (if (<= code 3790) 1 0))))
+    (if (<= code 3865) 1 (if (< code 3953) (if (< code 3893) 0
+    (if (<= code 3897) (if (= (word-and (- code 3893) 1) 0) 1 0) 0))
+    (if (<= code 3966) 1 0))))))))))))
+    (if (<= code 3972) 1 (if (< code 7083) (if (< code 6155) (if (< code 4237) (if (< code 4153) (if (< code 4038) (if (< code 3981) (if (< code 3974) 0
     (if (<= code 3975) 1 0))
     (if (<= code 3991) 1 (if (< code 3993) 0
     (if (<= code 4028) 1 0))))
     (if (<= code 4038) 1 (if (< code 4146) (if (< code 4141) 0
     (if (<= code 4144) 1 0))
-    (if (<= code 4151) 1 (if (< code 4153) 0
-    (if (<= code 4154) 1 0))))))
-    (if (<= code 4158) 1 (if (< code 4226) (if (< code 4190) (if (< code 4184) 0
-    (if (<= code 4185) 1 0))
-    (if (<= code 4192) 1 (if (< code 4209) 0
-    (if (<= code 4212) 1 0))))
-    (if (<= code 4226) 1 (if (< code 4237) (if (< code 4229) 0
-    (if (<= code 4230) 1 0))
-    (if (<= code 4237) 1 (if (< code 4253) 0
-    (if (<= code 4253) 1 0))))))))))
-    (if (<= code 4348) 1 (if (< code 6277) (if (< code 6086) (if (< code 5970) (if (< code 5906) (if (< code 4957) 0
-    (if (<= code 4959) 1 0))
-    (if (<= code 5908) 1 (if (< code 5938) 0
-    (if (<= code 5939) 1 0))))
-    (if (<= code 5971) 1 (if (< code 6068) (if (< code 6002) 0
-    (if (<= code 6003) 1 0))
-    (if (<= code 6069) 1 (if (< code 6071) 0
-    (if (<= code 6077) 1 0))))))
-    (if (<= code 6086) 1 (if (< code 6155) (if (< code 6103) (if (< code 6089) 0
-    (if (<= code 6099) 1 0))
-    (if (<= code 6103) 1 (if (< code 6109) 0
-    (if (<= code 6109) 1 0))))
-    (if (<= code 6157) 1 (if (< code 6159) (if (< code 6158) 0
-    (if (<= code 6158) 1 0))
-    (if (<= code 6159) 1 (if (< code 6211) 0
-    (if (<= code 6211) 1 0))))))))
-    (if (<= code 6278) 1 (if (< code 6742) (if (< code 6450) (if (< code 6432) (if (< code 6313) 0
-    (if (<= code 6313) 1 0))
-    (if (<= code 6434) 1 (if (< code 6439) 0
-    (if (<= code 6440) 1 0))))
-    (if (<= code 6450) 1 (if (< code 6679) (if (< code 6457) 0
-    (if (<= code 6459) 1 0))
-    (if (<= code 6680) 1 (if (< code 6683) 0
-    (if (<= code 6683) 1 0))))))
-    (if (<= code 6742) 1 (if (< code 6757) (if (< code 6752) (if (< code 6744) 0
-    (if (<= code 6750) 1 0))
-    (if (<= code 6752) 1 (if (< code 6754) 0
-    (if (<= code 6754) 1 0))))
-    (if (<= code 6764) 1 (if (< code 6783) (if (< code 6771) 0
-    (if (<= code 6780) 1 0))
-    (if (<= code 6783) 1 (if (< code 6823) 0
-    (if (<= code 6823) 1 0))))))))))))
-    (if (<= code 6845) 1 (if (< code 8141) (if (< code 7151) (if (< code 7019) (if (< code 6964) (if (< code 6880) (if (< code 6847) (if (< code 6846) 0
-    (if (<= code 6846) 1 0))
-    (if (<= code 6877) 1 0))
-    (if (<= code 6891) 1 (if (< code 6912) 0
-    (if (<= code 6915) 1 0))))
-    (if (<= code 6964) 1 (if (< code 6972) (if (< code 6966) 0
-    (if (<= code 6970) 1 0))
-    (if (<= code 6972) 1 (if (< code 6978) 0
-    (if (<= code 6978) 1 0))))))
-    (if (<= code 7027) 1 (if (< code 7083) (if (< code 7074) (if (< code 7040) 0
-    (if (<= code 7041) 1 0))
-    (if (<= code 7077) 1 (if (< code 7080) 0
-    (if (<= code 7081) 1 0))))
-    (if (<= code 7085) 1 (if (< code 7144) (if (< code 7142) 0
-    (if (<= code 7142) 1 0))
+    (if (<= code 4151) 1 0))))
+    (if (<= code 4154) 1 (if (< code 4209) (if (< code 4184) (if (< code 4157) 0
+    (if (<= code 4158) 1 0))
+    (if (<= code 4185) 1 (if (< code 4190) 0
+    (if (<= code 4192) 1 0))))
+    (if (<= code 4212) 1 (if (< code 4229) (if (< code 4226) 0
+    (if (<= code 4226) 1 0))
+    (if (<= code 4230) 1 0))))))
+    (if (<= code 4237) 1 (if (< code 6002) (if (< code 5906) (if (< code 4348) (if (< code 4253) 0
+    (if (<= code 4253) 1 0))
+    (if (<= code 4348) 1 (if (< code 4957) 0
+    (if (<= code 4959) 1 0))))
+    (if (<= code 5908) 1 (if (< code 5970) (if (< code 5938) 0
+    (if (<= code 5939) 1 0))
+    (if (<= code 5971) 1 0))))
+    (if (<= code 6003) 1 (if (< code 6089) (if (< code 6071) (if (< code 6068) 0
+    (if (<= code 6069) 1 0))
+    (if (<= code 6077) 1 (if (< code 6086) 0
+    (if (<= code 6086) 1 0))))
+    (if (<= code 6099) 1 (if (< code 6109) (if (< code 6103) 0
+    (if (<= code 6103) 1 0))
+    (if (<= code 6109) 1 0))))))))
+    (if (<= code 6159) 1 (if (< code 6771) (if (< code 6457) (if (< code 6432) (if (< code 6277) (if (< code 6211) 0
+    (if (<= code 6211) 1 0))
+    (if (<= code 6278) 1 (if (< code 6313) 0
+    (if (<= code 6313) 1 0))))
+    (if (<= code 6434) 1 (if (< code 6450) (if (< code 6439) 0
+    (if (<= code 6440) 1 0))
+    (if (<= code 6450) 1 0))))
+    (if (<= code 6459) 1 (if (< code 6745) (if (< code 6683) (if (< code 6679) 0
+    (if (<= code 6680) 1 0))
+    (if (<= code 6683) 1 (if (< code 6742) 0
+    (if (<= code 6744) (if (= (word-and (- code 6742) 1) 0) 1 0) 0))))
+    (if (<= code 6750) 1 (if (< code 6757) (if (< code 6752) 0
+    (if (<= code 6754) (if (= (word-and (- code 6752) 1) 0) 1 0) 0))
+    (if (<= code 6764) 1 0))))))
+    (if (<= code 6780) 1 (if (< code 6967) (if (< code 6880) (if (< code 6823) (if (< code 6783) 0
+    (if (<= code 6783) 1 0))
+    (if (<= code 6823) 1 (if (< code 6832) 0
+    (if (<= code 6877) 1 0))))
+    (if (<= code 6891) 1 (if (< code 6964) (if (< code 6912) 0
+    (if (<= code 6915) 1 0))
+    (if (<= code 6966) (if (= (word-and (- code 6964) 1) 0) 1 0) 0))))
+    (if (<= code 6970) 1 (if (< code 7040) (if (< code 6978) (if (< code 6972) 0
+    (if (<= code 6972) 1 0))
+    (if (<= code 6978) 1 (if (< code 7019) 0
+    (if (<= code 7027) 1 0))))
+    (if (<= code 7041) 1 (if (< code 7080) (if (< code 7074) 0
+    (if (<= code 7077) 1 0))
+    (if (<= code 7081) 1 0))))))))))
+    (if (<= code 7085) 1 (if (< code 8288) (if (< code 7468) (if (< code 7288) (if (< code 7152) (if (< code 7145) (if (< code 7142) 0
+    (if (<= code 7144) (if (= (word-and (- code 7142) 1) 0) 1 0) 0))
     (if (<= code 7145) 1 (if (< code 7149) 0
-    (if (<= code 7149) 1 0))))))))
-    (if (<= code 7153) 1 (if (< code 7412) (if (< code 7376) (if (< code 7222) (if (< code 7212) 0
+    (if (<= code 7151) (if (= (word-and (- code 7149) 1) 0) 1 0) 0))))
+    (if (<= code 7153) 1 (if (< code 7222) (if (< code 7212) 0
     (if (<= code 7219) 1 0))
-    (if (<= code 7223) 1 (if (< code 7288) 0
-    (if (<= code 7293) 1 0))))
-    (if (<= code 7378) 1 (if (< code 7394) (if (< code 7380) 0
-    (if (<= code 7392) 1 0))
-    (if (<= code 7400) 1 (if (< code 7405) 0
-    (if (<= code 7405) 1 0))))))
-    (if (<= code 7412) 1 (if (< code 7579) (if (< code 7468) (if (< code 7416) 0
-    (if (<= code 7417) 1 0))
-    (if (<= code 7530) 1 (if (< code 7544) 0
-    (if (<= code 7544) 1 0))))
-    (if (<= code 7615) 1 (if (< code 8125) (if (< code 7616) 0
-    (if (<= code 7679) 1 0))
-    (if (<= code 8125) 1 (if (< code 8127) 0
-    (if (<= code 8129) 1 0))))))))))
-    (if (<= code 8143) 1 (if (< code 8413) (if (< code 8231) (if (< code 8203) (if (< code 8173) (if (< code 8157) 0
-    (if (<= code 8159) 1 0))
-    (if (<= code 8175) 1 (if (< code 8189) 0
-    (if (<= code 8190) 1 0))))
-    (if (<= code 8207) 1 (if (< code 8217) (if (< code 8216) 0
-    (if (<= code 8216) 1 0))
-    (if (<= code 8217) 1 (if (< code 8228) 0
-    (if (<= code 8228) 1 0))))))
-    (if (<= code 8231) 1 (if (< code 8305) (if (< code 8288) (if (< code 8234) 0
-    (if (<= code 8238) 1 0))
-    (if (<= code 8292) 1 (if (< code 8294) 0
-    (if (<= code 8303) 1 0))))
-    (if (<= code 8305) 1 (if (< code 8336) (if (< code 8319) 0
-    (if (<= code 8319) 1 0))
-    (if (<= code 8348) 1 (if (< code 8400) 0
-    (if (<= code 8412) 1 0))))))))
-    (if (<= code 8416) 1 (if (< code 11744) (if (< code 11388) (if (< code 8418) (if (< code 8417) 0
-    (if (<= code 8417) 1 0))
-    (if (<= code 8420) 1 (if (< code 8421) 0
-    (if (<= code 8432) 1 0))))
-    (if (<= code 11389) 1 (if (< code 11631) (if (< code 11503) 0
-    (if (<= code 11505) 1 0))
-    (if (<= code 11631) 1 (if (< code 11647) 0
-    (if (<= code 11647) 1 0))))))
-    (if (<= code 11775) 1 (if (< code 12337) (if (< code 12293) (if (< code 11823) 0
-    (if (<= code 11823) 1 0))
-    (if (<= code 12293) 1 (if (< code 12330) 0
-    (if (<= code 12333) 1 0))))
-    (if (<= code 12341) 1 (if (< code 12441) (if (< code 12347) 0
+    (if (<= code 7223) 1 0))))
+    (if (<= code 7293) 1 (if (< code 7405) (if (< code 7380) (if (< code 7376) 0
+    (if (<= code 7378) 1 0))
+    (if (<= code 7392) 1 (if (< code 7394) 0
+    (if (<= code 7400) 1 0))))
+    (if (<= code 7405) 1 (if (< code 7416) (if (< code 7412) 0
+    (if (<= code 7412) 1 0))
+    (if (<= code 7417) 1 0))))))
+    (if (<= code 7530) 1 (if (< code 8173) (if (< code 8128) (if (< code 7579) (if (< code 7544) 0
+    (if (<= code 7544) 1 0))
+    (if (<= code 7679) 1 (if (< code 8125) 0
+    (if (<= code 8127) (if (= (word-and (- code 8125) 1) 0) 1 0) 0))))
+    (if (<= code 8129) 1 (if (< code 8157) (if (< code 8141) 0
+    (if (<= code 8143) 1 0))
+    (if (<= code 8159) 1 0))))
+    (if (<= code 8175) 1 (if (< code 8228) (if (< code 8203) (if (< code 8189) 0
+    (if (<= code 8190) 1 0))
+    (if (<= code 8207) 1 (if (< code 8216) 0
+    (if (<= code 8217) 1 0))))
+    (if (<= code 8228) 1 (if (< code 8234) (if (< code 8231) 0
+    (if (<= code 8231) 1 0))
+    (if (<= code 8238) 1 0))))))))
+    (if (<= code 8292) 1 (if (< code 12337) (if (< code 11503) (if (< code 8336) (if (< code 8305) (if (< code 8294) 0
+    (if (<= code 8303) 1 0))
+    (if (<= code 8305) 1 (if (< code 8319) 0
+    (if (<= code 8319) 1 0))))
+    (if (<= code 8348) 1 (if (< code 11388) (if (< code 8400) 0
+    (if (<= code 8432) 1 0))
+    (if (<= code 11389) 1 0))))
+    (if (<= code 11505) 1 (if (< code 11823) (if (< code 11647) (if (< code 11631) 0
+    (if (<= code 11631) 1 0))
+    (if (<= code 11647) 1 (if (< code 11744) 0
+    (if (<= code 11775) 1 0))))
+    (if (<= code 11823) 1 (if (< code 12330) (if (< code 12293) 0
+    (if (<= code 12293) 1 0))
+    (if (<= code 12333) 1 0))))))
+    (if (<= code 12341) 1 (if (< code 42607) (if (< code 40981) (if (< code 12441) (if (< code 12347) 0
     (if (<= code 12347) 1 0))
-    (if (<= code 12442) 1 (if (< code 12443) 0
-    (if (<= code 12444) 1 0))))))))))))))))
-    (if (<= code 12446) 1 (if (< code 70608) (if (< code 65106) (if (< code 43452) (if (< code 42889) (if (< code 42652) (if (< code 42607) (if (< code 42232) (if (< code 40981) (if (< code 12540) 0
-    (if (<= code 12542) 1 0))
-    (if (<= code 40981) 1 0))
-    (if (<= code 42237) 1 (if (< code 42508) 0
+    (if (<= code 12446) 1 (if (< code 12540) 0
+    (if (<= code 12542) 1 0))))
+    (if (<= code 40981) 1 (if (< code 42508) (if (< code 42232) 0
+    (if (<= code 42237) 1 0))
     (if (<= code 42508) 1 0))))
-    (if (<= code 42607) 1 (if (< code 42612) (if (< code 42608) 0
-    (if (<= code 42610) 1 0))
-    (if (<= code 42621) 1 (if (< code 42623) 0
-    (if (<= code 42623) 1 0))))))
-    (if (<= code 42653) 1 (if (< code 42775) (if (< code 42736) (if (< code 42654) 0
-    (if (<= code 42655) 1 0))
-    (if (<= code 42737) 1 (if (< code 42752) 0
-    (if (<= code 42774) 1 0))))
-    (if (<= code 42783) 1 (if (< code 42864) (if (< code 42784) 0
+    (if (<= code 42610) 1 (if (< code 42736) (if (< code 42623) (if (< code 42612) 0
+    (if (<= code 42621) 1 0))
+    (if (<= code 42623) 1 (if (< code 42652) 0
+    (if (<= code 42655) 1 0))))
+    (if (<= code 42737) 1 (if (< code 42864) (if (< code 42752) 0
     (if (<= code 42785) 1 0))
-    (if (<= code 42864) 1 (if (< code 42888) 0
-    (if (<= code 42888) 1 0))))))))
-    (if (<= code 42890) 1 (if (< code 43204) (if (< code 43014) (if (< code 43000) (if (< code 42993) 0
+    (if (<= code 42864) 1 0))))))))))))))
+    (if (<= code 42890) 1 (if (< code 70750) (if (< code 66272) (if (< code 43710) (if (< code 43446) (if (< code 43204) (if (< code 43014) (if (< code 43000) (if (< code 42993) 0
     (if (<= code 42996) 1 0))
     (if (<= code 43001) 1 (if (< code 43010) 0
     (if (<= code 43010) 1 0))))
@@ -2276,234 +2306,267 @@
     (if (<= code 43309) 1 0))))
     (if (<= code 43345) 1 (if (< code 43443) (if (< code 43392) 0
     (if (<= code 43394) 1 0))
-    (if (<= code 43443) 1 (if (< code 43446) 0
-    (if (<= code 43449) 1 0))))))))))
-    (if (<= code 43453) 1 (if (< code 43741) (if (< code 43596) (if (< code 43561) (if (< code 43493) (if (< code 43471) 0
-    (if (<= code 43471) 1 0))
-    (if (<= code 43493) 1 (if (< code 43494) 0
+    (if (<= code 43443) 1 0))))))
+    (if (<= code 43449) 1 (if (< code 43587) (if (< code 43561) (if (< code 43471) (if (< code 43452) 0
+    (if (<= code 43453) 1 0))
+    (if (<= code 43471) 1 (if (< code 43493) 0
     (if (<= code 43494) 1 0))))
     (if (<= code 43566) 1 (if (< code 43573) (if (< code 43569) 0
     (if (<= code 43570) 1 0))
-    (if (<= code 43574) 1 (if (< code 43587) 0
-    (if (<= code 43587) 1 0))))))
-    (if (<= code 43596) 1 (if (< code 43698) (if (< code 43644) (if (< code 43632) 0
-    (if (<= code 43632) 1 0))
-    (if (<= code 43644) 1 (if (< code 43696) 0
-    (if (<= code 43696) 1 0))))
-    (if (<= code 43700) 1 (if (< code 43710) (if (< code 43703) 0
-    (if (<= code 43704) 1 0))
-    (if (<= code 43711) 1 (if (< code 43713) 0
-    (if (<= code 43713) 1 0))))))))
-    (if (<= code 43741) 1 (if (< code 44005) (if (< code 43867) (if (< code 43763) (if (< code 43756) 0
-    (if (<= code 43757) 1 0))
-    (if (<= code 43764) 1 (if (< code 43766) 0
-    (if (<= code 43766) 1 0))))
-    (if (<= code 43867) 1 (if (< code 43881) (if (< code 43868) 0
-    (if (<= code 43871) 1 0))
-    (if (<= code 43881) 1 (if (< code 43882) 0
-    (if (<= code 43883) 1 0))))))
-    (if (<= code 44005) 1 (if (< code 64434) (if (< code 44013) (if (< code 44008) 0
-    (if (<= code 44008) 1 0))
-    (if (<= code 44013) 1 (if (< code 64286) 0
-    (if (<= code 64286) 1 0))))
-    (if (<= code 64450) 1 (if (< code 65043) (if (< code 65024) 0
-    (if (<= code 65039) 1 0))
-    (if (<= code 65043) 1 (if (< code 65056) 0
-    (if (<= code 65071) 1 0))))))))))))
-    (if (<= code 65106) 1 (if (< code 69633) (if (< code 67506) (if (< code 65438) (if (< code 65306) (if (< code 65287) (if (< code 65279) (if (< code 65109) 0
-    (if (<= code 65109) 1 0))
-    (if (<= code 65279) 1 0))
-    (if (<= code 65287) 1 (if (< code 65294) 0
+    (if (<= code 43574) 1 0))))
+    (if (<= code 43587) 1 (if (< code 43696) (if (< code 43632) (if (< code 43596) 0
+    (if (<= code 43596) 1 0))
+    (if (<= code 43632) 1 (if (< code 43644) 0
+    (if (<= code 43644) 1 0))))
+    (if (<= code 43698) (if (= (word-and (- code 43696) 1) 0) 1 0) (if (< code 43703) (if (< code 43699) 0
+    (if (<= code 43700) 1 0))
+    (if (<= code 43704) 1 0))))))))
+    (if (<= code 43711) 1 (if (< code 65043) (if (< code 43881) (if (< code 43763) (if (< code 43741) (if (< code 43713) 0
+    (if (<= code 43713) 1 0))
+    (if (<= code 43741) 1 (if (< code 43756) 0
+    (if (<= code 43757) 1 0))))
+    (if (<= code 43764) 1 (if (< code 43867) (if (< code 43766) 0
+    (if (<= code 43766) 1 0))
+    (if (<= code 43871) 1 0))))
+    (if (<= code 43883) 1 (if (< code 64286) (if (< code 44008) (if (< code 44005) 0
+    (if (<= code 44005) 1 0))
+    (if (<= code 44008) 1 (if (< code 44013) 0
+    (if (<= code 44013) 1 0))))
+    (if (<= code 64286) 1 (if (< code 65024) (if (< code 64434) 0
+    (if (<= code 64450) 1 0))
+    (if (<= code 65039) 1 0))))))
+    (if (<= code 65043) 1 (if (< code 65306) (if (< code 65279) (if (< code 65106) (if (< code 65056) 0
+    (if (<= code 65071) 1 0))
+    (if (<= code 65106) 1 (if (< code 65109) 0
+    (if (<= code 65109) 1 0))))
+    (if (<= code 65279) 1 (if (< code 65294) (if (< code 65287) 0
+    (if (<= code 65287) 1 0))
     (if (<= code 65294) 1 0))))
-    (if (<= code 65306) 1 (if (< code 65344) (if (< code 65342) 0
-    (if (<= code 65342) 1 0))
-    (if (<= code 65344) 1 (if (< code 65392) 0
-    (if (<= code 65392) 1 0))))))
-    (if (<= code 65439) 1 (if (< code 66272) (if (< code 65529) (if (< code 65507) 0
-    (if (<= code 65507) 1 0))
-    (if (<= code 65531) 1 (if (< code 66045) 0
-    (if (<= code 66045) 1 0))))
-    (if (<= code 66272) 1 (if (< code 67456) (if (< code 66422) 0
+    (if (<= code 65306) 1 (if (< code 65507) (if (< code 65392) (if (< code 65342) 0
+    (if (<= code 65344) (if (= (word-and (- code 65342) 1) 0) 1 0) 0))
+    (if (<= code 65392) 1 (if (< code 65438) 0
+    (if (<= code 65439) 1 0))))
+    (if (<= code 65507) 1 (if (< code 66045) (if (< code 65529) 0
+    (if (<= code 65531) 1 0))
+    (if (<= code 66045) 1 0))))))))))
+    (if (<= code 66272) 1 (if (< code 69826) (if (< code 68975) (if (< code 68108) (if (< code 67506) (if (< code 67456) (if (< code 66422) 0
     (if (<= code 66426) 1 0))
     (if (<= code 67461) 1 (if (< code 67463) 0
-    (if (<= code 67504) 1 0))))))))
-    (if (<= code 67514) 1 (if (< code 68942) (if (< code 68152) (if (< code 68101) (if (< code 68097) 0
+    (if (<= code 67504) 1 0))))
+    (if (<= code 67514) 1 (if (< code 68101) (if (< code 68097) 0
     (if (<= code 68099) 1 0))
-    (if (<= code 68102) 1 (if (< code 68108) 0
-    (if (<= code 68111) 1 0))))
-    (if (<= code 68154) 1 (if (< code 68325) (if (< code 68159) 0
-    (if (<= code 68159) 1 0))
-    (if (<= code 68326) 1 (if (< code 68900) 0
-    (if (<= code 68903) 1 0))))))
-    (if (<= code 68942) 1 (if (< code 69317) (if (< code 68975) (if (< code 68969) 0
-    (if (<= code 68973) 1 0))
-    (if (<= code 68975) 1 (if (< code 69291) 0
-    (if (<= code 69292) 1 0))))
-    (if (<= code 69317) 1 (if (< code 69446) (if (< code 69370) 0
-    (if (<= code 69375) 1 0))
-    (if (<= code 69456) 1 (if (< code 69506) 0
-    (if (<= code 69509) 1 0))))))))))
-    (if (<= code 69633) 1 (if (< code 70089) (if (< code 69826) (if (< code 69759) (if (< code 69744) (if (< code 69688) 0
-    (if (<= code 69702) 1 0))
-    (if (<= code 69744) 1 (if (< code 69747) 0
-    (if (<= code 69748) 1 0))))
-    (if (<= code 69761) 1 (if (< code 69817) (if (< code 69811) 0
-    (if (<= code 69814) 1 0))
-    (if (<= code 69818) 1 (if (< code 69821) 0
-    (if (<= code 69821) 1 0))))))
-    (if (<= code 69826) 1 (if (< code 69933) (if (< code 69888) (if (< code 69837) 0
+    (if (<= code 68102) 1 0))))
+    (if (<= code 68111) 1 (if (< code 68900) (if (< code 68159) (if (< code 68152) 0
+    (if (<= code 68154) 1 0))
+    (if (<= code 68159) 1 (if (< code 68325) 0
+    (if (<= code 68326) 1 0))))
+    (if (<= code 68903) 1 (if (< code 68969) (if (< code 68942) 0
+    (if (<= code 68942) 1 0))
+    (if (<= code 68973) 1 0))))))
+    (if (<= code 68975) 1 (if (< code 69688) (if (< code 69446) (if (< code 69317) (if (< code 69291) 0
+    (if (<= code 69292) 1 0))
+    (if (<= code 69317) 1 (if (< code 69370) 0
+    (if (<= code 69375) 1 0))))
+    (if (<= code 69456) 1 (if (< code 69633) (if (< code 69506) 0
+    (if (<= code 69509) 1 0))
+    (if (<= code 69633) 1 0))))
+    (if (<= code 69702) 1 (if (< code 69811) (if (< code 69747) (if (< code 69744) 0
+    (if (<= code 69744) 1 0))
+    (if (<= code 69748) 1 (if (< code 69759) 0
+    (if (<= code 69761) 1 0))))
+    (if (<= code 69814) 1 (if (< code 69821) (if (< code 69817) 0
+    (if (<= code 69818) 1 0))
+    (if (<= code 69821) 1 0))))))))
+    (if (<= code 69826) 1 (if (< code 70209) (if (< code 70070) (if (< code 69933) (if (< code 69888) (if (< code 69837) 0
     (if (<= code 69837) 1 0))
     (if (<= code 69890) 1 (if (< code 69927) 0
     (if (<= code 69931) 1 0))))
     (if (<= code 69940) 1 (if (< code 70016) (if (< code 70003) 0
     (if (<= code 70003) 1 0))
-    (if (<= code 70017) 1 (if (< code 70070) 0
-    (if (<= code 70078) 1 0))))))))
-    (if (<= code 70092) 1 (if (< code 70371) (if (< code 70198) (if (< code 70191) (if (< code 70095) 0
-    (if (<= code 70095) 1 0))
-    (if (<= code 70193) 1 (if (< code 70196) 0
-    (if (<= code 70196) 1 0))))
-    (if (<= code 70199) 1 (if (< code 70209) (if (< code 70206) 0
-    (if (<= code 70206) 1 0))
-    (if (<= code 70209) 1 (if (< code 70367) 0
-    (if (<= code 70367) 1 0))))))
-    (if (<= code 70378) 1 (if (< code 70502) (if (< code 70459) (if (< code 70400) 0
-    (if (<= code 70401) 1 0))
-    (if (<= code 70460) 1 (if (< code 70464) 0
-    (if (<= code 70464) 1 0))))
-    (if (<= code 70508) 1 (if (< code 70587) (if (< code 70512) 0
-    (if (<= code 70516) 1 0))
-    (if (<= code 70592) 1 (if (< code 70606) 0
-    (if (<= code 70606) 1 0))))))))))))))
-    (if (<= code 70608) 1 (if (< code 73538) (if (< code 72160) (if (< code 71231) (if (< code 70847) (if (< code 70726) (if (< code 70712) (if (< code 70625) (if (< code 70610) 0
-    (if (<= code 70610) 1 0))
-    (if (<= code 70626) 1 0))
-    (if (<= code 70719) 1 (if (< code 70722) 0
-    (if (<= code 70724) 1 0))))
-    (if (<= code 70726) 1 (if (< code 70835) (if (< code 70750) 0
-    (if (<= code 70750) 1 0))
-    (if (<= code 70840) 1 (if (< code 70842) 0
-    (if (<= code 70842) 1 0))))))
-    (if (<= code 70848) 1 (if (< code 71103) (if (< code 71090) (if (< code 70850) 0
-    (if (<= code 70851) 1 0))
-    (if (<= code 71093) 1 (if (< code 71100) 0
+    (if (<= code 70017) 1 0))))
+    (if (<= code 70078) 1 (if (< code 70196) (if (< code 70095) (if (< code 70089) 0
+    (if (<= code 70092) 1 0))
+    (if (<= code 70095) 1 (if (< code 70191) 0
+    (if (<= code 70193) 1 0))))
+    (if (<= code 70198) (if (= (word-and (- code 70196) 1) 0) 1 0) (if (< code 70206) (if (< code 70199) 0
+    (if (<= code 70199) 1 0))
+    (if (<= code 70206) 1 0))))))
+    (if (<= code 70209) 1 (if (< code 70512) (if (< code 70459) (if (< code 70371) (if (< code 70367) 0
+    (if (<= code 70367) 1 0))
+    (if (<= code 70378) 1 (if (< code 70400) 0
+    (if (<= code 70401) 1 0))))
+    (if (<= code 70460) 1 (if (< code 70502) (if (< code 70464) 0
+    (if (<= code 70464) 1 0))
+    (if (<= code 70508) 1 0))))
+    (if (<= code 70516) 1 (if (< code 70712) (if (< code 70606) (if (< code 70587) 0
+    (if (<= code 70592) 1 0))
+    (if (<= code 70610) (if (= (word-and (- code 70606) 1) 0) 1 0) (if (< code 70625) 0
+    (if (<= code 70626) 1 0))))
+    (if (<= code 70719) 1 (if (< code 70726) (if (< code 70722) 0
+    (if (<= code 70724) 1 0))
+    (if (<= code 70726) 1 0))))))))))))
+    (if (<= code 70750) 1 (if (< code 73562) (if (< code 72251) (if (< code 71351) (if (< code 71103) (if (< code 70850) (if (< code 70842) (if (< code 70835) 0
+    (if (<= code 70840) 1 0))
+    (if (<= code 70842) 1 (if (< code 70847) 0
+    (if (<= code 70848) 1 0))))
+    (if (<= code 70851) 1 (if (< code 71100) (if (< code 71090) 0
+    (if (<= code 71093) 1 0))
     (if (<= code 71101) 1 0))))
-    (if (<= code 71104) 1 (if (< code 71219) (if (< code 71132) 0
+    (if (<= code 71104) 1 (if (< code 71232) (if (< code 71219) (if (< code 71132) 0
     (if (<= code 71133) 1 0))
     (if (<= code 71226) 1 (if (< code 71229) 0
-    (if (<= code 71229) 1 0))))))))
-    (if (<= code 71232) 1 (if (< code 71463) (if (< code 71351) (if (< code 71341) (if (< code 71339) 0
-    (if (<= code 71339) 1 0))
-    (if (<= code 71341) 1 (if (< code 71344) 0
-    (if (<= code 71349) 1 0))))
-    (if (<= code 71351) 1 (if (< code 71455) (if (< code 71453) 0
-    (if (<= code 71453) 1 0))
-    (if (<= code 71455) 1 (if (< code 71458) 0
-    (if (<= code 71461) 1 0))))))
-    (if (<= code 71467) 1 (if (< code 71998) (if (< code 71737) (if (< code 71727) 0
-    (if (<= code 71735) 1 0))
-    (if (<= code 71738) 1 (if (< code 71995) 0
+    (if (<= code 71231) (if (= (word-and (- code 71229) 1) 0) 1 0) 0))))
+    (if (<= code 71232) 1 (if (< code 71344) (if (< code 71339) 0
+    (if (<= code 71341) (if (= (word-and (- code 71339) 1) 0) 1 0) 0))
+    (if (<= code 71349) 1 0))))))
+    (if (<= code 71351) 1 (if (< code 71998) (if (< code 71727) (if (< code 71458) (if (< code 71453) 0
+    (if (<= code 71455) (if (= (word-and (- code 71453) 1) 0) 1 0) 0))
+    (if (<= code 71461) 1 (if (< code 71463) 0
+    (if (<= code 71467) 1 0))))
+    (if (<= code 71735) 1 (if (< code 71995) (if (< code 71737) 0
+    (if (<= code 71738) 1 0))
     (if (<= code 71996) 1 0))))
-    (if (<= code 71998) 1 (if (< code 72148) (if (< code 72003) 0
+    (if (<= code 71998) 1 (if (< code 72160) (if (< code 72148) (if (< code 72003) 0
     (if (<= code 72003) 1 0))
     (if (<= code 72151) 1 (if (< code 72154) 0
-    (if (<= code 72155) 1 0))))))))))
-    (if (<= code 72160) 1 (if (< code 72874) (if (< code 72344) (if (< code 72263) (if (< code 72243) (if (< code 72193) 0
+    (if (<= code 72155) 1 0))))
+    (if (<= code 72160) 1 (if (< code 72243) (if (< code 72193) 0
     (if (<= code 72202) 1 0))
-    (if (<= code 72248) 1 (if (< code 72251) 0
-    (if (<= code 72254) 1 0))))
-    (if (<= code 72263) 1 (if (< code 72281) (if (< code 72273) 0
-    (if (<= code 72278) 1 0))
-    (if (<= code 72283) 1 (if (< code 72330) 0
-    (if (<= code 72342) 1 0))))))
-    (if (<= code 72345) 1 (if (< code 72752) (if (< code 72546) (if (< code 72544) 0
-    (if (<= code 72544) 1 0))
-    (if (<= code 72548) 1 (if (< code 72550) 0
-    (if (<= code 72550) 1 0))))
-    (if (<= code 72758) 1 (if (< code 72767) (if (< code 72760) 0
-    (if (<= code 72765) 1 0))
-    (if (<= code 72767) 1 (if (< code 72850) 0
-    (if (<= code 72871) 1 0))))))))
-    (if (<= code 72880) 1 (if (< code 73104) (if (< code 73018) (if (< code 72885) (if (< code 72882) 0
-    (if (<= code 72883) 1 0))
-    (if (<= code 72886) 1 (if (< code 73009) 0
-    (if (<= code 73014) 1 0))))
-    (if (<= code 73018) 1 (if (< code 73023) (if (< code 73020) 0
-    (if (<= code 73021) 1 0))
-    (if (<= code 73029) 1 (if (< code 73031) 0
-    (if (<= code 73031) 1 0))))))
-    (if (<= code 73105) 1 (if (< code 73459) (if (< code 73111) (if (< code 73109) 0
-    (if (<= code 73109) 1 0))
-    (if (<= code 73111) 1 (if (< code 73177) 0
-    (if (<= code 73177) 1 0))))
-    (if (<= code 73460) 1 (if (< code 73526) (if (< code 73472) 0
-    (if (<= code 73473) 1 0))
-    (if (<= code 73530) 1 (if (< code 73536) 0
-    (if (<= code 73536) 1 0))))))))))))
-    (if (<= code 73538) 1 (if (< code 121344) (if (< code 94179) (if (< code 92976) (if (< code 78919) (if (< code 78896) (if (< code 73562) 0
-    (if (<= code 73562) 1 0))
-    (if (<= code 78911) 1 (if (< code 78912) 0
-    (if (<= code 78912) 1 0))))
-    (if (<= code 78933) 1 (if (< code 90413) (if (< code 90398) 0
-    (if (<= code 90409) 1 0))
-    (if (<= code 90415) 1 (if (< code 92912) 0
-    (if (<= code 92916) 1 0))))))
-    (if (<= code 92982) 1 (if (< code 94031) (if (< code 93504) (if (< code 92992) 0
-    (if (<= code 92995) 1 0))
-    (if (<= code 93506) 1 (if (< code 93547) 0
-    (if (<= code 93548) 1 0))))
-    (if (<= code 94031) 1 (if (< code 94099) (if (< code 94095) 0
-    (if (<= code 94098) 1 0))
-    (if (<= code 94111) 1 (if (< code 94176) 0
-    (if (<= code 94177) 1 0))))))))
-    (if (<= code 94179) 1 (if (< code 118528) (if (< code 110581) (if (< code 94194) (if (< code 94180) 0
-    (if (<= code 94180) 1 0))
-    (if (<= code 94195) 1 (if (< code 110576) 0
-    (if (<= code 110579) 1 0))))
-    (if (<= code 110587) 1 (if (< code 113821) (if (< code 110589) 0
-    (if (<= code 110590) 1 0))
-    (if (<= code 113822) 1 (if (< code 113824) 0
-    (if (<= code 113827) 1 0))))))
-    (if (<= code 118573) 1 (if (< code 119163) (if (< code 119143) (if (< code 118576) 0
-    (if (<= code 118598) 1 0))
-    (if (<= code 119145) 1 (if (< code 119155) 0
-    (if (<= code 119162) 1 0))))
-    (if (<= code 119170) 1 (if (< code 119210) (if (< code 119173) 0
-    (if (<= code 119179) 1 0))
-    (if (<= code 119213) 1 (if (< code 119362) 0
-    (if (<= code 119364) 1 0))))))))))
-    (if (<= code 121398) 1 (if (< code 123628) (if (< code 122907) (if (< code 121499) (if (< code 121461) (if (< code 121403) 0
-    (if (<= code 121452) 1 0))
-    (if (<= code 121461) 1 (if (< code 121476) 0
-    (if (<= code 121476) 1 0))))
-    (if (<= code 121503) 1 (if (< code 122880) (if (< code 121505) 0
-    (if (<= code 121519) 1 0))
-    (if (<= code 122886) 1 (if (< code 122888) 0
-    (if (<= code 122904) 1 0))))))
+    (if (<= code 72248) 1 0))))))))
+    (if (<= code 72254) 1 (if (< code 72882) (if (< code 72547) (if (< code 72330) (if (< code 72273) (if (< code 72263) 0
+    (if (<= code 72263) 1 0))
+    (if (<= code 72278) 1 (if (< code 72281) 0
+    (if (<= code 72283) 1 0))))
+    (if (<= code 72342) 1 (if (< code 72544) (if (< code 72344) 0
+    (if (<= code 72345) 1 0))
+    (if (<= code 72546) (if (= (word-and (- code 72544) 1) 0) 1 0) 0))))
+    (if (<= code 72548) 1 (if (< code 72767) (if (< code 72752) (if (< code 72550) 0
+    (if (<= code 72550) 1 0))
+    (if (<= code 72758) 1 (if (< code 72760) 0
+    (if (<= code 72765) 1 0))))
+    (if (<= code 72767) 1 (if (< code 72874) (if (< code 72850) 0
+    (if (<= code 72871) 1 0))
+    (if (<= code 72880) 1 0))))))
+    (if (<= code 72883) 1 (if (< code 73104) (if (< code 73021) (if (< code 73009) (if (< code 72885) 0
+    (if (<= code 72886) 1 0))
+    (if (<= code 73014) 1 (if (< code 73018) 0
+    (if (<= code 73020) (if (= (word-and (- code 73018) 1) 0) 1 0) 0))))
+    (if (<= code 73023) (if (= (word-and (- code 73021) 1) 0) 1 0) (if (< code 73031) (if (< code 73024) 0
+    (if (<= code 73029) 1 0))
+    (if (<= code 73031) 1 0))))
+    (if (<= code 73105) 1 (if (< code 73472) (if (< code 73177) (if (< code 73109) 0
+    (if (<= code 73111) (if (= (word-and (- code 73109) 1) 0) 1 0) 0))
+    (if (<= code 73177) 1 (if (< code 73459) 0
+    (if (<= code 73460) 1 0))))
+    (if (<= code 73473) 1 (if (< code 73536) (if (< code 73526) 0
+    (if (<= code 73530) 1 0))
+    (if (<= code 73538) (if (= (word-and (- code 73536) 1) 0) 1 0) 0))))))))))
+    (if (<= code 73562) 1 (if (< code 121403) (if (< code 94194) (if (< code 92992) (if (< code 90413) (if (< code 78919) (if (< code 78896) 0
+    (if (<= code 78912) 1 0))
+    (if (<= code 78933) 1 (if (< code 90398) 0
+    (if (<= code 90409) 1 0))))
+    (if (<= code 90415) 1 (if (< code 92976) (if (< code 92912) 0
+    (if (<= code 92916) 1 0))
+    (if (<= code 92982) 1 0))))
+    (if (<= code 92995) 1 (if (< code 94095) (if (< code 93547) (if (< code 93504) 0
+    (if (<= code 93506) 1 0))
+    (if (<= code 93548) 1 (if (< code 94031) 0
+    (if (<= code 94031) 1 0))))
+    (if (<= code 94111) 1 (if (< code 94179) (if (< code 94176) 0
+    (if (<= code 94177) 1 0))
+    (if (<= code 94180) 1 0))))))
+    (if (<= code 94195) 1 (if (< code 118576) (if (< code 113821) (if (< code 110581) (if (< code 110576) 0
+    (if (<= code 110579) 1 0))
+    (if (<= code 110587) 1 (if (< code 110589) 0
+    (if (<= code 110590) 1 0))))
+    (if (<= code 113822) 1 (if (< code 118528) (if (< code 113824) 0
+    (if (<= code 113827) 1 0))
+    (if (<= code 118573) 1 0))))
+    (if (<= code 118598) 1 (if (< code 119210) (if (< code 119155) (if (< code 119143) 0
+    (if (<= code 119145) 1 0))
+    (if (<= code 119170) 1 (if (< code 119173) 0
+    (if (<= code 119179) 1 0))))
+    (if (<= code 119213) 1 (if (< code 121344) (if (< code 119362) 0
+    (if (<= code 119364) 1 0))
+    (if (<= code 121398) 1 0))))))))
+    (if (<= code 121452) 1 (if (< code 123628) (if (< code 122907) (if (< code 121505) (if (< code 121476) (if (< code 121461) 0
+    (if (<= code 121461) 1 0))
+    (if (<= code 121476) 1 (if (< code 121499) 0
+    (if (<= code 121503) 1 0))))
+    (if (<= code 121519) 1 (if (< code 122888) (if (< code 122880) 0
+    (if (<= code 122886) 1 0))
+    (if (<= code 122904) 1 0))))
     (if (<= code 122913) 1 (if (< code 123023) (if (< code 122918) (if (< code 122915) 0
     (if (<= code 122916) 1 0))
     (if (<= code 122922) 1 (if (< code 122928) 0
     (if (<= code 122989) 1 0))))
-    (if (<= code 123023) 1 (if (< code 123191) (if (< code 123184) 0
-    (if (<= code 123190) 1 0))
-    (if (<= code 123197) 1 (if (< code 123566) 0
-    (if (<= code 123566) 1 0))))))))
-    (if (<= code 123631) 1 (if (< code 124671) (if (< code 124643) (if (< code 124140) (if (< code 124139) 0
-    (if (<= code 124139) 1 0))
-    (if (<= code 124143) 1 (if (< code 124398) 0
-    (if (<= code 124399) 1 0))))
-    (if (<= code 124643) 1 (if (< code 124654) (if (< code 124646) 0
-    (if (<= code 124646) 1 0))
-    (if (<= code 124655) 1 (if (< code 124661) 0
-    (if (<= code 124661) 1 0))))))
-    (if (<= code 124671) 1 (if (< code 127995) (if (< code 125252) (if (< code 125136) 0
+    (if (<= code 123023) 1 (if (< code 123566) (if (< code 123184) 0
+    (if (<= code 123197) 1 0))
+    (if (<= code 123566) 1 0))))))
+    (if (<= code 123631) 1 (if (< code 124671) (if (< code 124646) (if (< code 124398) (if (< code 124139) 0
+    (if (<= code 124143) 1 0))
+    (if (<= code 124399) 1 (if (< code 124643) 0
+    (if (<= code 124643) 1 0))))
+    (if (<= code 124646) 1 (if (< code 124661) (if (< code 124654) 0
+    (if (<= code 124655) 1 0))
+    (if (<= code 124661) 1 0))))
+    (if (<= code 124671) 1 (if (< code 917505) (if (< code 125252) (if (< code 125136) 0
     (if (<= code 125142) 1 0))
-    (if (<= code 125258) 1 (if (< code 125259) 0
-    (if (<= code 125259) 1 0))))
-    (if (<= code 127999) 1 (if (< code 917536) (if (< code 917505) 0
-    (if (<= code 917505) 1 0))
-    (if (<= code 917631) 1 (if (< code 917760) 0
-    (if (<= code 917999) 1 0)))))))))))))))))))
+    (if (<= code 125259) 1 (if (< code 127995) 0
+    (if (<= code 127999) 1 0))))
+    (if (<= code 917505) 1 (if (< code 917760) (if (< code 917536) 0
+    (if (<= code 917631) 1 0))
+    (if (<= code 917999) 1 0)))))))))))))))))
+  (defun heap-unicode-case-ignorable-160 (code)
+    (if (< code 72550) (if (< code 69317) (if (< code 6880) (if (< code 6863) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 6877) 0 (heap-unicode-case-ignorable-17 code)))
+    (if (<= code 6891) 0 (if (< code 42993) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 42993) 0 (heap-unicode-case-ignorable-17 code)))))
+    (if (<= code 69317) 0 (if (< code 72544) (if (< code 69370) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 69371) 0 (heap-unicode-case-ignorable-17 code)))
+    (if (<= code 72546) (if (= (word-and (- code 72544) 1) 0) 0 (heap-unicode-case-ignorable-17 code)) (if (< code 72547) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 72548) 0 (heap-unicode-case-ignorable-17 code)))))))
+    (if (<= code 72550) 0 (if (< code 124646) (if (< code 94194) (if (< code 73177) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 73177) 0 (heap-unicode-case-ignorable-17 code)))
+    (if (<= code 94195) 0 (if (< code 124643) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 124643) 0 (heap-unicode-case-ignorable-17 code)))))
+    (if (<= code 124646) 0 (if (< code 124661) (if (< code 124654) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 124655) 0 (heap-unicode-case-ignorable-17 code)))
+    (if (<= code 124661) 0 (if (< code 124671) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 124671) 0 (heap-unicode-case-ignorable-17 code))))))))))
+  (defun heap-unicode-case-ignorable-151 (code)
+    (if (< code 72547) (if (< code 69317) (if (< code 42993) (if (< code 6863) (if (< code 2199) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 2199) 0 (heap-unicode-case-ignorable-17 code)))
+    (if (<= code 6877) 0 (if (< code 6880) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 6891) 0 (heap-unicode-case-ignorable-17 code)))))
+    (if (<= code 42993) 0 (if (< code 68969) (if (< code 68942) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 68942) 0 (heap-unicode-case-ignorable-17 code)))
+    (if (<= code 68973) 0 (if (< code 68975) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 68975) 0 (heap-unicode-case-ignorable-17 code)))))))
+    (if (<= code 69317) 0 (if (< code 70625) (if (< code 70587) (if (< code 69370) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 69372) 0 (heap-unicode-case-ignorable-17 code)))
+    (if (<= code 70592) 0 (if (< code 70606) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 70610) (if (= (word-and (- code 70606) 1) 0) 0 (heap-unicode-case-ignorable-17 code)) (heap-unicode-case-ignorable-17 code)))))
+    (if (<= code 70626) 0 (if (< code 72544) (if (< code 71454) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 71454) 1 (heap-unicode-case-ignorable-17 code)))
+    (if (<= code 72546) (if (= (word-and (- code 72544) 1) 0) 0 (heap-unicode-case-ignorable-17 code)) (heap-unicode-case-ignorable-17 code)))))))
+    (if (<= code 72548) 0 (if (< code 94194) (if (< code 90398) (if (< code 73177) (if (< code 72550) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 72550) 0 (heap-unicode-case-ignorable-17 code)))
+    (if (<= code 73177) 0 (if (< code 73562) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 73562) 0 (heap-unicode-case-ignorable-17 code)))))
+    (if (<= code 90409) 0 (if (< code 93504) (if (< code 90413) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 90415) 0 (heap-unicode-case-ignorable-17 code)))
+    (if (<= code 93506) 0 (if (< code 93547) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 93548) 0 (heap-unicode-case-ignorable-17 code)))))))
+    (if (<= code 94195) 0 (if (< code 124654) (if (< code 124643) (if (< code 124398) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 124399) 0 (heap-unicode-case-ignorable-17 code)))
+    (if (<= code 124643) 0 (if (< code 124646) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 124646) 0 (heap-unicode-case-ignorable-17 code)))))
+    (if (<= code 124655) 0 (if (< code 124671) (if (< code 124661) (heap-unicode-case-ignorable-17 code)
+    (if (<= code 124661) 0 (heap-unicode-case-ignorable-17 code)))
+    (if (<= code 124671) 0 (heap-unicode-case-ignorable-17 code))))))))))
+  (defun heap-unicode-case-ignorable (code)
+    (if (= (load-u32 16) 151) (heap-unicode-case-ignorable-151 code) (if (= (load-u32 16) 160) (heap-unicode-case-ignorable-160 code) (heap-unicode-case-ignorable-17 code))))
   ;; END GENERATED UNICODE CASE DATA
   (defun heap-code-point (data length index)
     (let ((code (load-u16 (+ data (* index 2)))))
@@ -4224,6 +4287,28 @@
         (if (= (heap-kind-check heap current 13) 0) (setq found 1)
           (if (= (value-table-has heap (load-u32 (+ (heap-block heap current) 32)) key) 1) (setq found 1)
             (setq current (load-u32 (+ (heap-block heap current) 36)))))) current))
+  ;; Borrow a matching immutable property name from an already rooted receiver.
+  ;; Missing/non-object receivers deliberately fall back to ordinary key creation
+  ;; so their normal conversion, assignment-reference and error order is retained.
+  (defun value-property-literal-key (heap object length a b c d e f g h i j)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (> length 20) (fail 3)
+        (if (= (heap-reference-check heap object) 0) 0
+          (if (or (<= object 3) (/= (load-u32 (heap-block heap object)) 13)) 0
+            (let ((current object) (result 0) (remaining 16))
+              (while (and (> current 3) (= result 0) (/= remaining 0))
+                (let* ((table (load-u32 (+ (heap-block heap current) 32))) (index 0)
+                       (count (load-u32 (+ (heap-block heap table) 12))) (scan 1))
+                  ;; Keep this small-object fast path bounded. Large tables use
+                  ;; the original hashed lookup rather than a new linear scan.
+                  (if (> count remaining) (progn (setq remaining 0) (setq scan 0)) (setq remaining (- remaining count)))
+                  (while (and (= scan 1) (< index count) (= result 0))
+                    (let ((cell (heap-table-cell heap table index)))
+                      (when (= (load-u32 (+ cell 20)) 1)
+                        (let ((key (load-u32 (+ cell 4))))
+                          (when (= (heap-key-is heap key length a b c d e f g h i j) 1) (setq result key)))))
+                    (setq index (1+ index))))
+                (setq current (load-u32 (+ (heap-block heap current) 36)))) result))))))
   (defun heap-object-read (heap object key)
     (let ((owner (heap-object-owner heap object key)))
       (if (/= (last-error) 0) 0
@@ -4263,7 +4348,7 @@
             (progn (fail 3) (setq allowed 0) (setq done 1))
             (if (= (value-table-has heap (load-u32 (+ (heap-block heap current) 32)) key) 1)
               (setq done 1) (setq current (load-u32 (+ (heap-block heap current) 36))))))) allowed))
-  (defun value-object-put (heap object key child mode)
+  (defun heap-object-put-converting (heap object key child mode)
     (begin-operation) (if (= (heap-check heap) 0) 0
       (if (or (= (heap-kind-check heap object 13) 0) (> mode 2) (= (heap-module-namespace-p heap object) 1))
         (if (or (> mode 2) (= (heap-module-namespace-p heap object) 1)) (fail 3) 0)
@@ -4278,6 +4363,21 @@
                     (setq result (heap-object-prototype heap object child))
                     (setq result (value-table-put heap (load-u32 (+ (heap-block heap object) 32)) name child))))))
             (setq result (heap-frame-result heap frame result))) result))))
+  ;; Already sealed own string keys need neither conversion nor temporary roots:
+  ;; table replacement does not allocate or call user code. Mode 1 still gives
+  ;; __proto__ its literal-initializer meaning, even for an existing own key.
+  (defun value-object-put (heap object key child mode)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= (heap-kind-check heap object 13) 0) (> mode 2) (= (heap-module-namespace-p heap object) 1))
+        (if (or (> mode 2) (= (heap-module-namespace-p heap object) 1)) (fail 3) 0)
+        (if (or (= (heap-reference-check heap key) 0) (= (heap-reference-check heap child) 0)) 0
+          (if (and (> key 3) (= (load-u32 (heap-block heap key)) 5))
+            (if (= (heap-string-check heap key) 0) 0
+              (if (and (not (and (= mode 1) (= (heap-key-proto heap key) 1)))
+                       (= (value-table-has heap (load-u32 (+ (heap-block heap object) 32)) key) 1))
+                (value-table-put heap (load-u32 (+ (heap-block heap object) 32)) key child)
+                (heap-object-put-converting heap object key child mode)))
+            (heap-object-put-converting heap object key child mode))))))
   (defun value-object-has-ordinary (heap object key)
     (begin-operation) (if (= (heap-check heap) 0) 0
       (if (= (heap-source-collection-p heap object) 1) (value-source-collection-has heap object key)
@@ -4918,6 +5018,91 @@
           (if (= (heap-string-check heap value) 0) 0 2)
           (if (and (= mode 1) (> value 3) (= (load-u32 (heap-block heap value)) 13)
                    (= (heap-object-owner heap value key) 3)) 3 (value-array-callback-builtin heap value key)))))))
+  ;; CompareArrayElements puts undefined after every defined value without
+  ;; calling the source comparator. Stable merges keep the left item on ties.
+  (defun heap-array-sort-compare (heap left right comparator frame arguments)
+    (if (= left 3) (if (= right 3) 0 2)
+      (if (= right 3) 1
+        (let ((result 0))
+          (if (= comparator 3)
+            (progn
+              (let ((a (heap-join-text heap left)))
+                (when (= (last-error) 0)
+                  (frame-set heap frame 6 a)
+                  (let ((b (heap-join-text heap right)))
+                    (when (= (last-error) 0) (frame-set heap frame 7 b) (setq result (value-string-compare heap a b)))))) 0)
+            (progn
+              (value-set heap arguments 0 left) (value-set heap arguments 1 right)
+              (let* ((code (value-function-code heap comparator))
+                     ;; The surrounding sort frame already roots both handles;
+                     ;; the returned value is rooted before any next allocation.
+                     (returned (if (= (last-error) 0) (call-source heap comparator arguments 2 code) 0)))
+                (when (= (last-error) 0)
+                  (frame-set heap frame 8 returned)
+                  (let ((number (heap-source-number heap returned)))
+                    (when (= (last-error) 0)
+                      (frame-set heap frame 8 number)
+                      (let* ((p (+ (heap-block heap number) 32)) (low (load-u32 p)) (high (load-u32 (+ p 4))))
+                        (unless (or (= (heap-number-nan heap number) 1)
+                                    (and (= low 0) (= (word-and high 2147483647) 0)))
+                          (setq result (if (= (word-shr high 31) 1) 1 2)))))))) 0)) result))))
+  (defun value-source-array-sort (heap items comparator copy)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (> copy 1) (fail 3)
+      (if (or (= (heap-kind-check heap items 14) 0) (= (heap-reference-check heap comparator) 0)) 0
+        (if (and (/= comparator 3) (or (<= comparator 3) (/= (load-u32 (heap-block heap comparator)) 18))) (fail 3)
+          (let ((frame (heap-argument-frame heap items comparator 0 9)) (result 0))
+            (when (/= frame 0)
+              (let* ((length (load-u32 (+ (heap-block heap items) 4)))
+                     (source (value-refs heap 7 length)) (target 0) (arguments 0) (count 0) (index 0) (width 1))
+                (when (/= source 0)
+                  (frame-set heap frame 3 source)
+                  (setq result (if (= copy 1) (value-array-new heap length) items))
+                  (when (/= result 0) (frame-set heap frame 2 result) (setq target (value-refs heap 7 length))))
+                (when (/= target 0)
+                  (frame-set heap frame 4 target)
+                  ;; The destination is a permutation of the fully rooted source.
+                  ;; Hide its duplicate edges while building a merge pass. Before
+                  ;; swapping, publish its length before hiding the old source.
+                  (store-u32 (+ (heap-block heap target) 4) 0)
+                  (setq arguments (value-refs heap 7 2)))
+                (when (/= arguments 0)
+                  (frame-set heap frame 5 arguments)
+                  (while (and (< index length) (= (last-error) 0))
+                    (when (or (= copy 1) (= (heap-source-array-index-read heap items index 1) 1))
+                      (value-set heap source count (heap-source-array-index-read heap items index 0)) (setq count (1+ count)))
+                    (setq index (1+ index)))
+                  (while (and (< width count) (= (last-error) 0))
+                    (let ((start 0))
+                      (while (and (< start count) (= (last-error) 0))
+                        (let* ((middle (if (< (+ start width) count) (+ start width) count))
+                               (end (if (< (+ middle width) count) (+ middle width) count))
+                               (left start) (right middle) (out start))
+                          (while (and (< out end) (= (last-error) 0))
+                            (let ((choose-left (if (>= left middle) 0 (if (>= right end) 1
+                              (if (= (heap-array-sort-compare heap (value-get heap source left) (value-get heap source right) comparator frame arguments) 2) 0 1)))))
+                              (when (= (last-error) 0)
+                                (store-u32 (+ (+ (heap-block heap target) 32) (* out 4))
+                                  (value-get heap source (if (= choose-left 1) left right)))
+                                (if (= choose-left 1) (setq left (1+ left)) (setq right (1+ right)))))
+                            (setq out (1+ out)))
+                          (setq start end))))
+                    (store-u32 (+ (heap-block heap target) 4) count)
+                    (store-u32 (+ (heap-block heap source) 4) 0)
+                    (let ((temporary source)) (setq source target) (setq target temporary))
+                    (setq width (* width 2)))
+                  (when (= (last-error) 0)
+                    ;; Sorting collects before comparing. Only successful sorting
+                    ;; writes back; callback mutations beyond the snapshot remain.
+                    (when (< (load-u32 (+ (heap-block heap result) 4)) count) (value-array-resize heap result count))
+                    (setq index 0)
+                    (while (and (< index count) (= (last-error) 0))
+                      (value-set heap result index (value-get heap source index)) (setq index (1+ index)))
+                    (let ((current (load-u32 (+ (heap-block heap result) 4))))
+                      (while (and (< index length) (< index current) (= (last-error) 0))
+                        (store-u32 (+ (+ (heap-block heap result) 32) (* index 4)) 4) (setq index (1+ index))))
+                    0)))
+              (setq result (heap-frame-result heap frame result))) result))))))
   (defun heap-number-radix-integer (heap value radix)
     (let ((frame (heap-argument-frame heap value 0 0 5)) (result 0))
       (when (/= frame 0)
@@ -5546,16 +5731,16 @@
         (let ((p (heap-block heap function)))
           (if (>= index (load-u32 (+ p 4))) (fail 3)
             (progn (store-u32 (+ (+ p 32) (* index 4)) cell) 1))))))
-  (export value-source-typeof-member value-source-typeof value-source-value-type value-source-array-join value-array-text-builtin value-source-array-text value-source-invoke value-regexp-code-word value-regexp-new value-regexp-check value-regexp-method-get value-regexp-run value-source-collection-new value-source-method-check value-source-method
+  (export value-property-literal-key value-source-typeof-member value-source-typeof value-source-value-type value-source-array-join value-array-text-builtin value-source-array-text value-source-invoke value-regexp-code-word value-regexp-new value-regexp-check value-regexp-method-get value-regexp-run value-source-collection-new value-source-method-check value-source-method
     value-source-collection-get value-source-collection-put value-source-collection-has value-source-collection-own
     value-source-iterator-new value-source-iterator-advance value-source-iterator-next
     value-primitive-binary value-primitive-negate value-primitive-word value-primitive-bitwise value-primitive-compare
-    value-to-number value-to-text value-json-parse value-json-stringify value-json-builtin value-builtin-primitive value-text-method-check value-text-get value-source-slice value-source-text-method value-source-text-concat value-source-text-codes value-source-replace-all
+    value-to-number value-to-text value-json-parse value-json-stringify value-json-builtin value-builtin-primitive value-text-method-check value-text-get value-source-slice value-source-text-method value-source-text-concat value-source-text-codes value-source-replace-all value-source-array-sort
     value-text-replacement-check value-text-replacement-prepare value-text-replacement-callback value-text-replacement-finish
     value-object-new value-object-get value-object-put value-object-has value-object-keys value-object-copy
     value-property-key-check value-property-get value-property-put value-object-length
     last-error retire buffer-new buffer-length buffer-reserve buffer-push buffer-get
-    record-new record-length record-get record-set string-new string-length string-get string-set string-seal utf8-encode utf8-decode heap-new heap-capacity heap-used heap-live heap-pin heap-release heap-collect
+    runtime-case-version record-new record-length record-get record-set string-new string-length string-get string-set string-seal utf8-encode utf8-decode heap-new heap-capacity heap-used heap-live heap-pin heap-release heap-collect
     value-kind value-truth value-data value-length value-number value-number-binary
     value-number-word value-number-bitwise value-number-remainder
     value-array-new value-array-check value-array-resize value-source-length

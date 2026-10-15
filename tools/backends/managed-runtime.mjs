@@ -1,3 +1,4 @@
+import {hostUnicodeCaseVersion} from '../runtime/unicode-case-profiles.mjs';
 // Bulk host boundary for the .eli managed heap. GC, value operations and allocation
 // execute inside WASM, with zero imports. Handles own explicit roots until release.
 function fail(code) {
@@ -7,8 +8,8 @@ function fail(code) {
 }
 function word(x,max=0xffffffff) {if(typeof x!=='number'||!Number.isInteger(x)||x<0||x>max||Object.is(x,-0))fail(3);return x;}
 function flag(value) {if(typeof value!=='boolean')fail(3);return Number(value);}
-export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=65536,maxBytes=16777216,initializeModule:initialize=true}={}) {
- if(typeof initialize!=='boolean')fail(3);
+export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=65536,maxBytes=16777216,initializeModule:initialize=true,unicodeVersion='host'}={}) {
+ if(typeof initialize!=='boolean'||!['host',15.1,16,17].includes(unicodeVersion))fail(3);
  const module=new WebAssembly.Module(bytes);if(WebAssembly.Module.imports(module).length)throw Error('managed runtime requires zero imports');
  const e=new WebAssembly.Instance(module).exports;if(!(e.memory instanceof WebAssembly.Memory))throw Error('managed runtime requires owned memory');
  const sections=WebAssembly.Module.customSections(module,'eliscript-managed-control'),entries=new Map(),moduleExports=new Map();let moduleInfo=null;
@@ -59,6 +60,10 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
  if(!moduleInfo&&['init','get','status','close','abort'].some(name=>Object.hasOwn(e,'__eliscript_module_'+name)))fail(3);
  const handles=new WeakMap(),frames=new WeakMap(),view=()=>new DataView(e.memory.buffer);
  const call=(name,...args)=>{const result=e[name](...args)>>>0;const code=e['last-error']();if(code)fail(code);return result;};
+ const caseConfigurable=typeof e['runtime-case-version']==='function';
+ const caseVersion=caseConfigurable?(unicodeVersion==='host'?hostUnicodeCaseVersion():unicodeVersion===15.1?151:unicodeVersion*10):170;
+ if(caseConfigurable)call('runtime-case-version',caseVersion);
+ else if(unicodeVersion!=='host')fail(3);
  const heap=call('heap-new',word(maxSlots),word(initialBytes),word(maxBytes));
  function id(value) {
   if(value===null)return 0;if(value===false)return 1;if(value===true)return 2;if(value===undefined)return 3;
@@ -118,6 +123,7 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
   }
  }
  const api=Object.freeze({
+  unicodeVersion:caseVersion===151?15.1:caseVersion/10,
   initializeModule:initializeModuleInstance,
   getExport(name){if(!moduleInfo||typeof name!=='string'||!moduleExports.has(name))fail(3);const item=moduleExports.get(name);return wrap(call(moduleInfo.get,heap,item.kind,item.index));},
   closeModule(){if(!moduleInfo)fail(3);call(moduleInfo.close,heap);return true;},
