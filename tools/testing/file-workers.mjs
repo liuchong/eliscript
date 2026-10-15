@@ -13,6 +13,7 @@ const exclusiveFiles = new Set([
   'wasm-compiler-analyzer.test.mjs',
   'wasm-compiler-emitter.test.mjs',
   'independent-compiler-producers.test.mjs',
+  'compiler-producer-stages.test.mjs',
   'wasm-managed-str.test.mjs',
   'native-backend.test.mjs',
   'native-memory-long-branches.test.mjs',

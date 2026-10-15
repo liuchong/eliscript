@@ -18,9 +18,10 @@ time limits. ERT, CLI, contract checks and strict byte compilation remain in
 each job. All jobs retain the original 30-minute limit and pinned actions.
 
 Two ordinary files may run concurrently. The four existing exclusive files and
-six additional files with observed CI timeouts execute behind barriers within
-their shard: analyzer, emitter, independent producers, str, native backend and
-native long branches. Failures still execute later files; cancellation reaps
+seven additional expensive files execute behind barriers within their shard:
+analyzer, emitter, independent producers, compiler stages, str, native backend
+and native long branches. The stage file also runs the same cases in a native
+compiler subprocess. Failures still execute later files; cancellation reaps
 owned children and stops dispatch.
 
 Focused evidence covers actual sharded child processes, exact union/disjoint

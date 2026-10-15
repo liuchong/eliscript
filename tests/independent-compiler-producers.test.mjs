@@ -83,3 +83,11 @@ if(process.env.ELISCRIPT_RUN_RUNTIME_IR_PRODUCER==='1'){
  test('explicit full-runtime WASM-host candidate compiles the entire runtime source to exact canonical IR',()=>candidate('runtime-ir','wasm','full-runtime'),190000);
  nativeTest('explicit full-runtime native-host candidate compiles the entire runtime source to exact canonical IR',()=>candidate('runtime-ir','native','full-runtime'),190000);
 }
+
+
+// This manual candidate retains every stage as an opaque managed root and feeds
+// the resulting complete runtime IR directly to the original managed backend.
+if(process.env.ELISCRIPT_RUN_STAGED_RUNTIME_PRODUCER==='1'){
+ test('explicit full-runtime WASM-host staged compiler produces and executes the complete runtime artifact',()=>candidate('runtime-stages','wasm','full-runtime'),190000);
+ nativeTest('explicit full-runtime native-host staged compiler produces and executes the complete runtime artifact',()=>candidate('runtime-stages','native','full-runtime'),190000);
+}

@@ -473,7 +473,7 @@ describe("CI file shards", () => {
 
   test("confirmed expensive functional files are exclusive while normal files still overlap", async () => {
     const {runTestFiles} = await import('../tools/testing/file-workers.mjs');
-    const expensive = ['wasm-compiler-analyzer', 'wasm-compiler-emitter', 'independent-compiler-producers', 'wasm-managed-str', 'native-backend', 'native-memory-long-branches'].map(name => 'tests/' + name + '.test.mjs');
+    const expensive = ['wasm-compiler-analyzer', 'wasm-compiler-emitter', 'independent-compiler-producers', 'compiler-producer-stages', 'wasm-managed-str', 'native-backend', 'native-memory-long-branches'].map(name => 'tests/' + name + '.test.mjs');
     const files = ['normal-a.test.mjs', 'normal-b.test.mjs', ...expensive, 'after-a.test.mjs', 'after-b.test.mjs'];
     const active = new Set(), seen = [];
     const spawn = spyOn(Bun, 'spawn').mockImplementation(([, , file]) => {

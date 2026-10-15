@@ -90,6 +90,7 @@ test-core: check-contracts
 		tests/wasm-compiler-backends.test.mjs \
 		tests/wasm-managed-compiler.test.mjs \
 		tests/independent-compiler-producers.test.mjs \
+		tests/compiler-producer-stages.test.mjs \
 		tests/wasm-compiler-ir-json-errors.test.mjs \
 		tests/wasm-compiler-source-map.test.mjs \
 		tests/wasm-managed-iteration.test.mjs \
@@ -130,6 +131,7 @@ test-core: check-contracts
 		tests/wasm-managed-array-search.test.mjs \
 		tests/wasm-managed-array-construction.test.mjs \
 		tests/wasm-managed-object-properties.test.mjs \
+		tests/wasm-managed-reflection-descriptor.test.mjs \
 		tests/wasm-managed-math.test.mjs \
 		tests/wasm-managed-json.test.mjs \
 		tests/wasm-managed-json-atoms.test.mjs \

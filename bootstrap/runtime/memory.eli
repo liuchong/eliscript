@@ -7527,7 +7527,13 @@
                     (let ((name (heap-reflection-label heap index))
                           (child (if (= index 0) data (if (= index 1) (if (= writable 1) 2 1)
                                    (if (= index 2) (if (= enumerable 1) 2 1) (if (= configurable 1) 2 1))))))
-                      (when (/= name 0) (frame-set heap frame 5 name) (value-object-put heap result name child 2)))
+                      (when (/= name 0)
+                        (frame-set heap frame 5 name)
+                        ;; This unpublished ordinary object has an empty four-slot
+                        ;; table. Its four distinct internal labels need no key
+                        ;; conversion, growth, assignment checks or extra frame.
+                        (heap-table-insert heap (load-u32 (+ (heap-block heap result) 32))
+                          name child (value-key-hash heap name))))
                     (setq index (1+ index))))))))
         (setq result (heap-frame-result heap frame result))) result))
   (defun value-object-reflection (heap arguments count operation)
