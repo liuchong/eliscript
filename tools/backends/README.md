@@ -207,6 +207,25 @@ calls the function; nil and undefined are invalid iterables. Source arrays
 (including holes), strings (by code point), Map/Set and owned source iterators
 are supported. Expansion and rest allocation execute inside WASM.
 
+Source-array callback methods execute through the same owned WASM table:
+`map`, `filter`, `forEach`, `some`, `every`, `find`, `findIndex`, `findLast`,
+`findLastIndex`, `reduce` and `reduceRight`. Predicate methods use JavaScript
+Boolean conversion, so zero, NaN and empty text are false here even though
+ordinary Lisp conditions treat them as true. Callbacks receive the original
+array and exact index, with an accumulator first for reductions. Length is
+captured when iteration begins; later writes and removals are observed, appended
+positions beyond that length are ignored, and each method follows its own
+hole and early-exit rules. `map` preserves holes and `filter` produces a dense
+array. Reductions without an initial value choose the first present position
+and reject an empty sequence.
+
+Receiver and method lookup precede all arguments. Own callable method overrides
+use the captured function, and argument mutation cannot replace an already
+captured builtin. `map` and `filter` retain ordinary constructor validation;
+custom Symbol species, arbitrary prototypes and Map/Set callback methods remain
+open. Callback errors, capacity failures and actual traps preserve caller roots
+and earlier observable effects, without host callbacks or imports.
+
 Host `invoke(name, args)` retains the exact descriptor arity for required-only
 entries and accepts a variable argument count for optional/rest entries. Those
 entries declare `arity: null`, `callingConvention: "argument-list"` and ordered

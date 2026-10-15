@@ -400,6 +400,47 @@
     (begin-operation)
     (if (= (heap-check heap) 0) 0
       (if (<= value 3) (if (= value 2) 1 0) (heap-value-check heap value))))
+  ;; Array predicates use JS Boolean, distinct from the language's Lisp truth.
+  (defun value-js-truth (heap value)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (<= value 3) (if (= value 2) 1 0)
+        (if (= (heap-value-check heap value) 0) 0
+          (let* ((p (heap-block heap value)) (kind (load-u32 p)))
+            (if (= kind 5) (if (= (heap-string-check heap value) 0) 0 (if (= (load-u32 (+ p 4)) 0) 0 1))
+              (if (= kind 4)
+                (if (or (= (heap-number-nan heap value) 1)
+                        (and (= (load-u32 (+ p 32)) 0) (= (word-and (load-u32 (+ p 36)) 2147483647) 0))) 0 1) 1)))))))
+  (defun value-array-callback-get (heap value key)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= value 0) (= value 3)) (fail 3)
+        (if (<= value 3) 3
+          (if (= (heap-value-check heap value) 0) 0
+            (let ((kind (load-u32 (heap-block heap value))))
+              (if (or (= kind 4) (= kind 18)) 3
+                (if (= kind 5) (if (= (heap-string-check heap value) 0) 0 3) (value-property-get heap value key 0)))))))))
+  ;; The supported source objects have no Symbol.species overrides. An own
+  ;; primitive constructor still triggers ArraySpeciesCreate's ordinary error.
+  (defun value-array-species-check (heap value)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-kind-check heap value 14) 0) 0
+        (let ((table (load-u32 (+ (heap-block heap value) 12))) (index 0) (result 1))
+          (when (/= table 0)
+            (while (and (= result 1) (< index (load-u32 (+ (heap-block heap table) 12))))
+              (let ((cell (heap-table-cell heap table index)))
+                (when (and (= (load-u32 (+ cell 20)) 1)
+                           (= (heap-key-is heap (load-u32 (+ cell 4)) 11 7274595 7536750 7471220 6488181 7274612 114 0 0 0 0) 1))
+                  (let ((constructor (load-u32 (+ cell 8))))
+                    (unless (= constructor 3)
+                      (if (<= constructor 3) (setq result (fail 3))
+                        (let ((kind (load-u32 (heap-block heap constructor))))
+                          (if (or (= kind 13) (= kind 14) (= kind 15) (= kind 16) (= kind 17) (= kind 18))
+                            0 (setq result (fail 3))))))))) (setq index (1+ index)))) result))))
+  (defun value-array-callback-builtin (heap value key)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= value 0) (= value 3)) (fail 3)
+        (if (= (heap-reference-check heap value) 0) 0
+          (if (and (> value 3) (= (load-u32 (heap-block heap value)) 14))
+            (if (= (value-array-has heap value key) 0) (if (= (last-error) 0) 1 0) 0) 0)))))
   (defun value-data (heap value kind)
     (begin-operation) (if (= (heap-check heap) 0) 0
       (if (= (heap-kind-check heap value kind) 0) 0 (+ (heap-block heap value) 32))))

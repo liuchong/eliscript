@@ -510,6 +510,149 @@
                     (js-array (get receiver :result) (word-if (word-compare (word-local length) (word-constant 0) "=")
                       (word-constant 0) (word-node "word-arithmetic" (js-array (word-local length) (word-constant 1)) "-"))))))
                 (put result :steps (word-sequence steps)) result)))))))
+  (defun managed-raw-binary (left right operator)
+    (word-node "word-arithmetic" (js-array left right) operator))
+  (defun managed-invoke-arguments (state callee values)
+    (put state :callable t)
+    (let* ((list (managed-result state (runtime-call state "value-refs" (runtime-arguments state
+                   (js-array (word-constant 7) (word-constant (js-length values))))) t))
+           (dispatch (new-managed-local state "callback-dispatch" nil))
+           (steps (js-array (get list :steps))) (index 0))
+      (while (< index (js-length values))
+        (js-call steps :push (checked-control state "value-set" (runtime-arguments state
+          (js-array (get list :result) (word-constant index) (js-nth index values))))) (setq index (1+ index)))
+      (js-call steps :push (managed-guard state (word-set dispatch (runtime-call state "value-function-code"
+        (runtime-arguments state (js-array callee))))) (capture-error state))
+      (let ((result (managed-result state (word-node "call-indirect"
+                     (js-array (word-local (get state :heap)) callee (get list :result)
+                       (word-constant (js-length values)) (word-local dispatch)) 4) t)))
+        (js-call steps :push (get result :steps)) (put result :steps (word-sequence steps)) result)))
+  (defun lower-managed-callback-loop (node scope state functions method receiver arguments)
+    (put state :callable t)
+    (let* ((reducing (or (= method "reduce") (= method "reduceRight")))
+           (reverse (or (= method "reduceRight") (= method "findLast") (= method "findLastIndex")))
+           (finding (or (= method "find") (= method "findIndex") (= method "findLast") (= method "findLastIndex")))
+           (index-result (or (= method "findIndex") (= method "findLastIndex")))
+           (callback (if (> (js-length arguments) 0) (js-nth 0 arguments) (word-constant 3)))
+           (length (new-managed-local state "callback-length" nil))
+           (cursor (new-managed-local state "callback-cursor" nil))
+           (index (new-managed-local state "callback-index" nil))
+           (done (new-managed-local state "callback-done" nil))
+           (initialized (new-managed-local state "callback-initialized" nil))
+           (output-index (new-managed-local state "callback-output-index" nil))
+           (output (new-managed-local state "callback-output" t))
+           (dispatch (new-managed-local state "callback-code" nil))
+           (steps (js-array)) (body (js-array)))
+      (js-call steps :push (checked-control state "value-array-check" (runtime-arguments state (js-array receiver)))
+        (managed-guard state (word-set length (runtime-call state "value-length" (runtime-arguments state (js-array receiver)))))
+        (capture-error state)
+        (managed-guard state (word-set dispatch (runtime-call state "value-function-code" (runtime-arguments state (js-array callback)))))
+        (capture-error state))
+      (when (or (= method "map") (= method "filter"))
+        (js-call steps :push (checked-control state "value-array-species-check" (runtime-arguments state (js-array receiver)))))
+      (let ((initial (cond ((or (= method "map") (= method "filter"))
+                           (managed-result state (runtime-call state "value-array-new" (runtime-arguments state
+                             (js-array (if (= method "map") (word-local length) (word-constant 0))))) t))
+                          (index-result (managed-number-constant -1 state))
+                          (t (js-object :steps (word-constant 0) :result
+                               (if reducing (if (> (js-length arguments) 1) (js-nth 1 arguments) (word-constant 3))
+                                 (word-constant (if (= method "every") 2 (if (= method "some") 1 3)))))))))
+        (js-call steps :push (get initial :steps) (managed-guard state (word-set output (get initial :result))) (root-local state output)))
+      (js-call steps :push (managed-guard state (word-set cursor (if reverse (word-local length) (word-constant 0))))
+        (managed-guard state (word-set done (word-constant 0)))
+        (managed-guard state (word-set output-index (word-constant 0)))
+        (managed-guard state (word-set initialized (word-constant (if (> (js-length arguments) 1) 1 0)))))
+      ;; Reuse one rooted argument list; each callback sees the same live
+      ;; receiver but a snapshot of its current element and exact boxed index.
+      (let* ((argv (managed-result state (runtime-call state "value-refs" (runtime-arguments state
+                      (js-array (word-constant 7) (word-constant (if reducing 4 3))))) t))
+             (key (managed-result state (runtime-call state "heap-number-from-word" (runtime-arguments state
+                      (js-array (word-local index) (word-constant 0)))) t))
+             (element (managed-result state (runtime-call state "heap-source-array-index-read" (runtime-arguments state
+                          (js-array receiver (word-local index) (word-constant 0)))) t))
+             (returned (managed-result state (word-node "call-indirect"
+                          (js-array (word-local (get state :heap)) callback (get argv :result)
+                            (word-constant (if reducing 4 3)) (word-local dispatch)) 4) t))
+             (invoke-steps (js-array (get key :steps) (get element :steps)))
+             (predicate (new-managed-local state "callback-predicate" nil)))
+        (js-call steps :push (get argv :steps))
+        (let ((values (if reducing (js-array (word-local output) (get element :result) (get key :result) receiver)
+                        (js-array (get element :result) (get key :result) receiver))) (position 0))
+          (while (< position (js-length values))
+            (js-call invoke-steps :push (checked-control state "value-set" (runtime-arguments state
+              (js-array (get argv :result) (word-constant position) (js-nth position values))))) (setq position (1+ position))))
+        (js-call invoke-steps :push (get returned :steps))
+        (cond
+          (reducing (js-call invoke-steps :push (managed-guard state (word-set output (get returned :result))) (root-local state output)))
+          ((= method "map") (js-call invoke-steps :push (checked-control state "value-set" (runtime-arguments state
+            (js-array (word-local output) (word-local index) (get returned :result))))))
+          ((/= method "forEach")
+           (js-call invoke-steps :push (managed-guard state (word-set predicate (runtime-call state "value-js-truth"
+             (runtime-arguments state (js-array (get returned :result)))))) (capture-error state))
+           (let* ((matched (word-compare (word-local predicate) (word-constant 0) (if (= method "every") "=" "/=")))
+                  (hit (js-array)))
+             (if (= method "filter")
+               (js-call hit :push (checked-control state "value-array-resize" (runtime-arguments state
+                 (js-array (word-local output) (managed-raw-binary (word-local output-index) (word-constant 1) "+"))))
+                 (checked-control state "value-set" (runtime-arguments state
+                   (js-array (word-local output) (word-local output-index) (get element :result))))
+                 (managed-guard state (word-set output-index (managed-raw-binary (word-local output-index) (word-constant 1) "+"))))
+               (js-call hit :push (managed-guard state (word-set output
+                 (if finding (if index-result (get key :result) (get element :result))
+                   (word-constant (if (= method "every") 1 2))))) (root-local state output)
+                 (managed-guard state (word-set done (word-constant 1)))))
+             (js-call invoke-steps :push (managed-guard state (word-if matched (word-sequence hit) (word-constant 0)))))))
+        ;; Reverse cursors use an exclusive end, so zero never wraps to uint32.
+        (js-call body :push (managed-guard state (word-set index
+          (if reverse (managed-raw-binary (word-local cursor) (word-constant 1) "-") (word-local cursor)))))
+        (let ((invoke (word-sequence invoke-steps)))
+          (when reducing
+            (setq invoke (managed-guard state (word-if (word-compare (word-local initialized) (word-constant 0) "=")
+              (word-sequence (js-array (get element :steps) (managed-guard state (word-set output (get element :result)))
+                (root-local state output) (managed-guard state (word-set initialized (word-constant 1))))) invoke))))
+          ;; Find methods read vanished positions as undefined; the other
+          ;; methods perform a live presence check and skip absent positions.
+          (unless finding
+            (setq invoke (managed-guard state (word-if
+              (word-compare (runtime-call state "heap-source-array-index-read" (runtime-arguments state
+                (js-array receiver (word-local index) (word-constant 1)))) (word-constant 0) "/=") invoke (word-constant 0)))))
+          (js-call body :push invoke))
+        (js-call body :push (managed-guard state (word-set cursor
+          (if reverse (word-local index) (managed-raw-binary (word-local cursor) (word-constant 1) "+")))))
+        (let ((condition (word-if (word-compare (word-local (get state :error)) (word-constant 0) "=")
+                          (word-if (word-compare (word-local done) (word-constant 0) "=")
+                            (word-compare (word-local cursor) (if reverse (word-constant 0) (word-local length)) (if reverse ">" "<"))
+                            (word-constant 0)) (word-constant 0))))
+          (put condition :type "i32")
+          (js-call steps :push (managed-guard state (js-object :kind "while" :type "i32"
+            :children (js-array condition (word-sequence body)) :value nil)))))
+      (when reducing
+        (js-call steps :push (managed-guard state (word-if (word-compare (word-local initialized) (word-constant 0) "=")
+          (word-sequence (js-array (runtime-call state "fail" (js-array (word-constant 3))) (capture-error state))) (word-constant 0)))))
+      (js-object :steps (word-sequence steps) :result (word-local output))))
+  (defun lower-managed-array-callback (node scope state functions method)
+    (let* ((children (get node :children)) (count (js-length children))
+           (receiver (snapshot-managed (lower-managed-expression (js-nth 0 children) scope state functions) state))
+           (key (lower-managed-key (js-nth 1 children) scope state functions))
+           ;; Keep the builtin marker separate from an own method's value:
+           ;; an own true value must still fail as a noncallable after arguments.
+           (builtin (new-managed-local state "callback-builtin" nil))
+           (steps (js-array (get receiver :steps) (get key :steps)
+             (managed-guard state (word-set builtin (runtime-call state "value-array-callback-builtin"
+               (runtime-arguments state (js-array (get receiver :result) (get key :result)))))) (capture-error state)))
+           (method-value (managed-result state (word-if (word-compare (word-local builtin) (word-constant 0) "=")
+             (runtime-call state "value-array-callback-get" (runtime-arguments state (js-array (get receiver :result) (get key :result))))
+             (word-constant 3)) t)) (arguments (js-array)) (index 2) (output (new-managed-local state "method-output" t)))
+      (js-call steps :push (get method-value :steps))
+      (while (< index count)
+        (let ((argument (snapshot-managed (lower-managed-expression (js-nth index children) scope state functions) state)))
+          (js-call steps :push (get argument :steps)) (js-call arguments :push (get argument :result))) (setq index (1+ index)))
+      (let ((ordinary (managed-invoke-arguments state (get method-value :result) arguments))
+            (iterate (lower-managed-callback-loop node scope state functions method (get receiver :result) arguments)))
+        (js-call steps :push (managed-guard state (word-if (word-compare (word-local builtin) (word-constant 0) "=")
+          (word-sequence (js-array (get ordinary :steps) (managed-guard state (word-set output (get ordinary :result)))))
+          (word-sequence (js-array (get iterate :steps) (managed-guard state (word-set output (get iterate :result))))))) (root-local state output)))
+      (js-object :steps (word-sequence steps) :result (word-local output))))
   (defun lower-managed-text-method (node scope state functions method)
     (let* ((children (get node :children)) (count (js-length children))
            (methods (js-array "at" "charAt" "charCodeAt" "codePointAt" "substring" "indexOf" "lastIndexOf" "includes" "startsWith" "endsWith" "repeat" "trim" "trimStart" "trimEnd" "isWellFormed" "toWellFormed" "toString" "valueOf" "substr"))
@@ -618,9 +761,11 @@
          (let* ((key (js-nth 1 children)) (method (managed-static-method key)))
            (if (js-call (js-array "get" "set" "has" "delete" "clear" "add" "entries" "keys" "values" "next") :includes method)
              (lower-managed-collection-method node scope state functions method)
-             (if (or (= method "push") (= method "pop") (= method "slice"))
-               (lower-managed-array-method node scope state functions)
-               (lower-managed-text-method node scope state functions method)))))
+             (if (js-call (js-array "map" "filter" "forEach" "some" "every" "find" "findIndex" "findLast" "findLastIndex" "reduce" "reduceRight") :includes method)
+               (lower-managed-array-callback node scope state functions method)
+               (if (or (= method "push") (= method "pop") (= method "slice"))
+                 (lower-managed-array-method node scope state functions)
+                 (lower-managed-text-method node scope state functions method))))))
         ((and (= kind "intrinsic") (= value "js-length"))
          (unless (= (js-length children) 1) (managed-fail node "invalid managed length arity"))
          (let* ((operand (lower-managed-expression (js-nth 0 children) scope state functions))

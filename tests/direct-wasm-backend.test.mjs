@@ -151,17 +151,21 @@ beforeAll(async () => {
   const callableSource = await readFile(callableInput, "utf8");
   const variadicInput = resolve(root, "tests/fixtures/wasm-managed-variadic-calls.eli");
   const variadicSource = await readFile(variadicInput, "utf8");
-  const [memorySeed, managedSeed, callableSeed, variadicSeed] = await Promise.all([
+  const callbackInput = resolve(root, "tests/fixtures/wasm-managed-array-callbacks.eli");
+  const callbackSource = await readFile(callbackInput, "utf8");
+  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed] = await Promise.all([
     seedJavascript(resolve(root, "bootstrap/runtime/memory.eli"), resolve(directory, "memory-seed.mjs")),
     seedJavascript(managedInput, resolve(directory, "managed-seed.mjs")),
     seedJavascript(callableInput, resolve(directory, "callables-seed.mjs")),
     seedJavascript(variadicInput, resolve(directory, "variadic-seed.mjs")),
+    seedJavascript(callbackInput, resolve(directory, "callback-seed.mjs")),
   ]);
   runtimeSeeds = {
     memory: { source, javascript: memorySeed },
     managed: { source: managedSource, javascript: managedSeed },
     callables: { source: callableSource, javascript: callableSeed, filename: callableInput },
     variadic: { source: variadicSource, javascript: variadicSeed, filename: variadicInput },
+    callbacks: { source: callbackSource, javascript: callbackSeed, filename: callbackInput },
   };
 }, 120_000);
 afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
@@ -853,6 +857,22 @@ test("mixed primitive operators have three-generation canonical IR, numeric JS, 
  const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
  for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const s=a.string('1.5'),n=a.number(2),sum=a.invoke('add',[s,n]),product=a.invoke('multiply',[s,n]);assert.equal(a.readString(sum),'1.52');assert.equal(a.readNumber(product),3);for(const x of[s,n,sum,product])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
 });
+test("array callback families retain Seed and three-generation IR, descriptors and executable bytes",async()=>{
+ const {source,javascript:seed,filename}=runtimeSeeds.callbacks;
+ const programs=generations.map(g=>g.compiler.compile_ir_string(source,filename)),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtimeSeeds.memory.source,'runtime.eli'));
+ const frozen=programs.map(JSON.stringify),frozenRuntime=runtimes.map(JSON.stringify),lowered=generations.map((g,i)=>g.managed.lower_managed_program(programs[i],runtimes[i]));
+ const artifacts=generations.map((g,i)=>g.managed.emit_managed_wasm(programs[i],runtimes[i],{maximumPages:16}));
+ const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
+ for(let i=0;i<3;i++){
+  assert.deepEqual(programs[i],programs[0]);assert.deepEqual(lowered[i],lowered[0]);assert.deepEqual(artifacts[i],artifacts[0]);assert.equal(generations[i].compiler.emit_ir_string(programs[i]),seed);
+  assert.equal(JSON.stringify(programs[i]),frozen[i]);assert.equal(JSON.stringify(runtimes[i]),frozenRuntime[i]);
+  const bytes=Uint8Array.from(artifacts[i]);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);const a=instantiateManagedRuntime(bytes);a.auto(1);
+  const zero=a.number(-0),nan=a.number(NaN),tiny=a.number(Number.MIN_VALUE),f=a.invoke('identity'),values=a.sourceArray([zero,nan,tiny,true]),out=a.invoke('filter-with',[values,f]);
+  assert.equal(a.length(out),2);const first=a.get(out,0);assert.equal(a.readNumber(first),Number.MIN_VALUE);assert.equal(a.get(out,1),true);
+  for(const x of[zero,nan,tiny,f,values,out,first])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+ }
+});
+
 test("variadic calls preserve Seed and three-generation IR, descriptors and executable WASM bytes",async()=>{
  const {source,javascript:seed,filename}=runtimeSeeds.variadic;
  const programs=generations.map(g=>g.compiler.compile_ir_string(source,filename)),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtimeSeeds.memory.source,'runtime.eli'));
@@ -1466,6 +1486,31 @@ describe("browser compiler backends", () => {
       }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
     },{source,runtime});
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-source-collections.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
+  });
+  test("browser array callbacks preserve JS truth, holes, reductions, mutation and actual trap cleanup",async()=>{
+    const source=runtimeSeeds.callbacks.source,runtime=runtimeSeeds.memory.source;
+    const result=await evaluateBrowser(async({bundle,source,runtime})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));
+      try{
+        const c=await import(url),p=c.compile_ir_string(source,'browser-callbacks.eli'),rt=c.compile_ir_string(runtime,'runtime.eli');
+        const bytes=Uint8Array.from(c.emit_managed_wasm(p,rt,{maximumPages:16})),check=(ok,label)=>{if(!ok)throw Error(label);};check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'zero imports');
+        const a=c.instantiateManagedRuntime(bytes);a.auto(1);
+        const read=x=>{if(x===null||typeof x==='boolean'||x===undefined)return x;if(x.kind===4)return a.readNumber(x);if(x.kind===5)return a.readString(x);const out=[];for(let i=0;i<a.length(x);i++){const key=a.number(i);let own;try{own=a.invoke('has-index',[x,key])}finally{a.release(key)}if(own){const v=a.get(x,i);try{out[i]=read(v)}finally{a.release(v)}}}out.length=a.length(x);return out};
+        const same=(x,y)=>Array.isArray(x)&&Array.isArray(y)?x.length===y.length&&Array.from({length:x.length},(_,i)=>(i in x)===(i in y)&&(!(i in x)||same(x[i],y[i]))).every(Boolean):Object.is(x,y);
+        const get=(name,args=[])=>{const out=a.invoke(name,args);try{return read(out)}finally{a.release(out)}};
+        const f=a.invoke('identity'),zero=a.number(-0),nan=a.number(NaN),tiny=a.number(Number.MIN_VALUE),empty=a.string(''),values=[false,0,-0,NaN,'',Number.MIN_VALUE,true],positiveZero=a.number(0),items=a.sourceArray([false,positiveZero,zero,nan,empty,tiny,true]);
+        for(const[name,method]of[['map','map'],['filter','filter'],['for-each','forEach'],['some','some'],['every','every'],['find','find'],['find-index','findIndex'],['find-last','findLast'],['find-last-index','findLastIndex']])check(same(get(name+'-with',[items,f]),values[method](x=>x)),method);
+        const sparse=[];sparse.length=5;sparse[2]=tiny;const input=a.sourceArray(sparse),mapped=a.invoke('map-with',[input,f]);const expected=[];expected.length=5;expected[2]=Number.MIN_VALUE;check(same(read(mapped),expected),'map holes');
+        const sum=a.invoke('sum-callback'),numbers=a.sourceArray([tiny,zero]),initial=a.number(-0);check(Object.is(get('reduce-initial',[numbers,sum,initial]),Number.MIN_VALUE),'reduce bits');check(Object.is(get('reduce-right-initial',[numbers,sum,initial]),Number.MIN_VALUE),'reduceRight bits');
+        const changing=a.sourceArray([true,false,true]),log=a.sourceArray([]),shrinker=a.invoke('shrink-callback',[log]);check(get('find-with',[changing,shrinker])===undefined,'find after shrink');check(same(read(log),[[true,0],[undefined,1],[undefined,2]]),'visit vanished indices');
+        const object=a.sourceObject({}),own=a.invoke('shadow-value');check(get('map-shadow',[object,own])===15,'own callable method');let refused=false;try{a.invoke('map-constructor',[items,f,null])}catch(e){refused=e.eliscriptDiagnostic?.code==='ELI-RT0003'}check(refused,'species refusal');
+        for(const x of[f,zero,nan,tiny,empty,positiveZero,items,input,mapped,sum,numbers,initial,changing,log,shrinker,object,own])a.release(x);a.collect();check(a.live()===0&&a.stats().frameDepth===0,'all roots reclaimed');
+        const start=runtime.indexOf('  (defun value-js-truth (heap value)'),end=runtime.indexOf('  (defun ',start+10);check(start>=0&&end>start,'fault location');const faulty=runtime.slice(0,start)+'  (defun value-js-truth (heap value) (load-u32 4294967295))'+String.fromCharCode(10)+runtime.slice(end);
+        const broken=c.instantiateManagedRuntime(Uint8Array.from(c.emit_managed_wasm(p,c.compile_ir_string(faulty,'browser-callback-trap.eli'),{maximumPages:16}))),keep=broken.number(7),frame=broken.frame(1),callback=broken.invoke('identity'),target=broken.sourceArray([true]);broken.frameSet(frame,0,keep);let trapped=false;
+        try{broken.invoke('some-with',[target,callback])}catch(e){trapped=e instanceof WebAssembly.RuntimeError}check(trapped&&broken.stats().frameDepth===1,'actual callback trap');const saved=broken.frameGet(frame,0);check(broken.readNumber(saved)===7,'caller root');broken.release(saved);broken.leaveFrame(frame);for(const x of[keep,callback,target])broken.release(x);broken.collect();check(broken.live()===0,'trap roots reclaimed');return [...bytes];
+      }finally{URL.revokeObjectURL(url);}
+    },{source,runtime});
+    assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-callbacks.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
   });
   test("browser variadic calls and apply preserve defaults, iterable order, captures and failure cleanup",async()=>{
     const source=runtimeSeeds.variadic.source,runtime=runtimeSeeds.memory.source;
