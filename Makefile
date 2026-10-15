@@ -1,5 +1,6 @@
 EMACS ?= emacs
 BUN ?= bun
+BUN_TEST_RUNNER ?= test
 
 .PHONY: test test-core test-applications check-contracts byte-compile
 test: test-core test-applications
@@ -16,7 +17,7 @@ test-core: check-contracts
 		-l tests/eliscript-analysis-tests.el \
 		-l tests/bootstrap-tests.el \
 		-f ert-run-tests-batch-and-exit
-	$(BUN) test tests/conformance.test.mjs tests/compiler-parity-corpus.test.mjs \
+	$(BUN) $(BUN_TEST_RUNNER) tests/conformance.test.mjs tests/compiler-parity-corpus.test.mjs \
 		tests/stable-compatibility-corpus.test.mjs \
 		tests/public-surface.test.mjs \
 		tests/api-index.test.mjs \
@@ -69,6 +70,9 @@ test-core: check-contracts
 		tests/wasm-managed-callables.test.mjs \
 		tests/wasm-managed-variadic-calls.test.mjs \
 		tests/wasm-managed-array-callbacks.test.mjs \
+		tests/wasm-managed-array-text.test.mjs \
+		tests/wasm-managed-typeof.test.mjs \
+		tests/wasm-managed-behavior.test.mjs \
 		tests/wasm-managed-module-bindings.test.mjs \
 		tests/wasm-managed-project-linking.test.mjs \
 		tests/wasm-managed-arithmetic.test.mjs \
@@ -149,7 +153,7 @@ test-applications:
 	$(EMACS) --batch -Q -L tools/org -L tests \
 		-l tests/eliscript-org-tests.el \
 		-f ert-run-tests-batch-and-exit
-	$(BUN) test tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
+	$(BUN) $(BUN_TEST_RUNNER) tests/vite-plugin.test.mjs tests/org-vite-plugin.test.mjs \
 		tests/dogfood-site.test.mjs tests/dogfood-action.test.mjs \
 		tests/dogfood-issues.test.mjs tests/dogfood-comments.test.mjs \
 		tests/dogfood-discussions.test.mjs tests/dogfood-browser.test.mjs \

@@ -20,6 +20,8 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    env:
+      BUN_TEST_RUNNER: tools/testing/file-workers.mjs
     strategy:
       fail-fast: false
       matrix:

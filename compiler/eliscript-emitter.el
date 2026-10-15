@@ -14,6 +14,10 @@
 (require 'eliscript-diagnostic)
 (require 'eliscript-parameters)
 
+;; Identical capsules share cycle guards without global mutation.
+(defconst eliscript-emitter--array-text-import
+  "import { c as __eliscript_at } from \"data:text/javascript;base64,dmFyIGU9UmVmbGVjdC5hcHBseSxhPUFycmF5LmlzQXJyYXksbT1BcnJheS5wcm90b3R5cGUuam9pbixsPUFycmF5LnByb3RvdHlwZS50b1N0cmluZyxiPU9iamVjdC5wcm90b3R5cGUudG9TdHJpbmcsaj1TdHJpbmcscz1UeXBlRXJyb3IsdT1TeW1ib2wudG9QcmltaXRpdmUsaz1XZWFrU2V0LnByb3RvdHlwZS5oYXMseD1XZWFrU2V0LnByb3RvdHlwZS5hZGQsQT1XZWFrU2V0LnByb3RvdHlwZS5kZWxldGUscD1uZXcgV2Vha1NldCxkPSh0KT0+dCE9PW51bGwmJih0eXBlb2YgdD09PSJvYmplY3QifHx0eXBlb2YgdD09PSJmdW5jdGlvbiJ8fHR5cGVvZiB0PiJ1IiYmdCE9PXZvaWQgMCksUz0odCk9PnR5cGVvZiB0PT09ImZ1bmN0aW9uInx8dHlwZW9mIHQ+InUiJiZ0IT09dm9pZCAwO2Z1bmN0aW9uIEMoKXtsZXQgbz1uZXcgcygiY3ljbGljIGFycmF5IHRleHQgY29udmVyc2lvbiIpO3Rocm93IG8uZWxpc2NyaXB0RGlhZ25vc3RpYz17Zm9ybWF0OiJlbGlzY3JpcHQtZGlhZ25vc3RpYyIsdmVyc2lvbjoxLGNvZGU6IkVMSS1SVDAwMDkiLHNldmVyaXR5OiJlcnJvciIscGhhc2U6InJ1bnRpbWUiLG1lc3NhZ2U6ImN5Y2xpYyBhcnJheSB0ZXh0IGNvbnZlcnNpb24ifSxvfWZ1bmN0aW9uIFQodCl7aWYoIWQodCkpcmV0dXJuIHQ7bGV0IG89dFt1XTtpZihvIT09dm9pZCAwJiZvIT09bnVsbCl7bGV0IG49ZShvLHQsWyJzdHJpbmciXSk7aWYoIWQobikpcmV0dXJuIG47dGhyb3cgbmV3IHMoIkNhbm5vdCBjb252ZXJ0IG9iamVjdCB0byBwcmltaXRpdmUgdmFsdWUiKX1mb3IobGV0IG49MDtuPDI7bisrKXtsZXQgcj10W249PT0wPyJ0b1N0cmluZyI6InZhbHVlT2YiXTtpZihTKHIpKXtsZXQgaT1yPT09bCYmYSh0KT93KHQpOmUocix0LFtdKTtpZighZChpKSlyZXR1cm4gaX19dGhyb3cgbmV3IHMoIkNhbm5vdCBjb252ZXJ0IG9iamVjdCB0byBwcmltaXRpdmUgdmFsdWUiKX1mdW5jdGlvbiBnKHQpe2xldCBvPVQodCk7aWYodHlwZW9mIG89PT0ic3ltYm9sIil0aHJvdyBuZXcgcygiQ2Fubm90IGNvbnZlcnQgYSBTeW1ib2wgdmFsdWUgdG8gYSBzdHJpbmciKTtyZXR1cm4gaihvKX1mdW5jdGlvbiBoKHQsbyl7bGV0IG49K3QubGVuZ3RoLHI9biE9PW58fG48PTA/MDpuPj05MDA3MTk5MjU0NzQwOTkxPzkwMDcxOTkyNTQ3NDA5OTE6bi1uJTEsaT1vPT09dm9pZCAwPyIsIjpnKG8pO2lmKGUoayxwLFt0XSkpQygpO2UoeCxwLFt0XSk7dHJ5e2xldCB5PSIiO2ZvcihsZXQgYz0wO2M8cjtjKyspe2lmKGMpeSs9aTtsZXQgZj10W2NdO2lmKGYhPT1udWxsJiZmIT09dm9pZCAwKXkrPWcoZil9cmV0dXJuIHl9ZmluYWxseXtlKEEscCxbdF0pfX1mdW5jdGlvbiB3KHQpe2xldCBvPXQuam9pbjtyZXR1cm4gUyhvKT9vPT09bT9oKHQsdm9pZCAwKTplKG8sdCxbXSk6ZShiLHQsW10pfWZ1bmN0aW9uIFcodCxvKXtsZXQgbj10W29dO3JldHVybiguLi5yKT0+e2lmKG49PT1tJiZhKHQpKXJldHVybiBoKHQsclswXSk7aWYobj09PWwmJmEodCkpcmV0dXJuIHcodCk7cmV0dXJuIGUobix0LHIpfX1leHBvcnR7VyBhcyBjfTs=\";\n")
+
 (defconst eliscript-emitter--number-conversion-intrinsics
     "const __eliscript_number_intrinsic = globalThis.Number;\nconst __eliscript_bigint_intrinsic = globalThis.BigInt;\nconst __eliscript_numeric_apply = globalThis.Reflect.apply;\nconst __eliscript_numeric_symbol = globalThis.Symbol.toPrimitive;\nconst __eliscript_numeric_error = globalThis.TypeError;\nconst __eliscript_numeric_trim = globalThis.String.prototype.trim;\nconst __eliscript_numeric_slice = globalThis.String.prototype.slice;\nconst __eliscript_numeric_exec = globalThis.RegExp.prototype.exec;\n")
   (defconst eliscript-emitter--number-conversion-capsule
@@ -911,10 +915,18 @@ No calls, host access, strings, free bindings or destructuring enter this proof.
                 (eliscript-emitter-emit-expression (nth 2 arguments)))
       access)))
 
+(defun eliscript-emitter--array-text-key-p (key)
+  "Return non-nil for array text keys and computed KEY expressions."
+  (if (or (keywordp key) (stringp key) (numberp key) (memq key '(nil t false undefined)))
+      (member (if (keywordp key) (substring (symbol-name key) 1) key)
+              '("join" "toString"))
+    t))
+
 (defun eliscript-emitter--emit-js-call (arguments)
   "Emit a receiver-preserving JavaScript method call from ARGUMENTS."
   (eliscript-emitter--require-arity "js-call" arguments 2)
-  (format "(%s)[%s](%s)"
+  (format (if (eliscript-emitter--array-text-key-p (nth 1 arguments))
+              "__eliscript_at(%s, %s)(%s)" "(%s)[%s](%s)")
           (eliscript-emitter-emit-expression (nth 0 arguments))
           (eliscript-emitter--emit-property-key (nth 1 arguments))
           (eliscript-emitter--emit-arguments (nthcdr 2 arguments))))
@@ -1538,11 +1550,23 @@ No calls, host access, strings, free bindings or destructuring enter this proof.
   (concat (if shadowed eliscript-emitter--imul-capsule eliscript-emitter--imul-intrinsic)
           eliscript-emitter--imul-operator-helper))
 
+(defun eliscript-emitter--uses-array-text-p (forms)
+  "Return non-nil when unquoted FORMS contain guarded method calls."
+  (cl-labels ((walk (form)
+               (cond ((vectorp form) (cl-some #'walk (append form nil)))
+                     ((consp form)
+                      (and (not (eq (car form) 'quote))
+                           (or (and (eq (car form) 'js-call)
+                                    (eliscript-emitter--array-text-key-p (nth 2 form)))
+                               (cl-some #'walk form)))))))
+    (cl-some #'walk forms)))
+
 (defun eliscript-emit-module (forms)
   "Emit FORMS as one ECMAScript module."
   (let ((eliscript-emitter--temporary-counter 0))
     (concat
      "// Generated by Eliscript. Do not edit.\n"
+     (if (eliscript-emitter--uses-array-text-p forms) eliscript-emitter--array-text-import "")
      (if (eliscript-emitter--uses-literal-runtime-p forms)
          eliscript-emitter--literal-runtime-import
        "")

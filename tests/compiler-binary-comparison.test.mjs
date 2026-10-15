@@ -106,3 +106,12 @@ test("failed binary-comparison gates retain complete measurement evidence", asyn
   expect(failure).toBeInstanceOf(TypeError);
   expect(failure.report).toBe(report);
 });
+
+test("binary-comparison size failures retain every measured sample and artifact checksum", async () => {
+  const report = JSON.parse(await readFile(reportPath, 'utf8'));
+  report.validation.optimizedBytes = report.validation.baselineBytes + 1;
+  let failure;try {validateCompilerBinaryComparisonReport(report);} catch (error) {failure = error;}
+  expect(failure).toBeInstanceOf(TypeError);expect(failure.report).toBe(report);
+  expect(failure.report.measurements.optimized.samplesMs).toHaveLength(report.parameters.timingSamples);
+  expect(failure.report.validation.optimizedChecksum).toBeGreaterThan(0);
+});

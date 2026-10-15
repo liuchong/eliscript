@@ -112,6 +112,7 @@ test("optimized compiler runtime scan matches its readable reference", async () 
           irNode("persistent-list-literal", null),
         ])),
         expression(irNode("intrinsic", "equal", [literal(1), literal(1)])),
+        expression(irNode("method-call", "js-call", [irNode("reference", "values"), literal("join")])),
       ],
     };
     const staticKeywordProperty = {
@@ -135,6 +136,7 @@ test("optimized compiler runtime scan matches its readable reference", async () 
     expect(emitter.runtime_requirements(allRequirements)).toEqual({
       numericCoercion: true,
       imul: true,
+      arrayText: true,
       numberConversion: true,
       hostIdentityToken: true,
       literal: true,
@@ -146,6 +148,7 @@ test("optimized compiler runtime scan matches its readable reference", async () 
     expect(emitter.runtime_requirements(staticKeywordProperty)).toEqual({
       numericCoercion: false,
       imul: false,
+      arrayText: false,
       numberConversion: false,
       hostIdentityToken: false,
       literal: false,

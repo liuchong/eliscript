@@ -32,6 +32,16 @@ object operations. `js-call` invokes a host callable or method, `new` invokes a
 constructor, and `js*` is the explicit escape hatch for a JavaScript expression.
 Use the narrowest interop form that expresses the required host operation.
 
+Array `join` and `toString` reject circular text conversion with `TypeError`
+and diagnostic `ELI-RT0009` (`cyclic array text conversion`). For example, an
+array containing itself cannot be joined; the circular item is not silently
+omitted. Shared arrays that do not point back into the active conversion remain
+valid. The error follows the native Emacs string-joining direction. Ordinary
+noncircular arrays retain their existing JavaScript conversion rules, including
+empty fields for holes, nil and undefined. Generated method calls capture the
+method before evaluating arguments; they do not modify JavaScript prototypes.
+Calls made entirely inside imported JavaScript retain that library's behavior.
+
 ## Persistent Conversion
 
 The standard interop library converts between persistent values and native

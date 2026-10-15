@@ -1,0 +1,205 @@
+{
+  "format": "eliscript-managed-bdd",
+  "version": 1,
+  "features": [
+    {
+      "name": "Array text conversion",
+      "description": "Ordinary array joining and text conversion execute independently in JS and collecting zero-import WASM, with the selected cycle error and original evaluation order.",
+      "scenarios": [
+        {
+          "id": "empty-and-holes",
+          "given": "an empty array and a sparse four-position array",
+          "when": "both arrays are joined with default separators",
+          "then": "empty text and exactly three separators are returned",
+          "source": "(defun run () (let ((a (js-array))) (put a :length 4) (js-array (js-call (js-array) :join) (js-call a :join))))",
+          "expected": [
+            "",
+            ",,,"
+          ]
+        },
+        {
+          "id": "exact-primitive-text",
+          "given": "negative zero, NaN, infinity, the smallest subnormal and Unicode text",
+          "when": "the values are joined with a vertical bar",
+          "then": "their exact existing JS text is retained",
+          "source": "(defun run () (js-call (js-array -0.0 (/ 0 0) (/ 1 0) 5e-324 \"中😀\") :join \"|\"))",
+          "expected": "0|NaN|Infinity|5e-324|中😀"
+        },
+        {
+          "id": "shared-arrays",
+          "given": "two positions refer to the same noncircular child",
+          "when": "the parent is joined",
+          "then": "both child occurrences are preserved",
+          "source": "(defun run () (let ((child (js-array \"x\"))) (js-call (js-array child child) :join \"|\")))",
+          "expected": "x|x"
+        },
+        {
+          "id": "length-before-separator",
+          "given": "separator conversion appends an array item",
+          "when": "join converts that separator",
+          "then": "the original length is used and the append remains observable",
+          "source": "(defun run () (let* ((a (js-array \"x\")) (sep (js-object :toString (lambda () (js-call a :push \"late\") \"|\")))) (let ((out (js-call a :join sep))) (js-array out (js-length a)))))",
+          "expected": [
+            "x",
+            2
+          ]
+        },
+        {
+          "id": "live-element-reads",
+          "given": "the first element conversion changes the second element",
+          "when": "join reads elements in order",
+          "then": "the later read observes the changed value",
+          "source": "(defun run () (let ((a (js-array nil \"old\"))) (put a 0 (js-object :toString (lambda () (put a 1 \"changed\") \"first\"))) (js-call a :join \"|\")))",
+          "expected": "first|changed"
+        },
+        {
+          "id": "conversion-fallback",
+          "given": "toString returns an object and valueOf returns a number",
+          "when": "the containing array is joined",
+          "then": "callbacks run once in string-hint order and the number becomes text",
+          "source": "(defun run () (let* ((trace (js-array)) (item (js-object :toString (lambda () (js-call trace :push \"to\") (js-object)) :valueOf (lambda () (js-call trace :push \"value\") 7))) (out (js-call (js-array item) :join))) (js-array out (js-call trace :join \">\"))))",
+          "expected": [
+            "7",
+            "to>value"
+          ]
+        },
+        {
+          "id": "capture-before-arguments",
+          "given": "an own join function is replaced while evaluating an argument",
+          "when": "the original method call completes",
+          "then": "the previously captured function is called",
+          "source": "(defun run () (let ((a (js-array \"x\"))) (put a :join (lambda (&rest ignored) \"captured\")) (js-call a :join (progn (put a :join (lambda () \"replacement\")) \"|\"))))",
+          "expected": "captured"
+        },
+        {
+          "id": "toString-late-join-lookup",
+          "given": "toString has an ignored argument that installs an own join",
+          "when": "toString executes after the argument",
+          "then": "the newly installed join is observed",
+          "source": "(defun run () (let ((a (js-array \"x\"))) (js-call a :toString (put a :join (lambda () \"changed\")))))",
+          "expected": "changed"
+        },
+        {
+          "id": "custom-result-identity",
+          "given": "an own join returns a source object",
+          "when": "array toString calls that join",
+          "then": "the exact original object is returned",
+          "source": "(defun run () (let ((a (js-array)) (answer (js-object))) (put a :join (lambda () answer)) (eq (js-call a :toString) answer)))",
+          "expected": true
+        },
+        {
+          "id": "self-cycle-and-recovery",
+          "given": "an array item points to the containing array",
+          "when": "join is attempted and the item is then replaced",
+          "then": "both targets report ELI-RT0009 and the same array can be joined afterwards",
+          "source": "(defvar values (js-array \"苹果\" nil \"香蕉\")) (defun run () (put values 1 values) (js-call values :join \"、\")) (defun recover () (put values 1 \"梨\") (js-call values :join \"、\"))",
+          "expected": null,
+          "runtimeError": "ELI-RT0009",
+          "jsError": "TypeError",
+          "wasmError": "TypeError",
+          "recover": "苹果、梨、香蕉"
+        },
+        {
+          "id": "mutual-cycle-and-recovery",
+          "given": "two arrays refer back to each other",
+          "when": "array toString is attempted and the first edge is replaced",
+          "then": "both targets report the cycle error and release the active conversion state",
+          "source": "(defvar values (js-array nil)) (defvar other (js-array values)) (defun run () (put values 0 other) (js-call values :toString)) (defun recover () (put values 0 \"safe\") (js-call values :toString))",
+          "expected": null,
+          "runtimeError": "ELI-RT0009",
+          "jsError": "TypeError",
+          "wasmError": "TypeError",
+          "recover": "safe"
+        }
+      ]
+    },
+    {
+      "name": "Represented type and null queries",
+      "description": "Type queries inspect represented bindings without string conversion, retain lexical capture and member failure, and keep the current four null-predicate meanings. Unsupported capabilities remain explicit.",
+      "scenarios": [
+        {
+          "id": "primitive-labels",
+          "given": "values include nil, undefined, Boolean, Number, String, Array and a function",
+          "when": "typeof queries run inside the compiled module",
+          "then": "the exact seven JS labels are returned",
+          "source": "(defun label (value) (js* \"typeof value\")) (defun run () (js-array (label nil) (label undefined) (label false) (label -0.0) (label \"中😀\") (label (js-array)) (label label)))",
+          "expected": [
+            "object",
+            "undefined",
+            "boolean",
+            "number",
+            "string",
+            "object",
+            "function"
+          ]
+        },
+        {
+          "id": "capture-and-live-member",
+          "given": "a closure captures an object whose member is later changed",
+          "when": "the captured member type is queried",
+          "then": "the later undefined value is observed",
+          "source": "(defun run () (let* ((value (js-object :item 7)) (f (lambda () (js* \"typeof value.item\")))) (put value :item undefined) (funcall f)))",
+          "expected": "undefined"
+        },
+        {
+          "id": "missing-member",
+          "given": "a represented object has no requested member",
+          "when": "its member type is queried",
+          "then": "undefined is returned without stringifying the object",
+          "source": "(defun run () (let* ((trace (js-object :calls 0)) (value (js-object :toString (lambda () (put trace :calls 1) \"wrong\")))) (js-array (js* \"typeof value.item\") (get trace :calls))))",
+          "expected": [
+            "undefined",
+            0
+          ]
+        },
+        {
+          "id": "null-predicate-family",
+          "given": "the operand is undefined and one expression counts its own evaluation",
+          "when": "nil, undefined and null predicates are applied",
+          "then": "their existing meanings remain distinct and the effect runs once",
+          "source": "(defun run () (let ((value undefined) (trace (js-object :calls 0))) (js-array (nil? value) (undefined? value) (null value) (nullish? value) (null (progn (put trace :calls (1+ (get trace :calls))) value)) (get trace :calls))))",
+          "expected": [
+            false,
+            true,
+            true,
+            true,
+            true,
+            1
+          ]
+        },
+        {
+          "id": "nil-is-distinct",
+          "given": "the operand is nil",
+          "when": "all four null predicates are applied",
+          "then": "nil is not confused with undefined",
+          "source": "(defun run () (js-array (nil? nil) (undefined? nil) (null nil) (nullish? nil)))",
+          "expected": [
+            true,
+            false,
+            true,
+            true
+          ]
+        },
+        {
+          "id": "null-member-fails",
+          "given": "the represented receiver is nil",
+          "when": "a member type is queried",
+          "then": "member access fails instead of being mislabeled undefined",
+          "source": "(defun run () (let ((value nil)) (js* \"typeof value.item\")))",
+          "expected": null,
+          "runtimeError": "ELI-RT0003",
+          "jsError": "TypeError"
+        },
+        {
+          "id": "unrepresented-global-refusal",
+          "given": "raw JS refers to an unrepresented ambient name",
+          "when": "the module is compiled for managed WASM",
+          "then": "source-bound ELI-B0001 refuses the unsupported capability",
+          "source": "(defun run () (js* \"typeof eliscriptUnrepresentedGlobal\"))",
+          "expected": "undefined",
+          "compileError": "ELI-B0001"
+        }
+      ]
+    }
+  ]
+}

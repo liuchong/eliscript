@@ -925,6 +925,42 @@ test("ordinary replacement retains public Seed and three-generation IR, descript
     for (const value of [text, out, callback]) a.release(value); a.closeModule(); a.collect(); assert.equal(a.live(), 0); assert.equal(a.stats().frameDepth, 0);
   }
 });
+test("array text retains public Seed and three-generation IR, conversion tables, cycle errors and executable bytes", async () => {
+  const filename = resolve(root, 'tests/fixtures/wasm-managed-array-text.eli'), source = await readFile(filename, 'utf8'), seed = await seedJavascript(filename, resolve(directory, 'array-text-seed.mjs'));
+  const programs = generations.map(g => g.compiler.compile_ir_string(source, filename)), runtimes = generations.map(g => g.compiler.compile_ir_string(runtimeSeeds.memory.source, 'runtime.eli'));
+  const lowered = generations.map((g, i) => g.managed.lower_managed_program(programs[i], runtimes[i])), bytes = generations.map((g, i) => g.managed.emit_managed_wasm(programs[i], runtimes[i]));
+  const {instantiateManagedRuntime} = await import('../tools/backends/managed-runtime.mjs');
+  for (let i = 0; i < 3; i++) {
+    assert.equal(generations[i].compiler.emit_ir_string(programs[i]), seed);assert.deepEqual(programs[i], programs[0]);assert.deepEqual(lowered[i], lowered[0]);assert.deepEqual(bytes[i], bytes[0]);
+    assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(Uint8Array.from(bytes[i]))), []);
+    const a = instantiateManagedRuntime(Uint8Array.from(bytes[i]));a.auto(1);const text = a.string('中😀\ud800'), trace = a.sourceObject({}), object = a.invoke('custom-value', [trace, text]), values = a.sourceArray([object, null, undefined, text]), separator = a.string('|'), out = a.invoke('join-value', [values, separator]);
+    assert.equal(a.readString(out), '中😀\ud800|||中😀\ud800');
+    const cyclic = a.sourceArray([text, null]);a.set(cyclic, 1, cyclic);
+    assert.throws(() => a.invoke('default-value', [cyclic]), e => e instanceof TypeError && e.eliscriptDiagnostic?.code === 'ELI-RT0009');assert.equal(a.stats().frameDepth, 0);
+    a.set(cyclic, 1, text);const recovered = a.invoke('default-value', [cyclic]);assert.equal(a.readString(recovered), '中😀\ud800,中😀\ud800');
+    for (const value of [text, trace, object, values, separator, out, cyclic, recovered]) a.release(value);a.closeModule();a.collect();assert.equal(a.live(), 0);assert.equal(a.stats().frameDepth, 0);
+  }
+});
+test("represented type queries retain public Seed and three-generation IR, closure tables, exact values and executable bytes", async () => {
+  const filename = resolve(root, 'tests/fixtures/wasm-managed-typeof.eli'), source = await readFile(filename, 'utf8'), seed = await seedJavascript(filename, resolve(directory, 'typeof-seed.mjs'));
+  const programs = generations.map(g => g.compiler.compile_ir_string(source, filename)), runtimes = generations.map(g => g.compiler.compile_ir_string(runtimeSeeds.memory.source, 'runtime.eli'));
+  const lowered = generations.map((g, i) => g.managed.lower_managed_program(programs[i], runtimes[i])), bytes = generations.map((g, i) => g.managed.emit_managed_wasm(programs[i], runtimes[i]));
+  const js = await import('data:text/javascript;base64,' + Buffer.from(seed).toString('base64'));
+  const {instantiateManagedRuntime} = await import('../tools/backends/managed-runtime.mjs');
+  for (let i = 0; i < 3; i++) {
+    assert.equal(generations[i].compiler.emit_ir_string(programs[i]), seed);assert.deepEqual(programs[i], programs[0]);assert.deepEqual(lowered[i], lowered[0]);assert.deepEqual(bytes[i], bytes[0]);
+    assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(Uint8Array.from(bytes[i]))), []);
+    const a = instantiateManagedRuntime(Uint8Array.from(bytes[i]));a.auto(1);
+    for (const value of [undefined, null, false, true, -0, NaN, Infinity, Number.MIN_VALUE, '', '中😀\ud800']) {
+      const input = typeof value === 'number' ? a.number(value) : typeof value === 'string' ? a.string(value) : value, box = a.invoke('make-box', [input]), closure = a.invoke('capture', [input]);
+      for (const [name, argument] of [['type-value', input], ['type-underscore', input], ['type-member', box], ['invoke', closure]]) {const out = a.invoke(name, [argument]);assert.equal(a.readString(out), typeof value);a.release(out);}
+      for (const name of ['is-nil', 'is-undefined', 'is-null', 'is-nullish']) assert.equal(a.invoke(name, [input]), js[name.replaceAll('-', '_')](value));
+      for (const item of [input, box, closure]) a.release(item);a.collect();assert.equal(a.stats().frameDepth, 0);
+    }
+    assert.throws(() => a.invoke('type-member', [null]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003');
+    a.closeModule();a.collect();assert.equal(a.live(), 0);assert.equal(a.stats().frameDepth, 0);
+  }
+});
 test("empty bindings retain public Seed and three-generation IR, descriptors, closure tables and executable bytes", async () => {
   const filename = resolve(root, 'tests/fixtures/wasm-managed-empty-bindings.eli'), source = await readFile(filename, 'utf8'), seed = await seedJavascript(filename, resolve(directory, 'empty-bindings-seed.mjs'));
   const programs = generations.map(g => g.compiler.compile_ir_string(source, filename)), runtimes = generations.map(g => g.compiler.compile_ir_string(runtimeSeeds.memory.source, 'runtime.eli'));
@@ -1569,6 +1605,59 @@ describe("browser compiler backends", () => {
         }
         a.closeModule(); a.collect(); check(a.live() === 0 && a.stats().frameDepth === 0, 'cleanup'); return [...bytes];
       } finally {URL.revokeObjectURL(url); if (jsUrl) URL.revokeObjectURL(jsUrl);}
+    }, {source, seed, filename, runtime});
+    assert.deepEqual(bytes, generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source, filename), generations[2].compiler.compile_ir_string(runtime, 'runtime.eli')));
+  });
+  test("browser array text preserves sparse entries, conversion callbacks, cycle errors and owned UTF16 output without imports", async () => {
+    const filename = resolve(root, 'tests/fixtures/wasm-managed-array-text.eli'), source = await readFile(filename, 'utf8'), seed = await seedJavascript(filename, resolve(directory, 'browser-array-text-seed.mjs')), runtime = runtimeSeeds.memory.source;
+    const bytes = await evaluateBrowser(async ({bundle, source, seed, filename, runtime}) => {
+      const url = URL.createObjectURL(new Blob([bundle], {type: 'text/javascript'}));let jsUrl;
+      try {
+        const c = await import(url), p = c.compile_ir_string(source, filename), bytes = Uint8Array.from(c.emit_managed_wasm(p, c.compile_ir_string(runtime, 'runtime.eli')));
+        const check = (ok, label) => {if (!ok) throw Error(label);};check(c.emit_ir_string(p) === seed, 'Seed');check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length === 0, 'imports');
+        jsUrl = URL.createObjectURL(new Blob([seed], {type: 'text/javascript'}));const js = await import(jsUrl), a = c.instantiateManagedRuntime(bytes);a.auto(1);
+        for (const value of [null, undefined, false, true, -0, NaN, Infinity, Number.MIN_VALUE, '', '中😀\ud800']) {
+          const x = typeof value === 'number' ? a.number(value) : typeof value === 'string' ? a.string(value) : value, trace = a.sourceObject({}), object = a.invoke('fallback-value', [trace, x]), values = a.sourceArray([null, object, undefined]), out = a.invoke('default-value', [values]);
+          check(a.readString(out) === [null, js.fallback_value({}, value), undefined].join(), 'conversion');
+          a.resize(values, 5);const sparse = a.invoke('default-value', [values]);const reference = [null, js.fallback_value({}, value), undefined];reference.length = 5;check(a.readString(sparse) === reference.join(), 'holes');
+          for (const v of [x, trace, object, values, out, sparse]) a.release(v);a.collect();check(a.stats().frameDepth === 0, 'frame');
+        }
+        const cyclic = a.sourceArray([null]);a.set(cyclic, 0, cyclic);const reference = [];reference.push(reference);
+        for (const name of ['default-value', 'text-value']) {
+          let jsError, wasmError;try {js[name.replaceAll('-', '_')](reference);} catch (error) {jsError = error;}try {a.invoke(name, [cyclic]);} catch (error) {wasmError = error;}
+          check(jsError instanceof TypeError && wasmError instanceof TypeError && jsError.eliscriptDiagnostic?.code === 'ELI-RT0009' && wasmError.eliscriptDiagnostic?.code === 'ELI-RT0009', 'cycle error');check(a.stats().frameDepth === 0, 'cycle cleanup');
+        }
+        a.set(cyclic, 0, null);const recovered = a.invoke('default-value', [cyclic]);check(a.readString(recovered) === '', 'cycle recovery');a.release(cyclic);a.release(recovered);
+        // The legacy browser value has typeof undefined but remains an object
+        // (and a callable). Guarded JS conversion must use its actual identity.
+        const outcome = f => {try {return ['value', f()];} catch (error) {return ['error', error.name];}};
+        for (const value of [document.all, {toString: () => document.all, valueOf: () => 7}, {toString: document.all, valueOf: () => 7}, {[Symbol.toPrimitive]: () => document.all}]) {
+          const actual = outcome(() => js.join_value([value], '|')), expected = outcome(() => [value].join('|'));
+          check(actual[0] === expected[0] && actual[1] === expected[1], 'legacy browser conversion');
+        }
+        a.closeModule();a.collect();check(a.live() === 0 && a.stats().frameDepth === 0, 'cleanup');return [...bytes];
+      } finally {URL.revokeObjectURL(url);if (jsUrl) URL.revokeObjectURL(jsUrl);}
+    }, {source, seed, filename, runtime});
+    assert.deepEqual(bytes, generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source, filename), generations[2].compiler.compile_ir_string(runtime, 'runtime.eli')));
+  });
+  test("browser represented type queries preserve primitives, captured values, member errors and null predicates without imports", async () => {
+    const filename = resolve(root, 'tests/fixtures/wasm-managed-typeof.eli'), source = await readFile(filename, 'utf8'), seed = await seedJavascript(filename, resolve(directory, 'browser-typeof-seed.mjs')), runtime = runtimeSeeds.memory.source;
+    const bytes = await evaluateBrowser(async ({bundle, source, seed, filename, runtime}) => {
+      const url = URL.createObjectURL(new Blob([bundle], {type: 'text/javascript'}));let jsUrl;
+      try {
+        const c = await import(url), p = c.compile_ir_string(source, filename), bytes = Uint8Array.from(c.emit_managed_wasm(p, c.compile_ir_string(runtime, 'runtime.eli'))), check = (ok, label) => {if (!ok) throw Error(label);};
+        check(c.emit_ir_string(p) === seed, 'Seed');check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length === 0, 'imports');
+        jsUrl = URL.createObjectURL(new Blob([seed], {type: 'text/javascript'}));const js = await import(jsUrl), a = c.instantiateManagedRuntime(bytes);a.auto(1);
+        for (const value of [undefined, null, false, true, -0, NaN, Infinity, Number.MIN_VALUE, '', '中😀\ud800']) {
+          const input = typeof value === 'number' ? a.number(value) : typeof value === 'string' ? a.string(value) : value, box = a.invoke('make-box', [input]), closure = a.invoke('capture', [input]);
+          for (const [name, argument] of [['type-value', input], ['type-underscore', input], ['type-member', box], ['invoke', closure]]) {const out = a.invoke(name, [argument]);check(a.readString(out) === typeof value, name);a.release(out);}
+          for (const name of ['is-nil', 'is-undefined', 'is-null', 'is-nullish']) check(a.invoke(name, [input]) === js[name.replaceAll('-', '_')](value), name);
+          for (const item of [input, box, closure]) a.release(item);a.collect();check(a.stats().frameDepth === 0, 'frame');
+        }
+        let error;try {a.invoke('type-member', [null]);} catch (e) {error = e;}check(error?.eliscriptDiagnostic?.code === 'ELI-RT0003', 'member error');
+        const fn = a.getExport('type-value'), label = a.invoke('type-value', [fn]);check(a.readString(label) === 'function', 'function type');a.release(fn);a.release(label);
+        a.closeModule();a.collect();check(a.live() === 0 && a.stats().frameDepth === 0, 'cleanup');return [...bytes];
+      } finally {URL.revokeObjectURL(url);if (jsUrl) URL.revokeObjectURL(jsUrl);}
     }, {source, seed, filename, runtime});
     assert.deepEqual(bytes, generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source, filename), generations[2].compiler.compile_ir_string(runtime, 'runtime.eli')));
   });

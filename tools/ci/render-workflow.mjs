@@ -285,6 +285,8 @@ export function renderWorkflow(matrix) {
 `    name: \${{ matrix.name }}\n` +
 `    runs-on: \${{ matrix.os }}\n` +
 `    timeout-minutes: 30\n` +
+`    env:\n` +
+`      BUN_TEST_RUNNER: tools/testing/file-workers.mjs\n` +
 `    strategy:\n` +
 `      fail-fast: false\n` +
 `      matrix:\n` +

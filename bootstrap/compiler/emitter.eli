@@ -11,6 +11,10 @@
     ir-property)
   (import "./source-map.mjs" create-source-map)
 
+  ;; Identical capsules share cycle guards without global mutation.
+  (defconst array-text-import
+    "import { c as __eliscript_at } from \"data:text/javascript;base64,dmFyIGU9UmVmbGVjdC5hcHBseSxhPUFycmF5LmlzQXJyYXksbT1BcnJheS5wcm90b3R5cGUuam9pbixsPUFycmF5LnByb3RvdHlwZS50b1N0cmluZyxiPU9iamVjdC5wcm90b3R5cGUudG9TdHJpbmcsaj1TdHJpbmcscz1UeXBlRXJyb3IsdT1TeW1ib2wudG9QcmltaXRpdmUsaz1XZWFrU2V0LnByb3RvdHlwZS5oYXMseD1XZWFrU2V0LnByb3RvdHlwZS5hZGQsQT1XZWFrU2V0LnByb3RvdHlwZS5kZWxldGUscD1uZXcgV2Vha1NldCxkPSh0KT0+dCE9PW51bGwmJih0eXBlb2YgdD09PSJvYmplY3QifHx0eXBlb2YgdD09PSJmdW5jdGlvbiJ8fHR5cGVvZiB0PiJ1IiYmdCE9PXZvaWQgMCksUz0odCk9PnR5cGVvZiB0PT09ImZ1bmN0aW9uInx8dHlwZW9mIHQ+InUiJiZ0IT09dm9pZCAwO2Z1bmN0aW9uIEMoKXtsZXQgbz1uZXcgcygiY3ljbGljIGFycmF5IHRleHQgY29udmVyc2lvbiIpO3Rocm93IG8uZWxpc2NyaXB0RGlhZ25vc3RpYz17Zm9ybWF0OiJlbGlzY3JpcHQtZGlhZ25vc3RpYyIsdmVyc2lvbjoxLGNvZGU6IkVMSS1SVDAwMDkiLHNldmVyaXR5OiJlcnJvciIscGhhc2U6InJ1bnRpbWUiLG1lc3NhZ2U6ImN5Y2xpYyBhcnJheSB0ZXh0IGNvbnZlcnNpb24ifSxvfWZ1bmN0aW9uIFQodCl7aWYoIWQodCkpcmV0dXJuIHQ7bGV0IG89dFt1XTtpZihvIT09dm9pZCAwJiZvIT09bnVsbCl7bGV0IG49ZShvLHQsWyJzdHJpbmciXSk7aWYoIWQobikpcmV0dXJuIG47dGhyb3cgbmV3IHMoIkNhbm5vdCBjb252ZXJ0IG9iamVjdCB0byBwcmltaXRpdmUgdmFsdWUiKX1mb3IobGV0IG49MDtuPDI7bisrKXtsZXQgcj10W249PT0wPyJ0b1N0cmluZyI6InZhbHVlT2YiXTtpZihTKHIpKXtsZXQgaT1yPT09bCYmYSh0KT93KHQpOmUocix0LFtdKTtpZighZChpKSlyZXR1cm4gaX19dGhyb3cgbmV3IHMoIkNhbm5vdCBjb252ZXJ0IG9iamVjdCB0byBwcmltaXRpdmUgdmFsdWUiKX1mdW5jdGlvbiBnKHQpe2xldCBvPVQodCk7aWYodHlwZW9mIG89PT0ic3ltYm9sIil0aHJvdyBuZXcgcygiQ2Fubm90IGNvbnZlcnQgYSBTeW1ib2wgdmFsdWUgdG8gYSBzdHJpbmciKTtyZXR1cm4gaihvKX1mdW5jdGlvbiBoKHQsbyl7bGV0IG49K3QubGVuZ3RoLHI9biE9PW58fG48PTA/MDpuPj05MDA3MTk5MjU0NzQwOTkxPzkwMDcxOTkyNTQ3NDA5OTE6bi1uJTEsaT1vPT09dm9pZCAwPyIsIjpnKG8pO2lmKGUoayxwLFt0XSkpQygpO2UoeCxwLFt0XSk7dHJ5e2xldCB5PSIiO2ZvcihsZXQgYz0wO2M8cjtjKyspe2lmKGMpeSs9aTtsZXQgZj10W2NdO2lmKGYhPT1udWxsJiZmIT09dm9pZCAwKXkrPWcoZil9cmV0dXJuIHl9ZmluYWxseXtlKEEscCxbdF0pfX1mdW5jdGlvbiB3KHQpe2xldCBvPXQuam9pbjtyZXR1cm4gUyhvKT9vPT09bT9oKHQsdm9pZCAwKTplKG8sdCxbXSk6ZShiLHQsW10pfWZ1bmN0aW9uIFcodCxvKXtsZXQgbj10W29dO3JldHVybiguLi5yKT0+e2lmKG49PT1tJiZhKHQpKXJldHVybiBoKHQsclswXSk7aWYobj09PWwmJmEodCkpcmV0dXJuIHcodCk7cmV0dXJuIGUobix0LHIpfX1leHBvcnR7VyBhcyBjfTs=\";\n")
+
   (defconst literal-runtime-import
     "import { hashMap as __eliscript_hash_map, hashSet as __eliscript_hash_set, keyword as __eliscript_keyword, list as __eliscript_list, queue as __eliscript_queue, symbol as __eliscript_symbol, vector as __eliscript_vector } from \"eliscript/runtime/literals.mjs\";\n")
   (defconst collection-runtime-import
@@ -1374,6 +1378,10 @@
           (text-fragment (json-string (ir-value node)))
         (emit-expression node))))
 
+  (defun array-text-key-p (node)
+    (or (not (= (ir-kind node) "literal"))
+        (= (ir-value node) "join") (= (ir-value node) "toString")))
+
   (defun emit-expression (node)
     (unless (node-p node)
       (fail "expected an IR expression node"))
@@ -1429,8 +1437,9 @@
               (emit-expression (js-nth 2 nodes)) ")")))
           ((= kind "method-call")
           (combine
-            (js-array "(" (emit-expression (js-nth 0 nodes)) ")["
-              (emit-property-key (js-nth 1 nodes)) "]("
+            (js-array (if (array-text-key-p (js-nth 1 nodes)) "__eliscript_at(" "(")
+              (emit-expression (js-nth 0 nodes)) (if (array-text-key-p (js-nth 1 nodes)) ", " ")[")
+              (emit-property-key (js-nth 1 nodes)) (if (array-text-key-p (js-nth 1 nodes)) ")(" "](")
               (emit-arguments (js-call nodes :slice 2)) ")")))
           ((= kind "constructor-call")
            (combine
@@ -1716,10 +1725,17 @@
             (setq found t))))
       found))
 
+  (defun node-uses-array-text-p (node)
+    (let ((found (and (= (ir-kind node) "method-call")
+                     (array-text-key-p (js-nth 1 (children node))))))
+      (js-call (children node) :forEach
+        (lambda (child) (when (node-uses-array-text-p child) (setq found t)))) found))
+
   (defun reference-runtime-requirements (program)
     (js-object
       :numericCoercion (program-uses-numeric-coercion-p program)
       :imul (js-call (program-body program) :some node-uses-imul-p)
+      :arrayText (js-call (program-body program) :some node-uses-array-text-p)
       :numberConversion (program-uses-number-conversion-p program)
       :hostIdentityToken (program-uses-host-identity-token-p program)
       :literal (program-uses-literal-runtime-p program)
@@ -1755,6 +1771,8 @@
            (static-key-index (literal-runtime-static-key-index node))
           (index 0)
           (child nil))
+      (when (and (= kind "method-call") (array-text-key-p (js-nth 1 nodes)))
+        (put requirements :arrayText t))
       (cond
         ((= kind "map-binding-pattern")
          (put requirements :binding t))
@@ -1803,6 +1821,7 @@
            (js-object
              :numericCoercion false
              :imul false
+             :arrayText false
              :numberConversion false
              :hostIdentityToken false
              :literal false
@@ -1887,6 +1906,7 @@
               "\n\n")))
       (combine
         (js-array "// Generated by Eliscript. Do not edit.\n"
+         (if (get requirements :arrayText) array-text-import "")
          (if (get requirements :literal)
              literal-runtime-import
            "")

@@ -643,3 +643,38 @@ Binding shape is checked before reading initializer children. Malformed names,
 invalid initializer nodes and unsupported binding patterns report the
 existing source-bound ELI-B0001 diagnostic without mutating the original IR.
 This does not implement destructuring or change the source language contract.
+
+## Ordinary array text conversion
+
+Managed WASM implements ordinary `join` and array `toString`
+inside owned memory. It preserves sparse positions, exact primitive text,
+the length captured before separator conversion, and element reads after earlier
+conversion effects. Ordinary object conversion calls source `toString` and
+`valueOf` functions in order through the existing WASM function table, including
+closures. Method lookup precedes argument evaluation, including ignored extras.
+Private join frames are unwound after allocation errors and actual WASM traps.
+
+The internal `memory32` capability `call-source` passes heap, function, argument
+vector and count through a checked four-word table signature. Explicit internal
+`indirectArities` declarations allow an empty table without a matching local
+body; undeclared signatures and malformed declarations remain errors. Missing
+or incorrectly typed table targets retain WASM bounds and type traps.
+
+Circular array text conversion throws TypeError with ELI-RT0009 in both the JS
+and managed WASM paths, following native Emacs string joining's error direction.
+Noncircular conversion keeps existing JS rules. JS modules share one immutable
+data-URL support module and no global prototype is changed. Its readable source
+is `runtime/array-text.mjs`; `bun tools/compiler/array-text-capsule.mjs --write`
+refreshes the compact literals in both emitters. This maintenance operation uses
+the development bundler; normal compilation by any compiler host emits only the
+fixed literal and never invokes a bundler, optimizer or external service.
+
+Represented lexical/module `typeof` identifiers and static member paths now
+execute within WASM. They preserve null/undefined, function identity and module
+renaming without invoking object conversion hooks. Existing `nil?`, `undefined?`,
+`null` and `nullish?` predicates retain their distinct current meanings; `null`
+and `nullish?` both accept nil or undefined. Unknown ambient bindings, arbitrary
+raw JS expressions and unimplemented primitive prototype values remain explicit
+refusals. Full object conversion, function source reflection, arbitrary prototype
+changes and complete compiler hosts remain open. See the single backend plan
+for remaining acceptance gates.

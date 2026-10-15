@@ -1,7 +1,8 @@
 // Bulk host boundary for the .eli managed heap. GC, value operations and allocation
 // execute inside WASM, with zero imports. Handles own explicit roots until release.
 function fail(code) {
- const error=new Error(code===1?'invalid managed value handle':code===2?'managed capacity exhausted':code===4?'invalid UTF-8 input':code===5?'invalid UTF-16 surrogate':code===6?'managed string sealing error':code===8?'uninitialized managed module binding':'managed argument or bounds error');
+ const message=code===1?'invalid managed value handle':code===2?'managed capacity exhausted':code===4?'invalid UTF-8 input':code===5?'invalid UTF-16 surrogate':code===6?'managed string sealing error':code===8?'uninitialized managed module binding':code===9?'cyclic array text conversion':'managed argument or bounds error';
+ const error=code===9?new TypeError(message):new Error(message);
  error.eliscriptDiagnostic={format:'eliscript-diagnostic',version:1,code:`ELI-RT${String(code).padStart(4,'0')}`,severity:'error',phase:'runtime',message:error.message};throw error;
 }
 function word(x,max=0xffffffff) {if(typeof x!=='number'||!Number.isInteger(x)||x<0||x>max||Object.is(x,-0))fail(3);return x;}

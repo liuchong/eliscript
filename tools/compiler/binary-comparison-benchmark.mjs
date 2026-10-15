@@ -117,30 +117,29 @@ function compileCorpus(compiler, corpus, rounds) {
 }
 
 export function validateCompilerBinaryComparisonReport(report) {
+  const reject = message => {const error = new TypeError(message);error.report = report;throw error;};
   if (report?.format !== COMPILER_BINARY_COMPARISON_FORMAT ||
       report?.version !== COMPILER_BINARY_COMPARISON_VERSION ||
       report?.baseline?.revision !== COMPILER_BINARY_COMPARISON_BASELINE) {
-    throw new TypeError("invalid compiler binary comparison report identity");
+    reject("invalid compiler binary comparison report identity");
   }
   const samples = report.parameters?.timingSamples;
   if (!Array.isArray(report.measurements?.baseline?.samplesMs) ||
       !Array.isArray(report.measurements?.optimized?.samplesMs) ||
       report.measurements.baseline.samplesMs.length !== samples ||
       report.measurements.optimized.samplesMs.length !== samples) {
-    throw new TypeError("compiler binary comparison samples are incomplete");
+    reject("compiler binary comparison samples are incomplete");
   }
   if (report.validation?.compiledModules !== report.corpus?.files?.length ||
       report.validation?.validSourceMaps !== report.corpus?.files?.length ||
       report.validation?.baselineChecksum <= 0 ||
       report.validation?.optimizedChecksum <= 0 ||
       report.validation?.optimizedBytes >= report.validation?.baselineBytes) {
-    throw new TypeError("compiler binary comparison validation failed");
+    reject("compiler binary comparison validation failed");
   }
   if (report.decision?.passed !== true ||
       report.measurements.speedup < report.decision.minimumSpeedup) {
-    const error = new TypeError("compiler binary comparison speedup decision failed");
-    error.report = report;
-    throw error;
+    reject("compiler binary comparison speedup decision failed");
   }
   return report;
 }
