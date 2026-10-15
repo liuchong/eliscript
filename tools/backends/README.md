@@ -521,3 +521,36 @@ object ToPrimitive conversions remain outside this experimental profile.
 Invalid code-point ranges use `ELI-RT0003` at the existing experimental bridge.
 Source-level RangeError and catch semantics remain part of the incomplete
 exception runtime; this capability does not promote the full backend.
+
+
+## Experimental RegExp matching
+
+Static RegExp literals compile through `bootstrap/backends/regexp.eli` into a
+private word program. Its test and exec methods run inside owned WASM memory
+with zero imports. Both methods share ordered backtracking, UTF-16 offsets,
+Unicode code-point advancement, capture restoration and automatic roots.
+The program is privately copied and structurally checked; guarded backedges
+prevent zero-width repetitions from looping without consuming input.
+
+The current capability includes literal characters, dot, character classes and
+ranges, common character/control/hex/Unicode escapes, numbered captures,
+noncapturing groups, alternatives, anchors and word boundaries, greedy/lazy
+`*`, `+`, `?`, and the `m`, `s`, `u` flags. Exec returns a source array whose
+captures, missing entries, index, input and own undefined groups property match
+the existing JS source. Method values and receivers are captured before arguments;
+ignored arguments still execute, nullish receivers fail before arguments, and
+noncallable ordinary methods fail after their arguments.
+
+RegExp values own private kind-21 program/source references, traced by the common
+collector. Temporary capture registers and growable backtracking storage belong
+to the entered frame; capacity failures and actual traps preserve caller roots.
+The current parser bounds nesting at 256, instructions at 1,048,576 and capture
+or progress-register counts at 65,535. The existing heap/word ABI imposes its
+normal allocation limits.
+
+Bounded repetitions, backreferences, lookaround, named groups, case folding,
+other flags, dynamic RegExp construction, mutable RegExp properties/prototypes,
+object ToPrimitive conversion, string replacement/search/split integration and
+source exception semantics remain open. Unsupported static forms are rejected
+with ELI-B0001 and the original source identity. This experimental capability
+does not complete RegExp, the standard library or a compiler host.

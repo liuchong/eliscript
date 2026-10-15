@@ -153,6 +153,8 @@ beforeAll(async () => {
   const variadicSource = await readFile(variadicInput, "utf8");
   const callbackInput = resolve(root, "tests/fixtures/wasm-managed-array-callbacks.eli");
   const callbackSource = await readFile(callbackInput, "utf8");
+  const regexpInput = resolve(root, "tests/fixtures/wasm-managed-regexp.eli");
+  const regexpSource = await readFile(regexpInput, "utf8");
   const stringsInput = resolve(root, "tests/fixtures/wasm-managed-strings.eli");
   const stringsSource = await readFile(stringsInput, "utf8");
   const moduleInput = resolve(root, "tests/fixtures/wasm-managed-module-bindings.eli");
@@ -161,7 +163,7 @@ beforeAll(async () => {
   const projectEntryInput = resolve(root, "tests/fixtures/wasm-managed-project-entry.eli");
   const projectStateSource = await readFile(projectStateInput, "utf8");
   const projectEntrySource = await readFile(projectEntryInput, "utf8");
-  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed, moduleSeed, projectStateSeed, projectEntrySeed, stringsSeed] = await Promise.all([
+  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed, moduleSeed, projectStateSeed, projectEntrySeed, stringsSeed, regexpSeed] = await Promise.all([
     seedJavascript(resolve(root, "bootstrap/runtime/memory.eli"), resolve(directory, "memory-seed.mjs")),
     seedJavascript(managedInput, resolve(directory, "managed-seed.mjs")),
     seedJavascript(callableInput, resolve(directory, "callables-seed.mjs")),
@@ -171,10 +173,12 @@ beforeAll(async () => {
     seedJavascript(projectStateInput, resolve(directory, "project-state-seed.mjs")),
     seedJavascript(projectEntryInput, resolve(directory, "project-entry-seed.mjs")),
     seedJavascript(stringsInput, resolve(directory, "strings-seed.mjs")),
+    seedJavascript(regexpInput, resolve(directory, "regexp-seed.mjs")),
   ]);
   runtimeSeeds = {
     memory: { source, javascript: memorySeed },
     strings: { source: stringsSource, javascript: stringsSeed, filename: stringsInput },
+    regexp: { source: regexpSource, javascript: regexpSeed, filename: regexpInput },
     managed: { source: managedSource, javascript: managedSeed },
     callables: { source: callableSource, javascript: callableSeed, filename: callableInput },
     variadic: { source: variadicSource, javascript: variadicSeed, filename: variadicInput },
@@ -850,6 +854,15 @@ test("ordinary source text has Seed and three-generation IR, descriptor and WASM
  const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
  for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const s=a.string('中😀\ud800'),p=a.number(1),point=a.invoke('code-point',[s,p]);assert.equal(a.readNumber(point),0x1f600);a.release(point);const fixed=a.invoke('repair',[s]);assert.equal(a.readString(fixed),'中😀�');const needle=a.string('😀'),last=a.invoke('last',[s,needle,undefined]);assert.equal(a.readNumber(last),1);const pointInput=a.number(0x1f600),constructed=a.invoke('from-point',[pointInput]);assert.equal(a.readString(constructed),'😀');const invalid=a.number(.5);assert.throws(()=>a.invoke('from-point',[invalid]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');for(const v of[s,p,fixed,needle,last,pointInput,constructed,invalid])a.release(v);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
 });
+test("RegExp literals preserve public Seed and three-generation programs, typed IR, descriptors and executable bytes",async()=>{
+ const {source,javascript:seed,filename}=runtimeSeeds.regexp;
+ const programs=generations.map(g=>g.compiler.compile_ir_string(source,filename)),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtimeSeeds.memory.source,'runtime.eli'));
+ const lowered=generations.map((g,i)=>g.managed.lower_managed_program(programs[i],runtimes[i])),bytes=generations.map((g,i)=>g.managed.emit_managed_wasm(programs[i],runtimes[i]));
+ const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
+ for(let i=0;i<3;i++){assert.equal(generations[i].compiler.emit_ir_string(programs[i]),seed);assert.deepEqual(programs[i],programs[0]);assert.deepEqual(lowered[i],lowered[0]);assert.deepEqual(bytes[i],bytes[0]);const a=instantiateManagedRuntime(Uint8Array.from(bytes[i]));a.auto(1);
+  const text=a.string('😀abc42'),out=a.invoke('groups',[text]);assert.equal(a.length(out),3);const whole=a.get(out,0),digits=a.get(out,2);assert.equal(a.readString(whole),'abc42');assert.equal(a.readString(digits),'42');const key=a.string('index'),index=a.invoke('meta',[out,key]);assert.equal(a.readNumber(index),2);assert.equal(a.invoke('own',[out,key]),true);const number=a.string('1.e-2');assert.equal(a.invoke('numeric',[number]),true);for(const x of[text,out,whole,digits,key,index,number])a.release(x);a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+ }
+});
 test("ordinary source collections have Seed and three-generation IR, descriptor and WASM fixed points",async()=>{
  const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-source-collections.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
  const programs=generations.map(g=>g.compiler.compile_ir_string(source,'source-collections.eli')),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtime,'runtime.eli'));
@@ -1441,6 +1454,17 @@ describe("browser compiler backends", () => {
       }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
     },{source,runtime,seed,filename});
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,filename),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
+  });
+  test("browser RegExp test and exec preserve capture priority, Unicode offsets, metadata and source effect order without imports",async()=>{
+    const {source,javascript:seed,filename}=runtimeSeeds.regexp,runtime=runtimeSeeds.memory.source;
+    const result=await evaluateBrowser(async({bundle,source,seed,filename,runtime})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));let jsUrl;
+      try{const c=await import(url),p=c.compile_ir_string(source,filename),rt=c.compile_ir_string(runtime,'runtime.eli'),bytes=Uint8Array.from(c.emit_managed_wasm(p,rt)),check=(ok,message)=>{if(!ok)throw Error(message)};check(c.emit_ir_string(p)===seed,'public Seed');check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'imports');jsUrl=URL.createObjectURL(new Blob([seed],{type:'text/javascript'}));const js=await import(jsUrl),a=c.instantiateManagedRuntime(bytes);a.auto(1);
+       for(const text of['','a','aa','😀abc42','x12','😀😀a','b','a\nb','\ud800']){const input=a.string(text);for(const name of['numeric','line'])check(a.invoke(name,[input])===js[name](text),name);for(const name of['groups','nullable','unicode']){const out=a.invoke(name,[input]),expected=js[name](text);if(expected===null)check(out===null,'missing');else{check(a.length(out)===expected.length,'capture count');for(let i=0;i<expected.length;i++){const value=a.get(out,i);check((value===undefined?undefined:a.readString(value))===expected[i],'capture');a.release(value)}for(const name of['index','input','groups']){const key=a.string(name),value=a.invoke('meta',[out,key]);check((value===undefined?undefined:value.kind===4?a.readNumber(value):a.readString(value))===expected[name],'metadata');check(a.invoke('own',[out,key])===true,'own metadata');a.release(key);a.release(value)}}a.release(out)}a.release(input)}
+       const text=a.string('1.e2'),trace=a.sourceObject({});check(a.invoke('capture',[text,trace])===true,'snapshot');const key=a.string('visited'),value=a.objectGet(trace,key);check(a.readNumber(value)===7,'ignored argument');for(const x of[text,trace,key,value])a.release(x);a.closeModule();a.collect();check(a.live()===0&&a.stats().frameDepth===0,'root cleanup');return [...bytes];
+      }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl)}
+    },{source,seed,filename,runtime});
+    assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,filename),generations[2].compiler.compile_ir_string(runtime,'runtime.eli')));
   });
   test("browser primitive Number conversions match exact IEEE rounding, shortest text and corrected JS primitives without host callbacks", async () => {
     const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-number-conversion.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
