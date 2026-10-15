@@ -1,0 +1,15 @@
+(module managed.json
+  (defconst parser (js* "JSON.parse"))
+  (defconst writer (js* "JSON.stringify"))
+  (defun parse-value (text) (js-call (js* "JSON") :parse text))
+  (defun stringify-value (value) (JSON/stringify value))
+  (defun pretty-value (value space) (funcall writer value nil space))
+  (defun select-value (value keys space) (funcall writer value keys space))
+  (defun canonical-value (text) (funcall writer (funcall parser text)))
+  (defun same-parser () (eq parser globalThis.JSON/parse))
+  (defun parse-extra (text trace) (funcall parser text false (put trace :visited 7)))
+  (defun key-value (value key) (get value key))
+  (defun own-value (value key) (object-has? value key))
+  (defun set-value (value key child) (put value key child))
+  (export parser writer parse-value stringify-value pretty-value select-value canonical-value
+    same-parser parse-extra key-value own-value set-value))

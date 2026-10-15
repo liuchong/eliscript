@@ -157,6 +157,8 @@ beforeAll(async () => {
   const regexpSource = await readFile(regexpInput, "utf8");
   const builtinsInput = resolve(root, "tests/fixtures/wasm-managed-builtins.eli");
   const builtinsSource = await readFile(builtinsInput, "utf8");
+  const jsonInput = resolve(root, "tests/fixtures/wasm-managed-json.eli");
+  const jsonSource = await readFile(jsonInput, "utf8");
   const stringsInput = resolve(root, "tests/fixtures/wasm-managed-strings.eli");
   const stringsSource = await readFile(stringsInput, "utf8");
   const moduleInput = resolve(root, "tests/fixtures/wasm-managed-module-bindings.eli");
@@ -165,7 +167,7 @@ beforeAll(async () => {
   const projectEntryInput = resolve(root, "tests/fixtures/wasm-managed-project-entry.eli");
   const projectStateSource = await readFile(projectStateInput, "utf8");
   const projectEntrySource = await readFile(projectEntryInput, "utf8");
-  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed, moduleSeed, projectStateSeed, projectEntrySeed, stringsSeed, regexpSeed, builtinsSeed] = await Promise.all([
+  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed, moduleSeed, projectStateSeed, projectEntrySeed, stringsSeed, regexpSeed, builtinsSeed, jsonSeed] = await Promise.all([
     seedJavascript(resolve(root, "bootstrap/runtime/memory.eli"), resolve(directory, "memory-seed.mjs")),
     seedJavascript(managedInput, resolve(directory, "managed-seed.mjs")),
     seedJavascript(callableInput, resolve(directory, "callables-seed.mjs")),
@@ -177,12 +179,14 @@ beforeAll(async () => {
     seedJavascript(stringsInput, resolve(directory, "strings-seed.mjs")),
     seedJavascript(regexpInput, resolve(directory, "regexp-seed.mjs")),
     seedJavascript(builtinsInput, resolve(directory, "builtins-seed.mjs")),
+    seedJavascript(jsonInput, resolve(directory, "json-seed.mjs")),
   ]);
   runtimeSeeds = {
     memory: { source, javascript: memorySeed },
     strings: { source: stringsSource, javascript: stringsSeed, filename: stringsInput },
     regexp: { source: regexpSource, javascript: regexpSeed, filename: regexpInput },
     builtins: { source: builtinsSource, javascript: builtinsSeed, filename: builtinsInput },
+    json: { source: jsonSource, javascript: jsonSeed, filename: jsonInput },
     managed: { source: managedSource, javascript: managedSeed },
     callables: { source: callableSource, javascript: callableSeed, filename: callableInput },
     variadic: { source: variadicSource, javascript: variadicSeed, filename: variadicInput },
@@ -892,6 +896,20 @@ test("first-class builtins retain public Seed and three-generation IR, descripto
     for (const x of [text, out, unsafe]) a.release(x); a.closeModule(); a.collect(); assert.equal(a.live(), 0); assert.equal(a.stats().frameDepth, 0);
   }
 });
+test("ordinary JSON retains public Seed and three-generation source IR, descriptors, tables and executable bytes", async () => {
+  const {source, javascript: seed, filename} = runtimeSeeds.json;
+  const programs = generations.map(g => g.compiler.compile_ir_string(source, filename));
+  const runtimes = generations.map(g => g.compiler.compile_ir_string(runtimeSeeds.memory.source, 'runtime.eli'));
+  const lowered = generations.map((g, i) => g.managed.lower_managed_program(programs[i], runtimes[i]));
+  const bytes = generations.map((g, i) => g.managed.emit_managed_wasm(programs[i], runtimes[i]));
+  const {instantiateManagedRuntime} = await import('../tools/backends/managed-runtime.mjs');
+  for (let i = 0; i < 3; i++) {
+    assert.equal(generations[i].compiler.emit_ir_string(programs[i]), seed); assert.deepEqual(programs[i], programs[0]); assert.deepEqual(lowered[i], lowered[0]); assert.deepEqual(bytes[i], bytes[0]);
+    const a = instantiateManagedRuntime(Uint8Array.from(bytes[i])); a.auto(1);
+    const text = a.string('{"b":-0,"1":"😀","__proto__":7}'), out = a.invoke('canonical-value', [text]); assert.equal(a.readString(out), '{"1":"😀","b":0,"__proto__":7}'); assert.equal(a.invoke('same-parser'), true);
+    for (const value of [text, out]) a.release(value); a.closeModule(); a.collect(); assert.equal(a.live(), 0); assert.equal(a.stats().frameDepth, 0);
+  }
+});
 test("primitive Number and text conversions have Seed and three-generation IR, descriptor and WASM fixed points", async () => {
   const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-number-conversion.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
   const programs=generations.map(g=>g.compiler.compile_ir_string(source,'number-conversion.eli')),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtime,'runtime.eli'));
@@ -1486,6 +1504,25 @@ describe("browser compiler backends", () => {
       }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl)}
     },{source,seed,filename,runtime});
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,filename),generations[2].compiler.compile_ir_string(runtime,'runtime.eli')));
+  });
+  test("browser JSON parses and serializes ordinary source values with exact text, metadata, indentation and roots", async () => {
+    const {source, javascript: seed, filename} = runtimeSeeds.json, runtime = runtimeSeeds.memory.source;
+    const bytes = await evaluateBrowser(async ({bundle, source, seed, filename, runtime}) => {
+      const url = URL.createObjectURL(new Blob([bundle], {type: 'text/javascript'})); let jsUrl;
+      try {
+        const c = await import(url), p = c.compile_ir_string(source, filename), bytes = Uint8Array.from(c.emit_managed_wasm(p, c.compile_ir_string(runtime, 'runtime.eli')));
+        const check = (ok, label) => {if (!ok) throw Error(label);}; check(c.emit_ir_string(p) === seed, 'Seed'); check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length === 0, 'imports');
+        jsUrl = URL.createObjectURL(new Blob([seed], {type: 'text/javascript'})); const js = await import(jsUrl), a = c.instantiateManagedRuntime(bytes); a.auto(1);
+        for (const text of ['null', 'true', '-0', '5e-324', '1e9999', '"\\ud800😀"', '[null,0,{},[]]', '{"b":1,"2":2,"1":3,"b":4,"__proto__":7}']) {
+          const input = a.string(text), out = a.invoke('canonical-value', [input]); check(a.readString(out) === js.canonical_value(text), 'canonical');
+          const parsed = a.invoke('parse-value', [input]), gap = a.string('😀x'), pretty = a.invoke('pretty-value', [parsed, gap]); check(a.readString(pretty) === JSON.stringify(JSON.parse(text), null, '😀x'), 'pretty');
+          for (const value of [input, out, parsed, gap, pretty]) a.release(value); a.collect(); check(a.stats().frameDepth === 0, 'frame');
+        }
+        for (const text of ['[1,]', '01', '"\\x00"']) {const input = a.string(text); let caught = false; try {a.invoke('parse-value', [input]);} catch (error) {check(error.eliscriptDiagnostic?.code === 'ELI-RT0003', 'syntax'); caught = true;} check(caught, 'invalid accepted'); a.release(input);}
+        check(a.invoke('same-parser') === true, 'identity'); a.closeModule(); a.collect(); check(a.live() === 0 && a.stats().frameDepth === 0, 'cleanup'); return [...bytes];
+      } finally {URL.revokeObjectURL(url); if (jsUrl) URL.revokeObjectURL(jsUrl);}
+    }, {source, seed, filename, runtime});
+    assert.deepEqual(bytes, generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source, filename), generations[2].compiler.compile_ir_string(runtime, 'runtime.eli')));
   });
   test("browser first-class builtins preserve conversion, predicates, identity, callbacks and roots without imports", async () => {
     const {source, javascript: seed, filename} = runtimeSeeds.builtins, runtime = runtimeSeeds.memory.source;

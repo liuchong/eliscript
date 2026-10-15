@@ -577,3 +577,35 @@ not replace the original compiler input or change public canonical IR. Mutable
 builtin properties/prototypes, reflection on builtin functions, wrapper-object
 construction and object ToPrimitive conversions remain open; unsupported forms
 are rejected rather than being reported as a complete builtin or compiler host.
+
+## Experimental ordinary JSON data
+
+The original `JSON.parse` and `JSON.stringify` calls and function references run
+inside WASM with zero imports. They use ordinary source arrays and objects and
+the shared exact Number conversion and decimal formatting. This does not change
+the separate strict persistent JSON/Result library.
+
+The data path covers JSON grammar, UTF-16 escapes including unpaired surrogates,
+duplicate keys, ordinary object prototypes, own `__proto__` data properties,
+integer-key ordering, undefined/function omissions, array holes, nonfinite
+numbers, well-formed JSON string escaping, indentation and property-list
+replacers. Builtin references use the same callable ABI and binding identity as
+other supported builtin values; local and linked namespace shadows keep ordinary
+method lookup and argument effects. Empty `String()` results are sealed before
+being returned to subsequent source operations.
+
+Parsing and serialization keep text, intermediate containers, growable UTF-16
+output, ancestor identity and temporary values in the owned heap and root frames.
+Nesting beyond 512 reports the existing capacity error. Invalid JSON, cycles and
+unsupported conversions currently use the experimental ELI-RT0003 bridge;
+source SyntaxError/TypeError identities and full exception behavior remain open.
+Output growth, exact surrogate handling, GC, capacity failures and actual WASM
+traps are tested independently of host JSON execution.
+
+Callable revivers/replacers and callable `toJSON` transformations are explicitly
+refused, rather than silently ignored. Complete callback context, wrapper-object
+conversions, arbitrary JSON namespace aliases/mutation and builtin-prototype
+reflection remain open. These ordinary data capabilities do not complete JSON,
+the standard library, a compiler host or the full backend matrix.
+RegExp property-list reads require the still-open reflection path and fail
+explicitly; an unavailable property must not be silently replaced by undefined.

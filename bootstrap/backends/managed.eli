@@ -138,21 +138,25 @@
     (when (and (= (value-type name) "string") (js-call name :startsWith "globalThis."))
       (setq name (js-call name :slice 11)))
     (js-call (js-array "Number" "Number.isFinite" "Number.isNaN" "Number.isInteger"
-      "Number.isSafeInteger" "Array.isArray" "String" "Boolean" "isFinite" "isNaN") :indexOf name))
+      "Number.isSafeInteger" "Array.isArray" "String" "Boolean" "isFinite" "isNaN" "JSON.parse" "JSON.stringify") :indexOf name))
   (defun managed-builtin-function (operation state functions)
     (let ((index 0) (found nil))
       (while (< index (js-length functions))
         (let ((function (js-nth index functions)))
           (when (= (get function :builtin nil) operation) (setq found function))) (setq index (1+ index)))
       (unless found
-        (let ((slot (js-length functions)))
+        (let ((slot (js-length functions)) (arity (if (>= operation 10) 3 1))
+              (parameters (js-array)) (kinds (js-array)) (position 0))
+          (while (< position arity)
+            (js-call parameters :push (js-object :kind "parameter-binding"
+              :value (js-nth position (js-array "$builtin-value" "$builtin-option" "$builtin-space")) :children (js-array)
+              :properties (js-object :parameterKind "required")))
+            (js-call kinds :push "required") (setq position (1+ position)))
           (setq found (js-object :name nil :internalName (str "__eliscript_managed_" slot)
-            :index (+ (js-length (get state :runtime)) slot) :arity 4 :publicArity 1
-            :parameterKinds (js-array "required") :uniform t :tableSlot slot :builtin operation
+            :index (+ (js-length (get state :runtime)) slot) :arity 4 :publicArity arity
+            :parameterKinds kinds :uniform t :tableSlot slot :builtin operation
             :source (js-object :kind "function-declaration" :value nil
-              :children (js-array (js-object :kind "parameter-binding" :value "$builtin-value" :children (js-array)
-                                   :properties (js-object :parameterKind "required")))
-              :properties (js-object :parameterCount 1))))
+              :children parameters :properties (js-object :parameterCount arity))))
           (js-call functions :push found))) found))
   (defun lower-managed-builtin-reference (node scope state functions)
     (let* ((name (managed-static-reference node)) (operation (managed-builtin-operation name))
@@ -933,7 +937,7 @@
          (lower-managed-access node scope state functions))
         ((= kind "method-call")
          (let* ((key (js-nth 1 children)) (method (managed-static-method key)))
-           (if (js-call (js-array "isFinite" "isNaN" "isInteger" "isSafeInteger" "isArray") :includes method)
+           (if (js-call (js-array "isFinite" "isNaN" "isInteger" "isSafeInteger" "isArray" "parse" "stringify") :includes method)
              (lower-managed-ordinary-method node scope state functions method)
            (if (or (= method "test") (= method "exec")) (lower-managed-regexp-method node scope state functions method)
            (if (js-call (js-array "get" "set" "has" "delete" "clear" "add" "entries" "keys" "values" "next") :includes method)
@@ -1087,9 +1091,14 @@
             (js-call scope :push (new-managed-local state (get parameter :value) t))) (setq index (1+ index)))
         (put state :error (new-managed-local state "error" nil)) (put state :frame (new-managed-local state "frame" nil))
         (let* ((body (if (not (nil? (get function :builtin nil)))
-                      (managed-result state (runtime-call state "value-builtin-primitive" (runtime-arguments state
-                        (js-array (binding-read (js-nth 0 scope)) (word-local (get state :count))
-                          (word-constant (get function :builtin))))) t)
+                      (managed-result state
+                        (if (>= (get function :builtin) 10)
+                          (runtime-call state "value-json-builtin" (runtime-arguments state
+                            (js-array (binding-read (js-nth 0 scope)) (binding-read (js-nth 1 scope)) (binding-read (js-nth 2 scope))
+                              (word-constant (- (get function :builtin) 10)))))
+                          (runtime-call state "value-builtin-primitive" (runtime-arguments state
+                            (js-array (binding-read (js-nth 0 scope)) (word-local (get state :count))
+                              (word-constant (get function :builtin)))))) t)
                       (lower-managed-sequence (js-call children :slice arity) scope state functions)))
                (captures (get state :captures)) (result (new-managed-local state "result" nil)) (steps (js-array)))
           (js-call steps :push (runtime-call state "begin-operation" (js-array))
@@ -1485,7 +1494,9 @@
                  (or (managed-link-local-name scope "String") (js-call (get record :bindings) :has "String")))
         (managed-link-fail node "managed String constructor binding is shadowed"))
       (cond
-        ((and (= kind "raw-javascript") (>= (managed-builtin-operation (managed-static-reference node)) 0))
+        ((and (= kind "raw-javascript")
+              (or (>= (managed-builtin-operation (managed-static-reference node)) 0)
+                  (js-call (js-array "JSON" "globalThis.JSON" "Array" "globalThis.Array") :includes (managed-static-reference node))))
          (let* ((name (managed-static-reference node))
                 (reference (js-call globalThis.Object :assign (js-object) node
                   (js-object :kind "reference" :value name :children (js-array) :properties nil))))
