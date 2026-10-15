@@ -470,15 +470,36 @@
                         (if (/= index 4294967295) (value-text-get heap value key 0)
                           (if (= (heap-typeof-string-builtin heap key) 1) (fail 3) 3))))))
                 (value-property-get heap value key 0))))))))
-  (defun value-source-typeof (heap value)
+  ;; The source intrinsic examines own data properties, never prototype reads
+  ;; or conversion hooks. Symbol-keyed brands await represented symbol values.
+  (defun heap-source-type-marker (heap value kind)
+    (let ((table 0) (marker 3) (index 0))
+      (when (= kind 13) (setq table (load-u32 (+ (heap-block heap value) 32))))
+      (when (= kind 14) (setq table (load-u32 (+ (heap-block heap value) 12))))
+      (when (and (>= kind 15) (<= kind 17))
+        (let ((bag (heap-source-own-bag heap value)))
+          (when (/= bag 0) (setq table (load-u32 (+ (heap-block heap bag) 32))))))
+      (when (/= table 0)
+        (while (< index (load-u32 (+ (heap-block heap table) 12)))
+          (let ((cell (heap-table-cell heap table index)))
+            (when (and (= (load-u32 (+ cell 20)) 1)
+                       (= (heap-key-is heap (load-u32 (+ cell 4)) 4 6881387 6553710 0 0 0 0 0 0 0 0) 1))
+              (setq marker (load-u32 (+ cell 8)))
+              (when (and (= kind 13) (= (load-u32 (+ (heap-block heap value) 20)) 1))
+                ;; A namespace descriptor reads its live binding; an uninitialized
+                ;; binding throws inside the JS intrinsic's catch and falls back.
+                (setq marker (if (= (load-u32 (+ (heap-block heap marker) 16)) 0) 3
+                  (load-u32 (+ (heap-block heap marker) 32)))))))
+          (setq index (1+ index)))) marker))
+  (defun heap-source-type-label (heap value intrinsic)
     (begin-operation) (if (= (heap-check heap) 0) 0
       (if (= (heap-reference-check heap value) 0) 0
         (let ((frame (heap-argument-frame heap value 0 0 4)) (result 0))
           (when (/= frame 0)
             (let ((kind (if (> value 3) (load-u32 (heap-block heap value)) 0))
                   (length 6) (a 6422639) (b 6619242) (c 7602275) (d 0) (e 0))
-              ;; Exact JS typeof labels; this does not inspect properties or
-              ;; invoke user conversion hooks. Null deliberately stays object.
+              ;; Raw typeof never inspects properties or conversion hooks.
+              ;; The source intrinsic below adds null and own-data brands.
               (when (= value 3)
                 (setq length 9) (setq a 7209077) (setq b 6619236) (setq c 6881382) (setq d 6619246) (setq e 100))
               (when (or (= value 1) (= value 2))
@@ -487,16 +508,28 @@
               (when (= kind 5) (setq a 7602291) (setq b 6881394) (setq c 6750318))
               (when (= kind 18)
                 (setq length 8) (setq a 7667814) (setq b 6488174) (setq c 6881396) (setq d 7209071))
+              (when (= intrinsic 1)
+                (when (= value 0)
+                  (setq length 4) (setq a 7667822) (setq b 7077996) (setq c 0))
+                (let ((marker (heap-source-type-marker heap value kind)))
+                  (when (and (> marker 3) (= (load-u32 (heap-block heap marker)) 5))
+                    (when (= (heap-key-is heap marker 17 7077989 7536745 7471203 7340137 3080308 6619243 7798905 7471215 100 0) 1)
+                      (setq length 7) (setq a 6619243) (setq b 7798905) (setq c 7471215) (setq d 100))
+                    (when (= (heap-key-is heap marker 16 7077989 7536745 7471203 7340137 3080308 7929971 6422637 7077999 0 0) 1)
+                      (setq length 6) (setq a 7929971) (setq b 6422637) (setq c 7077999)))))
               (setq result (value-string heap length))
               (when (/= result 0)
                 (frame-set heap frame 3 result)
                 (let ((p (+ (heap-block heap result) 32)))
-                  (store-u32 p a) (store-u32 (+ p 4) b) (store-u32 (+ p 8) c)
+                  (store-u32 p a) (store-u32 (+ p 4) b)
+                  (when (>= length 6) (store-u32 (+ p 8) c))
                   (when (= length 7) (store-u16 (+ p 12) d))
                   (when (>= length 8) (store-u32 (+ p 12) d))
                   (when (= length 9) (store-u16 (+ p 16) e)))
                 (value-seal heap result)))
             (setq result (heap-frame-result heap frame result))) result))))
+  (defun value-source-typeof (heap value) (heap-source-type-label heap value 0))
+  (defun value-source-value-type (heap value) (heap-source-type-label heap value 1))
   (defun value-truth (heap value)
     (begin-operation)
     (if (= (heap-check heap) 0) 0
@@ -3971,7 +4004,7 @@
         (let ((p (heap-block heap function)))
           (if (>= index (load-u32 (+ p 4))) (fail 3)
             (progn (store-u32 (+ (+ p 32) (* index 4)) cell) 1))))))
-  (export value-source-typeof-member value-source-typeof value-source-array-join value-array-text-builtin value-source-array-text value-source-invoke value-regexp-code-word value-regexp-new value-regexp-check value-regexp-method-get value-regexp-run value-source-collection-new value-source-method-check value-source-method
+  (export value-source-typeof-member value-source-typeof value-source-value-type value-source-array-join value-array-text-builtin value-source-array-text value-source-invoke value-regexp-code-word value-regexp-new value-regexp-check value-regexp-method-get value-regexp-run value-source-collection-new value-source-method-check value-source-method
     value-source-collection-get value-source-collection-put value-source-collection-has value-source-collection-own
     value-source-iterator-new value-source-iterator-advance value-source-iterator-next
     value-primitive-binary value-primitive-negate value-primitive-word value-primitive-bitwise value-primitive-compare

@@ -1,4 +1,5 @@
-import { chmod, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildBackends } from "./build.mjs";
@@ -12,6 +13,7 @@ if (args.includes("--help")) {
   process.exit(0);
 }
 let abi, target, output, input, platform, nativeFormat, entry, project = false;
+let buildDirectory;
 try {
   for (let index = 0; index < args.length; index++) {
     const argument = args[index];
@@ -41,7 +43,10 @@ try {
   } else if (platform !== undefined || nativeFormat !== undefined || entry !== undefined) {
     throw new Error("native options require --target native");
   }
-  const { compiler, numeric, wasm, native, managed } = await buildBackends();
+  // Standalone invocations must not race with each other or with packaging
+  // over the checkout's bootstrap cache. Only the requested output is shared.
+  buildDirectory = await mkdtemp(resolve(tmpdir(), "eliscript-backend-cli-"));
+  const { compiler, numeric, wasm, native, managed } = await buildBackends({outputRoot: buildDirectory});
   const filename = resolve(input);
   const source = await readFile(filename, "utf8");
   const program = project ? null : compiler.compile_ir_string(source, filename);
@@ -81,4 +86,6 @@ try {
     ? `${location.file}:${location.start.line}:${location.start.column}: ${diagnostic.code}: ${diagnostic.message}`
     : error?.message ?? String(error));
   process.exitCode = 1;
+} finally {
+  if (buildDirectory) await rm(buildDirectory, {recursive: true, force: true});
 }

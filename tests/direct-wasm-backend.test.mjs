@@ -952,11 +952,12 @@ test("represented type queries retain public Seed and three-generation IR, closu
     assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(Uint8Array.from(bytes[i]))), []);
     const a = instantiateManagedRuntime(Uint8Array.from(bytes[i]));a.auto(1);
     for (const value of [undefined, null, false, true, -0, NaN, Infinity, Number.MIN_VALUE, '', '中😀\ud800']) {
-      const input = typeof value === 'number' ? a.number(value) : typeof value === 'string' ? a.string(value) : value, box = a.invoke('make-box', [input]), closure = a.invoke('capture', [input]);
-      for (const [name, argument] of [['type-value', input], ['type-underscore', input], ['type-member', box], ['invoke', closure]]) {const out = a.invoke(name, [argument]);assert.equal(a.readString(out), typeof value);a.release(out);}
+      const input = typeof value === 'number' ? a.number(value) : typeof value === 'string' ? a.string(value) : value, box = a.invoke('make-box', [input]), closure = a.invoke('capture', [input]), indexedBox = a.sourceObject({item: input, 'a.b': input}), indexedArray = a.sourceArray([indexedBox]), indexedClosure = a.invoke('capture-index', [indexedArray]);
+      for (const [name, argument] of [['type-value', input], ['type-intrinsic', input], ['type-underscore', input], ['type-member', box], ['invoke', closure], ['type-index', indexedArray], ['type-index-key', indexedArray], ['invoke', indexedClosure]]) {const out = a.invoke(name, [argument]);assert.equal(a.readString(out), name === 'type-intrinsic' ? js.type_intrinsic(value) : typeof value);a.release(out);}
       for (const name of ['is-nil', 'is-undefined', 'is-null', 'is-nullish']) assert.equal(a.invoke(name, [input]), js[name.replaceAll('-', '_')](value));
-      for (const item of [input, box, closure]) a.release(item);a.collect();assert.equal(a.stats().frameDepth, 0);
+      for (const item of [input, box, closure, indexedBox, indexedArray, indexedClosure]) a.release(item);a.collect();assert.equal(a.stats().frameDepth, 0);
     }
+    for (const marker of ['eliscript/keyword', 'eliscript/symbol', 'keyword', 'other']) {const input = a.string(marker), out = a.invoke('type-branded', [input]);assert.equal(a.readString(out), js.type_branded(marker));a.release(input);a.release(out);}
     assert.throws(() => a.invoke('type-member', [null]), e => e.eliscriptDiagnostic?.code === 'ELI-RT0003');
     a.closeModule();a.collect();assert.equal(a.live(), 0);assert.equal(a.stats().frameDepth, 0);
   }
@@ -1649,11 +1650,12 @@ describe("browser compiler backends", () => {
         check(c.emit_ir_string(p) === seed, 'Seed');check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length === 0, 'imports');
         jsUrl = URL.createObjectURL(new Blob([seed], {type: 'text/javascript'}));const js = await import(jsUrl), a = c.instantiateManagedRuntime(bytes);a.auto(1);
         for (const value of [undefined, null, false, true, -0, NaN, Infinity, Number.MIN_VALUE, '', '中😀\ud800']) {
-          const input = typeof value === 'number' ? a.number(value) : typeof value === 'string' ? a.string(value) : value, box = a.invoke('make-box', [input]), closure = a.invoke('capture', [input]);
-          for (const [name, argument] of [['type-value', input], ['type-underscore', input], ['type-member', box], ['invoke', closure]]) {const out = a.invoke(name, [argument]);check(a.readString(out) === typeof value, name);a.release(out);}
+          const input = typeof value === 'number' ? a.number(value) : typeof value === 'string' ? a.string(value) : value, box = a.invoke('make-box', [input]), closure = a.invoke('capture', [input]), indexedBox = a.sourceObject({item: input, 'a.b': input}), indexedArray = a.sourceArray([indexedBox]), indexedClosure = a.invoke('capture-index', [indexedArray]);
+          for (const [name, argument] of [['type-value', input], ['type-intrinsic', input], ['type-underscore', input], ['type-member', box], ['invoke', closure], ['type-index', indexedArray], ['type-index-key', indexedArray], ['invoke', indexedClosure]]) {const out = a.invoke(name, [argument]);check(a.readString(out) === (name === 'type-intrinsic' ? js.type_intrinsic(value) : typeof value), name);a.release(out);}
           for (const name of ['is-nil', 'is-undefined', 'is-null', 'is-nullish']) check(a.invoke(name, [input]) === js[name.replaceAll('-', '_')](value), name);
-          for (const item of [input, box, closure]) a.release(item);a.collect();check(a.stats().frameDepth === 0, 'frame');
+          for (const item of [input, box, closure, indexedBox, indexedArray, indexedClosure]) a.release(item);a.collect();check(a.stats().frameDepth === 0, 'frame');
         }
+        for (const marker of ['eliscript/keyword', 'eliscript/symbol', 'keyword', 'other']) {const input = a.string(marker), out = a.invoke('type-branded', [input]);check(a.readString(out) === js.type_branded(marker), 'own data brand');a.release(input);a.release(out);}
         let error;try {a.invoke('type-member', [null]);} catch (e) {error = e;}check(error?.eliscriptDiagnostic?.code === 'ELI-RT0003', 'member error');
         const fn = a.getExport('type-value'), label = a.invoke('type-value', [fn]);check(a.readString(label) === 'function', 'function type');a.release(fn);a.release(label);
         a.closeModule();a.collect();check(a.live() === 0 && a.stats().frameDepth === 0, 'cleanup');return [...bytes];

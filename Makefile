@@ -73,6 +73,8 @@ test-core: check-contracts
 		tests/wasm-managed-array-callbacks.test.mjs \
 		tests/wasm-managed-array-text.test.mjs \
 		tests/wasm-managed-typeof.test.mjs \
+		tests/wasm-managed-typeof-paths.test.mjs \
+		tests/backend-cli-isolation.test.mjs \
 		tests/wasm-managed-behavior.test.mjs \
 		tests/wasm-managed-module-bindings.test.mjs \
 		tests/wasm-managed-project-linking.test.mjs \

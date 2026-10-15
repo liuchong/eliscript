@@ -198,6 +198,69 @@
           "source": "(defun run () (js* \"typeof eliscriptUnrepresentedGlobal\"))",
           "expected": "undefined",
           "compileError": "ELI-B0001"
+        },
+        {
+          "id": "indexed-member-path",
+          "given": "an array contains an object with an own dotted property name",
+          "when": "numeric, quoted and negative zero member paths are queried",
+          "then": "all three paths report the exact value type",
+          "source": "(defun run () (let ((value (js-array (js-object :item 7 :a.b \"中😀\")))) (js-array (js* \"typeof value [ -0 ] . item\") (js* \"typeof value[0][\\\"a.b\\\"]\") (js* \"typeof value[1]\"))))",
+          "expected": [
+            "number",
+            "string",
+            "undefined"
+          ]
+        },
+        {
+          "id": "indexed-capture-live-write",
+          "given": "a closure captures an array whose element changes",
+          "when": "the closure queries the new element through its captured binding",
+          "then": "the changed Boolean type is observed",
+          "source": "(defun run () (let* ((value-name (js-array (js-object :item 7))) (f (lambda () (js* \"typeof value_name[0].item\")))) (put value-name 0 (js-object :item false)) (funcall f)))",
+          "expected": "boolean"
+        },
+        {
+          "id": "indexed-intermediate-fails",
+          "given": "an empty array has no first element",
+          "when": "a query accesses a member of that missing element",
+          "then": "the intermediate access fails instead of returning undefined",
+          "source": "(defun run () (let ((value (js-array))) (js* \"typeof value[0].item\")))",
+          "expected": null,
+          "runtimeError": "ELI-RT0003",
+          "jsError": "TypeError"
+        },
+        {
+          "id": "computed-index-refusal",
+          "given": "a valid JS query uses a computed member key",
+          "when": "the current experimental managed target compiles it",
+          "then": "the unsupported computed key is explicitly refused",
+          "source": "(defun run () (let ((value (js-array 7)) (key 0)) (js* \"typeof value[key]\")))",
+          "expected": "number",
+          "compileError": "ELI-B0001"
+        },
+        {
+          "id": "intrinsic-type-evaluates-once",
+          "given": "an operand counts its own evaluation and returns undefined",
+          "when": "the existing value-type intrinsic queries it",
+          "then": "undefined is returned and the count is one",
+          "source": "(defun run () (let ((trace (js-object :calls 0))) (js-array (value-type (progn (put trace :calls (1+ (get trace :calls))) undefined)) (get trace :calls))))",
+          "expected": [
+            "undefined",
+            1
+          ]
+        },
+        {
+          "id": "intrinsic-own-brands",
+          "given": "objects contain an own language brand or inherit it from a prototype",
+          "when": "value-type and raw typeof inspect them",
+          "then": "only own recognized data brands affect value-type and raw typeof stays object",
+          "source": "(defun run () (let* ((value (js-object :kind \"eliscript/keyword\")) (child (js-object))) (put child :__proto__ value) (js-array (value-type nil) (value-type value) (js* \"typeof value\") (value-type child))))",
+          "expected": [
+            "null",
+            "keyword",
+            "object",
+            "object"
+          ]
         }
       ]
     }
