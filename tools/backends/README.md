@@ -503,3 +503,21 @@ publication. This mode remains limited to the admitted managed IR: general
 interop, Symbols/descriptors, async/exceptions, remaining compiler dependencies,
 full compiler hosts and the complete bootstrap matrix remain open. The existing
 browser Worker request/response protocol is unchanged.
+
+
+Static `String.fromCharCode` and `String.fromCodePoint` calls, including existing
+`string-from-code-unit`, construct sealed UTF-16 strings inside WASM memory.
+All source arguments are evaluated and snapshotted before conversions. Code-unit
+construction uses exact ToUint16; code-point construction accepts integer values
+from zero through U+10FFFF, including lone surrogates, and rejects invalid ranges.
+Supplementary points produce surrogate pairs. The runtime converts each argument
+once and keeps its scratch space and caller-owned inputs alive across collection.
+
+Only statically identified, unshadowed `String` / `globalThis.String` constructors
+are accepted. Project linking preserves lexical shadowing of recognized raw
+builtin references. Dynamic method lookup, general raw JavaScript and arbitrary
+object ToPrimitive conversions remain outside this experimental profile.
+
+Invalid code-point ranges use `ELI-RT0003` at the existing experimental bridge.
+Source-level RangeError and catch semantics remain part of the incomplete
+exception runtime; this capability does not promote the full backend.

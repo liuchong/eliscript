@@ -75,6 +75,7 @@ test-core: check-contracts
 		tests/wasm-managed-arrays.test.mjs \
 		tests/wasm-managed-objects.test.mjs \
 		tests/wasm-managed-strings.test.mjs \
+		tests/wasm-managed-text-constructors.test.mjs \
 		tests/wasm-managed-number-conversion.test.mjs \
 		tests/wasm-managed-primitive-operators.test.mjs \
 		tests/native-backend.test.mjs \

@@ -2093,6 +2093,42 @@
     (begin-operation) (if (= (heap-check heap) 0) 0
                         (if (= (heap-reference-check heap value) 0) 0 (heap-property-key heap value))))
 
+  ;; Static String constructors retain UTF-16 code units, including surrogates.
+  ;; Cache converted words so no argument conversion is repeated after allocation.
+  (defun value-source-text-codes (heap arguments mode)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (= (heap-kind-check heap arguments 7) 0) (> mode 1)) (if (> mode 1) (fail 3) 0)
+        (let ((frame (heap-argument-frame heap arguments 0 0 5)) (result 0))
+          (when (/= frame 0)
+            (let* ((count (load-u32 (+ (heap-block heap arguments) 4))) (scratch (heap-object heap 6 count 4))
+                   (index 0) (units 0))
+              (when (/= scratch 0)
+                (frame-set heap frame 3 scratch)
+                (while (and (< index count) (= (last-error) 0))
+                  (let ((number (value-to-number heap (load-u32 (+ (+ (heap-block heap arguments) 32) (* index 4))))))
+                    (when (= (last-error) 0)
+                      (frame-set heap frame 4 number)
+                      (let ((word (heap-number-word heap number)))
+                        (if (and (= mode 1) (or (= (heap-number-uint heap number) 0) (> word 1114111))) (fail 3)
+                          (progn
+                            (when (= mode 0) (setq word (word-and word 65535)))
+                            (store-u32 (+ (+ (heap-block heap scratch) 32) (* index 4)) word)
+                            (setq units (+ units (if (> word 65535) 2 1)))))))) (setq index (1+ index)))
+                (when (= (last-error) 0)
+                  (setq result (value-string heap units))
+                  (when (/= result 0)
+                    (frame-set heap frame 4 result) (setq index 0)
+                    (let ((output (+ (heap-block heap result) 32)) (position 0))
+                      (while (< index count)
+                        (let ((word (load-u32 (+ (+ (heap-block heap scratch) 32) (* index 4)))))
+                          (when (> word 65535)
+                            (setq word (- word 65536))
+                            (store-u16 (+ output (* position 2)) (+ 55296 (word-shr word 10)))
+                            (setq position (1+ position)) (setq word (+ 56320 (word-and word 1023))))
+                          (store-u16 (+ output (* position 2)) word) (setq position (1+ position))) (setq index (1+ index))))
+                    (value-seal heap result)))))
+            (setq result (heap-frame-result heap frame result))) result))))
+
   ;; Source operators accept primitive conversions; the raw Number API remains
   ;; Number-only. Root both original operands before either conversion allocates.
   (defun heap-primitive-numeric-pair (heap left right operation family)
@@ -3009,7 +3045,7 @@
     value-source-collection-get value-source-collection-put value-source-collection-has value-source-collection-own
     value-source-iterator-new value-source-iterator-advance value-source-iterator-next
     value-primitive-binary value-primitive-negate value-primitive-word value-primitive-bitwise value-primitive-compare
-    value-to-number value-to-text value-text-method-check value-text-get value-source-slice value-source-text-method value-source-text-concat
+    value-to-number value-to-text value-text-method-check value-text-get value-source-slice value-source-text-method value-source-text-concat value-source-text-codes
     value-object-new value-object-get value-object-put value-object-has value-object-keys value-object-copy
     value-property-key-check value-property-get value-property-put value-object-length
     last-error retire buffer-new buffer-length buffer-reserve buffer-push buffer-get
