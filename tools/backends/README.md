@@ -609,3 +609,24 @@ reflection remain open. These ordinary data capabilities do not complete JSON,
 the standard library, a compiler host or the full backend matrix.
 RegExp property-list reads require the still-open reflection path and fail
 explicitly; an unavailable property must not be silently replaced by undefined.
+
+## Experimental ordinary string replacement
+
+Original `String.replace` calls execute first-occurrence string searches and the
+existing stateless RegExp profile entirely in WASM. Replacement templates retain
+literal dollars, matched text, prefixes, suffixes, absent captures, one/two-digit
+capture fallback and UTF-16 boundaries. Primitive search and replacement values
+use the shared exact conversions. Noncallable replacements convert before the
+search even when no match exists; callback results are converted after invocation
+and are not interpreted as templates.
+
+Callbacks use the ordinary function table, closure roots and argument-list ABI.
+They receive the match, available captures, code-unit offset and original input,
+and execute only when a match exists. Same-named ordinary object methods retain
+lookup before argument effects and their captured callable identity. Temporary
+match arguments, output growth and returned text live in the owned heap.
+
+Global/sticky RegExp state, custom Symbol.replace hooks, arbitrary builtin
+prototype changes, object ToPrimitive and complete source exception identities
+remain open. This does not claim complete RegExp, replacement, standard-library
+or compiler-host support; replaceAll remains a separate unimplemented method.

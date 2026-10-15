@@ -1,0 +1,8 @@
+(module managed.replacement
+  (defconst tail (js* "/[ \\t]+$/u"))
+  (defun replace-value (text search replacement) (js-call text :replace search replacement))
+  (defun trim-comment (text) (js-call text :replace tail ""))
+  (defun replace-captures (text replacement) (js-call text :replace (js* "/(a)|(b)/") replacement))
+  (defun replace-callback (text)
+    (js-call text :replace tail (lambda (match index original) (str "<" match ":" index ":" original ">"))))
+  (export replace-value trim-comment replace-captures replace-callback))
