@@ -47,8 +47,18 @@
   (defconst fail
     (lambda (message)
       (throw (new (js* "Error") message))))
+  (defconst prefix-locate-mark (js* "(head, tail) => [head, ...tail]"))
   (defconst native-locate
-    (js* "(span, output) => { const fragment = typeof output === \"string\" ? { text: output, marks: [] } : output; const marks = fragment.marks; if (fragment.text.length === 0 || span == null || span === false || (marks.length > 0 && marks[0].offset === 0)) return fragment; return { text: fragment.text, marks: [{ offset: 0, span }, ...marks] }; }"))
+    (lambda (span output)
+      (let* ((fragment (if (= (value-type output) "string")
+                           (js-object :text output :marks (js-array)) output))
+             (marks (aref fragment "marks")))
+        (if (or (= (aref (aref fragment "text") "length") 0)
+                (nullish? span) (eq span false)
+                (and (> (aref marks "length") 0) (= (aref (aref marks 0) "offset") 0)))
+            fragment
+          (js-object :text (aref fragment "text")
+            :marks (prefix-locate-mark (js-object :offset 0 :span span) marks))))))
   (defvar temporary-counter 0)
   (defvar binding-temporaries (new globalThis.Map))
 
@@ -59,7 +69,7 @@
     (make-fragment text (js-array)))
 
   (defun as-fragment (part)
-    (if (= (js* "typeof part") "string")
+    (if (= (value-type part) "string")
         (text-fragment part)
       part))
 
@@ -357,6 +367,19 @@
           output
         (combine (js-array "(" output ")")))))
 
+  (defun boolean-reference-text-p (text)
+    (let ((length (js-length text)) (index 2) (valid t))
+      (when (or (< length 3) (/= (js-call text :charCodeAt 0) 33)
+                (/= (js-call text :charCodeAt 1) 33)) (setq valid false))
+      (while (and valid (< index length))
+        (let ((code (js-call text :charCodeAt index)))
+          (unless (or (and (>= code 65) (<= code 90))
+                      (and (>= code 97) (<= code 122))
+                      (= code 95) (= code 36)
+                      (and (> index 2) (>= code 48) (<= code 57)))
+            (setq valid false)))
+        (setq index (1+ index))) valid))
+
   (defun boolean-p (node)
     (let ((kind (ir-kind node)) (value (ir-value node)))
       (cond
@@ -365,8 +388,7 @@
          (let ((nodes (children node)))
            (and (= (js-length nodes) 1) (= (ir-kind (js-nth 0 nodes)) "literal")
                 (= (value-type (ir-value (js-nth 0 nodes))) "string")
-                (js-call (js* "/^!![A-Za-z_$][A-Za-z0-9_$]*$/") :test
-                  (js-call (ir-value (js-nth 0 nodes)) :trim)))))
+                (boolean-reference-text-p (js-call (ir-value (js-nth 0 nodes)) :trim)))))
         ((= kind "intrinsic")
          (not (= (js-call
                    (js-array "not" "=" "/=" "not=" "<" "<=" ">" ">="
@@ -542,7 +564,7 @@
               (while (>= index 0)
                 (js-call pending :push (js-nth index nodes))
                 (setq index (1- index))))))
-          ((js* "Array.isArray(current)")
+          ((Array/isArray current)
            (setq index (1- (get current :length)))
            (while (>= index 0)
              (js-call pending :push (js-nth index current))
@@ -607,7 +629,7 @@
               (while (>= index 0)
                 (js-call pending :push (js-nth index nodes))
                 (setq index (1- index))))))
-          ((js* "Array.isArray(current)")
+          ((Array/isArray current)
            (setq index (1- (get current :length)))
            (while (>= index 0)
              (js-call pending :push (js-nth index current))
@@ -792,8 +814,8 @@
       (let ((kind (ir-kind node)) (nodes (children node)))
       (cond
         ((= kind "literal")
-         (or (= (ir-value node) nil) (= (js* "typeof node.value") "number")
-             (= (js* "typeof node.value") "boolean") (= (js* "typeof node.value") "undefined")))
+         (or (= (ir-value node) nil) (= (value-type (aref node "value")) "number")
+             (= (value-type (aref node "value")) "boolean") (= (value-type (aref node "value")) "undefined")))
         ((= kind "reference") (>= (js-call scope :indexOf (ir-value node)) 0))
         ((= kind "lexical-bindings")
          (let* ((parts (split-counted-children node "bindingCount"))
@@ -1412,17 +1434,17 @@
         ((null value) (text-fragment "null"))
         ((eq value t) (text-fragment "true"))
         ((eq value false) (text-fragment "false"))
-        ((= (js* "typeof value") "number")
+        ((= (value-type value) "number")
          (unless (Number/isFinite value)
            (fail (str "non-finite numbers are not supported: " value)))
          (text-fragment (if (and (= value 0) (< (/ 1 value) 0)) "-0.0" (str value))))
-        ((= (js* "typeof value") "string")
+        ((= (value-type value) "string")
          (text-fragment (json-string value)))
         (t (fail (str "unsupported IR literal: " value))))))
 
   (defun datum-kind (value)
     (and value
-         (= (js* "typeof value") "object")
+         (= (value-type value) "object")
          (get value :kind)))
 
   (defun emit-quoted (value)
@@ -1432,9 +1454,9 @@
         ((eq value t) (text-fragment "true"))
         ((eq value false)
          (text-fragment "__eliscript_symbol(\"false\")"))
-        ((= (js* "typeof value") "number")
+        ((= (value-type value) "number")
          (text-fragment (if (and (= value 0) (< (/ 1 value) 0)) "-0.0" (str value))))
-        ((= (js* "typeof value") "string")
+        ((= (value-type value) "string")
          (text-fragment (json-string value)))
         ((= kind "undefined") (text-fragment "undefined"))
         ((= kind "symbol")
@@ -1477,7 +1499,7 @@
       (ir-span node)
       (if (and (= (ir-kind node) "literal")
                (or (= (literal-kind node) "keyword")
-                   (= (js* "typeof node.value") "string")))
+                   (= (value-type (aref node "value")) "string")))
           (text-fragment (json-string (ir-value node)))
         (emit-expression node))))
 

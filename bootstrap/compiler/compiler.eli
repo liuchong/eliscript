@@ -53,8 +53,14 @@
   (defconst evaluation-module-heads
     (js-array "export" "export-default" "import" "import-portable" "module"))
   (defconst evaluation-fail
-    (js*
-      "(message, filename) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-E0001', severity: 'error', phase: 'evaluation-request', message, ...(filename ? { location: { file: filename } } : {}) }; throw error; }"))
+    (lambda (message filename)
+      (let* ((error (new (js* "Error") message))
+             (diagnostic (js-object :format "eliscript-diagnostic" :version 1
+               :code "ELI-E0001" :severity "error" :phase "evaluation-request" :message message)))
+        (when (js* "!!filename")
+          (put diagnostic :location (js-object :file filename)))
+        (put error :eliscriptDiagnostic diagnostic)
+        (throw error))))
   (defconst evaluation-object-p
     (lambda (value)
       (and (not (nil? value)) (= (js* "typeof value") "object") (not (Array/isArray value)))))
@@ -134,7 +140,7 @@
         (unless (js-call evaluation-operation-keys :includes key)
           (funcall evaluation-fail (str "unknown evaluation operation key: " key) false))))
     (let*
-      ((id (evaluation-object-field input "id" (js* "null")))
+      ((id (evaluation-object-field input "id" nil))
         (operation (get input :operation)))
       (unless (funcall evaluation-id-p id)
         (funcall
@@ -151,7 +157,7 @@
         (let*
           ((filename (evaluation-require-filename (get input :filename)))
             (source (evaluation-require-source (get input :source) filename))
-            (root (evaluation-object-field input "root" (js* "null")))
+            (root (evaluation-object-field input "root" nil))
             (line (evaluation-object-field input "line" 1))
             (column (evaluation-object-field input "column" 1)))
           (unless
@@ -266,9 +272,9 @@
             :kind
             (cond (definition "definition") (module-form "module") (t "expression"))
             :head
-            (or head (js* "null"))
+            (or head nil)
             :name
-            (or name (js* "null"))
+            (or name nil)
             :runtimeBinding
             (and definition (not (= head "defmacro")))
             :filename

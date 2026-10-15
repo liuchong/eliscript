@@ -27,7 +27,12 @@
     (cond ((< left right) -1) ((> left right) 1) (t 0)))
 
   (defconst fail
-    (js* "(message) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-B0003', severity: 'error', phase: 'project-plan', message }; throw error; }"))
+    (lambda (message)
+      (let ((error (new (js* "Error") message)))
+        (put error :eliscriptDiagnostic
+          (js-object :format "eliscript-diagnostic" :version 1
+            :code "ELI-B0003" :severity "error" :phase "project-plan" :message message))
+        (throw error))))
   (defconst array-p (js* "Array.isArray"))
   (defconst object-p
     (lambda (value)
@@ -47,9 +52,22 @@
         (not (js-call (js* "/^(?:[\\\\/]|[A-Za-z]:[\\\\/])/") :test value))
         (not (js-call (js-call value :split (js* "/[\\\\/]+/u")) :some (lambda (part) (= part "..")))))))
   (defconst project-request-fail
-    (js* "(message) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-B0001', severity: 'error', phase: 'project-build', message }; throw error; }"))
+    (lambda (message)
+      (let ((error (new (js* "Error") message)))
+        (put error :eliscriptDiagnostic
+          (js-object :format "eliscript-diagnostic" :version 1
+            :code "ELI-B0001" :severity "error" :phase "project-build" :message message))
+        (throw error))))
   (defconst project-configuration-fail
-    (js* "(message, filename) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-B0002', severity: 'error', phase: 'project-config', message, ...(filename ? { location: { file: filename } } : {}) }; throw error; }"))
+    (lambda (message filename)
+      (let* ((error (new (js* "Error") message))
+             (diagnostic
+              (js-object :format "eliscript-diagnostic" :version 1
+                :code "ELI-B0002" :severity "error" :phase "project-config" :message message)))
+        (when (js* "!!filename")
+          (put diagnostic :location (js-object :file filename)))
+        (put error :eliscriptDiagnostic diagnostic)
+        (throw error))))
   (defconst project-configuration-keys-v1
     (js-array "schemaVersion" "sourceRoot" "entry" "outDir"
               "portableEntries" "macroCapabilities"
@@ -235,12 +253,12 @@
       (cond
         ((= mode "single")
          (let* ((source-input
-                 (object-field input "input" (js* "undefined")))
+                 (object-field input "input" undefined))
                 (raw-output
-                 (object-field input "output" (js* "undefined")))
+                 (object-field input "output" undefined))
                 (output
-                 (if (js* "raw_output === undefined")
-                     (js* "null")
+                 (if (undefined? raw-output)
+                     nil
                    raw-output))
                 (source-map (object-field input "sourceMap" false))
                 (portable-input
@@ -316,7 +334,7 @@
                 :entry (get input :entry)
                 :entries (get input :entries)
                 :outDir "."
-                :root (object-field input "root" (js* "null"))
+                :root (object-field input "root" nil)
                 :portableEntries
                 (object-field input "portableEntries" (js-array))
                 :macroCapabilities
@@ -345,7 +363,7 @@
       (project-configuration-fail
         "configuration root must be an object" filename))
     (let* ((schema-version
-            (object-field input "schemaVersion" (js* "undefined")))
+            (object-field input "schemaVersion" undefined))
            (configuration-keys
             (cond
               ((= schema-version project-configuration-version)
@@ -366,11 +384,11 @@
             (str "unknown configuration key: " (js-nth 0 unknown))
             filename))))
     (let* ((schema-version
-            (object-field input "schemaVersion" (js* "undefined")))
+            (object-field input "schemaVersion" undefined))
            (source-root (object-field input "sourceRoot" "."))
-           (entry (object-field input "entry" (js* "undefined")))
-           (entries-input (object-field input "entries" (js* "undefined")))
-           (out-dir (object-field input "outDir" (js* "undefined")))
+           (entry (object-field input "entry" undefined))
+           (entries-input (object-field input "entries" undefined))
+           (out-dir (object-field input "outDir" undefined))
            (portable-input
             (object-field input "portableEntries" (js-array)))
            (macro-capabilities-input

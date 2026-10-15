@@ -507,15 +507,106 @@
                         ((= kind "nonzero") 889192448) (t 335544320)))
       at))
 
+  (defun branch-kind (opcode)
+    (cond
+      ((= (bit-and opcode 2080374784) 335544320) 0) ;; B / BL: imm26
+      ((= (bit-and opcode 4278190096) 1409286144) 1) ;; B.cond: imm19
+      ((= (bit-and opcode 2113929216) 872415232) 2) ;; CBZ / CBNZ: imm19
+      ((= (bit-and opcode 2113929216) 905969664) 3) ;; TBZ / TBNZ: imm14
+      (t (backend-fail nil "unsupported native branch instruction"))))
+
+  (defun branch-limit (kind)
+    (if (= kind 0) 33554432 (if (= kind 3) 8192 262144)))
+
+  (defun branch-fits (distance limit)
+    (and (>= distance (- limit)) (< distance limit)))
+
+  (defun branch-word (opcode distance)
+    (let* ((kind (branch-kind opcode)) (limit (branch-limit kind)))
+      (unless (branch-fits distance limit)
+        (backend-fail nil "native branch exceeds ARM64 displacement range"))
+      (if (= kind 0) (bit-or (bit-and opcode 4227858432) (bit-and distance 67108863))
+        (bit-or (bit-and opcode (if (= kind 3) 4294443039 4278190111))
+          (* (bit-and distance (if (= kind 3) 16383 524287)) 32)))))
+
   (defun patch-jump (state at target)
     (let* ((words (get state :words)) (opcode (js-nth at words))
-           (conditional (/= (bit-and opcode 2080374784) 335544320))
-           (distance (- target at)) (limit (if conditional 262144 33554432)))
-      (unless (and (>= distance (- limit)) (< distance limit))
-        (backend-fail nil "native branch exceeds ARM64 displacement range"))
-      (js-call words :splice at 1 (if conditional
-        (bit-or opcode (* (bit-and distance 524287) 32))
-        (bit-or opcode (bit-and distance 67108863))))))
+           (branches (or (get state :branches nil)
+             (let ((created (js-array))) (put state :branches created) created)))
+           (kind (branch-kind opcode)) (distance (- target at)))
+      ;; Keep source positions stable until every local label and call is known.
+      (js-call branches :push (js-object :at at :target target :opcode opcode :kind kind :size 1))
+      (when (branch-fits distance (branch-limit kind))
+        (put words at (branch-word opcode distance)))))
+
+  (defun branch-position (branches position)
+    (let ((low 0) (high (js-length branches)))
+      (while (< low high)
+        (let ((middle (js-call globalThis.Math :floor (/ (+ low high) 2))))
+          (if (< (get (js-nth middle branches) :at) position) (setq low (1+ middle)) (setq high middle))))
+      (if (= low 0) position
+        (let ((entry (js-nth (1- low) branches)))
+          (+ position (get entry :before) (1- (get entry :size)))))))
+
+  (defun long-jump (state distance link)
+    ;; Position-independent ADR + signed 64-bit delta; x16/x17 are ABI scratch.
+    ;; BLR returns after the whole sequence, preserving the ordinary call ABI.
+    (word state 268435472) ;; adr x16, .
+    (integer-register state 17 (uint32 (* distance 4))
+      (uint32 (js-call globalThis.Math :floor (/ (* distance 4) 4294967296))))
+    (word state 2333147664) ;; add x16,x16,x17
+    (word state (if link 3594453504 3592356352))) ;; blr / br x16
+
+  (defun finish-branches (state offsets)
+    (let ((branches (get state :branches (js-array))) (changed t))
+      (js-call branches :sort (lambda (left right) (- (get left :at) (get right :at))))
+      ;; Sizes only grow. Revisit all labels after each growth, including branches
+      ;; which were in range before another expansion shifted their destination.
+      (while changed
+        (setq changed false)
+        (let ((growth 0))
+          (js-call branches :forEach (lambda (entry)
+            (put entry :before growth) (setq growth (+ growth (1- (get entry :size)))))))
+        (js-call branches :forEach (lambda (entry)
+          (let* ((at (branch-position branches (get entry :at)))
+                 (target (branch-position branches (get entry :target)))
+                 (kind (get entry :kind)) (opcode (get entry :opcode))
+                 (always (and (= kind 1) (>= (bit-and opcode 15) 14)))
+                 (size (if (branch-fits (- target at) (branch-limit kind)) 1
+                   (if (or (= kind 0) always)
+                     (if (branch-fits (- target at) 33554432) 1 7)
+                     (if (branch-fits (- target at 1) 33554432) 2 8)))))
+            (when (> size (get entry :size)) (put entry :size size) (setq changed t))))))
+      (let* ((old (get state :words)) (output (js-array))
+             (out (js-object :words output :compact nil)) (index 0) (next 0))
+        (while (< index (js-length old))
+          (let ((entry (if (< next (js-length branches)) (js-nth next branches) nil)))
+            (if (and entry (= (get entry :at) index))
+              (let* ((at (js-length output)) (target (branch-position branches (get entry :target)))
+                     (opcode (get entry :opcode)) (kind (get entry :kind)) (size (get entry :size)))
+                (if (branch-fits (- target at) (branch-limit kind))
+                  (word out (branch-word opcode (- target at)))
+                  (if (or (= kind 0) (and (= kind 1) (>= (bit-and opcode 15) 14)))
+                    (if (= size 1) (word out (branch-word 335544320 (- target at)))
+                      (long-jump out (- target at) (/= (bit-and opcode 2147483648) 0)))
+                    (progn
+                      (word out (branch-word (bit-xor opcode (if (= kind 1) 1 16777216)) size))
+                      (if (= size 2) (word out (branch-word 335544320 (- target at 1)))
+                        (long-jump out (- target at 1) nil)))))
+                (setq next (1+ next)))
+              (word out (js-nth index old))))
+          (setq index (1+ index)))
+        (setq index 0)
+        (while (< index (js-length offsets))
+          (put offsets index (* (branch-position branches (/ (js-nth index offsets) 4)) 4))
+          (setq index (1+ index)))
+        (js-call (get state :constants (js-array)) :forEach (lambda (entry)
+          (let ((uses (get entry :uses)) (i 0))
+            (while (< i (js-length uses)) (put uses i (branch-position branches (js-nth i uses))) (setq i (1+ i))))))
+        (let ((uses (get state :tableUses (js-array))) (i 0))
+          (while (< i (js-length uses)) (put uses i (branch-position branches (js-nth i uses))) (setq i (1+ i))))
+        (put state :words output)
+        (put state :branches (js-array)))))
 
   (defun condition (state node)
     (expression state node)
@@ -801,6 +892,7 @@
                (target (/ (js-nth (get call :function) offsets) 4)))
           (patch-jump state (get call :at) target))
         (setq i (1+ i)))
+      (finish-branches state offsets)
       (finish-literals state)
       (js-object :words (get state :words) :offsets offsets)))
 
@@ -1077,6 +1169,8 @@
           (patch-jump state failed (js-length words))
           (integer-register state 0 1 0) (integer-register state 16 1 0)
           (word state 3556773889))
+        (finish-branches state (js-array))
+        (put code :words (get state :words))
         (macho-library typed-program code start))))
 
 
@@ -1252,6 +1346,7 @@
         (let ((call (js-nth i (get state :calls))))
           (patch-jump state (get call :at) (/ (js-nth (get call :function) offsets) 4)))
         (setq i (1+ i)))
+      (finish-branches state offsets)
       (memory-finish-table state program offsets)
       (js-object :words (get state :words) :offsets offsets)))
 

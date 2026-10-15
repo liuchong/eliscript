@@ -7,7 +7,7 @@ import {spawnSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {buildBackends} from '../tools/backends/build.mjs';
 import {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';
-let directory, backend, runtime, modules, helpers, helperFile;
+let directory, backend, runtime, modules, helpers, helperFile, lowerGraph;
 beforeAll(async()=>{
  directory=await mkdtemp(resolve(tmpdir(),'eliscript-whole-ir-lower-'));
  backend=await buildBackends({outputRoot:directory});
@@ -19,6 +19,7 @@ beforeAll(async()=>{
  const helperIR=backend.compiler.compile_ir_string(exposed,'ir-helper-parity.eli');
  const javascript=backend.compiler.emit_ir_string(helperIR);helperFile=resolve(directory,'ir-helper-parity.mjs');await writeFile(helperFile,javascript);
  helpers=await import('data:text/javascript;base64,'+Buffer.from(javascript).toString('base64'));
+ await prepareLowerGraph();
 },120000);
 afterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});
 test('the entire IR module and actual syntax/lower dependency graph compile to zero-import WASM without extracting private helpers',()=>{
@@ -142,7 +143,7 @@ test('the full IR module validates, deserializes and canonically serializes real
  }
  finish(a);
 });
-test('the complete lower module consumes actual reader syntax trees through real imports and produces the exact JS oracle IR text',async()=>{
+async function prepareLowerGraph(){
  const reader=await import(pathToFileURL(resolve(directory,'bootstrap/reader.mjs')).href),lower=await import(pathToFileURL(resolve(directory,'bootstrap/lower.mjs')).href);
  const entry=backend.compiler.compile_ir_string('(import "./lower.mjs" lower-module) (import "./ir.mjs" serialize-program) (defun run (source filename) (serialize-program (lower-module (JSON/parse source) filename))) (export run)','lower-entry.eli');
  const graph=[...modules,{id:'entry.mjs',program:entry}],saved=JSON.stringify(graph),bytes=Uint8Array.from(backend.managed.emit_managed_project_wasm(graph,'entry.mjs',runtime));
@@ -156,8 +157,17 @@ test('the complete lower module consumes actual reader syntax trees through real
   '(defconst values (js-array nil undefined false true -0.0 1.5)) (defconst text "\\ud800中😀\\udfff")'];
  let state=0x91a3cbd;const next=()=>state=(Math.imul(state,1664525)+1013904223)>>>0;
  for(let index=0;index<32;index++){let text='';for(let unit=0;unit<next()%16;unit++)text+=String.fromCharCode(next()%65536);corpus.push('(defconst generated-'+index+' '+JSON.stringify(text)+') (defun f (value) (if value '+(next()%1024)+' nil))');}
- for(const source of corpus){
-  const filename='实际-lower.eli',forms=reader.read_string(source,filename),expected=helpers.serialize_program(lower.lower_module(forms,filename)),input=a.string(syntaxJSON(forms)),file=a.string(filename),out=a.invoke('run',[input,file]);
+ const cases=corpus.map(source=>{
+  const filename='实际-lower.eli',forms=reader.read_string(source,filename);
+  return{source,filename,syntax:syntaxJSON(forms),expected:helpers.serialize_program(lower.lower_module(forms,filename))};
+ });
+ assert.equal(cases.length,43);
+ lowerGraph={a,cases};
+}
+test('the complete lower module consumes actual reader syntax trees through real imports and produces the exact JS oracle IR text',async()=>{
+ const {a,cases}=lowerGraph;
+ for(const {source,filename,syntax,expected} of cases){
+  const input=a.string(syntax),file=a.string(filename),out=a.invoke('run',[input,file]);
   assert.equal(a.readString(out),expected,source);
   for(const value of[input,file,out])a.release(value);
  }

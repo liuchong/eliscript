@@ -117,6 +117,82 @@ describe("compatibility matrix contract", () => {
     }
   });
 
+  test("exclusive file barriers retain two ordinary workers and ordered complete results after failures", async () => {
+    const {runTestFiles} = await import('../tools/testing/file-workers.mjs');
+    const exclusive = ['wasm-compiler-ir-lower', 'wasm-managed-array-sort', 'native-compiler-modules', 'bootstrap-compiler']
+      .map((name, i) => i % 2 ? path.join(root, 'tests', name + '.test.mjs') : 'tests/' + name + '.test.mjs');
+    const ordinary = 'abcdefghi'.split('').map(name => name + '.test.mjs');
+    const files = [ordinary[0], ordinary[1], ordinary[2], exclusive[0], ordinary[3], ordinary[4], exclusive[1], exclusive[2], ordinary[5], ordinary[6], exclusive[3], ordinary[7], ordinary[8]];
+    const active = new Map(), started = [], exits = new Map();
+    const spawn = spyOn(Bun, 'spawn').mockImplementation(([executable, command, file], options) => {
+      expect([executable, command]).toEqual([process.execPath, 'test']);
+      expect(options).toEqual({stdin: 'ignore', stdout: 'inherit', stderr: 'inherit'});
+      let done;const exited = new Promise(resolve => {done = resolve;});
+      const child = {exited, kill(signal) {complete(file, signal === 'SIGINT' ? 130 : 143);}};
+      started.push(file);active.set(file, {done, child});return child;
+    });
+    function complete(file, code = 0) {const entry = active.get(file);expect(entry).toBeDefined();active.delete(file);exits.set(file, code);entry.done(code);}
+    const tick = () => new Promise(resolve => setImmediate(resolve)), running = runTestFiles(files);
+    try {
+      expect([...active.keys()]).toEqual(ordinary.slice(0, 2));
+      complete(ordinary[1]);await tick();expect([...active.keys()]).toEqual([ordinary[0], ordinary[2]]);
+      complete(ordinary[2], 9);await tick();expect([...active.keys()]).toEqual([ordinary[0]]);
+      complete(ordinary[0]);await tick();expect([...active.keys()]).toEqual([exclusive[0]]);
+      complete(exclusive[0], 2);await tick();expect([...active.keys()]).toEqual(ordinary.slice(3, 5));
+      complete(ordinary[3]);await tick();expect([...active.keys()]).toEqual([ordinary[4]]);
+      complete(ordinary[4]);await tick();expect([...active.keys()]).toEqual([exclusive[1]]);
+      complete(exclusive[1]);await tick();expect([...active.keys()]).toEqual([exclusive[2]]);
+      complete(exclusive[2], 3);await tick();expect([...active.keys()]).toEqual(ordinary.slice(5, 7));
+      complete(ordinary[6]);complete(ordinary[5]);await tick();expect([...active.keys()]).toEqual([exclusive[3]]);
+      complete(exclusive[3]);await tick();expect([...active.keys()]).toEqual(ordinary.slice(7));
+      complete(ordinary[8]);complete(ordinary[7]);
+      const result = await running;expect(result.exitCode).toBe(1);expect(started).toEqual(files);
+      expect(result.results).toEqual(files.map(file => ({file, exitCode: exits.get(file)})));
+    } finally {process.emit('SIGTERM');await running;spawn.mockRestore();}
+  });
+
+  test("exclusive file barriers retain an exclusive spawn failure and continue every later ordinary task", async () => {
+    const {runTestFiles} = await import('../tools/testing/file-workers.mjs');
+    const files = ['before.test.mjs', 'tests/wasm-managed-array-sort.test.mjs', 'after-a.test.mjs', 'after-b.test.mjs'];
+    const active = new Map(), attempts = [];
+    const spawn = spyOn(Bun, 'spawn').mockImplementation(([, , file]) => {
+      attempts.push(file);if (file === files[1]) throw new Error('injected exclusive spawn failure');
+      let done;const exited = new Promise(resolve => {done = resolve;});
+      active.set(file, done);return {exited, kill() {active.get(file)?.(143);active.delete(file);}};
+    });
+    const errors = spyOn(console, 'error').mockImplementation(() => {}), running = runTestFiles(files);
+    try {
+      expect(attempts).toEqual([files[0]]);active.get(files[0])(0);active.delete(files[0]);
+      await new Promise(resolve => setImmediate(resolve));expect([...active.keys()]).toEqual(files.slice(2));
+      active.get(files[3])(0);active.get(files[2])(0);active.clear();
+      expect(await running).toEqual({results: files.map((file, i) => ({file, exitCode: i === 1 ? 1 : 0})), exitCode: 1});
+      expect(attempts).toEqual(files);expect(errors).toHaveBeenCalledTimes(1);
+    } finally {process.emit('SIGTERM');await running;spawn.mockRestore();errors.mockRestore();}
+  });
+
+  test("exclusive file barriers cancel ordinary or exclusive phases without dispatching queued files", async () => {
+    const {runTestFiles} = await import('../tools/testing/file-workers.mjs');
+    for (const [signal, status] of [['SIGINT', 130], ['SIGTERM', 143]]) for (const firstExclusive of [false, true]) {
+      const exclusive = 'tests/bootstrap-compiler.test.mjs', files = firstExclusive
+        ? [exclusive, 'after-a.test.mjs', 'after-b.test.mjs']
+        : ['before-a.test.mjs', 'before-b.test.mjs', exclusive, 'after.test.mjs'];
+      const started = [], killed = [], listeners = ['SIGINT', 'SIGTERM'].map(name => process.listenerCount(name));
+      const spawn = spyOn(Bun, 'spawn').mockImplementation(([, , file]) => {
+        let done;const exited = new Promise(resolve => {done = resolve;});started.push(file);
+        return {exited, kill(received) {killed.push([file, received]);done(status);}};
+      });
+      const running = runTestFiles(files);
+      try {
+        expect(started).toEqual(files.slice(0, firstExclusive ? 1 : 2));process.emit(signal);
+        const result = await running;expect(result.exitCode).toBe(status);
+        expect(result.results).toEqual(started.map(file => ({file, exitCode: status})));
+        expect(killed).toEqual(started.map(file => [file, signal]));
+        expect(started).toEqual(files.slice(0, firstExclusive ? 1 : 2));
+        expect(['SIGINT', 'SIGTERM'].map(name => process.listenerCount(name))).toEqual(listeners);
+      } finally {process.emit('SIGTERM');await running;spawn.mockRestore();}
+    }
+  });
+
   test("repository compatibility matrix renders the committed CI workflow", async () => {
     const report = await checkCompatibilityWorkflow({ root });
     expect(report.jobs).toBe(4);

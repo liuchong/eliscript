@@ -82,6 +82,14 @@ test-core: check-contracts
 		tests/wasm-compiler-ir-lower.test.mjs \
 		tests/wasm-compiler-analyzer.test.mjs \
 		tests/wasm-compiler-expander.test.mjs \
+		tests/wasm-compiler-emitter.test.mjs \
+		tests/wasm-compiler-project.test.mjs \
+		tests/wasm-compiler-entry.test.mjs \
+		tests/wasm-compiler-candidate-smoke.test.mjs \
+		tests/wasm-compiler-runtime.test.mjs \
+		tests/wasm-compiler-backends.test.mjs \
+		tests/wasm-managed-compiler.test.mjs \
+		tests/independent-compiler-producers.test.mjs \
 		tests/wasm-compiler-ir-json-errors.test.mjs \
 		tests/wasm-compiler-source-map.test.mjs \
 		tests/wasm-managed-iteration.test.mjs \
@@ -92,6 +100,7 @@ test-core: check-contracts
 		tests/wasm-managed-template-string.test.mjs \
 		tests/wasm-managed-variadic-calls.test.mjs \
 		tests/wasm-managed-array-callbacks.test.mjs \
+		tests/wasm-managed-array-splice.test.mjs \
 		tests/wasm-managed-array-sort.test.mjs \
 		tests/wasm-managed-array-text.test.mjs \
 		tests/js-array-text-fast-path.test.mjs \
@@ -106,12 +115,15 @@ test-core: check-contracts
 		tests/wasm-managed-arithmetic.test.mjs \
 		tests/wasm-managed-operand-conversion.test.mjs \
 		tests/wasm-managed-word.test.mjs \
+		tests/wasm-managed-float64-words.test.mjs \
+		tests/wasm-managed-string-code-unit.test.mjs \
 		tests/wasm-managed-arrays.test.mjs \
 		tests/wasm-managed-objects.test.mjs \
 		tests/wasm-managed-strings.test.mjs \
 		tests/wasm-managed-replacement.test.mjs \
 		tests/wasm-managed-text-constructors.test.mjs \
 		tests/wasm-managed-regexp.test.mjs \
+		tests/wasm-managed-regexp-exact.test.mjs \
 		tests/wasm-managed-builtins.test.mjs \
 		tests/wasm-managed-identity.test.mjs \
 		tests/wasm-managed-object-integrity.test.mjs \
@@ -127,10 +139,12 @@ test-core: check-contracts
 		tests/wasm-managed-js-truth.test.mjs \
 		tests/native-backend.test.mjs \
 		tests/native-memory-backend.test.mjs \
+		tests/native-memory-long-branches.test.mjs \
 		tests/native-memory-indirect.test.mjs \
 		tests/native-managed-runtime.test.mjs \
 		tests/native-compiler-modules.test.mjs \
 		tests/native-compiler-ir-lower-source-map.test.mjs \
+		tests/native-compiler-runtime.test.mjs \
 		tests/native-managed-behavior.test.mjs \
 		tests/compiler-reader-character.test.mjs \
 		tests/compiler-source-map-cursor.test.mjs \
