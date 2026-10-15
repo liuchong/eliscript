@@ -4,10 +4,51 @@
   (defconst fail
     (lambda (message)
       (throw (new (js* "Error") message))))
+  (defconst visit-iterable
+    (js* "(iterable, visit) => { for (const item of iterable) visit(item); }"))
+  (defconst spread-iterable (js* "(iterable) => [...iterable]"))
   (defconst native-source-locations
-    (js* "(source, marks) => { const wanted = new Set(); const locations = new Map(); for (const mark of marks) { const span = (mark ?? [])[2] ?? null; const start = span.start; if (start !== undefined) wanted.add(start); } const starts = [...wanted].filter((start) => Number.isSafeInteger(start) && start >= 0).sort((left, right) => left - right); let index = 0; let offset = 0; let line = 0; let column = 0; for (const start of starts) { while (offset < start && index < source.length) { const code = source.codePointAt(index); const width = code > 65535 ? 2 : 1; if (code === 10) { line += 1; column = 0; } else { column += width; } index += width; offset += 1; } if (offset === start && (index < source.length || source.length === 0)) locations.set(offset, [line, column]); } return locations; }"))
+    (lambda (source marks)
+      (let ((wanted (new (js* "Set"))) (locations (new (js* "Map"))))
+        (funcall visit-iterable marks
+          (lambda (mark)
+            (let* ((entry (if (nullish? mark) (js-array) mark))
+                   (raw-span (aref entry 2))
+                   (span (if (nullish? raw-span) nil raw-span))
+                   (start (aref span "start")))
+              (unless (eq start undefined) (js-call wanted :add start)))))
+        (let* ((starts (js-call (funcall spread-iterable wanted) :filter
+                        (lambda (start)
+                          (let ((answer (Number/isSafeInteger start)))
+                            (and (js* "!!answer") (>= start 0))))))
+               (ordered (js-call starts :sort (lambda (left right) (- left right))))
+               (index 0) (offset 0) (line 0) (column 0))
+          (funcall visit-iterable ordered
+            (lambda (start)
+              (while (and (< offset start) (< index (aref source "length")))
+                (let* ((code (js-call source :codePointAt index))
+                       (width (if (> code 65535) 2 1)))
+                  (if (eq code 10) (progn (setq line (+ line 1)) (setq column 0))
+                    (setq column (+ column width)))
+                  (setq index (+ index width)) (setq offset (+ offset 1))))
+              (when (and (eq offset start)
+                         (or (< index (aref source "length")) (eq (aref source "length") 0)))
+                (js-call locations :set offset (js-array line column)))))
+          locations))))
   (defconst native-collect-generated-marks
-    (js* "(generated, marks) => { const result = []; let index = 0; let line = 0; let column = 0; for (const mark of marks) { const target = mark.offset; while (index < target && index < generated.length) { if (generated.charCodeAt(index) === 10) { line += 1; column = 0; } else { column += 1; } index += 1; } if (index === target && index < generated.length) result.push([line, column, mark.span]); } return result; }"))
+    (lambda (generated marks)
+      (let ((result (js-array)) (index 0) (line 0) (column 0))
+        (funcall visit-iterable marks
+          (lambda (mark)
+            (let ((target (aref mark "offset")))
+              (while (and (< index target) (< index (aref generated "length")))
+                (if (eq (js-call generated :charCodeAt index) 10)
+                    (progn (setq line (+ line 1)) (setq column 0))
+                  (setq column (+ column 1)))
+                (setq index (+ index 1)))
+              (when (and (eq index target) (< index (aref generated "length")))
+                (js-call result :push (js-array line column (aref mark "span")))))))
+        result)))
 
   (defun signed-vlq (value)
     (if (< value 0)
@@ -143,7 +184,7 @@
 
   (defun create-source-map
       (generated marks source source-name generated-name)
-    (unless (js* "Array.isArray(marks)")
+    (unless (Array/isArray marks)
       (fail "source map marks must be an array"))
     (let* ((generated-marks (collect-generated-marks generated marks))
            (locations (source-locations source generated-marks))

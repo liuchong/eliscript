@@ -510,6 +510,11 @@ When PREDECLARED is non-nil, reuse an already attached top-level resource."
       (eliscript-transient--analyze-sequence
        (cdr (eliscript-form-value finally-clause)) scope nil))))
 
+(defun eliscript-transient--utf16-less-p (left right)
+  "Compare LEFT and RIGHT by UTF-16 code units without locale collation."
+  (string-lessp (encode-coding-string left 'utf-16be t)
+                (encode-coding-string right 'utf-16be t)))
+
 (defun eliscript-transient--visible-active-resources ()
   "Return active or maybe-active resources owned by the current function."
   (let (resources)
@@ -522,7 +527,7 @@ When PREDECLARED is non-nil, reuse an already attached top-level resource."
      eliscript-transient--state)
     (sort resources
           (lambda (left right)
-            (string-lessp
+            (eliscript-transient--utf16-less-p
              (symbol-name (eliscript-transient--resource-name left))
              (symbol-name (eliscript-transient--resource-name right)))))))
 

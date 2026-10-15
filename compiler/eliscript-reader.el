@@ -296,6 +296,11 @@ reader has produced a list."
         (children (eliscript-reader--node-children node))
         (kind (eliscript-reader--node-kind node)))
     (cond
+     ;; Emacs integers discard the sign of -0, -00 and -0.  The scanner's
+     ;; original atom span retains it, including inside quoted containers.
+     ((and (eq kind 'atom) (numberp value) (zerop value)
+           (eq (char-after (1+ (eliscript-source-span-start span))) ?-))
+      (eliscript-form-locate-generated -0.0 span))
      ((keywordp value)
       (let ((name (substring (symbol-name value) 1)))
         (unless (eliscript-reader--valid-keyword-name-p name)

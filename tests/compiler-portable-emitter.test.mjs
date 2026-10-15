@@ -177,8 +177,8 @@ test('source spans preserve alias identity and arbitrary cyclic span data while 
  assert.equal(a.readString(text),'a\nb');assert.equal(a.length(marks),2);for(const v of[span,self,zero,two,first,second,marks,text,fragment,out,marksKey,spanKey,returned])a.release(v);finish(a);
 });
 
-test('represented string properties agree with JS while other primitive boxing remains explicitly refused',()=>{
+test('represented primitive property reads preserve the original fragment algorithm and JS results',()=>{
  const a=instantiateManagedRuntime(bytes??emit());a.auto(1);
  for(const marks of['','x','中😀\ud800']){const input={text:'a',marks};assert.deepEqual(js.native_indent(input),oracle(input));assert.deepEqual(invoke(a,input),oracle(input));assert.equal(a.stats().frameDepth,0);}
- for(const marks of[false,true,0,NaN]){const input={text:'a',marks};assert.deepEqual(js.native_indent(input),oracle(input));assert.throws(()=>invoke(a,input),e=>['ELI-RT0001','ELI-RT0003'].includes(e.eliscriptDiagnostic?.code));assert.equal(a.stats().frameDepth,0);}finish(a);
+ for(const marks of[false,true,0,-0,NaN,Infinity,-Infinity]){const input={text:'a',marks};assert.deepEqual(js.native_indent(input),oracle(input));assert.deepEqual(invoke(a,input),oracle(input));assert.equal(a.stats().frameDepth,0);}finish(a);
 });

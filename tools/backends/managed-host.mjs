@@ -126,12 +126,12 @@ export function createManagedHostRuntime(e,descriptor,memory,{maxSlots=1024,init
  // A compiled-runtime cleanup boundary shared by module close and native
  // transport disposal. Realm-root cleanup can be added here independently of
  // transport ownership; externally held values keep their own heap roots.
- lifecycle.dispose=()=>{if(moduleInfo)call(moduleInfo.close,heap);};
+ lifecycle.dispose=()=>{if(moduleInfo)call(moduleInfo.close,heap);else if(typeof e['value-standard-prototypes-close']==='function')call('value-standard-prototypes-close',heap);};
  const api=Object.freeze({
   unicodeVersion:caseVersion===151?15.1:caseVersion/10,
   initializeModule:initializeModuleInstance,
   getExport(name){if(!moduleInfo||typeof name!=='string'||!moduleExports.has(name))failManagedRuntime(3);const item=moduleExports.get(name);return wrap(call(moduleInfo.get,heap,item.kind,item.index));},
-  closeModule(){if(!moduleInfo)failManagedRuntime(3);lifecycle.dispose();return true;},
+  closeModule(){if(!moduleInfo&&typeof e['value-standard-prototypes-close']!=='function')failManagedRuntime(3);lifecycle.dispose();return moduleInfo!==null;},
   invoke(name,args=[]) {
    if(typeof name!=='string'||!entries.has(name)||!Array.isArray(args))failManagedRuntime(3);
    const entry=entries.get(name);if(!entry.uniform&&args.length!==entry.arity)failManagedRuntime(3);

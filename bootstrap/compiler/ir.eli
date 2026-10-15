@@ -28,14 +28,54 @@
     (lambda (message)
       (throw (new (js* "Error") message))))
 
+  (defconst make-schema-error
+    (lambda (message options)
+      (let ((error (if (eq options undefined)
+                       (new (js* "Error") message)
+                     (new (js* "Error") message options))))
+        (put error :eliscriptDiagnostic
+          (js-object :format "eliscript-diagnostic" :version 1
+            :code "ELI-I0001" :severity "error" :phase "ir-schema" :message message))
+        error)))
+
   (defconst schema-fail
-    (js* "(message) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-I0001', severity: 'error', phase: 'ir-schema', message }; throw error; }"))
+    (lambda (message)
+      (throw (make-schema-error message undefined))))
 
   (defconst array-p (js* "Array.isArray"))
   (defconst dense-json-array-p
-    (js* "(value) => { if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || Object.getOwnPropertySymbols(value).length !== 0) return false; const names = Object.getOwnPropertyNames(value); if (names.length !== value.length + 1 || names[names.length - 1] !== 'length') return false; for (let index = 0; index < value.length; index += 1) { const name = String(index); if (names[index] !== name) return false; const descriptor = Object.getOwnPropertyDescriptor(value, name); if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) return false; } return true; }"))
+    (lambda (value)
+      (if (or (not (Array/isArray value))
+              (not (Object/is (Object/getPrototypeOf value) globalThis.Array.prototype))
+              (/= (js-length (Object/getOwnPropertySymbols value)) 0)) false
+        (let ((names (Object/getOwnPropertyNames value)))
+          (if (or (/= (js-length names) (+ (aref value "length") 1))
+                  (/= (aref names (1- (js-length names))) "length")) false
+            (let ((index 0) (valid t))
+              (while (and valid (< index (aref value "length")))
+                (let ((name (funcall (js* "String") index)))
+                  (if (/= (aref names index) name) (setq valid false)
+                    (let ((descriptor (Object/getOwnPropertyDescriptor value name)))
+                      (unless (and (funcall (js* "Boolean") descriptor)
+                                   (funcall (js* "Boolean") (aref descriptor "enumerable"))
+                                   (Object/hasOwn descriptor "value"))
+                        (setq valid false)))))
+                (setq index (1+ index))) valid))))))
   (defconst plain-record-keys
-    (js* "(value) => { if (value === null || typeof value !== 'object' || Array.isArray(value)) return null; const prototype = Object.getPrototypeOf(value); if (prototype !== Object.prototype && prototype !== null) return null; if (Object.getOwnPropertySymbols(value).length !== 0) return null; const names = Object.getOwnPropertyNames(value); for (const name of names) { const descriptor = Object.getOwnPropertyDescriptor(value, name); if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) return null; } return names.sort(); }"))
+    (lambda (value)
+      (if (or (nil? value) (/= (js* "typeof value") "object") (Array/isArray value)) nil
+        (let ((prototype (Object/getPrototypeOf value)))
+          (if (and (not (Object/is prototype globalThis.Object.prototype)) (not (nil? prototype))) nil
+            (if (/= (js-length (Object/getOwnPropertySymbols value)) 0) nil
+              (let ((names (Object/getOwnPropertyNames value)) (index 0) (valid t))
+                (while (and valid (< index (js-length names)))
+                  (let ((descriptor (Object/getOwnPropertyDescriptor value (aref names index))))
+                    (unless (and (funcall (js* "Boolean") descriptor)
+                                 (funcall (js* "Boolean") (aref descriptor "enumerable"))
+                                 (Object/hasOwn descriptor "value"))
+                      (setq valid false)))
+                  (setq index (1+ index)))
+                (if valid (js-call names :sort) nil))))))))
   (defconst has-own (js* "Object.hasOwn"))
   (defconst finite-number-p (js* "Number.isFinite"))
   (defconst non-negative-integer-p
@@ -45,7 +85,13 @@
     (lambda (value)
       (and (Number/isSafeInteger value) (>= value 1))))
   (defconst parse-json
-    (js* "(source, reject) => { try { return JSON.parse(source); } catch (error) { return reject(`invalid canonical IR JSON: ${error.message}`); } }"))
+    (lambda (source reject)
+      (try (JSON/parse source)
+        (catch error
+          (let ((message "invalid canonical IR JSON"))
+            (if (Object/is reject schema-fail)
+                (throw (make-schema-error message (js-object :cause error)))
+              (funcall reject message)))))))
 
   (defconst node-kind-set
     (new globalThis.Set node-kinds))
@@ -113,7 +159,7 @@
        ((= type "number")
         (unless (funcall finite-number-p value)
           (schema-fail (str path " must contain only finite numbers")))
-        (if (js* "Object.is(value, -0)") "-0" (JSON/stringify value)))
+        (if (Object/is value (- 0)) "-0" (JSON/stringify value)))
        ((= type "string") (JSON/stringify value))
        ((funcall array-p value)
         (canonical-json-array value path active depth))
@@ -220,7 +266,7 @@
     (js-call node-kinds :includes kind))
 
   (defun make-program (filename body)
-    (unless (js* "Array.isArray(body)")
+    (unless (Array/isArray body)
       (fail "IR program body must be an array"))
     (unless (js-call body :every node-p)
       (fail "IR program body must contain only IR nodes"))
@@ -239,7 +285,7 @@
   (defun make-node (kind span value children properties)
     (unless (node-kind-p kind)
       (fail (str "unknown Eliscript IR node kind: " kind)))
-    (unless (js* "Array.isArray(children)")
+    (unless (Array/isArray children)
       (fail "IR node children must be an array"))
     (unless (js-call children :every node-p)
       (fail "IR node children must all be IR nodes"))

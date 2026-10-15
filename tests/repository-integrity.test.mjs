@@ -1,7 +1,9 @@
-import { expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { seedCompilerFixture } from "./helpers/seed-compiler.mjs";
 
 import {
   checkGeneratedMarkerCoverage,
@@ -14,6 +16,17 @@ import {
 } from "../tools/integrity/check.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+let compiler, compilerDirectory;
+// All cases inspect the same source snapshot. Build its compiler once per file;
+// each integrity invocation still scans dependencies and regenerates artifacts.
+beforeAll(async () => {
+  compilerDirectory = await mkdtemp(path.join(tmpdir(), "eliscript-integrity-tests-"));
+  await seedCompilerFixture(compilerDirectory);
+  compiler = await import(pathToFileURL(path.join(compilerDirectory, "compiler.mjs")).href);
+}, 15_000);
+afterAll(async () => {
+  if (compilerDirectory) await rm(compilerDirectory, { recursive: true, force: true });
+});
 
 async function readJson(relativePath) {
   return JSON.parse(await readFile(path.join(ROOT, relativePath), "utf8"));
@@ -21,7 +34,7 @@ async function readJson(relativePath) {
 
 test("repository dependencies and generated artifacts satisfy declared boundaries", async () => {
   const deferred = process.env.ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE === "1";
-  const report = await checkRepositoryIntegrity({ root: ROOT, deferPerformanceAcceptance: deferred });
+  const report = await checkRepositoryIntegrity({ root: ROOT, compiler, deferPerformanceAcceptance: deferred });
   // The count comes from the contract, so declaring a dependency updates the
   // contract rather than this expectation.
   const contract = await readJson("contracts/repository-integrity.json");
@@ -55,11 +68,11 @@ test("performance deferral is explicit and does not suppress dependency or artif
   const trackedFiles = await repositoryTrackedFiles(ROOT);
   const broken = structuredClone(contract);
   broken.artifacts.benchmarkReports = [];
-  await expect(checkRepositoryIntegrity({ root: ROOT, contract: broken,
+  await expect(checkRepositoryIntegrity({ root: ROOT, compiler, contract: broken,
     trackedFiles, deferPerformanceAcceptance: true })).rejects.toThrow("benchmark");
   const badWorkflow = structuredClone(contract);
   badWorkflow.artifacts.derived.find(entry => entry.id === "browser-compatibility-workflow").outputs = ["wrong.yml"];
-  await expect(checkRepositoryIntegrity({ root: ROOT, contract: badWorkflow,
+  await expect(checkRepositoryIntegrity({ root: ROOT, compiler, contract: badWorkflow,
     trackedFiles, deferPerformanceAcceptance: true })).rejects.toThrow("browser workflow");
 }, 15000);
 

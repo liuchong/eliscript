@@ -5,17 +5,18 @@ import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {buildBackends} from '../tools/backends/build.mjs';
 import {hashValue,equalValues} from '../runtime/core/value.mjs';
-let directory,backend,bytes;
+let directory,backend,bytes,memoryProgram;
 beforeAll(async()=>{
  directory=await mkdtemp(resolve(tmpdir(),'eliscript-managed-'));
  backend=await buildBackends({outputRoot:directory});
  const source=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8')+'\n(defun gc-named (heap code) (value-function-named heap code)) (export gc-named)';
- bytes=Uint8Array.from(backend.wasm.emit_memory_wasm(backend.compiler.compile_ir_string(source,'managed-runtime.eli'),{maximumPages:256}));
+ memoryProgram=backend.compiler.compile_ir_string(source,'managed-runtime.eli');
+ bytes=Uint8Array.from(backend.wasm.emit_memory_wasm(memoryProgram,{maximumPages:256}));
  assert(WebAssembly.validate(bytes)); assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);
 },120000);
 afterAll(async()=>{if(directory) await rm(directory,{recursive:true,force:true});});
-function runtime(slots=64,initial=4096,max=1048576) {
- const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;
+function runtime(slots=64,initial=4096,max=1048576,artifact=bytes) {
+ const e=new WebAssembly.Instance(new WebAssembly.Module(artifact)).exports;
  const r=Object.fromEntries(Object.entries(e).map(([k,v])=>[k.replaceAll('-','_'),typeof v==='function'? (...args)=>v(...args)>>>0:v]));
  const h=r.heap_new(slots,initial,max); assert(h>0); return {r,h};
 }
@@ -100,6 +101,20 @@ test('managed Number arithmetic and truth match IEEE including negative zero and
  }
  for(const v of [0,1,3]) assert.equal(r.value_truth(h,v),0);assert.equal(r.value_truth(h,2),1);
  const n=number(r,h,1);assert.equal(r.value_number_binary(h,n,2,0),0);assert.equal(r.last_error(),1);
+});
+test('managed pool growth distinguishes the linear memory limit and preserves rooted bytes after a failed reserve',()=>{
+ const larger=Uint8Array.from(backend.wasm.emit_memory_wasm(memoryProgram,{maximumPages:512}));
+ for(const [artifact,canGrow] of [[bytes,false],[larger,true]]){
+  const {r,h}=runtime(131072,8388608,16777216,artifact);
+  const first=r.value_bytes(h,4194304);assert(first>0);assert.equal(r.heap_pin(h,first),1);
+  assert.equal(r.value_byte_set(h,first,0,17),1);assert.equal(r.value_byte_set(h,first,4194303,239),1);
+  const used=r.heap_used(h),second=r.value_bytes(h,2097152),error=r.last_error();
+  if(canGrow){assert(second>0);assert.equal(error,0);assert.equal(r.heap_pin(h,second),1);assert.equal(r.heap_capacity(h),16777216);}
+  else{assert.equal(second,0);assert.equal(error,2);assert.equal(r.heap_capacity(h),8388608);assert.equal(r.heap_used(h),used);assert.equal(r.heap_live(h),1);}
+  assert.equal(r.value_byte_get(h,first,0),17);assert.equal(r.value_byte_get(h,first,4194303),239);
+  assert.equal(r.heap_release(h,first),1);if(canGrow)assert.equal(r.heap_release(h,second),1);
+  assert.equal(r.heap_collect(h),canGrow?2:1);assert.equal(r.heap_live(h),0);
+ }
 });
 test('managed growth retains relative references and resize failures preserve data',()=>{
  const {r,h}=runtime(64,2048,262144);const a=r.value_refs(h,7,1),s=r.value_string(h,35000);

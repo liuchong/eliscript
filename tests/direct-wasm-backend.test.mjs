@@ -169,20 +169,24 @@ beforeAll(async () => {
   const projectEntryInput = resolve(root, "tests/fixtures/wasm-managed-project-entry.eli");
   const projectStateSource = await readFile(projectStateInput, "utf8");
   const projectEntrySource = await readFile(projectEntryInput, "utf8");
-  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed, moduleSeed, projectStateSeed, projectEntrySeed, stringsSeed, regexpSeed, builtinsSeed, jsonSeed] = await Promise.all([
-    seedJavascript(resolve(root, "bootstrap/runtime/memory.eli"), resolve(directory, "memory-seed.mjs")),
-    seedJavascript(managedInput, resolve(directory, "managed-seed.mjs")),
-    seedJavascript(callableInput, resolve(directory, "callables-seed.mjs")),
-    seedJavascript(variadicInput, resolve(directory, "variadic-seed.mjs")),
-    seedJavascript(callbackInput, resolve(directory, "callback-seed.mjs")),
-    seedJavascript(moduleInput, resolve(directory, "module-seed.mjs")),
-    seedJavascript(projectStateInput, resolve(directory, "project-state-seed.mjs")),
-    seedJavascript(projectEntryInput, resolve(directory, "project-entry-seed.mjs")),
-    seedJavascript(stringsInput, resolve(directory, "strings-seed.mjs")),
-    seedJavascript(regexpInput, resolve(directory, "regexp-seed.mjs")),
-    seedJavascript(builtinsInput, resolve(directory, "builtins-seed.mjs")),
-    seedJavascript(jsonInput, resolve(directory, "json-seed.mjs")),
-  ]);
+  // Keep the public seed CLI and its per-child deadline. Avoid launching
+  // twelve Emacs instances at once while another test file is also running.
+  const seedOutputs = [];
+  for (const [input, output] of [
+    [resolve(root, "bootstrap/runtime/memory.eli"), "memory-seed.mjs"],
+    [managedInput, "managed-seed.mjs"],
+    [callableInput, "callables-seed.mjs"],
+    [variadicInput, "variadic-seed.mjs"],
+    [callbackInput, "callback-seed.mjs"],
+    [moduleInput, "module-seed.mjs"],
+    [projectStateInput, "project-state-seed.mjs"],
+    [projectEntryInput, "project-entry-seed.mjs"],
+    [stringsInput, "strings-seed.mjs"],
+    [regexpInput, "regexp-seed.mjs"],
+    [builtinsInput, "builtins-seed.mjs"],
+    [jsonInput, "json-seed.mjs"],
+  ]) seedOutputs.push(await seedJavascript(input, resolve(directory, output)));
+  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed, moduleSeed, projectStateSeed, projectEntrySeed, stringsSeed, regexpSeed, builtinsSeed, jsonSeed] = seedOutputs;
   runtimeSeeds = {
     memory: { source, javascript: memorySeed },
     strings: { source: stringsSource, javascript: stringsSeed, filename: stringsInput },

@@ -1205,6 +1205,20 @@ STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
      :manifest-write-ms manifest-write-ms
      :total-ms total-ms)))
 
+(defun eliscript-project--report-utf16-less-p (left right)
+  "Compare report strings LEFT and RIGHT in deterministic UTF-16 order."
+  (string-lessp (encode-coding-string left 'utf-16be t)
+                (encode-coding-string right 'utf-16be t)))
+
+(defun eliscript-project--report-macro-dependencies (dependencies root)
+  "Return UTF-16 ordered report records without changing cache identities."
+  (vconcat
+   (sort (append (eliscript-project--macro-dependency-records dependencies root)
+                 nil)
+         (lambda (left right)
+           (eliscript-project--report-utf16-less-p
+            (alist-get 'path left) (alist-get 'path right))))))
+
 (defun eliscript-project-build-report (result)
   "Return a stable JSON-compatible report for project build RESULT."
   (unless (eliscript-project-build-result-p result)
@@ -1298,14 +1312,18 @@ STARTED-AT and CACHE-READ-MS provide the complete build timing boundary."
                           nil))))
                 ,@(when (eliscript-project-module-macro-dependencies module)
                     `((macroDependencies
-                       . ,(eliscript-project--macro-dependency-records
+                       . ,(eliscript-project--report-macro-dependencies
                            (eliscript-project-module-macro-dependencies module)
                            root))))
                 (portableEntries
                  . ,(vconcat
                      (or (eliscript-project-module-portable-entries module)
                          nil)))))
-            (eliscript-project-build-result-modules result)))))))
+            (sort (copy-sequence (eliscript-project-build-result-modules result))
+                  (lambda (left right)
+                    (eliscript-project--report-utf16-less-p
+                     (file-relative-name (eliscript-project-module-source left) root)
+                     (file-relative-name (eliscript-project-module-source right) root))))))))))
 
 (defun eliscript-project-build (entry out-dir &optional root)
   "Compile the local Eliscript graph rooted at ENTRY into OUT-DIR."

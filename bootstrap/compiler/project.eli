@@ -21,6 +21,11 @@
   (defconst project-cache-version 2)
   (defconst project-cache-legacy-version 1)
 
+  ;; Compiler metadata uses the same deterministic UTF-16 order as Array.sort.
+  ;; This intentionally does not perform locale collation or normalization.
+  (defun utf16-string-order (left right)
+    (cond ((< left right) -1) ((> left right) 1) (t 0)))
+
   (defconst fail
     (js* "(message) => { const error = new Error(message); error.eliscriptDiagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-B0003', severity: 'error', phase: 'project-plan', message }; throw error; }"))
   (defconst array-p (js* "Array.isArray"))
@@ -875,7 +880,7 @@
                   (fail "build report macro dependency is invalid"))))
             (js-call macro-dependencies :sort
               (lambda (left right)
-                (js-call (get left :path) :localeCompare (get right :path))))
+                (utf16-string-order (get left :path) (get right :path))))
             (js-call globalThis.Object :freeze macro-dependencies)
             (unless (or (= status "compiled") (= status "reused"))
               (fail "build report module status must be compiled or reused"))
@@ -915,7 +920,7 @@
                 (js-call globalThis.Object :freeze normalized-module))))))
       (js-call result :sort
         (lambda (left right)
-          (js-call (get left :source) :localeCompare (get right :source))))
+          (utf16-string-order (get left :source) (get right :source))))
       (js-call globalThis.Object :freeze result)
       (js-call globalThis.Object :freeze
         (js-object :modules result :compiled compiled :reused reused))))
@@ -1060,7 +1065,7 @@
                       false))))))))
       (js-call result :sort
         (lambda (left right)
-          (js-call (get left :source) :localeCompare (get right :source))))
+          (utf16-string-order (get left :source) (get right :source))))
       (js-call globalThis.Object :freeze result)))
 
   (defun project-check-report (check)

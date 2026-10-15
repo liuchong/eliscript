@@ -23,7 +23,20 @@
     (js-array "js*" "print" "put" "js-call" "new" "async" "await" "throw" "try"))
 
   (defconst fail
-    (js* "(diagnostic) => { const p = diagnostic.location.start; const error = new Error(`${diagnostic.location.file}:${p.line}:${p.column}: ${diagnostic.message}`); error.eliscriptDiagnostic = diagnostic; throw error; }"))
+    (lambda (diagnostic)
+      (let* ((p (aref (aref diagnostic "location") "start"))
+             (error (new (js* "Error")
+               (let* ((file-value (aref (aref diagnostic "location") "file"))
+                      (file (js* "`${file_value}`"))
+                      (line-value (aref p "line"))
+                      (line (js* "`${line_value}`"))
+                      (column-value (aref p "column"))
+                      (column (js* "`${column_value}`"))
+                      (message-value (aref diagnostic "message"))
+                      (message (js* "`${message_value}`")))
+                 (+ file ":" line ":" column ": " message)))))
+        (put error :eliscriptDiagnostic diagnostic)
+        (throw error))))
   (defconst guard
     (lambda (operation onError)
       (try (funcall operation)

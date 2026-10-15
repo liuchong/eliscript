@@ -79,6 +79,16 @@ test-core: check-contracts
 		tests/wasm-compiler-modules.test.mjs \
 		tests/wasm-compiler-reader.test.mjs \
 		tests/wasm-compiler-formatter.test.mjs \
+		tests/wasm-compiler-ir-lower.test.mjs \
+		tests/wasm-compiler-analyzer.test.mjs \
+		tests/wasm-compiler-expander.test.mjs \
+		tests/wasm-compiler-ir-json-errors.test.mjs \
+		tests/wasm-compiler-source-map.test.mjs \
+		tests/wasm-managed-iteration.test.mjs \
+		tests/wasm-managed-primitive-properties.test.mjs \
+		tests/wasm-managed-str.test.mjs \
+		tests/wasm-managed-array-inheritance.test.mjs \
+		tests/wasm-managed-array-prototype-methods.test.mjs \
 		tests/wasm-managed-template-string.test.mjs \
 		tests/wasm-managed-variadic-calls.test.mjs \
 		tests/wasm-managed-array-callbacks.test.mjs \
@@ -119,10 +129,15 @@ test-core: check-contracts
 		tests/native-memory-backend.test.mjs \
 		tests/native-memory-indirect.test.mjs \
 		tests/native-managed-runtime.test.mjs \
+		tests/native-compiler-modules.test.mjs \
+		tests/native-compiler-ir-lower-source-map.test.mjs \
+		tests/native-managed-behavior.test.mjs \
 		tests/compiler-reader-character.test.mjs \
 		tests/compiler-source-map-cursor.test.mjs \
 		tests/compiler-portable-predicates.test.mjs \
 		tests/compiler-portable-reader.test.mjs \
+		tests/compiler-seed-negative-zero.test.mjs \
+		tests/compiler-internal-string-order.test.mjs \
 		tests/compiler-portable-emitter.test.mjs \
 		tests/compiler-fragment-combine.test.mjs \
 		tests/compiler-source-map-vlq.test.mjs \

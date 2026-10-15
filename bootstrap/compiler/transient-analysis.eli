@@ -2,8 +2,38 @@
   (import "./syntax.mjs"
     node-kind node-span node-value node-name node-items)
 
+  ;; Compiler metadata uses the same deterministic UTF-16 order as Array.sort.
+  ;; This intentionally does not perform locale collation or normalization.
+  (defun utf16-string-order (left right)
+    (cond ((< left right) -1) ((> left right) 1) (t 0)))
+
   (defconst transient-fail
-    (js* "(filename, span, message) => { const file = filename || span?.filename || '<input>'; const start = span ? { offset: span.start, line: span.line, column: span.column } : { offset: 0, line: 1, column: 1 }; const end = span ? { offset: span.end, line: span.endLine, column: span.endColumn } : { offset: 0, line: 1, column: 1 }; const diagnostic = { format: 'eliscript-diagnostic', version: 1, code: 'ELI-A0001', severity: 'error', phase: 'analysis', message, location: { file, start, end } }; const error = new Error(`${file}:${start.line}:${start.column}: ${message}`); error.eliscriptDiagnostic = diagnostic; throw error; }"))
+    (lambda (filename span message)
+      (let* ((file
+              (if (js* "!!filename") filename
+                (let ((fallback (if (nullish? span) undefined (aref span "filename"))))
+                  (if (js* "!!fallback") fallback "<input>"))))
+             (start (if (js* "!!span")
+                      (js-object :offset (aref span "start") :line (aref span "line")
+                                 :column (aref span "column"))
+                      (js-object :offset 0 :line 1 :column 1)))
+             (end (if (js* "!!span")
+                    (js-object :offset (aref span "end") :line (aref span "endLine")
+                               :column (aref span "endColumn"))
+                    (js-object :offset 0 :line 1 :column 1)))
+             (diagnostic (js-object :format "eliscript-diagnostic" :version 1
+                           :code "ELI-A0001" :severity "error" :phase "analysis"
+                           :message message :location (js-object :file file :start start :end end)))
+             (error (new (js* "Error")
+                      (let* ((file-text (js* "`${file}`"))
+                             (line-value (aref start "line"))
+                             (line-text (js* "`${line_value}`"))
+                             (column-value (aref start "column"))
+                             (column-text (js* "`${column_value}`"))
+                             (message-text (js* "`${message}`")))
+                        (+ file-text ":" line-text ":" column-text ": " message-text)))))
+        (put error :eliscriptDiagnostic diagnostic)
+        (throw error))))
 
   (defconst canonical-transient-family
     (lambda (value)
@@ -494,7 +524,7 @@
             (js-call resources :push resource))))
       (js-call resources :sort
         (lambda (left right)
-          (js-call (get left :name) :localeCompare (get right :name))))
+          (utf16-string-order (get left :name) (get right :name))))
       resources))
 
   (defun analyze-await (form arguments scope context)
