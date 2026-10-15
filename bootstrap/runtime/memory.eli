@@ -3658,6 +3658,21 @@
                     (while (and (< index 4) (= (last-error) 0))
                       (let ((digit (heap-json-hex (heap-json-take heap text state))))
                         (if (= digit 4294967295) (fail 3) (setq value (+ (* value 16) digit)))) (setq index (1+ index))) value)))))))))))))
+  ;; A parse owns this Set through its outer frame. Only sealed primitives
+  ;; enter it; each source object and array keeps its independent identity.
+  (defun heap-json-atom (heap state value)
+    (let* ((p (heap-block heap value)) (cache (load-u32 (+ (heap-block heap state) 36))))
+      ;; Set equality merges signed zeros, while JSON must retain negative zero.
+      (if (and (= (load-u32 p) 4) (= (load-u32 (+ p 32)) 0)
+               (= (load-u32 (+ p 36)) 2147483648)) value
+        (let* ((hash (value-key-hash heap value)) (bucket (heap-table-search heap cache value hash)))
+          (if (/= bucket 0)
+            (load-u32 (+ (heap-table-cell heap cache
+              (1- (load-u32 (+ (+ (heap-block heap cache) 32) (* (1- bucket) 4))))) 4))
+            ;; The parse frame roots the cache and the caller frame roots value;
+            ;; avoid extra borrowed pins that a real WASM trap cannot unwind.
+            (if (= (heap-table-prepare heap cache) 1)
+              (progn (heap-table-insert heap cache value value hash) value) 0))))))
   (defun heap-json-string (heap text state)
     (let ((frame (heap-argument-frame heap text state 0 4)) (result 0))
       (when (/= frame 0)
@@ -3673,7 +3688,8 @@
                   (while (< index count)
                     (store-u16 (+ (+ (heap-block heap result) 32) (* index 2)) (heap-json-decoded heap text state))
                     (setq index (1+ index)))
-                  (heap-json-position-set heap state end) (value-seal heap result)))) 0))
+                  (heap-json-position-set heap state end) (value-seal heap result)
+                  (setq result (heap-json-atom heap state result))))) 0))
         (setq result (heap-frame-result heap frame result))) result))
   (defun heap-json-literal (heap text state low high count value)
     (let ((index 0))
@@ -3699,7 +3715,9 @@
           (while (= (heap-json-digit (heap-json-peek heap text state)) 1) (heap-json-take heap text state)))
         (when (= (last-error) 0)
           (let ((token (value-string-slice heap text start (heap-json-position heap state))))
-            (when (/= token 0) (frame-set heap frame 3 token) (setq result (value-to-number heap token)))))
+            (when (/= token 0) (frame-set heap frame 3 token) (setq result (value-to-number heap token))
+              (when (= (last-error) 0)
+                (frame-set heap frame 3 result) (setq result (heap-json-atom heap state result))))))
         (setq result (heap-frame-result heap frame result))) result))
   (defun heap-json-value (heap text state depth)
     (let ((frame (heap-argument-frame heap text state 0 6)) (result 0))
@@ -3743,14 +3761,19 @@
   (defun value-json-parse (heap input reviver)
     (begin-operation) (if (= (heap-check heap) 0) 0
       (if (or (= (heap-reference-check heap input) 0) (= (heap-reference-check heap reviver) 0)) 0
-        (let ((frame (heap-argument-frame heap input reviver 0 5)) (result 0))
+        (let ((frame (heap-argument-frame heap input reviver 0 6)) (result 0))
           (when (/= frame 0)
             (let ((text (value-to-text heap input)))
               (when (= (last-error) 0)
                 (frame-set heap frame 2 text)
-                (let ((state (value-bytes heap 4)))
+                (let ((state (value-bytes heap 8)))
                   (when (/= state 0)
-                    (frame-set heap frame 3 state) (setq result (heap-json-value heap text state 0))
+                    (frame-set heap frame 3 state)
+                    (let ((cache (value-table-new heap 11 4)))
+                      (when (/= cache 0)
+                        (frame-set heap frame 5 cache)
+                        (store-u32 (+ (heap-block heap state) 36) cache)
+                        (setq result (heap-json-value heap text state 0))))
                     (when (= (last-error) 3) (heap-control-set heap 16 4))
                     (when (= (last-error) 0)
                       (frame-set heap frame 4 result) (heap-json-white heap text state)

@@ -75,3 +75,11 @@ test('compiler teardown closes a native adapter on success and every cleanup fai
   assert.deepEqual(calls,failure==='closeModule'?['closeModule','close']:failure==='collect'?['closeModule','collect','close']:failure==='live'?['closeModule','collect','live','close']:['closeModule','collect','live','stats','close']);
  }
 });
+
+
+// The self-hosted input is the actual complete runtime source, not host-built
+// runtime JSON. This isolated manual mode emits canonical IR only.
+if(process.env.ELISCRIPT_RUN_RUNTIME_IR_PRODUCER==='1'){
+ test('explicit full-runtime WASM-host candidate compiles the entire runtime source to exact canonical IR',()=>candidate('runtime-ir','wasm','full-runtime'),190000);
+ nativeTest('explicit full-runtime native-host candidate compiles the entire runtime source to exact canonical IR',()=>candidate('runtime-ir','native','full-runtime'),190000);
+}

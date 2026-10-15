@@ -17,7 +17,7 @@ beforeAll(async()=>{
  const importJS=code=>import('data:text/javascript;base64,'+Buffer.from(code.replace(/from "[.]\/([^"\n]+)"/g,(_,name)=>'from '+JSON.stringify(pathToFileURL(resolve(directory,'bootstrap',name)).href))).toString('base64'));
  reference=await importJS(originalText);
  const exposed=emitterSource.trimEnd().slice(0,-1)+'\n(export native-locate boolean-reference-text-p))';helpers=await importJS(backend.compiler.emit_ir_string(backend.compiler.compile_ir_string(exposed,'emitter-helpers.eli')));
- const entry=backend.compiler.compile_ir_string('(import "./emitter.mjs" emit-module emit-module-numeric emit-module-artifact emit-module-with-source-map) (defun run (text mode source) (let ((program (JSON/parse text))) (cond ((= mode 0) (emit-module program)) ((= mode 1) (JSON/stringify (emit-module-artifact program))) ((= mode 2) (emit-module-numeric program)) (t (JSON/stringify (emit-module-with-source-map program source "out.mjs" "input.eli")))))) (defun recover () 7) (export run recover)','emitter-entry.eli');
+ const entry=backend.compiler.compile_ir_string('(import "./emitter.mjs" emit-module emit-module-numeric emit-module-artifact emit-module-with-source-map) (defvar emission-entered false) (defun entered-p () emission-entered) (defun reset-entered () (setq emission-entered false)) (defun run (text mode source) (setq emission-entered t) (let ((program (JSON/parse text))) (cond ((= mode 0) (emit-module program)) ((= mode 1) (JSON/stringify (emit-module-artifact program))) ((= mode 2) (emit-module-numeric program)) (t (JSON/stringify (emit-module-with-source-map program source "out.mjs" "input.eli")))))) (defun recover () 7) (export run recover entered-p reset-entered)','emitter-entry.eli');
  bytes=artifact({id:'entry.mjs',program:entry});
 },120000);
 afterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});
@@ -59,8 +59,21 @@ test('locate creates own mark entries even when a deeper Array prototype index i
 test('small deterministic existing source variants keep full emitter JavaScript output unchanged',()=>{
  const a=instantiateManagedRuntime(bytes,{maxSlots:8192,initialBytes:262144});a.auto(1);let seed=0x5198c1;for(let i=0;i<12;i++){seed=(Math.imul(seed,1664525)+1013904223)>>>0;const source='(defun value'+i+' (x) (let* ((a (+ x '+seed%17+')) (b (* a '+(1+seed%5)+'))) (if (> b 0) b (- b))))';const program=backend.compiler.compile_ir_string(source,'input.eli');assert.equal(runSource(a,source,0),expected(program,0,source));}finish(a);
 });
-test('bounded whole emitter failure preserves caller frames and a subsequent source call recovers',()=>{
- const a=instantiateManagedRuntime(bytes,{maxSlots:1024,initialBytes:262144}),caller=a.frame(1);a.auto(1);a.frameSet(caller,0,true);assert.throws(()=>runSource(a,corpus.find(source=>source.includes('(catch [')),1),error=>error.eliscriptDiagnostic?.code==='ELI-RT0002');assert.equal(a.stats().frameDepth,1);const out=a.invoke('recover');assert.equal(a.readNumber(out),7);a.leaveFrame(caller);finish(a,[out]);
+test('bounded whole emitter retains exact output at the original budget and recovers from genuine slot exhaustion',()=>{
+ const a=instantiateManagedRuntime(bytes,{maxSlots:1024,initialBytes:262144}),caller=a.frame(1);a.auto(1);a.frameSet(caller,0,true);
+ const source=corpus.find(source=>source.includes('(catch [')),program=backend.compiler.compile_ir_string(source,'input.eli'),oracle=expected(program,1,source);
+ assert.equal(runSource(a,source,1),oracle);
+ const input=a.string(programJSON(program)),mode=a.number(1),text=a.string(source),padding=[];
+ assert.equal(a.invoke('reset_entered'),false);
+ try{for(let i=0;i<1024;i++)padding.push(a.number(i));}catch(error){assert.equal(error.eliscriptDiagnostic?.code,'ELI-RT0002');}
+ assert.equal(a.live(),1024);assert.throws(()=>a.invoke('run',[input,mode,text]),error=>error.eliscriptDiagnostic?.code==='ELI-RT0002');assert.equal(a.stats().frameDepth,1);assert.equal(a.frameGet(caller,0),true);
+ // Leave room for the host entry and source frame, then prove the real source
+ // function entered before its JSON/emitter allocation exhausted this same heap.
+ assert(padding.length>64);for(const value of padding.splice(-64))a.release(value);a.collect();assert.equal(a.live(),960);assert.equal(a.invoke('entered_p'),false);
+ assert.throws(()=>a.invoke('run',[input,mode,text]),error=>error.eliscriptDiagnostic?.code==='ELI-RT0002');assert.equal(a.invoke('entered_p'),true);assert.equal(a.stats().frameDepth,1);assert.equal(a.frameGet(caller,0),true);
+ for(const value of padding)a.release(value);a.collect();
+ const retry=a.invoke('run',[input,mode,text]);assert.equal(a.readString(retry),oracle);a.release(retry);
+ const out=a.invoke('recover');assert.equal(a.readNumber(out),7);a.leaveFrame(caller);finish(a,[input,mode,text,out]);
 });
 test('independent Node executes the same whole emitter WASM and compares original JavaScript output and marks',async()=>{
  const wasm=resolve(directory,'emitter.wasm'),oracle=resolve(directory,'bootstrap/emitter-original.mjs');await writeFile(wasm,bytes);

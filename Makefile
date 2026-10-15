@@ -132,6 +132,7 @@ test-core: check-contracts
 		tests/wasm-managed-object-properties.test.mjs \
 		tests/wasm-managed-math.test.mjs \
 		tests/wasm-managed-json.test.mjs \
+		tests/wasm-managed-json-atoms.test.mjs \
 		tests/wasm-managed-number-conversion.test.mjs \
 		tests/wasm-managed-number-text.test.mjs \
 		tests/wasm-managed-text-format.test.mjs \

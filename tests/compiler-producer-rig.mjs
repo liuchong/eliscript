@@ -4,6 +4,7 @@ import {resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {pathToFileURL,fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import {buildBackends,backendModules} from '../tools/backends/build.mjs';
 import {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';
 import {instantiateNativeManagedRuntime} from '../tools/backends/native-managed-runtime.mjs';
@@ -56,7 +57,14 @@ const entrySource=`(import "./bootstrap/compiler.mjs" compile-ir-string compile-
  (defun produce-managed-native (source filename runtime-json)
    (let ((lowered (lower-managed-program (compile-ir-string source filename) (JSON/parse runtime-json))))
      (JSON/stringify (js-object :bytes (emit-typed-native-memory-library (get lowered :typed) "arm64-macos") :descriptor (get lowered :descriptor) :typed (get lowered :typed)))))
- (export produce-js produce-ir produce-numeric-wasm produce-native-object produce-native-library produce-managed-wasm produce-managed-native)`;
+ (defun decode-runtime-ir (runtime-json) (JSON/parse runtime-json))
+ (defun produce-managed-wasm-from-ir (source filename runtime-ir)
+   (JSON/stringify (emit-managed-wasm (compile-ir-string source filename) runtime-ir)))
+ (defun produce-managed-native-from-ir (source filename runtime-ir)
+   (let ((lowered (lower-managed-program (compile-ir-string source filename) runtime-ir)))
+     (JSON/stringify (js-object :bytes (emit-typed-native-memory-library (get lowered :typed) "arm64-macos") :descriptor (get lowered :descriptor) :typed (get lowered :typed)))))
+ (export produce-js produce-ir produce-numeric-wasm produce-native-object produce-native-library produce-managed-wasm produce-managed-native
+   decode-runtime-ir produce-managed-wasm-from-ir produce-managed-native-from-ir)`;
 
 function failureDetail(a,error){
  const detail={name:error?.name,message:error?.message,diagnostic:error?.eliscriptDiagnostic};
@@ -79,7 +87,7 @@ export async function buildCompilerProducer({producerHost='wasm',profile='small'
  let stage='bootstrap',a;
  const mark=(name,extra={})=>{stage=name;onStage({stage,producerHost,profile,productTarget:'compiler-runtime',...extra,...(a?{stats:a.stats(),live:a.live()}: {})});};
  try{
-  mark('bootstrap',{budget,memory,auto});
+  mark('bootstrap',{directory,budget,memory,auto});
   const backend=await buildBackends({outputRoot:directory});
   const names=(await readdir('bootstrap/compiler')).filter(name=>name.endsWith('.eli')).sort();assert.equal(names.length,13);assert.equal(backendModules.length,8);
   mark('compile-real-module-ir');
@@ -109,20 +117,45 @@ export async function buildCompilerProducer({producerHost='wasm',profile='small'
   mark('initialize-producer');a.initializeModule();mark('producer-ready');
   return {directory,backend,modules,runtime,runtimeJSON,a,mark,producerHost,profile,budget,memory,auto,
    call(name,args){const productTarget=name==='produce_js'?'javascript':name==='produce_ir'?'canonical-ir':name.includes('wasm')?'wasm':name==='produce_native_object'?'arm64-macos-object':'arm64-macos-library';mark(name+'-box-input',{productTarget,inputBytes:args.reduce((sum,v)=>sum+Buffer.byteLength(v),0)});const roots=[];try{for(const value of args)roots.push(a.string(value));mark(name+'-invoke',{productTarget});const out=a.invoke(name,roots);try{const text=a.readString(out);mark(name+'-read-output',{productTarget,outputBytes:Buffer.byteLength(text)});return text;}finally{a.release(out);}}finally{roots.forEach(root=>a.release(root));}},
+   callFromRuntimeIR(mode,args){
+    const productTarget=mode==='managed-wasm'?'wasm':'arm64-macos-library',method=mode==='managed-wasm'?'produce_managed_wasm_from_ir':'produce_managed_native_from_ir';
+    const roots=[];let runtimeIR,out;
+    mark('decode-runtime-ir-box-input',{productTarget,inputBytes:args.reduce((sum,value)=>sum+Buffer.byteLength(value),0)});
+    try{
+     // Hold the same three boxed inputs for both stages. The host neither walks
+     // nor reconstructs the parsed graph; its sole new ownership is this root.
+     for(const value of args)roots.push(a.string(value));
+     mark('decode-runtime-ir-invoke',{productTarget});runtimeIR=a.invoke('decode_runtime_ir',[roots[2]]);
+     mark('decode-ready',{productTarget});
+     mark('emit-from-runtime-ir',{productTarget,method});out=a.invoke(method,[roots[0],roots[1],runtimeIR]);
+     const text=a.readString(out);mark(method+'-read-output',{productTarget,outputBytes:Buffer.byteLength(text)});return text;
+    }finally{a.release(out);a.release(runtimeIR);roots.forEach(root=>a.release(root));}
+   },
    async close({preserve=false}={}){finishCompiler(a);a=undefined;if(!preserve)await rm(directory,{recursive:true,force:true});},
   };
  }catch(error){try{onStage({stage,producerHost,profile,productTarget:'compiler-runtime',failed:true,directory,error:failureDetail(a,error),...(a?{stats:a.stats(),live:a.live()}: {})});}finally{try{a?.close?.();}catch{}}throw error;}
 }
 
 export async function runProducerCandidate(mode='numeric',{producerHost='wasm',profile='small',onStage=()=>{}}={}){
- assert(['numeric','managed-wasm','managed-native'].includes(mode));
+ assert(['numeric','managed-wasm','managed-native','runtime-ir'].includes(mode));
+ if(mode==='runtime-ir')assert.equal(profile,'full-runtime','runtime-ir requires the explicit full-runtime candidate profile');
  const fixture=await buildCompilerProducer({producerHost,profile,onStage});const {backend,a,mark,budget,memory,auto}=fixture;let failed=false;
  try{
-  const source=mode==='numeric'?producerSource:managedProducerSource,filename='producer-'+mode+'.eli';
-  await writeFile(resolve(fixture.directory,'candidate-input.json'),JSON.stringify({mode,producerHost,profile,source,filename,budget,memory,auto,...(mode==='numeric'?{}:{runtimeJSON:fixture.runtimeJSON})}));
+  const runtimeSource=mode==='runtime-ir'?await readFile('bootstrap/runtime/memory.eli'):undefined;
+  const source=runtimeSource?runtimeSource.toString('utf8'):mode==='numeric'?producerSource:managedProducerSource,filename=mode==='runtime-ir'?'bootstrap/runtime/memory.eli':'producer-'+mode+'.eli';
+  const sourceIdentity=runtimeSource?{sourceSha256:createHash('sha256').update(runtimeSource).digest('hex'),sourceBytes:runtimeSource.length}:{};
+  await writeFile(resolve(fixture.directory,'candidate-input.json'),JSON.stringify({mode,producerHost,profile,source,filename,budget,memory,auto,...sourceIdentity,...(mode==='numeric'||mode==='runtime-ir'?{}:{runtimeJSON:fixture.runtimeJSON})}));
+  if(mode==='runtime-ir')mark('runtime-ir-source',{productTarget:'canonical-ir',filename,...sourceIdentity});
   const program=backend.compiler.compile_ir_string(source,filename),saved=JSON.stringify(program);
-  assert.equal(fixture.call('produce_js',[source,filename]),backend.compiler.compile_string(source,filename));
-  assert.equal(fixture.call('produce_ir',[source,filename]),backend.compiler.serialize_ir_program(program));
+  if(mode==='runtime-ir'){
+   const expectedIR=backend.compiler.serialize_ir_program(program);
+   mark('runtime-ir-reference-ready',{productTarget:'canonical-ir',outputBytes:Buffer.byteLength(expectedIR),...sourceIdentity});
+   assert.equal(fixture.call('produce_ir',[source,filename]),expectedIR);
+   mark('runtime-ir-compared',{productTarget:'canonical-ir',outputBytes:Buffer.byteLength(expectedIR),...sourceIdentity});
+  }else{
+   assert.equal(fixture.call('produce_js',[source,filename]),backend.compiler.compile_string(source,filename));
+   assert.equal(fixture.call('produce_ir',[source,filename]),backend.compiler.serialize_ir_program(program));
+  }
   if(mode==='numeric'){
    const javascript=fixture.call('produce_js',[source,filename]),actualJS=await import('data:text/javascript;base64,'+Buffer.from(javascript).toString('base64'));
    const wasm=Uint8Array.from(JSON.parse(fixture.call('produce_numeric_wasm',[source,filename])));
@@ -142,10 +175,13 @@ export async function runProducerCandidate(mode='numeric',{producerHost='wasm',p
     mark('native-product-executed',{productTarget:'arm64-macos-library',bytes:library.length});
    }
    mark('numeric-products-executed',{productTarget:'numeric-wasm-and-arm64-macos-object',wasmBytes:wasm.length,objectBytes:object.length});
-  }else{
+  }else if(mode!=='runtime-ir'){
    // This is the complete current runtime IR, without a reduced fixture or a
    // substitute host implementation. Its fixed capacity failures stay visible.
-   const wire=fixture.call(mode==='managed-wasm'?'produce_managed_wasm':'produce_managed_native',[source,filename,fixture.runtimeJSON]);
+   const inputs=[source,filename,fixture.runtimeJSON];
+   // Preserve the original small-budget failure path. Only the explicit full
+   // profile exposes the pure-Eli decoder and emitter as separately timed calls.
+   const wire=profile==='full-runtime'?fixture.callFromRuntimeIR(mode,inputs):fixture.call(mode==='managed-wasm'?'produce_managed_wasm':'produce_managed_native',inputs);
    const emitted=JSON.parse(wire);let product;
    if(mode==='managed-wasm'){
     const bytes=Uint8Array.from(emitted);assert.deepEqual(bytes,Uint8Array.from(backend.managed.emit_managed_wasm(program,fixture.runtime)));
