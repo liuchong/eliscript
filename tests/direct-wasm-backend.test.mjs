@@ -155,6 +155,8 @@ beforeAll(async () => {
   const callbackSource = await readFile(callbackInput, "utf8");
   const regexpInput = resolve(root, "tests/fixtures/wasm-managed-regexp.eli");
   const regexpSource = await readFile(regexpInput, "utf8");
+  const builtinsInput = resolve(root, "tests/fixtures/wasm-managed-builtins.eli");
+  const builtinsSource = await readFile(builtinsInput, "utf8");
   const stringsInput = resolve(root, "tests/fixtures/wasm-managed-strings.eli");
   const stringsSource = await readFile(stringsInput, "utf8");
   const moduleInput = resolve(root, "tests/fixtures/wasm-managed-module-bindings.eli");
@@ -163,7 +165,7 @@ beforeAll(async () => {
   const projectEntryInput = resolve(root, "tests/fixtures/wasm-managed-project-entry.eli");
   const projectStateSource = await readFile(projectStateInput, "utf8");
   const projectEntrySource = await readFile(projectEntryInput, "utf8");
-  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed, moduleSeed, projectStateSeed, projectEntrySeed, stringsSeed, regexpSeed] = await Promise.all([
+  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed, moduleSeed, projectStateSeed, projectEntrySeed, stringsSeed, regexpSeed, builtinsSeed] = await Promise.all([
     seedJavascript(resolve(root, "bootstrap/runtime/memory.eli"), resolve(directory, "memory-seed.mjs")),
     seedJavascript(managedInput, resolve(directory, "managed-seed.mjs")),
     seedJavascript(callableInput, resolve(directory, "callables-seed.mjs")),
@@ -174,11 +176,13 @@ beforeAll(async () => {
     seedJavascript(projectEntryInput, resolve(directory, "project-entry-seed.mjs")),
     seedJavascript(stringsInput, resolve(directory, "strings-seed.mjs")),
     seedJavascript(regexpInput, resolve(directory, "regexp-seed.mjs")),
+    seedJavascript(builtinsInput, resolve(directory, "builtins-seed.mjs")),
   ]);
   runtimeSeeds = {
     memory: { source, javascript: memorySeed },
     strings: { source: stringsSource, javascript: stringsSeed, filename: stringsInput },
     regexp: { source: regexpSource, javascript: regexpSeed, filename: regexpInput },
+    builtins: { source: builtinsSource, javascript: builtinsSeed, filename: builtinsInput },
     managed: { source: managedSource, javascript: managedSeed },
     callables: { source: callableSource, javascript: callableSeed, filename: callableInput },
     variadic: { source: variadicSource, javascript: variadicSeed, filename: variadicInput },
@@ -871,6 +875,23 @@ test("ordinary source collections have Seed and three-generation IR, descriptor 
  const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
  for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const n=a.number(64),map=a.invoke('map-loop',[n]),size=a.invoke('size',[map]);assert.equal(a.readNumber(size),64);a.release(size);const it=a.invoke('entries',[map]),step=a.invoke('next',[it]),key=a.string('value'),pair=a.objectGet(step,key),first=a.get(pair,0);assert.equal(a.readNumber(first),0);for(const x of[first,pair,key,step,it,map,n])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
 });
+test("first-class builtins retain public Seed and three-generation IR, descriptors, table slots and executable bytes", async () => {
+  const {source, javascript: seed, filename} = runtimeSeeds.builtins;
+  const programs = generations.map(g => g.compiler.compile_ir_string(source, filename));
+  const runtimes = generations.map(g => g.compiler.compile_ir_string(runtimeSeeds.memory.source, 'runtime.eli'));
+  const lowered = generations.map((g, i) => g.managed.lower_managed_program(programs[i], runtimes[i]));
+  const bytes = generations.map((g, i) => g.managed.emit_managed_wasm(programs[i], runtimes[i]));
+  const {instantiateManagedRuntime} = await import('../tools/backends/managed-runtime.mjs');
+  for (let i = 0; i < 3; i++) {
+    assert.equal(generations[i].compiler.emit_ir_string(programs[i]), seed); assert.deepEqual(programs[i], programs[0]);
+    assert.deepEqual(lowered[i], lowered[0]); assert.deepEqual(bytes[i], bytes[0]);
+    const a = instantiateManagedRuntime(Uint8Array.from(bytes[i])); a.auto(1);
+    const text = a.string('-0'), out = a.invoke('number-call', [text]); assert(Object.is(a.readNumber(out), -0));
+    const unsafe = a.number(2 ** 53); assert.equal(a.invoke('integer-call', [unsafe]), true); assert.equal(a.invoke('safe-call', [unsafe]), false);
+    assert.equal(a.invoke('same-number'), true); assert.equal(a.invoke('same-finite'), true);
+    for (const x of [text, out, unsafe]) a.release(x); a.closeModule(); a.collect(); assert.equal(a.live(), 0); assert.equal(a.stats().frameDepth, 0);
+  }
+});
 test("primitive Number and text conversions have Seed and three-generation IR, descriptor and WASM fixed points", async () => {
   const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-number-conversion.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
   const programs=generations.map(g=>g.compiler.compile_ir_string(source,'number-conversion.eli')),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtime,'runtime.eli'));
@@ -1465,6 +1486,35 @@ describe("browser compiler backends", () => {
       }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl)}
     },{source,seed,filename,runtime});
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,filename),generations[2].compiler.compile_ir_string(runtime,'runtime.eli')));
+  });
+  test("browser first-class builtins preserve conversion, predicates, identity, callbacks and roots without imports", async () => {
+    const {source, javascript: seed, filename} = runtimeSeeds.builtins, runtime = runtimeSeeds.memory.source;
+    const bytes = await evaluateBrowser(async ({bundle, source, seed, filename, runtime}) => {
+      const url = URL.createObjectURL(new Blob([bundle], {type: 'text/javascript'})); let jsUrl;
+      try {
+        const c = await import(url), p = c.compile_ir_string(source, filename);
+        const bytes = Uint8Array.from(c.emit_managed_wasm(p, c.compile_ir_string(runtime, 'runtime.eli')));
+        const check = (ok, label) => {if (!ok) throw Error(label);};
+        check(c.emit_ir_string(p) === seed, 'Seed'); check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length === 0, 'imports');
+        jsUrl = URL.createObjectURL(new Blob([seed], {type: 'text/javascript'})); const js = await import(jsUrl);
+        const a = c.instantiateManagedRuntime(bytes); a.auto(1);
+        for (const x of [null, undefined, true, false, '', '-0', '0x10', '中😀', 0, -0, NaN, Infinity, 5e-324, 2 ** 53, 1.5]) {
+          const value = typeof x === 'number' ? a.number(x) : typeof x === 'string' ? a.string(x) : x;
+          for (const name of ['number-call', 'string-call', 'boolean-call', 'finite-call', 'nan-call', 'integer-call', 'safe-call', 'coercive-finite', 'coercive-nan']) {
+            const out = a.invoke(name, [value]), actual = out?.kind === 4 ? a.readNumber(out) : out?.kind === 5 ? a.readString(out) : out;
+            check(Object.is(actual, js[name.replaceAll('-', '_')](x)), name); a.release(out);
+          }
+          a.release(value); a.collect();
+        }
+        check(a.invoke('same-number') === true && a.invoke('same-finite') === true, 'identity');
+        const x = a.string('-0'), values = a.sourceArray([x, true, null]), out = a.invoke('number-map', [values]);
+        for (const [index, expected] of [-0, 1, 0].entries()) {const value = a.get(out, index); check(Object.is(a.readNumber(value), expected), 'callback'); a.release(value);}
+        check(a.invoke('array-call', [values]) === true, 'array');
+        for (const value of [x, values, out]) a.release(value); a.closeModule(); a.collect();
+        check(a.live() === 0 && a.stats().frameDepth === 0, 'roots'); return [...bytes];
+      } finally {URL.revokeObjectURL(url); if (jsUrl) URL.revokeObjectURL(jsUrl);}
+    }, {source, seed, filename, runtime});
+    assert.deepEqual(bytes, generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source, filename), generations[2].compiler.compile_ir_string(runtime, 'runtime.eli')));
   });
   test("browser primitive Number conversions match exact IEEE rounding, shortest text and corrected JS primitives without host callbacks", async () => {
     const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-number-conversion.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');

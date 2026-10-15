@@ -49,7 +49,7 @@ test('exact subnormal remainder is exhaustive across small integer significands 
  for(let x=0;x<64;x++)for(let y=1;y<32;y++)for(const sign of[1,-1])check(a,'remainder',[sign*x*Number.MIN_VALUE,y*Number.MIN_VALUE]);
 });
 test('a word-operation error suppresses a later genuine trap and unwinds only its own frames',async()=>{
- const source=await readFile('bootstrap/runtime/memory.eli','utf8'),start=source.indexOf('  (defun value-truth (heap value)'),end=source.indexOf('  (defun value-data',start);assert(start>=0&&end>start);
+ const source=await readFile('bootstrap/runtime/memory.eli','utf8'),start=source.indexOf('  (defun value-truth (heap value)'),end=source.indexOf('  (defun ',start+3);assert(start>=0&&end>start);
  const injected=backend.compiler.compile_ir_string(source.slice(0,start)+'  (defun value-truth (heap value) (load-u32 4294967295))\n'+source.slice(end),'trap-runtime.eli');
  const ir=backend.compiler.compile_ir_string('(defun crash (x y) (progn (bit-xor x y) (if x 1 2))) (export crash)','word-error.eli');
  const a=instantiateManagedRuntime(Uint8Array.from(backend.managed.emit_managed_wasm(ir,injected))),text=a.sourceObject({}),n=a.number(-0),caller=a.frame(1);a.frameSet(caller,0,n);

@@ -554,3 +554,26 @@ object ToPrimitive conversion, string replacement/search/split integration and
 source exception semantics remain open. Unsupported static forms are rejected
 with ELI-B0001 and the original source identity. This experimental capability
 does not complete RegExp, the standard library or a compiler host.
+
+## Experimental primitive builtin values
+
+The original `Number`, `String`, `Boolean`, `Number.isFinite`, `Number.isNaN`,
+`Number.isInteger`, `Number.isSafeInteger`, `Array.isArray`, global `isFinite`
+and global `isNaN` references use ordinary WASM function-table entries. Source
+code can store, compare, capture, apply and pass these values to callbacks.
+Supported direct static method/property reads and qualified references retain
+the same identity, including the corresponding `globalThis` spellings.
+
+Number and String distinguish a missing first argument from explicit undefined;
+extra arguments still execute before conversion. Boolean uses JS truth, while
+ordinary language conditions retain their existing Lisp truth. Number predicates
+never coerce; the two global numeric predicates use the shared exact primitive
+ToNumber conversion. Integer predicates inspect binary64 words without truncating
+to a machine integer or rounding a fractional input.
+
+Internal argument-list adapters preserve method lookup order, local and module
+shadowing, linked binding identities, automatic roots and trap cleanup. They do
+not replace the original compiler input or change public canonical IR. Mutable
+builtin properties/prototypes, reflection on builtin functions, wrapper-object
+construction and object ToPrimitive conversions remain open; unsupported forms
+are rejected rather than being reported as a complete builtin or compiler host.

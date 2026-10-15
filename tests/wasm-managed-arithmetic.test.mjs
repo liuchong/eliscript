@@ -55,7 +55,7 @@ test('ordinary numeric loops and recursive calls reclaim expression temporaries 
  for(let i=0;i<100;i++)check(a,'sum-to',[32]);assert(a.stats().collections>1000);
 });
 test('arithmetic type or capacity failures unwind their frames without evaluating a later trapping expression',async()=>{
- const runtimeSource=await readFile('bootstrap/runtime/memory.eli','utf8'),start=runtimeSource.indexOf('  (defun value-truth (heap value)'),end=runtimeSource.indexOf('  (defun value-data',start);assert(start>=0&&end>start);
+ const runtimeSource=await readFile('bootstrap/runtime/memory.eli','utf8'),start=runtimeSource.indexOf('  (defun value-truth (heap value)'),end=runtimeSource.indexOf('  (defun ',start+3);assert(start>=0&&end>start);
  const injected=backend.compiler.compile_ir_string(runtimeSource.slice(0,start)+'  (defun value-truth (heap value) (load-u32 4294967295))\n'+runtimeSource.slice(end),'later-trap.eli');
  const original=backend.compiler.compile_ir_string('(defun first-error (x y) (+ (+ x y) (if x 1 2))) (export first-error)','first-error.eli');
  const a=instantiateManagedRuntime(Uint8Array.from(backend.managed.emit_managed_wasm(original,injected)));const text=a.sourceObject({}),n=a.number(2),frame=a.frame(1);a.frameSet(frame,0,n);

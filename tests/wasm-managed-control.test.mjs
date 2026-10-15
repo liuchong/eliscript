@@ -91,7 +91,7 @@ test('the checked entry roots earlier arguments across later getters and restore
 test('a true WASM runtime trap restores the caller frame and does not leak transient argument roots',async()=>{
  // Fault injection uses the original out-of-bounds address and real WASM trap;
  // it never substitutes a host-thrown error for cleanup acceptance.
- const original=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8'),start=original.indexOf('  (defun value-truth (heap value)'),end=original.indexOf('  (defun value-data',start);assert(start>=0&&end>start);
+ const original=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8'),start=original.indexOf('  (defun value-truth (heap value)'),end=original.indexOf('  (defun ',start+3);assert(start>=0&&end>start);
  const runtimeSource=original.slice(0,start)+'  (defun value-truth (heap value) (load-u32 4294967295))\n'+original.slice(end);
  const injected=backend.compiler.compile_ir_string(runtimeSource,'trap-runtime.eli');
  const ir=backend.compiler.compile_ir_string('(defun crash (x) (if x x nil)) (export crash)','trap.eli');

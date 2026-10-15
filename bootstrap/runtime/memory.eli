@@ -1979,6 +1979,39 @@
                               (if (= kind 4) value
                                 (if (= kind 5) (if (= (heap-string-check heap value) 0) 0 (heap-string-number heap value)) (fail 3))))))))
 
+  ;; Builtin function thunks use the ordinary argument-list ABI. Predicates do
+  ;; not coerce; global isFinite/isNaN deliberately use ToNumber first.
+  (defun heap-builtin-number-predicate (heap value operation)
+    (let* ((p (+ (heap-block heap value) 32)) (low (load-u32 p)) (high (load-u32 (+ p 4)))
+           (exponent (word-and (word-shr high 20) 2047)) (fraction (word-and high 1048575)))
+      (if (or (= operation 2) (= operation 9))
+        (if (and (= exponent 2047) (or (/= low 0) (/= fraction 0))) 1 0)
+        (if (= exponent 2047) 0
+          (if (or (= operation 1) (= operation 8)) 1
+            (if (and (= low 0) (= (word-and high 2147483647) 0)) 1
+              (if (or (< exponent 1023) (and (= operation 4) (>= exponent 1076))) 0
+                (if (>= exponent 1075) 1
+                  (let ((bits (- 1075 exponent)))
+                    (if (>= bits 32)
+                      (if (and (= low 0) (= (word-and fraction (1- (word-shl 1 (- bits 32)))) 0)) 1 0)
+                      (if (= (word-and low (1- (word-shl 1 bits))) 0) 1 0)))))))))))
+  (defun value-builtin-primitive (heap input count operation)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (or (> operation 9) (= (heap-reference-check heap input) 0)) (if (> operation 9) (fail 3) 0)
+        (if (= operation 0)
+          (if (= count 0) (value-number heap 0 0) (value-to-number heap input))
+          (if (= operation 6)
+            (if (= count 0) (value-string heap 0) (value-to-text heap input))
+            (if (= operation 7)
+              (let ((truth (value-js-truth heap input))) (if (= (last-error) 0) (if (= truth 1) 2 1) 0))
+              (if (= operation 5)
+                (if (and (> input 3) (= (load-u32 (heap-block heap input)) 14)) 2 1)
+                (let ((value input))
+                  (when (>= operation 8) (setq value (value-to-number heap value)))
+                  (if (/= (last-error) 0) 0
+                    (if (and (> value 3) (= (load-u32 (heap-block heap value)) 4))
+                      (if (= (heap-builtin-number-predicate heap value operation) 1) 2 1) 1))))))))))
+
   ;; Shortest decimal generation uses exact scaled integers and both rounding
   ;; boundaries. The lower boundary is asymmetric at normal powers of two.
   (defun heap-number-text (heap value)
@@ -3258,7 +3291,7 @@
     value-source-collection-get value-source-collection-put value-source-collection-has value-source-collection-own
     value-source-iterator-new value-source-iterator-advance value-source-iterator-next
     value-primitive-binary value-primitive-negate value-primitive-word value-primitive-bitwise value-primitive-compare
-    value-to-number value-to-text value-text-method-check value-text-get value-source-slice value-source-text-method value-source-text-concat value-source-text-codes
+    value-to-number value-to-text value-builtin-primitive value-text-method-check value-text-get value-source-slice value-source-text-method value-source-text-concat value-source-text-codes
     value-object-new value-object-get value-object-put value-object-has value-object-keys value-object-copy
     value-property-key-check value-property-get value-property-put value-object-length
     last-error retire buffer-new buffer-length buffer-reserve buffer-push buffer-get
