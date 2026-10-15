@@ -27,6 +27,30 @@ test('ordinary Number arithmetic, unary operations and relations exactly match J
   for(const y of numbers)for(const name of['add','subtract','multiply','divide','equal','distinct','not-equal','less','less-equal','greater','greater-equal','snapshot'])check(a,name,[x,y]);}
  check(a,'zero',[]);check(a,'one',[]);assert(a.stats().collections>1000);
 });
+test('Number increment and decrement allocate only their result and call frame, preserving every input bit',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);
+ for(const name of['increment','decrement'])for(const x of numbers){const input=a.number(x),before=a.stats().collections,out=a.invoke(name,[input]);assert(Object.is(a.readNumber(out),js[name](x)));assert(Object.is(a.readNumber(input),x));assert.equal(a.stats().collections-before,2,'one frame and one Number, without a boxed literal one');a.release(out);a.release(input);}
+ a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+});
+test('increment and decrement retain mixed primitive conversion and reject malformed raw inputs before allocating',()=>{
+ const a=instantiateManagedRuntime(bytes);a.auto(1);
+ for(const value of[undefined,null,false,true,'',' ','x','-0','0x10','中\ud800'])for(const name of['increment','decrement'])check(a,name,[value]);
+ const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports,h=e['heap-new'](32,8192,8192),input=numberFromWords(-0),frame=e['frame-new'](h,1);
+ function numberFromWords(x){const v=new DataView(new ArrayBuffer(8));v.setFloat64(0,x,true);return e['value-number'](h,v.getUint32(0,true),v.getUint32(4,true));}
+ e['frame-set'](h,frame,0,input);const before=e['heap-live'](h);
+ for(const [value,mode,error]of[[0xffffffff,0,1],[frame,0,3],[input,2,3]]){assert.equal(e['value-primitive-step'](h,value,mode),0);assert.equal(e['last-error'](),error);assert.equal(e['frame-depth'](h),1);assert.equal(e['heap-live'](h),before);}
+ const p=e['value-data'](h,input,4);assert(Object.is(new DataView(e.memory.buffer).getFloat64(p,true),-0));e['frame-pop'](h,frame);e['heap-collect'](h);assert.equal(e['heap-live'](h),0);
+});
+test('Number steps retain borrowed operands across capacity failure and pool relocation, then recover without a literal allocation',()=>{
+ const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;
+ const rawNumber=(h,x)=>{const v=new DataView(new ArrayBuffer(8));v.setFloat64(0,x,true);return e['value-number'](h,v.getUint32(0,true),v.getUint32(4,true));};
+ const read=(h,v)=>new DataView(e.memory.buffer).getFloat64(e['value-data'](h,v,4),true);
+ const h=e['heap-new'](2,384,384),input=rawNumber(h,-0),held=rawNumber(h,9);e['heap-pin'](h,input);e['heap-pin'](h,held);e['heap-auto'](h,1);
+ for(const mode of[0,1]){assert.equal(e['value-primitive-step'](h,input,mode),0);assert.equal(e['last-error'](),2);assert(Object.is(read(h,input),-0));assert.equal(e['frame-depth'](h),0);}
+ e['heap-release'](h,held);e['heap-collect'](h);const result=e['value-primitive-step'](h,input,0);assert.equal(e['last-error'](),0);assert.equal(read(h,result),1);assert(Object.is(read(h,input),-0));e['heap-release'](h,input);e['heap-collect'](h);assert.equal(e['heap-live'](h),0);
+ const grown=e['heap-new'](16,512,65536),value=rawNumber(grown,Number.MIN_VALUE);e['heap-pin'](grown,value);const initial=e['heap-capacity'](grown),padding=e['value-bytes'](grown,initial-e['heap-used'](grown)-32);assert(padding);e['heap-pin'](grown,padding);e['heap-auto'](grown,1);
+ const out=e['value-primitive-step'](grown,value,1);assert.equal(e['last-error'](),0);assert(e['heap-capacity'](grown)>initial);assert(Object.is(read(grown,out),Number.MIN_VALUE-1));assert.equal(read(grown,value),Number.MIN_VALUE);e['heap-release'](grown,value);e['heap-release'](grown,padding);e['heap-collect'](grown);assert.equal(e['heap-live'](grown),0);
+});
 test('variadic arithmetic keeps left association and comparisons capture every argument before comparing',()=>{
  const a=instantiateManagedRuntime(bytes);a.auto(1);
  const triples=[[1,1e16,-1e16],[1e16,-1e16,1],[Number.MAX_VALUE,2,.5],[-0,0,-0],[NaN,1,2],[1,NaN,2],[1,1,2],[1,2,1],[3,2,1],[0,1,1],[Infinity,-Infinity,Number.MIN_VALUE]];

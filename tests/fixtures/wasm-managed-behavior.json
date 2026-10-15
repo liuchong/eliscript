@@ -468,6 +468,231 @@
           ]
         }
       ]
+    },
+    {
+      "name": "Integer rounding",
+      "description": "Math round floor ceil and trunc retain exact IEEE boundaries, signed zero and ordinary number conversion in collecting zero-import WASM.",
+      "scenarios": [
+        {
+          "id": "math-round-half-and-zero",
+          "given": "values immediately below and at one half and a negative half",
+          "when": "Math.round chooses the nearest integer",
+          "then": "ties go toward positive infinity and a negative result of zero retains its sign",
+          "source": "(defun run () (js-array (Math/round 0.49999999999999994) (Math/round 0.5) (Math/round -1.5) (= (/ 1 (Math/round -0.5)) (- (/ 1 0)))))",
+          "expected": [
+            0,
+            1,
+            -1,
+            true
+          ]
+        },
+        {
+          "id": "math-floor-ceil-trunc",
+          "given": "negative fractional values and the smallest negative subnormal",
+          "when": "floor ceil and trunc apply their distinct integer directions",
+          "then": "the exact integers and the negative zero from ceil are retained",
+          "source": "(defun run () (js-array (Math/floor -1.5) (Math/ceil -1.5) (Math/trunc -1.5) (= (/ 1 (Math/ceil -5e-324)) (- (/ 1 0)))))",
+          "expected": [
+            -2,
+            -1,
+            -1,
+            true
+          ]
+        },
+        {
+          "id": "math-number-hint-after-arguments",
+          "given": "extra argument effects and an object whose valueOf returns another object",
+          "when": "Math.round converts the first argument",
+          "then": "all arguments finish before valueOf then toString run once in number-hint order",
+          "source": "(defun run () (let ((trace (js-object :events \"\"))) (let ((value (js-call globalThis.Math :round (js-object :valueOf (lambda () (put trace :events (str (get trace :events) \"v\")) (js-object)) :toString (lambda () (put trace :events (str (get trace :events) \"s\")) \"-1.5\")) (put trace :events \"e\")))) (str value \":\" (get trace :events)))))",
+          "expected": "-1:evs"
+        },
+        {
+          "id": "math-conversion-error-recovery",
+          "given": "an object whose numeric conversion callbacks both return objects",
+          "when": "Math.ceil cannot obtain a primitive number",
+          "then": "conversion fails without leaked frames and a later round call succeeds",
+          "source": "(defun run () (Math/ceil (js-object :valueOf (lambda () (js-object)) :toString (lambda () (js-object))))) (defun recover () (Math/round 1.5))",
+          "runtimeError": "ELI-RT0003",
+          "jsError": "TypeError",
+          "recover": 2
+        }
+      ]
+    },
+    {
+      "name": "Live collection callbacks",
+      "description": "Map and Set forEach execute source closures with live mutation, exact arguments and recovery entirely inside collecting zero-import WASM",
+      "scenarios": [
+        {
+          "id": "map-for-each-live-clear",
+          "given": "a two-entry Map and a callback clearing it during its first visit",
+          "when": "the callback appends a new entry after clearing",
+          "then": "the removed entry is skipped and the appended entry is visited with the same receiver",
+          "source": "(defun run () (let ((items (new globalThis.Map (js-array (js-array 1 \"a\") (js-array 2 \"b\")))) (log (js-array)) (first t)) (js-call items :forEach (lambda (value key receiver) (js-call log :push (js-array value key (eq items receiver))) (when first (setq first false) (js-call items :clear) (js-call items :set 3 \"c\")))) log))",
+          "expected": [
+            [
+              "a",
+              1,
+              true
+            ],
+            [
+              "c",
+              3,
+              true
+            ]
+          ]
+        },
+        {
+          "id": "set-for-each-reinsert",
+          "given": "a Set and a callback deleting then reinserting the first visited value",
+          "when": "forEach follows the live insertion order",
+          "then": "each callback receives value value Set and the reinserted value is revisited at the end",
+          "source": "(defun run () (let ((items (new globalThis.Set (js-array 1 2))) (log (js-array)) (first t)) (js-call items :forEach (lambda (value key receiver) (js-call log :push (js-array value key (eq items receiver))) (when first (setq first false) (js-call items :delete value) (js-call items :add value)))) log))",
+          "expected": [
+            [
+              1,
+              1,
+              true
+            ],
+            [
+              2,
+              2,
+              true
+            ],
+            [
+              1,
+              1,
+              true
+            ]
+          ]
+        },
+        {
+          "id": "collection-for-each-empty-error",
+          "given": "an empty Map and a noncallable callback",
+          "when": "forEach validates its callback",
+          "then": "validation fails even without entries and a later Set callback succeeds",
+          "source": "(defun run () (js-call (new globalThis.Map) :forEach false)) (defun recover () (let ((log (js-array))) (js-call (new globalThis.Set (js-array 7)) :forEach (lambda (value key receiver) (js-call log :push (js-array value key)))) log))",
+          "runtimeError": "ELI-RT0003",
+          "jsError": "TypeError",
+          "recover": [
+            [
+              7,
+              7
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Sequence concatenation",
+      "description": "Array shallow copying and String concatenation preserve sparse ownership, identity, captured methods and ordered conversions inside collecting zero-import WASM",
+      "scenarios": [
+        {
+          "id": "concat-sparse-shallow-copy",
+          "given": "a sparse array containing an owned undefined and a shared nested array",
+          "when": "concat copies it twice and the nested array is changed afterwards",
+          "then": "the output is distinct, holes remain absent, undefined remains owned and nested references remain shared",
+          "source": "(defun run () (let ((items (js-array)) (inner (js-array 1))) (put items :length 4) (put items 1 undefined) (put items 3 inner) (let ((out (js-call items :concat items \"tail\"))) (put inner 0 7) (js-array (eq items out) (js-length out) (object-has? out 0) (object-has? out 1) (eq (js-nth 3 out) (js-nth 7 out)) (js-nth 3 out) (js-nth 8 out)))))",
+          "expected": [
+            false,
+            9,
+            false,
+            true,
+            true,
+            [
+              7
+            ],
+            "tail"
+          ]
+        },
+        {
+          "id": "concat-ordered-string-conversions",
+          "given": "two objects with text conversion hooks and an argument with effects",
+          "when": "String.concat evaluates all operands and converts them",
+          "then": "argument effects finish before left-to-right conversion hooks",
+          "source": "(defun run () (let* ((log (js-array)) (first (js-object :toString (lambda () (js-call log :push \"first\") \"1\"))) (second (js-object :toString (lambda () (js-call log :push \"second\") \"2\")))) (js-array (js-call \"a\" :concat first (progn (js-call log :push \"argument\") second)) log)))",
+          "expected": [
+            "a12",
+            [
+              "argument",
+              "first",
+              "second"
+            ]
+          ]
+        },
+        {
+          "id": "concat-own-method-capture",
+          "given": "an own concat method that is replaced during argument evaluation",
+          "when": "the call finishes evaluating two arguments",
+          "then": "the original captured function receives both values exactly once",
+          "source": "(defun run () (let ((items (js-array)) (log (js-array))) (put items :concat (lambda (&rest values) (js-call log :push \"captured\") values)) (js-array (js-call items :concat (progn (put items :concat false) 1) (progn (js-call log :push \"argument\") 2)) log)))",
+          "expected": [
+            [
+              1,
+              2
+            ],
+            [
+              "argument",
+              "captured"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Value identity",
+      "description": "Object.is and Array.isArray preserve exact source value identity and ordinary evaluation without imports or coercion.",
+      "scenarios": [
+        {
+          "id": "same-value-ieee",
+          "given": "NaN, signed zeros and infinities",
+          "when": "Object.is compares values directly and through an alias",
+          "then": "NaNs compare equal while opposite signed zeros differ",
+          "source": "(defun run () (let ((same (js* \"Object.is\"))) (js-array (Object/is (/ 0 0) (/ 0 0)) (Object/is -0.0 0) (funcall same -0.0 -0.0) (Object/is (/ 1 0) (/ 1 0)))))",
+          "expected": [
+            true,
+            false,
+            true,
+            true
+          ]
+        },
+        {
+          "id": "same-value-object-identity",
+          "given": "objects, arrays and primitive strings with identical contents",
+          "when": "Object.is compares shared and distinct values",
+          "then": "objects retain identity and strings compare by exact UTF-16 contents",
+          "source": "(defun run () (let ((a (js-object)) (b (js-object))) (js-array (Object/is a a) (Object/is a b) (Object/is (js-array) (js-array)) (Object/is \"中😀\" \"中😀\") (Object/is 1 \"1\"))))",
+          "expected": [
+            true,
+            false,
+            false,
+            true,
+            false
+          ]
+        },
+        {
+          "id": "same-value-missing-effects",
+          "given": "missing arguments and side effects in ignored arguments",
+          "when": "identity predicates are called",
+          "then": "undefined defaults match and every argument runs once",
+          "source": "(defun run () (let ((trace (js-object :n 0))) (js-array (Object/is) (Object/is 1) (Object/is 1 1 (put trace :n 7)) (Array/isArray (js-array) (put trace :n 9)) (get trace :n))))",
+          "expected": [
+            true,
+            false,
+            true,
+            true,
+            9
+          ]
+        },
+        {
+          "id": "same-value-lexical-method",
+          "given": "a lexical Object binding with its own is method",
+          "when": "an argument changes that method",
+          "then": "the captured method receives all arguments",
+          "source": "(defun run () (let ((Object (js-object :is (lambda (&rest args) (js-length args))))) (js-call Object :is 1 2 (put Object :is false))))",
+          "expected": 3
+        }
+      ]
     }
   ]
 }

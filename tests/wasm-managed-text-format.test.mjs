@@ -201,7 +201,10 @@ test('Given raw runtime configuration, when heaps exist or unsupported versions 
 
 test('Given a legacy WASM ABI without case configuration, when host case probing is unavailable, then existing numeric execution still works', async () => {
   const source = await readFile('bootstrap/runtime/memory.eli', 'utf8'), start = source.indexOf('  (defun runtime-case-version '), end = source.indexOf('  (defun last-error ', start);assert(start >= 0 && end > start);
-  const legacy = b.compiler.compile_ir_string((source.slice(0, start) + source.slice(end)).replace('    runtime-case-version record-new', '    record-new'), 'legacy-runtime.eli');
+  const withoutDefinition = source.slice(0, start) + source.slice(end);
+  const legacySource = withoutDefinition.replace(/\bruntime-case-version(?=\s+record-new\b)/u, '');
+  assert.notEqual(legacySource, withoutDefinition, 'remove the legacy export independently of adjacent new exports');
+  const legacy = b.compiler.compile_ir_string(legacySource, 'legacy-runtime.eli');
   const program = b.compiler.compile_ir_string('(defun f () 7) (export f)', 'legacy.eli'), bytes = Uint8Array.from(b.managed.emit_managed_wasm(program, legacy));assert.equal(WebAssembly.Module.exports(new WebAssembly.Module(bytes)).some(e => e.name === 'runtime-case-version'), false);
   const file = resolve(directory, 'legacy-case.wasm');await writeFile(file, bytes);
   const script = `import assert from'node:assert/strict';import{readFileSync}from'node:fs';const{instantiateManagedRuntime}=await import(process.argv[1]),{hostUnicodeCaseVersion}=await import(process.argv[2]);String.prototype.toUpperCase=()=>{throw Error('injected unavailable case data')};assert.throws(()=>hostUnicodeCaseVersion(),/injected unavailable case data/);const a=instantiateManagedRuntime(readFileSync(process.argv[3])),out=a.invoke('f');assert.equal(a.unicodeVersion,17);assert.equal(a.readNumber(out),7);a.release(out);a.collect();assert.equal(a.live(),0);assert.throws(()=>instantiateManagedRuntime(readFileSync(process.argv[3]),{unicodeVersion:16}),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');`;

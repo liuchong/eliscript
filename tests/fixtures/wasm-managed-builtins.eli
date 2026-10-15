@@ -23,7 +23,18 @@
   (defun invoke-one (f x) (funcall f x))
   (defun number-map (values) (js-call values :map number-value))
   (defun finite-map (values) (js-call values :map finite-value))
+  (defun math-round-call (x) (Math/round x))
+  (defun math-floor-call (x) (js-call globalThis.Math :floor x))
+  (defun math-ceil-call (x) (funcall (js* "Math.ceil") x))
+  (defun math-trunc-call (x) (let ((f Math/trunc)) (funcall f x)))
+  (defun math-empty () (Math/round))
+  (defun same-round () (eq (js* "Math.round") (get (js* "Math") :round)))
+  (defun object-same (x y) (Object/is x y))
+  (defun object-same-alias (x y) (let ((f (js* "globalThis.Object.is"))) (funcall f x y)))
+  (defun object-same-empty () (Object/is))
+  (defun same-object-is () (eq Object/is (get (js* "Object") :is)))
   (export number-value finite-value number-call number-empty number-apply number-extra
     string-call string-empty boolean-call boolean-empty finite-call nan-call integer-call
     safe-call array-call coercive-finite coercive-nan same-number same-finite held-number
-    invoke-one number-map finite-map))
+    invoke-one number-map finite-map math-round-call math-floor-call math-ceil-call
+    math-trunc-call math-empty same-round object-same object-same-alias object-same-empty same-object-is))

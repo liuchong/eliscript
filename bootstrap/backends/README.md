@@ -60,6 +60,10 @@ oversized calls stay intact. Assignment values remain available when used.
   `2^31 - 1`, with f64 fallback; fractional limits use `ceil` once;
 - proven cyclic integer locals, power-of-two wrap masks, zero/one-iteration
   loop versions and four-iteration unrolling with an untouched remainder;
+- WASM-only counted compound guards: a proven nonnegative integer range admits
+  four complete steps with one counter check, while every floating escape test
+  stays at its original position; the final zero to three steps retain the
+  complete original condition;
 - pure lexical-initializer hoisting and loop-square reuse with dependency
   invalidation; writes, branches and calls conservatively end availability;
 - two-lane scheduling of independent scalar call loops. Arguments and caller
@@ -133,8 +137,9 @@ The retained 2026-10-14 report passes all nine frozen numeric hot-execution
 pairs. Confirmation used identical JS/WASM artifact hashes. The generated JS
 control is unchanged from the previous failed report. The WASM module grows
 from 789 to 5517 bytes because guarded versions and unrolled code retain their
-fallbacks. The compound-guard expansion preserves a full guard check after
-every complete iteration. This closes this numeric performance gate only; download, cold
+fallbacks. Subsequent counted-guard emission retains each floating guard and
+uses the original loop for the remainder. The retained report records the actual
+current artifact size and hash. This closes this numeric performance gate only; download, cold
 startup, compiler throughput, memory and full-language/backend acceptance stay
 open. The full backend remains experimental.
 
@@ -378,9 +383,9 @@ Generated JS uses a shared primitive helper for nondecimal Number conversion:
 it parses valid radix integers exactly before converting to binary64, avoiding
 host differences in direct Number(string) conversion. Modules with neither
 numeric conversion nor dynamic numeric operators receive no helper. Seed and self-hosted emitters retain the
-same bytes and source marks. Object/Symbol/BigInt coercion in the managed
-profile, complete ToPrimitive and full compiler hosts
-remain open and explicitly refused; these primitive slices do not close them.
+same bytes and source marks. Represented ordinary-object conversion hooks run
+through the source call ABI. Symbol/BigInt coercion, complete JS interoperability
+and full compiler hosts remain open; these slices do not close them.
 
 ## Primitive source operators and typed JS
 
@@ -418,7 +423,7 @@ Backend fixture preparation compiles all frontend modules in one Emacs seed
 process with the same normal file compiler. Independent CLI comparisons verify
 all JS and source-map bytes; no compiler module, generation or test is omitted.
 This reduces repeated startup work within the original CI budget. Complete
-compiler hosts, managed Object/Symbol/BigInt coercion, production acceptance and
+compiler hosts, managed Symbol/BigInt coercion, production acceptance and
 the full nine-cell bootstrap matrix remain open.
 
 ## Source-array properties and sparse slots
@@ -445,7 +450,7 @@ Bulk source-array bridging snapshots enumerable own string-keyed properties,
 retains holes at other indices, protects earlier getter values and ignores the
 input's iterator override.
 Own proto data is copied as data; changing Array prototypes, general descriptors,
-Symbol/BigInt keys and object ToPrimitive remain explicitly unsupported.
+Symbol/BigInt keys and arbitrary host-object coercion remain explicitly unsupported.
 
 ## Source Map, Set and live iterators
 
@@ -464,12 +469,47 @@ does not change the captured builtin. Simple parameter-only get/has leaves use
 no private frame, allocation or GC.
 
 Table iteration stays live across insertion, deletion, clear and storage growth.
+Map and Set `forEach` use those same live tickets, with `(value, key, map)` and
+`(value, value, set)` callback arguments. They validate the callback even for an
+empty table, preserve captured own methods and argument effects, and unwind
+private roots on capacity failures or real WASM traps. Mutation does not create
+a snapshot or substitute a host-side loop.
 Array iterators observe current length and return undefined for holes; String
 iteration consumes code points and preserves lone surrogates. Each next call
 returns a fresh value/done object. Completion is sticky and releases its source.
 GC traces wrappers, named data, active iterators and their current values.
 
-Arbitrary constructors, callbacks, function values, Symbol protocols, descriptors,
+Arbitrary constructors, other builtin method values, Symbol protocols, descriptors,
 prototype changes and other collection APIs remain unsupported. Missing members
 return undefined; known unsupported builtin function values are refused. These
 zero-import WASM slices do not complete either compiler host or the full matrix.
+
+## Exact integer rounding
+
+Unshadowed `Math.round`, `floor`, `ceil` and `trunc` are first-class managed
+builtins. They evaluate all arguments before ordinary Number conversion, retain
+lexical shadows and conversion callback order, and handle missing arguments.
+Their binary64 implementation preserves NaN, infinities, signed zero and
+subnormals. `round` resolves negative half ties toward positive infinity without
+adding 0.5 before rounding. Neither these functions nor source Number `1+`/`1-`
+call a host math service. Number steps allocate the result directly and retain
+the original mixed-value conversion path.
+
+## Source sequence concatenation
+
+Array and String `concat` capture their selected method before evaluating every
+argument. Array results are fresh shallow copies: arrays spread one level,
+other values remain single entries, and holes stay distinct from own undefined.
+Array constructor validation follows argument effects and precedes copying.
+String arguments use ordinary text conversion in order, including source
+conversion callbacks and lone UTF-16 surrogates. Own methods retain their
+original callable and extra argument effects. Private roots protect arguments,
+partial results and caller frames through collection, capacity failure and
+actual WASM traps; no host copying or conversion implementation is required.
+
+`Object.is` is a first-class builtin with SameValue semantics: NaN equals NaN,
+positive and negative zero differ, and objects retain reference identity.
+The existing `Array.isArray` continues to recognize source arrays only, keeping
+private reference arrays and records separate. Aliases, missing arguments,
+ignored extra arguments and lexical namespace shadows preserve normal call
+semantics; neither predicate performs coercion.

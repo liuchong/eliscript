@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, test } from "bun:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, writeFile, mkdir } from "node:fs/promises";
 import { execFile, spawnSync } from "node:child_process";
 import { promisify } from "node:util";
@@ -640,6 +641,23 @@ test("compound loop expansion preserves each guard, effect and exact IEEE result
   }
 });
 
+test("WASM counted compound chunks remove redundant counter guards while retaining exact IEEE exits", async () => {
+ const source=`(defun counted (n x) (let ((i 0) (sum 0)) (while (and (< i n) (< (* x x) 100)) (setq sum (+ sum x)) (setq x (+ (* x 1.25) 0.1)) (setq i (1+ i))) (+ sum i)))
+ (defun effectful (n) (let ((i 0) (checks 0)) (while (and (< i n) (< (setq checks (1+ checks)) 9)) (setq i (1+ i))) (+ (* checks 10) i)))
+ (defun changed (n) (let ((i 0) (x 0)) (while (and (< i n) (< i 9)) (setq n (1- n)) (setq i (1+ i))) i)) (export counted effectful changed)`;
+ const {compiler,numeric,wasm}=generations[2],original=numeric.lower_numeric_program(compiler.compile_ir_string(source,'counted-compound.eli')),saved=JSON.stringify(original),oracle=await javascript(source),nodes=function*(n){yield n;for(const c of n.children)yield*nodes(c);};
+ const optimized=numeric.optimize_numeric_program(original,{countedGuards:true});assert.equal(JSON.stringify(original),saved);assert([...nodes(optimized.functions[0].body)].some(n=>n.kind==='guarded-counter-while'),'a proven loop must use one counter guard per four complete steps');
+ for(const name of['effectful','changed'])assert(![...nodes(optimized.functions.find(f=>f.name===name).body)].some(n=>n.kind==='guarded-counter-while'),name+' keeps its original guards');
+ const bytes=Uint8Array.from(wasm.emit_typed_numeric_wasm(optimized)),e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports;assert(WebAssembly.validate(bytes));
+ let state=0x3972ad51;const inputs=[-Infinity,-1,-0,0,Number.MIN_VALUE,.5,1,1.1,2,3,3.1,4,4.1,5,7,8,8.1,9,15,31,2147483647,2147483647.5,Infinity,NaN];
+ for(let k=0;k<128;k++){state=(Math.imul(state,1664525)+1013904223)>>>0;inputs.push((state%500)/13);}
+ for(const n of inputs){for(const x of[-Infinity,-10,-1,-0,0,Number.MIN_VALUE,Math.PI/10,.123,1,9,10,Infinity,NaN])sameNumber(e.counted(n,x),oracle.module.counted(n,x),`counted/${n}/${x}`);for(const name of['effectful','changed'])sameNumber(e[name](n),oracle.module[name](n),name+'/'+n);}
+ const untouched=numeric.optimize_numeric_program(original,{countedGuards:false});assert(![...nodes(untouched.functions[0].body)].some(n=>n.kind==='guarded-counter-while'));
+ const artifacts=generations.map(g=>Uint8Array.from(g.wasm.emit_numeric_wasm(g.compiler.compile_ir_string(source,'counted-compound.eli'))));assert.deepEqual(artifacts[0],artifacts[1]);assert.deepEqual(artifacts[1],artifacts[2]);
+ const unproven=structuredClone(untouched);for(const f of unproven.functions)for(const l of f.locals)delete l.boundedInteger;const conservative=numeric.optimize_numeric_program(unproven,{inlining:false,loops:false,integers:false,countedGuards:true});assert(![...nodes(conservative.functions[0].body)].some(n=>n.kind==='guarded-counter-while'),'an i32 local alone is not a nonnegative range proof');
+ const check=spawnSync(process.env.NODE??'node',['--input-type=module','-e','const m=await import(process.argv[1]);const w=new WebAssembly.Instance(new WebAssembly.Module(Buffer.from(process.argv[2],"base64"))).exports;for(const n of[-Infinity,-0,0,.5,1,3,3.1,4,4.1,7,8,8.1,15,31,2147483647,2147483647.5,Infinity,NaN])for(const x of[-Infinity,-1,-0,0,Number.MIN_VALUE,.123,1,9,10,Infinity,NaN])if(!Object.is(w.counted(n,x),m.counted(n,x)))throw Error(n+"/"+x);',pathToFileURL(oracle.path).href,Buffer.from(artifacts[2]).toString('base64')],{encoding:'utf8',timeout:30000});assert.equal(check.status,0,check.stderr);
+});
+
 test("direct WASM rejects unsupported dynamic capabilities before optimization", () => {
   assert.throws(() => generations[2].numeric.optimize_numeric_program({ abi: "unknown" }),
     error => error.eliscriptDiagnostic.code === "ELI-B0001");
@@ -687,7 +705,31 @@ test("direct WASM performance report preserves budgets and blocks failed promoti
   const collectionFirst = JSON.parse(await readFile(resolve(root, "tools/backends/results/direct-wasm-source-collections-first-macos-arm64.json"), "utf8"));
   await validateDirectWasmReport(collectionFirst, { verifySources: false });
   assert.equal(collectionFirst.decision.productionPassed, false);
-  assert.deepEqual(collectionFirst.artifacts, report.artifacts);
+  // Historical failures bind the artifact actually measured at that time.
+  // An optimizer change must retain that evidence and verify fresh emission,
+  // rather than rewriting old hashes or requiring old and new WASM to match.
+  assert.deepEqual(collectionFirst.artifacts, {
+    javascriptSha256: "399d92b0226bc62963bae146e3546a24879d2e4233e280d89d359b479f0ee8c8",
+    wasmSha256: "9e3f41bc43dd60b1f98accac4e4d227868f3804350c0d9b79c12f750bcb8d5fd",
+    wasmBytes: 5496, wasmImports: 0, externalBackend: false,
+  });
+  const source = await readFile(resolve(root, "tools/experiments/native-wasm/kernels.eli"), "utf8") + "\n" +
+    await readFile(resolve(root, "tools/backends/batches.eli"), "utf8");
+  const input = generations[0].compiler.compile_ir_string(source, "direct-batches.eli");
+  const javascript = generations[0].numeric.emit_numeric_javascript(input);
+  const wasm = Uint8Array.from(generations[0].wasm.emit_numeric_wasm(input));
+  const digest = value => createHash("sha256").update(value).digest("hex");
+  assert.deepEqual(report.artifacts, {
+    javascriptSha256: digest(javascript), wasmSha256: digest(wasm), wasmBytes: wasm.length,
+    wasmImports: WebAssembly.Module.imports(new WebAssembly.Module(wasm)).length, externalBackend: false,
+  });
+  assert.equal(report.artifacts.javascriptSha256, collectionFirst.artifacts.javascriptSha256);
+  const sortFirst = JSON.parse(await readFile(resolve(root, "tools/backends/results/direct-wasm-array-sort-first-macos-arm64.json"), "utf8"));
+  await validateDirectWasmReport(sortFirst, { verifySources: false });
+  assert.equal(sortFirst.decision.productionPassed, false);
+  assert.deepEqual(sortFirst.artifacts, collectionFirst.artifacts);
+  const forgedSort = structuredClone(sortFirst); forgedSort.decision.productionPassed = true;
+  await assert.rejects(validateDirectWasmReport(forgedSort, { verifySources: false }));
   const forgedCollection = structuredClone(collectionFirst);
   forgedCollection.decision.productionPassed = true;
   await assert.rejects(validateDirectWasmReport(forgedCollection, { verifySources: false }));
@@ -877,11 +919,17 @@ test("RegExp literals preserve public Seed and three-generation programs, typed 
 });
 test("ordinary source collections have Seed and three-generation IR, descriptor and WASM fixed points",async()=>{
  const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-source-collections.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
+ const seed=await seedJavascript(resolve(root,'tests/fixtures/wasm-managed-source-collections.eli'),resolve(directory,'source-collections-seed.mjs'));
  const programs=generations.map(g=>g.compiler.compile_ir_string(source,'source-collections.eli')),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtime,'runtime.eli'));
+ for(let i=0;i<3;i++)assert.equal(generations[i].compiler.emit_ir_string(programs[i]),seed);
  const lowered=generations.map((g,i)=>g.managed.lower_managed_program(programs[i],runtimes[i]));assert.deepEqual(programs[0],programs[1]);assert.deepEqual(programs[1],programs[2]);assert.deepEqual(lowered[0],lowered[1]);assert.deepEqual(lowered[1],lowered[2]);
  const bytes=generations.map((g,i)=>g.managed.emit_managed_wasm(programs[i],runtimes[i],{maximumPages:16}));assert.deepEqual(bytes[0],bytes[1]);assert.deepEqual(bytes[1],bytes[2]);
  const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
- for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const n=a.number(64),map=a.invoke('map-loop',[n]),size=a.invoke('size',[map]);assert.equal(a.readNumber(size),64);a.release(size);const it=a.invoke('entries',[map]),step=a.invoke('next',[it]),key=a.string('value'),pair=a.objectGet(step,key),first=a.get(pair,0);assert.equal(a.readNumber(first),0);for(const x of[first,pair,key,step,it,map,n])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
+ const reference=await import('data:text/javascript;base64,'+Buffer.from(seed).toString('base64'));
+ for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const n=a.number(64),map=a.invoke('map-loop',[n]),size=a.invoke('size',[map]);assert.equal(a.readNumber(size),64);a.release(size);const it=a.invoke('entries',[map]),step=a.invoke('next',[it]),key=a.string('value'),pair=a.objectGet(step,key),first=a.get(pair,0);assert.equal(a.readNumber(first),0);
+  const read=x=>{if(x===null||typeof x!=='object')return x;if(x.kind===4)return a.readNumber(x);if(x.kind===5)return a.readString(x);return Array.from({length:a.length(x)},(_,i)=>{const child=a.get(x,i);try{return read(child)}finally{a.release(child)}})};
+  for(const set of[false,true])for(const mode of[0,1,2,3]){const argument=a.number(mode),out=a.invoke('for-each-mutate',[set,argument]);assert.deepEqual(read(out),reference.for_each_mutate(set,mode));a.release(argument);a.release(out);}
+  for(const x of[first,pair,key,step,it,map,n])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
 });
 test("first-class builtins retain public Seed and three-generation IR, descriptors, table slots and executable bytes", async () => {
   const {source, javascript: seed, filename} = runtimeSeeds.builtins;
@@ -897,6 +945,10 @@ test("first-class builtins retain public Seed and three-generation IR, descripto
     const text = a.string('-0'), out = a.invoke('number-call', [text]); assert(Object.is(a.readNumber(out), -0));
     const unsafe = a.number(2 ** 53); assert.equal(a.invoke('integer-call', [unsafe]), true); assert.equal(a.invoke('safe-call', [unsafe]), false);
     assert.equal(a.invoke('same-number'), true); assert.equal(a.invoke('same-finite'), true);
+    assert.equal(a.invoke('same-object-is'), true);assert.equal(a.invoke('object-same-empty'), true);
+    for(const [x,y] of [[NaN,NaN],[-0,0],[0,0],[-0,-0],[1,1],[1,'1'],['中😀','中😀'],[null,undefined]]){const left=typeof x==='number'?a.number(x):typeof x==='string'?a.string(x):x,right=typeof y==='number'?a.number(y):typeof y==='string'?a.string(y):y;for(const name of ['object-same','object-same-alias'])assert.equal(a.invoke(name,[left,right]),Object.is(x,y));a.release(left);a.release(right);}
+    assert.equal(a.invoke('same-round'), true);const empty=a.invoke('math-empty');assert(Number.isNaN(a.readNumber(empty)));a.release(empty);
+    for(const value of[-Infinity,-0,0,Number.MIN_VALUE,-Number.MIN_VALUE,.49999999999999994,.5,-.5,.5000000000000001,-.5000000000000001,1.5,-1.5,2**20-.5,2**32-.5,2**52-.5,-(2**52)+.5,2**53,Infinity,NaN]){const input=a.number(value);for(const method of['round','floor','ceil','trunc']){const out=a.invoke('math-'+method+'-call',[input]);assert(Object.is(a.readNumber(out),Math[method](value)),method+':'+value);a.release(out);}a.release(input);}
     for (const x of [text, out, unsafe]) a.release(x); a.closeModule(); a.collect(); assert.equal(a.live(), 0); assert.equal(a.stats().frameDepth, 0);
   }
 });
@@ -1016,6 +1068,7 @@ test("array callback families retain Seed and three-generation IR, descriptors a
   const copy=a.invoke('sort-copy',[input]);assert(!a.keyEqual(copy,input));assert.deepEqual(read(copy),reference.sort_copy(referenceInput));assert.deepEqual(read(input),referenceInput);
   const sorted=a.invoke('sort-default',[input]);assert(a.keyEqual(sorted,input));assert.equal(reference.sort_default(referenceInput),referenceInput);assert.deepEqual(read(sorted),referenceInput);
   const stable=a.invoke('sort-stable');assert.deepEqual(read(stable),reference.sort_stable());
+  const concatenated=a.invoke('concat-summary');assert.deepEqual(read(concatenated),reference.concat_summary());a.release(concatenated);
   const numbers=[a.number(-0),a.number(0),a.number(Number.MIN_VALUE),a.number(-1),a.number(3)],numeric=a.sourceArray(numbers),numericOut=a.invoke('sort-numeric',[numeric,false]);assert(a.keyEqual(numericOut,numeric));assert.deepEqual(read(numericOut),reference.sort_numeric([-0,0,Number.MIN_VALUE,-1,3],false));
   const mutationValues=[a.number(3),a.number(1),a.number(2)],mutationInput=a.sourceArray(mutationValues),mutationRef=[3,1,2],mutationOut=a.invoke('sort-copy-mutation',[mutationInput]);assert.deepEqual(read(mutationOut),reference.sort_copy_mutation(mutationRef));assert.deepEqual(read(mutationInput),mutationRef);
   for(const x of[...sparse,input,copy,sorted,stable,...numbers,numeric,numericOut,...mutationValues,mutationInput,mutationOut])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
@@ -1715,7 +1768,13 @@ describe("browser compiler backends", () => {
           }
           a.release(value); a.collect();
         }
-        check(a.invoke('same-number') === true && a.invoke('same-finite') === true, 'identity');
+        check(a.invoke('same-number') === true && a.invoke('same-finite') === true && a.invoke('same-round') === true, 'identity');
+        check(a.invoke('same-object-is')===true&&a.invoke('object-same-empty')===true,'Object.is identity/missing');
+        for(const [x,y] of [[NaN,NaN],[-0,0],[0,0],[-0,-0],[1,1],[1,'1'],['中😀','中😀'],[null,undefined]]){const left=typeof x==='number'?a.number(x):typeof x==='string'?a.string(x):x,right=typeof y==='number'?a.number(y):typeof y==='string'?a.string(y):y;for(const name of ['object-same','object-same-alias'])check(a.invoke(name,[left,right])===Object.is(x,y),name);a.release(left);a.release(right);}
+        const missing=a.invoke('math-empty');check(Number.isNaN(a.readNumber(missing)),'missing Math argument');a.release(missing);
+        const words=new DataView(new ArrayBuffer(8));let state=0x782b1a37;const mathInputs=[-Infinity,-0,0,Number.MIN_VALUE,-Number.MIN_VALUE,.49999999999999994,.5,-.5,.5000000000000001,-.5000000000000001,1.5,-1.5,2**20-.5,2**32-.5,2**52-.5,-(2**52)+.5,2**53,Infinity,NaN];
+        for(let i=0;i<256;i++){state=(Math.imul(state,1664525)+1013904223)>>>0;words.setUint32(0,state,true);state=(Math.imul(state,1664525)+1013904223)>>>0;words.setUint32(4,((state&0x800fffff)|((1022+i%54)<<20))>>>0,true);mathInputs.push(words.getFloat64(0,true));}
+        for(const value of mathInputs){const input=a.number(value);for(const method of['round','floor','ceil','trunc']){const out=a.invoke('math-'+method+'-call',[input]);check(Object.is(a.readNumber(out),js['math_'+method+'_call'](value)),method+':'+value);a.release(out);}a.release(input);}
         const x = a.string('-0'), values = a.sourceArray([x, true, null]), out = a.invoke('number-map', [values]);
         for (const [index, expected] of [-0, 1, 0].entries()) {const value = a.get(out, index); check(Object.is(a.readNumber(value), expected), 'callback'); a.release(value);}
         check(a.invoke('array-call', [values]) === true, 'array');
@@ -1824,6 +1883,8 @@ describe("browser compiler backends", () => {
         const map=a.invoke('empty-map'),set=a.invoke('empty-set'),reference=js.empty_map(),referenceSet=js.empty_set();
         for(const[k,v]of[[null,undefined],[false,null],[true,false],[undefined,true],[-0,-0],[NaN,Infinity],['中😀\ud800','text']]){const key=box(k),value=box(v),written=a.invoke('set-value',[map,key,value]),added=a.invoke('add-value',[set,key]);check(a.keyEqual(map,written)&&a.keyEqual(set,added),'receiver result');a.release(written);a.release(added);js.set_value(reference,k,v);js.add_value(referenceSet,k);verify(call('lookup',[map,key]),js.lookup(reference,k),'get');a.release(key);a.release(value);}
         verify(list(map),[...reference],'entries');verify(list(set,'values'),[...referenceSet],'Set values');verify(call('own-keys',[map]),[],'entries are not own fields');const size=a.string('size');verify(call('own',[map,size]),false,'inherited size');a.release(size);
+        for(const[collection,control]of[[map,reference],[set,referenceSet]]){const log=a.sourceArray([]),expected=[];control.forEach((value,key,receiver)=>expected.push([value,key,receiver===control]));verify(call('visit',[collection,log]),undefined,'forEach return');verify(read(log),expected,'forEach exact arguments and identity');a.release(log);let invalid=false;try{a.invoke('for-each-with',[collection,false])}catch(e){invalid=e.eliscriptDiagnostic?.code==='ELI-RT0003'}check(invalid&&a.stats().frameDepth===0,'forEach callback rejection');}
+        for(const isSet of[false,true])for(const mode of[0,1,2,3]){const argument=a.number(mode);verify(call('for-each-mutate',[isSet,argument]),js.for_each_mutate(isSet,mode),'live forEach delete clear reinsert append and update');a.release(argument);}
         const it=a.invoke('entries',[map]),rit=js.entries(reference);verify(call('next',[it]),js.next(rit),'live first');call('clear',[map]);js.clear(reference);const late=a.string('late'),written=a.invoke('set-value',[map,late,true]);a.release(written);js.set_value(reference,'late',true);verify(call('next',[it]),js.next(rit),'live clear/reinsert');verify(call('next',[it]),js.next(rit),'done');
         const word=a.string('a😀a\ud800'),unicode=a.invoke('from-set',[word]);verify(list(unicode,'values'),[...js.from_set('a😀a\ud800')],'code points');const one=a.number(1),two=a.number(2),pair=a.sourceArray([one,two]),input=a.sourceArray([pair]),constructed=a.invoke('from-map',[input]);verify(list(constructed),[...js.from_map([[1,2]])],'entry constructor');
         const holes=a.sourceArray([true,,undefined]),arrayIterator=a.invoke('entries',[holes]),arrayReference=[true,,undefined].entries();for(let i=0;i<4;i++)verify(call('next',[arrayIterator]),arrayReference.next(),'array iteration');
@@ -1912,6 +1973,7 @@ describe("browser compiler backends", () => {
         const sortSparse=Array(6);sortSparse[1]=undefined;sortSparse[3]=tiny;sortSparse[5]=zero;const sortSparseInput=a.sourceArray(sortSparse),dense=a.invoke('sort-copy',[sortSparseInput]);check(same(read(dense),[-0,Number.MIN_VALUE,undefined,undefined,undefined,undefined]),'toSorted holes become owned undefined');check(same(read(sortSparseInput),Object.assign(Array(6),{1:undefined,3:Number.MIN_VALUE,5:-0})),'copy preserves source holes');
         const sortOut=a.invoke('sort-default',[sortSparseInput]);check(a.keyEqual(sortOut,sortSparseInput),'sort receiver identity');const sparseSorted=Array(6);sparseSorted[0]=-0;sparseSorted[1]=Number.MIN_VALUE;sparseSorted[2]=undefined;check(same(read(sortOut),sparseSorted),'sort retains final holes');
         const stable=a.invoke('sort-stable');check(same(read(stable),['b','d','a','c']),'stable object ties');const tieInput=a.sourceArray([true,false,true]),tieOut=a.invoke('sort-nan-ties',[tieInput]);check(a.keyEqual(tieInput,tieOut)&&same(read(tieOut),[true,false,true]),'NaN ties');
+        const concatenated=a.invoke('concat-summary');check(same(read(concatenated),[false,9,false,true,true,[7],'tail']),'concat shallow sparse copy and identity');a.release(concatenated);
         const numericInput=a.sourceArray([tiny,zero,positiveZero]),numericOut=a.invoke('sort-numeric',[numericInput,true]);check(same(read(numericOut),[Number.MIN_VALUE,-0,0]),'exact numeric values and stable signed zeros');
         const mutationInput=a.sourceArray([positiveZero,tiny,zero]),mutationOut=a.invoke('sort-copy-mutation',[mutationInput]);check(same(read(mutationOut),[0,-0,Number.MIN_VALUE]),'copy snapshot despite comparator mutations');check(same(read(mutationInput),[99,Number.MIN_VALUE,-0]),'source mutation remains visible');
         const emptySort=a.sourceArray([]);for(const name of['sort-with','sort-copy-with']){let failed=false;try{a.invoke(name,[emptySort,false])}catch(e){failed=e.eliscriptDiagnostic?.code==='ELI-RT0003'}check(failed&&a.stats().frameDepth===0,'invalid comparator cleanup');const recovered=a.invoke(name,[emptySort,undefined]);check(same(read(recovered),[]),'sort after comparator error');a.release(recovered);}

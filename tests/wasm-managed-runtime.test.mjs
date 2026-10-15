@@ -9,7 +9,7 @@ let directory,backend,bytes;
 beforeAll(async()=>{
  directory=await mkdtemp(resolve(tmpdir(),'eliscript-managed-'));
  backend=await buildBackends({outputRoot:directory});
- const source=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8');
+ const source=await readFile(resolve('bootstrap/runtime/memory.eli'),'utf8')+'\n(defun gc-named (heap code) (value-function-named heap code)) (export gc-named)';
  bytes=Uint8Array.from(backend.wasm.emit_memory_wasm(backend.compiler.compile_ir_string(source,'managed-runtime.eli'),{maximumPages:256}));
  assert(WebAssembly.validate(bytes)); assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);
 },120000);
@@ -64,6 +64,20 @@ test('managed heap reclaims cycles, preserves roots and rejects recycled generat
  assert.equal(r.heap_live(h),0);assert.equal(r.value_get(h,a,0),0);assert.equal(r.last_error(),1);
  const c=r.value_refs(h,7,2);assert.notEqual(c,a);assert.notEqual(c,b);
  assert.equal(r.value_set(h,c,0,a),0);assert.equal(r.last_error(),1);assert.equal(r.value_get(h,c,0),0);
+});
+test('repeated full collections retain weak named identity and changed roots independently across growing heaps',()=>{
+ const {r,h}=runtime(64,4096,131072),other=r.heap_new(64,4096,131072);assert(other>0);
+ const root=r.value_refs(h,7,2),n=number(r,h,-0),named=r.gc_named(h,77);r.value_set(h,root,0,root);r.value_set(h,root,1,n);r.heap_pin(h,root);r.heap_pin(h,named);
+ const peer=r.value_refs(other,8,1),peerValue=number(r,other,42);r.value_set(other,peer,0,peerValue);r.heap_pin(other,peer);
+ const buffer=r.value_bytes(h,30000);assert(buffer>0);r.heap_pin(h,buffer);r.value_byte_set(h,buffer,29999,197);assert(r.heap_capacity(h)>4096);const baseCount=r.heap_collections(h),peerCount=r.heap_collections(other);
+ for(let cycle=0;cycle<64;cycle++){
+  const garbage=number(r,h,cycle);assert(garbage>0);assert.equal(r.heap_collect(h),1);assert.equal(r.last_error(),0);assert.equal(r.value_kind(h,garbage),0);assert.equal(r.last_error(),1);
+  assert.equal(r.gc_named(h,77),named);assert.equal(r.value_get(h,root,0),root);assert(Object.is(unbox(r,h,n),-0));assert.equal(r.value_byte_get(h,buffer,29999),197);assert.equal(r.heap_collect(h),0);assert.equal(r.gc_named(h,77),named);
+  if(cycle%3===0){assert.equal(r.heap_collect(other),0);assert.equal(r.value_get(other,peer,0),peerValue);assert.equal(unbox(r,other,peerValue),42);}
+ }
+ assert.equal(r.heap_collections(h)-baseCount,128);assert.equal(r.heap_collections(other)-peerCount,22);assert.equal(r.value_set(h,root,1,0),1);assert.equal(r.heap_collect(h),1);assert.equal(r.value_kind(h,n),0);assert.equal(r.last_error(),1);assert.equal(r.gc_named(h,77),named);
+ r.heap_release(h,root);r.heap_release(h,named);r.heap_release(h,buffer);assert.equal(r.heap_collect(h),3);assert.equal(r.heap_live(h),0);const replacement=r.gc_named(h,77);assert(replacement>0);assert.notEqual(replacement,named);assert.equal(r.heap_collect(h),1);
+ assert.equal(r.value_get(other,peer,0),peerValue);r.heap_release(other,peer);assert.equal(r.heap_collect(other),2);assert.equal(r.heap_live(other),0);
 });
 test('managed slots never wrap a generation and reclaimed bytes stay bounded',()=>{
  const {r,h}=runtime(1,256,256);let old=0;

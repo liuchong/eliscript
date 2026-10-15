@@ -1,0 +1,78 @@
+import {beforeAll,afterAll,test} from 'bun:test';
+import assert from 'node:assert/strict';
+import {readFile,mkdtemp,rm} from 'node:fs/promises';
+import {resolve} from 'node:path';import {tmpdir} from 'node:os';
+import {spawnSync} from 'node:child_process';
+import {buildBackends} from '../tools/backends/build.mjs';
+import {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';
+let directory,b,runtime;
+beforeAll(async()=>{directory=await mkdtemp(resolve(tmpdir(),'eliscript-concat-'));b=await buildBackends({outputRoot:directory});runtime=b.compiler.compile_ir_string(await readFile('bootstrap/runtime/memory.eli','utf8'),'runtime.eli');},120000);
+afterAll(async()=>{if(directory)await rm(directory,{recursive:true,force:true});});
+async function compiled(source,options){const ir=b.compiler.compile_ir_string('(defconst marker 1) '+source,'concat.eli'),before=JSON.stringify(ir),js=await import('data:text/javascript;base64,'+Buffer.from(b.compiler.emit_ir_string(ir)).toString('base64')),bytes=Uint8Array.from(b.managed.emit_managed_wasm(ir,runtime));assert.equal(JSON.stringify(ir),before);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);const a=instantiateManagedRuntime(bytes,options);a.auto(1);return{a,js,bytes};}
+function box(a,v){return typeof v==='number'?a.number(v):typeof v==='string'?a.string(v):v;}
+function array(a,values){const xs=values.map(v=>Array.isArray(v)?array(a,v):box(a,v));try{return a.sourceArray(xs);}finally{for(const x of xs)a.release(x);}}
+function read(a,v){if(v===null||typeof v!=='object')return v;if(v.kind===4)return a.readNumber(v);if(v.kind===5)return a.readString(v);assert.equal(v.kind,14);const out=Array(a.length(v));for(let i=0;i<out.length;i++){const n=a.number(i),own=a.invoke('own',[v,n]);a.release(n);if(own){const x=a.get(v,i);try{out[i]=read(a,x);}finally{a.release(x);}}}return out;}
+function finish(a){a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
+const own=' (defun own (items key) (object-has? items key)) ';
+
+test('Given arrays and scalar arguments, when concat copies them, then order, sparse ownership, nested identity and source values match JS',async()=>{
+ const {a,js}=await compiled('(defun f (items other tail) (js-call items :concat other tail))'+own+'(export f own)');
+ const sparse=Array(5);sparse[1]=undefined;sparse[3]=-0;const pairs=[[[],[]],[[1,2],[3,4]],[sparse,[false,null,NaN]],[[[1,2]],[['x']]]];
+ for(const [values,others]of pairs){const input=array(a,values),other=array(a,others),tail=a.string('中😀'),out=a.invoke('f',[input,other,tail]);assert.equal(a.keyEqual(out,input),false);assert.deepEqual(read(a,out),js.f(values,others,'中😀'));assert.deepEqual(read(a,input),values);assert.deepEqual(read(a,other),others);for(const x of[out,input,other,tail])a.release(x);}finish(a);
+});
+
+test('Given a receiver included in its own concat arguments, when one level is copied, then references stay shallow and the new result has independent storage',async()=>{
+ const {a,js}=await compiled('(defun f () (let* ((inner (js-array 1)) (items (js-array inner)) (out (js-call items :concat items))) (put inner 0 7) (js-array out (= (js-nth 0 out) (js-nth 1 out)) (= out items))))'+own+'(export f own)');const out=a.invoke('f');assert.deepEqual(read(a,out),js.f());a.release(out);finish(a);
+});
+
+test('Given a captured own concat function, when argument effects replace it, then the captured function receives every argument exactly once',async()=>{
+ const {a,js}=await compiled('(defun f () (let ((items (js-array)) (trace (js-object :calls 0))) (put items :concat (lambda (&rest args) (js-array "captured" (js-length args)))) (js-array (js-call items :concat (progn (put items :concat (lambda () "wrong")) 1) (progn (put trace :calls (1+ (get trace :calls))) 2)) (get trace :calls))))'+own+'(export f own)');const out=a.invoke('f');assert.deepEqual(read(a,out),js.f());a.release(out);finish(a);
+});
+
+test('Given unsupported receivers and noncallable own concat data, when invocation fails, then argument effects and original frame ownership match JS',async()=>{
+ const {a,js}=await compiled('(defun f (items trace) (js-call items :concat (progn (put trace :calls 1) 4)))'+own+'(export f own)');
+ for(const value of[null,undefined,false,0]){const input=box(a,value),trace=a.sourceObject({}),ref={};assert.throws(()=>js.f(value,ref),TypeError);assert.throws(()=>a.invoke('f',[input,trace]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');const key=a.string('calls'),calls=a.objectGet(trace,key);assert.equal(calls===undefined?undefined:a.readNumber(calls),ref.calls);for(const x of[input,trace,key,calls])a.release(x);assert.equal(a.stats().frameDepth,0);}finish(a);
+});
+
+test('Given a bad array constructor, when concat creates its result, then arguments run before species rejection and copying leaves the input intact',async()=>{
+ const {a,js}=await compiled('(defun f (items trace) (put items :constructor 7) (js-call items :concat (progn (put trace :calls 1) "x")))'+own+'(export f own)');const input=array(a,[1,2]),trace=a.sourceObject({}),values=[1,2],ref={};assert.throws(()=>js.f(values,ref),TypeError);assert.throws(()=>a.invoke('f',[input,trace]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.deepEqual(read(a,input),[1,2]);const key=a.string('calls'),count=a.objectGet(trace,key);assert.equal(a.readNumber(count),ref.calls);for(const x of[input,trace,key,count])a.release(x);finish(a);
+});
+
+test('Given primitive strings, when concat has zero, many and converting operands, then UTF16 and source conversion order match JS',async()=>{
+ const {a,js}=await compiled('(defun empty (text) (js-call text :concat)) (defun f (text value) (js-call text :concat value "😀" "\\ud800")) (defun hooks () (let ((trace (js-object :calls 0))) (js-array (js-call "a" :concat (js-object :toString (lambda () (put trace :calls 1) "x")) (js-object :toString (lambda () (put trace :calls (+ (get trace :calls) 10)) "y"))) (get trace :calls))))'+own+'(export empty f hooks own)');
+ for(const text of['','中😀','\ud800']){const input=a.string(text),empty=a.invoke('empty',[input]);assert.equal(a.readString(empty),js.empty(text));a.release(empty);for(const value of[undefined,null,false,-0,NaN,'x']){const arg=box(a,value),out=a.invoke('f',[input,arg]);assert.equal(a.readString(out),js.f(text,value));a.release(out);a.release(arg);}a.release(input);}const hooks=a.invoke('hooks');assert.deepEqual(read(a,hooks),js.hooks());a.release(hooks);finish(a);
+});
+test('Given deferred text conversion hooks, when all arguments have effects, then evaluation completes before left-to-right string conversion',async()=>{
+ const {a,js}=await compiled('(defun f () (let* ((log (js-array)) (first (js-object :toString (lambda () (js-call log :push "first") "1"))) (second (js-object :toString (lambda () (js-call log :push "second") "2")))) (js-array (js-call "a" :concat first (progn (js-call log :push "argument") second)) log)))'+own+'(export f own)');const out=a.invoke('f');assert.deepEqual(read(a,out),js.f());assert.deepEqual(read(a,out),['a12',['argument','first','second']]);a.release(out);finish(a);
+});
+test('Given deterministic sparse inputs, when arrays concatenate scalars and nested arrays, then every value and hole matches independent JS',async()=>{
+ const {a,js}=await compiled('(defun f (items other tail) (js-call items :concat other tail))'+own+'(export f own)');let seed=0x48cf126b;const next=()=>seed=(Math.imul(seed,1664525)+1013904223)>>>0;
+ const generate=()=>{const values=Array(next()%24);for(let i=0;i<values.length;i++)if(next()%4)values[i]=[undefined,null,false,-0,NaN,Number.MIN_VALUE,'中😀',[1,2]][next()%8];return values;};
+ for(let i=0;i<128;i++){const values=generate(),others=generate(),input=array(a,values),other=array(a,others),tail=box(a,i%2?undefined:'x'),out=a.invoke('f',[input,other,tail]);assert.deepEqual(read(a,out),js.f(values,others,i%2?undefined:'x'));assert.deepEqual(read(a,input),values);assert.deepEqual(read(a,other),others);for(const x of[input,other,tail,out])a.release(x);a.collect();assert(a.live()>0);assert.equal(a.stats().frameDepth,0);}finish(a);
+});
+test('Given a bounded heap, when copying exceeds capacity, then argument effects and inputs remain intact and only private frames unwind',async()=>{
+ const {a}=await compiled('(defun f (items trace) (js-call items :concat items items (progn (put trace :calls 1) items)))'+own+'(export f own)',{maxSlots:64,initialBytes:8192,maxBytes:8192});const items=array(a,Array(512).fill(true)),trace=a.sourceObject({}),caller=a.frame(1);a.frameSet(caller,0,items);
+ assert.throws(()=>a.invoke('f',[items,trace]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0002');assert.equal(a.length(items),512);for(let i=0;i<512;i++)assert.equal(a.get(items,i),true);assert.equal(a.stats().frameDepth,1);const key=a.string('calls'),value=a.objectGet(trace,key);assert.equal(a.readNumber(value),1);a.release(key);a.release(value);a.leaveFrame(caller);a.release(items);a.release(trace);finish(a);
+});
+test('Given own concat data and ordinary objects, when lookup captures a noncallable or callable value, then argument effects and method results match JS',async()=>{
+ const {a,js}=await compiled('(defun bad (items trace) (put items :concat false) (js-call items :concat (put trace 0 9))) (defun ordinary () (let ((item (js-object :concat (lambda (x) (js-array "object" x))))) (js-call item :concat 7)))'+own+'(export bad ordinary own)');const items=array(a,[1]),trace=a.sourceArray([false]),ref=[];assert.throws(()=>js.bad([1],ref),TypeError);assert.throws(()=>a.invoke('bad',[items,trace]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.deepEqual(read(a,trace),ref);const result=a.invoke('ordinary');assert.deepEqual(read(a,result),js.ordinary());for(const x of[items,trace,result])a.release(x);finish(a);
+});
+test('Given malformed raw arguments and an invalid copied slot, when concat validates references, then original handle errors and caller frames survive',async()=>{
+ const {a,bytes}=await compiled('(defun f (items other) (js-call items :concat other))'+own+'(export f own)');finish(a);const e=new WebAssembly.Instance(new WebAssembly.Module(bytes)).exports,heap=e['heap-new'](32,4096,65536),items=e['value-array-new'](heap,1),args=e['value-refs'](heap,7,1),caller=e['frame-new'](heap,2);e['frame-set'](heap,caller,0,items);e['frame-set'](heap,caller,1,args);e['value-set'](heap,items,0,2);e['value-set'](heap,args,0,1);
+ assert.equal(e['value-sequence-concat-kind'](heap,items,0xffffffff),0);assert.equal(e['last-error'](),1);assert.equal(e['value-sequence-concat'](heap,items,0xffffffff),0);assert.equal(e['last-error'](),1);
+ const p=e['value-data'](heap,items,14);new DataView(e.memory.buffer).setUint32(p,0xffffffff,true);assert.equal(e['value-sequence-concat'](heap,items,args),0);assert.equal(e['last-error'](),1);assert.equal(e['frame-depth'](heap),1);new DataView(e.memory.buffer).setUint32(p,2,true);e['frame-pop'](heap,caller);e['heap-collect'](heap);assert.equal(e['heap-live'](heap),0);
+});
+test('Given a real array-copy trap, when concat enters its private frame, then inputs and the caller frame remain owned after unwinding',async()=>{
+ const source='(defun f (items other) (js-call items :concat other)) (defun fail-first (items) (js-call items :concat (js-call nil :charAt)))'+own+'(export f fail-first own)',{a}=await compiled(source);finish(a);const text=await readFile('bootstrap/runtime/memory.eli','utf8'),point=text.indexOf('(setq result (value-array-new heap total))',text.indexOf('  (defun value-sequence-concat '));assert(point>=0);const rt=b.compiler.compile_ir_string(text.slice(0,point)+'(setq result (load-u32 4294967295))'+text.slice(point+'(setq result (value-array-new heap total))'.length),'array-concat-trap.eli'),p=b.compiler.compile_ir_string('(defconst marker 1) '+source,'concat.eli'),broken=instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(p,rt)));broken.auto(1);const items=broken.sourceArray([true,false]),other=broken.sourceArray([undefined]),caller=broken.frame(1);broken.frameSet(caller,0,items);assert.throws(()=>broken.invoke('f',[items,other]),WebAssembly.RuntimeError);assert.equal(broken.stats().frameDepth,1);assert.deepEqual(read(broken,items),[true,false]);assert.throws(()=>broken.invoke('fail-first',[items]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.equal(broken.stats().frameDepth,1);broken.leaveFrame(caller);broken.release(items);broken.release(other);finish(broken);
+});
+test('Given a real string-copy trap, when concat aborts, then outer roots survive and prior argument errors suppress the later trap',async()=>{
+ const {a,bytes}=await compiled('(defun f (text other) (js-call text :concat other)) (defun fail-first (text) (js-call text :concat (js-call nil :charAt)))'+own+'(export f fail-first own)');finish(a);
+ const source=await readFile('bootstrap/runtime/memory.eli','utf8'),start=source.indexOf('  (defun value-string-concat (heap '),end=source.indexOf('  (defun ',start+10);assert(start>=0&&end>start);const injected=b.compiler.compile_ir_string(source.slice(0,start)+'  (defun value-string-concat (heap left right) (load-u32 4294967295))\n'+source.slice(end),'concat-trap.eli');
+ const program=b.compiler.compile_ir_string('(defconst marker 1) (defun f (text other) (js-call text :concat other)) (defun fail-first (text) (js-call text :concat (js-call nil :charAt)))'+own+'(export f fail-first own)','concat.eli'),broken=instantiateManagedRuntime(Uint8Array.from(b.managed.emit_managed_wasm(program,injected)));broken.auto(1);const input=broken.string('中😀'),other=broken.string('x'),caller=broken.frame(1);broken.frameSet(caller,0,input);assert.throws(()=>broken.invoke('f',[input,other]),WebAssembly.RuntimeError);assert.equal(broken.stats().frameDepth,1);assert.equal(broken.readString(input),'中😀');assert.throws(()=>broken.invoke('fail-first',[input]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');assert.equal(broken.stats().frameDepth,1);broken.leaveFrame(caller);broken.release(input);broken.release(other);finish(broken);
+
+});
+
+test('Given Node and identical concat bytes, when strings and sparse arrays concatenate, then UTF16 text, missing slots and independent result identity agree',async()=>{
+ const {a,bytes}=await compiled('(defun f (items other) (js-call items :concat other))'+own+'(export f own)');finish(a);
+ const result=spawnSync('node',['--input-type=module','-e',`import assert from 'node:assert/strict';import{readFileSync}from'node:fs';import{instantiateManagedRuntime}from${JSON.stringify(resolve('tools/backends/managed-runtime.mjs'))};const a=instantiateManagedRuntime(readFileSync(0));a.auto(1);const input=a.string('中😀'),value=a.number(-0),out=a.invoke('f',[input,value]);assert.equal(a.readString(out),'中😀0');for(const x of[input,value,out])a.release(x);const items=a.sourceArray([true,,undefined]),other=a.sourceArray([false]),copy=a.invoke('f',[items,other]);assert.equal(a.keyEqual(copy,items),false);assert.equal(a.length(copy),4);for(let i=0;i<4;i++){const key=a.number(i);assert.equal(a.invoke('own',[copy,key]),i!==1);a.release(key)}assert.equal(a.get(copy,0),true);assert.equal(a.get(copy,2),undefined);assert.equal(a.get(copy,3),false);for(const x of[items,other,copy])a.release(x);a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);`],{input:Buffer.from(bytes),encoding:'utf8',timeout:30000});assert.equal(result.status,0,result.stderr);
+});

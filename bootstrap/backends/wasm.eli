@@ -132,6 +132,21 @@
         (setq index (1+ index))))
     (js-call output :push 11 11))
 
+  (defun emit-counter-guarded-while (output children)
+    ;; Exit on each floating guard at its original evaluation point. The
+    ;; proven counter admits complete chunks; the original loop handles the
+    ;; final zero to three iterations with the original short circuit order.
+    (js-call output :push 2 64 2 64 3 64)
+    (emit-branch-false output (js-nth 2 children) 1)
+    (let ((index 0))
+      (while (< index 4)
+        (emit-branch-false output (js-nth 3 children) 2)
+        (emit-discarded output (js-nth 1 children))
+        (setq index (1+ index))))
+    (js-call output :push 12 0 11 11)
+    (emit-while output children)
+    (js-call output :push 11))
+
   (defun emit-branch-true (output expression depth)
     (let ((kind (get expression :kind)) (children (get expression :children)))
       (cond
@@ -237,6 +252,7 @@
          (js-call output :push 11))
         ((or (= kind "while") (= kind "remainder-while")) (emit-while output children))
         ((= kind "guarded-while") (emit-guarded-while output children))
+        ((= kind "guarded-counter-while") (emit-counter-guarded-while output children))
         ((or (= kind "and") (= kind "or"))
          (emit-discarded-short-circuit output expression 0))
         (t (emit-expression output expression) (js-call output :push 26)))))
@@ -455,6 +471,9 @@
         ((= kind "guarded-while")
          (emit-guarded-while output children)
          (js-call output :push 65 0))
+        ((= kind "guarded-counter-while")
+         (emit-counter-guarded-while output children)
+         (js-call output :push 65 0))
         ((or (= kind "and") (= kind "or")) (emit-short-circuit output expression 0))
         ((= kind "call")
          (let ((index 0))
@@ -629,6 +648,6 @@
     ;; Validate the complete input, including unselected branches, first.
     (lower-numeric-program program)
     (emit-typed-numeric-wasm (optimize-numeric-program
-      (lower-numeric-program (optimize-program program)) (js-object :constantFlow t :unswitch t))))
+      (lower-numeric-program (optimize-program program)) (js-object :constantFlow t :unswitch t :countedGuards t))))
 
   (export emit-numeric-wasm emit-typed-numeric-wasm emit-memory-wasm emit-typed-memory-wasm append-metadata-section))

@@ -66,6 +66,7 @@ test-core: check-contracts
 		tests/wasm-managed-runtime.test.mjs \
 		tests/wasm-managed-tables.test.mjs \
 		tests/wasm-managed-source-collections.test.mjs \
+		tests/wasm-managed-collection-for-each.test.mjs \
 		tests/wasm-managed-control.test.mjs \
 		tests/wasm-managed-empty-bindings.test.mjs \
 		tests/wasm-managed-callables.test.mjs \
@@ -73,6 +74,7 @@ test-core: check-contracts
 		tests/wasm-managed-array-callbacks.test.mjs \
 		tests/wasm-managed-array-sort.test.mjs \
 		tests/wasm-managed-array-text.test.mjs \
+		tests/wasm-managed-concat.test.mjs \
 		tests/wasm-managed-typeof.test.mjs \
 		tests/wasm-managed-typeof-paths.test.mjs \
 		tests/backend-cli-isolation.test.mjs \
@@ -88,6 +90,8 @@ test-core: check-contracts
 		tests/wasm-managed-text-constructors.test.mjs \
 		tests/wasm-managed-regexp.test.mjs \
 		tests/wasm-managed-builtins.test.mjs \
+		tests/wasm-managed-identity.test.mjs \
+		tests/wasm-managed-math.test.mjs \
 		tests/wasm-managed-json.test.mjs \
 		tests/wasm-managed-number-conversion.test.mjs \
 		tests/wasm-managed-number-text.test.mjs \
