@@ -18,7 +18,7 @@ export function validateBrowserCompatibility(contract, matrix) {
   if (JSON.stringify(contract.browserEngines) !== JSON.stringify(["chromium", "firefox", "webkit"])) {
     throw new BrowserCompatibilityError("browserEngines must be chromium, firefox, webkit in that order");
   }
-  if (contract.testCommand !== "bun test tests/direct-wasm-backend.test.mjs") {
+  if (contract.testCommand !== "bun test tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs") {
     throw new BrowserCompatibilityError("testCommand must run the complete direct WASM backend suite");
   }
   const action = contract.artifactAction;

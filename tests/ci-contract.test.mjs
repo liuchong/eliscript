@@ -247,7 +247,7 @@ describe("browser compatibility matrix", () => {
     }
     expect(workflow).toContain('install --with-deps "${{ matrix.browser }}"');
     expect(workflow).toContain("ELISCRIPT_TEST_BROWSER: ${{ matrix.browser }}");
-    expect(workflow).toContain("bun test tests/direct-wasm-backend.test.mjs 2>&1 | tee");
+    expect(workflow).toContain("bun test tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs 2>&1 | tee");
     expect(workflow).toContain("set -o pipefail");
     expect(workflow).toContain("if: always()");
     expect(workflow).toContain(`actions/upload-artifact@${browserContract.artifactAction.revision}`);
@@ -260,7 +260,11 @@ describe("browser compatibility matrix", () => {
   });
 
   test("browser gate rejects filtering, skipped execution and mutable artifact actions", () => {
-    for (const testCommand of ["true", `${browserContract.testCommand} || true`, `${browserContract.testCommand} --test-name-pattern browser`]) {
+    for (const testCommand of ["true", `${browserContract.testCommand} || true`, `${browserContract.testCommand} --test-name-pattern browser`,
+      "bun test tests/direct-wasm-backend.test.mjs",
+      browserContract.testCommand.replace(" tests/wasm-managed-array-search.test.mjs", ""),
+      browserContract.testCommand.replace(" tests/wasm-managed-array-construction.test.mjs", ""),
+      browserContract.testCommand.replace(" tests/wasm-managed-object-properties.test.mjs", "")]) {
       expect(() => validateBrowserCompatibility({ ...browserContract, testCommand }, baseline)).toThrow(/complete direct WASM/);
     }
     expect(() => validateBrowserCompatibility({ ...browserContract,

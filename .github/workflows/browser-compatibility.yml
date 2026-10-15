@@ -105,7 +105,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p "$RUNNER_TEMP/eliscript-browser-ci"
-          bun test tests/direct-wasm-backend.test.mjs 2>&1 | tee "$RUNNER_TEMP/eliscript-browser-ci/tests.log"
+          bun test tests/direct-wasm-backend.test.mjs tests/wasm-managed-array-search.test.mjs tests/wasm-managed-array-construction.test.mjs tests/wasm-managed-object-properties.test.mjs 2>&1 | tee "$RUNNER_TEMP/eliscript-browser-ci/tests.log"
       - name: Preserve browser test evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

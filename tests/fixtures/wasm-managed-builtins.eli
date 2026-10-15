@@ -33,8 +33,23 @@
   (defun object-same-alias (x y) (let ((f (js* "globalThis.Object.is"))) (funcall f x y)))
   (defun object-same-empty () (Object/is))
   (defun same-object-is () (eq Object/is (get (js* "Object") :is)))
+  (defconst freeze-value (js* "Object.freeze"))
+  (defconst frozen-value (js* "Object.isFrozen"))
+  (defun freeze-call (x) (Object/freeze x))
+  (defun frozen-call (x) (Object/isFrozen x))
+  (defun freeze-alias (x) (funcall freeze-value x))
+  (defun freeze-empty () (funcall freeze-value))
+  (defun frozen-empty () (funcall frozen-value))
+  (defun same-freeze () (and (eq freeze-value (get (js* "Object") :freeze))
+                            (eq frozen-value (js* "globalThis.Object.isFrozen"))))
+  (defun integrity-write (x) (put x :tag t))
+  (defun integrity-sort (x) (js-call x :sort))
+  (defun integrity-sorted (x) (js-call x :toSorted))
+  (defun integrity-slice (x) (js-call x :slice))
+  (defun integrity-push-empty (x) (js-call x :push))
+  (defun integrity-pop (x) (js-call x :pop))
   (export number-value finite-value number-call number-empty number-apply number-extra
     string-call string-empty boolean-call boolean-empty finite-call nan-call integer-call
     safe-call array-call coercive-finite coercive-nan same-number same-finite held-number
     invoke-one number-map finite-map math-round-call math-floor-call math-ceil-call
-    math-trunc-call math-empty same-round object-same object-same-alias object-same-empty same-object-is))
+    math-trunc-call math-empty same-round object-same object-same-alias object-same-empty same-object-is freeze-call frozen-call freeze-alias freeze-empty frozen-empty same-freeze integrity-write integrity-sort integrity-sorted integrity-slice integrity-push-empty integrity-pop))

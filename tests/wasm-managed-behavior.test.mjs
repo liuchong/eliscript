@@ -8,7 +8,7 @@ import {instantiateManagedRuntime} from '../tools/backends/managed-runtime.mjs';
 
 const catalog = JSON.parse(await readFile(new URL('./fixtures/wasm-managed-behavior.json', import.meta.url), 'utf8'));
 assert.equal(catalog.format, 'eliscript-managed-bdd');assert.equal(catalog.version, 1);
-assert.deepEqual(catalog.features.map(feature => feature.name), ['Array text conversion', 'Represented type and null queries', 'Text formatting and decomposition', 'Stable array sorting', 'Integer rounding', 'Live collection callbacks', 'Sequence concatenation', 'Value identity']);
+assert.deepEqual(catalog.features.map(feature => feature.name), ['Array text conversion', 'Represented type and null queries', 'Text formatting and decomposition', 'Stable array sorting', 'Integer rounding', 'Live collection callbacks', 'Sequence concatenation', 'Value identity', 'Shallow source object integrity', 'Array searching', 'Array construction', 'Object own properties']);
 assert.deepEqual(catalog.features.flatMap(feature => feature.scenarios.map(scenario => scenario.id)), [
   'empty-and-holes', 'exact-primitive-text', 'shared-arrays', 'length-before-separator', 'live-element-reads', 'conversion-fallback',
   'capture-before-arguments', 'toString-late-join-lookup', 'custom-result-identity', 'self-cycle-and-recovery', 'mutual-cycle-and-recovery',
@@ -20,6 +20,10 @@ assert.deepEqual(catalog.features.flatMap(feature => feature.scenarios.map(scena
   'map-for-each-live-clear', 'set-for-each-reinsert', 'collection-for-each-empty-error',
   'concat-sparse-shallow-copy', 'concat-ordered-string-conversions', 'concat-own-method-capture',
   'same-value-ieee', 'same-value-object-identity', 'same-value-missing-effects', 'same-value-lexical-method',
+  'freeze-shallow-identity', 'freeze-strict-write-and-recovery', 'freeze-collection-internal-slots', 'freeze-invalid-comparator-before-short-sort',
+  'search-equality-and-zero', 'search-holes-and-undefined', 'search-last-omitted-versus-undefined', 'search-length-before-conversion', 'search-empty-skips-conversion', 'search-method-capture',
+  'array-of-dense-identity', 'array-from-unicode-points', 'array-from-arraylike-snapshot', 'array-from-live-collection', 'array-from-captured-next', 'array-from-abrupt-close',
+  'object-keys-integer-order', 'object-string-own-units', 'object-key-string-hint', 'object-assign-sparse-identity', 'object-assign-proto-data', 'object-assign-partial-error',
 ]);
 let directory, b, runtime;
 beforeAll(async () => {

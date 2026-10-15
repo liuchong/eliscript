@@ -945,6 +945,8 @@ test("first-class builtins retain public Seed and three-generation IR, descripto
     const text = a.string('-0'), out = a.invoke('number-call', [text]); assert(Object.is(a.readNumber(out), -0));
     const unsafe = a.number(2 ** 53); assert.equal(a.invoke('integer-call', [unsafe]), true); assert.equal(a.invoke('safe-call', [unsafe]), false);
     assert.equal(a.invoke('same-number'), true); assert.equal(a.invoke('same-finite'), true);
+    assert.equal(a.invoke('same-freeze'),true);assert.equal(a.invoke('freeze-empty'),undefined);assert.equal(a.invoke('frozen-empty'),true);
+    const mutable=a.sourceObject({tag:false});assert.equal(a.invoke('frozen-call',[mutable]),false);const locked=a.invoke('freeze-call',[mutable]),again=a.invoke('freeze-alias',[mutable]);assert(a.keyEqual(locked,mutable));assert(a.keyEqual(again,mutable));assert.equal(a.invoke('frozen-call',[mutable]),true);assert.throws(()=>a.invoke('integrity-write',[mutable]),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');for(const value of[mutable,locked,again])a.release(value);
     assert.equal(a.invoke('same-object-is'), true);assert.equal(a.invoke('object-same-empty'), true);
     for(const [x,y] of [[NaN,NaN],[-0,0],[0,0],[-0,-0],[1,1],[1,'1'],['中😀','中😀'],[null,undefined]]){const left=typeof x==='number'?a.number(x):typeof x==='string'?a.string(x):x,right=typeof y==='number'?a.number(y):typeof y==='string'?a.string(y):y;for(const name of ['object-same','object-same-alias'])assert.equal(a.invoke(name,[left,right]),Object.is(x,y));a.release(left);a.release(right);}
     assert.equal(a.invoke('same-round'), true);const empty=a.invoke('math-empty');assert(Number.isNaN(a.readNumber(empty)));a.release(empty);
@@ -1769,6 +1771,22 @@ describe("browser compiler backends", () => {
           a.release(value); a.collect();
         }
         check(a.invoke('same-number') === true && a.invoke('same-finite') === true && a.invoke('same-round') === true, 'identity');
+        check(a.invoke('same-freeze')===true&&a.invoke('freeze-empty')===undefined&&a.invoke('frozen-empty')===true,'integrity builtin identity');
+        const mutable=a.sourceObject({tag:false}),reference={tag:false};check(a.invoke('frozen-call',[mutable])===false,'extensible');const locked=a.invoke('freeze-call',[mutable]),again=a.invoke('freeze-alias',[mutable]);check(a.keyEqual(locked,mutable)&&a.keyEqual(again,mutable)&&a.invoke('frozen-call',[mutable])===true,'frozen identity');check(js.freeze_call(reference)===reference&&js.frozen_call(reference)===true,'JS integrity');let jsError,wasmError;try{js.integrity_write(reference);}catch(e){jsError=e;}try{a.invoke('integrity-write',[mutable]);}catch(e){wasmError=e;}check(jsError instanceof TypeError&&wasmError?.eliscriptDiagnostic?.code==='ELI-RT0003','strict frozen write');for(const value of[mutable,locked,again])a.release(value);
+        for(const input of[[],Array(1),Array(4),[undefined],[false],[true,false],[undefined,undefined]]){
+          const value=a.sourceArray(input),frozen=a.invoke('freeze-call',[value]),reference=Object.freeze(input.slice());let expectedFailure=false,actualFailure=false,out;
+          try{js.integrity_sort(reference);}catch(e){check(e instanceof TypeError,'native frozen sort error');expectedFailure=true;}
+          try{out=a.invoke('integrity-sort',[value]);}catch(e){check(e.eliscriptDiagnostic?.code==='ELI-RT0003','WASM frozen sort error');actualFailure=true;}
+          check(expectedFailure===actualFailure,'frozen sort length '+input.length+' keys '+Object.keys(input));if(out)a.release(out);
+          for(const method of['integrity-slice','integrity-sorted']){const copy=a.invoke(method,[value]);check(a.invoke('frozen-call',[copy])===false,'mutable frozen source copy');a.release(copy);}
+          a.release(value);a.release(frozen);
+        }
+        for(const method of['integrity-push-empty','integrity-pop']){
+          const value=a.sourceArray([]),frozen=a.invoke('freeze-call',[value]),reference=Object.freeze([]);let jsFailure=false,wasmFailure=false;
+          try{js[method.replaceAll('-','_')](reference);}catch(e){check(e instanceof TypeError,'native empty mutation error');jsFailure=true;}
+          try{a.invoke(method,[value]);}catch(e){check(e.eliscriptDiagnostic?.code==='ELI-RT0003','WASM empty mutation error');wasmFailure=true;}
+          check(jsFailure&&wasmFailure,'empty frozen mutation');a.release(value);a.release(frozen);
+        }
         check(a.invoke('same-object-is')===true&&a.invoke('object-same-empty')===true,'Object.is identity/missing');
         for(const [x,y] of [[NaN,NaN],[-0,0],[0,0],[-0,-0],[1,1],[1,'1'],['中😀','中😀'],[null,undefined]]){const left=typeof x==='number'?a.number(x):typeof x==='string'?a.string(x):x,right=typeof y==='number'?a.number(y):typeof y==='string'?a.string(y):y;for(const name of ['object-same','object-same-alias'])check(a.invoke(name,[left,right])===Object.is(x,y),name);a.release(left);a.release(right);}
         const missing=a.invoke('math-empty');check(Number.isNaN(a.readNumber(missing)),'missing Math argument');a.release(missing);

@@ -1,0 +1,11 @@
+(module array.search
+  (defconst marker 1)
+  (defun includes (items needle start) (js-call items :includes needle start))
+  (defun index (items needle start) (js-call items :indexOf needle start))
+  (defun last (items needle start) (js-call items :lastIndexOf needle start))
+  (defun missing-includes (items) (js-call items :includes))
+  (defun missing-index (items) (js-call items :indexOf))
+  (defun missing-last (items) (js-call items :lastIndexOf))
+  (defun default-last (items needle) (js-call items :lastIndexOf needle))
+  (defun own (items i) (object-has? items i))
+  (export includes index last missing-includes missing-index missing-last default-last own))

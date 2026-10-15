@@ -139,14 +139,14 @@
       (setq name (js-call name :slice 11)))
     (js-call (js-array "Number" "Number.isFinite" "Number.isNaN" "Number.isInteger"
       "Number.isSafeInteger" "Array.isArray" "String" "Boolean" "isFinite" "isNaN" "JSON.parse" "JSON.stringify"
-      "Math.round" "Math.floor" "Math.ceil" "Math.trunc" "Object.is") :indexOf name))
+      "Math.round" "Math.floor" "Math.ceil" "Math.trunc" "Object.is" "Object.freeze" "Object.isFrozen" "Array.from" "Array.of" "Object.keys" "Object.hasOwn" "Object.assign") :indexOf name))
   (defun managed-builtin-function (operation state functions)
     (let ((index 0) (found nil))
       (while (< index (js-length functions))
         (let ((function (js-nth index functions)))
           (when (= (get function :builtin nil) operation) (setq found function))) (setq index (1+ index)))
       (unless found
-        (let ((slot (js-length functions)) (arity (if (= operation 16) 2 (if (and (>= operation 10) (<= operation 11)) 3 1)))
+        (let ((slot (js-length functions)) (arity (if (= operation 20) 0 (if (or (= operation 16) (= operation 22) (= operation 23)) 2 (if (and (>= operation 10) (<= operation 11)) 3 1))))
               (parameters (js-array)) (kinds (js-array)) (position 0))
           (while (< position arity)
             (js-call parameters :push (js-object :kind "parameter-binding"
@@ -923,7 +923,29 @@
           (word-sequence (js-array (get ordinary :steps) (managed-guard state (word-set output (get ordinary :result)))))
           (word-sequence builtin-steps))) (root-local state output)))
       (js-object :steps (word-sequence steps) :result (word-local output))))
+  (defun lower-managed-sequence-search (node scope state functions method)
+    (let* ((children (get node :children)) (receiver (snapshot-managed (lower-managed-expression (js-nth 0 children) scope state functions) state))
+           (key (lower-managed-key (js-nth 1 children) scope state functions)) (builtin (new-managed-local state "search-builtin" nil))
+           (steps (js-array (get receiver :steps) (get key :steps) (managed-guard state (word-set builtin
+             (runtime-call state "value-sequence-search-kind" (runtime-arguments state (js-array (get receiver :result) (get key :result)))))) (capture-error state)))
+           (callee (managed-result state (word-if (word-compare (word-local builtin) (word-constant 0) "=")
+             (runtime-call state "value-array-callback-get" (runtime-arguments state (js-array (get receiver :result) (get key :result)))) (word-constant 3)) t))
+           (arguments (js-array)) (index 2) (output (new-managed-local state "search-output" t)))
+      (js-call steps :push (get callee :steps))
+      (while (< index (js-length children))
+        (let ((argument (snapshot-managed (lower-managed-expression (js-nth index children) scope state functions) state)))
+          (js-call steps :push (get argument :steps)) (js-call arguments :push (get argument :result))) (setq index (1+ index)))
+      (let ((ordinary (managed-invoke-arguments state (get callee :result) arguments))
+            (result (managed-result state (runtime-call state "value-sequence-search" (runtime-arguments state
+              (js-array (get receiver :result) (if (> (js-length arguments) 0) (js-nth 0 arguments) (word-constant 3))
+                (if (> (js-length arguments) 1) (js-nth 1 arguments) (word-constant 3)) (word-constant (if (> (js-length arguments) 1) 1 0))
+                (word-constant (if (= method "includes") 0 (if (= method "indexOf") 1 2)))))) t)))
+        (js-call steps :push (managed-guard state (word-if (word-compare (word-local builtin) (word-constant 0) "=")
+          (word-sequence (js-array (get ordinary :steps) (managed-guard state (word-set output (get ordinary :result)))))
+          (word-sequence (js-array (get result :steps) (managed-guard state (word-set output (get result :result))))))) (root-local state output)))
+      (js-object :steps (word-sequence steps) :result (word-local output))))
   (defun lower-managed-text-method (node scope state functions method)
+    (if (js-call (js-array "includes" "indexOf" "lastIndexOf") :includes method) (lower-managed-sequence-search node scope state functions method)
     (if (= method "concat") (lower-managed-concat node scope state functions)
     (if (or (= method "join") (= method "toString")) (lower-managed-array-text node scope state functions method)
     (if (= method "replaceAll") (lower-managed-replace-all node scope state functions)
@@ -951,7 +973,7 @@
           (let ((result (managed-result state (runtime-call state "value-source-text-method" (runtime-arguments state
                           (js-array (get receiver :result) (if (> count 2) (js-nth 0 arguments) (word-constant 3))
                             (if (> count 3) (js-nth 1 arguments) (word-constant 3)) (word-constant mode)))) t)))
-            (js-call steps :push (get result :steps)) (put result :steps (word-sequence steps)) result)))))))))
+            (js-call steps :push (get result :steps)) (put result :steps (word-sequence steps)) result))))))))))
   (defun lower-managed-replace-all (node scope state functions)
     (let* ((children (get node :children)) (count (js-length children))
            (_arity (unless (>= count 2) (managed-fail node "managed replaceAll requires a static method")))
@@ -1192,7 +1214,7 @@
          (lower-managed-access node scope state functions))
         ((= kind "method-call")
          (let* ((key (js-nth 1 children)) (method (managed-static-method key)))
-           (if (js-call (js-array "isFinite" "isNaN" "isInteger" "isSafeInteger" "isArray" "parse" "stringify" "round" "floor" "ceil" "trunc" "is") :includes method)
+           (if (js-call (js-array "isFinite" "isNaN" "isInteger" "isSafeInteger" "isArray" "parse" "stringify" "round" "floor" "ceil" "trunc" "is" "freeze" "isFrozen") :includes method)
              (lower-managed-ordinary-method node scope state functions method)
            (if (or (= method "test") (= method "exec")) (lower-managed-regexp-method node scope state functions method)
            (if (js-call (js-array "get" "set" "has" "delete" "clear" "add" "entries" "keys" "values" "next") :includes method)
@@ -1367,6 +1389,17 @@
         (put state :error (new-managed-local state "error" nil)) (put state :frame (new-managed-local state "frame" nil))
         (let* ((body (if (not (nil? (get function :builtin nil)))
                       (managed-result state
+                        (if (>= (get function :builtin) 21)
+                          (runtime-call state "value-object-properties" (runtime-arguments state
+                            (js-array (word-local (get state :arguments)) (word-local (get state :count))
+                              (word-constant (- (get function :builtin) 21)))))
+                        (if (>= (get function :builtin) 19)
+                          (runtime-call state "value-array-construction" (runtime-arguments state
+                            (js-array (word-local (get state :arguments)) (word-local (get state :count))
+                              (word-constant (- (get function :builtin) 19)))))
+                        (if (>= (get function :builtin) 17)
+                          (runtime-call state "value-object-integrity" (runtime-arguments state
+                            (js-array (binding-read (js-nth 0 scope)) (word-constant (- (get function :builtin) 17)))))
                         (if (= (get function :builtin) 16)
                           (runtime-call state "value-object-is" (runtime-arguments state
                             (js-array (binding-read (js-nth 0 scope)) (binding-read (js-nth 1 scope)))))
@@ -1379,7 +1412,7 @@
                               (word-constant (- (get function :builtin) 10)))))
                           (runtime-call state "value-builtin-primitive" (runtime-arguments state
                             (js-array (binding-read (js-nth 0 scope)) (word-local (get state :count))
-                              (word-constant (get function :builtin)))))))) t)
+                              (word-constant (get function :builtin))))))))))) t)
                       (lower-managed-sequence (js-call children :slice arity) scope state functions)))
                (captures (get state :captures)) (result (new-managed-local state "result" nil)) (steps (js-array)))
           (js-call steps :push (runtime-call state "begin-operation" (js-array))

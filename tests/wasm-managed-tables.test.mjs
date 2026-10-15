@@ -229,6 +229,14 @@ test('managed table growth defragments out-of-order live blocks without changing
  assert.deepEqual(Array.from({length:4},(_,i)=>r.value_unit_get(h,str,i)),[0xd800,0x4e2d,0xd83d,0xde00]);
  assert.equal(r.value_get(h,array,0),m);assert.equal(r.value_get(h,array,1),nan);assert.equal(r.value_get(h,record,0),array);assert.equal(r.frame_get(h,frame,1),record);
  assert.equal(r.value_iterator_value(h,it),nan);assert.equal(r.value_table_get(h,m,nan),record);assert.equal(r.frame_depth(h),1);
+ // Compaction reuses live-slot scratch links. All independently pinned leaves,
+ // graphs and iterators must still be roots in subsequent complete collections.
+ for(let cycle=0;cycle<8;cycle++){
+  assert.equal(r.heap_collect(h),0);assert.equal(r.heap_live(h),before[1]);
+  for(const x of pinned){assert(r.value_kind(h,x)>0);r.heap_release(h,x);r.heap_pin(h,x);}
+  assert.equal(r.value_get(h,record,0),array);assert.equal(r.value_iterator_value(h,it),nan);
+  assert.equal(new DataView(r.memory.buffer).getUint32(r.value_data(h,nan,4),true),0x12345678);
+ }
  r.value_iterator_close(h,it);r.frame_pop(h,frame);for(const x of pinned)r.heap_release(h,x);r.heap_collect(h);assert.equal(r.heap_live(h),0);
 });
 test('Node and Bun execute the whole bounded Map/Set pipeline inside zero-import WASM across allocation safepoints',async()=>{

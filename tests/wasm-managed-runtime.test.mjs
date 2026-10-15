@@ -131,6 +131,35 @@ test('managed root counts, reference validation and failed construction are tran
  const used=r.heap_used(h);assert.equal(r.value_string(h,0xffffffff),0);assert.equal(r.last_error(),2);assert.equal(r.heap_used(h),used);
  assert.equal(r.heap_collect(h),1);assert.equal(r.heap_used(h),120);
 });
+test('released then repinned roots retain cycles, duplicate pins and weak named identity across every full collection',()=>{
+ const {r,h}=runtime(),root=r.value_refs(h,7,2),leaf=number(r,h,-0),named=r.gc_named(h,312);
+ r.value_set(h,root,0,root);r.value_set(h,root,1,leaf);
+ for(const x of[root,named]){r.heap_pin(h,x);r.heap_release(h,x);r.heap_pin(h,x);r.heap_pin(h,x);r.heap_release(h,x);}
+ for(let i=0;i<32;i++){
+  assert.equal(r.heap_collect(h),0);assert.equal(r.gc_named(h,312),named);assert.equal(r.value_get(h,root,0),root);assert(Object.is(unbox(r,h,leaf),-0));
+  r.heap_release(h,root);r.heap_pin(h,root);r.heap_release(h,named);r.heap_pin(h,named);
+  // A released root may survive through another object's edge, then be pinned
+  // again after collection removed its direct ownership.
+  r.heap_pin(h,leaf);r.heap_release(h,leaf);assert.equal(r.heap_collect(h),0);r.heap_pin(h,leaf);r.heap_release(h,leaf);
+ }
+ r.heap_release(h,root);r.heap_release(h,named);assert.equal(r.heap_collect(h),3);assert.equal(r.heap_live(h),0);
+});
+test('each automatic allocation performs a complete collection including newly detached children and sparse holes',()=>{
+ const {r,h}=runtime(),root=r.value_array_new(h,4),a=number(r,h,11),b=number(r,h,22),garbage=number(r,h,33);
+ r.heap_pin(h,root);assert.equal(r.value_set(h,root,0,a),1);assert.equal(r.value_set(h,root,2,b),1);r.heap_auto(h,1);
+ const before=r.heap_collections(h),first=number(r,h,44);assert(first>0);assert.equal(r.heap_collections(h),before+1);
+ assert.equal(r.value_kind(h,garbage),0);assert.equal(r.last_error(),1);assert.equal(r.value_get(h,root,1),3);assert.equal(unbox(r,h,a),11);assert.equal(unbox(r,h,b),22);
+ assert.equal(r.value_set(h,root,0,3),1);const second=number(r,h,55);assert(second>0);assert.equal(r.heap_collections(h),before+2);
+ assert.equal(r.value_kind(h,a),0);assert.equal(r.last_error(),1);assert.equal(r.value_kind(h,first),0);assert.equal(r.last_error(),1);assert.equal(unbox(r,h,b),22);
+ r.heap_release(h,root);assert.equal(r.heap_collect(h),3);assert.equal(r.heap_live(h),0);
+});
+test('temporarily borrowed unpinned operands survive allocation safepoints and become collectible after return',()=>{
+ const {r,h}=runtime(),left=managedString(r,h,'left'),right=managedString(r,h,'\ud800right');r.heap_auto(h,1);
+ const count=r.heap_collections(h),joined=r.value_string_concat(h,left,right);assert(joined>0);assert.equal(r.heap_collections(h),count+1);assert.equal(readManagedString(r,h,joined),'left\ud800right');
+ assert.equal(readManagedString(r,h,left),'left');assert.equal(readManagedString(r,h,right),'\ud800right');
+ r.heap_pin(h,joined);assert.equal(r.heap_collect(h),2);assert.equal(readManagedString(r,h,joined),'left\ud800right');
+ r.heap_release(h,joined);assert.equal(r.heap_collect(h),1);assert.equal(r.heap_live(h),0);
+});
 test('managed Number unary and comparisons preserve IEEE order and signed zero',()=>{
  const {r,h}=runtime(64);
  for(const a of [0,-0,1,-1,Infinity,-Infinity,NaN,Number.MIN_VALUE]) {

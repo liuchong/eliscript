@@ -91,6 +91,10 @@ test-core: check-contracts
 		tests/wasm-managed-regexp.test.mjs \
 		tests/wasm-managed-builtins.test.mjs \
 		tests/wasm-managed-identity.test.mjs \
+		tests/wasm-managed-object-integrity.test.mjs \
+		tests/wasm-managed-array-search.test.mjs \
+		tests/wasm-managed-array-construction.test.mjs \
+		tests/wasm-managed-object-properties.test.mjs \
 		tests/wasm-managed-math.test.mjs \
 		tests/wasm-managed-json.test.mjs \
 		tests/wasm-managed-number-conversion.test.mjs \

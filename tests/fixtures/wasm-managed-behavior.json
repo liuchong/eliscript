@@ -693,6 +693,298 @@
           "expected": 3
         }
       ]
+    },
+    {
+      "name": "Shallow source object integrity",
+      "description": "Shallow freezing keeps source identity and protects own properties while retaining mutable child objects and collection internal slots, with strict errors and independent recovery.",
+      "scenarios": [
+        {
+          "id": "freeze-shallow-identity",
+          "given": "an object owns a mutable child",
+          "when": "only the parent is frozen and the child is changed",
+          "then": "the parent keeps identity and only its own properties are frozen",
+          "source": "(defun run () (let* ((child (js-object :value 1)) (parent (js-object :child child)) (result (Object/freeze parent))) (put child :value 2) (js-array (eq parent result) (Object/isFrozen parent) (Object/isFrozen child) (get child :value))))",
+          "expected": [
+            true,
+            true,
+            false,
+            2
+          ]
+        },
+        {
+          "id": "freeze-strict-write-and-recovery",
+          "given": "a frozen object owns a data property",
+          "when": "a strict assignment writes the same value",
+          "then": "the write fails and a following independent frozen query succeeds",
+          "source": "(defun run () (put (Object/freeze (js-object :x 1)) :x 1)) (defun recover () (Object/isFrozen (Object/freeze (js-object))))",
+          "runtimeError": "ELI-RT0003",
+          "jsError": "TypeError",
+          "recover": true
+        },
+        {
+          "id": "freeze-collection-internal-slots",
+          "given": "a frozen Map wrapper contains no entries",
+          "when": "its entries are added and then cleared",
+          "then": "internal entries remain mutable while the wrapper stays frozen",
+          "source": "(defun run () (let ((m (Object/freeze (new (js* \"Map\"))))) (js-call m :set \"key\" 7) (let ((value (js-call m :get \"key\"))) (js-call m :clear) (js-array value (get m :size) (Object/isFrozen m)))))",
+          "expected": [
+            7,
+            0,
+            true
+          ]
+        },
+        {
+          "id": "freeze-invalid-comparator-before-short-sort",
+          "given": "a frozen empty array has an invalid sort comparator",
+          "when": "sort checks that comparator",
+          "then": "the comparator error is preserved even though no item would be written",
+          "source": "(defun run () (js-call (Object/freeze (js-array)) :sort false)) (defun recover () (js-length (js-call (Object/freeze (js-array)) :toSorted)))",
+          "runtimeError": "ELI-RT0003",
+          "jsError": "TypeError",
+          "recover": 0
+        }
+      ]
+    },
+    {
+      "name": "Array searching",
+      "description": "includes, indexOf and lastIndexOf execute entirely in collecting zero-import WASM with exact equality, sparse slots and original conversion order.",
+      "scenarios": [
+        {
+          "id": "search-equality-and-zero",
+          "given": "NaN and negative zero in an ordinary array",
+          "when": "includes and the strict index methods search those values",
+          "then": "only includes matches NaN and all methods treat both zeros equally",
+          "source": "(defun run () (let ((a (js-array (/ 0 0) -0.0))) (js-array (js-call a :includes (/ 0 0)) (js-call a :indexOf (/ 0 0)) (js-call a :lastIndexOf 0))))",
+          "expected": [
+            true,
+            -1,
+            1
+          ]
+        },
+        {
+          "id": "search-holes-and-undefined",
+          "given": "a sparse array with one explicit undefined position",
+          "when": "all search methods omit their search element",
+          "then": "includes reads holes as undefined while index methods visit only the explicit position",
+          "source": "(defun run () (let ((a (js-array))) (put a :length 4) (put a 2 undefined) (js-array (js-call a :includes) (js-call a :indexOf) (js-call a :lastIndexOf))))",
+          "expected": [
+            true,
+            2,
+            2
+          ]
+        },
+        {
+          "id": "search-last-omitted-versus-undefined",
+          "given": "the same value appears twice",
+          "when": "lastIndexOf either omits fromIndex or explicitly passes undefined",
+          "then": "omission starts at the last slot while undefined converts to zero",
+          "source": "(defun run () (let ((a (js-array 1 2 1))) (js-array (js-call a :lastIndexOf 1) (js-call a :lastIndexOf 1 undefined) (js-call a :indexOf 1 -1.9))))",
+          "expected": [
+            2,
+            0,
+            2
+          ]
+        },
+        {
+          "id": "search-length-before-conversion",
+          "given": "a fromIndex callback shrinks the searched array",
+          "when": "includes observes the original length and then reads its removed positions",
+          "then": "a removed position matches undefined and the source shrink remains visible",
+          "source": "(defun run () (let* ((a (js-array 1 2 3)) (from (js-object :valueOf (lambda () (put a :length 0) 0)))) (js-array (js-call a :includes undefined from) (js-length a))))",
+          "expected": [
+            true,
+            0
+          ]
+        },
+        {
+          "id": "search-empty-skips-conversion",
+          "given": "an empty array and a fromIndex object unable to convert",
+          "when": "indexOf runs after all argument expressions finish",
+          "then": "it returns minus one without invoking numeric conversion",
+          "source": "(defun run () (js-call (js-array) :indexOf nil (js-object :valueOf (lambda () (js-object)) :toString (lambda () (js-object)))))",
+          "expected": -1
+        },
+        {
+          "id": "search-method-capture",
+          "given": "an own includes function replaced by an argument effect",
+          "when": "method invocation evaluates the remaining ignored arguments",
+          "then": "the original captured function receives every argument",
+          "source": "(defun run () (let ((a (js-array))) (put a :includes (lambda (x &rest rest) (str x \":\" (js-length rest)))) (js-call a :includes (progn (put a :includes false) \"captured\") 1 2)))",
+          "expected": "captured:2"
+        }
+      ]
+    },
+    {
+      "name": "Array construction",
+      "description": "Native Array.from and Array.of preserve dense ownership, Unicode iteration, array-like snapshots, live cursors and abrupt closing in independent JS and zero-import collecting WASM.",
+      "scenarios": [
+        {
+          "id": "array-of-dense-identity",
+          "given": "undefined and an ordinary object supplied to Array.of",
+          "when": "the result is copied with Array.from",
+          "then": "both arrays own dense slots and retain the original object reference",
+          "source": "(defun run () (let* ((x (js-object)) (a (Array/of undefined x)) (b (Array/from a))) (js-array (js-length a) (object-has? a 0) (undefined? (aref a 0)) (eq (aref b 1) x) (not (eq a b)))))",
+          "expected": [
+            2,
+            true,
+            true,
+            true,
+            true
+          ]
+        },
+        {
+          "id": "array-from-unicode-points",
+          "given": "a supplementary Unicode character and an isolated high surrogate",
+          "when": "Array.from iterates the string",
+          "then": "the supplementary pair stays together and the isolated code unit survives",
+          "source": "(defun run () (let ((x (Array/from (str \"A😀\" (String/fromCharCode 55296))))) (js-array (js-length x) (js-length (aref x 1)) (js-call (aref x 2) :charCodeAt 0))))",
+          "expected": [
+            3,
+            2,
+            55296
+          ]
+        },
+        {
+          "id": "array-from-arraylike-snapshot",
+          "given": "an array-like object with an inherited first item",
+          "when": "its mapper shrinks length and changes a later value",
+          "then": "the original length is retained and subsequent indexed reads observe the change",
+          "source": "(defun run () (let* ((p (js-object :0 \"inherited\")) (x (js-object :__proto__ p :length 3 :1 \"old\" :2 \"last\"))) (Array/from x (lambda (value index) (when (= index 0) (put x :length 1) (put x 1 \"new\")) value))))",
+          "expected": [
+            "inherited",
+            "new",
+            "last"
+          ]
+        },
+        {
+          "id": "array-from-live-collection",
+          "given": "a Set containing two values",
+          "when": "the mapper deletes the next value and appends another",
+          "then": "live iteration skips the deleted value and visits the appended value with consecutive indices",
+          "source": "(defun run () (let ((s (new (js* \"Set\") (js-array \"a\" \"b\")))) (Array/from s (lambda (value index &rest rest) (when (= index 0) (js-call s :delete \"b\") (js-call s :add \"c\")) (js-array value index (js-length rest))))))",
+          "expected": [
+            [
+              "a",
+              0,
+              0
+            ],
+            [
+              "c",
+              1,
+              0
+            ]
+          ]
+        },
+        {
+          "id": "array-from-captured-next",
+          "given": "a source iterator with an own next callback",
+          "when": "the callback overwrites next after the first invocation",
+          "then": "the originally captured callback is used until its done result",
+          "source": "(defun run () (let ((i (js-call (js-array) :values)) (n 0)) (put i :next (lambda () (setq n (1+ n)) (put i :next false) (js-object :done (> n 2) :value n))) (Array/from i)))",
+          "expected": [
+            1,
+            2
+          ]
+        },
+        {
+          "id": "array-from-abrupt-close",
+          "given": "an iterator whose return callback records closing and itself fails",
+          "when": "the mapper throws an invalid-radix error",
+          "then": "return runs once and the original mapper error survives",
+          "source": "(defconst trace (js-object :closed false)) (defun run () (let ((i (js-call (js-array 1) :values))) (put i :return (lambda () (put trace :closed t) (js-call nil :charAt))) (Array/from i (lambda (value index) (js-call 1 :toString 1))))) (defun recover () (get trace :closed))",
+          "runtimeError": "ELI-RT0010",
+          "jsError": "RangeError",
+          "recover": true
+        }
+      ]
+    },
+    {
+      "name": "Object own properties",
+      "description": "Own enumerable data properties, key coercion and ordered assignment execute in JS and zero-import WASM while retaining original target identity and failure effects.",
+      "scenarios": [
+        {
+          "id": "object-keys-integer-order",
+          "given": "numeric-looking names inserted between ordinary names",
+          "when": "Object.keys enumerates the object",
+          "then": "canonical integer indices precede other names in insertion order",
+          "source": "(defun run () (Object/keys (js-object :z 1 :10 2 :01 3 :2 4 :a 5)))",
+          "expected": [
+            "2",
+            "10",
+            "z",
+            "01",
+            "a"
+          ]
+        },
+        {
+          "id": "object-string-own-units",
+          "given": "a string containing a supplementary Unicode character",
+          "when": "keys and own properties are queried",
+          "then": "indices count UTF16 units and length is own but non-enumerable",
+          "source": "(defun run () (js-array (Object/keys \"A😀\") (Object/hasOwn \"A😀\" \"length\") (Object/hasOwn \"A😀\" \"2\") (Object/hasOwn \"A😀\" \"3\")))",
+          "expected": [
+            [
+              "0",
+              "1",
+              "2"
+            ],
+            true,
+            true,
+            false
+          ]
+        },
+        {
+          "id": "object-key-string-hint",
+          "given": "a property key object with two conversion hooks",
+          "when": "hasOwn evaluates an extra argument then converts the key",
+          "then": "toString runs once after the argument and valueOf is skipped",
+          "source": "(defun run () (let ((trace (js-object :n 0))) (let ((found (Object/hasOwn (js-object :x 1) (js-object :toString (lambda () (put trace :n (+ (* (get trace :n) 10) 1)) \"x\") :valueOf (lambda () (put trace :n 999) \"missing\")) (put trace :n 2)))) (js-array found (get trace :n)))))",
+          "expected": [
+            true,
+            21
+          ]
+        },
+        {
+          "id": "object-assign-sparse-identity",
+          "given": "a sparse array and a target object",
+          "when": "assign copies the array and skips nullish sources",
+          "then": "only owned indices copy and the target keeps its identity",
+          "source": "(defun run () (let ((target (js-object)) (items (js-array t undefined))) (put items :length 3) (let ((result (Object/assign target nil undefined items))) (js-array (eq target result) (Object/keys result) (Object/hasOwn result \"1\") (Object/hasOwn result \"2\")))))",
+          "expected": [
+            true,
+            [
+              "0",
+              "1"
+            ],
+            true,
+            false
+          ]
+        },
+        {
+          "id": "object-assign-proto-data",
+          "given": "null-prototype source and target objects with an own __proto__ data name",
+          "when": "assign copies properties",
+          "then": "the name stays ordinary data on the target",
+          "source": "(defun run () (let ((source (js-object :__proto__ nil :x 1)) (target (js-object :__proto__ nil))) (put source :__proto__ \"data\") (Object/assign target source) (js-array (get target :__proto__) (Object/keys target))))",
+          "expected": [
+            "data",
+            [
+              "x",
+              "__proto__"
+            ]
+          ]
+        },
+        {
+          "id": "object-assign-partial-error",
+          "given": "an early source and a later source that would make the target its own prototype",
+          "when": "assignment reaches the invalid later property",
+          "then": "the original error is reported and the earlier write remains visible",
+          "source": "(defconst target (js-object)) (defun run () (let ((source (js-object :__proto__ nil))) (put source :__proto__ target) (Object/assign target (js-object :saved 7) source))) (defun recover () (get target :saved))",
+          "runtimeError": "ELI-RT0003",
+          "jsError": "TypeError",
+          "recover": 7
+        }
+      ]
     }
   ]
 }
