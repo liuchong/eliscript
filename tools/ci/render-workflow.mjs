@@ -6,6 +6,9 @@ const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const defaultRoot = path.resolve(moduleDirectory, "../..");
 const matrixPath = "contracts/compatibility-matrix.json";
 
+// CI scheduling leaves the measured local compatibility contract unchanged.
+export const COMPATIBILITY_FILE_SHARDS = 2;
+
 export class CompatibilityMatrixError extends Error {
   constructor(errors) {
     super(`compatibility matrix validation failed:\n- ${errors.join("\n- ")}`);
@@ -189,20 +192,22 @@ export function validateCompatibilityMatrix(matrix) {
     localEvidence,
     actions,
     commands,
-    jobs: systems.length * emacsVersions.length,
-    acceptanceJobs: acceptanceSystems.length * emacsVersions.length,
+    testFileShards: COMPATIBILITY_FILE_SHARDS,
+    jobs: systems.length * emacsVersions.length * COMPATIBILITY_FILE_SHARDS,
+    acceptanceJobs: acceptanceSystems.length * emacsVersions.length * COMPATIBILITY_FILE_SHARDS,
     workflow: matrix.workflow,
   };
 }
 
 function workflowJobRows(validated) {
   return validated.systems.flatMap((system) =>
-    validated.emacsVersions.map((emacsVersion) => [
-      "          - name: " + `${system.id}-emacs-${emacsVersion}`,
+    validated.emacsVersions.flatMap((emacsVersion) => Array.from({length: validated.testFileShards}, (_, index) => [
+      "          - name: " + `${system.id}-emacs-${emacsVersion}-shard-${index + 1}-of-${validated.testFileShards}`,
       "            os: " + system.runner,
       "            architecture: " + system.architecture,
       `            emacs: \"${emacsVersion}\"`,
-    ].join("\n"))
+      `            shard: ${index + 1}`,
+    ].join("\n")))
   ).join("\n");
 }
 
@@ -260,7 +265,7 @@ export function renderWorkflow(matrix) {
   const commandSteps = validated.commands.map((command) => {
     const names = {
       "bun install --frozen-lockfile": "Install locked dependencies",
-      "bun run test": "Run complete test suite",
+      "bun run test": "Run test file shard ${{ matrix.shard }}/" + validated.testFileShards,
       "make byte-compile": "Strict byte compilation",
     };
     const label = command === "bun run test" && matrix.performanceAcceptance === "deferred"
@@ -292,7 +297,7 @@ export function renderWorkflow(matrix) {
 `    runs-on: \${{ matrix.os }}\n` +
 `    timeout-minutes: 30\n` +
 `    env:\n` +
-`      BUN_TEST_RUNNER: tools/testing/file-workers.mjs\n` +
+`      BUN_TEST_RUNNER: tools/testing/file-workers.mjs --shard-index \${{ matrix.shard }} --shard-count ${validated.testFileShards}\n` +
 (matrix.performanceAcceptance === "deferred"
   ? `      ELISCRIPT_DEFER_PERFORMANCE_ACCEPTANCE: "1"\n` : "") +
 `    strategy:\n` +
@@ -332,6 +337,7 @@ export async function checkCompatibilityWorkflow(options = {}) {
     javascriptHost: validated.javascriptHost,
     nodeHost: validated.localEvidence.nodeHost,
     localEvidenceDirectory: validated.localEvidence.directory,
+    testFileShards: validated.testFileShards,
     jobs: validated.jobs,
     acceptanceJobs: validated.acceptanceJobs,
     workflow: validated.workflow,
@@ -352,6 +358,7 @@ export function humanCompatibilityReport(report) {
     `  Emacs          ${report.emacsVersions.join(", ")}`,
     `  JS host        ${report.javascriptHost.name} ${report.javascriptHost.version}`,
     `  Node host      ${report.nodeHost.name} ${report.nodeHost.version}`,
+    `  File shards    ${report.testFileShards} per system/Emacs pair`,
     `  Matrix jobs    ${report.jobs}`,
     `  Required jobs  ${report.acceptanceJobs}`,
     `  Local evidence ${report.localEvidenceDirectory}`,

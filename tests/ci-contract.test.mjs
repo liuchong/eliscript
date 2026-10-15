@@ -195,8 +195,9 @@ describe("compatibility matrix contract", () => {
 
   test("repository compatibility matrix renders the committed CI workflow", async () => {
     const report = await checkCompatibilityWorkflow({ root });
-    expect(report.jobs).toBe(4);
-    expect(report.acceptanceJobs).toBe(2);
+    expect(report.jobs).toBe(8);
+    expect(report.acceptanceJobs).toBe(4);
+    expect(report.testFileShards).toBe(2);
     expect(report.systems.map((system) => system.id)).toEqual(["linux", "macos"]);
     expect(report.acceptanceSystems.map((system) => system.id)).toEqual(["macos"]);
     expect(report.emacsVersions).toEqual(["29.4", "30.2"]);
@@ -254,7 +255,7 @@ describe("compatibility matrix contract", () => {
     expect(workflow).toContain("shasum -a 256 -c node.sha256");
     expect(workflow).toContain(`test "$(node --version)" = "v${baseline.localEvidence.nodeHost.version}"`);
     expect(workflow.indexOf("name: Install Node")).toBeLessThan(
-      workflow.indexOf("name: Run complete test suite"),
+      workflow.indexOf("name: Run test file shard"),
     );
     const unsupported = copyBaseline();
     unsupported.localEvidence.nodeHost.version = "22.23.2";
@@ -316,7 +317,7 @@ case "$url" in */SHASUMS256.txt)
     const workflow = renderWorkflow(baseline);
     const dependencies = workflow.indexOf("name: Install locked dependencies");
     const browser = workflow.indexOf("name: Install Chromium");
-    const tests = workflow.indexOf("name: Run complete test suite");
+    const tests = workflow.indexOf("name: Run test file shard");
     expect(browser).toBeGreaterThan(dependencies);
     expect(browser).toBeLessThan(tests);
     expect(workflow).toContain("bun node_modules/playwright-core/cli.js install --with-deps chromium");
@@ -365,5 +366,123 @@ describe("browser compatibility matrix", () => {
     for (const drift of [workflow.replace("set -o pipefail", "true"), workflow.replace("if: always()", "if: success()")]) {
       await expect(checkBrowserCompatibilityWorkflow({ contract: browserContract, matrix: baseline, workflowText: drift })).rejects.toThrow(/differs/);
     }
+  });
+});
+
+
+describe("CI file shards", () => {
+  test("strict CLI partitions preserve order, cover each file once and reject incomplete or invalid options", async () => {
+    const {parseTestFileArgs, partitionTestFiles} = await import('../tools/testing/file-workers.mjs');
+    const files = ['a', 'b', 'c', 'd', 'e'].map(name => name + '.test.mjs');
+    expect(parseTestFileArgs(files)).toEqual({files, shard: null});
+    for (const count of [1, 2, 3, 8]) {
+      const parts = Array.from({length: count}, (_, i) => partitionTestFiles(files, i + 1, count));
+      expect(parts.flat().sort()).toEqual([...files].sort());
+      expect(new Set(parts.flat()).size).toBe(files.length);
+      for (let i = 0; i < count; i++) expect(parts[i]).toEqual(files.filter((_, position) => position % count === i));
+    }
+    expect(parseTestFileArgs(['--shard-index', '2', '--shard-count', '2', ...files])).toEqual({files, shard: {index: 2, count: 2}});
+    expect(parseTestFileArgs([...files, '--shard-count', '2', '--shard-index', '1'])).toEqual({files, shard: {index: 1, count: 2}});
+    for (const args of [[], ['--unknown', ...files], ['--shard-index', '1', ...files], ['--shard-count', '2', ...files],
+      ['--shard-index'], ['--shard-count'], ['--shard-index', '1', '--shard-index', '1', '--shard-count', '2', ...files],
+      ['--shard-index', '1', '--shard-count', '2', '--shard-count', '2', ...files], ['--', ...files], ['other.mjs'], [files[0], files[0]]]) {
+      expect(() => parseTestFileArgs(args)).toThrow();
+    }
+    for (const value of ['0', '-1', '1.5', '01', '1e0', 'Infinity', 'NaN', '9007199254740992', '']) {
+      expect(() => parseTestFileArgs(['--shard-index', value, '--shard-count', '2', ...files])).toThrow();
+      expect(() => parseTestFileArgs(['--shard-index', '1', '--shard-count', value, ...files])).toThrow();
+    }
+    for (const [index, count] of [[0, 2], [3, 2], [1, 0], [1.5, 2], [1, Infinity], [1, '2']]) {
+      expect(() => partitionTestFiles(files, index, count)).toThrow();
+    }
+    expect(() => parseTestFileArgs(['--shard-index', '3', '--shard-count', '2', ...files])).toThrow();
+  });
+
+  test("actual CLI shard processes execute the full union exactly once, retain failures and default to all files", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'eliscript-file-shards-'));
+    try {
+      const log = path.join(directory, 'executed.jsonl'), runner = path.join(root, 'tools/testing/file-workers.mjs');
+      const files = Array.from({length: 5}, (_, i) => path.join(directory, i + '.test.mjs'));
+      for (let i = 0; i < files.length; i++) await writeFile(files[i], `import{test}from'bun:test';import{appendFileSync}from'node:fs';import assert from'node:assert/strict';test('case ${i}',()=>{appendFileSync(process.env.ELISCRIPT_SHARD_OUTPUT,JSON.stringify({run:process.env.ELISCRIPT_SHARD_RUN,index:${i}})+'\\n');${i === 0 ? "assert.fail('intentional shard failure');" : ''}});`);
+      const run = (label, flags) => spawnSync(process.execPath, [runner, ...flags, ...files], {cwd: directory,
+        env: {...process.env, BUN_TEST_RUNNER: 'tools/testing/file-workers.mjs --shard-index 2 --shard-count 2', ELISCRIPT_SHARD_OUTPUT: log, ELISCRIPT_SHARD_RUN: label}, encoding: 'utf8', timeout: 30000});
+      for (const index of [1, 2]) {
+        const result = run('shards', ['--shard-index', String(index), '--shard-count', '2']);
+        expect(result.status, result.stderr).toBe(index === 1 ? 1 : 0);
+        expect(result.stdout).toContain(`Test file shard ${index}/2: ${index === 1 ? 3 : 2}/5 selected`);
+        expect(result.stdout).toContain(`${index === 1 ? 3 : 2}/${index === 1 ? 3 : 2} completed`);
+      }
+      const full = run('full', []);expect(full.status).toBe(1);expect(full.stdout).toContain('5/5 completed');expect(full.stdout).not.toContain('Test file shard');
+      const empty = run('empty', ['--shard-index', '8', '--shard-count', '8']);expect(empty.status).toBe(0);expect(empty.stdout).toContain('0/5 selected');expect(empty.stdout).toContain('0/0 completed');
+      const before = await readFile(log, 'utf8');
+      for (const flags of [['--shard-index', '1'], ['--shard-index', '0', '--shard-count', '2'], ['--shrad-index', '1', '--shard-count', '2']]) {
+        const invalid = run('invalid', flags);expect(invalid.status).toBe(1);expect(invalid.stderr).toContain('test-file arguments');
+      }
+      expect(await readFile(log, 'utf8')).toBe(before);
+      const records = before.trim().split('\n').map(line => JSON.parse(line));
+      for (const label of ['shards', 'full']) expect(records.filter(item => item.run === label).map(item => item.index).sort()).toEqual([0, 1, 2, 3, 4]);
+      expect(records).toHaveLength(10);
+    } finally {await rm(directory, {recursive: true, force: true});}
+  });
+
+  test("sharded CLI cancellation reaps selected children and never starts queued or unselected files", async () => {
+    for (const [signal, status] of [['SIGINT', 130], ['SIGTERM', 143]]) for (const shard of [1, 2]) {
+      const directory = await mkdtemp(path.join(tmpdir(), 'eliscript-shard-cancel-'));let child;
+      try {
+        const files = Array.from({length: 6}, (_, i) => path.join(directory, i + '.test.mjs'));
+        for (let i = 0; i < files.length; i++) await writeFile(files[i], `import{test}from'bun:test';import{writeFileSync}from'node:fs';import{join}from'node:path';test('held ${i}',async()=>{writeFileSync(join(process.env.ELISCRIPT_SHARD_CANCEL,'pid-${i}'),String(process.pid));await new Promise(r=>setTimeout(r,4000));});`);
+        const selected = files.map((_, i) => i).filter(i => i % 2 === shard - 1);
+        child = Bun.spawn([process.execPath, path.join(root, 'tools/testing/file-workers.mjs'), '--shard-index', String(shard), '--shard-count', '2', ...files],
+          {cwd: directory, env: {...process.env, ELISCRIPT_SHARD_CANCEL: directory}, stdout: 'ignore', stderr: 'ignore'});
+        const deadline = Date.now() + 3000;let pids;
+        while (Date.now() < deadline) {try {pids = await Promise.all(selected.slice(0, 2).map(i => readFile(path.join(directory, 'pid-' + i), 'utf8')));break;} catch {await new Promise(resolve => setTimeout(resolve, 10));}}
+        expect(pids?.length).toBe(2);child.kill(signal);expect(await child.exited).toBe(status);
+        for (const pid of pids) expect(() => process.kill(Number(pid), 0)).toThrow();
+        for (let i = 0; i < files.length; i++) if (!selected.slice(0, 2).includes(i)) await expect(access(path.join(directory, 'pid-' + i))).rejects.toThrow();
+      } finally {if (child) {child.kill();await child.exited;}await rm(directory, {recursive: true, force: true});}
+    }
+  });
+
+  test("eight matrix jobs cover every core and application inventory once per OS and Emacs pair without weakening other gates", async () => {
+    const {partitionTestFiles} = await import('../tools/testing/file-workers.mjs');
+    const workflow = renderWorkflow(baseline), validated = validateCompatibilityMatrix(baseline);
+    expect(validated.jobs).toBe(8);expect(validated.acceptanceJobs).toBe(4);expect(validated.testFileShards).toBe(2);
+    const rows = [...workflow.matchAll(/          - name: ([^\n]+)\n            os: ([^\n]+)\n            architecture: ([^\n]+)\n            emacs: "([^"\n]+)"\n            shard: (\d+)$/gm)];
+    expect(rows).toHaveLength(8);
+    const makefile = await readFile(path.join(root, 'Makefile'), 'utf8');
+    const inventories = makefile.replace(/\\\n/g, ' ').split('\n').filter(line => line.includes('$(BUN) $(BUN_TEST_RUNNER)')).map(line => line.match(/tests\/[a-z0-9-]+\.test\.mjs/g));
+    expect(inventories).toHaveLength(2);for (const files of inventories) {expect(files.length).toBeGreaterThan(20);expect(new Set(files).size).toBe(files.length);}
+    for (const system of baseline.operatingSystems) for (const emacs of baseline.emacsVersions) {
+      const pair = rows.filter(row => row[2] === system.runner && row[4] === emacs);
+      expect(pair.map(row => Number(row[5])).sort()).toEqual([1, 2]);
+      for (const row of pair) {expect(row[1]).toBe(`${system.id}-emacs-${emacs}-shard-${row[5]}-of-2`);expect(row[3]).toBe(system.architecture);}
+      for (const files of inventories) {
+        const all = pair.flatMap(row => partitionTestFiles(files, Number(row[5]), 2));
+        expect(all.sort()).toEqual([...files].sort());expect(new Set(all).size).toBe(files.length);
+      }
+    }
+    expect(workflow).toContain('BUN_TEST_RUNNER: tools/testing/file-workers.mjs --shard-index ${{ matrix.shard }} --shard-count 2');
+    expect(workflow).toContain('Run test file shard ${{ matrix.shard }}/2');
+    expect(workflow).toContain('timeout-minutes: 30');expect(workflow).toContain('fail-fast: false');
+    for (const command of baseline.commands) expect(workflow).toContain(`run: ${command}`);
+    for (const action of baseline.actions) expect(workflow).toContain(`${action.repository}@${action.revision}`);
+    for (const script of ['cli-test.sh', 'project-cli-test.sh', 'check-cli-test.sh', 'format-cli-test.sh', 'application-cli-test.sh']) expect(makefile).toContain(`./tests/${script}`);
+    expect(makefile.match(/ert-run-tests-batch-and-exit/g)).toHaveLength(2);
+    expect(workflow).not.toMatch(/\|\| true|--test-name-pattern|continue-on-error|if:.*matrix/);
+  });
+
+  test("confirmed expensive functional files are exclusive while normal files still overlap", async () => {
+    const {runTestFiles} = await import('../tools/testing/file-workers.mjs');
+    const expensive = ['wasm-compiler-analyzer', 'wasm-compiler-emitter', 'independent-compiler-producers', 'wasm-managed-str', 'native-backend', 'native-memory-long-branches'].map(name => 'tests/' + name + '.test.mjs');
+    const files = ['normal-a.test.mjs', 'normal-b.test.mjs', ...expensive, 'after-a.test.mjs', 'after-b.test.mjs'];
+    const active = new Set(), seen = [];
+    const spawn = spyOn(Bun, 'spawn').mockImplementation(([, , file]) => {
+      if (expensive.includes(file)) expect(active.size).toBe(0);
+      else expect([...active].some(item => expensive.includes(item))).toBe(false);
+      active.add(file);seen.push(file);
+      return {exited: new Promise(resolve => setImmediate(() => {active.delete(file);resolve(0);})), kill() {}};
+    });
+    try {const running = runTestFiles(files);expect(active.size).toBe(2);const result = await running;expect(seen).toEqual(files);expect(result.exitCode).toBe(0);expect(result.results).toHaveLength(files.length);}
+    finally {spawn.mockRestore();}
   });
 });
