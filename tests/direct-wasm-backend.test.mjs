@@ -925,6 +925,19 @@ test("ordinary replacement retains public Seed and three-generation IR, descript
     for (const value of [text, out, callback]) a.release(value); a.closeModule(); a.collect(); assert.equal(a.live(), 0); assert.equal(a.stats().frameDepth, 0);
   }
 });
+test("empty bindings retain public Seed and three-generation IR, descriptors, closure tables and executable bytes", async () => {
+  const filename = resolve(root, 'tests/fixtures/wasm-managed-empty-bindings.eli'), source = await readFile(filename, 'utf8'), seed = await seedJavascript(filename, resolve(directory, 'empty-bindings-seed.mjs'));
+  const programs = generations.map(g => g.compiler.compile_ir_string(source, filename)), runtimes = generations.map(g => g.compiler.compile_ir_string(runtimeSeeds.memory.source, 'runtime.eli'));
+  const lowered = generations.map((g, i) => g.managed.lower_managed_program(programs[i], runtimes[i])), bytes = generations.map((g, i) => g.managed.emit_managed_wasm(programs[i], runtimes[i]));
+  const {instantiateManagedRuntime} = await import('../tools/backends/managed-runtime.mjs');
+  for (let i = 0; i < 3; i++) {
+    assert.equal(generations[i].compiler.emit_ir_string(programs[i]), seed); assert.deepEqual(programs[i], programs[0]); assert.deepEqual(lowered[i], lowered[0]); assert.deepEqual(bytes[i], bytes[0]);
+    const a = instantiateManagedRuntime(Uint8Array.from(bytes[i])); a.auto(1); assert.equal(a.invoke('default-value'), null);
+    const number = a.number(-0), text = a.string('中😀\ud800'), parallel = a.invoke('parallel-value', [number]), captured = a.invoke('capture-value', [text]);
+    assert(Object.is(a.readNumber(parallel), -0)); assert.equal(a.readString(captured), '中😀\ud800');
+    for (const value of [number, text, parallel, captured]) a.release(value); a.closeModule(); a.collect(); assert.equal(a.live(), 0); assert.equal(a.stats().frameDepth, 0);
+  }
+});
 test("primitive Number and text conversions have Seed and three-generation IR, descriptor and WASM fixed points", async () => {
   const source=await readFile(resolve(root,'tests/fixtures/wasm-managed-number-conversion.eli'),'utf8'),runtime=await readFile(resolve(root,'bootstrap/runtime/memory.eli'),'utf8');
   const programs=generations.map(g=>g.compiler.compile_ir_string(source,'number-conversion.eli')),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtime,'runtime.eli'));
@@ -1553,6 +1566,24 @@ describe("browser compiler backends", () => {
           const template = a.string("$&:$1:$2:$01:$20:$`:$':$$"), out = a.invoke('replace-captures', [input, template]); check(a.readString(out) === js.replace_captures(text, "$&:$1:$2:$01:$20:$`:$':$$"), 'captures');
           const search = a.string(''), inserted = a.invoke('replace-value', [input, search, template]); check(a.readString(inserted) === js.replace_value(text, '', "$&:$1:$2:$01:$20:$`:$':$$"), 'empty');
           for (const value of [input, template, out, search, inserted]) a.release(value); a.collect(); check(a.stats().frameDepth === 0, 'frame');
+        }
+        a.closeModule(); a.collect(); check(a.live() === 0 && a.stats().frameDepth === 0, 'cleanup'); return [...bytes];
+      } finally {URL.revokeObjectURL(url); if (jsUrl) URL.revokeObjectURL(jsUrl);}
+    }, {source, seed, filename, runtime});
+    assert.deepEqual(bytes, generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source, filename), generations[2].compiler.compile_ir_string(runtime, 'runtime.eli')));
+  });
+  test("browser empty bindings preserve nil defaults, sequential scope and captured mutable cells without imports", async () => {
+    const filename = resolve(root, 'tests/fixtures/wasm-managed-empty-bindings.eli'), source = await readFile(filename, 'utf8'), seed = await seedJavascript(filename, resolve(directory, 'browser-empty-bindings-seed.mjs')), runtime = runtimeSeeds.memory.source;
+    const bytes = await evaluateBrowser(async ({bundle, source, seed, filename, runtime}) => {
+      const url = URL.createObjectURL(new Blob([bundle], {type: 'text/javascript'})); let jsUrl;
+      try {
+        const c = await import(url), p = c.compile_ir_string(source, filename), bytes = Uint8Array.from(c.emit_managed_wasm(p, c.compile_ir_string(runtime, 'runtime.eli')));
+        const check = (ok, label) => {if (!ok) throw Error(label);}; check(c.emit_ir_string(p) === seed, 'Seed'); check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length === 0, 'imports');
+        jsUrl = URL.createObjectURL(new Blob([seed], {type: 'text/javascript'})); const js = await import(jsUrl), a = c.instantiateManagedRuntime(bytes); a.auto(1); check(a.invoke('default-value') === null, 'nil');
+        for (const value of [null, undefined, false, true, -0, NaN, Infinity, Number.MIN_VALUE, '', '中😀\ud800']) {
+          const input = typeof value === 'number' ? a.number(value) : typeof value === 'string' ? a.string(value) : value;
+          for (const name of ['parallel-value', 'sequential-value', 'capture-value']) {const out = a.invoke(name, [input]), read = out && typeof out === 'object' ? out.kind === 4 ? a.readNumber(out) : a.readString(out) : out; check(Object.is(read, js[name.replaceAll('-', '_')](value)), name); a.release(out);}
+          a.release(input); a.collect(); check(a.stats().frameDepth === 0, 'frame');
         }
         a.closeModule(); a.collect(); check(a.live() === 0 && a.stats().frameDepth === 0, 'cleanup'); return [...bytes];
       } finally {URL.revokeObjectURL(url); if (jsUrl) URL.revokeObjectURL(jsUrl);}

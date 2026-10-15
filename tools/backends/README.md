@@ -630,3 +630,16 @@ Global/sticky RegExp state, custom Symbol.replace hooks, arbitrary builtin
 prototype changes, object ToPrimitive and complete source exception identities
 remain open. This does not claim complete RegExp, replacement, standard-library
 or compiler-host support; replaceAll remains a separate unimplemented method.
+
+## Ordinary lexical bindings without initializers
+
+Managed WASM now preserves the existing JS behavior of plain `let` and `let*`
+bindings without initializers: their initial value is nil. Parallel bindings
+still evaluate initialized siblings in the outer scope; sequential bindings see
+earlier bindings, including nil defaults. Captured cells retain later writes and
+escaped closures keep their cells alive independently of their declaring frame.
+
+Binding shape is checked before reading initializer children. Malformed names,
+invalid initializer nodes and unsupported binding patterns report the
+existing source-bound ELI-B0001 diagnostic without mutating the original IR.
+This does not implement destructuring or change the source language contract.

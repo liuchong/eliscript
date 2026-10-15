@@ -65,6 +65,7 @@ test-core: check-contracts
 		tests/wasm-managed-tables.test.mjs \
 		tests/wasm-managed-source-collections.test.mjs \
 		tests/wasm-managed-control.test.mjs \
+		tests/wasm-managed-empty-bindings.test.mjs \
 		tests/wasm-managed-callables.test.mjs \
 		tests/wasm-managed-variadic-calls.test.mjs \
 		tests/wasm-managed-array-callbacks.test.mjs \
