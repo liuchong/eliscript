@@ -183,13 +183,13 @@ runtime.collect();
 ```
 
 The profile accepts primitive literals, references, `let`/`let*`, assignments,
-sequences, `if`/`cond`/`when`/`unless`, `while`, `and`/`or`/`not`, required synchronous
-parameters, direct named calls, named/lambda function values, dynamic calls and
-`funcall`. Lisp truth preserves Number zero, NaN and empty strings as true;
+sequences, `if`/`cond`/`when`/`unless`, `while`, `and`/`or`/`not`, synchronous required/optional/rest
+parameters, direct named calls, named/lambda function values, dynamic calls,
+`funcall` and `apply` over supported source iterables. Lisp truth preserves Number zero, NaN and empty strings as true;
 short-circuit returns preserve actual operand values. Every unsupported node is
 rejected even in an unselected branch. Persistent literals, imports, arbitrary
-host interop, optional/rest/async functions, `apply`/spread and exception
-expressions remain open; this profile does not represent the complete dynamic
+host interop, parameter destructuring, async functions, custom Symbol iterators
+and exception expressions remain open; this profile does not represent the complete dynamic
 backend.
 
 Function values execute through an owned WASM table and `call_indirect`, with
@@ -200,9 +200,22 @@ captures, recursive cycles and separate bindings for each loop iteration.
 Uncaptured source locals retain their ordinary representation. Source calls
 snapshot the callee before arguments, evaluate all arguments once in order,
 evaluate extras even when ignored, and supply undefined for missing required
-arguments. A noncallable fails after its arguments have executed. Host
-`invoke(name, args)` retains the explicit descriptor's exact entry arity and
-owned-handle requirements.
+arguments. Optional undefined defaults to nil, and each rest parameter receives
+its own shallow source array. A noncallable fails after its arguments have
+executed. `apply` snapshots its callee, evaluates and exhausts its iterable, then
+calls the function; nil and undefined are invalid iterables. Source arrays
+(including holes), strings (by code point), Map/Set and owned source iterators
+are supported. Expansion and rest allocation execute inside WASM.
+
+Host `invoke(name, args)` retains the exact descriptor arity for required-only
+entries and accepts a variable argument count for optional/rest entries. Those
+entries declare `arity: null`, `callingConvention: "argument-list"` and ordered
+`parameterKinds` in their descriptor; the adapter checks these fields against
+the export signature and transfers one dense owned argument list. The null arity
+causes older fixed-arity readers to refuse the artifact rather than call it with
+the wrong convention. Every operand
+still obeys the existing owned-handle requirements. Getter, capacity and trap
+failures release temporary lists and preserve caller frames.
 
 ```lisp
 (defun make-counter (n)

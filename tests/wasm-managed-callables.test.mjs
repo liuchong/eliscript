@@ -370,8 +370,8 @@ test("unsupported callable forms are source-bound refusals even in dead code and
   const input = heap.number(4), output = heap.invoke("f", [input]); assert.equal(heap.readNumber(output), 4); finish(heap, [input, output]);
   backends.managed.emit_managed_wasm(program, runtime);
   assert.equal(JSON.stringify(program), before); assert.equal(JSON.stringify(runtime), runtimeBefore);
-  for (const source of ["(defun f () (if false (async () 1) 0))", "(defun f () (lambda (&optional x) x))", "(defun f () (lambda (&rest x) x))",
-    "(defun f (g x) (apply g (js-array x)))",
+  for (const source of ["(defun f () (if false (async () 1) 0))", "(defun f () (lambda ([x]) x))", "(defun f () (lambda (&optional [x]) x))",
+    "(defun f (g) (apply g (js* \"[]\")))",
     "(defun f () (let ((globalThis nil)) (lambda () (new globalThis.Map))))"]) {
     const ir = backends.compiler.compile_ir_string(source + " (export f)", "unsupported-callable.eli"), saved = JSON.stringify(ir);
     assert.throws(() => backends.managed.emit_managed_wasm(ir, runtime), e => e.eliscriptDiagnostic?.code === "ELI-B0001" && e.eliscriptDiagnostic.location.file === "unsupported-callable.eli");

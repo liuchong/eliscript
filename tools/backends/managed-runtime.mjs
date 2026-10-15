@@ -17,7 +17,22 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
   if(!ended||index+length!==payload.length)fail(3);let descriptor;
   try{descriptor=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(payload.subarray(index)));}catch{fail(3);}
   if(descriptor?.format!=='eliscript-managed-control'||descriptor.version!==1||descriptor.abi!=='managed-control-v1'||!Array.isArray(descriptor.functions))fail(3);
-  for(const item of descriptor.functions){if(typeof item?.name!=='string'||!Number.isInteger(item.arity)||item.arity<0||item.arity>65535||entries.has(item.name)||typeof e[item.name]!=='function')fail(3);entries.set(item.name,item.arity);}
+  for(const item of descriptor.functions){
+   if(typeof item?.name!=='string'||entries.has(item.name)||typeof e[item.name]!=='function')fail(3);
+   const uniform=item.callingConvention==='argument-list';
+   if(item.callingConvention!==undefined&&!uniform)fail(3);
+   if(uniform){
+    // Legacy fixed-arity readers reject null instead of miscalling this ABI.
+    if(item.arity!==null||!Array.isArray(item.parameterKinds)||item.parameterKinds.length===0||item.parameterKinds.length>65535||!item.parameterKinds.some(k=>k!=='required')||e[item.name].length!==4)fail(3);
+    let mode='required';
+    for(let i=0;i<item.parameterKinds.length;i++){
+     const kind=item.parameterKinds[i];
+     if(!((kind==='required'&&mode==='required')||(kind==='optional'&&mode!=='rest')||(kind==='rest'&&i===item.parameterKinds.length-1&&mode!=='rest')))fail(3);
+     mode=kind;
+    }
+   }else if(!Number.isInteger(item.arity)||item.arity<0||item.arity>65535||item.parameterKinds!==undefined||e[item.name].length!==item.arity+1)fail(3);
+   entries.set(item.name,{arity:item.arity,uniform});
+  }
  }
  const handles=new WeakMap(),frames=new WeakMap(),view=()=>new DataView(e.memory.buffer);
  const call=(name,...args)=>{const result=e[name](...args)>>>0;const code=e['last-error']();if(code)fail(code);return result;};
@@ -72,14 +87,21 @@ export function instantiateManagedRuntime(bytes,{maxSlots=1024,initialBytes=6553
  }
  const api=Object.freeze({
   invoke(name,args=[]) {
-   if(typeof name!=='string'||!entries.has(name)||!Array.isArray(args)||args.length!==entries.get(name))fail(3);
-   const borrowed=[];let entered=false,target=0;
+   if(typeof name!=='string'||!entries.has(name)||!Array.isArray(args))fail(3);
+   const entry=entries.get(name);if(!entry.uniform&&args.length!==entry.arity)fail(3);
+   const borrowed=[];let entered=false,target=0,argumentsList=0;
    try {
     const values=Array.from(args,value=>{const v=id(value);call('heap-pin',heap,v);borrowed.push(v);return v;});
     target=call('frame-current',heap);entered=true;
+    if(entry.uniform){
+     argumentsList=call('value-refs',heap,7,word(values.length));call('heap-pin',heap,argumentsList);
+     const offset=call('value-data',heap,argumentsList,7),targetView=view();
+     values.forEach((v,i)=>targetView.setUint32(offset+i*4,v,true));
+     return wrap(call(name,heap,0,argumentsList,values.length));
+    }
     return wrap(call(name,heap,...values));
    } catch(error){if(entered)call('frame-unwind',heap,target);throw error;}
-   finally{for(const value of borrowed)call('heap-release',heap,value);}
+   finally{if(argumentsList)call('heap-release',heap,argumentsList);for(const value of borrowed)call('heap-release',heap,value);}
   },
   number(input) {
    if(typeof input!=='number')fail(3);const bits=new DataView(new ArrayBuffer(8));bits.setFloat64(0,input,true);

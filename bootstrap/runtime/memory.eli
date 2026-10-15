@@ -2705,6 +2705,51 @@
     ) 1 0))
   ;; Function values carry a code-table index and references to mutable cells.
   ;; Cell and capture words are stable handles, never addresses into a moving pool.
+  ;; Dynamic calls carry a validated dense argument list. Rest arrays and spread
+  ;; expansion are owned values built inside WASM, including iterator consumption.
+  (defun value-call-arguments-check (heap arguments count)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (if (= (heap-kind-check heap arguments 7) 0) 0
+        (if (/= count (load-u32 (+ (heap-block heap arguments) 4))) (fail 3)
+          (let ((index 0) (valid 1))
+            (while (and (= valid 1) (< index count))
+              (setq valid (heap-reference-check heap (load-u32 (+ (+ (heap-block heap arguments) 32) (* index 4)))))
+              (setq index (1+ index))) valid)))))
+  (defun value-call-rest (heap arguments start count)
+    (begin-operation) (if (= (value-call-arguments-check heap arguments count) 0) 0
+      (let ((frame (heap-argument-frame heap arguments 0 0 4)) (result 0))
+        (when (/= frame 0)
+          (let ((length (if (> count start) (- count start) 0)) (index 0))
+            (setq result (value-array-new heap length))
+            (when (/= result 0)
+              (frame-set heap frame 3 result)
+              (while (< index length)
+                (store-u32 (+ (+ (heap-block heap result) 32) (* index 4))
+                  (load-u32 (+ (+ (heap-block heap arguments) 32) (* (+ start index) 4))))
+                (setq index (1+ index)))))
+          (setq result (heap-frame-result heap frame result))) result)))
+  (defun value-call-expand (heap input)
+    (begin-operation) (if (= (heap-check heap) 0) 0
+      (let ((frame (heap-argument-frame heap input 0 0 5)) (result 0))
+        (when (/= frame 0)
+          (let ((iterator (value-source-get-iterator heap input)) (count 0) (capacity 0) (next 0))
+            (when (= (last-error) 0)
+              (frame-set heap frame 3 iterator) (setq result (value-refs heap 7 0))
+              (when (= (last-error) 0)
+                (frame-set heap frame 1 result) (setq next (value-source-iterator-advance heap iterator))
+                (while (and (= (last-error) 0) (= next 1))
+                  (let ((item (heap-source-iterator-item heap iterator)))
+                    (when (= (last-error) 0)
+                      (frame-set heap frame 4 item)
+                      (when (= count capacity)
+                        (if (>= count 67108854) (fail 2)
+                          (progn (setq capacity (if (= capacity 0) 8 (if (> capacity 33554427) 67108854 (* capacity 2))))
+                            (value-refs-resize heap result capacity))))
+                      (when (= (last-error) 0)
+                        (value-set heap result count item) (setq count (1+ count)))))
+                  (when (= (last-error) 0) (setq next (value-source-iterator-advance heap iterator))))
+                (when (= (last-error) 0) (value-refs-resize heap result count)))))
+          (setq result (heap-frame-result heap frame result))) result)))
   (defun value-cell-new (heap value)
     (begin-operation)
     (if (= (heap-check heap) 0) 0

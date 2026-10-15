@@ -149,15 +149,19 @@ beforeAll(async () => {
   await writeFile(managedInput, managedSource);
   const callableInput = resolve(root, "tests/fixtures/wasm-managed-callables.eli");
   const callableSource = await readFile(callableInput, "utf8");
-  const [memorySeed, managedSeed, callableSeed] = await Promise.all([
+  const variadicInput = resolve(root, "tests/fixtures/wasm-managed-variadic-calls.eli");
+  const variadicSource = await readFile(variadicInput, "utf8");
+  const [memorySeed, managedSeed, callableSeed, variadicSeed] = await Promise.all([
     seedJavascript(resolve(root, "bootstrap/runtime/memory.eli"), resolve(directory, "memory-seed.mjs")),
     seedJavascript(managedInput, resolve(directory, "managed-seed.mjs")),
     seedJavascript(callableInput, resolve(directory, "callables-seed.mjs")),
+    seedJavascript(variadicInput, resolve(directory, "variadic-seed.mjs")),
   ]);
   runtimeSeeds = {
     memory: { source, javascript: memorySeed },
     managed: { source: managedSource, javascript: managedSeed },
     callables: { source: callableSource, javascript: callableSeed, filename: callableInput },
+    variadic: { source: variadicSource, javascript: variadicSeed, filename: variadicInput },
   };
 }, 120_000);
 afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
@@ -849,6 +853,22 @@ test("mixed primitive operators have three-generation canonical IR, numeric JS, 
  const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
  for(const artifact of bytes){const a=instantiateManagedRuntime(Uint8Array.from(artifact));a.auto(1);const s=a.string('1.5'),n=a.number(2),sum=a.invoke('add',[s,n]),product=a.invoke('multiply',[s,n]);assert.equal(a.readString(sum),'1.52');assert.equal(a.readNumber(product),3);for(const x of[s,n,sum,product])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);}
 });
+test("variadic calls preserve Seed and three-generation IR, descriptors and executable WASM bytes",async()=>{
+ const {source,javascript:seed,filename}=runtimeSeeds.variadic;
+ const programs=generations.map(g=>g.compiler.compile_ir_string(source,filename)),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtimeSeeds.memory.source,'runtime.eli'));
+ const saved=programs.map(JSON.stringify),savedRuntime=runtimes.map(JSON.stringify),lowered=generations.map((g,i)=>g.managed.lower_managed_program(programs[i],runtimes[i]));
+ const artifacts=generations.map((g,i)=>g.managed.emit_managed_wasm(programs[i],runtimes[i],{maximumPages:16}));
+ const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
+ for(let i=0;i<3;i++){
+  assert.deepEqual(programs[i],programs[0]);assert.deepEqual(lowered[i],lowered[0]);assert.deepEqual(artifacts[i],artifacts[0]);assert.equal(generations[i].compiler.emit_ir_string(programs[i]),seed);
+  assert.equal(JSON.stringify(programs[i]),saved[i]);assert.equal(JSON.stringify(runtimes[i]),savedRuntime[i]);
+  const bytes=Uint8Array.from(artifacts[i]);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);const a=instantiateManagedRuntime(bytes);a.auto(1);
+  assert.equal(a.invoke('optional-one'),null);const n=a.number(-0),f=a.invoke('mixed-value'),args=a.sourceArray([n,undefined,true]);const out=a.invoke('apply-values',[f,args]);
+  const first=a.get(out,0),second=a.get(out,1),tail=a.get(out,2);assert(Object.is(a.readNumber(first),-0));assert.equal(second,null);assert.equal(a.get(tail,0),true);
+  for(const x of[n,f,args,out,first,second,tail])a.release(x);a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+ }
+});
+
 test("source callables preserve Seed semantics and three-generation IR, descriptor and WASM fixed points", async () => {
   const {source,javascript:seed,filename}=runtimeSeeds.callables, runtime=runtimeSeeds.memory.source;
   const programs=generations.map(g=>g.compiler.compile_ir_string(source,filename)), runtimes=generations.map(g=>g.compiler.compile_ir_string(runtime,"runtime.eli"));
@@ -1446,6 +1466,34 @@ describe("browser compiler backends", () => {
       }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
     },{source,runtime});
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-source-collections.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
+  });
+  test("browser variadic calls and apply preserve defaults, iterable order, captures and failure cleanup",async()=>{
+    const source=runtimeSeeds.variadic.source,runtime=runtimeSeeds.memory.source;
+    const result=await evaluateBrowser(async({bundle,source,runtime})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'}));let jsUrl;
+      try{
+        const c=await import(url),p=c.compile_ir_string(source,'browser-variadic.eli'),rt=c.compile_ir_string(runtime,'runtime.eli');
+        const bytes=Uint8Array.from(c.emit_managed_wasm(p,rt,{maximumPages:16})),check=(ok,label)=>{if(!ok)throw Error(label);};check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'zero imports');
+        jsUrl=URL.createObjectURL(new Blob([c.emit_ir_string(p)],{type:'text/javascript'}));const ref=await import(jsUrl),a=c.instantiateManagedRuntime(bytes);a.auto(1);
+        const read=x=>{if(x===null||typeof x==='boolean'||x===undefined)return x;if(x.kind===4)return a.readNumber(x);if(x.kind===5)return a.readString(x);const result=[];for(let i=0;i<a.length(x);i++){const v=a.get(x,i);try{result.push(read(v));}finally{a.release(v)}}return result};
+        const same=(x,y)=>Array.isArray(x)&&Array.isArray(y)?x.length===y.length&&x.every((v,i)=>same(v,y[i])):Object.is(x,y);
+        const get=(name,args=[])=>{const out=a.invoke(name,args);try{return read(out)}finally{a.release(out)}};
+        for(const values of[[],[undefined],[false],[null],[-0,undefined,NaN,Infinity,Number.MIN_VALUE]]){const args=values.map(v=>typeof v==='number'?a.number(v):v);check(same(get('mixed',args),ref.mixed(...values)),'defaults and exact bits');for(const x of args)a.release(x);a.collect();}
+        const n=a.number(-0),f=a.invoke('mixed-value'),pack=a.invoke('pack-value'),items=a.sourceArray([n,undefined,true]),text=a.string('A😀\ud800Z');
+        check(same(get('apply-values',[f,items]),ref.mixed(-0,undefined,true)),'apply arrays');check(same(get('apply-values',[pack,text]),ref.pack(...'A😀\ud800Z')),'code points');
+        const holes=[];holes.length=3;const sparse=a.sourceArray(holes);check(same(get('apply-values',[pack,sparse]),[undefined,undefined,undefined]),'holes');
+        const set=a.invoke('as-set',[items]);check(same(get('apply-values',[pack,set]),ref.pack(...new Set([-0,undefined,true]))),'Set iteration');
+        const pair=a.sourceArray([n,true]),pairs=a.sourceArray([pair]),map=a.invoke('as-map',[pairs]);check(same(get('apply-values',[pack,map]),[[0,true]]),'Map iteration');
+        const iter=a.invoke('values-iterator',[items]);let failed=false;try{a.invoke('apply-values',[false,iter])}catch(e){failed=e.eliscriptDiagnostic?.code==='ELI-RT0003'}check(failed&&a.invoke('iterator-done',[iter])===true,'consume before noncallable');
+        const capture=a.invoke('make-capture',[n,true]),reference=ref.make_capture(-0,true);for(const x of[undefined,null,false,true]){check(same(get('call-capture',[capture,x]),ref.call_capture(reference,x)),'shared variadic capture');a.collect();}
+        for(const size of[127,128,513]){const out=a.invoke('pack',Array(size).fill(true));check(a.length(out)===size&&a.get(out,size-1)===true,'large rest');a.release(out);}
+        check(a.invoke('fresh-rest')===false,'fresh identity');for(const x of[n,f,pack,items,text,sparse,set,pair,pairs,map,iter,capture])a.release(x);a.collect();check(a.live()===0&&a.stats().frameDepth===0,'all roots reclaimed');
+        const start=runtime.indexOf('  (defun value-call-rest (heap arguments start count)'),end=runtime.indexOf('  (defun ',start+10);check(start>=0&&end>start,'fault location');const faulty=runtime.slice(0,start)+'  (defun value-call-rest (heap arguments start count) (load-u32 4294967295))'+String.fromCharCode(10)+runtime.slice(end);
+        const broken=c.instantiateManagedRuntime(Uint8Array.from(c.emit_managed_wasm(p,c.compile_ir_string(faulty,'browser-variadic-trap.eli'),{maximumPages:16}))),keep=broken.number(7),frame=broken.frame(1);broken.frameSet(frame,0,keep);let trapped=false;
+        try{broken.invoke('pack',[true])}catch(e){trapped=e instanceof WebAssembly.RuntimeError}check(trapped&&broken.stats().frameDepth===1,'actual rest trap');const saved=broken.frameGet(frame,0);check(broken.readNumber(saved)===7,'caller root');broken.release(saved);broken.leaveFrame(frame);broken.release(keep);broken.collect();check(broken.live()===0,'trap cleanup');return [...bytes];
+      }finally{URL.revokeObjectURL(url);if(jsUrl)URL.revokeObjectURL(jsUrl);}
+    },{source,runtime});
+    assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-variadic.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
   });
   test("browser source closures share mutable captures, preserve dynamic effects and reclaim complete graphs",async()=>{
     const source=runtimeSeeds.callables.source,runtime=runtimeSeeds.memory.source;
