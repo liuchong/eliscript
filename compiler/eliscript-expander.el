@@ -35,16 +35,21 @@
 
 (defun eliscript-expander--collect-symbol-names (form names)
   "Add every source symbol reachable from FORM to NAMES."
-  (let ((value (eliscript-form-value form)))
-    (cond
-     ((symbolp value) (puthash (symbol-name value) t names))
-     ((consp value)
-      (eliscript-expander--collect-symbol-names (car value) names)
-      (eliscript-expander--collect-symbol-names (cdr value) names))
-     ((vectorp value)
-      (mapc (lambda (item)
-              (eliscript-expander--collect-symbol-names item names))
-            (append value nil)))))
+  ;; Module bodies are wide lists. Recursing through each cdr makes their
+  ;; definition count consume the host's Lisp evaluation depth before expansion.
+  (let ((pending (list form)))
+    (while pending
+      (let ((value (eliscript-form-value (pop pending))))
+        (cond
+         ((symbolp value) (puthash (symbol-name value) t names))
+         ((consp value)
+          (push (cdr value) pending)
+          (push (car value) pending))
+         ((vectorp value)
+          (let ((index (1- (length value))))
+            (while (>= index 0)
+              (push (aref value index) pending)
+              (setq index (1- index)))))))))
   names)
 
 (defun eliscript-expander--register (form environment)

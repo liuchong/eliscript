@@ -44,6 +44,7 @@ test-core: check-contracts
 		tests/retained-soak-refresh.test.mjs \
 		tests/retained-transient-refresh.test.mjs \
 		tests/bootstrap-seed-batch.test.mjs \
+		tests/seed-symbol-reservation.test.mjs \
 		tests/esm-imports.test.mjs \
 		tests/ci-contract.test.mjs \
 		tests/local-compatibility-matrix.test.mjs \

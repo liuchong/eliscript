@@ -1,6 +1,6 @@
 import {beforeAll,afterAll,test} from 'bun:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,readFile} from 'node:fs/promises';
+import {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {buildBackends} from '../tools/backends/build.mjs';
@@ -232,10 +232,16 @@ test('memory32 refuses value-position when and unless rather than changing their
 test('Node executes the same standalone memory bytes and bulk bridge against independent codecs',async()=>{
  const {spawnSync}=await import('node:child_process');
  const {pathToFileURL}=await import('node:url');
+ const {createHash}=await import('node:crypto');
  const {bytes}=await runtime();
+ const artifact=resolve(directory,'node-memory-runtime.wasm');await writeFile(artifact,bytes);
  const script=`import assert from 'node:assert/strict';
+ import {readFileSync} from 'node:fs';
+ import {createHash} from 'node:crypto';
  const {instantiateMemoryRuntime}=await import(process.argv[1]);
- const a=instantiateMemoryRuntime(Buffer.from(process.argv[2],'base64'));
+ const bytes=readFileSync(process.argv[2]);
+ assert.equal(createHash('sha256').update(bytes).digest('hex'),process.argv[3]);
+ const a=instantiateMemoryRuntime(bytes);
  let state=0x1765abcd; const next=()=>{state^=state<<13;state^=state>>>17;state^=state<<5;return state>>>0;};
  for(let round=0;round<512;round++) {
   const text=String.fromCharCode(...Array.from({length:next()%64},()=>next()&65535));
@@ -249,9 +255,11 @@ test('Node executes the same standalone memory bytes and bulk bridge against ind
   }
   a.retire();
  }`;
- const child=spawnSync(process.env.NODE??'node',['--input-type=module','-e',script,
- pathToFileURL(resolve('tools/backends/memory-runtime.mjs')).href,Buffer.from(bytes).toString('base64')],{encoding:'utf8',timeout:30000});
- assert.equal(child.status,0,child.stderr);
+ const arguments_=['--input-type=module','-e',script,
+ pathToFileURL(resolve('tools/backends/memory-runtime.mjs')).href,artifact,createHash('sha256').update(bytes).digest('hex')];
+ assert(arguments_.every(value=>Buffer.byteLength(value)<128*1024),'runtime artifact must not exceed a portable subprocess argument boundary');
+ const child=spawnSync(process.env.NODE??'node',arguments_,{encoding:'utf8',timeout:30000});
+ assert.equal(child.status,0,child.error?.message??child.stderr);
 });
 
 test('memory32 handles recursion and multi-byte function and local indices',()=>{

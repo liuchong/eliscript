@@ -2252,6 +2252,32 @@
                "macro file dependency is not declared: build-value.txt"
                (error-message-string undeclared))))))
 
+(ert-deftest eliscript-symbol-reservation-handles-wide-and-deep-form-trees ()
+  "A wide module must not consume Lisp call depth during name reservation."
+  (let ((max-lisp-eval-depth 1600)
+        (names (make-hash-table :test #'equal))
+        (wide (make-list 2400 'reserved-wide))
+        (deep 'reserved-deep))
+    (dotimes (_ 2400) (setq deep (vector (list deep))))
+    (eliscript-expander--collect-symbol-names wide names)
+    (eliscript-expander--collect-symbol-names deep names)
+    (should (gethash "reserved-wide" names))
+    (should (gethash "reserved-deep" names))))
+
+(ert-deftest eliscript-symbol-reservation-preserves-located-quoted-and-dotted-names ()
+  "Every original symbol is reserved without changing the located source."
+  (let* ((forms (eliscript-read-located-string
+                 "(list 'quoted [vector-name :keyword] (a . tail) \"ignored\")"
+                 "reservation.eli"))
+         (before (prin1-to-string forms))
+         (names (make-hash-table :test #'equal)))
+    (mapc (lambda (form)
+            (eliscript-expander--collect-symbol-names form names)) forms)
+    (dolist (name '("list" "quote" "quoted" "vector-name" ":keyword" "a" "tail"))
+      (should (gethash name names)))
+    (should-not (gethash "ignored" names))
+    (should (equal before (prin1-to-string forms)))))
+
 (provide 'eliscript-tests)
 
 ;;; eliscript-tests.el ends here
