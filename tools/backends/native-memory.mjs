@@ -28,7 +28,7 @@ export async function openNativeMemory(path, signatures, {initialPages=1,maximum
       view.setUint32(24,0,true);
       const result=library.symbols[name](ptr(context),...args)>>>0;
       const error=view.getUint32(24,true);
-      if(error)throw new WebAssembly.RuntimeError(error===1?'memory access out of bounds':error===2?'integer divide by zero':'native memory trap');
+      if(error)throw new WebAssembly.RuntimeError(error===1?'memory access out of bounds':error===2?'integer divide by zero':error===3?'indirect call index out of bounds':error===4?'indirect call signature mismatch':'native memory trap');
       return result;
     },
     read(offset,length){range(offset,length);return bytes.slice(offset,offset+length);},

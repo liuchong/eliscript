@@ -117,6 +117,8 @@ test-core: check-contracts
 		tests/wasm-managed-js-truth.test.mjs \
 		tests/native-backend.test.mjs \
 		tests/native-memory-backend.test.mjs \
+		tests/native-memory-indirect.test.mjs \
+		tests/native-managed-runtime.test.mjs \
 		tests/compiler-reader-character.test.mjs \
 		tests/compiler-source-map-cursor.test.mjs \
 		tests/compiler-portable-predicates.test.mjs \

@@ -147,9 +147,8 @@ test.skipIf(process.platform!=='darwin'||process.arch!=='arm64')('native memory 
  }finally{n.close();}
 });
 
-test('native memory rejects indirect calls and unsupported input even in unselected branches',()=>{
+test('native memory rejects unsupported input even in unselected branches',()=>{
  for(const text of [
-  '(import "eliscript:memory32" call-source) (defun f (a b c d e) (call-source a b c d e))',
   '(defun f (x) (if false (js* "x") x))',
   '(import "eliscript:memory32" store-u32 load-f64) (defun f (p) (store-u32 p (load-f64 p)))',
   '(defun f (x) -0.0)',
@@ -184,4 +183,11 @@ test('native memory direct emission reaches a public Seed and three-generation b
   return {object:Uint8Array.from(g.native.emit_native_memory_object(ir,'arm64-macos')),library:Uint8Array.from(g.native.emit_native_memory_library(ir,'arm64-macos'))};
  });
  for(const artifact of artifacts.slice(1))assert.deepEqual(artifact,artifacts[0]);
+ const indirect=await Promise.all(generations.map(async g=>{
+  const memory=await import(pathToFileURL(resolve(g.directory,'memory.mjs')).href);
+  const program=memory.lower_memory_program(g.compiler.compile_ir_string('(import "eliscript:memory32" call-source) (defun target (a b c d) (+ (+ a b) (+ c d))) (defun invoke (slot) (call-source 1 2 3 4 slot)) (export invoke)','native-indirect-fixedpoint.eli'));
+  program.table=[program.functions.find(f=>f.name==='target').index];program.aliases=[{name:'invoke-alias',function:'invoke'}];
+  return {object:Uint8Array.from(g.native.emit_typed_native_memory_object(program,'arm64-macos')),library:Uint8Array.from(g.native.emit_typed_native_memory_library(program,'arm64-macos'))};
+ }));
+ for(const artifact of indirect.slice(1))assert.deepEqual(artifact,indirect[0]);
 },120000);
