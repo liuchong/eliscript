@@ -69,6 +69,7 @@ test-core: check-contracts
 		tests/wasm-managed-variadic-calls.test.mjs \
 		tests/wasm-managed-array-callbacks.test.mjs \
 		tests/wasm-managed-module-bindings.test.mjs \
+		tests/wasm-managed-project-linking.test.mjs \
 		tests/wasm-managed-arithmetic.test.mjs \
 		tests/wasm-managed-word.test.mjs \
 		tests/wasm-managed-arrays.test.mjs \

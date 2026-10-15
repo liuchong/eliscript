@@ -23,6 +23,8 @@
     (let ((counter value)) ((lambda () (setq counter (1+ counter)) counter))))
   (defun captured-global () (lambda (value) (setq counter (+ counter value)) counter))
   (defun allocate () (js-array 1 2 3))
-  (export counter unset missing negative-zero state initialization-log first second current
+  (defconst alias-name 3)
+  (defun emitted-alias (alias_name) alias-name)
+  (export emitted-alias counter unset missing negative-zero state initialization-log first second current
     mark tick read-counter read-state write-counter call-current set-current identity
     identity-value local-counter captured-global allocate))

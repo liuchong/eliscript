@@ -103,12 +103,15 @@ test('variadic lowering refuses invalid parameter modes, hidden children and mal
 });
 
 test('argument-list descriptors validate parameter modes and the actual exported ABI',()=>{
- const lowered=backends.managed.lower_managed_program(program,runtime),raw=backends.wasm.emit_typed_memory_wasm(lowered.typed);
+ const lowered=backends.managed.lower_managed_program(program,runtime),raw=backends.wasm.emit_typed_memory_wasm(lowered.typed),saved=[...raw];
+ const positive=Uint8Array.from(backends.wasm.append_metadata_section([...raw],'eliscript-managed-control',JSON.stringify(lowered.descriptor)));assert.equal(WebAssembly.Module.customSections(new WebAssembly.Module(positive),'eliscript-managed-control').length,1);finish(instantiateManagedRuntime(positive));
  const mixed=lowered.descriptor.functions.find(f=>f.name==='mixed');assert.deepEqual(mixed,{name:'mixed',arity:null,callingConvention:'argument-list',parameterKinds:['required','optional','rest']});
  for(const mutate of [d=>{delete d.functions.find(f=>f.name==='mixed').parameterKinds;},d=>{d.functions.find(f=>f.name==='mixed').arity++;},d=>{d.functions.find(f=>f.name==='mixed').callingConvention='other';},d=>{delete d.functions.find(f=>f.name==='mixed').callingConvention;},d=>{d.functions.find(f=>f.name==='mixed').parameterKinds=['required','rest','optional'];},d=>{d.functions.find(f=>f.name==='mixed').parameterKinds=['required','optional','unknown'];},d=>{d.functions.find(f=>f.name==='mixed').parameterKinds=['required','required','required'];},d=>{d.functions.find(f=>f.name==='call-none').arity=3;}]){
-  const d=structuredClone(lowered.descriptor);mutate(d);const invalid=Uint8Array.from(backends.wasm.append_metadata_section(raw,'eliscript-managed-control',JSON.stringify(d)));
+  const d=structuredClone(lowered.descriptor);mutate(d);const invalid=Uint8Array.from(backends.wasm.append_metadata_section([...raw],'eliscript-managed-control',JSON.stringify(d)));
+  assert.equal(WebAssembly.Module.customSections(new WebAssembly.Module(invalid),'eliscript-managed-control').length,1,'each argument-list mutant needs its own metadata section');
   assert.throws(()=>instantiateManagedRuntime(invalid),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');
  }
+ assert.deepEqual(raw,saved);
  const a=instance();assert.throws(()=>a.invoke('call-none'),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');finish(a);
 });
 

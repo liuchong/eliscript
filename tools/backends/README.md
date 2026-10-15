@@ -446,3 +446,60 @@ IR/byte fixed points, random codec/Unicode differentials, allocation failure,
 moving collection, explicit root cleanup and real Chromium/Firefox/WebKit.
 Numeric production reports retain their original inputs and per-case thresholds;
 they do not establish complete compiler performance or any missing 3×3 host cell.
+
+## Experimental managed projects
+
+`emit_managed_project_wasm(modules, entry, runtimeProgram, options)` links a bulk
+array of `{id, program}` records. Each program is ordinary canonical compiler IR;
+IDs are canonical relative virtual paths, and imports resolve relative to their
+importer. Source filenames and spans remain attached to diagnostics. The pure
+Eliscript linker reuses the project planner, retains source import order for
+one-time evaluation, instantiates bindings before evaluating cycles, and leaves
+all input IR unchanged. Reordering the supplied records does not change bytes.
+
+Named/default imports, reexports, side-effect imports and namespace imports use
+one owned module environment. Imports refer to the original cells; default
+expressions retain the existing JS snapshot behavior. Namespace objects retain
+shared identity, live string properties and a null prototype. Writes fail;
+own checks, enumeration and copies retain initialization-before-read errors.
+Copies contain current values with ordinary object semantics. Qualified names
+and statically linked namespace calls use the existing symbol munging rules;
+general dynamic method calls retain the managed profile's restrictions. No JS module executes
+on behalf of the resulting zero-import WASM artifact.
+
+Project exports use the public names emitted by the existing JS compiler. For
+example, a source `read-value` export is invoked as `read_value`; the ordinary
+named binding `default` exports as `default$`, distinct from a true `default`
+export. Standalone managed modules keep their existing source-name interface.
+Bindings that emit the same JS identifier shadow consistently across accepted
+scopes, including captures and assignments. Fresh project names account for
+emitted binding keys so munged local names cannot capture generated globals.
+Returned values and module lifecycle methods follow `managed-module-v1` above.
+The private namespace initializer is accepted only with linker-owned nodes;
+private kind-20 cells remain hidden behind namespace reads. Namespace objects
+use kind 13 with reserved header flag +20, retaining the existing tracing layout.
+
+The CLI accepts the existing virtual-project request shape in a JSON file:
+
+```json
+{
+  "mode": "project",
+  "entry": "main.eli",
+  "files": {
+    "state.eli": "(defvar counter 0) (defun tick () (setq counter (1+ counter))) (export counter tick)",
+    "main.eli": "(import \"./state.eli\" counter tick) (export counter tick)"
+  }
+}
+```
+
+```sh
+bun tools/backends/compile.mjs --abi managed-module-v1 --target wasm --project -o project.wasm request.json
+```
+
+The host transfers sources and invokes the compiler; declaration execution,
+namespace lookup and function dispatch remain in WASM. Invalid records, missing
+modules/exports, path escapes and import assignments are refused before output
+publication. This mode remains limited to the admitted managed IR: general
+interop, Symbols/descriptors, async/exceptions, remaining compiler dependencies,
+full compiler hosts and the complete bootstrap matrix remain open. The existing
+browser Worker request/response protocol is unchanged.

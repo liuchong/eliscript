@@ -1,0 +1,13 @@
+(module managed.project.entry
+  (import "./wasm-managed-project-state.mjs" :default initial counter history advance identity)
+  (import "./wasm-managed-project-state.mjs" :as api)
+  (defconst value-name 3)
+  (defun alias (value_name) value-name)
+  (defconst order (js-array (advance 1) (advance 2)))
+  (defun read () api/read-counter)
+  (defun current () counter)
+  (defun increment (value) (api/advance value))
+  (defun names () (object-keys api))
+  (defun snapshot () (object-assoc api :extra 7))
+  (defun forbidden () (put api :counter 999))
+  (export alias initial api counter history order identity read current increment names snapshot forbidden))

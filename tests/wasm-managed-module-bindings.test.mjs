@@ -142,10 +142,12 @@ test('raw module cells retain exact words reject invalid writes and keep reentra
 });
 
 test('module metadata refuses missing helpers malformed indexes mismatched exports and changed signatures',()=>{
- const lowered=b.managed.lower_managed_program(fixture,runtime),raw=b.wasm.emit_typed_memory_wasm(lowered.typed);
- for(const mutate of[d=>{delete d.module;},d=>{d.module.initialize='heap-collect';},d=>{d.module.bindingCount=-1;},d=>{d.module.functionCount=0;},d=>{d.module.exports[0].kind=9;},d=>{d.module.exports[0].index=d.module.bindingCount;},d=>{d.module.exports.pop();},d=>{d.module.exports.push(d.module.exports[0]);},d=>{d.functions[0].bindingIndex++;},d=>{d.functions[0].callingConvention='unknown';},d=>{d.functions[0].arity=2;},d=>{d.functions[0].parameterKinds=[];},d=>{d.functions.find(f=>f.name==='read-state').arity=1;}]){
-  const descriptor=structuredClone(lowered.descriptor);mutate(descriptor);const bytes=Uint8Array.from(b.wasm.append_metadata_section(raw,'eliscript-managed-control',JSON.stringify(descriptor)));assert.throws(()=>instantiateManagedRuntime(bytes),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');
+ const lowered=b.managed.lower_managed_program(fixture,runtime),raw=b.wasm.emit_typed_memory_wasm(lowered.typed),saved=[...raw];
+ const positive=Uint8Array.from(b.wasm.append_metadata_section([...raw],'eliscript-managed-control',JSON.stringify(lowered.descriptor)));assert.equal(WebAssembly.Module.customSections(new WebAssembly.Module(positive),'eliscript-managed-control').length,1);finish(instantiateManagedRuntime(positive));
+ for(const mutate of[d=>{delete d.module;},d=>{d.module.initialize='heap-collect';},d=>{d.module.bindingCount=-1;},d=>{d.module.functionCount=0;},d=>{d.module.exports[0].kind=9;},d=>{d.module.exports.find(e=>e.kind===0).index=d.module.bindingCount;},d=>{d.module.exports.find(e=>e.kind===1).index=d.module.functionCount;},d=>{d.module.exports.pop();},d=>{d.module.exports.push(d.module.exports[0]);},d=>{d.functions.find(f=>f.callingConvention==='module-binding').bindingIndex++;},d=>{d.functions[0].callingConvention='unknown';},d=>{d.functions[0].arity=2;},d=>{d.functions[0].parameterKinds=[];},d=>{d.functions.find(f=>f.name==='read-state').arity=1;}]){
+  const descriptor=structuredClone(lowered.descriptor);mutate(descriptor);const bytes=Uint8Array.from(b.wasm.append_metadata_section([...raw],'eliscript-managed-control',JSON.stringify(descriptor)));assert.equal(WebAssembly.Module.customSections(new WebAssembly.Module(bytes),'eliscript-managed-control').length,1,'each malformed descriptor must be checked in isolation');assert.throws(()=>instantiateManagedRuntime(bytes),e=>e.eliscriptDiagnostic?.code==='ELI-RT0003');
  }
+ assert.deepEqual(raw,saved);
 });
 
 test('module selection refuses non-string ABI requests rather than changing profiles implicitly',()=>{

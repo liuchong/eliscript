@@ -155,13 +155,19 @@ beforeAll(async () => {
   const callbackSource = await readFile(callbackInput, "utf8");
   const moduleInput = resolve(root, "tests/fixtures/wasm-managed-module-bindings.eli");
   const moduleSource = await readFile(moduleInput, "utf8");
-  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed, moduleSeed] = await Promise.all([
+  const projectStateInput = resolve(root, "tests/fixtures/wasm-managed-project-state.eli");
+  const projectEntryInput = resolve(root, "tests/fixtures/wasm-managed-project-entry.eli");
+  const projectStateSource = await readFile(projectStateInput, "utf8");
+  const projectEntrySource = await readFile(projectEntryInput, "utf8");
+  const [memorySeed, managedSeed, callableSeed, variadicSeed, callbackSeed, moduleSeed, projectStateSeed, projectEntrySeed] = await Promise.all([
     seedJavascript(resolve(root, "bootstrap/runtime/memory.eli"), resolve(directory, "memory-seed.mjs")),
     seedJavascript(managedInput, resolve(directory, "managed-seed.mjs")),
     seedJavascript(callableInput, resolve(directory, "callables-seed.mjs")),
     seedJavascript(variadicInput, resolve(directory, "variadic-seed.mjs")),
     seedJavascript(callbackInput, resolve(directory, "callback-seed.mjs")),
     seedJavascript(moduleInput, resolve(directory, "module-seed.mjs")),
+    seedJavascript(projectStateInput, resolve(directory, "project-state-seed.mjs")),
+    seedJavascript(projectEntryInput, resolve(directory, "project-entry-seed.mjs")),
   ]);
   runtimeSeeds = {
     memory: { source, javascript: memorySeed },
@@ -170,6 +176,10 @@ beforeAll(async () => {
     variadic: { source: variadicSource, javascript: variadicSeed, filename: variadicInput },
     callbacks: { source: callbackSource, javascript: callbackSeed, filename: callbackInput },
     moduleBindings: { source: moduleSource, javascript: moduleSeed, filename: moduleInput },
+    project: { entry: "wasm-managed-project-entry.mjs", modules: [
+      {id:"wasm-managed-project-state.mjs", source:projectStateSource, javascript:projectStateSeed, filename:projectStateInput},
+      {id:"wasm-managed-project-entry.mjs", source:projectEntrySource, javascript:projectEntrySeed, filename:projectEntryInput},
+    ]},
   };
 }, 120_000);
 afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
@@ -893,9 +903,27 @@ test("module bindings preserve public Seed and three-generation IR, descriptor a
   const num=(name,args=[])=>{const out=a.invoke(name,args);try{return a.readNumber(out)}finally{a.release(out)}};
   assert.equal(num('tick'),reference.tick());assert.equal(num('tick'),reference.tick());a.initializeModule();assert.equal(num('read-counter'),reference.read_counter());
   const state=a.getExport('state'),alias=a.invoke('read-state'),key=a.string('label'),label=a.objectGet(state,key);assert(a.keyEqual(state,alias));assert.equal(a.readString(label),reference.state.label);
-  const capture=a.invoke('captured-global'),one=a.number(1),assigned=a.invoke('set-current',[capture]);a.release(assigned);const result=a.invoke('call-current',[one]);assert.equal(a.readNumber(result),reference.captured_global()(1));
+  const capture=a.invoke('captured-global'),one=a.number(1);assert.equal(num('emitted-alias',[one]),reference.emitted_alias(1));const assigned=a.invoke('set-current',[capture]);a.release(assigned);const result=a.invoke('call-current',[one]);assert.equal(a.readNumber(result),reference.captured_global()(1));
   const zero=a.getExport('negative-zero');assert(Object.is(a.readNumber(zero),reference.negative_zero));assert.equal(a.getExport('missing'),null);
   for(const value of[state,alias,key,label,capture,one,result,zero])a.release(value);a.collect();assert(a.live()>0);a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
+ }
+});
+
+test("linked projects preserve public Seed, three-generation module IR, descriptors and executable fixed points",async()=>{
+ const fixture=runtimeSeeds.project,programs=generations.map(g=>fixture.modules.map(m=>({id:m.id,program:g.compiler.compile_ir_string(m.source,m.filename)}))),runtimes=generations.map(g=>g.compiler.compile_ir_string(runtimeSeeds.memory.source,'runtime.eli'));
+ const saved=programs.map(p=>p.map(m=>generations[0].compiler.serialize_ir_program(m.program))),savedRuntime=runtimes.map(JSON.stringify),linked=generations.map((g,i)=>g.managed.link_managed_project(programs[i],fixture.entry)),lowered=generations.map((g,i)=>g.managed.lower_managed_project(programs[i],fixture.entry,runtimes[i])),artifacts=generations.map((g,i)=>g.managed.emit_managed_project_wasm(programs[i],fixture.entry,runtimes[i],{maximumPages:16}));
+ const {instantiateManagedRuntime}=await import('../tools/backends/managed-runtime.mjs');
+ for(let i=0;i<3;i++){
+  assert.deepEqual(programs[i],programs[0]);assert.deepEqual(linked[i],linked[0]);assert.deepEqual(lowered[i],lowered[0]);assert.deepEqual(artifacts[i],artifacts[0]);assert.deepEqual(programs[i].map(m=>generations[i].compiler.serialize_ir_program(m.program)),saved[i]);assert.equal(JSON.stringify(runtimes[i]),savedRuntime[i]);
+  const referenceDirectory=resolve(directory,'project-reference-'+i);await mkdir(referenceDirectory);
+  for(let j=0;j<fixture.modules.length;j++){const module=fixture.modules[j],code=generations[i].compiler.emit_ir_string(programs[i][j].program);assert.equal(code,module.javascript);await writeFile(resolve(referenceDirectory,module.id),code)}
+  const reference=await import(pathToFileURL(resolve(referenceDirectory,fixture.entry)).href),bytes=Uint8Array.from(artifacts[i]);assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)),[]);const a=instantiateManagedRuntime(bytes);a.auto(1);
+  const num=(name,args=[])=>{const out=a.invoke(name,args);try{return a.readNumber(out)}finally{a.release(out)}};assert.equal(num('current'),reference.current());a.initializeModule();assert.equal(num('current'),reference.current());
+  const initial=a.getExport('initial'),api=a.getExport('api'),defaultKey=a.string('default'),fromNamespace=a.objectGet(api,defaultKey);assert(a.keyEqual(initial,fromNamespace));assert.equal(reference.initial,reference.api.default);
+  const getter=a.invoke('read'),key=a.string('read_counter'),named=a.objectGet(api,key);assert(a.keyEqual(getter,named));assert.equal(reference.read(),reference.api.read_counter);
+  const input=a.number(7);assert.equal(num('alias',[input]),reference.alias(7));const out=a.invoke('increment',[input]);assert.equal(a.readNumber(out),reference.increment(7));const exported=a.getExport('counter');assert.equal(a.readNumber(exported),reference.counter);
+  const valuesKey=a.string('values'),values=a.objectGet(initial,valuesKey);for(let j=0;j<3;j++){const value=a.get(values,j);assert(Object.is(a.readNumber(value),reference.initial.values[j]));a.release(value)}
+  for(const value of[initial,api,defaultKey,fromNamespace,getter,key,named,input,out,exported,valuesKey,values])a.release(value);a.closeModule();a.collect();assert.equal(a.live(),0);assert.equal(a.stats().frameDepth,0);
  }
 });
 
@@ -947,7 +975,7 @@ describe("browser compiler backends", () => {
     // each evaluation; performance benchmarks retain their separate policy.
     const entry = resolve(directory, "browser-entry.mjs");
     await writeFile(entry, `export {compile_ir_string,emit_ir_string} from ${JSON.stringify(resolve(directory, "g3/bootstrap/compiler.mjs"))};\nexport {emit_numeric_wasm,emit_memory_wasm} from ${JSON.stringify(resolve(directory, "g3/backends/wasm.mjs"))};\nexport {instantiateMemoryRuntime} from ${JSON.stringify(resolve(root, "tools/backends/memory-runtime.mjs"))};\nexport {instantiateManagedRuntime} from ${JSON.stringify(resolve(root, "tools/backends/managed-runtime.mjs"))};\nexport {emit_native_numeric_object,emit_native_numeric_library,emit_native_numeric_executable} from ${JSON.stringify(resolve(directory, "g3/backends/native.mjs"))};`);
-    await writeFile(entry,(await readFile(entry,'utf8'))+`\nexport {emit_managed_wasm} from ${JSON.stringify(resolve(directory,'g3/backends/managed.mjs'))};`);
+    await writeFile(entry,(await readFile(entry,'utf8'))+`\nexport {emit_managed_wasm,emit_managed_project_wasm} from ${JSON.stringify(resolve(directory,'g3/backends/managed.mjs'))};`);
     const build = await Bun.build({ entrypoints: [entry], target: "browser", format: "esm" });
     assert(build.success);
     browserBundle = await build.outputs[0].text();
@@ -1513,6 +1541,29 @@ describe("browser compiler backends", () => {
     },{source,runtime});
     assert.deepEqual(result,generations[2].managed.emit_managed_wasm(generations[2].compiler.compile_ir_string(source,'browser-source-collections.eli'),generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
   });
+  test("browser linked projects preserve namespaces, default identity, live imports, cycles and failure ownership",async()=>{
+    const fixture=runtimeSeeds.project,runtime=runtimeSeeds.memory.source;
+    const result=await evaluateBrowser(async({bundle,fixture,runtime})=>{
+      const url=URL.createObjectURL(new Blob([bundle],{type:'text/javascript'})),urls=[];
+      try{
+        const c=await import(url),rt=c.compile_ir_string(runtime,'runtime.eli'),modules=fixture.modules.map(m=>({id:m.id,program:c.compile_ir_string(m.source,m.id)})),bytes=Uint8Array.from(c.emit_managed_project_wasm(modules,fixture.entry,rt,{maximumPages:16}));
+        const check=(value,label)=>{if(!value)throw Error(label)},reject=(action,code)=>{let actual;try{action()}catch(e){actual=e.eliscriptDiagnostic?.code}check(actual===code,code)};check(WebAssembly.Module.imports(new WebAssembly.Module(bytes)).length===0,'zero imports');
+        const stateUrl=URL.createObjectURL(new Blob([c.emit_ir_string(modules[0].program)],{type:'text/javascript'}));urls.push(stateUrl);const entryIR=structuredClone(modules[1].program),rewrite=node=>{if(node.kind==='import-declaration')node.value=stateUrl;for(const child of node.children??[])rewrite(child)};for(const node of entryIR.body)rewrite(node);const entryUrl=URL.createObjectURL(new Blob([c.emit_ir_string(entryIR)],{type:'text/javascript'}));urls.push(entryUrl);const reference=await import(entryUrl);
+        const a=c.instantiateManagedRuntime(bytes);a.auto(1);const num=(name,args=[])=>{const out=a.invoke(name,args);try{return a.readNumber(out)}finally{a.release(out)}};check(num('current')===reference.current(),'initial dependency effects');a.initializeModule();check(num('current')===reference.current(),'once');
+        const api=a.getExport('api'),initial=a.getExport('initial'),defaultKey=a.string('default'),fromNamespace=a.objectGet(api,defaultKey);check(a.keyEqual(initial,fromNamespace)&&reference.api.default===reference.initial,'default identity');
+        const names=a.invoke('names'),actual=[];for(let i=0;i<a.length(names);i++){const name=a.get(names,i);actual.push(a.readString(name));a.release(name)}check(JSON.stringify(actual)===JSON.stringify(reference.names()),'namespace names');
+        const aliasInput=a.number(7);check(num('alias',[aliasInput])===reference.alias(7),'emitted-name shadowing');a.release(aliasInput);const copy=a.invoke('snapshot'),expectedCopy=reference.snapshot(),counterKey=a.string('counter'),before=a.objectGet(copy,counterKey);check(a.readNumber(before)===expectedCopy.counter,'snapshot');
+        for(const value of[-0,7,Number.MIN_VALUE]){const input=a.number(value),out=a.invoke('increment',[input]);check(Object.is(a.readNumber(out),reference.increment(value)),'live updates');a.release(input);a.release(out);a.collect();const current=a.getExport('counter');check(Object.is(a.readNumber(current),reference.counter),'live reexport');a.release(current)}
+        reject(()=>a.invoke('forbidden'),'ELI-RT0003');const snapshot=a.objectGet(copy,counterKey);check(a.readNumber(snapshot)===expectedCopy.counter,'copy is independent');const labelKey=a.string('label'),label=a.objectGet(initial,labelKey);check(a.readString(label)===reference.initial.label,'Unicode');
+        for(const value of[api,initial,defaultKey,fromNamespace,names,copy,counterKey,before,snapshot,labelKey,label])a.release(value);a.closeModule();a.collect();check(a.live()===0&&a.stats().frameDepth===0,'all project roots reclaimed');
+        const cyclic=[{id:'main.mjs',program:c.compile_ir_string('(import "./other.mjs" result) (defconst value 7) (export value)','main.eli')},{id:'other.mjs',program:c.compile_ir_string('(import "./main.mjs" :as ns) (defconst result (object-keys ns)) (export result)','other.eli')}],failed=c.instantiateManagedRuntime(Uint8Array.from(c.emit_managed_project_wasm(cyclic,'main.mjs',rt)),{initializeModule:false});failed.auto(1);const keep=failed.number(-0),frame=failed.frame(1);failed.frameSet(frame,0,keep);reject(()=>failed.initializeModule(),'ELI-RT0008');failed.collect();check(failed.stats().frameDepth===1&&failed.live()===2,'cyclic TDZ cleanup');failed.leaveFrame(frame);failed.release(keep);failed.collect();check(failed.live()===0,'caller release');
+        const start=runtime.indexOf('  (defun value-module-namespace-bind (heap object key kind index)'),end=runtime.indexOf('  (defun ',start+10);check(start>=0&&end>start,'fault location');const faulty=runtime.slice(0,start)+'  (defun value-module-namespace-bind (heap object key kind index) (load-u32 4294967295))'+String.fromCharCode(10)+runtime.slice(end),broken=c.instantiateManagedRuntime(Uint8Array.from(c.emit_managed_project_wasm(modules,fixture.entry,c.compile_ir_string(faulty,'project-trap.eli'))),{initializeModule:false}),saved=broken.number(7),caller=broken.frame(1);broken.frameSet(caller,0,saved);let trapped=false;try{broken.initializeModule()}catch(e){trapped=e instanceof WebAssembly.RuntimeError}check(trapped&&broken.stats().frameDepth===1,'actual namespace trap');broken.collect();check(broken.live()===2,'trap graph reclaimed');broken.leaveFrame(caller);broken.release(saved);broken.collect();check(broken.live()===0,'trap caller release');
+        return [...bytes];
+      }finally{URL.revokeObjectURL(url);for(const value of urls)URL.revokeObjectURL(value)}
+    },{fixture,runtime});
+    assert.deepEqual(result,generations[2].managed.emit_managed_project_wasm(fixture.modules.map(m=>({id:m.id,program:generations[2].compiler.compile_ir_string(m.source,m.id)})),fixture.entry,generations[2].compiler.compile_ir_string(runtime,'runtime.eli'),{maximumPages:16}));
+  });
+
   test("browser module initialization preserves live exports, isolation, TDZ, GC and failure ownership",async()=>{
     const source=runtimeSeeds.moduleBindings.source,runtime=runtimeSeeds.memory.source;
     const result=await evaluateBrowser(async({bundle,source,runtime})=>{
@@ -1529,7 +1580,7 @@ describe("browser compiler backends", () => {
         const log=a.getExport('initialization-log');check(a.length(log)===3,'source order length');for(let i=0;i<3;i++){const x=a.get(log,i);check(a.readNumber(x)===reference.initialization_log[i],'source order');a.release(x)}
         const state=a.getExport('state'),alias=a.invoke('read-state'),labelKey=a.string('label'),label=a.objectGet(state,labelKey),selfKey=a.string('self'),self=a.objectGet(state,selfKey),valuesKey=a.string('values'),values=a.objectGet(state,valuesKey);
         check(a.keyEqual(state,alias)&&a.keyEqual(state,self),'identity and cycle');check(a.readString(label)===reference.state.label,'UTF16');for(let i=0;i<3;i++){const x=a.get(values,i);check(Object.is(a.readNumber(x),reference.state.values[i]),'binary64');a.release(x)}
-        const capture=a.invoke('captured-global'),delta=a.number(7),assigned=a.invoke('set-current',[capture]);a.release(assigned);const changed=a.invoke('call-current',[delta]);check(a.readNumber(changed)===reference.captured_global()(7),'capture');
+        const capture=a.invoke('captured-global'),delta=a.number(7);check(num('emitted-alias',[delta])===reference.emitted_alias(7),'emitted-name shadowing');const assigned=a.invoke('set-current',[capture]);a.release(assigned);const changed=a.invoke('call-current',[delta]);check(a.readNumber(changed)===reference.captured_global()(7),'capture');
         for(let i=0;i<32;i++){const x=a.invoke('allocate');a.release(x);a.collect()}check(num('read-counter')===reference.counter,'global GC root');
         const other=c.instantiateManagedRuntime(bytes),first=other.invoke('tick');check(other.readNumber(first)===1,'heap isolation');other.release(first);other.closeModule();other.collect();check(other.live()===0,'second heap cleanup');
         for(const x of[log,alias,labelKey,label,selfKey,self,valuesKey,values,capture,delta,changed])a.release(x);a.closeModule();a.collect();check(a.stats().frameDepth===1,'close keeps caller frame');const held=a.frameGet(frame,0);check(Object.is(a.readNumber(held),-0),'caller bits');a.release(held);check(state.kind===13,'caller-owned state');a.release(state);a.leaveFrame(frame);a.release(keep);a.collect();check(a.live()===0,'closed module graph reclaimed');error(()=>a.getExport('state'),'ELI-RT0003');
