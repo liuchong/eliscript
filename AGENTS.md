@@ -86,10 +86,13 @@ precedence over parent rules when they address the same decision.
   source language. Keep generated JavaScript and intermediate compiler/build
   products ignored and untracked; never commit them to Git. Change their `.el`
   or `.eli` source and regenerate them; never hand-edit generated JavaScript or
-  label handwritten code as generated. Bootstrap must first build the initial
-  compiler from Emacs Lisp, then use that compiler to build the Eliscript
-  compiler sources and subsequent self-hosted generations. A checkout must be
-  buildable through this sequence without committed intermediate `.mjs` files.
+  label handwritten code as generated. Bootstrap may build the initial compiler
+  from the maintained Emacs Lisp compiler, or start with a previously released
+  compiler, including `0.0.1` or the preceding release. Use that compiler to build
+  the current Eliscript compiler sources and subsequent self-hosted generations.
+  A checkout must be buildable through a declared bootstrap sequence without
+  committed intermediate `.mjs` files. Maintain the Emacs Lisp bootstrap compiler
+  or the supported previous-release bootstrap path as development continues.
 - **LANGUAGE-05** - Migration must preserve the required behavior and acceptance
   criteria. Fix only defects blocking the active mainline before it is complete;
   retain other failures and deferred work without expanding tools, redesigning
