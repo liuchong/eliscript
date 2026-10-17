@@ -70,10 +70,11 @@ precedence over parent rules when they address the same decision.
   runtimes, tools, build orchestration, test runners, test cases and fixtures.
   Do not introduce or extend handwritten JavaScript, `.mjs`, or implementation
   code in any other language, including inside templates or embedded strings.
-- **LANGUAGE-02** - Emacs Lisp bootstraps the first compiler. Subsequent
-  compilers and tools must be implemented in Eliscript and built by an existing
-  Eliscript compiler version. New testing infrastructure and tests must use the
-  same language system; do not add foreign-language helper implementations.
+- **LANGUAGE-02** - The maintained Emacs Lisp compiler builds the first
+  Eliscript compiler. That generated Eliscript compiler builds subsequent
+  compiler generations and tools from Eliscript sources. New testing
+  infrastructure and tests must use the same language system; do not add
+  foreign-language helper implementations.
 - **LANGUAGE-03** - Existing foreign-language implementations are migration
   debt, not permission to continue using that language for development. When
   the active task needs to change such an implementation, progressively replace
@@ -86,13 +87,12 @@ precedence over parent rules when they address the same decision.
   source language. Keep generated JavaScript and intermediate compiler/build
   products ignored and untracked; never commit them to Git. Change their `.el`
   or `.eli` source and regenerate them; never hand-edit generated JavaScript or
-  label handwritten code as generated. Bootstrap may build the initial compiler
-  from the maintained Emacs Lisp compiler, or start with a previously released
-  compiler, including `0.0.1` or the preceding release. Use that compiler to build
-  the current Eliscript compiler sources and subsequent self-hosted generations.
-  A checkout must be buildable through a declared bootstrap sequence without
-  committed intermediate `.mjs` files. Maintain the Emacs Lisp bootstrap compiler
-  or the supported previous-release bootstrap path as development continues.
+  label handwritten code as generated. The only bootstrap entry is the
+  maintained Emacs Lisp compiler: build the initial Eliscript compiler from
+  source, then use that generated compiler for subsequent self-hosted builds.
+  Do not substitute a previously released compiler or a checked-in generated
+  compiler as the starting point. A checkout must be buildable through this
+  single sequence without committed intermediate `.mjs` files.
 - **LANGUAGE-05** - Migration must preserve the required behavior and acceptance
   criteria. Fix only defects blocking the active mainline before it is complete;
   retain other failures and deferred work without expanding tools, redesigning
