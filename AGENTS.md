@@ -63,6 +63,41 @@ precedence over parent rules when they address the same decision.
   validation only. They never increase core progress, satisfy a core milestone,
   or weaken an unmet core acceptance criterion.
 
+## Implementation Languages and Self-Hosting
+
+- **LANGUAGE-01** - Handwritten implementation code in this repository must be
+  Emacs Lisp (`.el`) or Eliscript (`.eli`). This includes compilers, backends,
+  runtimes, tools, build orchestration, test runners, test cases and fixtures.
+  Do not introduce or extend handwritten JavaScript, `.mjs`, or implementation
+  code in any other language, including inside templates or embedded strings.
+- **LANGUAGE-02** - The maintained Emacs Lisp compiler builds the first
+  Eliscript compiler. That generated Eliscript compiler builds subsequent
+  compiler generations and tools from Eliscript sources. New testing
+  infrastructure and tests must use the same language system; do not add
+  foreign-language helper implementations.
+- **LANGUAGE-03** - Existing foreign-language implementations are migration
+  debt, not permission to continue using that language for development. When
+  the active task needs to change such an implementation, progressively replace
+  the affected capability with Emacs Lisp or Eliscript and continue the main
+  task through it. Do not stop the current delivery to rewrite or remove every
+  unrelated legacy file at once. The eventual goal is to remove handwritten
+  foreign-language implementations, including handwritten `.mjs` files.
+- **LANGUAGE-04** - JavaScript remains a compiler output target. JavaScript and
+  `.mjs` emitted by the compiler are generated artifacts, never an alternative
+  source language. Keep generated JavaScript and intermediate compiler/build
+  products ignored and untracked; never commit them to Git. Change their `.el`
+  or `.eli` source and regenerate them; never hand-edit generated JavaScript or
+  label handwritten code as generated. The only bootstrap entry is the
+  maintained Emacs Lisp compiler: build the initial Eliscript compiler from
+  source, then use that generated compiler for subsequent self-hosted builds.
+  Do not substitute a previously released compiler or a checked-in generated
+  compiler as the starting point. A checkout must be buildable through this
+  single sequence without committed intermediate `.mjs` files.
+- **LANGUAGE-05** - Migration must preserve the required behavior and acceptance
+  criteria. Fix only defects blocking the active mainline before it is complete;
+  retain other failures and deferred work without expanding tools, redesigning
+  unrelated systems, or repeatedly retrying unchanged failures.
+
 ## Function-First Development
 
 - **DELIVERY-01** - Unless a concrete defect or acceptance blocker takes
